@@ -69,34 +69,23 @@ brew_install_if_missing() {
 }
 
 premake_asset_url() {
-    local fallback="https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-macosx.tar.gz"
+    local machine_arch
+    machine_arch="$(uname -m)"
 
-    if have python3; then
-        python3 - "$PREMAKE_VERSION" "$fallback" <<'PY'
-import json
-import sys
-import urllib.request
-
-version = sys.argv[1]
-fallback = sys.argv[2]
-url = f"https://api.github.com/repos/premake/premake-core/releases/tags/v{version}"
-try:
-    request = urllib.request.Request(url, headers={"User-Agent": "cross-platform-core-client-template-bootstrap"})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        data = json.load(response)
-    for asset in data.get("assets", []):
-        name = asset.get("name", "").lower()
-        if ("macos" in name or "macosx" in name or "osx" in name) and name.endswith((".tar.gz", ".zip")):
-            print(asset["browser_download_url"])
-            break
-    else:
-        print(fallback)
-except Exception:
-    print(fallback)
-PY
-    else
-        printf '%s\n' "$fallback"
-    fi
+    case "$machine_arch" in
+        x86_64|amd64)
+            printf 'https://github.com/premake/premake-core/releases/download/v%s/premake-%s-macosx-x64.tar.gz\n' \
+                "$PREMAKE_VERSION" "$PREMAKE_VERSION"
+            ;;
+        arm64|aarch64)
+            printf 'https://github.com/premake/premake-core/releases/download/v%s/premake-%s-macosx.tar.gz\n' \
+                "$PREMAKE_VERSION" "$PREMAKE_VERSION"
+            ;;
+        *)
+            printf "Unsupported macOS architecture '%s'.\n" "$machine_arch" >&2
+            return 1
+            ;;
+    esac
 }
 
 install_premake() {
@@ -124,6 +113,11 @@ install_premake() {
 
     cp "$downloaded" "$PREMAKE"
     chmod +x "$PREMAKE"
+    if ! "$PREMAKE" --version 2>/dev/null | grep -q "$PREMAKE_VERSION"; then
+        rm -f "$PREMAKE"
+        printf "Downloaded Premake cannot run on macOS architecture '%s'.\n" "$(uname -m)" >&2
+        exit 1
+    fi
     rm -rf "$temp_dir"
     step "Installed Premake at $PREMAKE"
 }

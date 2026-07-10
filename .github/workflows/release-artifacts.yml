@@ -22,12 +22,12 @@ jobs:
       matrix:
         include:
           - os-name: windows
-            runner: windows-2025
+            runner: windows-2022
             generator: vs2022
             configuration: Release
             artifact-path: Build/Bin/Release-windows-x86_64/Client
           - os-name: windows
-            runner: windows-2025
+            runner: windows-2022
             generator: vs2022
             configuration: Dist
             artifact-path: Build/Bin/Dist-windows-x86_64/Client

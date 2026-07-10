@@ -16,7 +16,8 @@ concurrency:
 jobs:
   windows:
     name: Windows ${{ matrix.configuration }}
-    runs-on: windows-2025
+    # Pin VS2022 jobs to the image that guarantees Visual Studio 2022.
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
