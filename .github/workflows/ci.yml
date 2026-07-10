@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  windows:
+    name: Windows ${{ matrix.configuration }}
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [ Debug, Release, Dist, DebugASan ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Bootstrap
+        shell: pwsh
+        run: .\Scripts\project.ps1 bootstrap -Generator vs2022
+
+      - name: Generate
+        shell: pwsh
+        run: .\Scripts\project.ps1 generate -Generator vs2022
+
+      - name: Build
+        shell: pwsh
+        run: .\Scripts\project.ps1 build -Generator vs2022 -Configuration ${{ matrix.configuration }}
+
+      - name: Test
+        shell: pwsh
+        run: .\Scripts\project.ps1 test -Generator vs2022 -Configuration ${{ matrix.configuration }}
+
+  linux:
+    name: Linux ${{ matrix.configuration }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Bootstrap
+        run: bash Scripts/project.sh bootstrap --generator ninja
+
+      - name: Generate
+        run: bash Scripts/project.sh generate --generator ninja
+
+      - name: Build
+        run: bash Scripts/project.sh build --generator ninja --configuration ${{ matrix.configuration }}
+
+      - name: Test
+        run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }}
+
+  macos:
+    name: macOS ${{ matrix.configuration }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Bootstrap
+        run: bash Scripts/project.sh bootstrap --generator ninja
+
+      - name: Generate
+        run: bash Scripts/project.sh generate --generator ninja
+
+      - name: Build
+        run: bash Scripts/project.sh build --generator ninja --configuration ${{ matrix.configuration }}
+
+      - name: Test
+        run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }}

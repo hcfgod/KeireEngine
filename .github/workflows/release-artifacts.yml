@@ -1,0 +1,90 @@
+name: Release Artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  package:
+    name: ${{ matrix.os-name }} ${{ matrix.configuration }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os-name: windows
+            runner: windows-2025
+            generator: vs2022
+            configuration: Release
+            artifact-path: Build/Bin/Release-windows-x86_64
+            shell: pwsh
+          - os-name: windows
+            runner: windows-2025
+            generator: vs2022
+            configuration: Dist
+            artifact-path: Build/Bin/Dist-windows-x86_64
+            shell: pwsh
+          - os-name: linux
+            runner: ubuntu-24.04
+            generator: ninja
+            configuration: Release
+            artifact-path: Build/Bin/Release-linux-x86_64
+            shell: bash
+          - os-name: linux
+            runner: ubuntu-24.04
+            generator: ninja
+            configuration: Dist
+            artifact-path: Build/Bin/Dist-linux-x86_64
+            shell: bash
+          - os-name: macos
+            runner: macos-15
+            generator: ninja
+            configuration: Release
+            artifact-path: Build/Bin/Release-macosx-x86_64
+            shell: bash
+          - os-name: macos
+            runner: macos-15
+            generator: ninja
+            configuration: Dist
+            artifact-path: Build/Bin/Dist-macosx-x86_64
+            shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Bootstrap Windows
+        if: matrix.os-name == 'windows'
+        shell: pwsh
+        run: .\Scripts\project.ps1 bootstrap -Generator ${{ matrix.generator }}
+
+      - name: Generate Windows
+        if: matrix.os-name == 'windows'
+        shell: pwsh
+        run: .\Scripts\project.ps1 generate -Generator ${{ matrix.generator }}
+
+      - name: Build Windows
+        if: matrix.os-name == 'windows'
+        shell: pwsh
+        run: .\Scripts\project.ps1 build -Generator ${{ matrix.generator }} -Configuration ${{ matrix.configuration }}
+
+      - name: Bootstrap Unix
+        if: matrix.os-name != 'windows'
+        run: bash Scripts/project.sh bootstrap --generator ${{ matrix.generator }}
+
+      - name: Generate Unix
+        if: matrix.os-name != 'windows'
+        run: bash Scripts/project.sh generate --generator ${{ matrix.generator }}
+
+      - name: Build Unix
+        if: matrix.os-name != 'windows'
+        run: bash Scripts/project.sh build --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os-name }}-${{ matrix.configuration }}
+          path: ${{ matrix.artifact-path }}

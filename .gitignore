@@ -1,0 +1,28 @@
+# User/editor state
+.vs/
+.vscode/
+.idea/
+
+# Build outputs
+Build/Bin/
+Build/Intermediates/
+Build/Generated/
+Logs/
+
+# Generated project files
+*.sln
+*.slnx
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+Makefile
+*.make
+build.ninja
+*.ninja
+compile_commands.json
+*.xcodeproj/
+*.xcworkspace/
+
+# OS files
+.DS_Store
+Thumbs.db
