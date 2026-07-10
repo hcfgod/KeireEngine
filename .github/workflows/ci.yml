@@ -4,6 +4,14 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows:
@@ -15,7 +23,7 @@ jobs:
         configuration: [ Debug, Release, Dist, DebugASan ]
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -35,6 +43,14 @@ jobs:
         shell: pwsh
         run: .\Scripts\project.ps1 test -Generator vs2022 -Configuration ${{ matrix.configuration }}
 
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-${{ matrix.configuration }}-logs
+          path: Logs/
+          if-no-files-found: ignore
+
   linux:
     name: Linux ${{ matrix.configuration }}
     runs-on: ubuntu-24.04
@@ -42,9 +58,13 @@ jobs:
       fail-fast: false
       matrix:
         configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -60,16 +80,28 @@ jobs:
       - name: Test
         run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }}
 
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.configuration }}-logs
+          path: Logs/
+          if-no-files-found: ignore
+
   macos:
     name: macOS ${{ matrix.configuration }}
-    runs-on: macos-15
+    runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
         configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
+    env:
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -84,3 +116,11 @@ jobs:
 
       - name: Test
         run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.configuration }}-logs
+          path: Logs/
+          if-no-files-found: ignore

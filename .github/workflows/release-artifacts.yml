@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   package:
@@ -17,42 +25,36 @@ jobs:
             runner: windows-2025
             generator: vs2022
             configuration: Release
-            artifact-path: Build/Bin/Release-windows-x86_64
-            shell: pwsh
+            artifact-path: Build/Bin/Release-windows-x86_64/Client
           - os-name: windows
             runner: windows-2025
             generator: vs2022
             configuration: Dist
-            artifact-path: Build/Bin/Dist-windows-x86_64
-            shell: pwsh
+            artifact-path: Build/Bin/Dist-windows-x86_64/Client
           - os-name: linux
             runner: ubuntu-24.04
             generator: ninja
             configuration: Release
-            artifact-path: Build/Bin/Release-linux-x86_64
-            shell: bash
+            artifact-path: Build/Bin/Release-linux-x86_64/Client
           - os-name: linux
             runner: ubuntu-24.04
             generator: ninja
             configuration: Dist
-            artifact-path: Build/Bin/Dist-linux-x86_64
-            shell: bash
+            artifact-path: Build/Bin/Dist-linux-x86_64/Client
           - os-name: macos
-            runner: macos-15
+            runner: macos-15-intel
             generator: ninja
             configuration: Release
-            artifact-path: Build/Bin/Release-macosx-x86_64
-            shell: bash
+            artifact-path: Build/Bin/Release-macosx-x86_64/Client
           - os-name: macos
-            runner: macos-15
+            runner: macos-15-intel
             generator: ninja
             configuration: Dist
-            artifact-path: Build/Bin/Dist-macosx-x86_64
-            shell: bash
+            artifact-path: Build/Bin/Dist-macosx-x86_64/Client
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -83,8 +85,17 @@ jobs:
         if: matrix.os-name != 'windows'
         run: bash Scripts/project.sh build --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }}
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Client artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.os-name }}-${{ matrix.configuration }}
+          name: ${{ matrix.os-name }}-${{ matrix.configuration }}-client
           path: ${{ matrix.artifact-path }}
+          if-no-files-found: error
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.os-name }}-${{ matrix.configuration }}-logs
+          path: Logs/
+          if-no-files-found: ignore
