@@ -1,0 +1,1 @@
+# C++ Cross Platform Core-Client Template
