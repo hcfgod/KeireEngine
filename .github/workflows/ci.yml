@@ -96,7 +96,8 @@ jobs:
       matrix:
         configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
     env:
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+      # LeakSanitizer is unavailable in Apple's AddressSanitizer runtime.
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       TSAN_OPTIONS: halt_on_error=1
     steps:

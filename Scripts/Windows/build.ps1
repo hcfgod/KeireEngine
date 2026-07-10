@@ -36,7 +36,7 @@ function Get-NinjaExecutable {
     throw "Ninja was not found. Run Scripts\Windows\bootstrap.ps1 -Generators ninja."
 }
 
-function Get-MSBuild {
+function Get-VSBuildEnvironment {
     param([int]$MajorVersion)
 
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
@@ -45,14 +45,30 @@ function Get-MSBuild {
     }
 
     $range = "[$MajorVersion.0,$($MajorVersion + 1).0)"
-    $matches = & $vswhere -latest -products * -version $range -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe"
-    $msbuild = $matches | Select-Object -First 1
+    $installationPaths = @(& $vswhere -products * -version $range `
+        -requires Microsoft.Component.MSBuild Microsoft.VisualStudio.Workload.NativeDesktop `
+        -property installationPath)
 
-    if (-not $msbuild) {
-        throw "MSBuild was not found for Visual Studio major version $MajorVersion."
+    foreach ($installationPath in $installationPaths) {
+        $msbuildCandidates = @(
+            (Join-Path $installationPath "MSBuild\Current\Bin\MSBuild.exe"),
+            (Join-Path $installationPath "MSBuild\15.0\Bin\MSBuild.exe")
+        )
+        $msbuild = $msbuildCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+        $vcTargetsPath = Join-Path $installationPath "MSBuild\Microsoft\VC\v$($MajorVersion)0"
+        $vcDefaultProps = Join-Path $vcTargetsPath "Microsoft.Cpp.Default.props"
+
+        if ($msbuild -and (Test-Path $vcDefaultProps)) {
+            return [pscustomobject]@{
+                InstallationPath = $installationPath
+                MSBuild          = $msbuild
+                VCTargetsPath    = $vcTargetsPath.Replace("\", "/") + "/"
+            }
+        }
     }
 
-    return $msbuild
+    throw "A complete Visual Studio $MajorVersion C++ build environment was not found. Run Scripts\Windows\bootstrap.ps1 for the requested generator."
 }
 
 function Invoke-VSBuild {
@@ -75,9 +91,14 @@ function Invoke-VSBuild {
         }
     }
 
-    $msbuild = Get-MSBuild -MajorVersion $MajorVersion
+    $buildEnvironment = Get-VSBuildEnvironment -MajorVersion $MajorVersion
     Write-Host "==> Building $Target $Configuration with $Generator"
-    & $msbuild $solution "/m" "/t:$Target" "/p:Configuration=$Configuration" "/p:Platform=x64"
+    Write-Host "==> Using Visual Studio at $($buildEnvironment.InstallationPath)"
+    & $buildEnvironment.MSBuild $solution "/m" "/t:$Target" "/p:Configuration=$Configuration" `
+        "/p:Platform=x64" "/p:VCTargetsPath=$($buildEnvironment.VCTargetsPath)"
+    if ($LASTEXITCODE -ne 0) {
+        throw "MSBuild failed with exit code $LASTEXITCODE."
+    }
 }
 
 function Invoke-NinjaBuild {
@@ -88,6 +109,9 @@ function Invoke-NinjaBuild {
     Write-Host "==> Building $Target $Configuration with Ninja"
     $ninja = Get-NinjaExecutable
     & $ninja -C $Root -f "build.ninja" "$($Target)_$Configuration"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Ninja failed with exit code $LASTEXITCODE."
+    }
 }
 
 function Invoke-GMakeBuild {
@@ -105,6 +129,9 @@ function Invoke-GMakeBuild {
 
     Write-Host "==> Building $Target $Configuration with GNU Make"
     & $make.Source -C $Root "config=$($Configuration.ToLowerInvariant())" $Target
+    if ($LASTEXITCODE -ne 0) {
+        throw "GNU Make failed with exit code $LASTEXITCODE."
+    }
 }
 
 switch ($Generator) {
