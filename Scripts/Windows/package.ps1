@@ -27,7 +27,7 @@ $compiler = if ($Toolset -eq "msc") {
 }
 elseif ($Toolset -eq "clang") { (& clang --version | Select-Object -First 1) -join "" }
 else { (& g++ --version | Select-Object -First 1) -join "" }
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; commit=((& git -C $Root rev-parse HEAD 2>$null)-join ""); platform="windows"; architecture=$Architecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT }
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; commit=(Get-GitHeadCommit $Root); platform="windows"; architecture=$Architecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json | Out-Null
@@ -45,5 +45,50 @@ if ($Configuration -eq "Release") {
 if ((Test-Path $symbolStage) -and (Get-ChildItem $symbolStage -File -Recurse | Select-Object -First 1)) {
     Compress-Archive "$symbolStage\*" $symbols -Force
     (Get-FileHash $symbols -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name-symbols.zip" | Set-Content "$symbols.sha256" -Encoding ASCII
+}
+$validationRoot = Join-Path $Root "Artifacts\$name-validation"
+try {
+    Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $sdkRoot = Join-Path $validationRoot "sdk"
+    New-Item -ItemType Directory -Force $sdkRoot | Out-Null
+    Expand-Archive $archive $sdkRoot -Force
+    $consumerSource = Join-Path $validationRoot "consumer.cpp"
+    $consumerExe = Join-Path $validationRoot "consumer.exe"
+    $consumerObject = Join-Path $validationRoot "consumer.obj"
+    @"
+#include "$($Project.PROJECT_NAMESPACE)/Core.h"
+#include <string>
+
+int main()
+{
+    $($Project.PROJECT_NAMESPACE)::LogConfig config;
+    config.EnableConsole = false;
+    config.LogDirectory = "Logs";
+    $($Project.PROJECT_NAMESPACE)::Log::Initialize(config);
+    CORE_INFO("SDK consumer initialized");
+    $($Project.PROJECT_NAMESPACE)::Log::Shutdown();
+    return std::string($($Project.PROJECT_NAMESPACE)::GetName()).empty() ? 1 : 0;
+}
+"@ | Set-Content $consumerSource -Encoding UTF8
+
+    if ($Toolset -eq "msc") {
+        $consumerLinkOptions = if ($Configuration -eq "Dist") { @("/link", "/LTCG") } else { @() }
+        & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus "/I$(Join-Path $sdkRoot 'include')" `
+            "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $consumerSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
+    }
+    else {
+        $compilerCommand = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
+        & $compilerCommand -std=c++20 -Wall -Wextra -Werror "-I$(Join-Path $sdkRoot 'include')" `
+            "-I$(Join-Path $sdkRoot 'third-party')" $consumerSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") -o $consumerExe
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Extracted SDK consumer compilation failed with exit code $LASTEXITCODE." }
+    Push-Location $validationRoot
+    try { & $consumerExe; if ($LASTEXITCODE -ne 0) { throw "Extracted SDK consumer failed with exit code $LASTEXITCODE." } }
+    finally { Pop-Location }
+}
+finally {
+    Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host "==> Package created: $archive"

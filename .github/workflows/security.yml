@@ -60,3 +60,30 @@ jobs:
           name: codeql-sarif
           path: codeql-results/*.sarif
           if-no-files-found: ignore
+
+  security-status:
+    name: Security activation status
+    if: always()
+    needs: [configuration, dependency-review, codeql]
+    runs-on: ubuntu-24.04
+    env:
+      ENABLED: ${{ vars.ENABLE_ADVANCED_SECURITY == 'true' }}
+      EVENT_NAME: ${{ github.event_name }}
+      FORK_PULL_REQUEST: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+      DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+      CODEQL_RESULT: ${{ needs.codeql.result }}
+    steps:
+      - run: |
+          if [ "$ENABLED" != true ]; then
+            echo 'Advanced security is intentionally disabled.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = pull_request ] && [ "$DEPENDENCY_REVIEW_RESULT" != success ]; then
+            echo "Dependency Review did not succeed: $DEPENDENCY_REVIEW_RESULT" >&2
+            exit 1
+          fi
+          if [ "$FORK_PULL_REQUEST" != true ] && [ "$CODEQL_RESULT" != success ]; then
+            echo "CodeQL did not succeed: $CODEQL_RESULT" >&2
+            exit 1
+          fi
+          echo 'All eligible advanced-security jobs completed successfully.' >> "$GITHUB_STEP_SUMMARY"

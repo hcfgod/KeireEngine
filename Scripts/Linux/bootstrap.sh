@@ -109,8 +109,12 @@ case "$TOOLSET" in
     clang)
         ensure_command clang++ clang
         check_version Clang "$(clang++ --version | extract_version)" 16
-        ensure_command llvm-profdata llvm
-        ensure_command llvm-cov llvm
+        if [[ $UPDATE -eq 1 ]] || ! resolve_llvm_tool llvm-profdata >/dev/null 2>&1 || ! resolve_llvm_tool llvm-cov >/dev/null 2>&1; then
+            install_logical_packages llvm
+        fi
+        profdata_path="$(resolve_llvm_tool llvm-profdata)" || exit 1
+        cov_path="$(resolve_llvm_tool llvm-cov)" || exit 1
+        step "LLVM coverage tools match Clang: $profdata_path, $cov_path"
         ;;
     *) printf "Unsupported Linux toolset '%s'.\n" "$TOOLSET" >&2; exit 1 ;;
 esac

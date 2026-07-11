@@ -11,7 +11,11 @@ bash "$ROOT/Scripts/$PLATFORM/build.sh" "${test_args[@]}"
 tests="$ROOT/Build/Bin/Coverage-$system-$output_arch/$TESTS_TARGET/$TESTS_TARGET"; LLVM_PROFILE_FILE="$directory/%p.profraw" "$tests"
 args[9]="$CLIENT_TARGET"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${args[@]}"
 client="$ROOT/Build/Bin/Coverage-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"; LLVM_PROFILE_FILE="$directory/%p.profraw" "$client"
-profdata=(llvm-profdata); cov=(llvm-cov); if [[ "$PLATFORM" == Mac ]]; then profdata=(xcrun llvm-profdata); cov=(xcrun llvm-cov); fi
+if [[ "$PLATFORM" == Mac ]]; then
+  profdata=(xcrun llvm-profdata); cov=(xcrun llvm-cov)
+else
+  profdata=("$(resolve_llvm_tool llvm-profdata)"); cov=("$(resolve_llvm_tool llvm-cov)")
+fi
 profiles=("$directory"/*.profraw); [[ -e "${profiles[0]}" ]] || { printf 'No coverage profiles produced.\n' >&2; exit 1; }
 "${profdata[@]}" merge -sparse "${profiles[@]}" -o "$directory/coverage.profdata"
 common=(-instr-profile="$directory/coverage.profdata" "$tests" -object="$client" -ignore-filename-regex='Vendor|Tests')

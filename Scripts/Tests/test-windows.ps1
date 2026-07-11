@@ -17,6 +17,22 @@ $project = Get-ProjectConfig
 Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
 Assert-Equal $project.PROJECT_MACRO_PREFIX (ConvertTo-MacroPrefix $project.PROJECT_IDENTIFIER) "Project macro prefix"
 Assert-Equal (ConvertTo-MacroPrefix "HTTPServer2Client") "HTTP_SERVER2_CLIENT" "Macro prefix derivation"
+$securityWorkflow = Get-Content (Join-Path (Get-RepositoryRoot) ".github\workflows\security.yml") -Raw
+Assert-True ($securityWorkflow -match "(?m)^  security-status:\s*$") "Security activation sentinel"
+Assert-True ($securityWorkflow -match "(?m)^    if: always\(\)\s*$") "Security sentinel always runs"
+Assert-True ($securityWorkflow.Contains("ENABLE_ADVANCED_SECURITY")) "Advanced security opt-in variable"
+Assert-True (-not $securityWorkflow.Contains("continue-on-error")) "Strict advanced security checks"
+$emptyRepository = Join-Path ([IO.Path]::GetTempPath()) ("template-empty-git-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory $emptyRepository | Out-Null
+try {
+    Assert-True (-not (Test-GitRepository $emptyRepository)) "Non-repository detection"
+    & git -C $emptyRepository init --quiet
+    Assert-Equal (Get-GitHeadCommit $emptyRepository) "uncommitted" "Empty Git commit fallback"
+    Assert-True (Test-GitRepository $emptyRepository) "Empty Git repository detection"
+}
+finally {
+    Remove-Item $emptyRepository -Recurse -Force -ErrorAction SilentlyContinue
+}
 Assert-Equal (Normalize-Architecture "amd64") "x86_64" "x64 normalization"
 Assert-Equal (Normalize-Architecture "aarch64") "ARM64" "ARM normalization"
 Assert-Equal (Resolve-WindowsToolset "vs2022" "default") "msc" "VS default toolset"

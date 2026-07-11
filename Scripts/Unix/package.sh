@@ -20,7 +20,7 @@ cp "$ROOT/Vendor/spdlog/LICENSE" "$stage/third-party/licenses/spdlog-LICENSE.txt
 cp "$ROOT/Vendor/spdlog/include/spdlog/fmt/bundled/fmt.license.rst" "$stage/third-party/licenses/fmt-LICENSE.rst"
 cp "$ROOT/Vendor/doctest/LICENSE.txt" "$stage/third-party/licenses/doctest-LICENSE.txt"
 cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
-commit="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"
+commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf uncommitted)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"
 compiler_command=gcc; [[ "$TOOLSET" == clang ]] && compiler_command=clang
 compiler="$("$compiler_command" --version | awk 'NR == 1 { print }')"
 printf '{\n  "project": "%s",\n  "commit": "%s",\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$commit")" "$(json_escape "$os_name")" "$(json_escape "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" > "$stage/build-manifest.json"
@@ -52,4 +52,27 @@ if [[ -d "$symbol_stage" ]] && find "$symbol_stage" -type f -print -quit | grep 
   if command -v sha256sum >/dev/null 2>&1; then symbol_digest="$(sha256sum "$symbols" | awk '{print $1}')"; else symbol_digest="$(shasum -a 256 "$symbols" | awk '{print $1}')"; fi
   printf '%s  %s\n' "$symbol_digest" "$(basename "$symbols")" > "$symbols.sha256"
 fi
+validation_root="$ROOT/Artifacts/$name-validation"; rm -rf "$validation_root"; mkdir -p "$validation_root/sdk"
+tar -C "$validation_root/sdk" -xzf "$archive"
+cat > "$validation_root/consumer.cpp" <<EOF
+#include "$PROJECT_NAMESPACE/Core.h"
+#include <string>
+
+int main()
+{
+    $PROJECT_NAMESPACE::LogConfig config;
+    config.EnableConsole = false;
+    config.LogDirectory = "Logs";
+    $PROJECT_NAMESPACE::Log::Initialize(config);
+    CORE_INFO("SDK consumer initialized");
+    $PROJECT_NAMESPACE::Log::Shutdown();
+    return std::string($PROJECT_NAMESPACE::GetName()).empty() ? 1 : 0;
+}
+EOF
+cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
+consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror "-I$validation_root/sdk/include" "-I$validation_root/sdk/third-party" "$validation_root/consumer.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" -o "$validation_root/consumer")
+[[ "$PLATFORM" == Linux ]] && consumer_compile+=(-pthread)
+"${consumer_compile[@]}"
+(cd "$validation_root" && ./consumer)
+rm -rf "$validation_root"
 printf '==> Package created: %s\n' "$archive"

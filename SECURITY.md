@@ -12,4 +12,4 @@ Dependency and workflow changes are locked by commit or checksum. Do not bypass 
 
 ## Automated checks
 
-CodeQL and Dependency Review require repository features that are not available in every copied template. Enable Dependency Graph and code scanning, set the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require the resulting checks in branch protection. With that variable enabled, action and upload failures are not suppressed.
+CodeQL and Dependency Review require repository features that are not available in every copied template. Enable Dependency Graph and code scanning, set the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in branch protection. With that variable enabled, the status job fails if an eligible advanced-security job is skipped or unsuccessful.

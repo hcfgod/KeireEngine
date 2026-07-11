@@ -37,6 +37,21 @@ assert_false mac_requires_full_xcode ninja
 assert_equal "$(json_escape $'quote" slash\\ tab\t')" 'quote\" slash\\ tab\t' 'JSON escaping'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)" 79524ddd08a4ec981b7fea76afd08ee05f83755d 'spdlog lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)" 2d0a9359a60c51affe2a9bebb1be1dca47868151 'doctest lock'
+security_workflow="$ROOT/.github/workflows/security.yml"
+grep -q '^  security-status:$' "$security_workflow" || fail 'Security activation sentinel is missing'
+grep -q '^    if: always()$' "$security_workflow" || fail 'Security activation sentinel is not unconditional'
+grep -q 'ENABLE_ADVANCED_SECURITY' "$security_workflow" || fail 'Advanced security opt-in variable is missing'
+! grep -q 'continue-on-error' "$security_workflow" || fail 'Advanced security checks are not strict'
+
+llvm_fixture="$(mktemp -d)"; old_path="$PATH"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "clang version 18.1.2\\n"' > "$llvm_fixture/clang++"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "LLVM version 17.0.6\\n"' > "$llvm_fixture/llvm-profdata"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "LLVM version 18.1.2\\n"' > "$llvm_fixture/llvm-profdata-18"
+printf '%s\n' '#!/usr/bin/env bash' 'printf "LLVM version 18.1.2\\n"' > "$llvm_fixture/llvm-cov-18"
+chmod +x "$llvm_fixture"/*; PATH="$llvm_fixture:$old_path"
+assert_equal "$(resolve_llvm_tool llvm-profdata clang++)" "$llvm_fixture/llvm-profdata-18" 'matching llvm-profdata selection'
+assert_equal "$(resolve_llvm_tool llvm-cov clang++)" "$llvm_fixture/llvm-cov-18" 'matching llvm-cov selection'
+PATH="$old_path"; rm -rf "$llvm_fixture"
 
 package_stage="$(mktemp -d)"
 for path in bin/Client lib/libCore.a include/Core/Core.h include/Core/Log.h third-party/spdlog/spdlog.h third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do

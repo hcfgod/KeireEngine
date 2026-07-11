@@ -135,6 +135,31 @@ extract_version() {
     '
 }
 
+resolve_llvm_tool() {
+    local tool="$1" compiler="${2:-clang++}" compiler_path compiler_version compiler_major
+    local candidate candidate_path tool_version
+    compiler_path="$(command -v "$compiler" 2>/dev/null)" || { printf '%s was not found.\n' "$compiler" >&2; return 1; }
+    compiler_version="$("$compiler_path" --version | extract_version)" || return 1
+    compiler_major="${compiler_version%%.*}"
+
+    for candidate in "$(dirname "$compiler_path")/$tool" "$tool-$compiler_major" "$tool$compiler_major" "$tool"; do
+        if [[ "$candidate" == */* ]]; then
+            [[ -x "$candidate" ]] || continue
+            candidate_path="$candidate"
+        else
+            candidate_path="$(command -v "$candidate" 2>/dev/null)" || continue
+        fi
+        tool_version="$("$candidate_path" --version 2>/dev/null | extract_version)" || continue
+        if [[ "${tool_version%%.*}" == "$compiler_major" ]]; then
+            printf '%s' "$candidate_path"
+            return 0
+        fi
+    done
+
+    printf 'No %s matching Clang major version %s was found.\n' "$tool" "$compiler_major" >&2
+    return 1
+}
+
 package_name() {
     local manager="$1" logical="$2"
     case "$manager:$logical" in

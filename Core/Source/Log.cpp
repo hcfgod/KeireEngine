@@ -137,9 +137,25 @@ LoggerHandle::LoggerHandle(std::shared_ptr<spdlog::logger> logger, std::shared_l
 {
 }
 
-spdlog::logger* LoggerHandle::operator->() const noexcept { return m_Logger.get(); }
-
 LoggerHandle::operator bool() const noexcept { return static_cast<bool>(m_Logger); }
+
+std::size_t LoggerHandle::SinkCount() const noexcept { return m_Logger ? m_Logger->sinks().size() : 0; }
+
+void LoggerHandle::Flush() const
+{
+    if (m_Logger)
+    {
+        m_Logger->flush();
+    }
+}
+
+void LoggerHandle::SetLevel(LogLevel level) const
+{
+    if (m_Logger)
+    {
+        m_Logger->set_level(Log::ToSpdlogLevel(level));
+    }
+}
 
 void Log::Initialize(const LogConfig& config)
 {

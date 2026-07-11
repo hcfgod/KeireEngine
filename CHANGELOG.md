@@ -22,6 +22,11 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Release packaging now compiles and runs a standalone consumer from the extracted SDK archive.
+- Windows packaging supports Git repositories without a first commit, and vendor probes suppress expected native Git errors.
+- Linux coverage resolves `llvm-profdata` and `llvm-cov` from the selected Clang major version.
+- Logger handles no longer expose a raw spdlog pointer beyond their lifecycle lock.
+- Security workflows expose an always-running activation check so disabled advanced-security jobs cannot look silently successful.
 - Linux Premake bootstrap now accepts release archives whose executable bit is not preserved.
 - ARM64 Premake source builds install the platform UUID development headers before compilation.
 - Vendor bootstrap verifies the committed submodule pointer and restores detached working trees to that exact hash.

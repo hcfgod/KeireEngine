@@ -34,7 +34,7 @@ foreach ($dependency in $Dependencies) {
         Invoke-Git clone --quiet $dependency.Url $directory
         Invoke-Git -C $directory checkout --quiet $dependency.Commit
     }
-    elseif (-not (((& git -C $directory rev-parse --is-inside-work-tree 2>&1) -join "") -eq "true")) {
+    elseif (-not (Test-GitRepository $directory)) {
         throw "$($dependency.Path) exists but is not a Git repository."
     }
 

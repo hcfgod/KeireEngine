@@ -26,6 +26,29 @@ function Get-GitWorktreeRoot {
     return (Resolve-Path $topLevel)
 }
 
+function Get-GitHeadCommit {
+    param([string]$Path, [string]$Fallback = "uncommitted")
+    try {
+        $commit = (& git -C $Path rev-parse --verify HEAD 2>$null) -join ""
+    }
+    catch {
+        return $Fallback
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $commit) { return $Fallback }
+    return $commit.Trim()
+}
+
+function Test-GitRepository {
+    param([string]$Path)
+    try {
+        $inside = (& git -C $Path rev-parse --is-inside-work-tree 2>$null) -join ""
+    }
+    catch {
+        return $false
+    }
+    return $LASTEXITCODE -eq 0 -and $inside.Trim() -eq "true"
+}
+
 function ConvertTo-MacroPrefix {
     param([string]$Identifier)
     $value = [regex]::Replace($Identifier, '([A-Z]+)([A-Z][a-z])', '$1_$2')

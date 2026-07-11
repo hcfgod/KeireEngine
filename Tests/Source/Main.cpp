@@ -163,7 +163,7 @@ TEST_CASE("Console output can be suppressed without disabling file logging")
     {
         auto logger = Core::Log::GetCoreLogger();
         REQUIRE(logger);
-        CHECK(logger->sinks().size() == 1);
+        CHECK(logger.SinkCount() == 1);
     }
     CORE_INFO("file-only message");
 }
@@ -304,7 +304,7 @@ TEST_CASE("Lazy acquisition and explicit initialization serialize safely")
                 try
                 {
                     auto logger = Core::Log::GetCoreLogger();
-                    logger->info("race-safe lazy message");
+                    logger.Write(spdlog::source_loc{}, spdlog::level::info, "race-safe lazy message");
                 }
                 catch (...)
                 {
