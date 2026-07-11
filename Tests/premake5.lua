@@ -17,7 +17,11 @@ project "Tests"
     includedirs
     {
         "Include",
-        "../Core/Include",
+        "../Core/Include"
+    }
+
+    externalincludedirs
+    {
         VendorIncludeDirs.doctest,
         VendorIncludeDirs.spdlog
     }

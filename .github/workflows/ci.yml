@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -15,114 +15,141 @@ concurrency:
 
 jobs:
   windows:
-    name: Windows ${{ matrix.configuration }}
-    # Pin VS2022 jobs to the image that guarantees Visual Studio 2022.
+    name: Windows x64 VS2022 ${{ matrix.configuration }}
     runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        configuration: [ Debug, Release, Dist, DebugASan ]
+        configuration: [Debug, Release, Dist, DebugASan]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-
       - name: Bootstrap
         shell: pwsh
-        run: .\Scripts\project.ps1 bootstrap -Generator vs2022
-
+        run: .\Scripts\project.ps1 bootstrap -Generator vs2022 -Architecture x86_64 -Toolset msc
+      - name: Verify clean bootstrap
+        shell: pwsh
+        run: if (git status --porcelain) { throw "Bootstrap modified tracked state." }
       - name: Generate
         shell: pwsh
-        run: .\Scripts\project.ps1 generate -Generator vs2022
-
-      - name: Build
+        run: .\Scripts\project.ps1 generate -Generator vs2022 -Architecture x86_64 -Toolset msc -CI
+      - name: Build and test
         shell: pwsh
-        run: .\Scripts\project.ps1 build -Generator vs2022 -Configuration ${{ matrix.configuration }}
-
-      - name: Test
+        run: .\Scripts\project.ps1 test -Generator vs2022 -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset msc -CI
+      - name: Client smoke test
         shell: pwsh
-        run: .\Scripts\project.ps1 test -Generator vs2022 -Configuration ${{ matrix.configuration }}
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
+        run: .\Scripts\project.ps1 run -Generator vs2022 -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset msc -CI
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-${{ matrix.configuration }}-logs
           path: Logs/
           if-no-files-found: ignore
 
-  linux:
-    name: Linux ${{ matrix.configuration }}
+  linux-x64:
+    name: Linux x64 GCC ${{ matrix.configuration }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
+        configuration: [Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan]
     env:
       ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       TSAN_OPTIONS: halt_on_error=1
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-
-      - name: Bootstrap
-        run: bash Scripts/project.sh bootstrap --generator ninja
-
-      - name: Generate
-        run: bash Scripts/project.sh generate --generator ninja
-
-      - name: Build
-        run: bash Scripts/project.sh build --generator ninja --configuration ${{ matrix.configuration }}
-
-      - name: Test
-        run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }}
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset gcc
+      - name: Verify clean bootstrap
+        run: test -z "$(git status --porcelain)"
+      - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset gcc --ci
+      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset gcc --ci
+      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset gcc --ci
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: linux-${{ matrix.configuration }}-logs
+          name: linux-x64-${{ matrix.configuration }}-logs
           path: Logs/
           if-no-files-found: ignore
 
-  macos:
-    name: macOS ${{ matrix.configuration }}
+  macos-intel:
+    name: macOS Intel ${{ matrix.configuration }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
       matrix:
-        configuration: [ Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan ]
+        configuration: [Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan]
     env:
-      # LeakSanitizer is unavailable in Apple's AddressSanitizer runtime.
       ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       TSAN_OPTIONS: halt_on_error=1
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset clang
+      - name: Verify clean bootstrap
+        run: test -z "$(git status --porcelain)"
+      - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset clang --ci
+      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset clang --ci
+      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset clang --ci
 
-      - name: Bootstrap
-        run: bash Scripts/project.sh bootstrap --generator ninja
-
-      - name: Generate
-        run: bash Scripts/project.sh generate --generator ninja
-
-      - name: Build
-        run: bash Scripts/project.sh build --generator ninja --configuration ${{ matrix.configuration }}
-
-      - name: Test
-        run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }}
-
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
+  arm64-smoke:
+    name: ${{ matrix.name }} ${{ matrix.configuration }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: Linux ARM64, runner: ubuntu-24.04-arm, platform: Linux, configuration: Debug}
+          - {name: Linux ARM64, runner: ubuntu-24.04-arm, platform: Linux, configuration: Release}
+          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: Debug}
+          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: Release}
+          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: DebugASan}
+    env:
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
-          name: macos-${{ matrix.configuration }}-logs
-          path: Logs/
-          if-no-files-found: ignore
+          submodules: recursive
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }}
+      - name: Verify clean bootstrap
+        run: test -z "$(git status --porcelain)"
+      - run: bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }} --ci
+      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }} --ci
+      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }} --ci
+
+  quality:
+    name: Format, lint, and static analysis
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - name: Install quality tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format clang-tidy shellcheck yamllint
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          pwsh -NoProfile -Command "Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser"
+      - name: Check C++ formatting
+        run: find Core Client Tests -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print0 | xargs -0 clang-format --dry-run --Werror
+      - name: Check shell scripts
+        run: shellcheck --exclude=SC2034 --source-path=SCRIPTDIR Scripts/project.sh Scripts/Unix/*.sh Scripts/Linux/*.sh Scripts/Mac/*.sh
+      - name: Check PowerShell scripts
+        shell: pwsh
+        run: |
+          $issues = Invoke-ScriptAnalyzer -Path Scripts -Recurse -Settings PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
+          $issues | Format-Table
+          if ($issues) { throw "PSScriptAnalyzer reported issues." }
+      - name: Check workflows
+        run: actionlint
+      - name: Check YAML
+        run: yamllint -c .yamllint.yml .github
+      - name: Generate compile database
+        run: bash Scripts/project.sh generate --generator compilecommands --architecture x86_64 --toolset clang --ci
+      - name: Run clang-tidy
+        run: clang-tidy Core/Source/*.cpp Client/Source/*.cpp Tests/Source/*.cpp -p . --quiet

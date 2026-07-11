@@ -3,23 +3,274 @@
 
 #include "Core.h"
 
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <sstream>
+#include <stdexcept>
 #include <string>
+#include <system_error>
+#include <thread>
+#include <vector>
+
+namespace
+{
+std::atomic<unsigned int> s_TestDirectoryCounter = 0;
+
+std::filesystem::path MakeTestDirectory(const std::string& name)
+{
+    const auto counter = s_TestDirectoryCounter.fetch_add(1);
+    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    return std::filesystem::temp_directory_path() / ("CrossPlatformCoreClientTemplate-" + name + "-" +
+                                                     std::to_string(timestamp) + "-" + std::to_string(counter));
+}
+
+std::string ReadFile(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    std::ostringstream contents;
+    contents << stream.rdbuf();
+    return contents.str();
+}
+
+struct LogFixture
+{
+    explicit LogFixture(const std::string& name) : Directory(MakeTestDirectory(name))
+    {
+        Core::Log::Shutdown();
+        std::filesystem::remove_all(Directory);
+        Config.LogDirectory = Directory.string();
+        Config.CoreLogFile = "CoreTests.log";
+        Config.ClientLogFile = "ClientTests.log";
+    }
+
+    ~LogFixture() noexcept
+    {
+        try
+        {
+            Core::Log::Shutdown();
+            std::error_code error;
+            std::filesystem::remove_all(Directory, error);
+        }
+        catch (...) // NOLINT(bugprone-empty-catch)
+        {
+            // Test cleanup must not terminate the process during stack unwinding.
+        }
+    }
+
+    std::filesystem::path Directory;
+    Core::LogConfig Config;
+};
+
+struct CurrentDirectoryGuard
+{
+    explicit CurrentDirectoryGuard(const std::filesystem::path& directory) : Original(std::filesystem::current_path())
+    {
+        std::filesystem::create_directories(directory);
+        std::filesystem::current_path(directory);
+    }
+
+    ~CurrentDirectoryGuard() noexcept
+    {
+        try
+        {
+            std::error_code error;
+            std::filesystem::current_path(Original, error);
+        }
+        catch (...) // NOLINT(bugprone-empty-catch)
+        {
+            // Restoring the working directory is best-effort in a destructor.
+        }
+    }
+
+    std::filesystem::path Original;
+};
+} // namespace
 
 TEST_CASE("Core name is stable")
 {
+    LogFixture fixture("core-name");
+    Core::Log::Initialize(fixture.Config);
+
     CHECK(std::string(Core::GetName()) == "Core");
 }
 
-TEST_CASE("Core logger can initialize, log, flush, and shutdown")
+TEST_CASE("Logger writes configured Core and Client files")
 {
-    Core::LogConfig config;
-    config.LogDirectory = "Logs/Tests";
-    config.CoreLogFile = "CoreTests.log";
-    config.ClientLogFile = "ClientTests.log";
+    LogFixture fixture("configured-files");
+    Core::Log::Initialize(fixture.Config);
 
-    CHECK_NOTHROW(Core::Log::Initialize(config));
-    CHECK_NOTHROW(CORE_INFO("doctest core logger smoke test"));
-    CHECK_NOTHROW(CLIENT_INFO("doctest client logger smoke test"));
+    CORE_INFO("configured core message");
+    CLIENT_WARN("configured client message");
+    Core::Log::Shutdown();
+
+    const auto coreFile = fixture.Directory / fixture.Config.CoreLogFile;
+    const auto clientFile = fixture.Directory / fixture.Config.ClientLogFile;
+    REQUIRE(std::filesystem::is_regular_file(coreFile));
+    REQUIRE(std::filesystem::is_regular_file(clientFile));
+    CHECK(ReadFile(coreFile).find("configured core message") != std::string::npos);
+    CHECK(ReadFile(clientFile).find("configured client message") != std::string::npos);
+}
+
+TEST_CASE("Logger initialization is idempotent only for the same configuration")
+{
+    LogFixture fixture("idempotence");
+    Core::Log::Initialize(fixture.Config);
+
+    CHECK_NOTHROW(Core::Log::Initialize(fixture.Config));
+
+    auto conflictingConfig = fixture.Config;
+    conflictingConfig.QueueSize *= 2;
+    CHECK_THROWS_AS(Core::Log::Initialize(conflictingConfig), std::logic_error);
+}
+
+TEST_CASE("Logger rejects invalid configurations")
+{
+    LogFixture fixture("validation");
+
+    auto config = fixture.Config;
+    config.QueueSize = 0;
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+
+    config = fixture.Config;
+    config.WorkerThreads = 0;
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+
+    config = fixture.Config;
+    config.MaxFileSizeBytes = 0;
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+
+    config = fixture.Config;
+    config.MaxFiles = 0;
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+
+    config = fixture.Config;
+    config.CoreLogFile = "../Core.log";
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+
+    config = fixture.Config;
+    config.ClientLogFile = config.CoreLogFile;
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+
+    const auto regularFile = fixture.Directory.parent_path() / (fixture.Directory.filename().string() + "-file");
+    {
+        std::ofstream stream(regularFile);
+        stream << "not a directory";
+    }
+    config = fixture.Config;
+    config.LogDirectory = regularFile.string();
+    CHECK_THROWS_AS(Core::Log::Initialize(config), std::invalid_argument);
+    std::filesystem::remove(regularFile);
+}
+
+TEST_CASE("Logger level changes filter lower-severity messages")
+{
+    LogFixture fixture("levels");
+    Core::Log::Initialize(fixture.Config);
+    Core::Log::SetLevel(Core::LogLevel::Error);
+
+    CORE_INFO("message that must be filtered");
+    CORE_ERROR("message that must be retained");
+    Core::Log::Shutdown();
+
+    const auto contents = ReadFile(fixture.Directory / fixture.Config.CoreLogFile);
+    CHECK(contents.find("message that must be filtered") == std::string::npos);
+    CHECK(contents.find("message that must be retained") != std::string::npos);
+}
+
+TEST_CASE("Logger rotates files at the configured size")
+{
+    LogFixture fixture("rotation");
+    fixture.Config.MaxFileSizeBytes = 512;
+    fixture.Config.MaxFiles = 2;
+    Core::Log::Initialize(fixture.Config);
+
+    for (int index = 0; index < 10; ++index)
+    {
+        CORE_INFO("rotation message {} {}", index, std::string(128, 'x'));
+    }
+    Core::Log::Shutdown();
+
+    std::size_t coreFileCount = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(fixture.Directory))
+    {
+        if (entry.path().filename().string().starts_with("CoreTests"))
+        {
+            ++coreFileCount;
+        }
+    }
+    CHECK(coreFileCount > 1);
+}
+
+TEST_CASE("Logger supports concurrent Core and Client logging")
+{
+    LogFixture fixture("concurrency");
+    Core::Log::Initialize(fixture.Config);
+
+    std::vector<std::thread> workers;
+    workers.reserve(4);
+    for (int worker = 0; worker < 4; ++worker)
+    {
+        workers.emplace_back(
+            [worker]()
+            {
+                for (int message = 0; message < 10; ++message)
+                {
+                    CORE_INFO("core worker {} message {}", worker, message);
+                    CLIENT_INFO("client worker {} message {}", worker, message);
+                }
+            });
+    }
+    for (auto& worker : workers)
+    {
+        worker.join();
+    }
+
     CHECK_NOTHROW(Core::Log::Flush());
-    CHECK_NOTHROW(Core::Log::Shutdown());
+    Core::Log::Shutdown();
+    CHECK(ReadFile(fixture.Directory / fixture.Config.CoreLogFile).find("core worker") != std::string::npos);
+    CHECK(ReadFile(fixture.Directory / fixture.Config.ClientLogFile).find("client worker") != std::string::npos);
+}
+
+TEST_CASE("Shutdown waits for active logger handles")
+{
+    using namespace std::chrono_literals;
+
+    LogFixture fixture("shutdown-coordination");
+    Core::Log::Initialize(fixture.Config);
+    std::future<void> shutdown;
+
+    {
+        auto handle = Core::Log::GetCoreLogger();
+        REQUIRE(handle);
+        shutdown = std::async(std::launch::async, []() { Core::Log::Shutdown(); });
+        CHECK(shutdown.wait_for(50ms) == std::future_status::timeout);
+    }
+
+    CHECK(shutdown.wait_for(2s) == std::future_status::ready);
+    CHECK_NOTHROW(shutdown.get());
+}
+
+TEST_CASE("Lazy initialization uses the process working directory and can reinitialize")
+{
+    const auto directory = MakeTestDirectory("lazy-initialization");
+    std::filesystem::remove_all(directory);
+
+    {
+        CurrentDirectoryGuard currentDirectory(directory);
+        Core::Log::Shutdown();
+        CORE_INFO("lazy initialization message");
+        Core::Log::Shutdown();
+        CHECK(std::filesystem::is_regular_file(directory / "Logs" / "Core.log"));
+    }
+
+    LogFixture fixture("reinitialization");
+    CHECK_NOTHROW(Core::Log::Initialize(fixture.Config));
+    CORE_INFO("reinitialized message");
+    Core::Log::Shutdown();
+    CHECK(ReadFile(fixture.Directory / fixture.Config.CoreLogFile).find("reinitialized message") != std::string::npos);
+
+    std::filesystem::remove_all(directory);
 }

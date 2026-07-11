@@ -1,46 +1,74 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "clean")]
+    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "vendor-update")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
     [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan")]
     [string]$Configuration = "Debug",
+    [string]$Architecture = "",
+    [ValidateSet("default", "msc", "gcc", "clang")]
+    [string]$Toolset = "default",
     [string]$Target = "Client",
+    [ValidateSet("spdlog", "doctest")]
+    [string]$Dependency = "spdlog",
+    [string]$Tag = "",
     [switch]$InstallOptional,
+    [switch]$Update,
+    [switch]$CI,
     [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
-
 $WindowsScripts = Join-Path $PSScriptRoot "Windows"
+. (Join-Path $WindowsScripts "common.ps1")
+$Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 
 function Invoke-ProjectCommand {
-    param(
-        [string]$SelectedCommand,
-        [string]$SelectedGenerator,
-        [string]$SelectedConfiguration,
-        [string]$SelectedTarget
-    )
-
+    param([string]$SelectedCommand)
     switch ($SelectedCommand) {
         "bootstrap" {
-            & (Join-Path $WindowsScripts "bootstrap.ps1") -Generators @($SelectedGenerator) -InstallOptional:$InstallOptional -Force:$Force
+            & (Join-Path $WindowsScripts "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
+                -Toolset $Toolset -InstallOptional:$InstallOptional -Update:$Update -Force:$Force
         }
         "generate" {
-            & (Join-Path $WindowsScripts "generate.ps1") -Generator $SelectedGenerator -Force:$Force
+            & (Join-Path $WindowsScripts "generate.ps1") -Generator $Generator -Architecture $Architecture `
+                -Toolset $Toolset -CI:$CI -Update:$Update -Force:$Force
         }
         "build" {
-            & (Join-Path $WindowsScripts "build.ps1") -Generator $SelectedGenerator -Configuration $SelectedConfiguration -Target $SelectedTarget -Generate:$Force
+            & (Join-Path $WindowsScripts "build.ps1") -Generator $Generator -Configuration $Configuration `
+                -Architecture $Architecture -Toolset $Toolset -Target $Target -CI:$CI -Update:$Update -Generate:$Force
         }
         "test" {
-            & (Join-Path $WindowsScripts "test.ps1") -Generator $SelectedGenerator -Configuration $SelectedConfiguration -Generate:$Force
+            & (Join-Path $WindowsScripts "test.ps1") -Generator $Generator -Configuration $Configuration `
+                -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
         }
-        "clean" {
-            & (Join-Path $WindowsScripts "clean.ps1") -All
+        "run" {
+            & (Join-Path $WindowsScripts "run.ps1") -Generator $Generator -Configuration $Configuration `
+                -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
         }
-        default {
-            throw "Unknown command '$SelectedCommand'."
+        "clean" { & (Join-Path $WindowsScripts "clean.ps1") -All }
+        "vendor-update" {
+            if (-not $Tag) { throw "-Tag is required for vendor-update." }
+            & (Join-Path $WindowsScripts "vendor-update.ps1") -Dependency $Dependency -Tag $Tag
         }
+    }
+}
+
+function Read-Setting([string]$Prompt, [string]$Current) {
+    $value = Read-Host "$Prompt [$Current]"
+    if ([string]::IsNullOrWhiteSpace($value)) { return $Current }
+    return $value
+}
+
+function Read-BuildSettings([bool]$IncludeConfiguration) {
+    $script:Generator = Read-Setting "Generator (vs2026, vs2022, vs2019, ninja, gmake)" $Generator
+    $script:Architecture = Normalize-Architecture (Read-Setting "Architecture (x86_64, ARM64)" $Architecture)
+    $script:Toolset = Read-Setting "Toolset (default, msc, gcc, clang)" $Toolset
+    $updateDefault = if ($Update) { "yes" } else { "no" }
+    $updateChoice = Read-Setting "Update installed prerequisites (yes, no)" $updateDefault
+    $script:Update = $updateChoice -match '^(y|yes)$'
+    if ($IncludeConfiguration) {
+        $script:Configuration = Read-Setting "Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan)" $Configuration
     }
 }
 
@@ -52,59 +80,27 @@ function Show-Menu {
         Write-Host "2. Generate project files"
         Write-Host "3. Build"
         Write-Host "4. Run tests"
-        Write-Host "5. Clean"
-        Write-Host "6. Exit"
+        Write-Host "5. Run Client"
+        Write-Host "6. Clean"
+        Write-Host "7. Exit"
         Write-Host ""
-
         $choice = Read-Host "Choose an option"
         try {
             switch ($choice) {
-                "1" { Invoke-ProjectCommand "bootstrap" $Generator $Configuration $Target }
-                "2" {
-                    $selectedGenerator = Read-Host "Generator (vs2026, vs2022, vs2019, ninja, gmake, compilecommands) [$Generator]"
-                    if ([string]::IsNullOrWhiteSpace($selectedGenerator)) { $selectedGenerator = $Generator }
-                    Invoke-ProjectCommand "generate" $selectedGenerator $Configuration $Target
-                    $Generator = $selectedGenerator
-                }
-                "3" {
-                    $selectedGenerator = Read-Host "Generator (vs2026, vs2022, vs2019, ninja, gmake) [$Generator]"
-                    if ([string]::IsNullOrWhiteSpace($selectedGenerator)) { $selectedGenerator = $Generator }
-                    $selectedConfiguration = Read-Host "Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan) [$Configuration]"
-                    if ([string]::IsNullOrWhiteSpace($selectedConfiguration)) { $selectedConfiguration = $Configuration }
-                    Invoke-ProjectCommand "build" $selectedGenerator $selectedConfiguration $Target
-                    $Generator = $selectedGenerator
-                    $Configuration = $selectedConfiguration
-                }
-                "4" {
-                    $selectedGenerator = Read-Host "Generator (vs2026, vs2022, vs2019, ninja, gmake) [$Generator]"
-                    if ([string]::IsNullOrWhiteSpace($selectedGenerator)) { $selectedGenerator = $Generator }
-                    $selectedConfiguration = Read-Host "Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan) [$Configuration]"
-                    if ([string]::IsNullOrWhiteSpace($selectedConfiguration)) { $selectedConfiguration = $Configuration }
-                    Invoke-ProjectCommand "test" $selectedGenerator $selectedConfiguration "Tests"
-                    $Generator = $selectedGenerator
-                    $Configuration = $selectedConfiguration
-                }
-                "5" { Invoke-ProjectCommand "clean" $Generator $Configuration $Target }
-                "6" { return }
-                default {
-                    Write-Warning "Invalid menu choice '$choice'."
-                }
+                "1" { Read-BuildSettings $false; Invoke-ProjectCommand bootstrap }
+                "2" { Read-BuildSettings $false; Invoke-ProjectCommand generate }
+                "3" { Read-BuildSettings $true; Invoke-ProjectCommand build }
+                "4" { Read-BuildSettings $true; Invoke-ProjectCommand test }
+                "5" { Read-BuildSettings $true; Invoke-ProjectCommand run }
+                "6" { Invoke-ProjectCommand clean }
+                "7" { return }
+                default { Write-Warning "Invalid menu choice '$choice'." }
             }
         }
-        catch {
-            Write-Host ""
-            Write-Host "Command failed:" -ForegroundColor Red
-            Write-Host $_.Exception.Message -ForegroundColor Red
-        }
-
+        catch { Write-Host "`nCommand failed:`n$($_.Exception.Message)" -ForegroundColor Red }
         Write-Host ""
         Read-Host "Press Enter to return to the menu"
     }
 }
 
-if ($Command -eq "menu") {
-    Show-Menu
-}
-else {
-    Invoke-ProjectCommand $Command $Generator $Configuration $Target
-}
+if ($Command -eq "menu") { Show-Menu } else { Invoke-ProjectCommand $Command }

@@ -1,216 +1,100 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TOOLS_DIR="$ROOT/Tools/Linux"
-PREMAKE_VERSION="5.0.0-beta8"
-PREMAKE="$TOOLS_DIR/premake5"
-INSTALL_OPTIONAL=0
-FORCE=0
-GENERATORS=()
-PACKAGE_MANAGER=""
-UPDATED=0
+source "$ROOT/Scripts/Unix/common.sh"
+GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+parse_build_arguments "$@"
+PREMAKE_VERSION=5.0.0-beta8
+PREMAKE="$ROOT/Tools/Linux/premake5"
+PACKAGE_MANAGER=""; PACKAGE_INDEX_UPDATED=0
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --generator)
-            GENERATORS+=("$2")
-            shift 2
-            ;;
-        --install-optional)
-            INSTALL_OPTIONAL=1
-            shift
-            ;;
-        --force)
-            FORCE=1
-            shift
-            ;;
-        *)
-            GENERATORS+=("$1")
-            shift
-            ;;
-    esac
-done
-
-step() {
-    printf '==> %s\n' "$1"
-}
-
-have() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-sudo_cmd() {
-    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-        "$@"
-    else
-        sudo "$@"
-    fi
-}
-
+step() { printf '==> %s\n' "$1"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+sudo_cmd() { if [[ ${EUID:-$(id -u)} -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
 detect_package_manager() {
-    if [[ -n "$PACKAGE_MANAGER" ]]; then
-        return
-    fi
-
-    if have apt-get; then
-        PACKAGE_MANAGER="apt"
-    elif have dnf; then
-        PACKAGE_MANAGER="dnf"
-    elif have pacman; then
-        PACKAGE_MANAGER="pacman"
-    elif have zypper; then
-        PACKAGE_MANAGER="zypper"
-    else
-        printf 'No supported package manager found. Expected apt, dnf, pacman, or zypper.\n' >&2
-        exit 1
-    fi
+    [[ -n "$PACKAGE_MANAGER" ]] && return
+    for candidate in apt-get dnf pacman zypper; do if have "$candidate"; then PACKAGE_MANAGER="$candidate"; return; fi; done
+    printf 'No supported package manager found.\n' >&2; exit 1
 }
-
 install_packages() {
     detect_package_manager
-
     case "$PACKAGE_MANAGER" in
-        apt)
-            if [[ "$UPDATED" -eq 0 ]]; then
-                sudo_cmd apt-get update
-                UPDATED=1
-            fi
-            sudo_cmd apt-get install -y "$@"
-            ;;
-        dnf)
-            sudo_cmd dnf install -y "$@"
-            ;;
-        pacman)
-            sudo_cmd pacman -Sy --needed --noconfirm "$@"
-            ;;
-        zypper)
-            sudo_cmd zypper --non-interactive install "$@"
-            ;;
+        apt-get) [[ $PACKAGE_INDEX_UPDATED -eq 1 ]] || { sudo_cmd apt-get update; PACKAGE_INDEX_UPDATED=1; }; sudo_cmd apt-get install -y "$@" ;;
+        dnf) sudo_cmd dnf install -y "$@" ;;
+        pacman) sudo_cmd pacman -Sy --needed --noconfirm "$@" ;;
+        zypper) sudo_cmd zypper --non-interactive install "$@" ;;
     esac
 }
-
-install_command_if_missing() {
-    local command_name="$1"
-    shift
-
-    if have "$command_name"; then
-        step "$command_name already available"
-        return
-    fi
-
-    step "Installing packages for $command_name"
-    install_packages "$@"
-}
-
-premake_asset_url() {
-    local fallback="https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-linux.tar.gz"
-
-    if have python3; then
-        python3 - "$PREMAKE_VERSION" "$fallback" <<'PY'
-import json
-import sys
-import urllib.request
-
-version = sys.argv[1]
-fallback = sys.argv[2]
-url = f"https://api.github.com/repos/premake/premake-core/releases/tags/v{version}"
-try:
-    request = urllib.request.Request(url, headers={"User-Agent": "cross-platform-core-client-template-bootstrap"})
-    with urllib.request.urlopen(request, timeout=20) as response:
-        data = json.load(response)
-    for asset in data.get("assets", []):
-        name = asset.get("name", "").lower()
-        if "linux" in name and name.endswith((".tar.gz", ".zip")):
-            print(asset["browser_download_url"])
-            break
-    else:
-        print(fallback)
-except Exception:
-    print(fallback)
-PY
+ensure_command() {
+    local command="$1"; shift
+    if ! have "$command" || [[ $UPDATE -eq 1 ]]; then
+        step "Installing or updating $command"
+        install_packages "$@"
     else
-        printf '%s\n' "$fallback"
+        step "$command already available"
     fi
+}
+check_version() {
+    local name="$1" actual="$2" minimum="$3"
+    version_at_least "$actual" "$minimum" || { printf '%s %s is older than required %s; rerun with --update.\n' "$name" "$actual" "$minimum" >&2; exit 1; }
 }
 
 install_premake() {
-    mkdir -p "$TOOLS_DIR"
-
-    if [[ "$FORCE" -eq 0 && -x "$PREMAKE" ]] && "$PREMAKE" --version 2>/dev/null | grep -q "$PREMAKE_VERSION"; then
-        step "Premake $PREMAKE_VERSION already installed at $PREMAKE"
-        return
+    mkdir -p "$(dirname "$PREMAKE")"
+    if [[ $FORCE -eq 0 && -x "$PREMAKE" ]] && "$PREMAKE" --version 2>/dev/null | grep -q "$PREMAKE_VERSION"; then step "Premake $PREMAKE_VERSION already installed"; return; fi
+    ensure_command curl curl
+    ensure_command tar tar
+    local temporary archive expected url
+    temporary="$(mktemp -d)"; trap 'rm -rf "$temporary"' RETURN
+    archive="$temporary/premake.tar.gz"
+    if [[ "$ARCHITECTURE" == x86_64 ]]; then
+        expected=63edd3e7461eebdd45b500a3c7e8ad4e7a67d68f230010f9a97cbb71b4ec59c8
+        url="https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-linux.tar.gz"
+        curl -fsSL "$url" -o "$archive"
+        [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$expected" ]] || { printf 'Premake checksum mismatch.\n' >&2; exit 1; }
+        tar -xf "$archive" -C "$temporary"
+    else
+        expected=2a55195fd2b27e5aa3de8ff6d22cdb127232a86f801d06e7f673d30a0eba09ac
+        url="https://github.com/premake/premake-core/archive/refs/tags/v$PREMAKE_VERSION.tar.gz"
+        install_packages gcc g++ make 2>/dev/null || install_packages gcc-c++ make
+        curl -fsSL "$url" -o "$archive"
+        [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$expected" ]] || { printf 'Premake source checksum mismatch.\n' >&2; exit 1; }
+        tar -xf "$archive" -C "$temporary"
+        local source
+        source="$(find "$temporary" -maxdepth 1 -type d -name 'premake-core-*' | head -n 1)"
+        make -C "$source" -f Bootstrap.mak linux PLATFORM=ARM64
     fi
-
-    install_command_if_missing curl curl
-    install_command_if_missing tar tar
-
-    step "Downloading Premake $PREMAKE_VERSION"
-    local temp_dir
-    temp_dir="$(mktemp -d)"
-
-    local archive="$temp_dir/premake-download"
-    curl -fsSL "$(premake_asset_url)" -o "$archive"
-    tar -xf "$archive" -C "$temp_dir" 2>/dev/null || unzip -q "$archive" -d "$temp_dir"
-
     local downloaded
-    downloaded="$(find "$temp_dir" -type f -name premake5 | head -n 1)"
-    if [[ -z "$downloaded" ]]; then
-        printf 'Downloaded Premake archive did not contain premake5.\n' >&2
-        exit 1
-    fi
-
-    cp "$downloaded" "$PREMAKE"
-    chmod +x "$PREMAKE"
-    rm -rf "$temp_dir"
-    step "Installed Premake at $PREMAKE"
-}
-
-ensure_generator() {
-    detect_package_manager
-
-    case "$1" in
-        ninja)
-            case "$PACKAGE_MANAGER" in
-                apt) install_command_if_missing ninja ninja-build ;;
-                *) install_command_if_missing ninja ninja ;;
-            esac
-            ;;
-        gmake)
-            case "$PACKAGE_MANAGER" in
-                apt) install_packages build-essential ;;
-                dnf) install_packages gcc-c++ make ;;
-                pacman) install_packages base-devel ;;
-                zypper) install_packages gcc-c++ make ;;
-            esac
-            ;;
-        compilecommands)
-            ensure_generator ninja
-            ;;
-        *)
-            printf "Unsupported Linux generator '%s'.\n" "$1" >&2
-            exit 1
-            ;;
-    esac
+    downloaded="$(find "$temporary" -type f -name premake5 -perm -u+x | head -n 1)"
+    [[ -n "$downloaded" ]] || { printf 'Premake executable was not produced.\n' >&2; exit 1; }
+    cp "$downloaded" "$PREMAKE"; chmod +x "$PREMAKE"
+    "$PREMAKE" --version | grep -q "$PREMAKE_VERSION"
+    rm -rf "$temporary"; trap - RETURN
 }
 
 install_premake
-install_command_if_missing git git
+ensure_command git git
+check_version Git "$(git --version | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)" 2.40
 
-if [[ "$INSTALL_OPTIONAL" -eq 1 ]]; then
+if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then ensure_command ninja ninja-build; check_version Ninja "$(ninja --version)" 1.11; fi
+[[ "$GENERATOR" == compilecommands ]] && ensure_command python3 python3
+if [[ "$GENERATOR" == gmake ]]; then
     detect_package_manager
-    case "$PACKAGE_MANAGER" in
-        apt) install_packages build-essential git curl unzip tar ninja-build clang ;;
-        dnf) install_packages gcc-c++ make git curl unzip tar ninja-build clang ;;
-        pacman) install_packages base-devel git curl unzip tar ninja clang ;;
-        zypper) install_packages gcc-c++ make git curl unzip tar ninja clang ;;
-    esac
+    case "$PACKAGE_MANAGER" in apt-get) install_packages build-essential;; dnf|zypper) install_packages gcc-c++ make;; pacman) install_packages base-devel;; esac
+    check_version Make "$(make --version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)+')" 4.3
 fi
+case "$TOOLSET" in
+    default|gcc)
+        ensure_command g++ g++
+        check_version GCC "$(g++ -dumpfullversion -dumpversion)" 12
+        ;;
+    clang)
+        ensure_command clang++ clang
+        check_version Clang "$(clang++ --version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)" 16
+        ;;
+    *) printf "Unsupported Linux toolset '%s'.\n" "$TOOLSET" >&2; exit 1 ;;
+esac
 
-for generator in "${GENERATORS[@]}"; do
-    ensure_generator "$generator"
-done
-
-bash "$(dirname "${BASH_SOURCE[0]}")/vendor.sh"
-
-step "Linux prerequisites are ready"
+if [[ $INSTALL_OPTIONAL -eq 1 ]]; then install_packages git curl tar ninja-build clang make; fi
+bash "$ROOT/Scripts/Linux/vendor.sh"
+step "Linux prerequisites are ready for $ARCHITECTURE"

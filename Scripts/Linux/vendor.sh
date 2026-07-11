@@ -1,71 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VENDOR_DIR="$ROOT/Vendor"
+command -v git >/dev/null 2>&1 || { printf 'Git is required.\n' >&2; exit 1; }
+git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || git -C "$ROOT" init
 
-step() {
-    printf '==> %s\n' "$1"
-}
-
-have() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-is_git_repo() {
-    local path="$1"
-    [[ -e "$path" ]] && git -C "$path" rev-parse --is-inside-work-tree >/dev/null 2>&1
-}
-
-is_git_index_path() {
-    local path="$1"
-    git -C "$ROOT" ls-files --error-unmatch "$path" >/dev/null 2>&1
-}
-
-if ! have git; then
-    printf 'Git is required to install vendor submodules.\n' >&2
-    exit 1
-fi
-
-if ! is_git_repo "$ROOT"; then
-    step "Initializing Git repository"
-    git -C "$ROOT" init
-fi
-
-mkdir -p "$VENDOR_DIR"
-
-install_vendor_dependency() {
-    local name="$1"
-    local path="$2"
-    local url="$3"
-    local tag="$4"
-    local dependency_dir="$ROOT/$path"
-
-    if [[ -e "$dependency_dir" ]]; then
-        if ! is_git_repo "$dependency_dir"; then
-            printf '%s already exists but is not a Git repository or submodule. Move it aside before bootstrapping vendor libraries.\n' "$path" >&2
-            exit 1
-        fi
-
-        step "Updating $name submodule"
+install_dependency() {
+    local name="$1" path="$2" url="$3" commit="$4"
+    local directory="$ROOT/$path" entry
+    entry="$(git -C "$ROOT" ls-files --stage -- "$path" 2>/dev/null || true)"
+    if [[ "$entry" == 160000\ * ]]; then
+        printf '==> Restoring %s from the committed submodule pointer\n' "$name"
         git -C "$ROOT" submodule update --init --recursive -- "$path"
-    elif is_git_index_path "$path"; then
-        step "Restoring $name submodule"
-        git -C "$ROOT" submodule update --init --recursive -- "$path"
-    else
-        step "Adding $name submodule"
-        git -C "$ROOT" submodule add "$url" "$path"
+    elif [[ ! -e "$directory" ]]; then
+        printf '==> Cloning %s at its pinned commit\n' "$name"
+        git clone --quiet "$url" "$directory"
+        git -C "$directory" checkout --quiet "$commit"
+    elif ! git -C "$directory" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        printf '%s exists but is not a Git repository.\n' "$path" >&2
+        exit 1
     fi
-
-    step "Checking out $name $tag"
-    git -C "$dependency_dir" fetch --tags --force --quiet
-    git -C "$dependency_dir" checkout --quiet "$tag"
-
-    step "Recording $name submodule pointer"
-    git -C "$ROOT" add .gitmodules "$path"
+    local actual
+    actual="$(git -C "$directory" rev-parse HEAD)"
+    [[ "$actual" == "$commit" ]] || { printf '%s is at %s; expected %s.\n' "$name" "$actual" "$commit" >&2; exit 1; }
+    printf '==> %s verified at %s\n' "$name" "$actual"
 }
 
-install_vendor_dependency "spdlog" "Vendor/spdlog" "https://github.com/gabime/spdlog.git" "v1.17.0"
-install_vendor_dependency "doctest" "Vendor/doctest" "https://github.com/doctest/doctest.git" "v2.5.3"
-
-step "Vendor libraries are ready"
+install_dependency spdlog Vendor/spdlog https://github.com/gabime/spdlog.git 79524ddd08a4ec981b7fea76afd08ee05f83755d
+install_dependency doctest Vendor/doctest https://github.com/doctest/doctest.git 2d0a9359a60c51affe2a9bebb1be1dca47868151
+printf '==> Vendor libraries are ready; Git staging was not modified\n'

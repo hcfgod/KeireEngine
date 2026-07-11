@@ -2,194 +2,96 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-UNAME="$(uname -s)"
-COMMAND="${1:-menu}"
-GENERATOR=""
-CONFIGURATION="Debug"
-TARGET="Client"
-INSTALL_OPTIONAL=0
-FORCE=0
+# shellcheck source=Unix/common.sh
+source "$SCRIPT_DIR/Unix/common.sh"
 
-if [[ "$COMMAND" != "menu" ]]; then
-    shift || true
-fi
-
-case "$UNAME" in
-    Darwin)
-        PLATFORM_DIR="$SCRIPT_DIR/Mac"
-        DEFAULT_GENERATOR="xcode4"
-        ;;
-    Linux)
-        PLATFORM_DIR="$SCRIPT_DIR/Linux"
-        DEFAULT_GENERATOR="ninja"
-        ;;
-    *)
-        printf "Unsupported platform '%s'. Use Scripts/project.ps1 on Windows.\n" "$UNAME" >&2
-        exit 1
-        ;;
+case "$(uname -s)" in
+    Darwin) PLATFORM_DIR="$SCRIPT_DIR/Mac"; PLATFORM_NAME="Mac"; GENERATOR="xcode4" ;;
+    Linux) PLATFORM_DIR="$SCRIPT_DIR/Linux"; PLATFORM_NAME="Linux"; GENERATOR="ninja" ;;
+    *) printf 'Use Scripts/project.ps1 on Windows.\n' >&2; exit 1 ;;
 esac
 
-GENERATOR="$DEFAULT_GENERATOR"
-
-normalize_configuration() {
-    case "$1" in
-        Debug|debug) printf 'Debug' ;;
-        Release|release) printf 'Release' ;;
-        Dist|dist) printf 'Dist' ;;
-        DebugASan|debugasan) printf 'DebugASan' ;;
-        DebugUBSan|debugubsan) printf 'DebugUBSan' ;;
-        DebugTSan|debugtsan) printf 'DebugTSan' ;;
-        *)
-            printf "Unsupported configuration '%s'. Expected Debug, Release, Dist, DebugASan, DebugUBSan, or DebugTSan.\n" "$1" >&2
-            return 1
-            ;;
-    esac
-}
+COMMAND="${1:-menu}"
+[[ "$COMMAND" == "menu" ]] || shift || true
+CONFIGURATION="Debug"
+ARCHITECTURE="$(native_architecture)"
+TOOLSET="default"
+TARGET="Client"
+DEPENDENCY="spdlog"
+TAG=""
+INSTALL_OPTIONAL=0
+UPDATE=0
+FORCE=0
+CI=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --generator)
-            GENERATOR="$2"
-            shift 2
-            ;;
-        --configuration)
-            CONFIGURATION="$(normalize_configuration "$2")"
-            shift 2
-            ;;
-        --target)
-            TARGET="$2"
-            shift 2
-            ;;
-        --install-optional)
-            INSTALL_OPTIONAL=1
-            shift
-            ;;
-        --force)
-            FORCE=1
-            shift
-            ;;
-        *)
-            if [[ -z "${GENERATOR_SET:-}" ]]; then
-                GENERATOR="$1"
-                GENERATOR_SET=1
-            else
-                printf "Unknown argument '%s'.\n" "$1" >&2
-                exit 1
-            fi
-            shift
-            ;;
+        --generator) GENERATOR="$2"; shift 2 ;;
+        --configuration) CONFIGURATION="$(normalize_configuration "$2")"; shift 2 ;;
+        --architecture) ARCHITECTURE="$(normalize_architecture "$2")"; shift 2 ;;
+        --toolset) TOOLSET="$2"; shift 2 ;;
+        --target) TARGET="$2"; shift 2 ;;
+        --dependency) DEPENDENCY="$2"; shift 2 ;;
+        --tag) TAG="$2"; shift 2 ;;
+        --install-optional) INSTALL_OPTIONAL=1; shift ;;
+        --update) UPDATE=1; shift ;;
+        --force) FORCE=1; shift ;;
+        --ci) CI=1; shift ;;
+        *) printf "Unknown argument '%s'.\n" "$1" >&2; exit 1 ;;
     esac
 done
 
 run_command() {
-    local selected_command="$1"
-
-    case "$selected_command" in
+    validate_unix_combination "$PLATFORM_NAME" "$GENERATOR" "$TOOLSET"
+    local common=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET")
+    [[ $CI -eq 1 ]] && common+=(--ci)
+    [[ $UPDATE -eq 1 ]] && common+=(--update)
+    [[ $FORCE -eq 1 ]] && common+=(--force)
+    case "$1" in
         bootstrap)
-            local args=("--generator" "$GENERATOR")
-            [[ "$INSTALL_OPTIONAL" -eq 1 ]] && args+=("--install-optional")
-            [[ "$FORCE" -eq 1 ]] && args+=("--force")
-            bash "$PLATFORM_DIR/bootstrap.sh" "${args[@]}"
+            [[ $INSTALL_OPTIONAL -eq 1 ]] && common+=(--install-optional)
+            bash "$PLATFORM_DIR/bootstrap.sh" "${common[@]}"
             ;;
-        generate)
-            bash "$PLATFORM_DIR/generate.sh" "$GENERATOR"
+        generate) bash "$PLATFORM_DIR/generate.sh" "${common[@]}" ;;
+        build) bash "$PLATFORM_DIR/build.sh" "${common[@]}" --configuration "$CONFIGURATION" --target "$TARGET" ;;
+        test) bash "$PLATFORM_DIR/test.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
+        run) bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
+        clean) bash "$PLATFORM_DIR/clean.sh" ;;
+        vendor-update)
+            [[ -n "$TAG" ]] || { printf '%s\n' '--tag is required for vendor-update.' >&2; return 1; }
+            bash "$PLATFORM_DIR/vendor-update.sh" "$DEPENDENCY" "$TAG"
             ;;
-        build)
-            bash "$PLATFORM_DIR/build.sh" "$GENERATOR" "$CONFIGURATION" "$TARGET"
-            ;;
-        test)
-            bash "$PLATFORM_DIR/test.sh" "$GENERATOR" "$CONFIGURATION"
-            ;;
-        clean)
-            bash "$PLATFORM_DIR/clean.sh"
-            ;;
-        *)
-            printf "Unknown command '%s'.\n" "$selected_command" >&2
-            exit 1
-            ;;
+        *) printf "Unknown command '%s'.\n" "$1" >&2; return 1 ;;
     esac
+}
+
+read_setting() {
+    local prompt="$1" current="$2" value
+    printf '%s [%s]: ' "$prompt" "$current" >&2
+    read -r value
+    printf '%s' "${value:-$current}"
 }
 
 show_menu() {
     while true; do
-        printf '\nCrossPlatformCoreClientTemplate\n'
-        printf '1. Bootstrap prerequisites\n'
-        printf '2. Generate project files\n'
-        printf '3. Build\n'
-        printf '4. Run tests\n'
-        printf '5. Clean\n'
-        printf '6. Exit\n\n'
-        printf 'Choose an option: '
+        printf '\nCrossPlatformCoreClientTemplate\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run Client\n6. Clean\n7. Exit\n\nChoose an option: '
         read -r choice
-
         case "$choice" in
-            1)
-                if ! run_command bootstrap; then
-                    printf '\nCommand failed.\n' >&2
-                fi
+            1|2|3|4|5)
+                GENERATOR="$(read_setting 'Generator' "$GENERATOR")"
+                ARCHITECTURE="$(normalize_architecture "$(read_setting 'Architecture (x86_64, ARM64)' "$ARCHITECTURE")")"
+                TOOLSET="$(read_setting 'Toolset (default, gcc, clang)' "$TOOLSET")"
+                update_choice="$(read_setting 'Update installed prerequisites (yes, no)' "$([[ $UPDATE -eq 1 ]] && printf yes || printf no)")"
+                [[ "$update_choice" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] && UPDATE=1 || UPDATE=0
+                [[ "$choice" =~ ^[345]$ ]] && CONFIGURATION="$(normalize_configuration "$(read_setting 'Configuration' "$CONFIGURATION")")"
+                case "$choice" in 1) run_command bootstrap;; 2) run_command generate;; 3) run_command build;; 4) run_command test;; 5) run_command run;; esac || printf '\nCommand failed.\n' >&2
                 ;;
-            2)
-                printf 'Generator [%s]: ' "$GENERATOR"
-                read -r selected_generator
-                [[ -n "$selected_generator" ]] && GENERATOR="$selected_generator"
-                if ! run_command generate; then
-                    printf '\nCommand failed.\n' >&2
-                fi
-                ;;
-            3)
-                printf 'Generator [%s]: ' "$GENERATOR"
-                read -r selected_generator
-                [[ -n "$selected_generator" ]] && GENERATOR="$selected_generator"
-                printf 'Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan) [%s]: ' "$CONFIGURATION"
-                read -r selected_configuration
-                if [[ -n "$selected_configuration" ]]; then
-                    if ! CONFIGURATION="$(normalize_configuration "$selected_configuration")"; then
-                        printf '\nCommand failed.\n' >&2
-                        printf '\nPress Enter to return to the menu.'
-                        read -r _
-                        continue
-                    fi
-                fi
-                if ! run_command build; then
-                    printf '\nCommand failed.\n' >&2
-                fi
-                ;;
-            4)
-                printf 'Generator [%s]: ' "$GENERATOR"
-                read -r selected_generator
-                [[ -n "$selected_generator" ]] && GENERATOR="$selected_generator"
-                printf 'Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan) [%s]: ' "$CONFIGURATION"
-                read -r selected_configuration
-                if [[ -n "$selected_configuration" ]]; then
-                    if ! CONFIGURATION="$(normalize_configuration "$selected_configuration")"; then
-                        printf '\nCommand failed.\n' >&2
-                        printf '\nPress Enter to return to the menu.'
-                        read -r _
-                        continue
-                    fi
-                fi
-                if ! run_command test; then
-                    printf '\nCommand failed.\n' >&2
-                fi
-                ;;
-            5)
-                if ! run_command clean; then
-                    printf '\nCommand failed.\n' >&2
-                fi
-                ;;
-            6) exit 0 ;;
-            *)
-                printf "Invalid menu choice '%s'.\n" "$choice" >&2
-                ;;
+            6) run_command clean || printf '\nCommand failed.\n' >&2 ;;
+            7) return ;;
+            *) printf 'Invalid menu choice.\n' >&2 ;;
         esac
-
-        printf '\nPress Enter to return to the menu.'
-        read -r _
+        printf '\nPress Enter to return to the menu.'; read -r _
     done
 }
 
-if [[ "$COMMAND" == "menu" ]]; then
-    show_menu
-else
-    run_command "$COMMAND"
-fi
+if [[ "$COMMAND" == "menu" ]]; then show_menu; else run_command "$COMMAND"; fi

@@ -9,6 +9,18 @@ Build/Intermediates/
 Build/Generated/
 Logs/
 
+# Downloaded project-local tools
+Tools/*
+!Tools/Windows/
+!Tools/Mac/
+!Tools/Linux/
+Tools/Windows/*
+Tools/Mac/*
+Tools/Linux/*
+!Tools/Windows/.gitkeep
+!Tools/Mac/.gitkeep
+!Tools/Linux/.gitkeep
+
 # Generated project files
 *.sln
 *.slnx

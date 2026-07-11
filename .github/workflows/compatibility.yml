@@ -1,0 +1,74 @@
+name: Extended Compatibility
+
+on:
+  schedule:
+    - cron: "17 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: VS2019 x64, runner: windows-2022, generator: vs2019, architecture: x86_64, toolset: msc, configuration: Debug, mode: test}
+          - {name: VS2022 x64, runner: windows-2022, generator: vs2022, architecture: x86_64, toolset: msc, configuration: Release, mode: test}
+          - {name: VS2026 x64, runner: windows-2025-vs2026, generator: vs2026, architecture: x86_64, toolset: msc, configuration: Release, mode: test}
+          - {name: Ninja MSVC x64, runner: windows-2022, generator: ninja, architecture: x86_64, toolset: msc, configuration: Debug, mode: test}
+          - {name: GNU Make GCC x64, runner: windows-2022, generator: gmake, architecture: x86_64, toolset: gcc, configuration: Release, mode: test}
+          - {name: Compile Commands Clang, runner: windows-2022, generator: compilecommands, architecture: x86_64, toolset: clang, configuration: Debug, mode: generate}
+          - {name: VS2022 ARM64, runner: windows-11-arm, generator: vs2022, architecture: ARM64, toolset: msc, configuration: Debug, mode: test}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - name: Bootstrap and generate
+        shell: pwsh
+        run: |
+          .\Scripts\project.ps1 bootstrap -Generator ${{ matrix.generator }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }}
+          .\Scripts\project.ps1 generate -Generator ${{ matrix.generator }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }} -CI
+      - if: matrix.mode == 'test'
+        shell: pwsh
+        run: .\Scripts\project.ps1 test -Generator ${{ matrix.generator }} -Configuration ${{ matrix.configuration }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }} -CI
+
+  unix:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: Linux GCC Ninja, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: gcc, configuration: Debug, mode: test}
+          - {name: Linux GCC GNU Make, runner: ubuntu-24.04, generator: gmake, architecture: x86_64, toolset: gcc, configuration: Release, mode: test}
+          - {name: Linux Clang ASan, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: clang, configuration: DebugASan, mode: test}
+          - {name: Linux Clang UBSan, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: clang, configuration: DebugUBSan, mode: test}
+          - {name: Linux Clang TSan, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: clang, configuration: DebugTSan, mode: test}
+          - {name: Linux ARM64 ASan, runner: ubuntu-24.04-arm, generator: ninja, architecture: ARM64, toolset: gcc, configuration: DebugASan, mode: test}
+          - {name: Linux Compile Commands, runner: ubuntu-24.04, generator: compilecommands, architecture: x86_64, toolset: clang, configuration: Debug, mode: generate}
+          - {name: macOS Intel Xcode, runner: macos-15-intel, generator: xcode4, architecture: x86_64, toolset: clang, configuration: Debug, mode: test}
+          - {name: macOS Intel Ninja, runner: macos-15-intel, generator: ninja, architecture: x86_64, toolset: clang, configuration: Debug, mode: test}
+          - {name: macOS ARM64 Ninja, runner: macos-15, generator: ninja, architecture: ARM64, toolset: clang, configuration: DebugASan, mode: test}
+          - {name: macOS ARM64 Xcode, runner: macos-15, generator: xcode4, architecture: ARM64, toolset: clang, configuration: Release, mode: test}
+          - {name: macOS Intel GNU Make, runner: macos-15-intel, generator: gmake, architecture: x86_64, toolset: clang, configuration: Release, mode: test}
+          - {name: macOS ARM64 Compile Commands, runner: macos-15, generator: compilecommands, architecture: ARM64, toolset: clang, configuration: Debug, mode: generate}
+    env:
+      ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      TSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - run: bash Scripts/project.sh bootstrap --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }}
+      - run: bash Scripts/project.sh generate --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
+      - if: matrix.mode == 'test'
+        run: bash Scripts/project.sh test --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci

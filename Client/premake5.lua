@@ -17,7 +17,11 @@ project "Client"
     includedirs
     {
         "Include",
-        "../Core/Include",
+        "../Core/Include"
+    }
+
+    externalincludedirs
+    {
         VendorIncludeDirs.spdlog
     }
 

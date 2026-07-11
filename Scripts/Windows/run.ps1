@@ -14,33 +14,26 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
-
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
-$TestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\Tests\Tests.exe"
+$ClientExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\Client\Client.exe"
 
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
-    -Architecture $Architecture -Toolset $Toolset -Target Tests -CI:$CI -Update:$Update -Generate:$Generate
-if (-not (Test-Path $TestsExe)) { throw "Tests executable was not found: $TestsExe" }
+    -Architecture $Architecture -Toolset $Toolset -Target Client -CI:$CI -Update:$Update -Generate:$Generate
+if (-not (Test-Path $ClientExe)) { throw "Client executable was not found: $ClientExe" }
 
-$originalPath = $env:PATH
-$exitCode = 1
 Push-Location $Root
+$originalPath = $env:PATH
 try {
     $usesMSVC = $Generator -like "vs*" -or ($Generator -eq "ninja" -and $Toolset -in @("default", "msc"))
     if ($Configuration -eq "DebugASan" -and $usesMSVC) {
         $majorVersion = if ($Generator -like "vs*") { Get-VisualStudioMajorVersion $Generator } else { 17 }
         $runtimeDirectory = Get-MSVCASanRuntimeDirectory $majorVersion $Architecture
-        Write-Host "==> Using MSVC AddressSanitizer runtime from $runtimeDirectory"
         $env:PATH = "$runtimeDirectory;$env:PATH"
     }
-    Write-Host "==> Running Tests $Configuration for $Architecture"
-    & $TestsExe
-    $exitCode = $LASTEXITCODE
+    Write-Host "==> Running Client $Configuration for $Architecture"
+    & $ClientExe
+    exit $LASTEXITCODE
 }
-finally {
-    $env:PATH = $originalPath
-    Pop-Location
-}
-exit $exitCode
+finally { $env:PATH = $originalPath; Pop-Location }

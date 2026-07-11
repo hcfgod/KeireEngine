@@ -1,0 +1,11 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  readability-redundant-*
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^(Core|Client|Tests)/'
+FormatStyle: file

@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GENERATOR="${1:-ninja}"
-PREMAKE="$ROOT/Tools/Linux/premake5"
+source "$ROOT/Scripts/Unix/common.sh"
+GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+parse_build_arguments "$@"
+validate_unix_combination Linux "$GENERATOR" "$TOOLSET"
 
-case "$GENERATOR" in
-    ninja|gmake|compilecommands) ;;
-    *)
-        printf "Unsupported Linux generator '%s'.\n" "$GENERATOR" >&2
-        exit 1
-        ;;
-esac
+bootstrap=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET")
+[[ $UPDATE -eq 1 ]] && bootstrap+=(--update)
+[[ $FORCE -eq 1 ]] && bootstrap+=(--force)
+bash "$ROOT/Scripts/Linux/bootstrap.sh" "${bootstrap[@]}"
 
-bash "$(dirname "${BASH_SOURCE[0]}")/bootstrap.sh" --generator "$GENERATOR"
-
-printf "==> Generating project files with Premake action '%s'\n" "$GENERATOR"
-if [[ "$GENERATOR" == "compilecommands" ]]; then
-    "$PREMAKE" --file="$ROOT/premake5.lua" ninja
-    ninja -C "$ROOT" -f build.ninja -t compdb > "$ROOT/compile_commands.json"
-    printf 'Generated compile_commands.json\n'
+args=("--file=$ROOT/premake5.lua" "--arch=$(premake_architecture "$ARCHITECTURE")" "--toolset=$TOOLSET")
+[[ $CI -eq 1 ]] && args+=(--ci)
+mkdir -p "$ROOT/Build/Generated"
+printf '==> Generating %s files for %s with toolset %s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET"
+if [[ "$GENERATOR" == compilecommands ]]; then
+    (cd "$ROOT" && "$ROOT/Tools/Linux/premake5" "${args[@]}" ninja)
+    rule_toolset="$TOOLSET"; [[ "$rule_toolset" == default ]] && rule_toolset=gcc
+    ninja -C "$ROOT" -f build.ninja -t compdb "cxx_$rule_toolset" > "$ROOT/Build/Generated/compile_commands.all.json"
+    python3 "$ROOT/Scripts/Unix/filter-compdb.py" "$ROOT/Build/Generated/compile_commands.all.json" "$ROOT/compile_commands.json"
 else
-    "$PREMAKE" --file="$ROOT/premake5.lua" "$GENERATOR"
+    (cd "$ROOT" && "$ROOT/Tools/Linux/premake5" "${args[@]}" "$GENERATOR")
 fi
+printf '%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$CI" > "$ROOT/Build/Generated/$GENERATOR.stamp"

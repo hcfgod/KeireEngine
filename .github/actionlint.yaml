@@ -1,0 +1,5 @@
+self-hosted-runner:
+  labels:
+    - macos-15-intel
+    - windows-2025-vs2026
+    - windows-11-arm

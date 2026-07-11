@@ -1,48 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-GENERATOR="${1:-ninja}"
-CONFIGURATION="${2:-Debug}"
-TARGET="${3:-Client}"
+source "$ROOT/Scripts/Unix/common.sh"
+GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+parse_build_arguments "$@"
+validate_unix_combination Linux "$GENERATOR" "$TOOLSET"
 
-normalize_configuration() {
-    case "$1" in
-        Debug|debug) printf 'Debug' ;;
-        Release|release) printf 'Release' ;;
-        Dist|dist) printf 'Dist' ;;
-        DebugASan|debugasan) printf 'DebugASan' ;;
-        DebugUBSan|debugubsan) printf 'DebugUBSan' ;;
-        DebugTSan|debugtsan) printf 'DebugTSan' ;;
-        *)
-            printf "Unsupported configuration '%s'. Expected Debug, Release, Dist, DebugASan, DebugUBSan, or DebugTSan.\n" "$1" >&2
-            return 1
-            ;;
-    esac
-}
-
-CONFIGURATION="$(normalize_configuration "$CONFIGURATION")"
-
-generate_if_needed() {
-    local expected="$1"
-    if [[ ! -e "$ROOT/$expected" ]]; then
-        bash "$(dirname "${BASH_SOURCE[0]}")/generate.sh" "$GENERATOR"
-    fi
-}
+expected="$GENERATOR|$ARCHITECTURE|$TOOLSET|$CI"
+stamp="$ROOT/Build/Generated/$GENERATOR.stamp"
+generated=build.ninja; [[ "$GENERATOR" == gmake ]] && generated=Makefile
+if [[ $FORCE -eq 1 || $UPDATE -eq 1 || ! -f "$ROOT/$generated" || ! -f "$stamp" || "$(tr -d '\r\n' < "$stamp")" != "$expected" ]]; then
+    args=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET"); [[ $CI -eq 1 ]] && args+=(--ci)
+    [[ $UPDATE -eq 1 ]] && args+=(--update)
+    [[ $FORCE -eq 1 ]] && args+=(--force)
+    bash "$ROOT/Scripts/Linux/generate.sh" "${args[@]}"
+fi
 
 case "$GENERATOR" in
-    ninja)
-        generate_if_needed "build.ninja"
-        printf "==> Building %s %s with Ninja\n" "$TARGET" "$CONFIGURATION"
-        ninja -C "$ROOT" -f build.ninja "${TARGET}_${CONFIGURATION}"
-        ;;
-    gmake)
-        generate_if_needed "Makefile"
-        printf "==> Building %s %s with GNU Make\n" "$TARGET" "$CONFIGURATION"
-        make -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET"
-        ;;
-    *)
-        printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2
-        exit 1
-        ;;
+    ninja) printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; ninja -C "$ROOT" -f build.ninja "${TARGET}_${CONFIGURATION}" ;;
+    gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; make -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
+    *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
 esac

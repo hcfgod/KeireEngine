@@ -16,6 +16,10 @@ project "Core"
 
     includedirs
     {
-        "Include",
+        "Include"
+    }
+
+    externalincludedirs
+    {
         VendorIncludeDirs.spdlog
     }

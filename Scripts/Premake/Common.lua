@@ -9,12 +9,23 @@ function ApplyCommonProjectSettings()
     language "C++"
     cppdialect "C++20"
     staticruntime "off"
+    warnings "Extra"
 
     targetdir ("../Build/Bin/" .. OutputDir .. "/%{prj.name}")
     objdir ("../Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
+    debugdir "../"
 
-    filter "system:windows"
+    filter "options:ci"
+        fatalwarnings "All"
+
+    filter {}
+
+    local selectedToolset = _OPTIONS["toolset"] or "default"
+    local usesMsvcCommandLine = os.host() == "windows" and
+        ((_ACTION and _ACTION:match("^vs")) or (_ACTION == "ninja" and (selectedToolset == "default" or selectedToolset == "msc")))
+    if usesMsvcCommandLine then
         buildoptions { "/utf-8" }
+    end
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan" }
         runtime "Debug"
@@ -30,6 +41,7 @@ function ApplyCommonProjectSettings()
         optimize "on"
         defines
         {
+            "NDEBUG",
             "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO"
         }
 
@@ -39,6 +51,7 @@ function ApplyCommonProjectSettings()
         symbols "off"
         defines
         {
+            "NDEBUG",
             "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO"
         }
 
@@ -48,22 +61,22 @@ function ApplyCommonProjectSettings()
 end
 
 function ApplySanitizerSettings()
-    filter { "configurations:DebugASan", "system:windows" }
+    filter { "configurations:DebugASan", "toolset:msc" }
         editandcontinue "Off"
         buildoptions { "/fsanitize=address" }
 
-    filter { "configurations:DebugASan", "system:windows", "kind:ConsoleApp" }
+    filter { "configurations:DebugASan", "toolset:msc", "kind:ConsoleApp" }
         linkoptions { "/INCREMENTAL:NO" }
 
-    filter { "configurations:DebugASan", "system:linux or macosx" }
+    filter { "configurations:DebugASan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=address" }
 
-    filter { "configurations:DebugUBSan", "system:linux or macosx" }
+    filter { "configurations:DebugUBSan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=undefined", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=undefined" }
 
-    filter { "configurations:DebugTSan", "system:linux or macosx" }
+    filter { "configurations:DebugTSan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=thread", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=thread" }
 
