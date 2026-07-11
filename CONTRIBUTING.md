@@ -2,25 +2,31 @@
 
 ## Development Workflow
 
-1. Bootstrap and generate with the platform launcher.
-2. Build and run tests in the configurations affected by the change.
-3. Run the Client smoke test.
-4. Keep `git status` free of generated files and downloaded tools.
+1. Bootstrap through the platform launcher.
+2. Run the script regression harness for script changes.
+3. Build and test every affected configuration and toolset.
+4. Run Client as a smoke test.
+5. Run coverage for logger or Core behavior changes.
+6. Confirm `git status --porcelain` contains no generated output.
 
-Do not commit generated Visual Studio, Xcode, Ninja, Make, compile-database, build-output, log, or downloaded-tool files.
+Use `./Scripts/Tests/test-windows.ps1` on Windows and `bash Scripts/Tests/test-unix.sh` on Unix. Do not commit generated IDE/Ninja/Make files, compile databases, logs, build output, coverage output, packages, or downloaded tools.
 
-## Quality Requirements
+## Quality Gates
 
-C++ uses the repository `.clang-format` and `.clang-tidy` configurations. Shell scripts must pass ShellCheck, PowerShell scripts must pass PSScriptAnalyzer, and workflow files must pass actionlint. Local builds enable extra warnings; CI treats template-code warnings as errors.
+C++ must match `.clang-format`, pass `.clang-tidy`, and compile warning-free under the affected toolchains. CI treats template warnings as errors. Shell scripts must pass ShellCheck, PowerShell must pass PSScriptAnalyzer, Python must pass syntax and Ruff checks, workflows must pass actionlint, and YAML must pass yamllint.
 
-Every behavioral fix requires a focused doctest. Logger tests must use isolated temporary directories and must not depend on test registration order. Changes to platform scripts should preserve explicit nonzero exits and safe clean-path containment.
-
-## Dependencies
-
-Normal bootstrap must not move dependency commits or stage files. Use `vendor-update` only when intentionally evaluating a new upstream tag. Review the upstream change, update every platform's pinned commit, run the full required matrix, and then stage the submodule pointer explicitly.
-
-GitHub Actions must be pinned to full commit SHAs. Executables and installer scripts downloaded by bootstrap must have a reviewed SHA-256 value committed alongside their version.
+Behavioral fixes require focused doctest coverage. Tests must isolate logger directories and lifecycle state. Script changes need regression coverage for parsing, resolution, containment, installer failure, lock behavior, or rename transactions as applicable.
 
 ## Compatibility
 
-Required CI must remain green before merging. Changes affecting a non-default generator, compiler, or ARM64 should also run the Extended Compatibility workflow manually. Unsupported combinations should fail with a clear message rather than falling back silently.
+Required CI must be green before merge. Run Extended Compatibility manually for changes affecting non-default generators, compiler discovery, ARM64, sanitizers, packaging, or dependency installation. Unsupported combinations must fail before generation with a specific diagnostic.
+
+## Dependencies
+
+Normal bootstrap must not fetch mutable tags, alter submodule pointers, or stage files. Use `vendor-update` only for an intentional dependency review. Verify the resulting commit, update notices when needed, run the complete matrix, then stage the lock file and submodule pointer yourself.
+
+GitHub Actions must use full commit SHAs. Downloaded executables and installer scripts require a reviewed SHA-256 in `Config/Dependencies.lock`.
+
+## Pull Requests
+
+Keep changes scoped and explain user-visible behavior, tested combinations, and residual platform limitations. Include release-note text in `CHANGELOG.md` for changes that affect template users.

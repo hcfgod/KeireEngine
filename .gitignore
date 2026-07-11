@@ -4,10 +4,13 @@
 .idea/
 
 # Build outputs
-Build/Bin/
-Build/Intermediates/
-Build/Generated/
+Build/
+Artifacts/
 Logs/
+.ninja_deps
+.ninja_log
+__pycache__/
+*.pyc
 
 # Downloaded project-local tools
 Tools/*

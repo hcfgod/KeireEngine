@@ -13,7 +13,9 @@ def main() -> int:
         for command in commands
         if "/Debug-" in command["output"].replace("\\", "/")
     ]
-    destination.write_text(json.dumps(debug_commands, indent=2) + "\n", encoding="utf-8")
+    destination.write_text(
+        json.dumps(debug_commands, indent=2) + "\n", encoding="utf-8"
+    )
     return 0
 
 

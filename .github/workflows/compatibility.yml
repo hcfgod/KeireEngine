@@ -24,13 +24,19 @@ jobs:
           - {name: VS2022 x64, runner: windows-2022, generator: vs2022, architecture: x86_64, toolset: msc, configuration: Release, mode: test}
           - {name: VS2026 x64, runner: windows-2025-vs2026, generator: vs2026, architecture: x86_64, toolset: msc, configuration: Release, mode: test}
           - {name: Ninja MSVC x64, runner: windows-2022, generator: ninja, architecture: x86_64, toolset: msc, configuration: Debug, mode: test}
+          - {name: Ninja concrete default, runner: windows-2022, generator: ninja, architecture: x86_64, toolset: default, configuration: Debug, mode: test}
           - {name: GNU Make GCC x64, runner: windows-2022, generator: gmake, architecture: x86_64, toolset: gcc, configuration: Release, mode: test}
           - {name: Compile Commands Clang, runner: windows-2022, generator: compilecommands, architecture: x86_64, toolset: clang, configuration: Debug, mode: generate}
+          - {name: Windows Clang Coverage, runner: windows-2022, generator: ninja, architecture: x86_64, toolset: clang, configuration: Coverage, mode: coverage}
           - {name: VS2022 ARM64, runner: windows-11-arm, generator: vs2022, architecture: ARM64, toolset: msc, configuration: Debug, mode: test}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/Windows
+          key: windows-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
       - name: Bootstrap and generate
         shell: pwsh
         run: |
@@ -39,6 +45,20 @@ jobs:
       - if: matrix.mode == 'test'
         shell: pwsh
         run: .\Scripts\project.ps1 test -Generator ${{ matrix.generator }} -Configuration ${{ matrix.configuration }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }} -CI
+      - if: matrix.mode == 'coverage'
+        shell: pwsh
+        run: .\Scripts\project.ps1 coverage -Architecture ${{ matrix.architecture }} -CI
+      - name: Verify unchanged tracked state
+        shell: pwsh
+        run: if (git status --porcelain) { git status --short; throw 'Automation modified tracked state.' }
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: compatibility-${{ matrix.name }}-failure
+          path: |
+            Logs/
+            Build/Generated/
+          if-no-files-found: ignore
 
   unix:
     name: ${{ matrix.name }}
@@ -48,18 +68,23 @@ jobs:
       matrix:
         include:
           - {name: Linux GCC Ninja, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: gcc, configuration: Debug, mode: test}
+          - {name: Linux concrete default, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: default, configuration: Debug, mode: test}
           - {name: Linux GCC GNU Make, runner: ubuntu-24.04, generator: gmake, architecture: x86_64, toolset: gcc, configuration: Release, mode: test}
           - {name: Linux Clang ASan, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: clang, configuration: DebugASan, mode: test}
           - {name: Linux Clang UBSan, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: clang, configuration: DebugUBSan, mode: test}
           - {name: Linux Clang TSan, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: clang, configuration: DebugTSan, mode: test}
           - {name: Linux ARM64 ASan, runner: ubuntu-24.04-arm, generator: ninja, architecture: ARM64, toolset: gcc, configuration: DebugASan, mode: test}
+          - {name: Linux ARM64 UBSan, runner: ubuntu-24.04-arm, generator: ninja, architecture: ARM64, toolset: gcc, configuration: DebugUBSan, mode: test}
+          - {name: Linux ARM64 TSan, runner: ubuntu-24.04-arm, generator: ninja, architecture: ARM64, toolset: gcc, configuration: DebugTSan, mode: test}
           - {name: Linux Compile Commands, runner: ubuntu-24.04, generator: compilecommands, architecture: x86_64, toolset: clang, configuration: Debug, mode: generate}
           - {name: macOS Intel Xcode, runner: macos-15-intel, generator: xcode4, architecture: x86_64, toolset: clang, configuration: Debug, mode: test}
           - {name: macOS Intel Ninja, runner: macos-15-intel, generator: ninja, architecture: x86_64, toolset: clang, configuration: Debug, mode: test}
+          - {name: macOS concrete default, runner: macos-15-intel, generator: ninja, architecture: x86_64, toolset: default, configuration: Debug, mode: test}
           - {name: macOS ARM64 Ninja, runner: macos-15, generator: ninja, architecture: ARM64, toolset: clang, configuration: DebugASan, mode: test}
           - {name: macOS ARM64 Xcode, runner: macos-15, generator: xcode4, architecture: ARM64, toolset: clang, configuration: Release, mode: test}
           - {name: macOS Intel GNU Make, runner: macos-15-intel, generator: gmake, architecture: x86_64, toolset: clang, configuration: Release, mode: test}
           - {name: macOS ARM64 Compile Commands, runner: macos-15, generator: compilecommands, architecture: ARM64, toolset: clang, configuration: Debug, mode: generate}
+          - {name: macOS ARM64 Coverage, runner: macos-15, generator: ninja, architecture: ARM64, toolset: clang, configuration: Coverage, mode: coverage}
     env:
       ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
@@ -68,7 +93,23 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/${{ startsWith(matrix.name, 'macOS') && 'Mac' || 'Linux' }}
+          key: ${{ runner.os }}-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
       - run: bash Scripts/project.sh bootstrap --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }}
       - run: bash Scripts/project.sh generate --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
       - if: matrix.mode == 'test'
         run: bash Scripts/project.sh test --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
+      - if: matrix.mode == 'coverage'
+        run: bash Scripts/project.sh coverage --generator ninja --architecture ${{ matrix.architecture }} --toolset clang --ci
+      - name: Verify unchanged tracked state
+        run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: compatibility-${{ matrix.name }}-failure
+          path: |
+            Logs/
+            Build/Generated/
+          if-no-files-found: ignore

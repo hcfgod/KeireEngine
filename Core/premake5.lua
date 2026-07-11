@@ -1,4 +1,4 @@
-project "Core"
+project(ProjectConfig.CORE_TARGET)
     location "."
     kind "StaticLib"
 

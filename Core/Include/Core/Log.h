@@ -31,6 +31,7 @@ struct LogConfig
     std::size_t WorkerThreads = 1;
     std::size_t MaxFileSizeBytes = std::size_t{5} * 1024 * 1024;
     std::size_t MaxFiles = 3;
+    bool EnableConsole = true;
     LogLevel Level =
 #if defined(CORE_LOG_DEFAULT_TRACE)
         LogLevel::Trace;
@@ -77,18 +78,59 @@ class Log
 };
 } // namespace Core
 
-#define CORE_TRACE(...) SPDLOG_LOGGER_TRACE(::Core::Log::GetCoreLogger(), __VA_ARGS__)
-#define CORE_DEBUG(...) SPDLOG_LOGGER_DEBUG(::Core::Log::GetCoreLogger(), __VA_ARGS__)
-#define CORE_INFO(...) SPDLOG_LOGGER_INFO(::Core::Log::GetCoreLogger(), __VA_ARGS__)
-#define CORE_WARN(...) SPDLOG_LOGGER_WARN(::Core::Log::GetCoreLogger(), __VA_ARGS__)
-#define CORE_ERROR(...) SPDLOG_LOGGER_ERROR(::Core::Log::GetCoreLogger(), __VA_ARGS__)
-#define CORE_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(::Core::Log::GetCoreLogger(), __VA_ARGS__)
+#define CORE_DETAIL_LOG(getter, logMacro, ...)                                                                         \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        auto coreDetailLoggerHandle = getter;                                                                          \
+        logMacro(coreDetailLoggerHandle, __VA_ARGS__);                                                                 \
+    } while (false)
 
-#define CLIENT_TRACE(...) SPDLOG_LOGGER_TRACE(::Core::Log::GetClientLogger(), __VA_ARGS__)
-#define CLIENT_DEBUG(...) SPDLOG_LOGGER_DEBUG(::Core::Log::GetClientLogger(), __VA_ARGS__)
-#define CLIENT_INFO(...) SPDLOG_LOGGER_INFO(::Core::Log::GetClientLogger(), __VA_ARGS__)
-#define CLIENT_WARN(...) SPDLOG_LOGGER_WARN(::Core::Log::GetClientLogger(), __VA_ARGS__)
-#define CLIENT_ERROR(...) SPDLOG_LOGGER_ERROR(::Core::Log::GetClientLogger(), __VA_ARGS__)
-#define CLIENT_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(::Core::Log::GetClientLogger(), __VA_ARGS__)
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_TRACE
+#define CORE_TRACE(...) CORE_DETAIL_LOG(::Core::Log::GetCoreLogger(), SPDLOG_LOGGER_TRACE, __VA_ARGS__)
+#define CLIENT_TRACE(...) CORE_DETAIL_LOG(::Core::Log::GetClientLogger(), SPDLOG_LOGGER_TRACE, __VA_ARGS__)
+#else
+#define CORE_TRACE(...) (void)0
+#define CLIENT_TRACE(...) (void)0
+#endif
+
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_DEBUG
+#define CORE_DEBUG(...) CORE_DETAIL_LOG(::Core::Log::GetCoreLogger(), SPDLOG_LOGGER_DEBUG, __VA_ARGS__)
+#define CLIENT_DEBUG(...) CORE_DETAIL_LOG(::Core::Log::GetClientLogger(), SPDLOG_LOGGER_DEBUG, __VA_ARGS__)
+#else
+#define CORE_DEBUG(...) (void)0
+#define CLIENT_DEBUG(...) (void)0
+#endif
+
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_INFO
+#define CORE_INFO(...) CORE_DETAIL_LOG(::Core::Log::GetCoreLogger(), SPDLOG_LOGGER_INFO, __VA_ARGS__)
+#define CLIENT_INFO(...) CORE_DETAIL_LOG(::Core::Log::GetClientLogger(), SPDLOG_LOGGER_INFO, __VA_ARGS__)
+#else
+#define CORE_INFO(...) (void)0
+#define CLIENT_INFO(...) (void)0
+#endif
+
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_WARN
+#define CORE_WARN(...) CORE_DETAIL_LOG(::Core::Log::GetCoreLogger(), SPDLOG_LOGGER_WARN, __VA_ARGS__)
+#define CLIENT_WARN(...) CORE_DETAIL_LOG(::Core::Log::GetClientLogger(), SPDLOG_LOGGER_WARN, __VA_ARGS__)
+#else
+#define CORE_WARN(...) (void)0
+#define CLIENT_WARN(...) (void)0
+#endif
+
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_ERROR
+#define CORE_ERROR(...) CORE_DETAIL_LOG(::Core::Log::GetCoreLogger(), SPDLOG_LOGGER_ERROR, __VA_ARGS__)
+#define CLIENT_ERROR(...) CORE_DETAIL_LOG(::Core::Log::GetClientLogger(), SPDLOG_LOGGER_ERROR, __VA_ARGS__)
+#else
+#define CORE_ERROR(...) (void)0
+#define CLIENT_ERROR(...) (void)0
+#endif
+
+#if SPDLOG_ACTIVE_LEVEL <= SPDLOG_LEVEL_CRITICAL
+#define CORE_CRITICAL(...) CORE_DETAIL_LOG(::Core::Log::GetCoreLogger(), SPDLOG_LOGGER_CRITICAL, __VA_ARGS__)
+#define CLIENT_CRITICAL(...) CORE_DETAIL_LOG(::Core::Log::GetClientLogger(), SPDLOG_LOGGER_CRITICAL, __VA_ARGS__)
+#else
+#define CORE_CRITICAL(...) (void)0
+#define CLIENT_CRITICAL(...) (void)0
+#endif
 
 #endif

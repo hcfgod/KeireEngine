@@ -1,5 +1,25 @@
 $ErrorActionPreference = "Stop"
 
+function Read-KeyValueFile {
+    param([string]$Path)
+    $values = @{}
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -match '^([A-Z0-9_]+)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
+    }
+    return $values
+}
+
+function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\..")) }
+function Get-ProjectConfig { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Project.conf") }
+function Get-DependencyLock { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") }
+
+function Resolve-WindowsToolset {
+    param([string]$Generator, [string]$Toolset)
+    if ($Toolset -ne "default") { return $Toolset }
+    if ($Generator -eq "gmake") { return "gcc" }
+    return "msc"
+}
+
 function Get-NativeArchitecture {
     if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq
         [System.Runtime.InteropServices.Architecture]::Arm64) {
@@ -167,6 +187,9 @@ function Assert-SupportedBuildCombination {
     if ($usesMSVC -and $Configuration -in @("DebugUBSan", "DebugTSan")) {
         throw "$Configuration is not supported by MSVC. Use Linux or macOS with GCC/Clang."
     }
+    if ($Configuration -eq "Coverage" -and ($Generator -ne "ninja" -or $Toolset -ne "clang")) {
+        throw "Coverage requires the Ninja generator and Clang toolset."
+    }
 }
 
 function Get-NinjaExecutable {
@@ -175,4 +198,37 @@ function Get-NinjaExecutable {
     $link = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\ninja.exe"
     if (Test-Path $link) { return $link }
     throw "Ninja was not found. Run bootstrap for the Ninja generator."
+}
+
+function Add-LLVMToPath {
+    $bin = "C:\Program Files\LLVM\bin"
+    if (-not (Test-Path (Join-Path $bin "clang.exe"))) { throw "LLVM was not found under $bin." }
+    $shimDirectory = Join-Path (Get-RepositoryRoot) "Tools\Windows\llvm-bin"
+    New-Item -ItemType Directory -Force $shimDirectory | Out-Null
+    $llvmAr = Join-Path $bin "llvm-ar.exe"
+    if (Test-Path $llvmAr) { Copy-Item $llvmAr (Join-Path $shimDirectory "ar.exe") -Force }
+    $env:PATH = "$shimDirectory;$bin;$env:PATH"
+    return $bin
+}
+
+function Add-MSYS2ToPath {
+    $bin = @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin") |
+        Where-Object { Test-Path (Join-Path $_ "g++.exe") } | Select-Object -First 1
+    if (-not $bin) { throw "An MSYS2 GCC environment was not found under C:\msys64." }
+    $env:PATH = "$bin;$env:PATH"
+    return $bin
+}
+
+function Enter-WindowsToolEnvironment {
+    param([string]$Generator, [string]$Toolset, [string]$Architecture)
+    $resolved = Resolve-WindowsToolset $Generator $Toolset
+    switch ($resolved) {
+        "msc" {
+            $majorVersion = if ($Generator -like "vs*") { Get-VisualStudioMajorVersion $Generator } else { 17 }
+            Enter-VSDeveloperEnvironment $majorVersion $Architecture | Out-Null
+        }
+        "clang" { Add-LLVMToPath | Out-Null }
+        "gcc" { Add-MSYS2ToPath | Out-Null }
+    }
+    return $resolved
 }

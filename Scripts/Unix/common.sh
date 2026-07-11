@@ -1,5 +1,32 @@
 #!/usr/bin/env bash
 
+config_value() {
+    local file="$1" key="$2"
+    awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }' "$file"
+}
+
+load_project_config() {
+    local root="$1" file="$1/Config/Project.conf"
+    PROJECT_IDENTIFIER="$(config_value "$file" PROJECT_IDENTIFIER)"
+    PROJECT_DISPLAY_NAME="$(config_value "$file" PROJECT_DISPLAY_NAME)"
+    PROJECT_NAMESPACE="$(config_value "$file" PROJECT_NAMESPACE)"
+    CORE_TARGET="$(config_value "$file" CORE_TARGET)"
+    CORE_DIRECTORY="$(config_value "$file" CORE_DIRECTORY)"
+    CLIENT_TARGET="$(config_value "$file" CLIENT_TARGET)"
+    CLIENT_DIRECTORY="$(config_value "$file" CLIENT_DIRECTORY)"
+    TESTS_TARGET="$(config_value "$file" TESTS_TARGET)"
+    TESTS_DIRECTORY="$(config_value "$file" TESTS_DIRECTORY)"
+    ARTIFACT_PREFIX="$(config_value "$file" ARTIFACT_PREFIX)"
+    REPOSITORY_SLUG="$(config_value "$file" REPOSITORY_SLUG)"
+}
+
+resolve_unix_toolset() {
+    local platform="$1" requested="$2"
+    if [[ "$requested" != default ]]; then printf '%s' "$requested"
+    elif [[ "$platform" == Mac ]]; then printf 'clang'
+    else printf 'gcc'; fi
+}
+
 native_architecture() {
     case "$(uname -m)" in
         x86_64|amd64) printf 'x86_64' ;;
@@ -28,6 +55,7 @@ normalize_configuration() {
         debugasan) printf 'DebugASan' ;;
         debugubsan) printf 'DebugUBSan' ;;
         debugtsan) printf 'DebugTSan' ;;
+        coverage) printf 'Coverage' ;;
         *) printf "Unsupported configuration '%s'.\n" "$1" >&2; return 1 ;;
     esac
 }
@@ -53,7 +81,34 @@ validate_unix_combination() {
 }
 
 version_at_least() {
-    [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" == "$2" ]]
+    local actual="$1" minimum="$2" index actual_part minimum_part
+    local IFS=.
+    read -r -a actual_parts <<< "$actual"
+    read -r -a minimum_parts <<< "$minimum"
+    for ((index = 0; index < ${#actual_parts[@]} || index < ${#minimum_parts[@]}; ++index)); do
+        actual_part="${actual_parts[index]:-0}"; actual_part="${actual_part%%[^0-9]*}"
+        minimum_part="${minimum_parts[index]:-0}"; minimum_part="${minimum_part%%[^0-9]*}"
+        ((10#${actual_part:-0} > 10#${minimum_part:-0})) && return 0
+        ((10#${actual_part:-0} < 10#${minimum_part:-0})) && return 1
+    done
+    return 0
+}
+
+package_name() {
+    local manager="$1" logical="$2"
+    case "$manager:$logical" in
+        apt-get:ninja|dnf:ninja|zypper:ninja) printf 'ninja-build' ;;
+        pacman:ninja) printf 'ninja' ;;
+        apt-get:cxx) printf 'g++' ;;
+        dnf:cxx|zypper:cxx) printf 'gcc-c++' ;;
+        pacman:cxx) printf 'gcc' ;;
+        apt-get:build) printf 'build-essential' ;;
+        dnf:build|zypper:build) printf 'gcc-c++ make' ;;
+        pacman:build) printf 'base-devel' ;;
+        pacman:python) printf 'python' ;;
+        *:python) printf 'python3' ;;
+        *:*) printf '%s' "$logical" ;;
+    esac
 }
 
 run_checked() {

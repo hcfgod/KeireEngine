@@ -1,15 +1,21 @@
 [CmdletBinding()]
 param(
+    [ValidateSet("all", "full", "build", "generated")][string]$Scope = "",
     [switch]$Generated,
     [switch]$Build,
     [switch]$All
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common.ps1")
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$Project = Get-ProjectConfig
 
-if (-not $Generated -and -not $Build -and -not $All) {
+if ($Scope) {
+    $All = $Scope -in @("all", "full"); $Build = $Scope -eq "build"; $Generated = $Scope -eq "generated"
+}
+elseif (-not $Generated -and -not $Build -and -not $All) {
     $All = $true
 }
 
@@ -32,6 +38,8 @@ function Remove-SafePath {
 if ($All -or $Build) {
     Remove-SafePath (Join-Path $Root "Build\Bin")
     Remove-SafePath (Join-Path $Root "Build\Intermediates")
+    Remove-SafePath (Join-Path $Root "Build\Coverage")
+    Remove-SafePath (Join-Path $Root "Artifacts")
 }
 
 if ($All -or $Generated) {
@@ -63,7 +71,7 @@ if ($All -or $Generated) {
         "*.xcworkspace"
     )
 
-    foreach ($projectDir in @("Core", "Client", "Tests")) {
+    foreach ($projectDir in @($Project.CORE_DIRECTORY, $Project.CLIENT_DIRECTORY, $Project.TESTS_DIRECTORY)) {
         $path = Join-Path $Root $projectDir
         if (-not (Test-Path $path)) {
             continue

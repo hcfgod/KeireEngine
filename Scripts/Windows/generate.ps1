@@ -16,10 +16,11 @@ $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $PremakeExe = Join-Path $Root "Tools\Windows\premake5.exe"
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
+$Toolset = Resolve-WindowsToolset $Generator $Toolset
 
 Assert-SupportedBuildCombination $Generator "Debug" $Architecture $Toolset
 & (Join-Path $PSScriptRoot "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
-    -Toolset $Toolset -Update:$Update -Force:$Force
+    -Toolset $Toolset -Update:$Update
 
 $premakeArchitecture = Get-PremakeArchitecture $Architecture
 $arguments = @("--file=$(Join-Path $Root 'premake5.lua')", "--arch=$premakeArchitecture", "--toolset=$Toolset")
@@ -42,7 +43,7 @@ if ($generationExitCode -ne 0) {
     throw "Premake generation failed with exit code $generationExitCode."
 }
 if ($Generator -eq "compilecommands") {
-    $ruleToolset = if ($Toolset -eq "default") { "msc" } else { $Toolset }
+    $ruleToolset = $Toolset
     $database = & (Get-NinjaExecutable) -C $Root -f build.ninja -t compdb "cxx_$ruleToolset"
     if ($LASTEXITCODE -ne 0) {
         throw "Ninja compile database generation failed with exit code $LASTEXITCODE."

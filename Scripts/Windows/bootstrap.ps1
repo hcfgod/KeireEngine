@@ -13,9 +13,11 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$Lock = Get-DependencyLock
 $ToolsDir = Join-Path $Root "Tools\Windows"
-$PremakeVersion = "5.0.0-beta8"
-$PremakeHash = "e64ce2ed8778e0098f63674cca61fe33941b5f0c8d9a4afd651152bdea3758ab"
+$PremakeVersion = $Lock.PREMAKE_VERSION
+$PremakeUrl = $Lock.PREMAKE_WINDOWS_X86_64_URL
+$PremakeHash = $Lock.PREMAKE_WINDOWS_X86_64_SHA256
 $PremakeExe = Join-Path $ToolsDir "premake5.exe"
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 
@@ -83,9 +85,8 @@ function Install-Premake {
     New-Item -ItemType Directory -Path $tempDirectory | Out-Null
     try {
         $archive = Join-Path $tempDirectory "premake.zip"
-        $url = "https://github.com/premake/premake-core/releases/download/v$PremakeVersion/premake-$PremakeVersion-windows.zip"
         Write-Step "Downloading verified Premake $PremakeVersion"
-        Invoke-WebRequest -Uri $url -OutFile $archive
+        Invoke-WebRequest -Uri $PremakeUrl -OutFile $archive
         $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
         if ($actualHash -ne $PremakeHash) { throw "Premake archive checksum mismatch." }
         Expand-Archive $archive -DestinationPath $tempDirectory -Force
@@ -147,10 +148,7 @@ function Ensure-LLVM {
 
 function Ensure-MSYS2 {
     if ($Update -or -not (Test-Path "C:\msys64")) { Invoke-WingetPackage "MSYS2.MSYS2" }
-    $bin = @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin") |
-        Where-Object { Test-Path (Join-Path $_ "g++.exe") } | Select-Object -First 1
-    if (-not $bin) { throw "An MSYS2 GCC environment was not found under C:\msys64." }
-    $env:PATH = "$bin;$env:PATH"
+    $bin = Add-MSYS2ToPath
     Assert-MinimumVersion "GCC" ((& (Join-Path $bin "g++.exe") -dumpfullversion -dumpversion) -join "") ([version]"12.0")
     Assert-MinimumVersion "GNU Make" ((& (Join-Path $bin "mingw32-make.exe") --version) -join "`n") ([version]"4.3")
 }

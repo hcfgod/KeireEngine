@@ -2,12 +2,12 @@
 param(
     [ValidateSet("vs2026", "vs2022", "vs2019", "ninja", "gmake")]
     [string]$Generator = "vs2022",
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan")]
+    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration = "Debug",
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
-    [string]$Target = "Client",
+    [string]$Target = "",
     [switch]$CI,
     [switch]$Update,
     [switch]$Generate
@@ -17,8 +17,11 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$WorkspaceName = "CrossPlatformCoreClientTemplate"
+$Project = Get-ProjectConfig
+$WorkspaceName = $Project.PROJECT_IDENTIFIER
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
+$Toolset = Resolve-WindowsToolset $Generator $Toolset
+$Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
 $expectedStamp = "$Generator|$Architecture|$Toolset|$([bool]$CI)"
 $stamp = Join-Path $Root "Build\Generated\$Generator.stamp"
 
@@ -57,9 +60,7 @@ switch ($Generator) {
     }
     "ninja" {
         Invoke-GenerationIfNeeded "build.ninja"
-        if ($Toolset -in @("default", "msc")) {
-            Enter-VSDeveloperEnvironment 17 $Architecture | Out-Null
-        }
+        Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         Write-Host "==> Building $Target $Configuration for $Architecture with Ninja"
         & (Get-NinjaExecutable) -C $Root -f build.ninja "$($Target)_$Configuration"
         if ($LASTEXITCODE -ne 0) { throw "Ninja failed with exit code $LASTEXITCODE." }
@@ -67,6 +68,7 @@ switch ($Generator) {
     }
     "gmake" {
         Invoke-GenerationIfNeeded "Makefile"
+        Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         $make = Get-Command mingw32-make, make -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $make) {
             $make = @("C:\msys64\ucrt64\bin\mingw32-make.exe", "C:\msys64\mingw64\bin\mingw32-make.exe") |

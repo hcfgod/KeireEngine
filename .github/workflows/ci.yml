@@ -14,6 +14,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  script-tests:
+    name: Script tests (${{ matrix.os }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: Windows, runner: windows-2022}
+          - {os: Linux, runner: ubuntu-24.04}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - name: Run Windows harness
+        if: matrix.os == 'Windows'
+        shell: pwsh
+        run: ./Scripts/Tests/test-windows.ps1
+      - name: Run Unix harness
+        if: matrix.os == 'Linux'
+        run: bash Scripts/Tests/test-unix.sh
+      - name: Verify Unix entrypoints are executable
+        if: matrix.os == 'Linux'
+        run: |
+          test -x Scripts/project.sh
+          test -z "$(find Scripts/Unix Scripts/Linux Scripts/Mac -name '*.sh' -type f ! -perm -111 -print -quit)"
+
   windows:
     name: Windows x64 VS2022 ${{ matrix.configuration }}
     runs-on: windows-2022
@@ -25,26 +51,28 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-      - name: Bootstrap
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/Windows
+          key: windows-tools-${{ hashFiles('Config/Dependencies.lock') }}
+      - shell: pwsh
+        run: ./Scripts/project.ps1 bootstrap -Generator vs2022 -Architecture x86_64 -Toolset default
+      - shell: pwsh
+        run: ./Scripts/project.ps1 generate -Generator vs2022 -Architecture x86_64 -Toolset default -CI
+      - shell: pwsh
+        run: ./Scripts/project.ps1 test -Generator vs2022 -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset default -CI
+      - shell: pwsh
+        run: ./Scripts/project.ps1 run -Generator vs2022 -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset default -CI
+      - name: Verify commands did not change tracked state
         shell: pwsh
-        run: .\Scripts\project.ps1 bootstrap -Generator vs2022 -Architecture x86_64 -Toolset msc
-      - name: Verify clean bootstrap
-        shell: pwsh
-        run: if (git status --porcelain) { throw "Bootstrap modified tracked state." }
-      - name: Generate
-        shell: pwsh
-        run: .\Scripts\project.ps1 generate -Generator vs2022 -Architecture x86_64 -Toolset msc -CI
-      - name: Build and test
-        shell: pwsh
-        run: .\Scripts\project.ps1 test -Generator vs2022 -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset msc -CI
-      - name: Client smoke test
-        shell: pwsh
-        run: .\Scripts\project.ps1 run -Generator vs2022 -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset msc -CI
+        run: if (git status --porcelain) { git status --short; throw 'Automation modified tracked state.' }
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: windows-${{ matrix.configuration }}-logs
-          path: Logs/
+          name: windows-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/Generated/
           if-no-files-found: ignore
 
   linux-x64:
@@ -62,21 +90,27 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset gcc
-      - name: Verify clean bootstrap
-        run: test -z "$(git status --porcelain)"
-      - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset gcc --ci
-      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset gcc --ci
-      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset gcc --ci
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/Linux
+          key: linux-x64-tools-${{ hashFiles('Config/Dependencies.lock') }}
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset default
+      - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset default --ci
+      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset default --ci
+      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset default --ci
+      - name: Verify commands did not change tracked state
+        run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: linux-x64-${{ matrix.configuration }}-logs
-          path: Logs/
+          name: linux-x64-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/Generated/
           if-no-files-found: ignore
 
   macos-intel:
-    name: macOS Intel ${{ matrix.configuration }}
+    name: macOS Intel Clang ${{ matrix.configuration }}
     runs-on: macos-15-intel
     strategy:
       fail-fast: false
@@ -90,12 +124,24 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset clang
-      - name: Verify clean bootstrap
-        run: test -z "$(git status --porcelain)"
-      - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset clang --ci
-      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset clang --ci
-      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset clang --ci
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/Mac
+          key: macos-intel-tools-${{ hashFiles('Config/Dependencies.lock') }}
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset default
+      - run: bash Scripts/project.sh generate --generator ninja --architecture x86_64 --toolset default --ci
+      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset default --ci
+      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset default --ci
+      - name: Verify commands did not change tracked state
+        run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: macos-intel-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/Generated/
+          if-no-files-found: ignore
 
   arm64-smoke:
     name: ${{ matrix.name }} ${{ matrix.configuration }}
@@ -104,23 +150,56 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {name: Linux ARM64, runner: ubuntu-24.04-arm, platform: Linux, configuration: Debug}
-          - {name: Linux ARM64, runner: ubuntu-24.04-arm, platform: Linux, configuration: Release}
-          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: Debug}
-          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: Release}
-          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: DebugASan}
+          - {name: Linux ARM64, runner: ubuntu-24.04-arm, platform: Linux, configuration: Debug, toolset: gcc}
+          - {name: Linux ARM64, runner: ubuntu-24.04-arm, platform: Linux, configuration: Release, toolset: gcc}
+          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: Debug, toolset: clang}
+          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: Release, toolset: clang}
+          - {name: macOS ARM64, runner: macos-15, platform: Mac, configuration: DebugASan, toolset: clang}
     env:
       ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }}
-      - name: Verify clean bootstrap
-        run: test -z "$(git status --porcelain)"
-      - run: bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }} --ci
-      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }} --ci
-      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset ${{ matrix.platform == 'Linux' && 'gcc' || 'clang' }} --ci
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/${{ matrix.platform }}
+          key: ${{ runner.os }}-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture ARM64 --toolset default
+      - run: bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset default --ci
+      - run: bash Scripts/project.sh test --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset default --ci
+      - run: bash Scripts/project.sh run --generator ninja --configuration ${{ matrix.configuration }} --architecture ARM64 --toolset default --ci
+      - name: Verify commands did not change tracked state
+        run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.platform }}-arm64-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/Generated/
+          if-no-files-found: ignore
+
+  coverage:
+    name: Linux Clang coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/Linux
+          key: linux-x64-tools-${{ hashFiles('Config/Dependencies.lock') }}
+      - run: bash Scripts/project.sh coverage --generator ninja --architecture x86_64 --toolset clang --ci
+      - run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linux-clang-coverage
+          path: |
+            Build/Coverage/linux-x86_64/coverage.info
+            Build/Coverage/linux-x86_64/html/
+          if-no-files-found: error
 
   quality:
     name: Format, lint, and static analysis
@@ -133,23 +212,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format clang-tidy shellcheck yamllint
+          python3 -m pip install --user ruff==0.12.5
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
           pwsh -NoProfile -Command "Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser"
       - name: Check C++ formatting
         run: find Core Client Tests -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) -print0 | xargs -0 clang-format --dry-run --Werror
       - name: Check shell scripts
-        run: shellcheck --exclude=SC2034 --source-path=SCRIPTDIR Scripts/project.sh Scripts/Unix/*.sh Scripts/Linux/*.sh Scripts/Mac/*.sh
+        run: shellcheck --exclude=SC2034 --source-path=SCRIPTDIR Scripts/project.sh Scripts/Tests/*.sh Scripts/Unix/*.sh Scripts/Linux/*.sh Scripts/Mac/*.sh
       - name: Check PowerShell scripts
         shell: pwsh
         run: |
           $issues = Invoke-ScriptAnalyzer -Path Scripts -Recurse -Settings PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
           $issues | Format-Table
-          if ($issues) { throw "PSScriptAnalyzer reported issues." }
-      - name: Check workflows
-        run: actionlint
-      - name: Check YAML
-        run: yamllint -c .yamllint.yml .github
+          if ($issues) { throw 'PSScriptAnalyzer reported issues.' }
+      - name: Check Python helper
+        run: |
+          python3 -m py_compile Scripts/Unix/filter-compdb.py
+          ~/.local/bin/ruff check Scripts/Unix/filter-compdb.py
+          ~/.local/bin/ruff format --check Scripts/Unix/filter-compdb.py
+      - name: Check workflows and YAML
+        run: |
+          "$(go env GOPATH)/bin/actionlint"
+          yamllint -c .yamllint.yml .github
       - name: Generate compile database
         run: bash Scripts/project.sh generate --generator compilecommands --architecture x86_64 --toolset clang --ci
       - name: Run clang-tidy
         run: clang-tidy Core/Source/*.cpp Client/Source/*.cpp Tests/Source/*.cpp -p . --quiet
+      - name: Verify quality commands did not change tracked state
+        run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }

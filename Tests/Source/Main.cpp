@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest/doctest.h"
 
-#include "Core.h"
+#include "Core/Core.h"
 
 #include <atomic>
 #include <chrono>
@@ -14,6 +14,8 @@
 #include <system_error>
 #include <thread>
 #include <vector>
+
+#include "spdlog/sinks/null_sink.h"
 
 namespace
 {
@@ -44,6 +46,7 @@ struct LogFixture
         Config.LogDirectory = Directory.string();
         Config.CoreLogFile = "CoreTests.log";
         Config.ClientLogFile = "ClientTests.log";
+        Config.EnableConsole = false;
     }
 
     ~LogFixture() noexcept
@@ -125,6 +128,54 @@ TEST_CASE("Logger initialization is idempotent only for the same configuration")
     conflictingConfig.QueueSize *= 2;
     CHECK_THROWS_AS(Core::Log::Initialize(conflictingConfig), std::logic_error);
 }
+
+TEST_CASE("Logger does not replace or shut down external spdlog state")
+{
+    LogFixture fixture("external-spdlog");
+    const auto previousDefault = spdlog::default_logger();
+    const auto sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+    const auto externalLogger = std::make_shared<spdlog::logger>("ExternalTestLogger", sink);
+    spdlog::set_default_logger(externalLogger);
+
+    Core::Log::Initialize(fixture.Config);
+    CORE_INFO("private logger message");
+    Core::Log::Shutdown();
+
+    CHECK(spdlog::default_logger() == externalLogger);
+    CHECK_NOTHROW(externalLogger->info("external logger remains usable"));
+    spdlog::set_default_logger(previousDefault);
+}
+
+TEST_CASE("Logging macros evaluate enabled arguments once")
+{
+    LogFixture fixture("macro-evaluation");
+    Core::Log::Initialize(fixture.Config);
+    int evaluations = 0;
+    CORE_INFO("evaluation {}", ++evaluations);
+    CHECK(evaluations == 1);
+}
+
+TEST_CASE("Console output can be suppressed without disabling file logging")
+{
+    LogFixture fixture("console-suppression");
+    Core::Log::Initialize(fixture.Config);
+
+    {
+        auto logger = Core::Log::GetCoreLogger();
+        REQUIRE(logger);
+        CHECK(logger->sinks().size() == 1);
+    }
+    CORE_INFO("file-only message");
+}
+
+#if SPDLOG_ACTIVE_LEVEL > SPDLOG_LEVEL_DEBUG
+TEST_CASE("Compiled-out logging macros do not evaluate arguments")
+{
+    int evaluations = 0;
+    CORE_DEBUG("disabled evaluation {}", ++evaluations);
+    CHECK(evaluations == 0);
+}
+#endif
 
 TEST_CASE("Logger rejects invalid configurations")
 {

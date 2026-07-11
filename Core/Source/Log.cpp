@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "spdlog/async.h"
+#include "spdlog/details/thread_pool.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
@@ -17,6 +18,7 @@ namespace
 {
 std::shared_ptr<spdlog::logger> s_CoreLogger;
 std::shared_ptr<spdlog::logger> s_ClientLogger;
+std::shared_ptr<spdlog::details::thread_pool> s_ThreadPool;
 std::shared_mutex s_LogMutex;
 bool s_Initialized = false;
 std::optional<LogConfig> s_ActiveConfig;
@@ -27,9 +29,10 @@ std::string MakeLogPath(const std::string& directory, const std::string& file)
 }
 
 std::shared_ptr<spdlog::logger> CreateAsyncLogger(const std::string& name, const std::vector<spdlog::sink_ptr>& sinks,
-                                                  spdlog::level::level_enum level)
+                                                  spdlog::level::level_enum level,
+                                                  const std::shared_ptr<spdlog::details::thread_pool>& threadPool)
 {
-    auto logger = std::make_shared<spdlog::async_logger>(name, sinks.begin(), sinks.end(), spdlog::thread_pool(),
+    auto logger = std::make_shared<spdlog::async_logger>(name, sinks.begin(), sinks.end(), threadPool,
                                                          spdlog::async_overflow_policy::block);
 
     logger->set_level(level);
@@ -118,10 +121,17 @@ void Log::Initialize(const LogConfig& config)
 
     try
     {
-        spdlog::init_thread_pool(config.QueueSize, config.WorkerThreads);
+        auto threadPool = std::make_shared<spdlog::details::thread_pool>(config.QueueSize, config.WorkerThreads);
+        std::vector<spdlog::sink_ptr> coreSinks;
+        std::vector<spdlog::sink_ptr> clientSinks;
 
-        auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        consoleSink->set_pattern("[%T] [%n] [%^%l%$] [thread %t] %v");
+        if (config.EnableConsole)
+        {
+            auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            consoleSink->set_pattern("[%T] [%n] [%^%l%$] [thread %t] %v");
+            coreSinks.push_back(consoleSink);
+            clientSinks.push_back(consoleSink);
+        }
 
         auto coreFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
             MakeLogPath(config.LogDirectory, config.CoreLogFile), config.MaxFileSizeBytes, config.MaxFiles);
@@ -131,25 +141,21 @@ void Log::Initialize(const LogConfig& config)
 
         coreFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
         clientFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
+        coreSinks.push_back(coreFileSink);
+        clientSinks.push_back(clientFileSink);
 
         const auto level = ToSpdlogLevel(config.Level);
-        auto coreLogger = CreateAsyncLogger("Core", {consoleSink, coreFileSink}, level);
-        auto clientLogger = CreateAsyncLogger("Client", {consoleSink, clientFileSink}, level);
-
-        spdlog::register_logger(coreLogger);
-        spdlog::register_logger(clientLogger);
-        spdlog::set_default_logger(coreLogger);
+        auto coreLogger = CreateAsyncLogger("Core", coreSinks, level, threadPool);
+        auto clientLogger = CreateAsyncLogger("Client", clientSinks, level, threadPool);
 
         s_CoreLogger = std::move(coreLogger);
         s_ClientLogger = std::move(clientLogger);
+        s_ThreadPool = std::move(threadPool);
         s_ActiveConfig = config;
         s_Initialized = true;
     }
     catch (...)
     {
-        spdlog::drop("Core");
-        spdlog::drop("Client");
-        spdlog::shutdown();
         throw;
     }
 
@@ -178,8 +184,7 @@ void Log::Shutdown() noexcept
 
         s_CoreLogger.reset();
         s_ClientLogger.reset();
-        spdlog::drop_all();
-        spdlog::shutdown();
+        s_ThreadPool.reset();
         s_ActiveConfig.reset();
         s_Initialized = false;
     }
@@ -188,6 +193,7 @@ void Log::Shutdown() noexcept
         std::fprintf(stderr, "Logger shutdown failed: %s\n", error.what());
         s_CoreLogger.reset();
         s_ClientLogger.reset();
+        s_ThreadPool.reset();
         s_ActiveConfig.reset();
         s_Initialized = false;
     }

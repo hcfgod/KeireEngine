@@ -20,12 +20,15 @@ function ApplyCommonProjectSettings()
 
     filter {}
 
-    local selectedToolset = _OPTIONS["toolset"] or "default"
+    local selectedToolset = SelectedToolset
     local usesMsvcCommandLine = os.host() == "windows" and
         ((_ACTION and _ACTION:match("^vs")) or (_ACTION == "ninja" and (selectedToolset == "default" or selectedToolset == "msc")))
     if usesMsvcCommandLine then
-        buildoptions { "/utf-8" }
+        buildoptions { "/utf-8", "/permissive-", "/Zc:__cplusplus", "/MP" }
     end
+
+    filter { "toolset:gcc or clang" }
+        buildoptions { "-Wpedantic", "-Wconversion", "-Wshadow" }
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan" }
         runtime "Debug"
@@ -49,10 +52,19 @@ function ApplyCommonProjectSettings()
         runtime "Release"
         optimize "full"
         symbols "off"
+        linktimeoptimization "On"
         defines
         {
             "NDEBUG",
             "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO"
+        }
+
+    filter "configurations:Coverage"
+        runtime "Debug"
+        symbols "on"
+        defines {
+            "CORE_LOG_DEFAULT_TRACE",
+            "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
         }
 
     ApplySanitizerSettings()
@@ -79,6 +91,10 @@ function ApplySanitizerSettings()
     filter { "configurations:DebugTSan", "toolset:gcc or clang" }
         buildoptions { "-fsanitize=thread", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=thread" }
+
+    filter { "configurations:Coverage", "toolset:clang" }
+        buildoptions { "-fprofile-instr-generate", "-fcoverage-mapping", "-fno-omit-frame-pointer" }
+        linkoptions { "-fprofile-instr-generate", "-fcoverage-mapping" }
 
     filter {}
 end

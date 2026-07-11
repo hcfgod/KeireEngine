@@ -4,11 +4,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
+load_project_config "$ROOT"
+TOOLSET="$(resolve_unix_toolset Mac "$TOOLSET")"
+[[ "$TARGET" == Client ]] && TARGET="$CLIENT_TARGET"
+[[ "$TARGET" == Tests ]] && TARGET="$TESTS_TARGET"
 validate_unix_combination Mac "$GENERATOR" "$TOOLSET"
+if [[ "$CONFIGURATION" == Coverage && ( "$GENERATOR" != ninja || "$TOOLSET" != clang ) ]]; then printf 'Coverage requires Ninja and Clang.\n' >&2; exit 1; fi
 expected="$GENERATOR|$ARCHITECTURE|$TOOLSET|$CI"; stamp="$ROOT/Build/Generated/$GENERATOR.stamp"
 
 case "$GENERATOR" in
-    xcode4) generated="CrossPlatformCoreClientTemplate.xcworkspace" ;;
+    xcode4) generated="$PROJECT_IDENTIFIER.xcworkspace" ;;
     ninja) generated=build.ninja ;;
     gmake) generated=Makefile ;;
     *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
@@ -23,10 +28,10 @@ fi
 case "$GENERATOR" in
     xcode4)
         printf '==> Building %s %s for %s with Xcode\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
-        if [[ -d "$ROOT/CrossPlatformCoreClientTemplate.xcworkspace" ]]; then
-            xcodebuild -workspace "$ROOT/CrossPlatformCoreClientTemplate.xcworkspace" -scheme "$TARGET" -configuration "$CONFIGURATION"
+        if [[ -d "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" ]]; then
+            xcodebuild -workspace "$ROOT/$PROJECT_IDENTIFIER.xcworkspace" -scheme "$TARGET" -configuration "$CONFIGURATION"
         else
-            xcodebuild -project "$ROOT/CrossPlatformCoreClientTemplate.xcodeproj" -scheme "$TARGET" -configuration "$CONFIGURATION"
+            xcodebuild -project "$ROOT/$PROJECT_IDENTIFIER.xcodeproj" -scheme "$TARGET" -configuration "$CONFIGURATION"
         fi
         ;;
     ninja) printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; ninja -C "$ROOT" -f build.ninja "${TARGET}_${CONFIGURATION}" ;;

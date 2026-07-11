@@ -2,10 +2,12 @@
 param()
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common.ps1")
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$Lock = Get-DependencyLock
 $Dependencies = @(
-    @{ Name = "spdlog"; Path = "Vendor/spdlog"; Url = "https://github.com/gabime/spdlog.git"; Commit = "79524ddd08a4ec981b7fea76afd08ee05f83755d" },
-    @{ Name = "doctest"; Path = "Vendor/doctest"; Url = "https://github.com/doctest/doctest.git"; Commit = "2d0a9359a60c51affe2a9bebb1be1dca47868151" }
+    @{ Name = "spdlog"; Path = "Vendor/spdlog"; Url = $Lock.SPDLOG_URL; Commit = $Lock.SPDLOG_COMMIT },
+    @{ Name = "doctest"; Path = "Vendor/doctest"; Url = $Lock.DOCTEST_URL; Commit = $Lock.DOCTEST_COMMIT }
 )
 
 function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments) {
@@ -14,8 +16,7 @@ function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$A
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "Git is required to install vendor dependencies." }
-$insideRepository = ((& git -C $Root rev-parse --is-inside-work-tree 2>&1) -join "") -eq "true"
-if (-not $insideRepository) { Invoke-Git -C $Root init }
+if (-not (Test-Path (Join-Path $Root ".git"))) { Invoke-Git -C $Root init }
 
 foreach ($dependency in $Dependencies) {
     $directory = Join-Path $Root $dependency.Path

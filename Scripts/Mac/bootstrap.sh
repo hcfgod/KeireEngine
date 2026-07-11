@@ -5,10 +5,18 @@ source "$ROOT/Scripts/Unix/common.sh"
 GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 validate_unix_combination Mac "$GENERATOR" "$TOOLSET"
-PREMAKE_VERSION=5.0.0-beta8
+PREMAKE_VERSION="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_VERSION)"
 PREMAKE="$ROOT/Tools/Mac/premake5"
-HOMEBREW_COMMIT=c7952e40b7957268f61643152f4db725379b292e
-HOMEBREW_HASH=99287f194a8b3c9e6b0203a11a5fa54518be57209343e6bb954dec4635796d9d
+HOMEBREW_URL="$(config_value "$ROOT/Config/Dependencies.lock" HOMEBREW_INSTALL_URL)"
+HOMEBREW_HASH="$(config_value "$ROOT/Config/Dependencies.lock" HOMEBREW_INSTALL_SHA256)"
+PREMAKE_X64_HASH="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_MACOS_X86_64_SHA256)"
+PREMAKE_ARM_HASH="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_MACOS_ARM64_SHA256)"
+PREMAKE_X64_URL="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_MACOS_X86_64_URL)"
+PREMAKE_ARM_URL="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_MACOS_ARM64_URL)"
+TEMPORARY=""
+
+cleanup_temporary() { [[ -z "$TEMPORARY" ]] || rm -rf "$TEMPORARY"; }
+trap cleanup_temporary EXIT
 
 step() { printf '==> %s\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -18,13 +26,12 @@ load_brew() {
 }
 ensure_brew() {
     load_brew; have brew && return
-    local temporary script
-    temporary="$(mktemp -d)"; script="$temporary/install.sh"
-    trap 'rm -rf "$temporary"' RETURN
-    curl -fsSL "https://raw.githubusercontent.com/Homebrew/install/$HOMEBREW_COMMIT/install.sh" -o "$script"
+    local script
+    TEMPORARY="$(mktemp -d)"; script="$TEMPORARY/install.sh"
+    curl -fsSL "$HOMEBREW_URL" -o "$script"
     [[ "$(shasum -a 256 "$script" | awk '{print $1}')" == "$HOMEBREW_HASH" ]] || { printf 'Homebrew installer checksum mismatch.\n' >&2; exit 1; }
     NONINTERACTIVE=1 /bin/bash "$script"
-    rm -rf "$temporary"; trap - RETURN; load_brew
+    rm -rf "$TEMPORARY"; TEMPORARY=""; load_brew
 }
 brew_install() {
     local command="$1" package="$2"
@@ -40,16 +47,16 @@ check_version() { version_at_least "$2" "$3" || { printf '%s %s is older than re
 install_premake() {
     mkdir -p "$(dirname "$PREMAKE")"
     if [[ $FORCE -eq 0 && -x "$PREMAKE" ]] && "$PREMAKE" --version 2>/dev/null | grep -q "$PREMAKE_VERSION"; then step "Premake $PREMAKE_VERSION already installed"; return; fi
-    local temporary archive hash suffix
-    temporary="$(mktemp -d)"; archive="$temporary/premake.tar.gz"; trap 'rm -rf "$temporary"' RETURN
-    if [[ "$ARCHITECTURE" == x86_64 ]]; then suffix=macosx-x64; hash=84b5fa5a432dcebdc3dd12e8677d10e38e5b32a3fe06d83ae68967e4f5e2db8a;
-    else suffix=macosx; hash=fa73a46f093fa6f17494a3d063421aa6cae3ea825a61c62dd59fc2f07a256d03; fi
-    curl -fsSL "https://github.com/premake/premake-core/releases/download/v$PREMAKE_VERSION/premake-$PREMAKE_VERSION-$suffix.tar.gz" -o "$archive"
+    local archive hash url
+    TEMPORARY="$(mktemp -d)"; archive="$TEMPORARY/premake.tar.gz"
+    if [[ "$ARCHITECTURE" == x86_64 ]]; then hash="$PREMAKE_X64_HASH"; url="$PREMAKE_X64_URL";
+    else hash="$PREMAKE_ARM_HASH"; url="$PREMAKE_ARM_URL"; fi
+    curl -fsSL "$url" -o "$archive"
     [[ "$(shasum -a 256 "$archive" | awk '{print $1}')" == "$hash" ]] || { printf 'Premake checksum mismatch.\n' >&2; exit 1; }
-    tar -xf "$archive" -C "$temporary"
-    cp "$(find "$temporary" -type f -name premake5 | head -n 1)" "$PREMAKE"; chmod +x "$PREMAKE"
+    tar -xf "$archive" -C "$TEMPORARY"
+    cp "$(find "$TEMPORARY" -type f -name premake5 | head -n 1)" "$PREMAKE"; chmod +x "$PREMAKE"
     "$PREMAKE" --version | grep -q "$PREMAKE_VERSION"
-    rm -rf "$temporary"; trap - RETURN
+    rm -rf "$TEMPORARY"; TEMPORARY=""
 }
 
 install_premake

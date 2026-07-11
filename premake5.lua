@@ -1,3 +1,15 @@
+local function loadConfig(path)
+    local values = {}
+    for line in io.lines(path) do
+        local key, value = line:match("^([A-Z0-9_]+)=(.*)$")
+        if key then
+            values[key] = value
+        end
+    end
+    return values
+end
+
+ProjectConfig = loadConfig("Config/Project.conf")
 include "Scripts/Premake/Common.lua"
 
 newoption {
@@ -18,32 +30,45 @@ newoption {
     description = "Enable CI-only warnings-as-errors settings"
 }
 
-local selectedArchitecture = os.targetarch() or os.hostarch()
-local selectedToolset = _OPTIONS["toolset"] or "default"
+local function resolveToolset(requested)
+    if requested ~= "default" then
+        return requested
+    end
+    if os.host() == "windows" then
+        if _ACTION == "gmake" then
+            return "gcc"
+        end
+        return "msc"
+    end
+    if os.host() == "macosx" then
+        return "clang"
+    end
+    return "gcc"
+end
 
-if _ACTION and _ACTION:match("^vs") and selectedToolset == "gcc" then
+local selectedArchitecture = os.targetarch() or os.hostarch()
+SelectedToolset = resolveToolset(_OPTIONS["toolset"] or "default")
+
+if _ACTION and _ACTION:match("^vs") and SelectedToolset == "gcc" then
     error("Visual Studio generators do not support the GCC toolset in this template.")
 end
-if os.host() == "macosx" and _ACTION == "xcode4" and selectedToolset ~= "default" and selectedToolset ~= "clang" then
-    error("Xcode generation supports only the default or Clang toolset.")
+if os.host() == "macosx" and _ACTION == "xcode4" and SelectedToolset ~= "clang" then
+    error("Xcode generation supports only the Clang toolset.")
 end
 
-workspace "CrossPlatformCoreClientTemplate"
+workspace(ProjectConfig.PROJECT_IDENTIFIER)
     architecture(selectedArchitecture)
-    startproject "Client"
+    startproject(ProjectConfig.CLIENT_TARGET)
+    toolset(SelectedToolset)
 
-    if selectedToolset ~= "default" then
-        toolset(selectedToolset)
-    end
-
-    configurations
-    {
+    configurations {
         "Debug",
         "Release",
         "Dist",
         "DebugASan",
         "DebugUBSan",
-        "DebugTSan"
+        "DebugTSan",
+        "Coverage"
     }
 
 filter "system:windows"
@@ -51,6 +76,6 @@ filter "system:windows"
 
 filter {}
 
-include "Core/premake5.lua"
-include "Client/premake5.lua"
-include "Tests/premake5.lua"
+include(ProjectConfig.CORE_DIRECTORY .. "/premake5.lua")
+include(ProjectConfig.CLIENT_DIRECTORY .. "/premake5.lua")
+include(ProjectConfig.TESTS_DIRECTORY .. "/premake5.lua")

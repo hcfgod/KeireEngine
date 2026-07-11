@@ -1,4 +1,4 @@
-project "Tests"
+project(ProjectConfig.TESTS_TARGET)
     location "."
     kind "ConsoleApp"
 
@@ -17,7 +17,7 @@ project "Tests"
     includedirs
     {
         "Include",
-        "../Core/Include"
+        "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
     externalincludedirs
@@ -28,5 +28,5 @@ project "Tests"
 
     links
     {
-        "Core"
+        ProjectConfig.CORE_TARGET
     }

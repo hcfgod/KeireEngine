@@ -4,11 +4,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 GENERATOR=xcode4; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
+load_project_config "$ROOT"
+TOOLSET="$(resolve_unix_toolset Mac "$TOOLSET")"
 validate_unix_combination Mac "$GENERATOR" "$TOOLSET"
 
 bootstrap=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$TOOLSET")
 [[ $UPDATE -eq 1 ]] && bootstrap+=(--update)
-[[ $FORCE -eq 1 ]] && bootstrap+=(--force)
 bash "$ROOT/Scripts/Mac/bootstrap.sh" "${bootstrap[@]}"
 
 args=("--file=$ROOT/premake5.lua" "--arch=$(premake_architecture "$ARCHITECTURE")" "--toolset=$TOOLSET")

@@ -1,17 +1,21 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "vendor-update")]
+    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "package", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan")]
+    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration = "Debug",
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
-    [string]$Target = "Client",
+    [string]$Target = "",
     [ValidateSet("spdlog", "doctest")]
     [string]$Dependency = "spdlog",
     [string]$Tag = "",
+    [string]$Name = "",
+    [string]$DisplayName = "",
+    [string]$Repository = "",
+    [ValidateSet("all", "full", "build", "generated")][string]$CleanScope = "full",
     [switch]$InstallOptional,
     [switch]$Update,
     [switch]$CI,
@@ -19,9 +23,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ConfigurationWasProvided = $PSBoundParameters.ContainsKey("Configuration")
 $WindowsScripts = Join-Path $PSScriptRoot "Windows"
 . (Join-Path $WindowsScripts "common.ps1")
+$Project = Get-ProjectConfig
+$Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
+if ($Command -eq "package" -and -not $ConfigurationWasProvided) { $Configuration = "Release" }
 
 function Invoke-ProjectCommand {
     param([string]$SelectedCommand)
@@ -46,12 +54,34 @@ function Invoke-ProjectCommand {
             & (Join-Path $WindowsScripts "run.ps1") -Generator $Generator -Configuration $Configuration `
                 -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
         }
-        "clean" { & (Join-Path $WindowsScripts "clean.ps1") -All }
+        "clean" { & (Join-Path $WindowsScripts "clean.ps1") -Scope $CleanScope }
+        "coverage" { & (Join-Path $WindowsScripts "coverage.ps1") -Architecture $Architecture -CI:$CI -Update:$Update -Generate:$Force }
+        "package" { & (Join-Path $WindowsScripts "package.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force }
+        "doctor" { & (Join-Path $WindowsScripts "doctor.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset }
+        "rename" {
+            if (-not $Name) { throw "-Name is required for rename." }
+            & (Join-Path $WindowsScripts "rename.ps1") -Name $Name -DisplayName $DisplayName -Repository $Repository
+        }
         "vendor-update" {
             if (-not $Tag) { throw "-Tag is required for vendor-update." }
             & (Join-Path $WindowsScripts "vendor-update.ps1") -Dependency $Dependency -Tag $Tag
         }
+        "help" { Show-Help }
     }
+}
+
+function Show-Help {
+    Write-Host @"
+Usage: Scripts\project.ps1 <command> [options]
+
+Commands: bootstrap, generate, build, test, run, clean, coverage, package,
+          doctor, rename, vendor-update, help
+
+Common options:
+  -Generator <vs2026|vs2022|vs2019|ninja|gmake|compilecommands>
+  -Configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
+  -Architecture <x86_64|ARM64>  -Toolset <default|msc|gcc|clang>
+"@
 }
 
 function Read-Setting([string]$Prompt, [string]$Current) {
@@ -68,32 +98,42 @@ function Read-BuildSettings([bool]$IncludeConfiguration) {
     $updateChoice = Read-Setting "Update installed prerequisites (yes, no)" $updateDefault
     $script:Update = $updateChoice -match '^(y|yes)$'
     if ($IncludeConfiguration) {
-        $script:Configuration = Read-Setting "Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan)" $Configuration
+        $script:Configuration = Read-Setting "Configuration (Debug, Release, Dist, DebugASan, DebugUBSan, DebugTSan, Coverage)" $Configuration
     }
 }
 
 function Show-Menu {
     while ($true) {
         Write-Host ""
-        Write-Host "CrossPlatformCoreClientTemplate"
+        Write-Host $Project.PROJECT_IDENTIFIER
         Write-Host "1. Bootstrap prerequisites"
         Write-Host "2. Generate project files"
         Write-Host "3. Build"
         Write-Host "4. Run tests"
         Write-Host "5. Run Client"
-        Write-Host "6. Clean"
-        Write-Host "7. Exit"
+        Write-Host "6. Coverage report"
+        Write-Host "7. Package SDK"
+        Write-Host "8. Doctor"
+        Write-Host "9. Clean"
+        Write-Host "10. Vendor update"
+        Write-Host "11. Rename template"
+        Write-Host "12. Exit"
         Write-Host ""
         $choice = Read-Host "Choose an option"
         try {
             switch ($choice) {
-                "1" { Read-BuildSettings $false; Invoke-ProjectCommand bootstrap }
-                "2" { Read-BuildSettings $false; Invoke-ProjectCommand generate }
+                "1" { Read-BuildSettings $false; $script:InstallOptional=(Read-Setting "Install optional toolchains (yes, no)" "no") -match '^(y|yes)$'; Invoke-ProjectCommand bootstrap }
+                "2" { Read-BuildSettings $false; $script:Force=(Read-Setting "Force regeneration (yes, no)" "no") -match '^(y|yes)$'; Invoke-ProjectCommand generate }
                 "3" { Read-BuildSettings $true; Invoke-ProjectCommand build }
                 "4" { Read-BuildSettings $true; Invoke-ProjectCommand test }
                 "5" { Read-BuildSettings $true; Invoke-ProjectCommand run }
-                "6" { Invoke-ProjectCommand clean }
-                "7" { return }
+                "6" { Read-BuildSettings $false; Invoke-ProjectCommand coverage }
+                "7" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
+                "8" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
+                "9" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
+                "10" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
+                "11" { $script:Name=Read-Setting "PascalCase identifier" $Name; $script:DisplayName=Read-Setting "Display name" $DisplayName; $script:Repository=Read-Setting "Repository (owner/name, optional)" $Repository; Invoke-ProjectCommand rename; $script:Project=Get-ProjectConfig }
+                "12" { return }
                 default { Write-Warning "Invalid menu choice '$choice'." }
             }
         }

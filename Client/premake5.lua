@@ -1,4 +1,4 @@
-project "Client"
+project(ProjectConfig.CLIENT_TARGET)
     location "."
     kind "ConsoleApp"
 
@@ -17,7 +17,7 @@ project "Client"
     includedirs
     {
         "Include",
-        "../Core/Include"
+        "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
     externalincludedirs
@@ -27,5 +27,5 @@ project "Client"
 
     links
     {
-        "Core"
+        ProjectConfig.CORE_TARGET
     }

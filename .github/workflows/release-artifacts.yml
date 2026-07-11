@@ -20,50 +20,55 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: windows, runner: windows-2022, generator: vs2022, architecture: x86_64, output-architecture: x86_64, toolset: msc, configuration: Release}
-          - {os: windows, runner: windows-2022, generator: vs2022, architecture: x86_64, output-architecture: x86_64, toolset: msc, configuration: Dist}
-          - {os: linux, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, output-architecture: x86_64, toolset: gcc, configuration: Release}
-          - {os: linux, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, output-architecture: x86_64, toolset: gcc, configuration: Dist}
-          - {os: macos, runner: macos-15-intel, generator: ninja, architecture: x86_64, output-architecture: x86_64, toolset: clang, configuration: Release}
-          - {os: macos, runner: macos-15-intel, generator: ninja, architecture: x86_64, output-architecture: x86_64, toolset: clang, configuration: Dist}
-          - {os: macos, runner: macos-15, generator: ninja, architecture: ARM64, output-architecture: AARCH64, toolset: clang, configuration: Release}
+          - {os: windows, platform: Windows, runner: windows-2022, generator: vs2022, architecture: x86_64, toolset: msc, configuration: Release}
+          - {os: windows, platform: Windows, runner: windows-2022, generator: vs2022, architecture: x86_64, toolset: msc, configuration: Dist}
+          - {os: windows, platform: Windows, runner: windows-11-arm, generator: vs2022, architecture: ARM64, toolset: msc, configuration: Release}
+          - {os: windows, platform: Windows, runner: windows-11-arm, generator: vs2022, architecture: ARM64, toolset: msc, configuration: Dist}
+          - {os: linux, platform: Linux, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: gcc, configuration: Release}
+          - {os: linux, platform: Linux, runner: ubuntu-24.04, generator: ninja, architecture: x86_64, toolset: gcc, configuration: Dist}
+          - {os: linux, platform: Linux, runner: ubuntu-24.04-arm, generator: ninja, architecture: ARM64, toolset: gcc, configuration: Release}
+          - {os: linux, platform: Linux, runner: ubuntu-24.04-arm, generator: ninja, architecture: ARM64, toolset: gcc, configuration: Dist}
+          - {os: macos, platform: Mac, runner: macos-15-intel, generator: ninja, architecture: x86_64, toolset: clang, configuration: Release}
+          - {os: macos, platform: Mac, runner: macos-15-intel, generator: ninja, architecture: x86_64, toolset: clang, configuration: Dist}
+          - {os: macos, platform: Mac, runner: macos-15, generator: ninja, architecture: ARM64, toolset: clang, configuration: Release}
+          - {os: macos, platform: Mac, runner: macos-15, generator: ninja, architecture: ARM64, toolset: clang, configuration: Dist}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
-      - name: Build, test, and run on Windows
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: Tools/${{ matrix.platform }}
+          key: ${{ runner.os }}-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
+      - name: Build, test, smoke-run, and package on Windows
         if: matrix.os == 'windows'
         shell: pwsh
-        run: |
-          .\Scripts\project.ps1 test -Generator ${{ matrix.generator }} -Configuration ${{ matrix.configuration }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }} -CI
-          .\Scripts\project.ps1 run -Generator ${{ matrix.generator }} -Configuration ${{ matrix.configuration }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }} -CI
-      - name: Build, test, and run on Unix
+        run: ./Scripts/project.ps1 package -Generator ${{ matrix.generator }} -Configuration ${{ matrix.configuration }} -Architecture ${{ matrix.architecture }} -Toolset ${{ matrix.toolset }} -CI
+      - name: Build, test, smoke-run, and package on Unix
         if: matrix.os != 'windows'
-        run: |
-          bash Scripts/project.sh test --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
-          bash Scripts/project.sh run --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
-      - name: Package Windows
-        if: matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force Artifacts | Out-Null
-          $name = "client-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}"
-          Compress-Archive "Build/Bin/${{ matrix.configuration }}-windows-${{ matrix.output-architecture }}/Client/*" "Artifacts/$name.zip"
-          (Get-FileHash "Artifacts/$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name.zip" | Set-Content "Artifacts/$name.zip.sha256" -Encoding ASCII
-      - name: Package Unix
-        if: matrix.os != 'windows'
-        run: |
-          system="${{ matrix.os == 'macos' && 'macosx' || 'linux' }}"
-          name="client-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}"
-          mkdir -p Artifacts
-          tar -C "Build/Bin/${{ matrix.configuration }}-$system-${{ matrix.output-architecture }}/Client" -czf "Artifacts/$name.tar.gz" .
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "Artifacts/$name.tar.gz" | sed 's#Artifacts/##' > "Artifacts/$name.tar.gz.sha256"
-          else
-            shasum -a 256 "Artifacts/$name.tar.gz" | sed 's#Artifacts/##' > "Artifacts/$name.tar.gz.sha256"
-          fi
+        run: bash Scripts/project.sh package --generator ${{ matrix.generator }} --configuration ${{ matrix.configuration }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
+      - name: Verify packaging did not change tracked state
+        shell: bash
+        run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: client-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}
-          path: Artifacts/
+          name: sdk-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}
+          path: |
+            Artifacts/*.zip
+            Artifacts/*.tar.gz
+            Artifacts/*.sha256
+            !Artifacts/*symbols*
           if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: symbols-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}
+          path: Artifacts/*symbols*
+          if-no-files-found: ignore
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/Generated/
+          if-no-files-found: ignore
