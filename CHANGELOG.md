@@ -17,6 +17,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 - Public Core headers now use the `Core/` include prefix.
 - Logging owns private asynchronous spdlog state and supports console suppression.
 - Dist builds use link-time optimization and CI treats template warnings as errors.
+- Release SDKs include complete dependency licenses and separate platform symbols; Dist remains stripped.
+- CodeQL and Dependency Review are explicitly opt-in and strict when enabled.
 
 ### Fixed
 
@@ -25,5 +27,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 - Vendor bootstrap verifies the committed submodule pointer and restores detached working trees to that exact hash.
 - macOS tool version checks consume complete command output, avoiding `xcodebuild` broken-pipe crashes.
 - Linux Clang bootstrap installs the LLVM profiling and coverage utilities required by coverage reports.
-- CodeQL runs locally and uploads SARIF as a workflow artifact when repository Code Scanning is unavailable.
-- Dependency review reports a warning instead of failing repositories where GitHub dependency analysis is unavailable.
+- Lazy and explicit logger initialization now serialize under one lifecycle lock.
+- macOS bootstrap accepts Command Line Tools without full Xcode for non-Xcode generators.
+- Arch installation performs a full package upgrade instead of a partial database synchronization.
+- Windows detects containing Git worktrees and rename updates public-header include guards.

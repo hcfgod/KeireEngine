@@ -285,6 +285,62 @@ TEST_CASE("Logger supports concurrent Core and Client logging")
     CHECK(ReadFile(fixture.Directory / fixture.Config.ClientLogFile).find("client worker") != std::string::npos);
 }
 
+TEST_CASE("Lazy acquisition and explicit initialization serialize safely")
+{
+    for (int iteration = 0; iteration < 16; ++iteration)
+    {
+        LogFixture fixture("initialization-race-" + std::to_string(iteration));
+        std::atomic<bool> start = false;
+        std::exception_ptr getterFailure;
+        std::exception_ptr initializerFailure;
+
+        std::thread getter(
+            [&]()
+            {
+                while (!start.load(std::memory_order_acquire))
+                {
+                    std::this_thread::yield();
+                }
+                try
+                {
+                    auto logger = Core::Log::GetCoreLogger();
+                    logger->info("race-safe lazy message");
+                }
+                catch (...)
+                {
+                    getterFailure = std::current_exception();
+                }
+            });
+        std::thread initializer(
+            [&]()
+            {
+                while (!start.load(std::memory_order_acquire))
+                {
+                    std::this_thread::yield();
+                }
+                try
+                {
+                    Core::Log::Initialize(fixture.Config);
+                }
+                catch (const std::logic_error&)
+                {
+                    // Lazy default initialization won the documented first-initializer race.
+                }
+                catch (...)
+                {
+                    initializerFailure = std::current_exception();
+                }
+            });
+
+        start.store(true, std::memory_order_release);
+        getter.join();
+        initializer.join();
+        CHECK(getterFailure == nullptr);
+        CHECK(initializerFailure == nullptr);
+        Core::Log::Shutdown();
+    }
+}
+
 TEST_CASE("Shutdown waits for active logger handles")
 {
     using namespace std::chrono_literals;

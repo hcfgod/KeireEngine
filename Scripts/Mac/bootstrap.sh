@@ -60,8 +60,26 @@ install_premake() {
 }
 
 install_premake
-if ! xcode-select -p >/dev/null 2>&1; then xcode-select --install; printf 'Complete the Xcode tools installation, then rerun bootstrap.\n' >&2; exit 1; fi
-check_version Xcode "$(xcodebuild -version | extract_version)" 15
+if ! developer_path="$(xcode-select -p 2>/dev/null)"; then
+    xcode-select --install
+    printf 'Command Line Tools are missing. Complete their installation, then rerun bootstrap.\n' >&2
+    exit 1
+fi
+if mac_requires_full_xcode "$GENERATOR"; then
+    command -v xcodebuild >/dev/null 2>&1 || { printf 'The xcode4 generator requires a full Xcode installation.\n' >&2; exit 1; }
+    xcode_version="$(xcodebuild -version 2>/dev/null | extract_version)" || { printf 'The xcode4 generator requires full Xcode to be selected with xcode-select.\n' >&2; exit 1; }
+    check_version Xcode "$xcode_version" 15
+else
+    clt_version="$(pkgutil --pkg-info=com.apple.pkg.CLTools_Executables 2>/dev/null | awk '$1 == "version:" { print $2; exit }')"
+    if [[ -n "$clt_version" ]]; then
+        check_version 'Xcode Command Line Tools' "$clt_version" 15
+    elif [[ "$developer_path" == *Xcode.app* ]] && xcode_version="$(xcodebuild -version 2>/dev/null | extract_version)"; then
+        check_version Xcode "$xcode_version" 15
+    else
+        printf 'A valid Xcode Command Line Tools receipt or full Xcode installation was not found.\n' >&2
+        exit 1
+    fi
+fi
 
 if ! have git; then brew_install git git; fi
 check_version Git "$(git --version | extract_version)" 2.40

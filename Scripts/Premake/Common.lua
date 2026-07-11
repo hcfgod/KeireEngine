@@ -42,6 +42,7 @@ function ApplyCommonProjectSettings()
     filter "configurations:Release"
         runtime "Release"
         optimize "on"
+        symbols "on"
         defines
         {
             "NDEBUG",

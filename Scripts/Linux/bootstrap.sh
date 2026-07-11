@@ -26,11 +26,11 @@ detect_package_manager() {
 }
 install_packages() {
     detect_package_manager
+    local flags=()
+    mapfile -t flags < <(package_install_arguments "$PACKAGE_MANAGER")
     case "$PACKAGE_MANAGER" in
-        apt-get) [[ $PACKAGE_INDEX_UPDATED -eq 1 ]] || { sudo_cmd apt-get update; PACKAGE_INDEX_UPDATED=1; }; sudo_cmd apt-get install -y "$@" ;;
-        dnf) sudo_cmd dnf install -y "$@" ;;
-        pacman) sudo_cmd pacman -Sy --needed --noconfirm "$@" ;;
-        zypper) sudo_cmd zypper --non-interactive install "$@" ;;
+        apt-get) [[ $PACKAGE_INDEX_UPDATED -eq 1 ]] || { sudo_cmd apt-get update; PACKAGE_INDEX_UPDATED=1; }; sudo_cmd apt-get install "${flags[@]}" "$@" ;;
+        dnf|pacman|zypper) sudo_cmd "$PACKAGE_MANAGER" "${flags[@]}" "$@" ;;
     esac
 }
 install_logical_packages() {
@@ -114,6 +114,7 @@ case "$TOOLSET" in
         ;;
     *) printf "Unsupported Linux toolset '%s'.\n" "$TOOLSET" >&2; exit 1 ;;
 esac
+ensure_command objcopy binutils
 
 if [[ $INSTALL_OPTIONAL -eq 1 ]]; then install_logical_packages git curl tar ninja clang make python; fi
 bash "$ROOT/Scripts/Linux/vendor.sh"

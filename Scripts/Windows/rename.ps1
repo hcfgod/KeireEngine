@@ -12,10 +12,12 @@ $reserved = @("Alignas","Alignof","And","Asm","Auto","Bool","Break","Case","Catc
 if ($reserved -contains $Name) { throw "Name '$Name' is a reserved C++ keyword." }
 if (-not $DisplayName) { $DisplayName = $Name }
 if ($Repository -and $Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Repository must use owner/name format." }
-$insideGit = Test-Path (Join-Path $Root ".git")
-if ($insideGit -and ((& git -C $Root status --porcelain --untracked-files=all) -join "")) { throw "Rename requires a clean Git worktree." }
+$gitTopLevel = Get-GitWorktreeRoot $Root
+$insideGit = $null -ne $gitTopLevel
+if ($insideGit -and ((& git -C $gitTopLevel status --porcelain --untracked-files=all) -join "")) { throw "Rename requires a clean containing Git worktree." }
 
 $newCore = "${Name}Core"; $newClient = "${Name}Client"; $newTests = "${Name}Tests"
+$newMacroPrefix = ConvertTo-MacroPrefix $Name
 foreach ($path in @($newCore, $newClient, $newTests)) {
     if ((Join-Path $Root $path) -notin @((Join-Path $Root $Project.CORE_DIRECTORY), (Join-Path $Root $Project.CLIENT_DIRECTORY), (Join-Path $Root $Project.TESTS_DIRECTORY)) -and (Test-Path (Join-Path $Root $path))) { throw "Destination '$path' already exists." }
 }
@@ -30,12 +32,14 @@ $textExtensions = @(".h", ".hpp", ".cpp", ".c", ".lua", ".ps1", ".sh", ".bat", "
 $originals = @{}; $moves = @()
 try {
     foreach ($relative in $files) {
+        if ($relative -match '^Scripts[\\/](Windows[\\/]rename\.ps1|Unix[\\/]rename\.sh|Tests[\\/])') { continue }
         $path = Join-Path $Root $relative
         if (-not (Test-Path $path -PathType Leaf)) { continue }
         if ([IO.Path]::GetExtension($path) -notin $textExtensions -and [IO.Path]::GetFileName($path) -notmatch '^\.(gitignore|gitattributes|editorconfig|clang-format|clang-tidy)$') { continue }
         $content = [IO.File]::ReadAllText($path); $originals[$relative] = $content
         $isCpp = [IO.Path]::GetExtension($path) -in @(".h", ".hpp", ".cpp", ".c")
         $content = $content.Replace($Project.PROJECT_IDENTIFIER, $Name).Replace($Project.PROJECT_DISPLAY_NAME, $DisplayName)
+        $content = $content.Replace($Project.PROJECT_MACRO_PREFIX, $newMacroPrefix)
         if ($Repository) { $content = $content.Replace($Project.REPOSITORY_SLUG, $Repository) }
         if ($isCpp) {
             $content = $content.Replace("namespace $($Project.PROJECT_NAMESPACE)", "namespace $Name")
@@ -56,7 +60,7 @@ try {
         [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
     }
     $configPath = Join-Path $Root "Config\Project.conf"
-    $config = @("PROJECT_IDENTIFIER=$Name", "PROJECT_DISPLAY_NAME=$DisplayName", "PROJECT_NAMESPACE=$Name", "CORE_TARGET=$newCore", "CORE_DIRECTORY=$newCore", "CLIENT_TARGET=$newClient", "CLIENT_DIRECTORY=$newClient", "TESTS_TARGET=$newTests", "TESTS_DIRECTORY=$newTests", "ARTIFACT_PREFIX=$($Name.ToLowerInvariant())", "REPOSITORY_SLUG=$Repository")
+    $config = @("PROJECT_IDENTIFIER=$Name", "PROJECT_DISPLAY_NAME=$DisplayName", "PROJECT_NAMESPACE=$Name", "PROJECT_MACRO_PREFIX=$newMacroPrefix", "CORE_TARGET=$newCore", "CORE_DIRECTORY=$newCore", "CLIENT_TARGET=$newClient", "CLIENT_DIRECTORY=$newClient", "TESTS_TARGET=$newTests", "TESTS_DIRECTORY=$newTests", "ARTIFACT_PREFIX=$($Name.ToLowerInvariant())", "REPOSITORY_SLUG=$Repository")
     [IO.File]::WriteAllLines($configPath, $config, [Text.UTF8Encoding]::new($false))
     $publicInclude = Join-Path $Root "$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)"
     if (Test-Path $publicInclude) { $newInclude = Join-Path (Split-Path $publicInclude) $Name; Move-Item $publicInclude $newInclude; $moves += @($newInclude, $publicInclude) }

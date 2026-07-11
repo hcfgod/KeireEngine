@@ -29,4 +29,4 @@ File paths are intentionally relative to the process working directory. Scripts 
 
 ## Release Shape
 
-Packages include the Client runtime, Core static library, public Core headers, required spdlog headers, license and notices, README, and a machine-readable build manifest. Debug symbols are uploaded separately where a platform toolchain emits them.
+Packages include the Client runtime, Core static library, public Core headers, required spdlog headers, complete spdlog/fmt/doctest license texts, notices, README, and a validated machine-readable build manifest. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is intentionally stripped.

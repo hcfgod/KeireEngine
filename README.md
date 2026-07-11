@@ -141,9 +141,11 @@ This derives `MyGameCore`, `MyGameClient`, `MyGameTests`, namespace `MyGame`, ma
 
 ## CI And Packages
 
-Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke builds, sanitizers, Client execution, script regression tests, 80% LLVM line coverage, formatting, clang-tidy, ShellCheck, PSScriptAnalyzer, actionlint, yamllint, and Python validation. Extended Compatibility runs weekly and manually. CodeQL and dependency review use least-privilege workflows; Dependabot checks Actions and submodules weekly.
+Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke builds, sanitizers, Client execution, script regression tests, 80% LLVM line coverage, formatting, clang-tidy, ShellCheck, PSScriptAnalyzer, actionlint, yamllint, and Python validation. Extended Compatibility runs weekly and manually. Dependabot checks Actions and submodules weekly.
 
-Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain Client, Core static library, public headers, spdlog headers, notices, documentation, and a JSON build manifest. SHA-256 files and separate symbol archives are included where available.
+CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require the resulting checks in the `master` branch protection rules. Once enabled, workflow and upload failures are fatal; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
+
+Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain Client, Core static library, public headers, spdlog headers, complete dependency license texts, notices, documentation, and a validated JSON build manifest. SHA-256 files and separate Client/Core symbol archives are included where available; Dist packages are intentionally stripped.
 
 ## Troubleshooting
 

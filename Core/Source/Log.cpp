@@ -93,6 +93,43 @@ void ValidateConfig(const LogConfig& config)
         throw std::invalid_argument("The configured log directory cannot be inspected.");
     }
 }
+
+void InstallLoggersLocked(const LogConfig& config, spdlog::level::level_enum level)
+{
+    std::filesystem::create_directories(config.LogDirectory);
+
+    auto threadPool = std::make_shared<spdlog::details::thread_pool>(config.QueueSize, config.WorkerThreads);
+    std::vector<spdlog::sink_ptr> coreSinks;
+    std::vector<spdlog::sink_ptr> clientSinks;
+
+    if (config.EnableConsole)
+    {
+        auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        consoleSink->set_pattern("[%T] [%n] [%^%l%$] [thread %t] %v");
+        coreSinks.push_back(consoleSink);
+        clientSinks.push_back(consoleSink);
+    }
+
+    auto coreFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        MakeLogPath(config.LogDirectory, config.CoreLogFile), config.MaxFileSizeBytes, config.MaxFiles);
+    auto clientFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        MakeLogPath(config.LogDirectory, config.ClientLogFile), config.MaxFileSizeBytes, config.MaxFiles);
+
+    coreFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
+    clientFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
+    coreSinks.push_back(coreFileSink);
+    clientSinks.push_back(clientFileSink);
+
+    auto coreLogger = CreateAsyncLogger("Core", coreSinks, level, threadPool);
+    auto clientLogger = CreateAsyncLogger("Client", clientSinks, level, threadPool);
+
+    coreLogger->info("Core logger initialized");
+    s_CoreLogger = std::move(coreLogger);
+    s_ClientLogger = std::move(clientLogger);
+    s_ThreadPool = std::move(threadPool);
+    s_ActiveConfig = config;
+    s_Initialized = true;
+}
 } // namespace
 
 LoggerHandle::LoggerHandle(std::shared_ptr<spdlog::logger> logger, std::shared_lock<std::shared_mutex>&& lifecycleLock)
@@ -117,49 +154,7 @@ void Log::Initialize(const LogConfig& config)
         throw std::logic_error("Logging is already initialized with a different configuration.");
     }
 
-    std::filesystem::create_directories(config.LogDirectory);
-
-    try
-    {
-        auto threadPool = std::make_shared<spdlog::details::thread_pool>(config.QueueSize, config.WorkerThreads);
-        std::vector<spdlog::sink_ptr> coreSinks;
-        std::vector<spdlog::sink_ptr> clientSinks;
-
-        if (config.EnableConsole)
-        {
-            auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-            consoleSink->set_pattern("[%T] [%n] [%^%l%$] [thread %t] %v");
-            coreSinks.push_back(consoleSink);
-            clientSinks.push_back(consoleSink);
-        }
-
-        auto coreFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-            MakeLogPath(config.LogDirectory, config.CoreLogFile), config.MaxFileSizeBytes, config.MaxFiles);
-
-        auto clientFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-            MakeLogPath(config.LogDirectory, config.ClientLogFile), config.MaxFileSizeBytes, config.MaxFiles);
-
-        coreFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
-        clientFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
-        coreSinks.push_back(coreFileSink);
-        clientSinks.push_back(clientFileSink);
-
-        const auto level = ToSpdlogLevel(config.Level);
-        auto coreLogger = CreateAsyncLogger("Core", coreSinks, level, threadPool);
-        auto clientLogger = CreateAsyncLogger("Client", clientSinks, level, threadPool);
-
-        s_CoreLogger = std::move(coreLogger);
-        s_ClientLogger = std::move(clientLogger);
-        s_ThreadPool = std::move(threadPool);
-        s_ActiveConfig = config;
-        s_Initialized = true;
-    }
-    catch (...)
-    {
-        throw;
-    }
-
-    s_CoreLogger->info("Core logger initialized");
+    InstallLoggersLocked(config, ToSpdlogLevel(config.Level));
 }
 
 void Log::Shutdown() noexcept
@@ -239,7 +234,14 @@ LoggerHandle Log::GetCoreLogger()
             return LoggerHandle(s_CoreLogger, std::move(lock));
         }
         lock.unlock();
-        Initialize();
+
+        const LogConfig config;
+        ValidateConfig(config);
+        std::unique_lock<std::shared_mutex> initializationLock(s_LogMutex);
+        if (!s_CoreLogger)
+        {
+            InstallLoggersLocked(config, ToSpdlogLevel(config.Level));
+        }
     }
 }
 
@@ -253,7 +255,14 @@ LoggerHandle Log::GetClientLogger()
             return LoggerHandle(s_ClientLogger, std::move(lock));
         }
         lock.unlock();
-        Initialize();
+
+        const LogConfig config;
+        ValidateConfig(config);
+        std::unique_lock<std::shared_mutex> initializationLock(s_LogMutex);
+        if (!s_ClientLogger)
+        {
+            InstallLoggersLocked(config, ToSpdlogLevel(config.Level));
+        }
     }
 }
 

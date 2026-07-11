@@ -16,7 +16,7 @@ function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$A
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw "Git is required to install vendor dependencies." }
-if (-not (Test-Path (Join-Path $Root ".git"))) { Invoke-Git -C $Root init }
+if (-not (Get-GitWorktreeRoot $Root)) { Invoke-Git -C $Root init }
 
 foreach ($dependency in $Dependencies) {
     $directory = Join-Path $Root $dependency.Path

@@ -50,6 +50,27 @@ jobs:
       - name: Verify packaging did not change tracked state
         shell: bash
         run: test -z "$(git status --porcelain)" || { git status --short; exit 1; }
+      - name: Validate Windows package metadata and symbols
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $manifest = Get-ChildItem Artifacts -Filter build-manifest.json -Recurse | Select-Object -First 1
+          if (-not $manifest) { throw 'Package manifest was not produced.' }
+          Get-Content $manifest.FullName -Raw | ConvertFrom-Json | Out-Null
+          if ('${{ matrix.configuration }}' -eq 'Release') {
+            if (-not (Get-ChildItem Artifacts -Filter '*-symbols.zip' | Select-Object -First 1)) { throw 'Release symbol archive was not produced.' }
+            if (-not (Get-ChildItem Artifacts -Filter '*-symbols.zip.sha256' | Select-Object -First 1)) { throw 'Release symbol checksum was not produced.' }
+          }
+      - name: Validate Unix package metadata and symbols
+        if: matrix.os != 'windows'
+        run: |
+          manifest="$(find Artifacts -name build-manifest.json -print -quit)"
+          test -n "$manifest"
+          python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$manifest"
+          if [ '${{ matrix.configuration }}' = Release ]; then
+            find Artifacts -maxdepth 1 -name '*-symbols.tar.gz' -type f -size +0c | grep -q .
+            find Artifacts -maxdepth 1 -name '*-symbols.tar.gz.sha256' -type f -size +0c | grep -q .
+          fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sdk-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}

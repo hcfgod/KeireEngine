@@ -14,7 +14,9 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 $project = Get-ProjectConfig
-Assert-Equal $project.PROJECT_IDENTIFIER "CrossPlatformCoreClientTemplate" "Project manifest"
+Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
+Assert-Equal $project.PROJECT_MACRO_PREFIX (ConvertTo-MacroPrefix $project.PROJECT_IDENTIFIER) "Project macro prefix"
+Assert-Equal (ConvertTo-MacroPrefix "HTTPServer2Client") "HTTP_SERVER2_CLIENT" "Macro prefix derivation"
 Assert-Equal (Normalize-Architecture "amd64") "x86_64" "x64 normalization"
 Assert-Equal (Normalize-Architecture "aarch64") "ARM64" "ARM normalization"
 Assert-Equal (Resolve-WindowsToolset "vs2022" "default") "msc" "VS default toolset"
@@ -26,36 +28,82 @@ $lock = Get-DependencyLock
 Assert-Equal $lock.SPDLOG_COMMIT "79524ddd08a4ec981b7fea76afd08ee05f83755d" "spdlog lock"
 Assert-Equal $lock.DOCTEST_COMMIT "2d0a9359a60c51affe2a9bebb1be1dca47868151" "doctest lock"
 
-$fixture = Join-Path ([IO.Path]::GetTempPath()) ("template-script-test-" + [guid]::NewGuid().ToString("N"))
+$packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
+try {
+    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "include\Core\Core.h", "include\Core\Log.h", "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+        $file = Join-Path $packageStage $path
+        New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+        New-Item -ItemType File -Force $file | Out-Null
+    }
+    Assert-WindowsPackageStage $packageStage Client Core Core
+    Remove-Item (Join-Path $packageStage "third-party\licenses\spdlog-LICENSE.txt")
+    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing package license validation"
+}
+finally {
+    Remove-Item $packageStage -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$parentFixture = Join-Path ([IO.Path]::GetTempPath()) ("template-script-test-" + [guid]::NewGuid().ToString("N"))
+$fixture = Join-Path $parentFixture "Template"
 New-Item -ItemType Directory -Path $fixture | Out-Null
 try {
-    foreach ($directory in @("Scripts\Windows", "Config", "Core\Include\Core", "Core\Source", "Client\Source", "Tests\Source", "Vendor", "Build\Bin")) {
+    $coreDirectory = $project.CORE_DIRECTORY
+    $clientDirectory = $project.CLIENT_DIRECTORY
+    $testsDirectory = $project.TESTS_DIRECTORY
+    $projectNamespace = $project.PROJECT_NAMESPACE
+    foreach ($directory in @("Scripts\Windows", "Config", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
         New-Item -ItemType Directory -Force (Join-Path $fixture $directory) | Out-Null
     }
     Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "rename.ps1"), (Join-Path $Windows "clean.ps1"), (Join-Path $Windows "doctor.ps1") (Join-Path $fixture "Scripts\Windows")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\Project.conf") (Join-Path $fixture "Config\Project.conf")
-    Set-Content (Join-Path $fixture "Core\Include\Core\Core.h") 'namespace Core { const char* GetName(); }'
-    Set-Content (Join-Path $fixture "Core\Source\Core.cpp") '#include "Core/Core.h"'
-    Set-Content (Join-Path $fixture "Client\Source\Main.cpp") '#include "Core/Core.h"'
-    Set-Content (Join-Path $fixture "Tests\Source\Main.cpp") '#include "Core/Core.h"'
-    Set-Content (Join-Path $fixture "README.md") 'CrossPlatformCoreClientTemplate hcfgod/C-Cross-Platform-Core-Client-Template'
+    Set-Content (Join-Path $fixture "$coreDirectory\Include\$projectNamespace\Core.h") @"
+#ifndef $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H
+#define $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H
+namespace $projectNamespace { const char* GetName(); }
+#endif
+"@
+    Set-Content (Join-Path $fixture "$coreDirectory\Include\$projectNamespace\Log.h") @"
+#ifndef $($project.PROJECT_MACRO_PREFIX)_CORE_LOG_H
+#define $($project.PROJECT_MACRO_PREFIX)_CORE_LOG_H
+namespace $projectNamespace { class Log; }
+#endif
+"@
+    Set-Content (Join-Path $fixture "$coreDirectory\Source\Library.cpp") "#include `"$projectNamespace/Core.h`""
+    Set-Content (Join-Path $fixture "$clientDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
+    Set-Content (Join-Path $fixture "$testsDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
+    Set-Content (Join-Path $fixture "README.md") "$($project.PROJECT_IDENTIFIER) $($project.REPOSITORY_SLUG)"
     Set-Content (Join-Path $fixture "Vendor\keep.txt") 'vendor'
     Set-Content (Join-Path $fixture "Build\Bin\remove.txt") 'build'
 
+    & git -C $parentFixture init --quiet
+    & git -C $parentFixture config user.email "scripts@example.invalid"
+    & git -C $parentFixture config user.name "Script Tests"
+    & git -C $parentFixture add Template
+    & git -C $parentFixture commit --quiet -m fixture
+    Assert-Equal (Get-GitWorktreeRoot $fixture).Path (Resolve-Path $parentFixture).Path "Parent Git worktree detection"
+    Add-Content (Join-Path $fixture "README.md") "dirty"
+    Assert-Throws { & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name BlockedRename } "Dirty parent worktree rename"
+    & git -C $parentFixture checkout --quiet -- Template/README.md
+
     & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName "Script Fixture" -Repository example/script-fixture
+    Assert-True (-not (Test-Path (Join-Path $fixture ".git"))) "Nested Git repository prevention"
     Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureCore\Include\ScriptFixture\Core.h")) "Rename structure"
     $renamed = Get-Content (Join-Path $fixture "Config\Project.conf") -Raw
     Assert-True ($renamed.Contains("CORE_TARGET=ScriptFixtureCore")) "Rename manifest"
+    Assert-True ($renamed.Contains("PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE")) "Rename macro manifest"
+    $renamedHeaders = (Get-ChildItem (Join-Path $fixture "ScriptFixtureCore\Include") -File -Recurse | Get-Content) -join "`n"
+    Assert-True (-not $renamedHeaders.Contains($project.PROJECT_MACRO_PREFIX)) "Old include guard removal"
+    Assert-True ($renamedHeaders.Contains("SCRIPT_FIXTURE_CORE_CORE_H")) "Renamed include guard"
     & (Join-Path $fixture "Scripts\Windows\doctor.ps1") -Generator ninja -Architecture x86_64 -Toolset clang
 
     & (Join-Path $fixture "Scripts\Windows\clean.ps1") -Scope full
     Assert-True (-not (Test-Path (Join-Path $fixture "Build\Bin"))) "Full clean build removal"
     Assert-True (Test-Path (Join-Path $fixture "Vendor\keep.txt")) "Full clean vendor preservation"
-    Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureCore\Source\Core.cpp")) "Full clean source preservation"
+    Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureCore\Source\Library.cpp")) "Full clean source preservation"
 }
 finally {
-    if ($fixture.StartsWith([IO.Path]::GetTempPath()) -and (Test-Path $fixture)) {
-        Remove-Item -LiteralPath $fixture -Recurse -Force
+    if ($parentFixture.StartsWith([IO.Path]::GetTempPath()) -and (Test-Path $parentFixture)) {
+        Remove-Item -LiteralPath $parentFixture -Recurse -Force
     }
 }
 Write-Host "Windows script regression tests passed."

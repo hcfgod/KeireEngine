@@ -10,6 +10,7 @@ load_project_config() {
     PROJECT_IDENTIFIER="$(config_value "$file" PROJECT_IDENTIFIER)"
     PROJECT_DISPLAY_NAME="$(config_value "$file" PROJECT_DISPLAY_NAME)"
     PROJECT_NAMESPACE="$(config_value "$file" PROJECT_NAMESPACE)"
+    PROJECT_MACRO_PREFIX="$(config_value "$file" PROJECT_MACRO_PREFIX)"
     CORE_TARGET="$(config_value "$file" CORE_TARGET)"
     CORE_DIRECTORY="$(config_value "$file" CORE_DIRECTORY)"
     CLIENT_TARGET="$(config_value "$file" CLIENT_TARGET)"
@@ -18,6 +19,28 @@ load_project_config() {
     TESTS_DIRECTORY="$(config_value "$file" TESTS_DIRECTORY)"
     ARTIFACT_PREFIX="$(config_value "$file" ARTIFACT_PREFIX)"
     REPOSITORY_SLUG="$(config_value "$file" REPOSITORY_SLUG)"
+}
+
+json_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    value="${value//$'\t'/\\t}"
+    printf '%s' "$value"
+}
+
+identifier_to_macro_prefix() {
+    printf '%s' "$1" | sed -E 's/([A-Z]+)([A-Z][a-z])/\1_\2/g; s/([a-z0-9])([A-Z])/\1_\2/g' | tr '[:lower:]' '[:upper:]'
+}
+
+validate_package_stage() {
+    local stage="$1" client="$2" core="$3" namespace="$4" path
+    local required=("bin/$client" "lib/lib$core.a" "include/$namespace/Core.h" "include/$namespace/Log.h" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
+    for path in "${required[@]}"; do
+        [[ -f "$stage/$path" ]] || { printf 'Package is missing required content: %s\n' "$path" >&2; return 1; }
+    done
 }
 
 resolve_unix_toolset() {
@@ -84,6 +107,10 @@ validate_unix_combination() {
     fi
 }
 
+mac_requires_full_xcode() {
+    [[ "$1" == xcode4 ]]
+}
+
 version_at_least() {
     local actual="$1" minimum="$2" index actual_part minimum_part
     local IFS=.
@@ -126,6 +153,15 @@ package_name() {
         pacman:uuid) printf 'util-linux-libs' ;;
         *:llvm) printf 'llvm' ;;
         *:*) printf '%s' "$logical" ;;
+    esac
+}
+
+package_install_arguments() {
+    case "$1" in
+        apt-get|dnf) printf '%s\n' -y ;;
+        pacman) printf '%s\n' -Syu --needed --noconfirm ;;
+        zypper) printf '%s\n' --non-interactive install ;;
+        *) printf "Unsupported package manager '%s'.\n" "$1" >&2; return 1 ;;
     esac
 }
 

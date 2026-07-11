@@ -13,6 +13,39 @@ function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\
 function Get-ProjectConfig { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Project.conf") }
 function Get-DependencyLock { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") }
 
+function Get-GitWorktreeRoot {
+    param([string]$Path)
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        $topLevel = (& git -C $Path rev-parse --show-toplevel 2>$null) -join ""
+    }
+    catch {
+        return $null
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $topLevel) { return $null }
+    return (Resolve-Path $topLevel)
+}
+
+function ConvertTo-MacroPrefix {
+    param([string]$Identifier)
+    $value = [regex]::Replace($Identifier, '([A-Z]+)([A-Z][a-z])', '$1_$2')
+    $value = [regex]::Replace($value, '([a-z0-9])([A-Z])', '$1_$2')
+    return $value.ToUpperInvariant()
+}
+
+function Assert-WindowsPackageStage {
+    param([string]$Stage, [string]$ClientTarget, [string]$CoreTarget, [string]$Namespace)
+    $required = @(
+        "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt",
+        "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
+        "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
+    )
+    foreach ($path in $required) {
+        if (-not (Test-Path (Join-Path $Stage $path) -PathType Leaf)) { throw "Package is missing required content: $path" }
+    }
+}
+
 function Resolve-WindowsToolset {
     param([string]$Generator, [string]$Toolset)
     if ($Toolset -ne "default") { return $Toolset }

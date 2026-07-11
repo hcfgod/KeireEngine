@@ -6,7 +6,7 @@ NAME="${1:-}"; DISPLAY="${2:-$NAME}"; REPOSITORY="${3:-}"
 [[ -z "$REPOSITORY" || "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { printf 'Repository must use owner/name format.\n' >&2; exit 1; }
 inside_git=0; git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 && inside_git=1
 [[ $inside_git -eq 0 || -z "$(git -C "$ROOT" status --porcelain --untracked-files=all)" ]] || { printf 'Rename requires a clean Git worktree.\n' >&2; exit 1; }
-new_core="${NAME}Core"; new_client="${NAME}Client"; new_tests="${NAME}Tests"
+new_core="${NAME}Core"; new_client="${NAME}Client"; new_tests="${NAME}Tests"; new_macro_prefix="$(identifier_to_macro_prefix "$NAME")"
 escape_sed_replacement() { printf '%s' "$1" | sed 's/[\\\/&\#]/\\&/g'; }
 display_replacement="$(escape_sed_replacement "$DISPLAY")"
 repository_replacement="$(escape_sed_replacement "$REPOSITORY")"
@@ -25,22 +25,23 @@ rollback() {
 }
 trap rollback EXIT
 while IFS= read -r relative; do
+    case "$relative" in Scripts/Windows/rename.ps1|Scripts/Unix/rename.sh|Scripts/Tests/*) continue ;; esac
     file="$ROOT/$relative"; [[ -f "$file" ]] || continue
     case "$file" in
       *.h|*.hpp|*.cpp|*.c)
-        sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/namespace $PROJECT_NAMESPACE/namespace $NAME/g" -e "s/$PROJECT_NAMESPACE::/$NAME::/g" -e "s#\"$PROJECT_NAMESPACE/#\"$NAME/#g" -e "s/\"$CORE_TARGET\"/\"$new_core\"/g" -e "s/\"$CLIENT_TARGET\"/\"$new_client\"/g" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+        sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/namespace $PROJECT_NAMESPACE/namespace $NAME/g" -e "s/$PROJECT_NAMESPACE::/$NAME::/g" -e "s#\"$PROJECT_NAMESPACE/#\"$NAME/#g" -e "s/\"$CORE_TARGET\"/\"$new_core\"/g" -e "s/\"$CLIENT_TARGET\"/\"$new_client\"/g" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
         ;;
       *.md|*.yml|*.yaml|*.json|*.conf|*.lua|*.ps1|*.sh|*.txt|*.bat)
         if [[ -n "$REPOSITORY" ]]; then
-          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s#$REPOSITORY_SLUG#$repository_replacement#g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file" > "$file.tmp"
+          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s#$REPOSITORY_SLUG#$repository_replacement#g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file" > "$file.tmp"
         else
-          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file" > "$file.tmp"
+          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file" > "$file.tmp"
         fi
         mv "$file.tmp" "$file"
         ;;
     esac
 done < "$list"
-printf 'PROJECT_IDENTIFIER=%s\nPROJECT_DISPLAY_NAME=%s\nPROJECT_NAMESPACE=%s\nCORE_TARGET=%s\nCORE_DIRECTORY=%s\nCLIENT_TARGET=%s\nCLIENT_DIRECTORY=%s\nTESTS_TARGET=%s\nTESTS_DIRECTORY=%s\nARTIFACT_PREFIX=%s\nREPOSITORY_SLUG=%s\n' "$NAME" "$DISPLAY" "$NAME" "$new_core" "$new_core" "$new_client" "$new_client" "$new_tests" "$new_tests" "$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')" "$REPOSITORY" > "$ROOT/Config/Project.conf"
+printf 'PROJECT_IDENTIFIER=%s\nPROJECT_DISPLAY_NAME=%s\nPROJECT_NAMESPACE=%s\nPROJECT_MACRO_PREFIX=%s\nCORE_TARGET=%s\nCORE_DIRECTORY=%s\nCLIENT_TARGET=%s\nCLIENT_DIRECTORY=%s\nTESTS_TARGET=%s\nTESTS_DIRECTORY=%s\nARTIFACT_PREFIX=%s\nREPOSITORY_SLUG=%s\n' "$NAME" "$DISPLAY" "$NAME" "$new_macro_prefix" "$new_core" "$new_core" "$new_client" "$new_client" "$new_tests" "$new_tests" "$(printf '%s' "$NAME" | tr '[:upper:]' '[:lower:]')" "$REPOSITORY" > "$ROOT/Config/Project.conf"
 [[ "$PROJECT_NAMESPACE" == "$NAME" ]] || mv "$ROOT/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$ROOT/$CORE_DIRECTORY/Include/$NAME"
 [[ "$CORE_DIRECTORY" == "$new_core" ]] || mv "$ROOT/$CORE_DIRECTORY" "$ROOT/$new_core"
 [[ "$CLIENT_DIRECTORY" == "$new_client" ]] || mv "$ROOT/$CLIENT_DIRECTORY" "$ROOT/$new_client"
