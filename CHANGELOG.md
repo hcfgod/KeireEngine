@@ -24,4 +24,6 @@ All notable template changes are documented here. The format follows Keep a Chan
 - ARM64 Premake source builds install the platform UUID development headers before compilation.
 - Vendor bootstrap verifies the committed submodule pointer and restores detached working trees to that exact hash.
 - macOS tool version checks consume complete command output, avoiding `xcodebuild` broken-pipe crashes.
+- Linux Clang bootstrap installs the LLVM profiling and coverage utilities required by coverage reports.
+- CodeQL receives read-only workflow-run access required during SARIF analysis.
 - Dependency review reports a warning instead of failing repositories where GitHub dependency analysis is unavailable.

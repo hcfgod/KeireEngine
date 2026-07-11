@@ -24,6 +24,7 @@ assert_equal "$(package_name apt-get uuid)" uuid-dev 'APT UUID development packa
 assert_equal "$(package_name dnf uuid)" libuuid-devel 'DNF UUID development package'
 assert_equal "$(package_name pacman uuid)" util-linux-libs 'pacman UUID development package'
 assert_equal "$(package_name zypper uuid)" libuuid-devel 'Zypper UUID development package'
+assert_equal "$(package_name apt-get llvm)" llvm 'LLVM tools package'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)" 79524ddd08a4ec981b7fea76afd08ee05f83755d 'spdlog lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)" 2d0a9359a60c51affe2a9bebb1be1dca47868151 'doctest lock'
 

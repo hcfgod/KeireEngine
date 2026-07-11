@@ -124,6 +124,7 @@ package_name() {
         apt-get:uuid) printf 'uuid-dev' ;;
         dnf:uuid|zypper:uuid) printf 'libuuid-devel' ;;
         pacman:uuid) printf 'util-linux-libs' ;;
+        *:llvm) printf 'llvm' ;;
         *:*) printf '%s' "$logical" ;;
     esac
 }

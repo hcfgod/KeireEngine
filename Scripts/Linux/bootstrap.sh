@@ -109,6 +109,8 @@ case "$TOOLSET" in
     clang)
         ensure_command clang++ clang
         check_version Clang "$(clang++ --version | extract_version)" 16
+        ensure_command llvm-profdata llvm
+        ensure_command llvm-cov llvm
         ;;
     *) printf "Unsupported Linux toolset '%s'.\n" "$TOOLSET" >&2; exit 1 ;;
 esac
