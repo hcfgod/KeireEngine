@@ -25,5 +25,5 @@ All notable template changes are documented here. The format follows Keep a Chan
 - Vendor bootstrap verifies the committed submodule pointer and restores detached working trees to that exact hash.
 - macOS tool version checks consume complete command output, avoiding `xcodebuild` broken-pipe crashes.
 - Linux Clang bootstrap installs the LLVM profiling and coverage utilities required by coverage reports.
-- CodeQL receives read-only workflow-run access required during SARIF analysis.
+- CodeQL runs locally and uploads SARIF as a workflow artifact when repository Code Scanning is unavailable.
 - Dependency review reports a warning instead of failing repositories where GitHub dependency analysis is unavailable.

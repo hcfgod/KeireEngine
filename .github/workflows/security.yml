@@ -30,7 +30,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-      security-events: write
+      security-events: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -40,3 +40,12 @@ jobs:
           languages: c-cpp
       - run: bash Scripts/project.sh build --generator ninja --configuration Debug --architecture x86_64 --toolset gcc --ci
       - uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
+        with:
+          output: codeql-results
+          upload: never
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: codeql-sarif
+          path: codeql-results/*.sarif
+          if-no-files-found: ignore
