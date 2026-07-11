@@ -16,7 +16,7 @@ cp -R "$ROOT/$CORE_DIRECTORY/Include/"* "$stage/include/"; cp -R "$ROOT/Vendor/s
 cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
 commit="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"
 compiler_command=gcc; [[ "$TOOLSET" == clang ]] && compiler_command=clang
-compiler="$("$compiler_command" --version | head -n 1)"
+compiler="$("$compiler_command" --version | awk 'NR == 1 { print }')"
 printf '{\n  "project": "%s",\n  "commit": "%s",\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s"\n}\n' "$PROJECT_IDENTIFIER" "$commit" "$os_name" "$ARCHITECTURE" "$CONFIGURATION" "$GENERATOR" "$TOOLSET" "$compiler" "$spdlog" "$doctest" > "$stage/build-manifest.json"
 archive="$ROOT/Artifacts/$name.tar.gz"; tar -C "$stage" -czf "$archive" .
 if command -v sha256sum >/dev/null 2>&1; then

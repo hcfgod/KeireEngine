@@ -75,16 +75,16 @@ install_premake() {
     else
         expected="$PREMAKE_ARM_HASH"
         url="$PREMAKE_ARM_URL"
-        install_logical_packages build
+        install_logical_packages build uuid
         curl -fsSL "$url" -o "$archive"
         [[ "$(sha256sum "$archive" | awk '{print $1}')" == "$expected" ]] || { printf 'Premake source checksum mismatch.\n' >&2; exit 1; }
         tar -xf "$archive" -C "$TEMPORARY"
         local source
-        source="$(find "$TEMPORARY" -maxdepth 1 -type d -name 'premake-core-*' | head -n 1)"
+        source="$(find "$TEMPORARY" -maxdepth 1 -type d -name 'premake-core-*' -print -quit)"
         make -C "$source" -f Bootstrap.mak linux PLATFORM=ARM64
     fi
     local downloaded
-    downloaded="$(find "$TEMPORARY" -type f -name premake5 -perm -u+x | head -n 1)"
+    downloaded="$(find_premake_binary "$TEMPORARY")"
     [[ -n "$downloaded" ]] || { printf 'Premake executable was not produced.\n' >&2; exit 1; }
     cp "$downloaded" "$PREMAKE"; chmod +x "$PREMAKE"
     "$PREMAKE" --version | grep -q "$PREMAKE_VERSION"
@@ -93,13 +93,13 @@ install_premake() {
 
 install_premake
 ensure_command git git
-check_version Git "$(git --version | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)" 2.40
+check_version Git "$(git --version | extract_version)" 2.40
 
 if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then ensure_command ninja ninja; check_version Ninja "$(ninja --version)" 1.11; fi
 [[ "$GENERATOR" == compilecommands ]] && ensure_command python3 python
 if [[ "$GENERATOR" == gmake ]]; then
     install_logical_packages build
-    check_version Make "$(make --version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)+')" 4.3
+    check_version Make "$(make --version | extract_version)" 4.3
 fi
 case "$TOOLSET" in
     default|gcc)
@@ -108,7 +108,7 @@ case "$TOOLSET" in
         ;;
     clang)
         ensure_command clang++ clang
-        check_version Clang "$(clang++ --version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)" 16
+        check_version Clang "$(clang++ --version | extract_version)" 16
         ;;
     *) printf "Unsupported Linux toolset '%s'.\n" "$TOOLSET" >&2; exit 1 ;;
 esac

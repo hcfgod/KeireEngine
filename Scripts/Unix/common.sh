@@ -68,6 +68,10 @@ architecture_output_name() {
     [[ "$(normalize_architecture "$1")" == ARM64 ]] && printf 'AARCH64' || printf 'x86_64'
 }
 
+find_premake_binary() {
+    find "$1" -type f -name premake5 -print -quit
+}
+
 validate_unix_combination() {
     local platform="$1" generator="$2" toolset="$3"
     if [[ "$toolset" == "msc" ]]; then
@@ -94,6 +98,16 @@ version_at_least() {
     return 0
 }
 
+extract_version() {
+    awk '
+        match($0, /[0-9]+([.][0-9]+)*/) && !found {
+            print substr($0, RSTART, RLENGTH)
+            found = 1
+        }
+        END { if (!found) exit 1 }
+    '
+}
+
 package_name() {
     local manager="$1" logical="$2"
     case "$manager:$logical" in
@@ -107,6 +121,9 @@ package_name() {
         pacman:build) printf 'base-devel' ;;
         pacman:python) printf 'python' ;;
         *:python) printf 'python3' ;;
+        apt-get:uuid) printf 'uuid-dev' ;;
+        dnf:uuid|zypper:uuid) printf 'libuuid-devel' ;;
+        pacman:uuid) printf 'util-linux-libs' ;;
         *:*) printf '%s' "$logical" ;;
     esac
 }

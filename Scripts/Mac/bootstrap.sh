@@ -54,21 +54,21 @@ install_premake() {
     curl -fsSL "$url" -o "$archive"
     [[ "$(shasum -a 256 "$archive" | awk '{print $1}')" == "$hash" ]] || { printf 'Premake checksum mismatch.\n' >&2; exit 1; }
     tar -xf "$archive" -C "$TEMPORARY"
-    cp "$(find "$TEMPORARY" -type f -name premake5 | head -n 1)" "$PREMAKE"; chmod +x "$PREMAKE"
+    cp "$(find_premake_binary "$TEMPORARY")" "$PREMAKE"; chmod +x "$PREMAKE"
     "$PREMAKE" --version | grep -q "$PREMAKE_VERSION"
     rm -rf "$TEMPORARY"; TEMPORARY=""
 }
 
 install_premake
 if ! xcode-select -p >/dev/null 2>&1; then xcode-select --install; printf 'Complete the Xcode tools installation, then rerun bootstrap.\n' >&2; exit 1; fi
-check_version Xcode "$(xcodebuild -version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)?')" 15
+check_version Xcode "$(xcodebuild -version | extract_version)" 15
 
 if ! have git; then brew_install git git; fi
-check_version Git "$(git --version | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)" 2.40
+check_version Git "$(git --version | extract_version)" 2.40
 [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]] && { brew_install ninja ninja; check_version Ninja "$(ninja --version)" 1.11; }
 [[ "$GENERATOR" == compilecommands ]] && brew_install python3 python
-[[ "$GENERATOR" == gmake ]] && { brew_install gmake make; check_version Make "$(gmake --version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)+')" 4.3; }
-case "$TOOLSET" in default|clang) check_version Clang "$(clang++ --version | head -n 1 | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)" 16;; *) printf 'macOS supports default or clang toolsets.\n' >&2; exit 1;; esac
+[[ "$GENERATOR" == gmake ]] && { brew_install gmake make; check_version Make "$(gmake --version | extract_version)" 4.3; }
+case "$TOOLSET" in default|clang) check_version Clang "$(clang++ --version | extract_version)" 16;; *) printf 'macOS supports default or clang toolsets.\n' >&2; exit 1;; esac
 if [[ $UPDATE -eq 1 ]]; then ensure_brew; brew update; fi
 if [[ $INSTALL_OPTIONAL -eq 1 ]]; then ensure_brew; brew install git ninja llvm make; fi
 bash "$ROOT/Scripts/Mac/vendor.sh"

@@ -15,15 +15,24 @@ assert_equal "$(resolve_unix_toolset Mac default)" clang 'macOS default toolset'
 assert_true version_at_least 16.0.1 16.0
 assert_true version_at_least 17 16.9
 assert_false version_at_least 15.9 16.0
+assert_equal "$(printf 'Xcode 16.4\nBuild version 16F6\n' | extract_version)" 16.4 'multi-line version extraction'
 assert_equal "$(package_name apt-get ninja)" ninja-build 'APT Ninja package'
 assert_equal "$(package_name pacman ninja)" ninja 'pacman Ninja package'
 assert_equal "$(package_name dnf cxx)" gcc-c++ 'DNF C++ package'
 assert_equal "$(package_name pacman python)" python 'pacman Python package'
+assert_equal "$(package_name apt-get uuid)" uuid-dev 'APT UUID development package'
+assert_equal "$(package_name dnf uuid)" libuuid-devel 'DNF UUID development package'
+assert_equal "$(package_name pacman uuid)" util-linux-libs 'pacman UUID development package'
+assert_equal "$(package_name zypper uuid)" libuuid-devel 'Zypper UUID development package'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)" 79524ddd08a4ec981b7fea76afd08ee05f83755d 'spdlog lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)" 2d0a9359a60c51affe2a9bebb1be1dca47868151 'doctest lock'
 
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT
+mkdir -p "$fixture/archive"
+printf '%s\n' premake > "$fixture/archive/premake5"
+chmod 0644 "$fixture/archive/premake5"
+assert_equal "$(find_premake_binary "$fixture/archive")" "$fixture/archive/premake5" 'non-executable Premake discovery'
 mkdir -p "$fixture/Scripts/Unix" "$fixture/Config" "$fixture/Core/Include/Core" "$fixture/Core/Source" "$fixture/Client/Source" "$fixture/Tests/Source" "$fixture/Vendor" "$fixture/Build/Bin"
 cp "$ROOT/Scripts/Unix/common.sh" "$ROOT/Scripts/Unix/rename.sh" "$ROOT/Scripts/Unix/clean.sh" "$fixture/Scripts/Unix/"
 cp "$ROOT/Config/Project.conf" "$fixture/Config/Project.conf"

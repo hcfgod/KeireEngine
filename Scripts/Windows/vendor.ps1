@@ -22,6 +22,10 @@ foreach ($dependency in $Dependencies) {
     $directory = Join-Path $Root $dependency.Path
     $indexEntry = (& git -C $Root ls-files --stage -- $dependency.Path 2>$null) -join ""
     if ($indexEntry.StartsWith("160000 ")) {
+        $indexCommit = ($indexEntry -split '\s+')[1]
+        if ($indexCommit -ne $dependency.Commit) {
+            throw "$($dependency.Name) lock is $($dependency.Commit); committed submodule pointer is $indexCommit."
+        }
         Write-Host "==> Restoring $($dependency.Name) from the committed submodule pointer"
         Invoke-Git -C $Root submodule update --init --recursive -- $dependency.Path
     }
@@ -35,6 +39,13 @@ foreach ($dependency in $Dependencies) {
     }
 
     $actualCommit = (& git -C $directory rev-parse HEAD).Trim()
+    if ($actualCommit -ne $dependency.Commit -and $indexEntry.StartsWith("160000 ")) {
+        Write-Host "==> Restoring $($dependency.Name) working tree to committed hash $($dependency.Commit)"
+        & git -C $directory cat-file -e "$($dependency.Commit)^{commit}" 2>$null
+        if ($LASTEXITCODE -ne 0) { Invoke-Git -C $directory fetch --no-tags origin $dependency.Commit }
+        Invoke-Git -C $directory checkout --quiet --detach $dependency.Commit
+        $actualCommit = (& git -C $directory rev-parse HEAD).Trim()
+    }
     if ($LASTEXITCODE -ne 0 -or $actualCommit -ne $dependency.Commit) {
         throw "$($dependency.Name) is at $actualCommit; expected pinned commit $($dependency.Commit)."
     }
