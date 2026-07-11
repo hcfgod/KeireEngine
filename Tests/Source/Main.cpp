@@ -168,6 +168,31 @@ TEST_CASE("Console output can be suppressed without disabling file logging")
     CORE_INFO("file-only message");
 }
 
+TEST_CASE("Logger handles provide lifecycle-safe level and flush operations")
+{
+    const auto directory = MakeTestDirectory("handle-operations");
+    std::filesystem::remove_all(directory);
+    {
+        CurrentDirectoryGuard currentDirectory(directory);
+        Core::Log::Shutdown();
+
+        {
+            auto logger = Core::Log::GetClientLogger();
+            REQUIRE(logger);
+            logger.SetLevel(Core::LogLevel::Error);
+            logger.Write(spdlog::source_loc{}, spdlog::level::info, "filtered handle message");
+            logger.Write(spdlog::source_loc{}, spdlog::level::err, "retained handle message");
+            logger.Flush();
+        }
+        Core::Log::Shutdown();
+
+        const auto contents = ReadFile(directory / "Logs" / "Client.log");
+        CHECK(contents.find("filtered handle message") == std::string::npos);
+        CHECK(contents.find("retained handle message") != std::string::npos);
+    }
+    std::filesystem::remove_all(directory);
+}
+
 #if SPDLOG_ACTIVE_LEVEL > SPDLOG_LEVEL_DEBUG
 TEST_CASE("Compiled-out logging macros do not evaluate arguments")
 {
@@ -290,7 +315,9 @@ TEST_CASE("Lazy acquisition and explicit initialization serialize safely")
     for (int iteration = 0; iteration < 16; ++iteration)
     {
         LogFixture fixture("initialization-race-" + std::to_string(iteration));
+        CurrentDirectoryGuard currentDirectory(fixture.Directory);
         std::atomic<bool> start = false;
+        bool lazyInitializationWon = false;
         std::exception_ptr getterFailure;
         std::exception_ptr initializerFailure;
 
@@ -324,7 +351,7 @@ TEST_CASE("Lazy acquisition and explicit initialization serialize safely")
                 }
                 catch (const std::logic_error&)
                 {
-                    // Lazy default initialization won the documented first-initializer race.
+                    lazyInitializationWon = true;
                 }
                 catch (...)
                 {
@@ -338,6 +365,14 @@ TEST_CASE("Lazy acquisition and explicit initialization serialize safely")
         CHECK(getterFailure == nullptr);
         CHECK(initializerFailure == nullptr);
         Core::Log::Shutdown();
+        if (lazyInitializationWon)
+        {
+            CHECK(std::filesystem::is_regular_file(fixture.Directory / "Logs" / "Core.log"));
+        }
+        else
+        {
+            CHECK(std::filesystem::is_regular_file(fixture.Directory / fixture.Config.CoreLogFile));
+        }
     }
 }
 
