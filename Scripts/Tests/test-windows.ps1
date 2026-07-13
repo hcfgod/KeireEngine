@@ -101,12 +101,14 @@ namespace $projectNamespace { class Log; }
     Assert-Throws { & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name BlockedRename } "Dirty parent worktree rename"
     & git -C $parentFixture checkout --quiet -- Template/README.md
 
-    & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName "Script Fixture" -Repository example/script-fixture
+    $unicodeDisplayName = "Script Fixtur$([char]0x00E9)"
+    & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName $unicodeDisplayName -Repository example/script-fixture
     Assert-True (-not (Test-Path (Join-Path $fixture ".git"))) "Nested Git repository prevention"
     Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureCore\Include\ScriptFixture\Core.h")) "Rename structure"
-    $renamed = Get-Content (Join-Path $fixture "Config\Project.conf") -Raw
+    $renamed = Get-Content (Join-Path $fixture "Config\Project.conf") -Raw -Encoding UTF8
     Assert-True ($renamed.Contains("CORE_TARGET=ScriptFixtureCore")) "Rename manifest"
     Assert-True ($renamed.Contains("PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE")) "Rename macro manifest"
+    Assert-True ($renamed.Contains("PROJECT_DISPLAY_NAME=$unicodeDisplayName")) "UTF-8 display name preservation"
     $renamedHeaders = (Get-ChildItem (Join-Path $fixture "ScriptFixtureCore\Include") -File -Recurse | Get-Content) -join "`n"
     Assert-True (-not $renamedHeaders.Contains($project.PROJECT_MACRO_PREFIX)) "Old include guard removal"
     Assert-True ($renamedHeaders.Contains("SCRIPT_FIXTURE_CORE_CORE_H")) "Renamed include guard"

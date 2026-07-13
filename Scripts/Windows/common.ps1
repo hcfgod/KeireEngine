@@ -3,7 +3,9 @@ $ErrorActionPreference = "Stop"
 function Read-KeyValueFile {
     param([string]$Path)
     $values = @{}
-    foreach ($line in Get-Content -LiteralPath $Path) {
+    # Project files are UTF-8 without a BOM. Windows PowerShell 5 otherwise
+    # decodes them using the legacy system code page.
+    foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
         if ($line -match '^([A-Z0-9_]+)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
     }
     return $values

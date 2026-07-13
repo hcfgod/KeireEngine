@@ -23,6 +23,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# Windows PowerShell 5 otherwise uses the active OEM code page for interactive
+# input and native command output, which corrupts names such as "Kéire".
+$utf8 = [Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $utf8
+[Console]::OutputEncoding = $utf8
+$OutputEncoding = $utf8
 $ConfigurationWasProvided = $PSBoundParameters.ContainsKey("Configuration")
 $WindowsScripts = Join-Path $PSScriptRoot "Windows"
 . (Join-Path $WindowsScripts "common.ps1")
@@ -132,7 +138,18 @@ function Show-Menu {
                 "8" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
                 "9" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
                 "10" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
-                "11" { $script:Name=Read-Setting "PascalCase identifier" $Name; $script:DisplayName=Read-Setting "Display name" $DisplayName; $script:Repository=Read-Setting "Repository (owner/name, optional)" $Repository; Invoke-ProjectCommand rename; $script:Project=Get-ProjectConfig }
+                "11" {
+                    # Keep proposed values local so a failed rename cannot poison
+                    # the defaults shown by the next menu attempt.
+                    $proposedName = Read-Setting "PascalCase identifier" $Project.PROJECT_IDENTIFIER
+                    $proposedDisplayName = Read-Setting "Display name" $Project.PROJECT_DISPLAY_NAME
+                    $proposedRepository = Read-Setting "Repository (owner/name, optional)" $Project.REPOSITORY_SLUG
+                    $script:Name = $proposedName
+                    $script:DisplayName = $proposedDisplayName
+                    $script:Repository = $proposedRepository
+                    Invoke-ProjectCommand rename
+                    $script:Project = Get-ProjectConfig
+                }
                 "12" { return }
                 default { Write-Warning "Invalid menu choice '$choice'." }
             }
