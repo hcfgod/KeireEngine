@@ -78,6 +78,7 @@ try {
     Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "rename.ps1"), (Join-Path $Windows "clean.ps1"), (Join-Path $Windows "doctor.ps1") (Join-Path $fixture "Scripts\Windows")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\Project.conf") (Join-Path $fixture "Config\Project.conf")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") (Join-Path $fixture "Config\PackageConfig.cmake.in")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "premake5.lua") (Join-Path $fixture "premake5.lua")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\Consumer\CMakeLists.txt"), (Join-Path (Get-RepositoryRoot) "Examples\Consumer\Main.cpp") (Join-Path $fixture "Examples\Consumer")
     Set-Content (Join-Path $fixture "$coreDirectory\Include\$projectNamespace\Core.h") @"
 #ifndef $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H
@@ -114,6 +115,8 @@ namespace $projectNamespace { class Log; }
     Assert-True ($renamed.Contains("CORE_TARGET=ScriptFixtureCore")) "Rename manifest"
     Assert-True ($renamed.Contains("PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE")) "Rename macro manifest"
     Assert-True ($renamed.Contains("PROJECT_VERSION=$($project.PROJECT_VERSION)")) "Rename version preservation"
+    $renamedPremake = Get-Content (Join-Path $fixture "premake5.lua") -Raw
+    Assert-True ($renamedPremake.Contains('"Build/Generated/" .. ProjectConfig.PROJECT_NAMESPACE')) "Generated header namespace directory"
     $renamedConsumer = Get-Content (Join-Path $fixture "Examples\Consumer\CMakeLists.txt") -Raw
     Assert-True ($renamedConsumer.Contains("find_package(ScriptFixture CONFIG REQUIRED)")) "Renamed CMake package identity"
     Assert-True ($renamedConsumer.Contains("ScriptFixture::Core")) "Renamed CMake imported target"

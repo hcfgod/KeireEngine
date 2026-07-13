@@ -30,7 +30,7 @@ end
 local gitCommit = commandOutput("git rev-parse --verify HEAD") or "unknown"
 local gitStatus = commandOutput("git status --porcelain --untracked-files=no")
 local gitDirty = gitStatus ~= nil and gitStatus ~= ""
-local generatedDirectory = "Build/Generated/Core"
+local generatedDirectory = "Build/Generated/" .. ProjectConfig.PROJECT_NAMESPACE
 os.mkdir(generatedDirectory)
 local generated = assert(io.open(generatedDirectory .. "/BuildInfo.generated.h", "w"))
 generated:write("#pragma once\n\n")
