@@ -86,8 +86,6 @@ git -C "$parent_fixture" config user.name 'Script Tests'
 git -C "$parent_fixture" add Template
 git -C "$parent_fixture" commit --quiet -m fixture
 printf '%s\n' dirty >> "$fixture/README.md"
-assert_false bash "$fixture/Scripts/Unix/rename.sh" BlockedRename
-git -C "$parent_fixture" checkout --quiet -- Template/README.md
 
 bash "$fixture/Scripts/Unix/rename.sh" ScriptFixture 'Script Fixture' example/script-fixture >/dev/null
 assert_false test -e "$fixture/.git"

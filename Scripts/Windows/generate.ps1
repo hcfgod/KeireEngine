@@ -23,10 +23,21 @@ Assert-SupportedBuildCombination $Generator "Debug" $Architecture $Toolset
     -Toolset $Toolset -Update:$Update
 
 $premakeArchitecture = Get-PremakeArchitecture $Architecture
-$arguments = @("--file=$(Join-Path $Root 'premake5.lua')", "--arch=$premakeArchitecture", "--toolset=$Toolset")
+# Premake beta8 cannot reliably parse a Unicode absolute --file path on
+# Windows. Generation already runs from $Root, so keep the script path local.
+$arguments = @("--file=premake5.lua", "--arch=$premakeArchitecture", "--toolset=$Toolset")
 if ($CI) { $arguments += "--ci" }
 Write-Host "==> Generating $Generator files for $Architecture with toolset $Toolset"
-Push-Location $Root
+$premakeRoot = $Root.Path
+$premakeJunction = $null
+if ($premakeRoot -match '[^\x00-\x7F]') {
+    # Premake beta8 cannot open its project script when the working directory
+    # contains Unicode. An ASCII junction preserves the real project layout.
+    $premakeJunction = Join-Path ([IO.Path]::GetTempPath()) ("premake-root-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Junction -Path $premakeJunction -Target $premakeRoot | Out-Null
+    $premakeRoot = $premakeJunction
+}
+Push-Location $premakeRoot
 try {
     if ($Generator -eq "compilecommands") {
         & $PremakeExe @arguments ninja
@@ -38,6 +49,11 @@ try {
 }
 finally {
     Pop-Location
+    if ($premakeJunction -and (Test-Path -LiteralPath $premakeJunction)) {
+        # Windows PowerShell 5 can throw a NullReferenceException when
+        # Remove-Item targets a directory junction.
+        [IO.Directory]::Delete($premakeJunction)
+    }
 }
 if ($generationExitCode -ne 0) {
     throw "Premake generation failed with exit code $generationExitCode."

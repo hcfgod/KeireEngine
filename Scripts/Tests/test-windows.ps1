@@ -14,6 +14,8 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 $project = Get-ProjectConfig
+$generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
+Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
 Assert-Equal $project.PROJECT_MACRO_PREFIX (ConvertTo-MacroPrefix $project.PROJECT_IDENTIFIER) "Project macro prefix"
 Assert-Equal (ConvertTo-MacroPrefix "HTTPServer2Client") "HTTP_SERVER2_CLIENT" "Macro prefix derivation"
@@ -98,8 +100,6 @@ namespace $projectNamespace { class Log; }
     & git -C $parentFixture commit --quiet -m fixture
     Assert-Equal (Get-GitWorktreeRoot $fixture).Path (Resolve-Path $parentFixture).Path "Parent Git worktree detection"
     Add-Content (Join-Path $fixture "README.md") "dirty"
-    Assert-Throws { & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name BlockedRename } "Dirty parent worktree rename"
-    & git -C $parentFixture checkout --quiet -- Template/README.md
 
     $unicodeDisplayName = "Script Fixtur$([char]0x00E9)"
     & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName $unicodeDisplayName -Repository example/script-fixture
@@ -109,6 +109,7 @@ namespace $projectNamespace { class Log; }
     Assert-True ($renamed.Contains("CORE_TARGET=ScriptFixtureCore")) "Rename manifest"
     Assert-True ($renamed.Contains("PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE")) "Rename macro manifest"
     Assert-True ($renamed.Contains("PROJECT_DISPLAY_NAME=$unicodeDisplayName")) "UTF-8 display name preservation"
+    Assert-True ((Get-Content (Join-Path $fixture "README.md") -Raw).Contains("dirty")) "Pre-existing edit preservation"
     $renamedHeaders = (Get-ChildItem (Join-Path $fixture "ScriptFixtureCore\Include") -File -Recurse | Get-Content) -join "`n"
     Assert-True (-not $renamedHeaders.Contains($project.PROJECT_MACRO_PREFIX)) "Old include guard removal"
     Assert-True ($renamedHeaders.Contains("SCRIPT_FIXTURE_CORE_CORE_H")) "Renamed include guard"

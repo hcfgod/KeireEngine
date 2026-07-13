@@ -12,22 +12,17 @@ $reserved = @("Alignas","Alignof","And","Asm","Auto","Bool","Break","Case","Catc
 if ($reserved -contains $Name) { throw "Name '$Name' is a reserved C++ keyword." }
 if (-not $DisplayName) { $DisplayName = $Name }
 if ($Repository -and $Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Repository must use owner/name format." }
-$gitTopLevel = Get-GitWorktreeRoot $Root
-$insideGit = $null -ne $gitTopLevel
-if ($insideGit -and ((& git -C $gitTopLevel status --porcelain --untracked-files=all) -join "")) { throw "Rename requires a clean containing Git worktree." }
-
 $newCore = "${Name}Core"; $newClient = "${Name}Client"; $newTests = "${Name}Tests"
 $newMacroPrefix = ConvertTo-MacroPrefix $Name
 foreach ($path in @($newCore, $newClient, $newTests)) {
     if ((Join-Path $Root $path) -notin @((Join-Path $Root $Project.CORE_DIRECTORY), (Join-Path $Root $Project.CLIENT_DIRECTORY), (Join-Path $Root $Project.TESTS_DIRECTORY)) -and (Test-Path (Join-Path $Root $path))) { throw "Destination '$path' already exists." }
 }
-$files = if ($insideGit) {
-    @(& git -C $Root ls-files | Where-Object { $_ -notmatch '^(Vendor|Tools)/' })
-}
-else {
-    $rootPrefix = $Root.Path.TrimEnd("\") + "\"
-    @(Get-ChildItem $Root -File -Recurse | Where-Object { $_.FullName -notmatch '[\\/](\.git|Vendor|Tools|Build|Logs)[\\/]' } | ForEach-Object { $_.FullName.Substring($rootPrefix.Length) })
-}
+# Work directly from the filesystem so clones, copies, archives, nested
+# worktrees, and Unicode paths all behave identically.
+$rootPrefix = $Root.Path.TrimEnd("\") + "\"
+$files = @(Get-ChildItem $Root -File -Recurse | Where-Object {
+    $_.FullName -notmatch '[\\/](\.git|Vendor|Tools|Build|Logs|\.vs)[\\/]'
+} | ForEach-Object { $_.FullName.Substring($rootPrefix.Length) })
 $textExtensions = @(".h", ".hpp", ".cpp", ".c", ".lua", ".ps1", ".sh", ".bat", ".md", ".yml", ".yaml", ".json", ".conf", ".txt", ".gitignore", ".gitattributes", ".editorconfig")
 $originals = @{}; $moves = @()
 try {

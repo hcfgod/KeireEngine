@@ -4,15 +4,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; source "$ROOT/Script
 NAME="${1:-}"; DISPLAY="${2:-$NAME}"; REPOSITORY="${3:-}"
 [[ "$NAME" =~ ^[A-Z][A-Za-z0-9]*$ ]] || { printf 'Name must be a PascalCase C++ identifier.\n' >&2; exit 1; }
 [[ -z "$REPOSITORY" || "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { printf 'Repository must use owner/name format.\n' >&2; exit 1; }
-inside_git=0; git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 && inside_git=1
-[[ $inside_git -eq 0 || -z "$(git -C "$ROOT" status --porcelain --untracked-files=all)" ]] || { printf 'Rename requires a clean Git worktree.\n' >&2; exit 1; }
 new_core="${NAME}Core"; new_client="${NAME}Client"; new_tests="${NAME}Tests"; new_macro_prefix="$(identifier_to_macro_prefix "$NAME")"
 escape_sed_replacement() { printf '%s' "$1" | sed 's/[\\\/&\#]/\\&/g'; }
 display_replacement="$(escape_sed_replacement "$DISPLAY")"
 repository_replacement="$(escape_sed_replacement "$REPOSITORY")"
 for destination in "$new_core" "$new_client" "$new_tests"; do [[ ! -e "$ROOT/$destination" || "$destination" == "$CORE_DIRECTORY" || "$destination" == "$CLIENT_DIRECTORY" || "$destination" == "$TESTS_DIRECTORY" ]] || { printf 'Destination exists: %s\n' "$destination" >&2; exit 1; }; done
 list="$(mktemp)"; backup="$(mktemp)"; completed=0
-if [[ $inside_git -eq 1 ]]; then git -C "$ROOT" ls-files | grep -Ev '^(Vendor|Tools)/' > "$list"; else find "$ROOT" -type f | grep -Ev '/(\.git|Vendor|Tools|Build|Logs)/' | sed "s#^$ROOT/##" > "$list"; fi
+find "$ROOT" -type f | grep -Ev '/(\.git|Vendor|Tools|Build|Logs|\.vs)/' | sed "s#^$ROOT/##" > "$list"
 tar -C "$ROOT" -cf "$backup" -T "$list"
 rollback() {
     status=$?

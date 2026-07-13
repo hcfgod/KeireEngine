@@ -12,7 +12,7 @@ bootstrap=(--generator "$GENERATOR" --architecture "$ARCHITECTURE" --toolset "$T
 [[ $UPDATE -eq 1 ]] && bootstrap+=(--update)
 bash "$ROOT/Scripts/Linux/bootstrap.sh" "${bootstrap[@]}"
 
-args=("--file=$ROOT/premake5.lua" "--arch=$(premake_architecture "$ARCHITECTURE")" "--toolset=$TOOLSET")
+args=("--file=premake5.lua" "--arch=$(premake_architecture "$ARCHITECTURE")" "--toolset=$TOOLSET")
 [[ $CI -eq 1 ]] && args+=(--ci)
 mkdir -p "$ROOT/Build/Generated"
 printf '==> Generating %s files for %s with toolset %s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET"
