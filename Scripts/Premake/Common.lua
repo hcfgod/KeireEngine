@@ -10,6 +10,7 @@ function ApplyCommonProjectSettings()
     cppdialect "C++20"
     staticruntime "off"
     warnings "Extra"
+    defines { "CORE_STATIC", 'CORE_BUILD_CONFIGURATION="%{cfg.buildcfg}"', 'CORE_BUILD_ARCHITECTURE="%{cfg.architecture}"' }
 
     targetdir ("../Build/Bin/" .. OutputDir .. "/%{prj.name}")
     objdir ("../Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
@@ -24,7 +25,7 @@ function ApplyCommonProjectSettings()
     local usesMsvcCommandLine = os.host() == "windows" and
         ((_ACTION and _ACTION:match("^vs")) or (_ACTION == "ninja" and (selectedToolset == "default" or selectedToolset == "msc")))
     if usesMsvcCommandLine then
-        buildoptions { "/utf-8", "/permissive-", "/Zc:__cplusplus", "/MP" }
+        buildoptions { "/utf-8", "/permissive-", "/Zc:__cplusplus", "/Zc:preprocessor", "/MP" }
     end
 
     filter { "toolset:gcc or clang" }
@@ -37,6 +38,7 @@ function ApplyCommonProjectSettings()
         {
             "CORE_LOG_DEFAULT_TRACE",
             "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
+            , "CORE_ASSERTIONS_ENABLED"
         }
 
     filter "configurations:Release"

@@ -156,6 +156,11 @@ function Ensure-MSYS2 {
 Install-Premake
 Ensure-CommandPackage git "Git.Git"
 Assert-MinimumVersion "Git" ((& git --version) -join "") ([version]"2.40")
+$cmakeBin = "C:\Program Files\CMake\bin"
+if (Test-Path (Join-Path $cmakeBin "cmake.exe")) { $env:PATH = "$cmakeBin;$env:PATH" }
+Ensure-CommandPackage cmake "Kitware.CMake"
+if (Test-Path (Join-Path $cmakeBin "cmake.exe")) { $env:PATH = "$cmakeBin;$env:PATH" }
+Assert-MinimumVersion "CMake" ((& cmake --version) -join "") ([version]"3.20")
 
 foreach ($generator in $Generators) {
     switch ($generator) {

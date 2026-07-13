@@ -9,6 +9,7 @@ load_project_config() {
     local root="$1" file="$1/Config/Project.conf"
     PROJECT_IDENTIFIER="$(config_value "$file" PROJECT_IDENTIFIER)"
     PROJECT_DISPLAY_NAME="$(config_value "$file" PROJECT_DISPLAY_NAME)"
+    PROJECT_VERSION="$(config_value "$file" PROJECT_VERSION)"
     PROJECT_NAMESPACE="$(config_value "$file" PROJECT_NAMESPACE)"
     PROJECT_MACRO_PREFIX="$(config_value "$file" PROJECT_MACRO_PREFIX)"
     CORE_TARGET="$(config_value "$file" CORE_TARGET)"
@@ -37,10 +38,11 @@ identifier_to_macro_prefix() {
 
 validate_package_stage() {
     local stage="$1" client="$2" core="$3" namespace="$4" path
-    local required=("bin/$client" "lib/lib$core.a" "include/$namespace/Core.h" "include/$namespace/Log.h" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
+    local required=("bin/$client" "lib/lib$core.a" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "examples/consumer/Main.cpp" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
     for path in "${required[@]}"; do
         [[ -f "$stage/$path" ]] || { printf 'Package is missing required content: %s\n' "$path" >&2; return 1; }
     done
+    find "$stage/lib/cmake" -type f -name '*Config.cmake' -print -quit 2>/dev/null | grep -q . || { printf 'Package is missing its CMake package configuration.\n' >&2; return 1; }
 }
 
 resolve_unix_toolset() {

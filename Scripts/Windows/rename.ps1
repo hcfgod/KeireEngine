@@ -27,7 +27,7 @@ $textExtensions = @(".h", ".hpp", ".cpp", ".c", ".lua", ".ps1", ".sh", ".bat", "
 $originals = @{}; $moves = @()
 try {
     foreach ($relative in $files) {
-        if ($relative -match '^Scripts[\\/](Windows[\\/]rename\.ps1|Unix[\\/]rename\.sh|Tests[\\/])') { continue }
+        if ($relative -match '^Scripts[\\/](Windows[\\/]rename\.ps1|Unix[\\/]rename\.sh|Tests[\\/])' -or $relative -eq 'Config\PackageConfig.cmake.in') { continue }
         $path = Join-Path $Root $relative
         if (-not (Test-Path $path -PathType Leaf)) { continue }
         if ([IO.Path]::GetExtension($path) -notin $textExtensions -and [IO.Path]::GetFileName($path) -notmatch '^\.(gitignore|gitattributes|editorconfig|clang-format|clang-tidy)$') { continue }
@@ -49,13 +49,14 @@ try {
             $content = [regex]::Replace($content, "\b$([regex]::Escape($Project.TESTS_TARGET))\b", $newTests)
             $content = $content.Replace("$newCore.h", "Core.h")
             $content = $content.Replace("$newCore::", "${Name}::")
+            $content = $content.Replace("${Name}::$newCore", "${Name}::Core")
             $content = $content.Replace("$newCore/Core.h", "$Name/Core.h")
             $content = $content.Replace("$newCore/Log.h", "$Name/Log.h")
         }
         [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
     }
     $configPath = Join-Path $Root "Config\Project.conf"
-    $config = @("PROJECT_IDENTIFIER=$Name", "PROJECT_DISPLAY_NAME=$DisplayName", "PROJECT_NAMESPACE=$Name", "PROJECT_MACRO_PREFIX=$newMacroPrefix", "CORE_TARGET=$newCore", "CORE_DIRECTORY=$newCore", "CLIENT_TARGET=$newClient", "CLIENT_DIRECTORY=$newClient", "TESTS_TARGET=$newTests", "TESTS_DIRECTORY=$newTests", "ARTIFACT_PREFIX=$($Name.ToLowerInvariant())", "REPOSITORY_SLUG=$Repository")
+    $config = @("PROJECT_IDENTIFIER=$Name", "PROJECT_DISPLAY_NAME=$DisplayName", "PROJECT_VERSION=$($Project.PROJECT_VERSION)", "PROJECT_NAMESPACE=$Name", "PROJECT_MACRO_PREFIX=$newMacroPrefix", "CORE_TARGET=$newCore", "CORE_DIRECTORY=$newCore", "CLIENT_TARGET=$newClient", "CLIENT_DIRECTORY=$newClient", "TESTS_TARGET=$newTests", "TESTS_DIRECTORY=$newTests", "ARTIFACT_PREFIX=$($Name.ToLowerInvariant())", "REPOSITORY_SLUG=$Repository")
     [IO.File]::WriteAllLines($configPath, $config, [Text.UTF8Encoding]::new($false))
     $publicInclude = Join-Path $Root "$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)"
     if (Test-Path $publicInclude) { $newInclude = Join-Path (Split-Path $publicInclude) $Name; Move-Item $publicInclude $newInclude; $moves += @($newInclude, $publicInclude) }

@@ -29,4 +29,6 @@ File paths are intentionally relative to the process working directory. Scripts 
 
 ## Release Shape
 
-Packages include the Client runtime, Core static library, public Core headers, required spdlog headers, complete spdlog/fmt/doctest license texts, notices, README, and a validated machine-readable build manifest. Packaging extracts the archive and compiles, links, and runs a standalone C++20 consumer against that payload. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is intentionally stripped.
+Packages include the Client runtime, Core static library, public Core headers, required spdlog headers, complete spdlog/fmt/doctest license texts, notices, README, and a validated machine-readable build manifest. Packaging extracts the archive and compiles, links, and runs the checked-in C++20 consumer both directly and through the generated CMake package. CMake is a consumer interface only; Premake remains the sole project build system. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is intentionally stripped.
+
+Build generation captures version and source-control identity under `Build/Generated`; the compiler supplies configuration, compiler, platform, and architecture identity. The resulting `Core::BuildInfo` describes the binary itself rather than the machine inspecting it.

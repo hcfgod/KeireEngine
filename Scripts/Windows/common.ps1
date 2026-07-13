@@ -15,6 +15,14 @@ function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\
 function Get-ProjectConfig { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Project.conf") }
 function Get-DependencyLock { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") }
 
+function Get-CMakeExecutable {
+    $command = Get-Command cmake -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $installed = "C:\Program Files\CMake\bin\cmake.exe"
+    if (Test-Path $installed) { return $installed }
+    return $null
+}
+
 function Get-GitWorktreeRoot {
     param([string]$Path)
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
@@ -62,12 +70,17 @@ function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
         "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "include\$Namespace\Api.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt",
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
+        "examples\consumer\Main.cpp", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
     )
     foreach ($path in $required) {
         if (-not (Test-Path (Join-Path $Stage $path) -PathType Leaf)) { throw "Package is missing required content: $path" }
+    }
+    if (-not (Get-ChildItem (Join-Path $Stage "lib\cmake") -Filter "*Config.cmake" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        throw "Package is missing its CMake package configuration."
     }
 }
 

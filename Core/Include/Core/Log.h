@@ -8,85 +8,86 @@
 #include <string>
 #include <utility>
 
+#include "Core/Api.h"
 #include "spdlog/spdlog.h"
 
 namespace Core
 {
-enum class LogLevel : std::uint8_t
-{
-    Trace,
-    Debug,
-    Info,
-    Warn,
-    Error,
-    Critical,
-    Off
-};
-
-struct LogConfig
-{
-    std::string LogDirectory = "Logs";
-    std::string CoreLogFile = "Core.log";
-    std::string ClientLogFile = "Client.log";
-    std::size_t QueueSize = 8192;
-    std::size_t WorkerThreads = 1;
-    std::size_t MaxFileSizeBytes = std::size_t{5} * 1024 * 1024;
-    std::size_t MaxFiles = 3;
-    bool EnableConsole = true;
-    LogLevel Level =
-#if defined(CORE_LOG_DEFAULT_TRACE)
-        LogLevel::Trace;
-#else
-        LogLevel::Info;
-#endif
-
-    bool operator==(const LogConfig&) const = default;
-};
-
-class LoggerHandle
-{
-  public:
-    LoggerHandle(LoggerHandle&&) noexcept = default;
-    LoggerHandle& operator=(LoggerHandle&&) noexcept = default;
-    LoggerHandle(const LoggerHandle&) = delete;
-    LoggerHandle& operator=(const LoggerHandle&) = delete;
-
-    explicit operator bool() const noexcept;
-    std::size_t SinkCount() const noexcept;
-    void Flush() const;
-    void SetLevel(LogLevel level) const;
-
-    template <typename... Args>
-    void Write(spdlog::source_loc location, spdlog::level::level_enum level, spdlog::format_string_t<Args...> format,
-               Args&&... args) const
+    enum class LogLevel : std::uint8_t
     {
-        m_Logger->log(location, level, format, std::forward<Args>(args)...);
-    }
+        Trace,
+        Debug,
+        Info,
+        Warn,
+        Error,
+        Critical,
+        Off
+    };
 
-  private:
-    friend class Log;
+    struct LogConfig
+    {
+        std::string LogDirectory = "Logs";
+        std::string CoreLogFile = "Core.log";
+        std::string ClientLogFile = "Client.log";
+        std::size_t QueueSize = 8192;
+        std::size_t WorkerThreads = 1;
+        std::size_t MaxFileSizeBytes = std::size_t{5} * 1024 * 1024;
+        std::size_t MaxFiles = 3;
+        bool EnableConsole = true;
+        LogLevel Level =
+    #if defined(CORE_LOG_DEFAULT_TRACE)
+            LogLevel::Trace;
+    #else
+            LogLevel::Info;
+    #endif
 
-    LoggerHandle(std::shared_ptr<spdlog::logger> logger, std::shared_lock<std::shared_mutex>&& lifecycleLock);
+        bool operator==(const LogConfig&) const = default;
+    };
 
-    std::shared_ptr<spdlog::logger> m_Logger;
-    std::shared_lock<std::shared_mutex> m_LifecycleLock;
-};
+    class CORE_API LoggerHandle
+    {
+      public:
+        LoggerHandle(LoggerHandle&&) noexcept = default;
+        LoggerHandle& operator=(LoggerHandle&&) noexcept = default;
+        LoggerHandle(const LoggerHandle&) = delete;
+        LoggerHandle& operator=(const LoggerHandle&) = delete;
 
-class Log
-{
-  public:
-    static void Initialize(const LogConfig& config = LogConfig{});
-    static void Shutdown() noexcept;
-    static void Flush();
-    static void SetLevel(LogLevel level);
+        explicit operator bool() const noexcept;
+        std::size_t SinkCount() const noexcept;
+        void Flush() const;
+        void SetLevel(LogLevel level) const;
 
-    static LoggerHandle GetCoreLogger();
-    static LoggerHandle GetClientLogger();
+        template <typename... Args>
+        void Write(spdlog::source_loc location, spdlog::level::level_enum level, spdlog::format_string_t<Args...> format,
+                   Args&&... args) const
+        {
+            m_Logger->log(location, level, format, std::forward<Args>(args)...);
+        }
 
-  private:
-    friend class LoggerHandle;
-    static spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
-};
+      private:
+        friend class Log;
+
+        LoggerHandle(std::shared_ptr<spdlog::logger> logger, std::shared_lock<std::shared_mutex>&& lifecycleLock);
+
+        std::shared_ptr<spdlog::logger> m_Logger;
+        std::shared_lock<std::shared_mutex> m_LifecycleLock;
+    };
+
+    class CORE_API Log
+    {
+      public:
+        static void Initialize(const LogConfig& config = LogConfig{});
+        static void Shutdown() noexcept;
+        static void Flush();
+        static void SetLevel(LogLevel level);
+
+        static LoggerHandle GetCoreLogger();
+        static LoggerHandle GetClientLogger();
+
+      private:
+        friend class LoggerHandle;
+        static spdlog::level::level_enum ToSpdlogLevel(LogLevel level);
+    };
 } // namespace Core
 
 #define CORE_DETAIL_LOG(getter, logLevel, ...)                                                                         \

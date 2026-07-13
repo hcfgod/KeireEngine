@@ -94,6 +94,8 @@ install_premake() {
 install_premake
 ensure_command git git
 check_version Git "$(git --version | extract_version)" 2.40
+ensure_command cmake cmake
+check_version CMake "$(cmake --version | extract_version)" 3.20
 
 if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then ensure_command ninja ninja; check_version Ninja "$(ninja --version)" 1.11; fi
 [[ "$GENERATOR" == compilecommands ]] && ensure_command python3 python

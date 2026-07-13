@@ -6,6 +6,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- Export-ready public Core API annotations and a Debug-only assertion foundation.
+- Generated runtime build identity and dependency-free Client help/version commands.
+- A canonical SDK consumer example and validated package-only CMake imported target.
 - Identity and dependency lock manifests.
 - Transactional full-template rename support.
 - Doctor, LLVM coverage, SDK package, and script regression commands.

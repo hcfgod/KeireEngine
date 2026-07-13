@@ -40,6 +40,19 @@ try {
     Write-Host "==> Running Tests $Configuration for $Architecture"
     & $TestsExe
     $exitCode = $LASTEXITCODE
+    if ($exitCode -eq 0 -and $Configuration -in @("Debug", "DebugASan", "DebugUBSan", "DebugTSan")) {
+        $probeOutput = Join-Path $env:TEMP ("core-assert-probe-" + [guid]::NewGuid().ToString("N") + ".txt")
+        try {
+            $probe = Start-Process -FilePath $TestsExe -ArgumentList "--core-assert-probe" -NoNewWindow -Wait `
+                -PassThru -RedirectStandardError $probeOutput
+            if ($probe.ExitCode -eq 0) { throw "Assertion probe unexpectedly succeeded." }
+            $diagnostic = Get-Content $probeOutput -Raw
+            if ($diagnostic -notmatch "Assertion failed: false" -or $diagnostic -notmatch "assertion probe") {
+                throw "Assertion probe did not emit the required diagnostic."
+            }
+        }
+        finally { Remove-Item $probeOutput -Force -ErrorAction SilentlyContinue }
+    }
 }
 finally {
     $env:PATH = $originalPath

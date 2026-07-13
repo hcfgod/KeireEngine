@@ -83,6 +83,8 @@ fi
 
 if ! have git; then brew_install git git; fi
 check_version Git "$(git --version | extract_version)" 2.40
+brew_install cmake cmake
+check_version CMake "$(cmake --version | extract_version)" 3.20
 [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]] && { brew_install ninja ninja; check_version Ninja "$(ninja --version)" 1.11; }
 [[ "$GENERATOR" == compilecommands ]] && brew_install python3 python
 [[ "$GENERATOR" == gmake ]] && { brew_install gmake make; check_version Make "$(gmake --version | extract_version)" 4.3; }

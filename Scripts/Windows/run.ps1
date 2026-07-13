@@ -36,6 +36,20 @@ try {
     }
     Write-Host "==> Running Client $Configuration for $Architecture"
     & $ClientExe
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $cliRoot = Join-Path $env:TEMP ("client-cli-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory $cliRoot | Out-Null
+    try {
+        foreach ($option in @("--help", "-h", "--version", "-v")) {
+            $result = Start-Process -FilePath $ClientExe -ArgumentList $option -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru
+            if ($result.ExitCode -ne 0) { throw "Client $option failed with exit code $($result.ExitCode)." }
+        }
+        $invalidOutput = Join-Path $cliRoot "invalid.txt"
+        $invalid = Start-Process -FilePath $ClientExe -ArgumentList "--invalid" -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru -RedirectStandardError $invalidOutput
+        if ($invalid.ExitCode -ne 2) { throw "Client invalid option returned $($invalid.ExitCode), expected 2." }
+        if (Test-Path (Join-Path $cliRoot "Logs")) { throw "Informational Client commands created logs." }
+    }
+    finally { Remove-Item $cliRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    exit 0
 }
 finally { $env:PATH = $originalPath; Pop-Location }

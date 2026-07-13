@@ -6,6 +6,8 @@
 
 A reproducible C++20 starter with a static Core library, Client application, doctest suite, private asynchronous spdlog integration, Premake generation, sanitizers, LLVM coverage, SDK packaging, and Windows/Linux/macOS automation.
 
+The public Core boundary is export-ready for a future shared-library build while remaining static by default. Generated build identity, development assertions, and a dependency-free Client command line provide useful foundations without imposing an application framework.
+
 ## Quick Start
 
 Clone submodules with the repository:
@@ -109,6 +111,12 @@ The root Premake file owns the workspace. Each target owns its project definitio
 
 Logs default to `Logs` relative to the process working directory. IDE debug directories and scripts use the repository root. Initialization is idempotent only for identical configuration; conflicting configuration throws. `LoggerHandle` coordinates active calls with exclusive shutdown, and disabled macro levels evaluate neither logger acquisition nor message arguments.
 
+## Build Identity And Assertions
+
+`Core::GetBuildInfo()` reports the project version, Git commit and dirty state, configuration, compiler, platform, and architecture compiled into the binary. `Client --version` prints that identity; `Client --help` documents the intentionally small command line. Informational commands do not initialize logging.
+
+`CORE_ASSERT(condition)` and `CORE_ASSERT(condition, "message")` diagnose and abort in Debug and sanitizer configurations. They compile out without evaluating arguments in Release, Dist, and Coverage.
+
 ## Dependencies
 
 `Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers.
@@ -145,7 +153,7 @@ Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke b
 
 CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in the `master` branch protection rules. Once enabled, the status job fails if any eligible security job is skipped or unsuccessful; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
 
-Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain Client, Core static library, public headers, spdlog headers, complete dependency license texts, notices, documentation, and a validated JSON build manifest. Every package is extracted and linked into a standalone C++20 consumer before success is reported. SHA-256 files and separate Client/Core symbol archives are included where available; Dist packages are intentionally stripped.
+Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain Client, Core static library, public headers, spdlog headers, complete dependency license texts, notices, documentation, a consumer example, a CMake package configuration, and a validated JSON build manifest. Every package is extracted and linked into the checked-in C++20 consumer directly and through `find_package(CrossPlatformCoreClientTemplate CONFIG REQUIRED)` before success is reported. The imported target is `Core::Core`. SHA-256 files and separate Client/Core symbol archives are included where available; Dist packages are intentionally stripped.
 
 ## Troubleshooting
 

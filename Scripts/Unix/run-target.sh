@@ -15,3 +15,25 @@ executable="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$
 [[ -x "$executable" ]] || { printf 'Executable not found: %s\n' "$executable" >&2; exit 1; }
 printf '==> Running %s %s for %s\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
 (cd "$ROOT" && "$executable")
+if [[ "$MODE" == test && "$CONFIGURATION" =~ ^Debug ]]; then
+    probe_output="$(mktemp)"
+    set +e
+    (cd "$ROOT" && "$executable" --core-assert-probe) 2>"$probe_output"
+    probe_status=$?
+    set -e
+    [[ $probe_status -ne 0 ]] || { printf 'Assertion probe unexpectedly succeeded.\n' >&2; rm -f "$probe_output"; exit 1; }
+    grep -q 'Assertion failed: false' "$probe_output"
+    grep -q 'assertion probe' "$probe_output"
+    rm -f "$probe_output"
+fi
+if [[ "$MODE" == run ]]; then
+    cli_root="$(mktemp -d)"
+    for option in --help -h --version -v; do (cd "$cli_root" && "$executable" "$option" >/dev/null); done
+    set +e
+    (cd "$cli_root" && "$executable" --invalid >/dev/null 2>&1)
+    invalid_status=$?
+    set -e
+    [[ $invalid_status -eq 2 ]] || { printf 'Client invalid option returned %s, expected 2.\n' "$invalid_status" >&2; rm -rf "$cli_root"; exit 1; }
+    [[ ! -d "$cli_root/Logs" ]] || { printf 'Informational Client commands created logs.\n' >&2; rm -rf "$cli_root"; exit 1; }
+    rm -rf "$cli_root"
+fi

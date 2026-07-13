@@ -16,8 +16,11 @@ project(ProjectConfig.CORE_TARGET)
 
     includedirs
     {
-        "Include"
+        "Include",
+        "../Build/Generated"
     }
+
+    defines { "CORE_BUILDING_LIBRARY" }
 
     externalincludedirs
     {

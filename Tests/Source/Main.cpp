@@ -1,10 +1,11 @@
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#define DOCTEST_CONFIG_IMPLEMENT
 #include "doctest/doctest.h"
 
 #include "Core/Core.h"
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -19,78 +20,113 @@
 
 namespace
 {
-std::atomic<unsigned int> s_TestDirectoryCounter = 0;
+    std::atomic<unsigned int> s_TestDirectoryCounter = 0;
 
-std::filesystem::path MakeTestDirectory(const std::string& name)
-{
-    const auto counter = s_TestDirectoryCounter.fetch_add(1);
-    const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::filesystem::temp_directory_path() / ("CrossPlatformCoreClientTemplate-" + name + "-" +
-                                                     std::to_string(timestamp) + "-" + std::to_string(counter));
-}
-
-std::string ReadFile(const std::filesystem::path& path)
-{
-    std::ifstream stream(path);
-    std::ostringstream contents;
-    contents << stream.rdbuf();
-    return contents.str();
-}
-
-struct LogFixture
-{
-    explicit LogFixture(const std::string& name) : Directory(MakeTestDirectory(name))
+    std::filesystem::path MakeTestDirectory(const std::string& name)
     {
-        Core::Log::Shutdown();
-        std::filesystem::remove_all(Directory);
-        Config.LogDirectory = Directory.string();
-        Config.CoreLogFile = "CoreTests.log";
-        Config.ClientLogFile = "ClientTests.log";
-        Config.EnableConsole = false;
+        const auto counter = s_TestDirectoryCounter.fetch_add(1);
+        const auto timestamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        return std::filesystem::temp_directory_path() / ("CrossPlatformCoreClientTemplate-" + name + "-" +
+                                                         std::to_string(timestamp) + "-" + std::to_string(counter));
     }
 
-    ~LogFixture() noexcept
+    std::string ReadFile(const std::filesystem::path& path)
     {
-        try
+        std::ifstream stream(path);
+        std::ostringstream contents;
+        contents << stream.rdbuf();
+        return contents.str();
+    }
+
+    struct LogFixture
+    {
+        explicit LogFixture(const std::string& name) : Directory(MakeTestDirectory(name))
         {
             Core::Log::Shutdown();
-            std::error_code error;
-            std::filesystem::remove_all(Directory, error);
+            std::filesystem::remove_all(Directory);
+            Config.LogDirectory = Directory.string();
+            Config.CoreLogFile = "CoreTests.log";
+            Config.ClientLogFile = "ClientTests.log";
+            Config.EnableConsole = false;
         }
-        catch (...) // NOLINT(bugprone-empty-catch)
+
+        ~LogFixture() noexcept
         {
-            // Test cleanup must not terminate the process during stack unwinding.
+            try
+            {
+                Core::Log::Shutdown();
+                std::error_code error;
+                std::filesystem::remove_all(Directory, error);
+            }
+            catch (...) // NOLINT(bugprone-empty-catch)
+            {
+                // Test cleanup must not terminate the process during stack unwinding.
+            }
         }
-    }
 
-    std::filesystem::path Directory;
-    Core::LogConfig Config;
-};
+        std::filesystem::path Directory;
+        Core::LogConfig Config;
+    };
 
-struct CurrentDirectoryGuard
-{
-    explicit CurrentDirectoryGuard(const std::filesystem::path& directory) : Original(std::filesystem::current_path())
+    struct CurrentDirectoryGuard
     {
-        std::filesystem::create_directories(directory);
-        std::filesystem::current_path(directory);
-    }
-
-    ~CurrentDirectoryGuard() noexcept
-    {
-        try
+        explicit CurrentDirectoryGuard(const std::filesystem::path& directory) : Original(std::filesystem::current_path())
         {
-            std::error_code error;
-            std::filesystem::current_path(Original, error);
+            std::filesystem::create_directories(directory);
+            std::filesystem::current_path(directory);
         }
-        catch (...) // NOLINT(bugprone-empty-catch)
-        {
-            // Restoring the working directory is best-effort in a destructor.
-        }
-    }
 
-    std::filesystem::path Original;
-};
+        ~CurrentDirectoryGuard() noexcept
+        {
+            try
+            {
+                std::error_code error;
+                std::filesystem::current_path(Original, error);
+            }
+            catch (...) // NOLINT(bugprone-empty-catch)
+            {
+                // Restoring the working directory is best-effort in a destructor.
+            }
+        }
+
+        std::filesystem::path Original;
+    };
 } // namespace
+
+int main(const int argc, char** argv)
+{
+    if (argc == 2 && std::strcmp(argv[1], "--core-assert-probe") == 0)
+    {
+        CORE_ASSERT(false, "assertion probe");
+        return 2;
+    }
+    doctest::Context context(argc, argv);
+    return context.run();
+}
+
+TEST_CASE("Build information is populated")
+{
+    const auto& info = Core::GetBuildInfo();
+    CHECK(info.ProjectName == "C++ Cross-Platform Core-Client Template");
+    CHECK(info.Version == "0.1.0");
+    CHECK_FALSE(info.GitCommit.empty());
+    CHECK_FALSE(info.Configuration.empty());
+    CHECK_FALSE(info.Compiler.empty());
+    CHECK_FALSE(info.Platform.empty());
+    CHECK_FALSE(info.Architecture.empty());
+    CHECK_FALSE(Core::GetVersionString().empty());
+}
+
+TEST_CASE("Assertions evaluate successful conditions once when enabled")
+{
+    int evaluations = 0;
+    CORE_ASSERT(++evaluations == 1);
+#if defined(CORE_ASSERTIONS_ENABLED)
+    CHECK(evaluations == 1);
+#else
+    CHECK(evaluations == 0);
+#endif
+}
 
 TEST_CASE("Core name is stable")
 {

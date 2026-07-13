@@ -9,9 +9,9 @@ Write-Host "$($Project.PROJECT_DISPLAY_NAME) environment"
 Write-Host "  Generator:    $Generator"
 Write-Host "  Architecture: $Architecture"
 Write-Host "  Toolset:      $Toolset"
-foreach ($command in @("git", "winget", "ninja", "clang", "llvm-profdata", "llvm-cov")) {
-    $found = Get-Command $command -ErrorAction SilentlyContinue
-    $commandPath = if ($found) { $found.Source } else { "not found" }
+foreach ($command in @("git", "cmake", "winget", "ninja", "clang", "llvm-profdata", "llvm-cov")) {
+    $found = if ($command -eq "cmake") { Get-CMakeExecutable } else { (Get-Command $command -ErrorAction SilentlyContinue).Source }
+    $commandPath = if ($found) { $found } else { "not found" }
     Write-Host ("  {0,-14} {1}" -f $command, $commandPath)
 }
 if ($Toolset -eq "msc") {
