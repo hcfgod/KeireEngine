@@ -20,6 +20,7 @@ CONFIGURATION_SET=0
 ARCHITECTURE="$(native_architecture)"
 TOOLSET="default"
 TARGET="$CLIENT_TARGET"
+TARGET_SET=0
 DEPENDENCY="spdlog"
 TAG=""
 NAME=""
@@ -37,7 +38,7 @@ while [[ $# -gt 0 ]]; do
         --configuration) CONFIGURATION="$(normalize_configuration "$2")"; CONFIGURATION_SET=1; shift 2 ;;
         --architecture) ARCHITECTURE="$(normalize_architecture "$2")"; shift 2 ;;
         --toolset) TOOLSET="$2"; shift 2 ;;
-        --target) TARGET="$2"; shift 2 ;;
+        --target) TARGET="$2"; TARGET_SET=1; shift 2 ;;
         --dependency) DEPENDENCY="$2"; shift 2 ;;
         --tag) TAG="$2"; shift 2 ;;
         --name) NAME="$2"; shift 2 ;;
@@ -78,6 +79,7 @@ run_command() {
             [[ -n "$NAME" ]] || { printf '%s\n' '--name is required for rename.' >&2; return 1; }
             bash "$SCRIPT_DIR/Unix/rename.sh" "$NAME" "${DISPLAY_NAME:-$NAME}" "$REPOSITORY"
             load_project_config "$ROOT"
+            [[ $TARGET_SET -eq 1 ]] || TARGET="$CLIENT_TARGET"
             ;;
         vendor-update)
             [[ -n "$TAG" ]] || { printf '%s\n' '--tag is required for vendor-update.' >&2; return 1; }
@@ -111,7 +113,7 @@ read_setting() {
 
 show_menu() {
     while true; do
-        printf '\n%s\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run Client\n6. Coverage report\n7. Package SDK\n8. Doctor\n9. Clean\n10. Vendor update\n11. Rename template\n12. Exit\n\nChoose an option: ' "$PROJECT_IDENTIFIER"
+        printf '\n%s\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run %s\n6. Coverage report\n7. Package SDK\n8. Doctor\n9. Clean\n10. Vendor update\n11. Rename template\n12. Exit\n\nChoose an option: ' "$PROJECT_IDENTIFIER" "$CLIENT_TARGET"
         read -r choice
         case "$choice" in
             1|2|3|4|5)

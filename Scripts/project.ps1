@@ -23,6 +23,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$TargetWasProvided = $PSBoundParameters.ContainsKey("Target")
 # Windows PowerShell 5 otherwise uses the active OEM code page for interactive
 # input and native command output, which corrupts names such as "Kéire".
 $utf8 = [Text.UTF8Encoding]::new($false)
@@ -116,7 +117,7 @@ function Show-Menu {
         Write-Host "2. Generate project files"
         Write-Host "3. Build"
         Write-Host "4. Run tests"
-        Write-Host "5. Run Client"
+        Write-Host "5. Run $($Project.CLIENT_TARGET)"
         Write-Host "6. Coverage report"
         Write-Host "7. Package SDK"
         Write-Host "8. Doctor"
@@ -149,6 +150,9 @@ function Show-Menu {
                     $script:Repository = $proposedRepository
                     Invoke-ProjectCommand rename
                     $script:Project = Get-ProjectConfig
+                    if (-not $TargetWasProvided) {
+                        $script:Target = $Project.CLIENT_TARGET
+                    }
                 }
                 "12" { return }
                 default { Write-Warning "Invalid menu choice '$choice'." }
