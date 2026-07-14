@@ -7,5 +7,5 @@ Checks: >
   modernize-use-override,
   readability-redundant-*
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(Core|Client|Tests)/'
+HeaderFilterRegex: '^(KeireCore|KeireClient|KeireTests)/'
 FormatStyle: file

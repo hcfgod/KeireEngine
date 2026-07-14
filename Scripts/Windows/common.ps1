@@ -6,9 +6,18 @@ function Read-KeyValueFile {
     # Project files are UTF-8 without a BOM. Windows PowerShell 5 otherwise
     # decodes them using the legacy system code page.
     foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
-        if ($line -match '^([A-Z0-9_]+)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
+        if ($line -match '^([A-Z0-9_]+)=(.*)$') {
+            if ($values.ContainsKey($Matches[1])) { throw "Duplicate key '$($Matches[1])' in $Path." }
+            $values[$Matches[1]] = $Matches[2]
+        }
+        elseif ($line.Length -ne 0) { throw "Malformed configuration line in $Path`: $line" }
     }
     return $values
+}
+
+function Test-SemanticVersion {
+    param([string]$Version)
+    return $Version -match '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
 }
 
 function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\..")) }
@@ -69,11 +78,15 @@ function ConvertTo-MacroPrefix {
 function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
-        "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
+        "include\$Namespace\Ref.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h",
         "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt",
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
-        "examples\consumer\Main.cpp", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
+        "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\SDL3\include\SDL3\SDL.h",
+        "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake",
+        "third-party\SDL3\licenses\SDL3\LICENSE.txt",
+        "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
     )
     foreach ($path in $required) {

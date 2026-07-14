@@ -1,0 +1,381 @@
+#include "Keire/Log.h"
+
+#include <atomic>
+#include <cstdio>
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <stdexcept>
+#include <vector>
+
+#include "spdlog/async.h"
+#include "spdlog/details/thread_pool.h"
+#include "spdlog/sinks/rotating_file_sink.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
+
+namespace Keire
+{
+namespace
+{
+std::string MakeLogPath(const std::string& directory, const std::string& file)
+{
+    return (std::filesystem::path(directory) / file).string();
+}
+
+spdlog::level::level_enum ToSpdlogLevel(const LogLevel level)
+{
+    switch (level)
+    {
+    case LogLevel::Trace:
+        return spdlog::level::trace;
+    case LogLevel::Debug:
+        return spdlog::level::debug;
+    case LogLevel::Info:
+        return spdlog::level::info;
+    case LogLevel::Warn:
+        return spdlog::level::warn;
+    case LogLevel::Error:
+        return spdlog::level::err;
+    case LogLevel::Critical:
+        return spdlog::level::critical;
+    case LogLevel::Off:
+        return spdlog::level::off;
+    }
+    return spdlog::level::info;
+}
+
+void ValidateConfig(const LogConfig& config)
+{
+    if (config.LogDirectory.empty() || config.CoreLogFile.empty() || config.ClientLogFile.empty())
+    {
+        throw std::invalid_argument("Log paths and filenames must not be empty.");
+    }
+    if (config.QueueSize == 0 || config.WorkerThreads == 0)
+    {
+        throw std::invalid_argument("Log queue size and worker thread count must be greater than zero.");
+    }
+    if (config.MaxFileSizeBytes == 0 || config.MaxFiles == 0)
+    {
+        throw std::invalid_argument("Log rotation size and file count must be greater than zero.");
+    }
+
+    const auto validateFileName = [](const std::string& fileName)
+    {
+        const std::filesystem::path path(fileName);
+        if (fileName.find('\0') != std::string::npos || fileName.find('/') != std::string::npos ||
+            fileName.find('\\') != std::string::npos || path.is_absolute() || path.has_parent_path() ||
+            fileName == "." || fileName == "..")
+        {
+            throw std::invalid_argument("Log filenames must be plain filenames without directory components.");
+        }
+    };
+
+    validateFileName(config.CoreLogFile);
+    validateFileName(config.ClientLogFile);
+    if (config.CoreLogFile == config.ClientLogFile)
+    {
+        throw std::invalid_argument("Core and Client log filenames must be different.");
+    }
+    if (config.LogDirectory.find('\0') != std::string::npos)
+    {
+        throw std::invalid_argument("The log directory contains an embedded null character.");
+    }
+
+    std::error_code error;
+    const std::filesystem::path directory(config.LogDirectory);
+    const bool directoryExists = std::filesystem::exists(directory, error);
+    if (error)
+    {
+        throw std::invalid_argument("The configured log directory cannot be inspected.");
+    }
+    if (directoryExists && !std::filesystem::is_directory(directory, error))
+    {
+        throw std::invalid_argument("The configured log directory is not a directory.");
+    }
+    if (error)
+    {
+        throw std::invalid_argument("The configured log directory cannot be inspected.");
+    }
+}
+
+std::shared_ptr<spdlog::logger> CreateAsyncLogger(const std::string& name, const std::vector<spdlog::sink_ptr>& sinks,
+                                                  const spdlog::level::level_enum level,
+                                                  const std::shared_ptr<spdlog::details::thread_pool>& threadPool)
+{
+    auto logger = std::make_shared<spdlog::async_logger>(name, sinks.begin(), sinks.end(), threadPool,
+                                                         spdlog::async_overflow_policy::block);
+    logger->set_level(level);
+    logger->flush_on(spdlog::level::warn);
+    return logger;
+}
+} // namespace
+
+namespace Detail
+{
+class LogState final : public RefCounted
+{
+  public:
+    explicit LogState(const LogConfig& config) : m_Config(config)
+    {
+        ValidateConfig(config);
+        std::filesystem::create_directories(config.LogDirectory);
+
+        auto threadPool = std::make_shared<spdlog::details::thread_pool>(config.QueueSize, config.WorkerThreads);
+        std::vector<spdlog::sink_ptr> coreSinks;
+        std::vector<spdlog::sink_ptr> clientSinks;
+
+        if (config.EnableConsole)
+        {
+            auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            consoleSink->set_pattern("[%T] [%n] [%^%l%$] [thread %t] %v");
+            coreSinks.push_back(consoleSink);
+            clientSinks.push_back(consoleSink);
+        }
+
+        auto coreFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            MakeLogPath(config.LogDirectory, config.CoreLogFile), config.MaxFileSizeBytes, config.MaxFiles);
+        auto clientFileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            MakeLogPath(config.LogDirectory, config.ClientLogFile), config.MaxFileSizeBytes, config.MaxFiles);
+
+        coreFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
+        clientFileSink->set_pattern("[%Y-%m-%d %T.%e] [%n] [%l] [thread %t] %v");
+        coreSinks.push_back(coreFileSink);
+        clientSinks.push_back(clientFileSink);
+
+        const auto level = ToSpdlogLevel(config.Level);
+        auto coreLogger = CreateAsyncLogger("KeireCore", coreSinks, level, threadPool);
+        auto clientLogger = CreateAsyncLogger("KeireClient", clientSinks, level, threadPool);
+        coreLogger->info("Core logger initialized");
+
+        m_CoreLogger = std::move(coreLogger);
+        m_ClientLogger = std::move(clientLogger);
+        m_ThreadPool = std::move(threadPool);
+        m_Open.store(true, std::memory_order_release);
+    }
+
+    ~LogState() override { Close(); }
+
+    [[nodiscard]] bool IsOpen() const noexcept { return m_Open.load(std::memory_order_acquire); }
+    [[nodiscard]] bool Matches(const LogConfig& config) const noexcept { return m_Config == config; }
+
+    [[nodiscard]] std::size_t SinkCount(const LogChannel channel) const noexcept
+    {
+        try
+        {
+            std::shared_lock lock(m_OperationMutex);
+            const auto& logger = SelectLogger(channel);
+            return m_Open.load(std::memory_order_relaxed) && logger ? logger->sinks().size() : 0;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
+    void Flush(const LogChannel channel) const
+    {
+        std::shared_lock lock(m_OperationMutex);
+        const auto& logger = SelectLogger(channel);
+        if (m_Open.load(std::memory_order_relaxed) && logger)
+        {
+            logger->flush();
+        }
+    }
+
+    void SetLevel(const LogChannel channel, const LogLevel level) const
+    {
+        std::shared_lock lock(m_OperationMutex);
+        const auto& logger = SelectLogger(channel);
+        if (m_Open.load(std::memory_order_relaxed) && logger)
+        {
+            logger->set_level(ToSpdlogLevel(level));
+        }
+    }
+
+    void SetLevel(const LogLevel level) const
+    {
+        std::shared_lock lock(m_OperationMutex);
+        if (!m_Open.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+        const auto spdlogLevel = ToSpdlogLevel(level);
+        m_CoreLogger->set_level(spdlogLevel);
+        m_ClientLogger->set_level(spdlogLevel);
+    }
+
+    void Flush() const
+    {
+        std::shared_lock lock(m_OperationMutex);
+        if (!m_Open.load(std::memory_order_relaxed))
+        {
+            return;
+        }
+        m_CoreLogger->flush();
+        m_ClientLogger->flush();
+    }
+
+    void Write(const LogChannel channel, const LogLevel level, const std::string_view message,
+               const std::source_location location) const
+    {
+        std::shared_lock lock(m_OperationMutex);
+        const auto& logger = SelectLogger(channel);
+        if (!m_Open.load(std::memory_order_relaxed) || !logger)
+        {
+            return;
+        }
+        const spdlog::source_loc source{location.file_name(), static_cast<int>(location.line()),
+                                        location.function_name()};
+        logger->log(source, ToSpdlogLevel(level), spdlog::string_view_t(message.data(), message.size()));
+    }
+
+    void Close() noexcept
+    {
+        try
+        {
+            std::unique_lock lock(m_OperationMutex);
+            if (!m_Open.exchange(false, std::memory_order_acq_rel))
+            {
+                return;
+            }
+            try
+            {
+                m_CoreLogger->flush();
+                m_ClientLogger->flush();
+            }
+            catch (const std::exception& error)
+            {
+                std::fprintf(stderr, "Logger flush during shutdown failed: %s\n", error.what());
+            }
+            m_CoreLogger.reset();
+            m_ClientLogger.reset();
+            m_ThreadPool.reset();
+        }
+        catch (const std::exception& error)
+        {
+            std::fprintf(stderr, "Logger shutdown failed: %s\n", error.what());
+        }
+    }
+
+  private:
+    const std::shared_ptr<spdlog::logger>& SelectLogger(const LogChannel channel) const noexcept
+    {
+        return channel == LogChannel::Core ? m_CoreLogger : m_ClientLogger;
+    }
+
+    LogConfig m_Config;
+    mutable std::shared_mutex m_OperationMutex;
+    std::atomic<bool> m_Open{false};
+    std::shared_ptr<spdlog::logger> m_CoreLogger;
+    std::shared_ptr<spdlog::logger> m_ClientLogger;
+    std::shared_ptr<spdlog::details::thread_pool> m_ThreadPool;
+};
+} // namespace Detail
+
+namespace
+{
+std::mutex s_LogMutex;
+Ref<Detail::LogState> s_LogState;
+
+Ref<Detail::LogState> GetOrCreateState()
+{
+    std::lock_guard lock(s_LogMutex);
+    if (!s_LogState || !s_LogState->IsOpen())
+    {
+        s_LogState = CreateRef<Detail::LogState>(LogConfig{});
+    }
+    return s_LogState;
+}
+
+Ref<Detail::LogState> GetCurrentState()
+{
+    std::lock_guard lock(s_LogMutex);
+    return s_LogState;
+}
+} // namespace
+
+LoggerHandle::LoggerHandle(Ref<Detail::LogState> state, const Detail::LogChannel channel) noexcept
+    : m_State(std::move(state)), m_Channel(channel)
+{
+}
+
+LoggerHandle::operator bool() const noexcept { return m_State && m_State->IsOpen(); }
+
+std::size_t LoggerHandle::SinkCount() const noexcept { return m_State ? m_State->SinkCount(m_Channel) : 0; }
+
+void LoggerHandle::Flush() const
+{
+    if (m_State)
+    {
+        m_State->Flush(m_Channel);
+    }
+}
+
+void LoggerHandle::SetLevel(const LogLevel level) const
+{
+    if (m_State)
+    {
+        m_State->SetLevel(m_Channel, level);
+    }
+}
+
+void LoggerHandle::Write(const LogLevel level, const std::string_view message,
+                         const std::source_location location) const
+{
+    if (m_State)
+    {
+        m_State->Write(m_Channel, level, message, location);
+    }
+}
+
+void Log::Initialize(const LogConfig& config)
+{
+    ValidateConfig(config);
+    std::lock_guard lock(s_LogMutex);
+    if (s_LogState && s_LogState->IsOpen())
+    {
+        if (s_LogState->Matches(config))
+        {
+            return;
+        }
+        throw std::logic_error("Logging is already initialized with a different configuration.");
+    }
+    s_LogState = CreateRef<Detail::LogState>(config);
+}
+
+void Log::Shutdown() noexcept
+{
+    Ref<Detail::LogState> state;
+    {
+        std::lock_guard lock(s_LogMutex);
+        state = std::move(s_LogState);
+    }
+    if (state)
+    {
+        state->Close();
+    }
+}
+
+void Log::Flush()
+{
+    const auto state = GetCurrentState();
+    if (state)
+    {
+        state->Flush();
+    }
+}
+
+void Log::SetLevel(const LogLevel level)
+{
+    const auto state = GetCurrentState();
+    if (state)
+    {
+        state->SetLevel(level);
+    }
+}
+
+LoggerHandle Log::GetCoreLogger() { return LoggerHandle(GetOrCreateState(), Detail::LogChannel::Core); }
+
+LoggerHandle Log::GetClientLogger() { return LoggerHandle(GetOrCreateState(), Detail::LogChannel::Client); }
+} // namespace Keire

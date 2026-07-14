@@ -4,7 +4,7 @@ PLATFORM="$1"; MODE="$2"; shift 2
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 GENERATOR=ninja; [[ "$PLATFORM" == Mac ]] && GENERATOR=xcode4
-CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"; load_project_config "$ROOT"; TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"
 if [[ "$MODE" == test ]]; then TARGET="$TESTS_TARGET"; else TARGET="$CLIENT_TARGET"; fi
 args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$TARGET")
@@ -14,7 +14,11 @@ system=linux; [[ "$PLATFORM" == Mac ]] && system=macosx
 executable="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$TARGET/$TARGET"
 [[ -x "$executable" ]] || { printf 'Executable not found: %s\n' "$executable" >&2; exit 1; }
 printf '==> Running %s %s for %s\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
-(cd "$ROOT" && "$executable")
+if [[ "$MODE" == run && ($CI -eq 1 || "${KEIRE_SMOKE_WINDOW:-0}" == 1) ]]; then
+    (cd "$ROOT" && SDL_VIDEODRIVER=dummy "$executable" --smoke-window)
+else
+    (cd "$ROOT" && "$executable")
+fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^Debug ]]; then
     probe_output="$(mktemp)"
     set +e
@@ -33,7 +37,7 @@ if [[ "$MODE" == run ]]; then
     (cd "$cli_root" && "$executable" --invalid >/dev/null 2>&1)
     invalid_status=$?
     set -e
-    [[ $invalid_status -eq 2 ]] || { printf 'Client invalid option returned %s, expected 2.\n' "$invalid_status" >&2; rm -rf "$cli_root"; exit 1; }
-    [[ ! -d "$cli_root/Logs" ]] || { printf 'Informational Client commands created logs.\n' >&2; rm -rf "$cli_root"; exit 1; }
+    [[ $invalid_status -eq 2 ]] || { printf 'KeireClient invalid option returned %s, expected 2.\n' "$invalid_status" >&2; rm -rf "$cli_root"; exit 1; }
+    [[ ! -d "$cli_root/Logs" ]] || { printf 'Informational KeireClient commands created logs.\n' >&2; rm -rf "$cli_root"; exit 1; }
     rm -rf "$cli_root"
 fi

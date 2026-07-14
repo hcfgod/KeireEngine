@@ -2,12 +2,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
-GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
 TOOLSET="$(resolve_unix_toolset Linux "$TOOLSET")"
-[[ "$TARGET" == Client ]] && TARGET="$CLIENT_TARGET"
-[[ "$TARGET" == Tests ]] && TARGET="$TESTS_TARGET"
+[[ "$TARGET" == KeireClient ]] && TARGET="$CLIENT_TARGET"
+[[ "$TARGET" == KeireTests ]] && TARGET="$TESTS_TARGET"
 validate_unix_combination Linux "$GENERATOR" "$TOOLSET"
 if [[ "$CONFIGURATION" == Coverage && ( "$GENERATOR" != ninja || "$TOOLSET" != clang ) ]]; then printf 'Coverage requires Ninja and Clang.\n' >&2; exit 1; fi
 

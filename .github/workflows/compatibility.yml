@@ -35,8 +35,10 @@ jobs:
           submodules: recursive
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: Tools/Windows
-          key: windows-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
+          path: |
+            Tools/Windows
+            Build/Dependencies
+          key: windows-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Windows/dependencies.ps1') }}
       - name: Bootstrap and generate
         shell: pwsh
         run: |
@@ -95,8 +97,10 @@ jobs:
           submodules: recursive
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: Tools/${{ startsWith(matrix.name, 'macOS') && 'Mac' || 'Linux' }}
-          key: ${{ runner.os }}-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
+          path: |
+            Tools/${{ startsWith(matrix.name, 'macOS') && 'Mac' || 'Linux' }}
+            Build/Dependencies
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Unix/dependencies.sh') }}
       - run: bash Scripts/project.sh bootstrap --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }}
       - run: bash Scripts/project.sh generate --generator ${{ matrix.generator }} --architecture ${{ matrix.architecture }} --toolset ${{ matrix.toolset }} --ci
       - if: matrix.mode == 'test'

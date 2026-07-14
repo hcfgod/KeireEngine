@@ -1,20 +1,20 @@
-# C++ Cross-Platform Core-Client Template
+# Kéire
 
-[![CI](https://github.com/hcfgod/C-Cross-Platform-Core-Client-Template/actions/workflows/ci.yml/badge.svg)](https://github.com/hcfgod/C-Cross-Platform-Core-Client-Template/actions/workflows/ci.yml)
-[![Security](https://github.com/hcfgod/C-Cross-Platform-Core-Client-Template/actions/workflows/security.yml/badge.svg)](https://github.com/hcfgod/C-Cross-Platform-Core-Client-Template/actions/workflows/security.yml)
+[![CI](https://github.com/hcfgod/KeireEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/hcfgod/KeireEngine/actions/workflows/ci.yml)
+[![Security](https://github.com/hcfgod/KeireEngine/actions/workflows/security.yml/badge.svg)](https://github.com/hcfgod/KeireEngine/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
-A reproducible C++20 starter with a static Core library, Client application, doctest suite, private asynchronous spdlog integration, Premake generation, sanitizers, LLVM coverage, SDK packaging, and Windows/Linux/macOS automation.
+A reproducible C++20 foundation with a static KeireCore library, a production application/layer runtime, typed immediate and queued events, Unity-style frame timing, an SDL3 multi-window platform layer, strict typed JSON configuration, reusable strong/weak references, private asynchronous logging, Premake generation, sanitizers, SDK packaging, and Windows/Linux/macOS automation.
 
-The public Core boundary is export-ready for a future shared-library build while remaining static by default. Generated build identity, development assertions, and a dependency-free Client command line provide useful foundations without imposing an application framework.
+KeireCore is static by default. Its export annotations prepare for a possible same-toolchain C++ shared-library build; they are not a stable cross-compiler ABI. Generated build identity, development assertions, and a core-owned entrypoint keep startup policy consistent while the client supplies only its application factory.
 
 ## Quick Start
 
 Clone submodules with the repository:
 
 ```sh
-git clone --recurse-submodules https://github.com/hcfgod/C-Cross-Platform-Core-Client-Template.git
-cd C-Cross-Platform-Core-Client-Template
+git clone --recurse-submodules https://github.com/hcfgod/KeireEngine.git
+cd KeireEngine
 ```
 
 Windows PowerShell:
@@ -51,7 +51,7 @@ Run `Scripts/project.bat` on Windows or `Scripts/project.sh` on Unix without a c
 | `generate` | Generate IDE, Ninja, Make, or compile-database files |
 | `build` | Build a selected target and configuration |
 | `test` | Build and run the doctest executable |
-| `run` | Build and smoke-run Client |
+| `run` | Build and run the interactive KeireClient window loop |
 | `coverage` | Run Clang source coverage and enforce 80% line coverage |
 | `package` | Test, smoke-run, and create runtime/SDK archives and checksums |
 | `doctor` | Report detected tools, versions, identity, and environment |
@@ -91,11 +91,11 @@ ASan is supported on all three operating systems. UBSan and TSan are supported w
 ## Project Layout
 
 ```text
-Config/                 Project identity and immutable dependency lock
-Core/                   Static library and public Core/<header> API
-Client/                 Console application
-Tests/                  Independent doctest cases
-Vendor/                 Pinned spdlog and doctest submodules
+Config/                 Project identity, client JSON, and immutable dependency lock
+KeireCore/              Static library and public Keire/<header> API
+KeireClient/            Console application
+KeireTests/             Independent doctest cases
+Vendor/                 Pinned spdlog, doctest, SDL3, and nlohmann/json submodules
 Scripts/Premake/        Shared Premake policy
 Scripts/Unix/           Shared macOS/Linux implementation
 Scripts/<platform>/     Platform bootstrap and wrappers
@@ -103,23 +103,66 @@ Tools/<platform>/       Ignored, checksum-verified local tools
 .github/workflows/      CI, compatibility, security, and packaging
 ```
 
-The root Premake file owns the workspace. Each target owns its project definition. Public consumers include `Core/Core.h` or `Core/Log.h`.
+The root Premake file owns the workspace. Each target owns its project definition. Public consumers include `Keire/Core.h` or `Keire/Log.h`.
+
+## Windowing And Configuration
+
+`Keire/Window.h` exposes SDL-free `WindowSystem`, `Window`, opaque `WindowId`, logical/pixel extents, and a typed ordered event variant. One system is active per process and any number of windows may be created. SDL video initialization, window creation, mutation, polling, and shutdown are creating-thread-affine; releasing the final `Ref<Window>` from a worker is safe because native destruction is deferred to the owner thread. Shutdown destroys all native windows and makes surviving handles inert.
+
+Logical sizes describe UI coordinates while pixel sizes describe the high-DPI drawable density. `DisplayScale()` bridges the two; pixel-size and scale changes arrive independently through events. The platform boundary deliberately creates no graphics context and translates no input; rendering and input remain separate concerns.
+
+`LoadWindowSpecification` parses `Config/Client.json` without exposing nlohmann/json. The root `window` object accepts `title`, `width`, `height`, `resizable`, `highPixelDensity`, `visible`, `maximized`, and `mode` (`windowed` or `borderlessFullscreen`). Missing optional fields retain API defaults; unknown/duplicate keys, malformed UTF-8, wrong types, invalid dimensions, oversized titles/files, and incompatible fullscreen/maximized state are errors with file and JSON-pointer-style locations.
+
+KeireClient accepts `--config <path>` and `--smoke-window`. The default `Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. `--smoke-window` is bounded and used with `SDL_VIDEODRIVER=dummy` by CI and package validation.
+
+## Application, Layers, Events, And Time
+
+`Keire::Application` owns logging, a standalone `EventBus`, `Time`, `WindowSystem`, the primary window, and a dedicated `LayerStack`. KeireCore supplies `main`, handles dependency-free help/version commands, owns the top-level exception boundary and application lifetime, and calls `Run()`. The client implements `CreateApplication(const ApplicationCommandLineArguments&)` and returns its application subclass. The stack owns layer lifetimes, overlay partitioning, attachment, detachment, deferred structural changes, and traversal. Access it through `Application::Layers()`; the `PushLayer`, `PushOverlay`, and `RemoveLayer` application helpers remain as convenient delegates. Layers update bottom-to-top, receive events top-to-bottom, and may safely request structural changes during callbacks; those changes apply at the next frame boundary.
+
+```cpp
+std::unique_ptr<Keire::Application>
+Keire::CreateApplication(const Keire::ApplicationCommandLineArguments& arguments)
+{
+    return std::make_unique<ClientApplication>(BuildSpecification(arguments));
+}
+```
+
+Events are ordinary C++ value types. `Subscribe<T>` and `SubscribeAny` return move-only RAII tokens, while `Dispatch` delivers synchronously on the bus owner thread. Worker threads use bounded `TryEnqueue`; the application drains one stable snapshot per frame. Higher priorities run first, equal priorities retain registration order, and `EventFlow::Handled` stops propagation. An unhandled quit or primary-window close exits cleanly, so overlays can veto close requests when necessary.
+
+```cpp
+struct AssetReady { std::uint64_t Id; };
+
+auto events = application.Events();
+auto subscription = events->Subscribe<AssetReady>([](const AssetReady& event) {
+    UseAsset(event.Id);
+    return Keire::EventFlow::Continue;
+});
+
+events->Dispatch(AssetReady{42});  // application thread
+events->TryEnqueue(AssetReady{43}); // any thread
+```
+
+`Keire::Time` provides `RawDeltaTime`, scaled and unscaled delta/time, smoothed delta, fixed time, frame/tick counts, interpolation alpha, pause, time scale, and dropped-backlog diagnostics. Fixed simulation defaults to 60 Hz, clamps a frame to 250 ms, and runs at most eight ticks per frame. The application-owned service is passed read-only to layer hooks; code that intentionally changes pause or scale uses `Application::GetTime()` on the application thread.
 
 ## Logging
 
-`Core::Log` owns a private spdlog thread pool and never changes spdlog's global registry or default logger. Core and Client use separate asynchronous rotating-file loggers. `LogConfig::EnableConsole` controls the color console sink and defaults to true.
+`Keire::Log` owns a private spdlog thread pool and never changes spdlog's global registry or default logger. KeireCore and KeireClient use separate asynchronous rotating-file loggers. `LogConfig::EnableConsole` controls the color console sink and defaults to true. The default files are `Logs/Core.log` and `Logs/Client.log`.
 
-Logs default to `Logs` relative to the process working directory. IDE debug directories and scripts use the repository root. Initialization is idempotent only for identical configuration; conflicting configuration throws. `LoggerHandle` coordinates active calls with exclusive shutdown, and disabled macro levels evaluate neither logger acquisition nor message arguments.
+Logs default to `Logs` relative to the process working directory. IDE debug directories and scripts use the repository root. Initialization is idempotent only for identical configuration; conflicting configuration throws. `LoggerHandle` is a copyable value backed by `Ref`; each call takes a short operation lock. Shutdown may wait for an active write, but never for a handle's lifetime, and old handles safely become inert. Disabled macro levels evaluate neither logger acquisition nor message arguments.
+
+## References
+
+`Keire/Ref.h` provides thread-safe `Ref<T>` strong ownership, `WeakRef<T>` observation, and the factory-only `CreateRef<T>(...)` API for types derived from `RefCounted`. The external control block keeps weak locking safe while the last strong owner is released, supports polymorphic and incomplete object types, and exposes `UseCount()` for inspection. Reference-counted graphs must use at least one `WeakRef` in every cycle.
 
 ## Build Identity And Assertions
 
-`Core::GetBuildInfo()` reports the project version, Git commit and dirty state, configuration, compiler, platform, and architecture compiled into the binary. `Client --version` prints that identity; `Client --help` documents the intentionally small command line. Informational commands do not initialize logging.
+`Keire::GetBuildInfo()` reports the project version, Git commit and tracked/untracked dirty state, configuration, compiler, platform, and architecture compiled into the binary. Identity is regenerated immediately before KeireCore compiles and only rewrites its header when values change. `KeireClient --version` prints that identity; `KeireClient --help` documents the intentionally small command line. Informational commands do not initialize logging.
 
-`CORE_ASSERT(condition)` and `CORE_ASSERT(condition, "message")` diagnose and abort in Debug and sanitizer configurations. They compile out without evaluating arguments in Release, Dist, and Coverage.
+`KEIRE_ASSERT(condition)` and `KEIRE_ASSERT(condition, "message")` diagnose and abort in Debug and sanitizer configurations. They compile out without evaluating arguments in Release, Dist, and Coverage. Logging uses `KEIRE_CORE_*` and `KEIRE_CLIENT_*` for every severity.
 
 ## Dependencies
 
-`Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers.
+`Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers. SDL 3.4.10 is built as cached Debug and Release static archives by a dependency-only CMake step; Kéire itself remains Premake-driven. Debug, sanitizer, and Coverage configurations select Debug SDL, while Release and Dist select Release SDL. nlohmann/json 3.12.0 remains a private header-only implementation dependency.
 
 Intentional updates are explicit:
 
@@ -149,11 +192,11 @@ This derives `MyGameCore`, `MyGameClient`, `MyGameTests`, namespace `MyGame`, ma
 
 ## CI And Packages
 
-Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke builds, sanitizers, Client execution, script regression tests, 80% LLVM line coverage, formatting, clang-tidy, ShellCheck, PSScriptAnalyzer, actionlint, yamllint, and Python validation. Extended Compatibility runs weekly and manually. Dependabot checks Actions and submodules weekly.
+Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke builds, sanitizers, KeireClient execution, script regression tests, 80% LLVM line coverage, formatting, clang-tidy, ShellCheck, PSScriptAnalyzer, actionlint, yamllint, and Python validation. Extended Compatibility runs weekly and manually. Dependabot checks Actions and submodules weekly.
 
 CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in the `master` branch protection rules. Once enabled, the status job fails if any eligible security job is skipped or unsuccessful; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
 
-Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain Client, Core static library, public headers, spdlog headers, complete dependency license texts, notices, documentation, a consumer example, a CMake package configuration, and a validated JSON build manifest. Every package is extracted and linked into the checked-in C++20 consumer directly and through `find_package(CrossPlatformCoreClientTemplate CONFIG REQUIRED)` before success is reported. The imported target is `Core::Core`. SHA-256 files and separate Client/Core symbol archives are included where available; Dist packages are intentionally stripped.
+Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain KeireClient, KeireCore, public headers, spdlog headers, SDL's static archive/headers/official CMake configuration, complete licenses, a consumer, and a validated JSON build manifest containing SDL and JSON commits. Every package is extracted and linked into the checked-in C++20 consumer directly and through `find_package(Keire CONFIG REQUIRED)`; `Keire::Core` transitively links `SDL3::SDL3-static`. nlohmann/json headers are intentionally absent. SHA-256 files and separate symbol archives are included where available; Dist packages are stripped.
 
 ## Troubleshooting
 

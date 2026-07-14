@@ -21,6 +21,8 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset
 Assert-SupportedBuildCombination $Generator "Debug" $Architecture $Toolset
 & (Join-Path $PSScriptRoot "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
     -Toolset $Toolset -Update:$Update
+& (Join-Path $PSScriptRoot "dependencies.ps1") -Generator $Generator -Architecture $Architecture `
+    -Toolset $Toolset -Force:$Force
 
 $premakeArchitecture = Get-PremakeArchitecture $Architecture
 # Premake beta8 cannot reliably parse a Unicode absolute --file path on

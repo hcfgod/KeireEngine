@@ -24,7 +24,7 @@ $TestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitectur
 
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
     -Architecture $Architecture -Toolset $Toolset -Target $Project.TESTS_TARGET -CI:$CI -Update:$Update -Generate:$Generate
-if (-not (Test-Path $TestsExe)) { throw "Tests executable was not found: $TestsExe" }
+if (-not (Test-Path $TestsExe)) { throw "KeireTests executable was not found: $TestsExe" }
 
 $originalPath = $env:PATH
 $exitCode = 1
@@ -37,7 +37,7 @@ try {
         Write-Host "==> Using MSVC AddressSanitizer runtime from $runtimeDirectory"
         $env:PATH = "$runtimeDirectory;$env:PATH"
     }
-    Write-Host "==> Running Tests $Configuration for $Architecture"
+    Write-Host "==> Running KeireTests $Configuration for $Architecture"
     & $TestsExe
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0 -and $Configuration -in @("Debug", "DebugASan", "DebugUBSan", "DebugTSan")) {

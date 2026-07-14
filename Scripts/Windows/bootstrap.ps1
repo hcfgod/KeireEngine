@@ -161,6 +161,8 @@ if (Test-Path (Join-Path $cmakeBin "cmake.exe")) { $env:PATH = "$cmakeBin;$env:P
 Ensure-CommandPackage cmake "Kitware.CMake"
 if (Test-Path (Join-Path $cmakeBin "cmake.exe")) { $env:PATH = "$cmakeBin;$env:PATH" }
 Assert-MinimumVersion "CMake" ((& cmake --version) -join "") ([version]"3.20")
+Ensure-CommandPackage ninja "Ninja-build.Ninja"
+Assert-MinimumVersion "Ninja" ((& (Get-NinjaExecutable) --version) -join "") ([version]"1.11")
 
 foreach ($generator in $Generators) {
     switch ($generator) {

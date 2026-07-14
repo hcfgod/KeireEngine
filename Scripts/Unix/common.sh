@@ -2,11 +2,25 @@
 
 config_value() {
     local file="$1" key="$2"
-    awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }' "$file"
+    awk -v key="$key" 'index($0, key "=") == 1 { value = substr($0, length(key) + 2); sub(/\r$/, "", value); print value; exit }' "$file"
 }
 
 load_project_config() {
     local root="$1" file="$1/Config/Project.conf"
+    local line key required
+    declare -A seen=()
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        [[ "$line" != *$'\r'* ]] || { printf 'Configuration contains an embedded carriage return: %s\n' "$file" >&2; return 1; }
+        [[ -z "$line" ]] && continue
+        [[ "$line" =~ ^([A-Z0-9_]+)=(.*)$ ]] || { printf 'Malformed configuration line in %s: %s\n' "$file" "$line" >&2; return 1; }
+        key="${BASH_REMATCH[1]}"
+        [[ -z "${seen[$key]+present}" ]] || { printf "Duplicate key '%s' in %s.\n" "$key" "$file" >&2; return 1; }
+        seen[$key]=1
+    done < "$file"
+    for required in PROJECT_IDENTIFIER PROJECT_DISPLAY_NAME PROJECT_VERSION PROJECT_NAMESPACE PROJECT_MACRO_PREFIX CORE_TARGET CORE_DIRECTORY CLIENT_TARGET CLIENT_DIRECTORY TESTS_TARGET TESTS_DIRECTORY ARTIFACT_PREFIX REPOSITORY_SLUG; do
+        [[ -n "${seen[$required]+present}" ]] || { printf "Project configuration is missing '%s'.\n" "$required" >&2; return 1; }
+    done
     PROJECT_IDENTIFIER="$(config_value "$file" PROJECT_IDENTIFIER)"
     PROJECT_DISPLAY_NAME="$(config_value "$file" PROJECT_DISPLAY_NAME)"
     PROJECT_VERSION="$(config_value "$file" PROJECT_VERSION)"
@@ -20,6 +34,11 @@ load_project_config() {
     TESTS_DIRECTORY="$(config_value "$file" TESTS_DIRECTORY)"
     ARTIFACT_PREFIX="$(config_value "$file" ARTIFACT_PREFIX)"
     REPOSITORY_SLUG="$(config_value "$file" REPOSITORY_SLUG)"
+    is_semantic_version "$PROJECT_VERSION" || { printf 'PROJECT_VERSION must be a valid Semantic Version 2.0.0 value.\n' >&2; return 1; }
+}
+
+is_semantic_version() {
+    [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$ ]]
 }
 
 json_escape() {
@@ -38,7 +57,7 @@ identifier_to_macro_prefix() {
 
 validate_package_stage() {
     local stage="$1" client="$2" core="$3" namespace="$4" path
-    local required=("bin/$client" "lib/lib$core.a" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "examples/consumer/Main.cpp" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
+    local required=("bin/$client" "lib/lib$core.a" "Config/Client.json" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "include/$namespace/Ref.h" "include/$namespace/Window.h" "include/$namespace/WindowConfig.h" "examples/consumer/Main.cpp" "examples/consumer/Client.json" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/SDL3/include/SDL3/SDL.h" "third-party/SDL3/lib/libSDL3.a" "third-party/SDL3/cmake/SDL3Config.cmake" "third-party/SDL3/licenses/SDL3/LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
     for path in "${required[@]}"; do
         [[ -f "$stage/$path" ]] || { printf 'Package is missing required content: %s\n' "$path" >&2; return 1; }
     done
@@ -178,6 +197,10 @@ package_name() {
         apt-get:uuid) printf 'uuid-dev' ;;
         dnf:uuid|zypper:uuid) printf 'libuuid-devel' ;;
         pacman:uuid) printf 'util-linux-libs' ;;
+        apt-get:sdl-video) printf 'libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libdrm-dev libgbm-dev' ;;
+        dnf:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXScrnSaver-devel wayland-devel libxkbcommon-devel libdrm-devel mesa-libgbm-devel' ;;
+        pacman:sdl-video) printf 'libx11 libxext libxrandr libxcursor libxfixes libxi libxss wayland libxkbcommon libdrm mesa' ;;
+        zypper:sdl-video) printf 'libX11-devel libXext-devel libXrandr-devel libXcursor-devel libXfixes-devel libXi-devel libXss-devel wayland-devel libxkbcommon-devel libdrm-devel Mesa-libgbm-devel' ;;
         *:llvm) printf 'llvm' ;;
         *:*) printf '%s' "$logical" ;;
     esac

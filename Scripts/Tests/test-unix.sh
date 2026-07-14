@@ -9,6 +9,10 @@ assert_false() { if "$@"; then printf 'Expected failure: %s\n' "$*" >&2; exit 1;
 load_project_config "$ROOT"
 assert_true test -n "$PROJECT_IDENTIFIER"
 assert_true grep -Eq '^PROJECT_VERSION=[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' "$ROOT/Config/Project.conf"
+assert_true is_semantic_version '1.2.3-alpha.1+build.5'
+assert_false is_semantic_version '01.2.3'
+assert_false is_semantic_version '1.2.3-01'
+assert_false is_semantic_version '1.2.3+'
 assert_equal "$PROJECT_MACRO_PREFIX" "$(identifier_to_macro_prefix "$PROJECT_IDENTIFIER")" 'project macro prefix'
 assert_equal "$(identifier_to_macro_prefix HTTPServer2Client)" HTTP_SERVER2_CLIENT 'macro prefix derivation'
 assert_equal "$(normalize_architecture amd64)" x86_64 'x64 normalization'
@@ -38,6 +42,14 @@ assert_false mac_requires_full_xcode ninja
 assert_equal "$(json_escape $'quote" slash\\ tab\t')" 'quote\" slash\\ tab\t' 'JSON escaping'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)" 79524ddd08a4ec981b7fea76afd08ee05f83755d 'spdlog lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)" 2d0a9359a60c51affe2a9bebb1be1dca47868151 'doctest lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)" 8e37db5e797b6167f3a00d697d816a684bd259c7 'SDL lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)" 55f93686c01528224f448c19128836e7df245f72 'JSON lock'
+assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL_OFFSCREEN=ON' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
+assert_false grep -R -E 'SDL3/|nlohmann/json' "$ROOT/KeireCore/Include"
 security_workflow="$ROOT/.github/workflows/security.yml"
 grep -q '^  security-status:$' "$security_workflow" || fail 'Security activation sentinel is missing'
 grep -q '^    if: always()$' "$security_workflow" || fail 'Security activation sentinel is not unconditional'
@@ -55,13 +67,60 @@ assert_equal "$(resolve_llvm_tool llvm-cov clang++)" "$llvm_fixture/llvm-cov-18"
 PATH="$old_path"; rm -rf "$llvm_fixture"
 
 package_stage="$(mktemp -d)"
-for path in bin/Client lib/libCore.a include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Assert.h include/Core/BuildInfo.h examples/consumer/Main.cpp examples/consumer/CMakeLists.txt examples/consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
+for path in bin/Client lib/libCore.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/Ref.h include/Core/Window.h include/Core/WindowConfig.h examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 assert_true validate_package_stage "$package_stage" Client Core Core
 rm "$package_stage/third-party/licenses/spdlog-LICENSE.txt"
 assert_false validate_package_stage "$package_stage" Client Core Core
 rm -rf "$package_stage"
+
+identity_fixture="$(mktemp -d)"
+mkdir -p "$identity_fixture/Scripts/Unix" "$identity_fixture/Config"
+cp "$ROOT/Scripts/Unix/common.sh" "$ROOT/Scripts/Unix/build-info.sh" "$identity_fixture/Scripts/Unix/"
+cat > "$identity_fixture/Config/Project.conf" <<'IDENTITY_CONFIG'
+PROJECT_IDENTIFIER=IdentityFixture
+PROJECT_DISPLAY_NAME=Quoted "Kéire" \\ Client
+PROJECT_VERSION=1.2.3-alpha.1+build.5
+PROJECT_NAMESPACE=IdentityFixture
+PROJECT_MACRO_PREFIX=IDENTITY_FIXTURE
+CORE_TARGET=IdentityFixtureCore
+CORE_DIRECTORY=IdentityFixtureCore
+CLIENT_TARGET=IdentityFixtureClient
+CLIENT_DIRECTORY=IdentityFixtureClient
+TESTS_TARGET=IdentityFixtureTests
+TESTS_DIRECTORY=IdentityFixtureTests
+ARTIFACT_PREFIX=identityfixture
+REPOSITORY_SLUG=example/identity-fixture
+IDENTITY_CONFIG
+printf '%s\n' /Build/ > "$identity_fixture/.gitignore"
+git -C "$identity_fixture" init --quiet
+git -C "$identity_fixture" config user.email scripts@example.invalid
+git -C "$identity_fixture" config user.name 'Script Tests'
+git -C "$identity_fixture" add .
+git -C "$identity_fixture" commit --quiet -m first
+first_commit="$(git -C "$identity_fixture" rev-parse HEAD)"
+bash "$identity_fixture/Scripts/Unix/build-info.sh"
+identity_header="$identity_fixture/Build/Generated/IdentityFixture/BuildInfo.generated.h"
+assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_VERSION "1.2.3-alpha.1+build.5"' "$identity_header"
+assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_NAME "Quoted \"Kéire\" \\\\ Client"' "$identity_header"
+assert_true grep -Fq "#define KEIRE_BUILD_GIT_COMMIT \"$first_commit\"" "$identity_header"
+assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
+touch "$identity_fixture/Build/identity-marker"
+sleep 1
+bash "$identity_fixture/Scripts/Unix/build-info.sh"
+[[ "$identity_header" -ot "$identity_fixture/Build/identity-marker" ]] || fail 'Unchanged identity header was rewritten'
+printf '%s\n' untracked > "$identity_fixture/untracked.txt"
+bash "$identity_fixture/Scripts/Unix/build-info.sh"
+assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY true' "$identity_header"
+git -C "$identity_fixture" add .
+git -C "$identity_fixture" commit --quiet -m second
+second_commit="$(git -C "$identity_fixture" rev-parse HEAD)"
+bash "$identity_fixture/Scripts/Unix/build-info.sh"
+assert_true grep -Fq "#define KEIRE_BUILD_GIT_COMMIT \"$second_commit\"" "$identity_header"
+assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
+[[ "$first_commit" != "$second_commit" ]] || fail 'Identity did not refresh after a commit'
+rm -rf "$identity_fixture"
 
 parent_fixture="$(mktemp -d)"; fixture="$parent_fixture/Template"
 trap 'rm -rf "$parent_fixture"' EXIT
@@ -72,6 +131,7 @@ assert_equal "$(find_premake_binary "$fixture/archive")" "$fixture/archive/prema
 mkdir -p "$fixture/Scripts/Unix" "$fixture/Config" "$fixture/Examples/Consumer" "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$fixture/$CORE_DIRECTORY/Source" "$fixture/$CLIENT_DIRECTORY/Source" "$fixture/$TESTS_DIRECTORY/Source" "$fixture/Vendor" "$fixture/Build/Bin"
 cp "$ROOT/Scripts/Unix/common.sh" "$ROOT/Scripts/Unix/rename.sh" "$ROOT/Scripts/Unix/clean.sh" "$fixture/Scripts/Unix/"
 cp "$ROOT/Config/Project.conf" "$fixture/Config/Project.conf"
+cp "$ROOT/Config/Client.json" "$fixture/Config/Client.json"
 cp "$ROOT/Config/PackageConfig.cmake.in" "$fixture/Config/PackageConfig.cmake.in"
 cp "$ROOT/premake5.lua" "$fixture/premake5.lua"
 cp "$ROOT/Examples/Consumer/CMakeLists.txt" "$ROOT/Examples/Consumer/Main.cpp" "$fixture/Examples/Consumer/"
@@ -80,7 +140,7 @@ printf '%s\n' "#ifndef ${PROJECT_MACRO_PREFIX}_CORE_LOG_H" "#define ${PROJECT_MA
 for source in "$fixture/$CORE_DIRECTORY/Source/Library.cpp" "$fixture/$CLIENT_DIRECTORY/Source/Main.cpp" "$fixture/$TESTS_DIRECTORY/Source/Main.cpp"; do
   printf '#include "%s/Core.h"\n' "$PROJECT_NAMESPACE" > "$source"
 done
-printf '%s %s\n' "$PROJECT_IDENTIFIER" "$REPOSITORY_SLUG" > "$fixture/README.md"
+printf '%s %s Scripts/Tests Core.log Client.log\n' "$PROJECT_IDENTIFIER" "$REPOSITORY_SLUG" > "$fixture/README.md"
 printf '%s\n' vendor > "$fixture/Vendor/keep.txt"
 printf '%s\n' build > "$fixture/Build/Bin/remove.txt"
 
@@ -91,20 +151,35 @@ git -C "$parent_fixture" add Template
 git -C "$parent_fixture" commit --quiet -m fixture
 printf '%s\n' dirty >> "$fixture/README.md"
 
-bash "$fixture/Scripts/Unix/rename.sh" ScriptFixture 'Script Fixture' example/script-fixture >/dev/null
+assert_false bash "$fixture/Scripts/Unix/rename.sh" ScriptFixture $'Bad\nName' example/script-fixture
+bash "$fixture/Scripts/Unix/rename.sh" ScriptFixture 'Script "Fixturé" \\ Name' example/script-fixture >/dev/null
 assert_false test -e "$fixture/.git"
 assert_true test -f "$fixture/ScriptFixtureCore/Include/ScriptFixture/Core.h"
 assert_true grep -q '^CORE_TARGET=ScriptFixtureCore$' "$fixture/Config/Project.conf"
 assert_true grep -q '^PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE$' "$fixture/Config/Project.conf"
 assert_true grep -q "^PROJECT_VERSION=$PROJECT_VERSION$" "$fixture/Config/Project.conf"
-assert_true grep -Fq '"Build/Generated/" .. ProjectConfig.PROJECT_NAMESPACE' "$fixture/premake5.lua"
+assert_true grep -Fq 'valid Semantic Version 2.0.0' "$fixture/premake5.lua"
 assert_true grep -q 'find_package(ScriptFixture CONFIG REQUIRED)' "$fixture/Examples/Consumer/CMakeLists.txt"
 assert_true grep -q 'ScriptFixture::Core' "$fixture/Examples/Consumer/CMakeLists.txt"
 assert_true grep -q '@PROJECT_NAMESPACE@::Core' "$fixture/Config/PackageConfig.cmake.in"
+assert_true grep -Fq 'Scripts/Tests Core.log Client.log' "$fixture/README.md"
+assert_true test -f "$fixture/Config/Client.json"
 assert_false grep -R -q "$PROJECT_MACRO_PREFIX" "$fixture/ScriptFixtureCore/Include"
 assert_true grep -q SCRIPT_FIXTURE_CORE_CORE_H "$fixture/ScriptFixtureCore/Include/ScriptFixture/Core.h"
 bash "$fixture/Scripts/Unix/clean.sh" full >/dev/null
 assert_false test -d "$fixture/Build/Bin"
 assert_true test -f "$fixture/Vendor/keep.txt"
 assert_true test -f "$fixture/ScriptFixtureCore/Source/Library.cpp"
+
+repository_files="$(mktemp)"
+find "$ROOT" -type f \
+  -not -path '*/.git/*' -not -path '*/.vs/*' -not -path '*/Vendor/*' -not -path '*/Tools/*' -not -path '*/Build/*' -not -path '*/Logs/*' -not -path '*/Artifacts/*' -not -path '*/Scripts/Tests/*' > "$repository_files"
+deprecated_pattern='\b(CORE|CLIENT)_(API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b'
+while IFS= read -r file; do
+  ! grep -En "$deprecated_pattern" "$file" || fail "Deprecated public macros remain in $file"
+  for stale in '#include "KeireCore/' 'Scripts/KeireTests' 'Scripts\KeireTests' 'Scripts/Windows/Tests' 'Scripts/Unix/Tests' 'KeireCore.log' 'KeireClient.log'; do
+    ! grep -Fn "$stale" "$file" || fail "Stale repository identity remains in $file: $stale"
+  done
+done < "$repository_files"
+rm -f "$repository_files"
 printf 'Unix script regression tests passed.\n'

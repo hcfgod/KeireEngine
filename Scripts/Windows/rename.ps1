@@ -11,6 +11,7 @@ if ($Name -notmatch '^[A-Z][A-Za-z0-9]*$') { throw "Name must be a PascalCase C+
 $reserved = @("Alignas","Alignof","And","Asm","Auto","Bool","Break","Case","Catch","Char","Class","Concept","Const","Continue","Default","Delete","Do","Double","Else","Enum","Explicit","Export","Extern","False","Float","For","Friend","Goto","If","Inline","Int","Long","Namespace","New","Noexcept","Not","Nullptr","Operator","Or","Private","Protected","Public","Register","Requires","Return","Short","Signed","Sizeof","Static","Struct","Switch","Template","This","Thread_local","Throw","True","Try","Typedef","Typeid","Typename","Union","Unsigned","Using","Virtual","Void","Volatile","Wchar_t","While")
 if ($reserved -contains $Name) { throw "Name '$Name' is a reserved C++ keyword." }
 if (-not $DisplayName) { $DisplayName = $Name }
+if ($Name -match '[\r\n]' -or $DisplayName -match '[\r\n]' -or $Repository -match '[\r\n]') { throw "Rename values must not contain line breaks." }
 if ($Repository -and $Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Repository must use owner/name format." }
 $newCore = "${Name}Core"; $newClient = "${Name}Client"; $newTests = "${Name}Tests"
 $newMacroPrefix = ConvertTo-MacroPrefix $Name
@@ -33,6 +34,8 @@ try {
         if ([IO.Path]::GetExtension($path) -notin $textExtensions -and [IO.Path]::GetFileName($path) -notmatch '^\.(gitignore|gitattributes|editorconfig|clang-format|clang-tidy)$') { continue }
         $content = [IO.File]::ReadAllText($path); $originals[$relative] = $content
         $isCpp = [IO.Path]::GetExtension($path) -in @(".h", ".hpp", ".cpp", ".c")
+        $content = $content.Replace("Scripts/Tests", "@@STABLE_TEST_PATH@@").Replace("Scripts\Tests", "@@STABLE_TEST_PATH_WINDOWS@@")
+        $content = $content.Replace("Core.log", "@@STABLE_CORE_LOG@@").Replace("Client.log", "@@STABLE_CLIENT_LOG@@")
         $content = $content.Replace($Project.PROJECT_IDENTIFIER, $Name).Replace($Project.PROJECT_DISPLAY_NAME, $DisplayName)
         $content = $content.Replace($Project.PROJECT_MACRO_PREFIX, $newMacroPrefix)
         if ($Repository) { $content = $content.Replace($Project.REPOSITORY_SLUG, $Repository) }
@@ -53,6 +56,8 @@ try {
             $content = $content.Replace("$newCore/Core.h", "$Name/Core.h")
             $content = $content.Replace("$newCore/Log.h", "$Name/Log.h")
         }
+        $content = $content.Replace("@@STABLE_TEST_PATH@@", "Scripts/Tests").Replace("@@STABLE_TEST_PATH_WINDOWS@@", "Scripts\Tests")
+        $content = $content.Replace("@@STABLE_CORE_LOG@@", "Core.log").Replace("@@STABLE_CLIENT_LOG@@", "Client.log")
         [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
     }
     $configPath = Join-Path $Root "Config\Project.conf"

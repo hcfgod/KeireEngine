@@ -20,6 +20,10 @@ $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
 Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
 Assert-True ($project.PROJECT_VERSION -match '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') "Semantic project version"
+Assert-True (Test-SemanticVersion "1.2.3-alpha.1+build.5") "Complete Semantic Version"
+Assert-True (-not (Test-SemanticVersion "01.2.3")) "Semantic Version major leading zero rejection"
+Assert-True (-not (Test-SemanticVersion "1.2.3-01")) "Semantic Version prerelease leading zero rejection"
+Assert-True (-not (Test-SemanticVersion "1.2.3+")) "Empty Semantic Version build rejection"
 Assert-Equal $project.PROJECT_MACRO_PREFIX (ConvertTo-MacroPrefix $project.PROJECT_IDENTIFIER) "Project macro prefix"
 Assert-Equal (ConvertTo-MacroPrefix "HTTPServer2Client") "HTTP_SERVER2_CLIENT" "Macro prefix derivation"
 $securityWorkflow = Get-Content (Join-Path (Get-RepositoryRoot) ".github\workflows\security.yml") -Raw
@@ -48,10 +52,19 @@ Assert-Throws { Assert-SupportedBuildCombination "vs2022" "Coverage" "x86_64" "c
 $lock = Get-DependencyLock
 Assert-Equal $lock.SPDLOG_COMMIT "79524ddd08a4ec981b7fea76afd08ee05f83755d" "spdlog lock"
 Assert-Equal $lock.DOCTEST_COMMIT "2d0a9359a60c51affe2a9bebb1be1dca47868151" "doctest lock"
+Assert-Equal $lock.SDL_COMMIT "8e37db5e797b6167f3a00d697d816a684bd259c7" "SDL lock"
+Assert-Equal $lock.JSON_COMMIT "55f93686c01528224f448c19128836e7df245f72" "JSON lock"
+$dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
+Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
+Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
+$premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
+Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+$publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include") -File -Recurse | Get-Content -Raw) -join "`n"
+Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json')) "Public dependency isolation"
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {
-    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "examples\consumer\Main.cpp", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\Ref.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
@@ -62,6 +75,50 @@ try {
 }
 finally {
     Remove-Item $packageStage -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$identityFixture = Join-Path ([IO.Path]::GetTempPath()) ("template-identity-test-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force (Join-Path $identityFixture "Scripts\Windows"), (Join-Path $identityFixture "Config") | Out-Null
+    Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "build-info.ps1") (Join-Path $identityFixture "Scripts\Windows")
+    $identityConfig = @(
+        "PROJECT_IDENTIFIER=IdentityFixture", 'PROJECT_DISPLAY_NAME=Quoted "Kéire" \\ Client',
+        "PROJECT_VERSION=1.2.3-alpha.1+build.5", "PROJECT_NAMESPACE=IdentityFixture", "PROJECT_MACRO_PREFIX=IDENTITY_FIXTURE",
+        "CORE_TARGET=IdentityFixtureCore", "CORE_DIRECTORY=IdentityFixtureCore", "CLIENT_TARGET=IdentityFixtureClient", "CLIENT_DIRECTORY=IdentityFixtureClient",
+        "TESTS_TARGET=IdentityFixtureTests", "TESTS_DIRECTORY=IdentityFixtureTests", "ARTIFACT_PREFIX=identityfixture", "REPOSITORY_SLUG=example/identity-fixture"
+    )
+    [IO.File]::WriteAllLines((Join-Path $identityFixture "Config\Project.conf"), $identityConfig, [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $identityFixture ".gitignore"), "/Build/`n", [Text.UTF8Encoding]::new($false))
+    & git -C $identityFixture init --quiet
+    & git -C $identityFixture config user.email "scripts@example.invalid"
+    & git -C $identityFixture config user.name "Script Tests"
+    & git -C $identityFixture add .
+    & git -C $identityFixture commit --quiet -m first
+    $firstCommit = (& git -C $identityFixture rev-parse HEAD) -join ""
+    & (Join-Path $identityFixture "Scripts\Windows\build-info.ps1")
+    $identityHeader = Join-Path $identityFixture "Build\Generated\IdentityFixture\BuildInfo.generated.h"
+    $firstIdentity = [IO.File]::ReadAllText($identityHeader, [Text.Encoding]::UTF8)
+    Assert-True ($firstIdentity.Contains('#define KEIRE_BUILD_PROJECT_VERSION "1.2.3-alpha.1+build.5"')) "Semantic Version identity generation"
+    Assert-True ($firstIdentity.Contains('#define KEIRE_BUILD_PROJECT_NAME "Quoted \"Kéire\" \\\\ Client"')) "C string identity escaping"
+    Assert-True ($firstIdentity.Contains("#define KEIRE_BUILD_GIT_COMMIT `"$firstCommit`"")) "Clean Git identity"
+    Assert-True ($firstIdentity.Contains("#define KEIRE_BUILD_GIT_DIRTY false")) "Clean Git dirty state"
+    $firstWriteTime = [IO.File]::GetLastWriteTimeUtc($identityHeader)
+    Start-Sleep -Milliseconds 1100
+    & (Join-Path $identityFixture "Scripts\Windows\build-info.ps1")
+    Assert-Equal ([IO.File]::GetLastWriteTimeUtc($identityHeader)) $firstWriteTime "Unchanged identity header timestamp"
+    Set-Content -LiteralPath (Join-Path $identityFixture "untracked.txt") -Value untracked
+    & (Join-Path $identityFixture "Scripts\Windows\build-info.ps1")
+    Assert-True (([IO.File]::ReadAllText($identityHeader)).Contains("#define KEIRE_BUILD_GIT_DIRTY true")) "Untracked Git dirty state"
+    & git -C $identityFixture add .
+    & git -C $identityFixture commit --quiet -m second
+    $secondCommit = (& git -C $identityFixture rev-parse HEAD) -join ""
+    & (Join-Path $identityFixture "Scripts\Windows\build-info.ps1")
+    $secondIdentity = [IO.File]::ReadAllText($identityHeader, [Text.Encoding]::UTF8)
+    Assert-True ($secondCommit -ne $firstCommit -and $secondIdentity.Contains($secondCommit)) "Identity refresh after commit"
+    Assert-True ($secondIdentity.Contains("#define KEIRE_BUILD_GIT_DIRTY false")) "Committed Git clean state"
+}
+finally {
+    Remove-Item -LiteralPath $identityFixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 $parentFixture = Join-Path ([IO.Path]::GetTempPath()) ("template-script-test-" + [guid]::NewGuid().ToString("N"))
@@ -77,6 +134,7 @@ try {
     }
     Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "rename.ps1"), (Join-Path $Windows "clean.ps1"), (Join-Path $Windows "doctor.ps1") (Join-Path $fixture "Scripts\Windows")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\Project.conf") (Join-Path $fixture "Config\Project.conf")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Config\Client.json") (Join-Path $fixture "Config\Client.json")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") (Join-Path $fixture "Config\PackageConfig.cmake.in")
     Copy-Item (Join-Path (Get-RepositoryRoot) "premake5.lua") (Join-Path $fixture "premake5.lua")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\Consumer\CMakeLists.txt"), (Join-Path (Get-RepositoryRoot) "Examples\Consumer\Main.cpp") (Join-Path $fixture "Examples\Consumer")
@@ -95,7 +153,7 @@ namespace $projectNamespace { class Log; }
     Set-Content (Join-Path $fixture "$coreDirectory\Source\Library.cpp") "#include `"$projectNamespace/Core.h`""
     Set-Content (Join-Path $fixture "$clientDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
     Set-Content (Join-Path $fixture "$testsDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
-    Set-Content (Join-Path $fixture "README.md") "$($project.PROJECT_IDENTIFIER) $($project.REPOSITORY_SLUG)"
+    Set-Content (Join-Path $fixture "README.md") "$($project.PROJECT_IDENTIFIER) $($project.REPOSITORY_SLUG) Scripts/Tests Core.log Client.log"
     Set-Content (Join-Path $fixture "Vendor\keep.txt") 'vendor'
     Set-Content (Join-Path $fixture "Build\Bin\remove.txt") 'build'
 
@@ -107,7 +165,8 @@ namespace $projectNamespace { class Log; }
     Assert-Equal (Get-GitWorktreeRoot $fixture).Path (Resolve-Path $parentFixture).Path "Parent Git worktree detection"
     Add-Content (Join-Path $fixture "README.md") "dirty"
 
-    $unicodeDisplayName = "Script Fixtur$([char]0x00E9)"
+    Assert-Throws { & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName "Bad`nName" -Repository example/script-fixture } "Rename newline rejection"
+    $unicodeDisplayName = 'Script "Fixturé" \\ Name'
     & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName $unicodeDisplayName -Repository example/script-fixture
     Assert-True (-not (Test-Path (Join-Path $fixture ".git"))) "Nested Git repository prevention"
     Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureCore\Include\ScriptFixture\Core.h")) "Rename structure"
@@ -116,13 +175,15 @@ namespace $projectNamespace { class Log; }
     Assert-True ($renamed.Contains("PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE")) "Rename macro manifest"
     Assert-True ($renamed.Contains("PROJECT_VERSION=$($project.PROJECT_VERSION)")) "Rename version preservation"
     $renamedPremake = Get-Content (Join-Path $fixture "premake5.lua") -Raw
-    Assert-True ($renamedPremake.Contains('"Build/Generated/" .. ProjectConfig.PROJECT_NAMESPACE')) "Generated header namespace directory"
+    Assert-True ($renamedPremake.Contains("valid Semantic Version 2.0.0")) "Premake Semantic Version validation"
     $renamedConsumer = Get-Content (Join-Path $fixture "Examples\Consumer\CMakeLists.txt") -Raw
     Assert-True ($renamedConsumer.Contains("find_package(ScriptFixture CONFIG REQUIRED)")) "Renamed CMake package identity"
     Assert-True ($renamedConsumer.Contains("ScriptFixture::Core")) "Renamed CMake imported target"
     Assert-True ((Get-Content (Join-Path $fixture "Config\PackageConfig.cmake.in") -Raw).Contains("@PROJECT_NAMESPACE@::Core")) "Generic package template preservation"
     Assert-True ($renamed.Contains("PROJECT_DISPLAY_NAME=$unicodeDisplayName")) "UTF-8 display name preservation"
     Assert-True ((Get-Content (Join-Path $fixture "README.md") -Raw).Contains("dirty")) "Pre-existing edit preservation"
+    Assert-True ((Get-Content (Join-Path $fixture "README.md") -Raw).Contains("Scripts/Tests Core.log Client.log")) "Stable generic path preservation"
+    Assert-True (Test-Path (Join-Path $fixture "Config\Client.json")) "Stable client configuration path preservation"
     $renamedHeaders = (Get-ChildItem (Join-Path $fixture "ScriptFixtureCore\Include") -File -Recurse | Get-Content) -join "`n"
     Assert-True (-not $renamedHeaders.Contains($project.PROJECT_MACRO_PREFIX)) "Old include guard removal"
     Assert-True ($renamedHeaders.Contains("SCRIPT_FIXTURE_CORE_CORE_H")) "Renamed include guard"
@@ -137,5 +198,18 @@ finally {
     if ($parentFixture.StartsWith([IO.Path]::GetTempPath()) -and (Test-Path $parentFixture)) {
         Remove-Item -LiteralPath $parentFixture -Recurse -Force
     }
+}
+
+$repositoryFiles = Get-ChildItem (Get-RepositoryRoot) -File -Recurse | Where-Object {
+    $_.FullName -notmatch '[\\/](\.git|\.vs|Vendor|Tools|Build|Logs|Artifacts)[\\/]' -and $_.FullName -notmatch '[\\/]Scripts[\\/]Tests[\\/]'
+}
+$deprecatedNames = foreach ($prefix in @("CORE", "CLIENT")) {
+    foreach ($suffix in @("API", "ASSERT", "ASSERTIONS_ENABLED", "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL")) { "${prefix}_${suffix}" }
+}
+foreach ($name in $deprecatedNames) {
+    Assert-Equal (@($repositoryFiles | Select-String -Pattern "\b$([regex]::Escape($name))\b").Count) 0 "Deprecated public macro check for $name"
+}
+foreach ($stale in @('#include "KeireCore/', 'Scripts/KeireTests', 'Scripts\KeireTests', 'Scripts/Windows/Tests', 'Scripts/Unix/Tests', 'KeireCore.log', 'KeireClient.log')) {
+    Assert-Equal (@($repositoryFiles | Select-String -SimpleMatch $stale).Count) 0 "Stale repository identity check for $stale"
 }
 Write-Host "Windows script regression tests passed."

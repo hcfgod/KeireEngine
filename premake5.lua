@@ -3,7 +3,12 @@ local function loadConfig(path)
     for line in io.lines(path) do
         local key, value = line:match("^([A-Z0-9_]+)=(.*)$")
         if key then
+            if values[key] ~= nil then
+                error("Duplicate configuration key: " .. key)
+            end
             values[key] = value
+        elseif line ~= "" then
+            error("Malformed configuration line: " .. line)
         end
     end
     return values
@@ -11,35 +16,62 @@ end
 
 ProjectConfig = loadConfig("Config/Project.conf")
 
-local validVersion = ProjectConfig.PROJECT_VERSION and
-    (ProjectConfig.PROJECT_VERSION:match("^%d+%.%d+%.%d+$") or
-     ProjectConfig.PROJECT_VERSION:match("^%d+%.%d+%.%d+[-+][%w%.%-]+$"))
-if not validVersion then
-    error("PROJECT_VERSION must be a semantic version such as 0.1.0.")
+local requiredKeys = {
+    "PROJECT_IDENTIFIER", "PROJECT_DISPLAY_NAME", "PROJECT_VERSION", "PROJECT_NAMESPACE", "PROJECT_MACRO_PREFIX",
+    "CORE_TARGET", "CORE_DIRECTORY", "CLIENT_TARGET", "CLIENT_DIRECTORY", "TESTS_TARGET", "TESTS_DIRECTORY",
+    "ARTIFACT_PREFIX", "REPOSITORY_SLUG"
+}
+for _, key in ipairs(requiredKeys) do
+    if ProjectConfig[key] == nil then
+        error("Missing configuration key: " .. key)
+    end
 end
 
-local function commandOutput(command)
-    local pipe = io.popen(command .. " 2>" .. (os.host() == "windows" and "NUL" or "/dev/null"))
-    if not pipe then return nil end
-    local value = pipe:read("*a")
-    local ok = pipe:close()
-    if not ok then return nil end
-    return value:gsub("%s+$", "")
+local function validIdentifiers(value, rejectNumericLeadingZero)
+    if value == "" or value:sub(1, 1) == "." or value:sub(-1) == "." or value:find("..", 1, true) then
+        return false
+    end
+    for identifier in value:gmatch("[^.]+") do
+        if not identifier:match("^[0-9A-Za-z%-]+$") then
+            return false
+        end
+        if rejectNumericLeadingZero and identifier:match("^%d+$") and #identifier > 1 and identifier:sub(1, 1) == "0" then
+            return false
+        end
+    end
+    return true
 end
 
-local gitCommit = commandOutput("git rev-parse --verify HEAD") or "unknown"
-local gitStatus = commandOutput("git status --porcelain --untracked-files=no")
-local gitDirty = gitStatus ~= nil and gitStatus ~= ""
-local generatedDirectory = "Build/Generated/" .. ProjectConfig.PROJECT_NAMESPACE
-os.mkdir(generatedDirectory)
-local generated = assert(io.open(generatedDirectory .. "/BuildInfo.generated.h", "w"))
-generated:write("#pragma once\n\n")
-generated:write('#define CORE_BUILD_PROJECT_VERSION "' .. ProjectConfig.PROJECT_VERSION .. '"\n')
-generated:write('#define CORE_BUILD_PROJECT_NAME "' .. ProjectConfig.PROJECT_DISPLAY_NAME .. '"\n')
-generated:write('#define CORE_BUILD_GIT_COMMIT "' .. gitCommit .. '"\n')
-generated:write("#define CORE_BUILD_GIT_DIRTY " .. (gitDirty and "true" or "false") .. "\n")
-generated:close()
+local function validSemanticVersion(version)
+    if not version then return false end
+    local coreAndPre, build = version, nil
+    local plus = version:find("+", 1, true)
+    if plus then
+        coreAndPre = version:sub(1, plus - 1)
+        build = version:sub(plus + 1)
+        if build:find("+", 1, true) or not validIdentifiers(build, false) then return false end
+    end
+    local core, prerelease = coreAndPre, nil
+    local dash = coreAndPre:find("-", 1, true)
+    if dash then
+        core = coreAndPre:sub(1, dash - 1)
+        prerelease = coreAndPre:sub(dash + 1)
+        if not validIdentifiers(prerelease, true) then return false end
+    end
+    local major, minor, patch = core:match("^(%d+)%.(%d+)%.(%d+)$")
+    if not major then return false end
+    for _, component in ipairs({ major, minor, patch }) do
+        if #component > 1 and component:sub(1, 1) == "0" then return false end
+    end
+    return true
+end
+
+if not validSemanticVersion(ProjectConfig.PROJECT_VERSION) then
+    error("PROJECT_VERSION must be a valid Semantic Version 2.0.0 value such as 0.1.0-alpha.1+build.5.")
+end
+
 include "Scripts/Premake/Common.lua"
+dofile "Build/Generated/Dependencies.lua"
 
 newoption {
     trigger = "toolset",

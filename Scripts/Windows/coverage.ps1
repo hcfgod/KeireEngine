@@ -15,13 +15,13 @@ $tests = Join-Path $Root "Build\Bin\Coverage-windows-$outputArchitecture\$($Proj
 Push-Location $Root; try { & $tests; if ($LASTEXITCODE -ne 0) { throw "Coverage tests failed with exit code $LASTEXITCODE." } } finally { Pop-Location }
 & (Join-Path $PSScriptRoot "build.ps1") -Generator ninja -Configuration Coverage -Architecture $Architecture -Toolset clang -Target $Project.CLIENT_TARGET -CI:$CI
 $client = Join-Path $Root "Build\Bin\Coverage-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe"
-Push-Location $Root; try { & $client; if ($LASTEXITCODE -ne 0) { throw "Coverage Client failed with exit code $LASTEXITCODE." } } finally { Pop-Location }
+Push-Location $Root; try { & $client; if ($LASTEXITCODE -ne 0) { throw "Coverage KeireClient failed with exit code $LASTEXITCODE." } } finally { Pop-Location }
 
 $profiles = @(Get-ChildItem $coverageDirectory -Filter *.profraw | ForEach-Object FullName)
 if (-not $profiles) { throw "No LLVM coverage profiles were produced." }
 $profileData = Join-Path $coverageDirectory "coverage.profdata"
 & llvm-profdata merge -sparse @profiles -o $profileData; if ($LASTEXITCODE -ne 0) { throw "llvm-profdata failed." }
-$common = @("-instr-profile=$profileData", $tests, "-object=$client", "-ignore-filename-regex=Vendor|Tests")
+$common = @("-instr-profile=$profileData", $tests, "-object=$client", "-ignore-filename-regex=Vendor|KeireTests")
 & llvm-cov export -format=lcov @common | Set-Content (Join-Path $coverageDirectory "coverage.info") -Encoding UTF8
 & llvm-cov show @common -format=html "-output-dir=$(Join-Path $coverageDirectory 'html')"; if ($LASTEXITCODE -ne 0) { throw "llvm-cov show failed." }
 $summary = (& llvm-cov export -summary-only @common) -join "`n" | ConvertFrom-Json

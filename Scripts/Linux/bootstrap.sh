@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
-GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=Client; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+GENERATOR=ninja; CONFIGURATION=Debug; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
 parse_build_arguments "$@"
 PREMAKE_VERSION="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_VERSION)"
 PREMAKE_X64_HASH="$(config_value "$ROOT/Config/Dependencies.lock" PREMAKE_LINUX_X86_64_SHA256)"
@@ -97,7 +97,14 @@ check_version Git "$(git --version | extract_version)" 2.40
 ensure_command cmake cmake
 check_version CMake "$(cmake --version | extract_version)" 3.20
 
-if [[ "$GENERATOR" == ninja || "$GENERATOR" == compilecommands ]]; then ensure_command ninja ninja; check_version Ninja "$(ninja --version)" 1.11; fi
+ensure_command ninja ninja
+check_version Ninja "$(ninja --version)" 1.11
+ensure_command pkg-config pkg-config
+install_logical_packages sdl-video
+if ! pkg-config --exists x11 && ! pkg-config --exists wayland-client; then
+    printf 'SDL video requires at least one available X11 or Wayland development backend.\n' >&2
+    exit 1
+fi
 [[ "$GENERATOR" == compilecommands ]] && ensure_command python3 python
 if [[ "$GENERATOR" == gmake ]]; then
     install_logical_packages build

@@ -8,6 +8,7 @@ param(
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
     [switch]$CI,
+    [switch]$SmokeWindow,
     [switch]$Update,
     [switch]$Generate
 )
@@ -23,7 +24,7 @@ $ClientExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitectu
 
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
     -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI -Update:$Update -Generate:$Generate
-if (-not (Test-Path $ClientExe)) { throw "Client executable was not found: $ClientExe" }
+if (-not (Test-Path $ClientExe)) { throw "KeireClient executable was not found: $ClientExe" }
 
 Push-Location $Root
 $originalPath = $env:PATH
@@ -34,20 +35,27 @@ try {
         $runtimeDirectory = Get-MSVCASanRuntimeDirectory $majorVersion $Architecture
         $env:PATH = "$runtimeDirectory;$env:PATH"
     }
-    Write-Host "==> Running Client $Configuration for $Architecture"
-    & $ClientExe
+    Write-Host "==> Running KeireClient $Configuration for $Architecture"
+    if ($CI -or $SmokeWindow) {
+        $originalVideoDriver = $env:SDL_VIDEODRIVER
+        $env:SDL_VIDEODRIVER = "dummy"
+        & $ClientExe --smoke-window
+        if ($null -eq $originalVideoDriver) { Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue }
+        else { $env:SDL_VIDEODRIVER = $originalVideoDriver }
+    }
+    else { & $ClientExe }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $cliRoot = Join-Path $env:TEMP ("client-cli-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory $cliRoot | Out-Null
     try {
         foreach ($option in @("--help", "-h", "--version", "-v")) {
             $result = Start-Process -FilePath $ClientExe -ArgumentList $option -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru
-            if ($result.ExitCode -ne 0) { throw "Client $option failed with exit code $($result.ExitCode)." }
+            if ($result.ExitCode -ne 0) { throw "KeireClient $option failed with exit code $($result.ExitCode)." }
         }
         $invalidOutput = Join-Path $cliRoot "invalid.txt"
         $invalid = Start-Process -FilePath $ClientExe -ArgumentList "--invalid" -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru -RedirectStandardError $invalidOutput
-        if ($invalid.ExitCode -ne 2) { throw "Client invalid option returned $($invalid.ExitCode), expected 2." }
-        if (Test-Path (Join-Path $cliRoot "Logs")) { throw "Informational Client commands created logs." }
+        if ($invalid.ExitCode -ne 2) { throw "KeireClient invalid option returned $($invalid.ExitCode), expected 2." }
+        if (Test-Path (Join-Path $cliRoot "Logs")) { throw "Informational KeireClient commands created logs." }
     }
     finally { Remove-Item $cliRoot -Recurse -Force -ErrorAction SilentlyContinue }
     exit 0

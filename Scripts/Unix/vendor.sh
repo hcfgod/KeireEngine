@@ -28,4 +28,6 @@ install_dependency() {
 
 install_dependency spdlog Vendor/spdlog "$(config_value "$LOCK" SPDLOG_URL)" "$(config_value "$LOCK" SPDLOG_COMMIT)"
 install_dependency doctest Vendor/doctest "$(config_value "$LOCK" DOCTEST_URL)" "$(config_value "$LOCK" DOCTEST_COMMIT)"
+install_dependency SDL Vendor/SDL "$(config_value "$LOCK" SDL_URL)" "$(config_value "$LOCK" SDL_COMMIT)"
+install_dependency json Vendor/json "$(config_value "$LOCK" JSON_URL)" "$(config_value "$LOCK" JSON_COMMIT)"
 printf '==> Vendor libraries are ready; Git staging was not modified\n'

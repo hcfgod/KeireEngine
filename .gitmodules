@@ -4,3 +4,9 @@
 [submodule "Vendor/doctest"]
 	path = Vendor/doctest
 	url = https://github.com/doctest/doctest.git
+[submodule "Vendor/SDL"]
+	path = Vendor/SDL
+	url = https://github.com/libsdl-org/SDL.git
+[submodule "Vendor/json"]
+	path = Vendor/json
+	url = https://github.com/nlohmann/json.git

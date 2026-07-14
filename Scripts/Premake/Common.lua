@@ -2,15 +2,29 @@ OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
-    doctest = "../Vendor/doctest"
+    doctest = "../Vendor/doctest",
+    json = "../Vendor/json/include"
 }
+
+function LinkSDL3()
+    externalincludedirs { DependencyManifest.SDL3Include }
+    links { DependencyManifest.SDL3PlatformLinks }
+
+    filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+        links { DependencyManifest.SDL3DebugLibrary }
+
+    filter { "configurations:Release or Dist" }
+        links { DependencyManifest.SDL3ReleaseLibrary }
+
+    filter {}
+end
 
 function ApplyCommonProjectSettings()
     language "C++"
     cppdialect "C++20"
     staticruntime "off"
     warnings "Extra"
-    defines { "CORE_STATIC", 'CORE_BUILD_CONFIGURATION="%{cfg.buildcfg}"', 'CORE_BUILD_ARCHITECTURE="%{cfg.architecture}"' }
+    defines { "KEIRE_STATIC", 'KEIRE_BUILD_CONFIGURATION="%{cfg.buildcfg}"', 'KEIRE_BUILD_ARCHITECTURE="%{cfg.architecture}"' }
 
     targetdir ("../Build/Bin/" .. OutputDir .. "/%{prj.name}")
     objdir ("../Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
@@ -36,9 +50,9 @@ function ApplyCommonProjectSettings()
         symbols "on"
         defines
         {
-            "CORE_LOG_DEFAULT_TRACE",
+            "KEIRE_LOG_DEFAULT_TRACE",
             "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
-            , "CORE_ASSERTIONS_ENABLED"
+            , "KEIRE_ASSERTIONS_ENABLED"
         }
 
     filter "configurations:Release"
@@ -66,7 +80,7 @@ function ApplyCommonProjectSettings()
         runtime "Debug"
         symbols "on"
         defines {
-            "CORE_LOG_DEFAULT_TRACE",
+            "KEIRE_LOG_DEFAULT_TRACE",
             "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
         }
 

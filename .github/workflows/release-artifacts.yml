@@ -38,8 +38,10 @@ jobs:
           submodules: recursive
       - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: Tools/${{ matrix.platform }}
-          key: ${{ runner.os }}-${{ runner.arch }}-tools-${{ hashFiles('Config/Dependencies.lock') }}
+          path: |
+            Tools/${{ matrix.platform }}
+            Build/Dependencies
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.toolset }}-dependencies-${{ hashFiles('Config/Dependencies.lock', 'Scripts/Windows/dependencies.ps1', 'Scripts/Unix/dependencies.sh') }}
       - name: Build, test, smoke-run, and package on Windows
         if: matrix.os == 'windows'
         shell: pwsh

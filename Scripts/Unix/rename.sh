@@ -3,6 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; source "$ROOT/Scripts/Unix/common.sh"; load_project_config "$ROOT"
 NAME="${1:-}"; DISPLAY="${2:-$NAME}"; REPOSITORY="${3:-}"
 [[ "$NAME" =~ ^[A-Z][A-Za-z0-9]*$ ]] || { printf 'Name must be a PascalCase C++ identifier.\n' >&2; exit 1; }
+[[ "$NAME" != *$'\n'* && "$NAME" != *$'\r'* && "$DISPLAY" != *$'\n'* && "$DISPLAY" != *$'\r'* && "$REPOSITORY" != *$'\n'* && "$REPOSITORY" != *$'\r'* ]] || { printf 'Rename values must not contain line breaks.\n' >&2; exit 1; }
 [[ -z "$REPOSITORY" || "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { printf 'Repository must use owner/name format.\n' >&2; exit 1; }
 new_core="${NAME}Core"; new_client="${NAME}Client"; new_tests="${NAME}Tests"; new_macro_prefix="$(identifier_to_macro_prefix "$NAME")"
 escape_sed_replacement() { printf '%s' "$1" | sed 's/[\\\/&\#]/\\&/g'; }
@@ -27,14 +28,20 @@ while IFS= read -r relative; do
     file="$ROOT/$relative"; [[ -f "$file" ]] || continue
     case "$file" in
       *.h|*.hpp|*.cpp|*.c)
-        sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/namespace $PROJECT_NAMESPACE/namespace $NAME/g" -e "s/$PROJECT_NAMESPACE::/$NAME::/g" -e "s#\"$PROJECT_NAMESPACE/#\"$NAME/#g" -e "s/\"$CORE_TARGET\"/\"$new_core\"/g" -e "s/\"$CLIENT_TARGET\"/\"$new_client\"/g" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+        sed -e 's#Scripts/Tests#@@STABLE_TEST_PATH@@#g' -e 's#Core\.log#@@STABLE_CORE_LOG@@#g' -e 's#Client\.log#@@STABLE_CLIENT_LOG@@#g' \
+          -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/namespace $PROJECT_NAMESPACE/namespace $NAME/g" -e "s/$PROJECT_NAMESPACE::/$NAME::/g" -e "s#\"$PROJECT_NAMESPACE/#\"$NAME/#g" -e "s/\"$CORE_TARGET\"/\"$new_core\"/g" -e "s/\"$CLIENT_TARGET\"/\"$new_client\"/g" \
+          -e 's#@@STABLE_TEST_PATH@@#Scripts/Tests#g' -e 's#@@STABLE_CORE_LOG@@#Core.log#g' -e 's#@@STABLE_CLIENT_LOG@@#Client.log#g' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
         ;;
       *.md|*.yml|*.yaml|*.json|*.conf|*.lua|*.ps1|*.sh|*.txt|*.bat)
+        sed -e 's#Scripts/Tests#@@STABLE_TEST_PATH@@#g' -e 's#Core\.log#@@STABLE_CORE_LOG@@#g' -e 's#Client\.log#@@STABLE_CLIENT_LOG@@#g' "$file" > "$file.protected"
         if [[ -n "$REPOSITORY" ]]; then
-          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s#$REPOSITORY_SLUG#$repository_replacement#g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s/$NAME::$new_core/$NAME::Core/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file" > "$file.tmp"
+          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s#$REPOSITORY_SLUG#$repository_replacement#g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s/$NAME::$new_core/$NAME::Core/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file.protected" > "$file.tmp"
         else
-          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s/$NAME::$new_core/$NAME::Core/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file" > "$file.tmp"
+          sed -e "s/$PROJECT_IDENTIFIER/$NAME/g" -e "s/$PROJECT_MACRO_PREFIX/$new_macro_prefix/g" -e "s/$PROJECT_DISPLAY_NAME/$display_replacement/g" -e "s/$CORE_TARGET/$new_core/g" -e "s/$CLIENT_TARGET/$new_client/g" -e "s/$TESTS_TARGET/$new_tests/g" -e "s/$new_core\.h/Core.h/g" -e "s/$new_core::/$NAME::/g" -e "s/$NAME::$new_core/$NAME::Core/g" -e "s#$new_core/$new_core\.h#$NAME/Core.h#g" -e "s#$new_core/Log\.h#$NAME/Log.h#g" "$file.protected" > "$file.tmp"
         fi
+        sed -e 's#@@STABLE_TEST_PATH@@#Scripts/Tests#g' -e 's#@@STABLE_CORE_LOG@@#Core.log#g' -e 's#@@STABLE_CLIENT_LOG@@#Client.log#g' "$file.tmp" > "$file.restored"
+        mv "$file.restored" "$file.tmp"
+        rm -f "$file.protected"
         mv "$file.tmp" "$file"
         ;;
     esac

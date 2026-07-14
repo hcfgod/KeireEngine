@@ -6,7 +6,7 @@ Describe the behavior and why the change is needed.
 
 - [ ] Relevant Debug/Release/Dist builds pass
 - [ ] Relevant sanitizer builds pass
-- [ ] Tests and Client smoke run pass
+- [ ] KeireTests and KeireClient smoke run pass
 - [ ] Script regression tests pass when applicable
 - [ ] Formatting and static analysis pass
 - [ ] Generated files and downloaded tools are not committed

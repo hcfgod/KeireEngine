@@ -1,0 +1,12 @@
+{
+  "window": {
+    "title": "Kéire",
+    "width": 1280,
+    "height": 720,
+    "resizable": true,
+    "highPixelDensity": true,
+    "visible": true,
+    "maximized": false,
+    "mode": "windowed"
+  }
+}

@@ -1,9 +1,10 @@
 include(CMakeFindDependencyMacro)
+get_filename_component(_core_sdk_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+find_dependency(SDL3 CONFIG REQUIRED PATHS "${_core_sdk_prefix}/third-party/SDL3" NO_DEFAULT_PATH)
 if(UNIX)
     find_dependency(Threads)
 endif()
 
-get_filename_component(_core_sdk_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 if(WIN32)
     set(_core_sdk_library "${_core_sdk_prefix}/lib/@CORE_TARGET@.lib")
 else()
@@ -14,7 +15,7 @@ if(NOT TARGET @PROJECT_NAMESPACE@::Core)
     add_library(@PROJECT_NAMESPACE@::Core STATIC IMPORTED)
     set_target_properties(@PROJECT_NAMESPACE@::Core PROPERTIES
         IMPORTED_LOCATION "${_core_sdk_library}"
-        INTERFACE_COMPILE_DEFINITIONS CORE_STATIC
+        INTERFACE_COMPILE_DEFINITIONS KEIRE_STATIC
         INTERFACE_COMPILE_FEATURES cxx_std_20
         INTERFACE_INCLUDE_DIRECTORIES "${_core_sdk_prefix}/include;${_core_sdk_prefix}/third-party"
     )
@@ -33,6 +34,8 @@ if(NOT TARGET @PROJECT_NAMESPACE@::Core)
         set_property(TARGET @PROJECT_NAMESPACE@::Core APPEND PROPERTY
             INTERFACE_LINK_LIBRARIES Threads::Threads)
     endif()
+    set_property(TARGET @PROJECT_NAMESPACE@::Core APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES SDL3::SDL3-static)
 endif()
 
 unset(_core_sdk_library)
