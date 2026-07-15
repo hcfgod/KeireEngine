@@ -109,7 +109,10 @@ namespace Keire
         constexpr Ref() noexcept = default;
         constexpr Ref(std::nullptr_t) noexcept {}
 
-        Ref(const Ref& other) noexcept : m_Instance(other.m_Instance), m_ControlBlock(other.m_ControlBlock) { Retain(); }
+        Ref(const Ref& other) noexcept : m_Instance(other.m_Instance), m_ControlBlock(other.m_ControlBlock)
+        {
+            Retain();
+        }
 
         template <typename U>
             requires(!std::same_as<T, U> && std::convertible_to<U*, T*>)

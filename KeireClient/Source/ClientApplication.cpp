@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -8,6 +9,11 @@
 
 namespace
 {
+    constexpr std::array ClientCommandLineOptions{
+        Keire::ApplicationCommandLineOption{"--config <path>", "Load a specific client configuration file."},
+        Keire::ApplicationCommandLineOption{"--smoke-window", "Create a window, pump several iterations, and exit."},
+    };
+
     struct CommandLine
     {
         std::filesystem::path ConfigurationPath = "Config/Client.json";
@@ -89,6 +95,11 @@ namespace
 
 namespace Keire
 {
+    ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
+    {
+        return {"[--config <path>] [--smoke-window]", ClientCommandLineOptions};
+    }
+
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
     {
         const auto commandLine = ParseCommandLine(arguments);

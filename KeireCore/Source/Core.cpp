@@ -2,5 +2,5 @@
 
 namespace Keire
 {
-const char* GetName() noexcept { return "KeireCore"; }
+    const char* GetName() noexcept { return "KeireCore"; }
 } // namespace Keire

@@ -18,9 +18,9 @@ c_string_escape() {
     character="${value:0:1}"
     value="${value:1}"
     case "$character" in
-      \\) output+='\\\\' ;;
-      \") output+='\\"' ;;
-      $'\t') output+='\\t' ;;
+      \\) output+='\\' ;;
+      \") output+='\"' ;;
+      $'\t') output+='\t' ;;
       *)
         printf -v code '%d' "'$character"
         if ((code < 32 || code == 127)); then

@@ -33,26 +33,26 @@
 
 namespace Keire
 {
-const BuildInfo& GetBuildInfo() noexcept
-{
-    static constexpr BuildInfo Info{KEIRE_BUILD_PROJECT_NAME,  KEIRE_BUILD_PROJECT_VERSION, KEIRE_BUILD_GIT_COMMIT,
-                                    KEIRE_BUILD_CONFIGURATION, KEIRE_BUILD_COMPILER,        KEIRE_BUILD_PLATFORM,
-                                    KEIRE_BUILD_ARCHITECTURE,  KEIRE_BUILD_GIT_DIRTY};
-    return Info;
-}
-
-std::string GetVersionString()
-{
-    const auto& info = GetBuildInfo();
-    const auto commitLength = std::min<std::size_t>(12, info.GitCommit.size());
-    std::ostringstream stream;
-    stream << info.Version << " (" << info.GitCommit.substr(0, commitLength);
-    if (info.Dirty)
+    const BuildInfo& GetBuildInfo() noexcept
     {
-        stream << "-dirty";
+        static constexpr BuildInfo Info{KEIRE_BUILD_PROJECT_NAME,  KEIRE_BUILD_PROJECT_VERSION, KEIRE_BUILD_GIT_COMMIT,
+                                        KEIRE_BUILD_CONFIGURATION, KEIRE_BUILD_COMPILER,        KEIRE_BUILD_PLATFORM,
+                                        KEIRE_BUILD_ARCHITECTURE,  KEIRE_BUILD_GIT_DIRTY};
+        return Info;
     }
-    stream << ", " << info.Configuration << ", " << info.Compiler << ", " << info.Platform << ' ' << info.Architecture
-           << ')';
-    return stream.str();
-}
+
+    std::string GetVersionString()
+    {
+        const auto& info = GetBuildInfo();
+        const auto commitLength = std::min<std::size_t>(12, info.GitCommit.size());
+        std::ostringstream stream;
+        stream << info.Version << " (" << info.GitCommit.substr(0, commitLength);
+        if (info.Dirty)
+        {
+            stream << "-dirty";
+        }
+        stream << ", " << info.Configuration << ", " << info.Compiler << ", " << info.Platform << ' '
+               << info.Architecture << ')';
+        return stream.str();
+    }
 } // namespace Keire

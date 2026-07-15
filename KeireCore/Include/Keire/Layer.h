@@ -60,6 +60,10 @@ namespace Keire
         void Listen(std::function<EventFlow(const std::remove_cvref_t<T>&)> callback,
                     const EventPriority priority = EventPriorities::Normal)
         {
+            if (m_Detaching)
+            {
+                return;
+            }
             m_Subscriptions.push_back(EventSystem()->Subscribe<T>(std::move(callback), priority));
         }
 
@@ -74,6 +78,7 @@ namespace Keire
 
         std::string m_Name;
         Application* m_Application = nullptr;
+        bool m_Detaching = false;
         std::vector<EventSubscription> m_Subscriptions;
     };
 

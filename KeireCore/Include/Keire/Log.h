@@ -36,11 +36,11 @@ namespace Keire
         std::size_t MaxFiles = 3;
         bool EnableConsole = true;
         LogLevel Level =
-    #if defined(KEIRE_LOG_DEFAULT_TRACE)
+#if defined(KEIRE_LOG_DEFAULT_TRACE)
             LogLevel::Trace;
-    #else
+#else
             LogLevel::Info;
-    #endif
+#endif
 
         bool operator==(const LogConfig&) const = default;
     };

@@ -6,18 +6,18 @@
 
 namespace
 {
-class ConsumerSession final : public Keire::RefCounted
-{
-  public:
-    explicit ConsumerSession(std::string version) : Version(std::move(version)) {}
+    class ConsumerSession final : public Keire::RefCounted
+    {
+      public:
+        explicit ConsumerSession(std::string version) : Version(std::move(version)) {}
 
-    std::string Version;
-};
+        std::string Version;
+    };
 
-struct ConsumerEvent
-{
-    int Value = 0;
-};
+    struct ConsumerEvent
+    {
+        int Value = 0;
+    };
 } // namespace
 
 int main(const int argc, char* argv[])

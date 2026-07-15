@@ -9,27 +9,27 @@
 
 namespace
 {
-class TemporaryConfiguration
-{
-  public:
-    explicit TemporaryConfiguration(const std::string& contents)
+    class TemporaryConfiguration
     {
-        static std::atomic<unsigned> sequence = 0;
-        m_Path = std::filesystem::temp_directory_path() /
-                 ("keire-window-config-" + std::to_string(sequence.fetch_add(1)) + ".json");
-        std::ofstream stream(m_Path, std::ios::binary);
-        stream.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-    }
-    ~TemporaryConfiguration()
-    {
-        std::error_code error;
-        std::filesystem::remove(m_Path, error);
-    }
-    [[nodiscard]] const std::filesystem::path& Path() const noexcept { return m_Path; }
+      public:
+        explicit TemporaryConfiguration(const std::string& contents)
+        {
+            static std::atomic<unsigned> sequence = 0;
+            m_Path = std::filesystem::temp_directory_path() /
+                     ("keire-window-config-" + std::to_string(sequence.fetch_add(1)) + ".json");
+            std::ofstream stream(m_Path, std::ios::binary);
+            stream.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+        }
+        ~TemporaryConfiguration()
+        {
+            std::error_code error;
+            std::filesystem::remove(m_Path, error);
+        }
+        [[nodiscard]] const std::filesystem::path& Path() const noexcept { return m_Path; }
 
-  private:
-    std::filesystem::path m_Path;
-};
+      private:
+        std::filesystem::path m_Path;
+    };
 } // namespace
 
 TEST_CASE("Window configuration accepts complete, partial, and Unicode documents")

@@ -15,5 +15,5 @@
 
 namespace Keire
 {
-KEIRE_API const char* GetName() noexcept;
+    KEIRE_API const char* GetName() noexcept;
 }

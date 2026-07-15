@@ -64,7 +64,7 @@ Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json')) "Public depende
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {
-    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\Ref.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Application.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\EntryPoint.h", "include\Core\Event.h", "include\Core\Layer.h", "include\Core\Ref.h", "include\Core\Time.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
@@ -88,7 +88,7 @@ try {
         "TESTS_TARGET=IdentityFixtureTests", "TESTS_DIRECTORY=IdentityFixtureTests", "ARTIFACT_PREFIX=identityfixture", "REPOSITORY_SLUG=example/identity-fixture"
     )
     [IO.File]::WriteAllLines((Join-Path $identityFixture "Config\Project.conf"), $identityConfig, [Text.UTF8Encoding]::new($false))
-    [IO.File]::WriteAllText((Join-Path $identityFixture ".gitignore"), "/Build/`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $identityFixture ".gitignore"), "/Build/`n.ninja_lock`n", [Text.UTF8Encoding]::new($false))
     & git -C $identityFixture init --quiet
     & git -C $identityFixture config user.email "scripts@example.invalid"
     & git -C $identityFixture config user.name "Script Tests"
@@ -102,6 +102,9 @@ try {
     Assert-True ($firstIdentity.Contains('#define KEIRE_BUILD_PROJECT_NAME "Quoted \"Kéire\" \\\\ Client"')) "C string identity escaping"
     Assert-True ($firstIdentity.Contains("#define KEIRE_BUILD_GIT_COMMIT `"$firstCommit`"")) "Clean Git identity"
     Assert-True ($firstIdentity.Contains("#define KEIRE_BUILD_GIT_DIRTY false")) "Clean Git dirty state"
+    New-Item -ItemType File -Force (Join-Path $identityFixture ".ninja_lock") | Out-Null
+    & (Join-Path $identityFixture "Scripts\Windows\build-info.ps1")
+    Assert-True (([IO.File]::ReadAllText($identityHeader)).Contains("#define KEIRE_BUILD_GIT_DIRTY false")) "Ignored Ninja lock dirty state"
     $firstWriteTime = [IO.File]::GetLastWriteTimeUtc($identityHeader)
     Start-Sleep -Milliseconds 1100
     & (Join-Path $identityFixture "Scripts\Windows\build-info.ps1")
@@ -129,7 +132,7 @@ try {
     $clientDirectory = $project.CLIENT_DIRECTORY
     $testsDirectory = $project.TESTS_DIRECTORY
     $projectNamespace = $project.PROJECT_NAMESPACE
-    foreach ($directory in @("Scripts\Windows", "Config", "Examples\Consumer", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
+    foreach ($directory in @("Scripts\Windows", "Config", "Examples\Consumer", "Examples\ManagedConsumer", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
         New-Item -ItemType Directory -Force (Join-Path $fixture $directory) | Out-Null
     }
     Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "rename.ps1"), (Join-Path $Windows "clean.ps1"), (Join-Path $Windows "doctor.ps1") (Join-Path $fixture "Scripts\Windows")
@@ -138,6 +141,7 @@ try {
     Copy-Item (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") (Join-Path $fixture "Config\PackageConfig.cmake.in")
     Copy-Item (Join-Path (Get-RepositoryRoot) "premake5.lua") (Join-Path $fixture "premake5.lua")
     Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\Consumer\CMakeLists.txt"), (Join-Path (Get-RepositoryRoot) "Examples\Consumer\Main.cpp") (Join-Path $fixture "Examples\Consumer")
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Examples\ManagedConsumer\CMakeLists.txt"), (Join-Path (Get-RepositoryRoot) "Examples\ManagedConsumer\ClientApplication.cpp") (Join-Path $fixture "Examples\ManagedConsumer")
     Set-Content (Join-Path $fixture "$coreDirectory\Include\$projectNamespace\Core.h") @"
 #ifndef $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H
 #define $($project.PROJECT_MACRO_PREFIX)_CORE_CORE_H
@@ -179,6 +183,9 @@ namespace $projectNamespace { class Log; }
     $renamedConsumer = Get-Content (Join-Path $fixture "Examples\Consumer\CMakeLists.txt") -Raw
     Assert-True ($renamedConsumer.Contains("find_package(ScriptFixture CONFIG REQUIRED)")) "Renamed CMake package identity"
     Assert-True ($renamedConsumer.Contains("ScriptFixture::Core")) "Renamed CMake imported target"
+    $renamedManagedConsumer = Get-Content (Join-Path $fixture "Examples\ManagedConsumer\CMakeLists.txt") -Raw
+    Assert-True ($renamedManagedConsumer.Contains("find_package(ScriptFixture CONFIG REQUIRED)")) "Renamed managed CMake package identity"
+    Assert-True ($renamedManagedConsumer.Contains("ScriptFixture::Core")) "Renamed managed CMake imported target"
     Assert-True ((Get-Content (Join-Path $fixture "Config\PackageConfig.cmake.in") -Raw).Contains("@PROJECT_NAMESPACE@::Core")) "Generic package template preservation"
     Assert-True ($renamed.Contains("PROJECT_DISPLAY_NAME=$unicodeDisplayName")) "UTF-8 display name preservation"
     Assert-True ((Get-Content (Join-Path $fixture "README.md") -Raw).Contains("dirty")) "Pre-existing edit preservation"

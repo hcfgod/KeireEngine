@@ -5,6 +5,7 @@
 #include <exception>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <variant>
 
@@ -20,7 +21,8 @@ namespace Keire
             Stopped
         };
 
-        explicit Impl(ApplicationSpecification value) : Specification(std::move(value))
+        explicit Impl(ApplicationSpecification value)
+            : Specification(std::move(value)), OwnerThread(std::this_thread::get_id())
         {
             if (Specification.TargetFrameRate > 1000)
             {
@@ -35,6 +37,7 @@ namespace Keire
         static constexpr int NoExitRequested = std::numeric_limits<int>::min();
 
         ApplicationSpecification Specification;
+        std::thread::id OwnerThread;
         State RuntimeState = State::Constructed;
         std::atomic<int> ExitCode{NoExitRequested};
         Ref<EventBus> EventSystem;
@@ -61,6 +64,7 @@ namespace Keire
 
     int Application::Run()
     {
+        RequireOwnerThread("Run");
         if (m_Impl->RuntimeState != Impl::State::Constructed)
         {
             throw std::logic_error("Application::Run may be called exactly once.");
@@ -82,8 +86,9 @@ namespace Keire
             m_Impl->Clock = std::make_unique<Time>(m_Impl->Specification.Timing);
             m_Impl->Windowing = CreateRef<WindowSystem>();
             m_Impl->PrimaryWindow = m_Impl->Windowing->CreateWindow(m_Impl->Specification.MainWindow);
-            m_Impl->LayerListener = m_Impl->EventSystem->SubscribeAny(
-                [this](const EventView& event) { return m_Impl->LayerSystem->Dispatch(event); }, EventPriorities::Normal);
+            m_Impl->LayerListener = m_Impl->EventSystem->SubscribeAny([this](const EventView& event)
+                                                                      { return m_Impl->LayerSystem->Dispatch(event); },
+                                                                      EventPriorities::Normal);
 
             m_Impl->LayerSystem->Activate();
             OnInitialize();
@@ -227,6 +232,15 @@ namespace Keire
     Ref<Window> Application::MainWindow() const noexcept { return m_Impl->PrimaryWindow; }
 
     const ApplicationSpecification& Application::Specification() const noexcept { return m_Impl->Specification; }
+
+    void Application::RequireOwnerThread(const char* operation) const
+    {
+        if (std::this_thread::get_id() != m_Impl->OwnerThread)
+        {
+            throw std::logic_error(std::string("Application::") + operation +
+                                   " must be called on the application construction thread.");
+        }
+    }
 
     bool Application::CanModifyLayers() const noexcept { return m_Impl->RuntimeState != Impl::State::Stopped; }
 

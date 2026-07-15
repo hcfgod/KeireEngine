@@ -72,7 +72,10 @@ namespace Keire
         double m_Seconds = 0.0;
     };
 
-    [[nodiscard]] constexpr TimeStep operator*(const double scalar, const TimeStep step) noexcept { return step * scalar; }
+    [[nodiscard]] constexpr TimeStep operator*(const double scalar, const TimeStep step) noexcept
+    {
+        return step * scalar;
+    }
 
     struct TimeSpecification
     {

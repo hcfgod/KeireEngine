@@ -12,21 +12,21 @@
 
 namespace
 {
-struct TestEvent
-{
-    int Value = 0;
-};
+    struct TestEvent
+    {
+        int Value = 0;
+    };
 
-struct ProducerEvent
-{
-    std::size_t Producer = 0;
-    std::size_t Sequence = 0;
-};
+    struct ProducerEvent
+    {
+        std::size_t Producer = 0;
+        std::size_t Sequence = 0;
+    };
 
-struct MoveOnlyEvent
-{
-    std::unique_ptr<int> Value;
-};
+    struct MoveOnlyEvent
+    {
+        std::unique_ptr<int> Value;
+    };
 } // namespace
 
 TEST_CASE("EventBus merges typed and generic listeners by priority and stops handled propagation")

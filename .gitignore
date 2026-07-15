@@ -8,6 +8,7 @@ Build/
 Artifacts/
 Logs/
 .ninja_deps
+.ninja_lock
 .ninja_log
 __pycache__/
 *.pyc

@@ -15,7 +15,7 @@ $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $sta
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
+New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
@@ -30,6 +30,7 @@ if (-not (Test-Path (Join-Path $sdlInstall "lib\SDL3-static.lib"))) { throw "Pac
 Copy-Item "$sdlInstall\*" "$stage\third-party\SDL3\" -Recurse
 Copy-Item "$Root\README.md", "$Root\LICENSE.txt", "$Root\THIRD_PARTY_NOTICES.md" $stage
 Copy-Item "$Root\Examples\Consumer\*" "$stage\examples\consumer\" -Recurse
+Copy-Item "$Root\Examples\ManagedConsumer\*" "$stage\examples\managed-consumer\" -Recurse
 $packageConfig = [IO.File]::ReadAllText((Join-Path $Root "Config\PackageConfig.cmake.in"))
 $packageConfig = $packageConfig.Replace("@CORE_TARGET@", $Project.CORE_TARGET).Replace("@PROJECT_NAMESPACE@", $Project.PROJECT_NAMESPACE).Replace("@PACKAGE_CONFIGURATION@", $Configuration)
 [IO.File]::WriteAllText((Join-Path $stage "lib\cmake\$($Project.PROJECT_IDENTIFIER)\$($Project.PROJECT_IDENTIFIER)Config.cmake"), $packageConfig, [Text.UTF8Encoding]::new($false))
@@ -96,6 +97,29 @@ try {
     Push-Location $validationRoot
     try { & $consumerExe (Join-Path $sdkRoot "examples\consumer\Client.json"); if ($LASTEXITCODE -ne 0) { throw "Extracted SDK consumer failed with exit code $LASTEXITCODE." } }
     finally { Pop-Location }
+
+    $managedSource = Join-Path $sdkRoot "examples\managed-consumer\ClientApplication.cpp"
+    $managedExe = Join-Path $validationRoot "managed-consumer.exe"
+    $managedObject = Join-Path $validationRoot "managed-consumer.obj"
+    if ($Toolset -eq "msc") {
+        & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
+            "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $managedSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
+            user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
+            "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
+    }
+    else {
+        & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
+            "-I$(Join-Path $sdkRoot 'third-party')" $managedSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
+            -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $managedExe
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Managed SDK consumer compilation failed with exit code $LASTEXITCODE." }
+    $managedHelp = (& $managedExe --help) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or -not $managedHelp.Contains("--managed-smoke")) { throw "Managed SDK consumer help validation failed." }
+    & $managedExe --managed-smoke
+    if ($LASTEXITCODE -ne 0) { throw "Managed SDK consumer failed with exit code $LASTEXITCODE." }
+
     $cmakeBuild = Join-Path $validationRoot "cmake-build"
     & $CMake -S (Join-Path $sdkRoot "examples\consumer") -B $cmakeBuild "-DCMAKE_PREFIX_PATH=$sdkRoot"
     if ($LASTEXITCODE -ne 0) { throw "SDK CMake configuration failed with exit code $LASTEXITCODE." }
@@ -105,6 +129,16 @@ try {
     if (-not $cmakeConsumer) { throw "SDK CMake consumer executable was not produced." }
     & $cmakeConsumer.FullName (Join-Path $sdkRoot "examples\consumer\Client.json")
     if ($LASTEXITCODE -ne 0) { throw "SDK CMake consumer failed with exit code $LASTEXITCODE." }
+
+    $managedCmakeBuild = Join-Path $validationRoot "managed-cmake-build"
+    & $CMake -S (Join-Path $sdkRoot "examples\managed-consumer") -B $managedCmakeBuild "-DCMAKE_PREFIX_PATH=$sdkRoot"
+    if ($LASTEXITCODE -ne 0) { throw "Managed SDK CMake configuration failed with exit code $LASTEXITCODE." }
+    & $CMake --build $managedCmakeBuild --config Release
+    if ($LASTEXITCODE -ne 0) { throw "Managed SDK CMake build failed with exit code $LASTEXITCODE." }
+    $managedCmakeConsumer = Get-ChildItem $managedCmakeBuild -Filter "ManagedSdkConsumer.exe" -Recurse | Select-Object -First 1
+    if (-not $managedCmakeConsumer) { throw "Managed SDK CMake consumer executable was not produced." }
+    & $managedCmakeConsumer.FullName --managed-smoke
+    if ($LASTEXITCODE -ne 0) { throw "Managed SDK CMake consumer failed with exit code $LASTEXITCODE." }
 }
 finally {
     Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue

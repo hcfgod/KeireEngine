@@ -61,6 +61,7 @@ namespace Keire
         friend class LayerStack;
         class Impl;
 
+        void RequireOwnerThread(const char* operation) const;
         [[nodiscard]] bool CanModifyLayers() const noexcept;
         bool DispatchWindowEvent(const WindowEvent& event);
         void ShutdownRuntime(bool initialized) noexcept;

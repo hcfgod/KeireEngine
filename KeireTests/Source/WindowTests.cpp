@@ -10,48 +10,48 @@
 
 namespace
 {
-void UseDummyVideoDriver()
-{
-#if defined(_WIN32)
-    REQUIRE(_putenv_s("SDL_VIDEODRIVER", "dummy") == 0);
-#else
-    REQUIRE(setenv("SDL_VIDEODRIVER", "dummy", 1) == 0);
-#endif
-    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
-}
-
-Keire::WindowSpecification HiddenSpecification(const char* title)
-{
-    Keire::WindowSpecification specification;
-    specification.Title = title;
-    specification.Visible = false;
-    specification.HighPixelDensity = true;
-    return specification;
-}
-
-SDL_WindowID OnlyNativeWindowId()
-{
-    int count = 0;
-    SDL_Window** windows = SDL_GetWindows(&count);
-    REQUIRE(windows != nullptr);
-    REQUIRE(count == 1);
-    const auto id = SDL_GetWindowID(windows[0]);
-    SDL_free(windows);
-    return id;
-}
-
-template <typename T> std::optional<T> PollFor(const Keire::Ref<Keire::WindowSystem>& system)
-{
-    for (int iteration = 0; iteration < 64; ++iteration)
+    void UseDummyVideoDriver()
     {
-        auto event = system->PollEvent();
-        if (!event)
-            return std::nullopt;
-        if (const auto* typed = std::get_if<T>(&*event))
-            return *typed;
+#if defined(_WIN32)
+        REQUIRE(_putenv_s("SDL_VIDEODRIVER", "dummy") == 0);
+#else
+        REQUIRE(setenv("SDL_VIDEODRIVER", "dummy", 1) == 0);
+#endif
+        REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
     }
-    return std::nullopt;
-}
+
+    Keire::WindowSpecification HiddenSpecification(const char* title)
+    {
+        Keire::WindowSpecification specification;
+        specification.Title = title;
+        specification.Visible = false;
+        specification.HighPixelDensity = true;
+        return specification;
+    }
+
+    SDL_WindowID OnlyNativeWindowId()
+    {
+        int count = 0;
+        SDL_Window** windows = SDL_GetWindows(&count);
+        REQUIRE(windows != nullptr);
+        REQUIRE(count == 1);
+        const auto id = SDL_GetWindowID(windows[0]);
+        SDL_free(windows);
+        return id;
+    }
+
+    template <typename T> std::optional<T> PollFor(const Keire::Ref<Keire::WindowSystem>& system)
+    {
+        for (int iteration = 0; iteration < 64; ++iteration)
+        {
+            auto event = system->PollEvent();
+            if (!event)
+                return std::nullopt;
+            if (const auto* typed = std::get_if<T>(&*event))
+                return *typed;
+        }
+        return std::nullopt;
+    }
 } // namespace
 
 TEST_CASE("WindowSystem initialization failures retain SDL diagnostics")

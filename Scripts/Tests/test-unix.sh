@@ -67,7 +67,7 @@ assert_equal "$(resolve_llvm_tool llvm-cov clang++)" "$llvm_fixture/llvm-cov-18"
 PATH="$old_path"; rm -rf "$llvm_fixture"
 
 package_stage="$(mktemp -d)"
-for path in bin/Client lib/libCore.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/Ref.h include/Core/Window.h include/Core/WindowConfig.h examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
+for path in bin/Client lib/libCore.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Window.h include/Core/WindowConfig.h examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 assert_true validate_package_stage "$package_stage" Client Core Core
@@ -93,7 +93,7 @@ TESTS_DIRECTORY=IdentityFixtureTests
 ARTIFACT_PREFIX=identityfixture
 REPOSITORY_SLUG=example/identity-fixture
 IDENTITY_CONFIG
-printf '%s\n' /Build/ > "$identity_fixture/.gitignore"
+printf '%s\n' /Build/ .ninja_lock > "$identity_fixture/.gitignore"
 git -C "$identity_fixture" init --quiet
 git -C "$identity_fixture" config user.email scripts@example.invalid
 git -C "$identity_fixture" config user.name 'Script Tests'
@@ -105,6 +105,9 @@ identity_header="$identity_fixture/Build/Generated/IdentityFixture/BuildInfo.gen
 assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_VERSION "1.2.3-alpha.1+build.5"' "$identity_header"
 assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_NAME "Quoted \"Kéire\" \\\\ Client"' "$identity_header"
 assert_true grep -Fq "#define KEIRE_BUILD_GIT_COMMIT \"$first_commit\"" "$identity_header"
+assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
+touch "$identity_fixture/.ninja_lock"
+bash "$identity_fixture/Scripts/Unix/build-info.sh"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
 touch "$identity_fixture/Build/identity-marker"
 sleep 1
@@ -128,13 +131,14 @@ mkdir -p "$fixture/archive"
 printf '%s\n' premake > "$fixture/archive/premake5"
 chmod 0644 "$fixture/archive/premake5"
 assert_equal "$(find_premake_binary "$fixture/archive")" "$fixture/archive/premake5" 'non-executable Premake discovery'
-mkdir -p "$fixture/Scripts/Unix" "$fixture/Config" "$fixture/Examples/Consumer" "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$fixture/$CORE_DIRECTORY/Source" "$fixture/$CLIENT_DIRECTORY/Source" "$fixture/$TESTS_DIRECTORY/Source" "$fixture/Vendor" "$fixture/Build/Bin"
+mkdir -p "$fixture/Scripts/Unix" "$fixture/Config" "$fixture/Examples/Consumer" "$fixture/Examples/ManagedConsumer" "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$fixture/$CORE_DIRECTORY/Source" "$fixture/$CLIENT_DIRECTORY/Source" "$fixture/$TESTS_DIRECTORY/Source" "$fixture/Vendor" "$fixture/Build/Bin"
 cp "$ROOT/Scripts/Unix/common.sh" "$ROOT/Scripts/Unix/rename.sh" "$ROOT/Scripts/Unix/clean.sh" "$fixture/Scripts/Unix/"
 cp "$ROOT/Config/Project.conf" "$fixture/Config/Project.conf"
 cp "$ROOT/Config/Client.json" "$fixture/Config/Client.json"
 cp "$ROOT/Config/PackageConfig.cmake.in" "$fixture/Config/PackageConfig.cmake.in"
 cp "$ROOT/premake5.lua" "$fixture/premake5.lua"
 cp "$ROOT/Examples/Consumer/CMakeLists.txt" "$ROOT/Examples/Consumer/Main.cpp" "$fixture/Examples/Consumer/"
+cp "$ROOT/Examples/ManagedConsumer/CMakeLists.txt" "$ROOT/Examples/ManagedConsumer/ClientApplication.cpp" "$fixture/Examples/ManagedConsumer/"
 printf '%s\n' "#ifndef ${PROJECT_MACRO_PREFIX}_CORE_CORE_H" "#define ${PROJECT_MACRO_PREFIX}_CORE_CORE_H" "namespace $PROJECT_NAMESPACE { const char* GetName(); }" '#endif' > "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE/Core.h"
 printf '%s\n' "#ifndef ${PROJECT_MACRO_PREFIX}_CORE_LOG_H" "#define ${PROJECT_MACRO_PREFIX}_CORE_LOG_H" "namespace $PROJECT_NAMESPACE { class Log; }" '#endif' > "$fixture/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE/Log.h"
 for source in "$fixture/$CORE_DIRECTORY/Source/Library.cpp" "$fixture/$CLIENT_DIRECTORY/Source/Main.cpp" "$fixture/$TESTS_DIRECTORY/Source/Main.cpp"; do
@@ -161,6 +165,8 @@ assert_true grep -q "^PROJECT_VERSION=$PROJECT_VERSION$" "$fixture/Config/Projec
 assert_true grep -Fq 'valid Semantic Version 2.0.0' "$fixture/premake5.lua"
 assert_true grep -q 'find_package(ScriptFixture CONFIG REQUIRED)' "$fixture/Examples/Consumer/CMakeLists.txt"
 assert_true grep -q 'ScriptFixture::Core' "$fixture/Examples/Consumer/CMakeLists.txt"
+assert_true grep -q 'find_package(ScriptFixture CONFIG REQUIRED)' "$fixture/Examples/ManagedConsumer/CMakeLists.txt"
+assert_true grep -q 'ScriptFixture::Core' "$fixture/Examples/ManagedConsumer/CMakeLists.txt"
 assert_true grep -q '@PROJECT_NAMESPACE@::Core' "$fixture/Config/PackageConfig.cmake.in"
 assert_true grep -Fq 'Scripts/Tests Core.log Client.log' "$fixture/README.md"
 assert_true test -f "$fixture/Config/Client.json"

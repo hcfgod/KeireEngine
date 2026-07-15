@@ -117,9 +117,19 @@ KeireClient accepts `--config <path>` and `--smoke-window`. The default `Config/
 
 ## Application, Layers, Events, And Time
 
-`Keire::Application` owns logging, a standalone `EventBus`, `Time`, `WindowSystem`, the primary window, and a dedicated `LayerStack`. KeireCore supplies `main`, handles dependency-free help/version commands, owns the top-level exception boundary and application lifetime, and calls `Run()`. The client implements `CreateApplication(const ApplicationCommandLineArguments&)` and returns its application subclass. The stack owns layer lifetimes, overlay partitioning, attachment, detachment, deferred structural changes, and traversal. Access it through `Application::Layers()`; the `PushLayer`, `PushOverlay`, and `RemoveLayer` application helpers remain as convenient delegates. Layers update bottom-to-top, receive events top-to-bottom, and may safely request structural changes during callbacks; those changes apply at the next frame boundary.
+`Keire::Application` owns logging, a standalone `EventBus`, `Time`, `WindowSystem`, the primary window, and a dedicated `LayerStack`. KeireCore supplies `main`, handles dependency-free help/version commands, owns the top-level exception boundary and application lifetime, and calls `Run()`. A managed client supplies a static command-line description plus `CreateApplication(const ApplicationCommandLineArguments&)`; custom help remains client-owned without initializing engine services. The stack owns layer lifetimes, overlay partitioning, attachment, detachment, deferred structural changes, and traversal. Access it through `Application::Layers()`; the `PushLayer`, `PushOverlay`, and `RemoveLayer` application helpers remain as convenient delegates. The application construction thread owns `Run` and all layer mutations, while `RequestExit` remains safe from workers. Layers update bottom-to-top, receive events top-to-bottom, and may safely request structural changes during nested callbacks; those changes apply at the next frame boundary. Automatic layer subscriptions cannot be created during `OnDetach` and never survive detachment.
 
 ```cpp
+constexpr Keire::ApplicationCommandLineOption Options[]{
+    {"--profile <name>", "Select a runtime profile."},
+};
+
+Keire::ApplicationCommandLineDescription
+Keire::GetApplicationCommandLineDescription() noexcept
+{
+    return {"[--profile <name>]", Options};
+}
+
 std::unique_ptr<Keire::Application>
 Keire::CreateApplication(const Keire::ApplicationCommandLineArguments& arguments)
 {
@@ -196,7 +206,7 @@ Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke b
 
 CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in the `master` branch protection rules. Once enabled, the status job fails if any eligible security job is skipped or unsuccessful; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
 
-Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain KeireClient, KeireCore, public headers, spdlog headers, SDL's static archive/headers/official CMake configuration, complete licenses, a consumer, and a validated JSON build manifest containing SDL and JSON commits. Every package is extracted and linked into the checked-in C++20 consumer directly and through `find_package(Keire CONFIG REQUIRED)`; `Keire::Core` transitively links `SDL3::SDL3-static`. nlohmann/json headers are intentionally absent. SHA-256 files and separate symbol archives are included where available; Dist packages are stripped.
+Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain KeireClient, KeireCore, public headers, spdlog headers, SDL's static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build manifest containing SDL and JSON commits. Every package extracts and validates both a low-level consumer with its own `main` and a managed consumer whose `main` comes from KeireCore, using direct compiler invocation and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links `SDL3::SDL3-static`. nlohmann/json headers are intentionally absent. SHA-256 files and separate symbol archives are included where available; Dist packages are stripped.
 
 ## Troubleshooting
 

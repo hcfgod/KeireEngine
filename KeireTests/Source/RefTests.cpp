@@ -11,63 +11,63 @@
 
 namespace
 {
-struct RefProbe : Keire::RefCounted
-{
-    explicit RefProbe(std::atomic<int>& destructions) : Destructions(destructions) {}
-    ~RefProbe() override { Destructions.fetch_add(1); }
+    struct RefProbe : Keire::RefCounted
+    {
+        explicit RefProbe(std::atomic<int>& destructions) : Destructions(destructions) {}
+        ~RefProbe() override { Destructions.fetch_add(1); }
 
-    std::atomic<int>& Destructions;
-    int Value = 42;
-};
+        std::atomic<int>& Destructions;
+        int Value = 42;
+    };
 
-struct RefBase : Keire::RefCounted
-{
-    virtual int GetValue() const noexcept { return 1; }
-};
+    struct RefBase : Keire::RefCounted
+    {
+        virtual int GetValue() const noexcept { return 1; }
+    };
 
-struct RefDerived final : RefBase
-{
-    explicit RefDerived(std::atomic<int>& destructions) : Destructions(destructions) {}
-    ~RefDerived() override { Destructions.fetch_add(1); }
-    int GetValue() const noexcept override { return 2; }
+    struct RefDerived final : RefBase
+    {
+        explicit RefDerived(std::atomic<int>& destructions) : Destructions(destructions) {}
+        ~RefDerived() override { Destructions.fetch_add(1); }
+        int GetValue() const noexcept override { return 2; }
 
-    std::atomic<int>& Destructions;
-};
+        std::atomic<int>& Destructions;
+    };
 
-struct CycleNode final : Keire::RefCounted
-{
-    explicit CycleNode(std::atomic<int>& destructions) : Destructions(destructions) {}
-    ~CycleNode() override { Destructions.fetch_add(1); }
+    struct CycleNode final : Keire::RefCounted
+    {
+        explicit CycleNode(std::atomic<int>& destructions) : Destructions(destructions) {}
+        ~CycleNode() override { Destructions.fetch_add(1); }
 
-    std::atomic<int>& Destructions;
-    Keire::Ref<CycleNode> Child;
-    Keire::WeakRef<CycleNode> Parent;
-};
+        std::atomic<int>& Destructions;
+        Keire::Ref<CycleNode> Child;
+        Keire::WeakRef<CycleNode> Parent;
+    };
 
-struct ThrowingRef final : Keire::RefCounted
-{
-    ThrowingRef() { throw std::runtime_error("construction failed"); }
-};
+    struct ThrowingRef final : Keire::RefCounted
+    {
+        ThrowingRef() { throw std::runtime_error("construction failed"); }
+    };
 
-struct IncompleteRef;
+    struct IncompleteRef;
 
-struct IncompleteOwner
-{
-    ~IncompleteOwner();
+    struct IncompleteOwner
+    {
+        ~IncompleteOwner();
 
-    Keire::Ref<IncompleteRef> Strong;
-    Keire::WeakRef<IncompleteRef> Weak;
-};
+        Keire::Ref<IncompleteRef> Strong;
+        Keire::WeakRef<IncompleteRef> Weak;
+    };
 
-struct IncompleteRef final : Keire::RefCounted
-{
-};
+    struct IncompleteRef final : Keire::RefCounted
+    {
+    };
 
-IncompleteOwner::~IncompleteOwner() = default;
+    IncompleteOwner::~IncompleteOwner() = default;
 
-static_assert(!std::copy_constructible<Keire::RefCounted>);
-static_assert(!std::movable<Keire::RefCounted>);
-static_assert(!std::constructible_from<Keire::Ref<RefProbe>, RefProbe*>);
+    static_assert(!std::copy_constructible<Keire::RefCounted>);
+    static_assert(!std::movable<Keire::RefCounted>);
+    static_assert(!std::constructible_from<Keire::Ref<RefProbe>, RefProbe*>);
 } // namespace
 
 TEST_CASE("Ref supports null, copy, move, reset, and self-assignment")

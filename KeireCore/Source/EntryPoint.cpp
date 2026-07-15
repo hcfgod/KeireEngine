@@ -16,80 +16,96 @@
 
 namespace
 {
-void ConfigureConsoleEncoding() noexcept
-{
+    void ConfigureConsoleEncoding() noexcept
+    {
 #if defined(_WIN32)
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
 #endif
-}
-
-bool IsHelpArgument(const std::string_view argument) noexcept { return argument == "--help" || argument == "-h"; }
-
-bool IsVersionArgument(const std::string_view argument) noexcept { return argument == "--version" || argument == "-v"; }
-
-void PrintHelp(const std::string_view executable)
-{
-    std::printf("Usage: %.*s [--config <path>] [--smoke-window]\n\nOptions:\n"
-                "  -h, --help       Show this help without initializing engine services.\n"
-                "  -v, --version    Show build information without initializing engine services.\n"
-                "      --config     Load a specific client configuration file.\n"
-                "      --smoke-window  Create a window, pump several iterations, and exit.\n",
-                static_cast<int>(executable.size()), executable.data());
-}
-
-void PrintVersion()
-{
-    const auto& info = Keire::GetBuildInfo();
-    std::printf("%.*s %s\n", static_cast<int>(info.ProjectName.size()), info.ProjectName.data(),
-                Keire::GetVersionString().c_str());
-}
-
-std::optional<int> HandleInformationalCommand(const Keire::ApplicationCommandLineArguments& arguments)
-{
-    if (arguments.Size() == 2 && IsHelpArgument(arguments[1]))
-    {
-        PrintHelp(arguments.Executable());
-        return 0;
-    }
-    if (arguments.Size() == 2 && IsVersionArgument(arguments[1]))
-    {
-        PrintVersion();
-        return 0;
     }
 
-    for (std::size_t index = 1; index < arguments.Size(); ++index)
+    bool IsHelpArgument(const std::string_view argument) noexcept { return argument == "--help" || argument == "-h"; }
+
+    bool IsVersionArgument(const std::string_view argument) noexcept
     {
-        if (IsHelpArgument(arguments[index]) || IsVersionArgument(arguments[index]))
+        return argument == "--version" || argument == "-v";
+    }
+
+    void PrintOption(const std::string_view syntax, const std::string_view description)
+    {
+        std::printf("  %-22.*s %.*s\n", static_cast<int>(syntax.size()), syntax.data(),
+                    static_cast<int>(description.size()), description.data());
+    }
+
+    void PrintHelp(const std::string_view executable)
+    {
+        const auto client = Keire::GetApplicationCommandLineDescription();
+        std::printf("Usage: %.*s", static_cast<int>(executable.size()), executable.data());
+        if (!client.UsageSuffix.empty())
         {
-            throw Keire::CommandLineError("--help and --version must be used alone.");
+            std::printf(" %.*s", static_cast<int>(client.UsageSuffix.size()), client.UsageSuffix.data());
+        }
+        std::fputs("\n\nOptions:\n", stdout);
+        PrintOption("-h, --help", "Show this help without initializing engine services.");
+        PrintOption("-v, --version", "Show build information without initializing engine services.");
+        for (const auto& option : client.Options)
+        {
+            PrintOption(option.Syntax, option.Description);
         }
     }
-    return std::nullopt;
-}
+
+    void PrintVersion()
+    {
+        const auto& info = Keire::GetBuildInfo();
+        std::printf("%.*s %s\n", static_cast<int>(info.ProjectName.size()), info.ProjectName.data(),
+                    Keire::GetVersionString().c_str());
+    }
+
+    std::optional<int> HandleInformationalCommand(const Keire::ApplicationCommandLineArguments& arguments)
+    {
+        if (arguments.Size() == 2 && IsHelpArgument(arguments[1]))
+        {
+            PrintHelp(arguments.Executable());
+            return 0;
+        }
+        if (arguments.Size() == 2 && IsVersionArgument(arguments[1]))
+        {
+            PrintVersion();
+            return 0;
+        }
+
+        for (std::size_t index = 1; index < arguments.Size(); ++index)
+        {
+            if (IsHelpArgument(arguments[index]) || IsVersionArgument(arguments[index]))
+            {
+                throw Keire::CommandLineError("--help and --version must be used alone.");
+            }
+        }
+        return std::nullopt;
+    }
 } // namespace
 
 namespace Keire
 {
-ApplicationCommandLineArguments::ApplicationCommandLineArguments(const int count, char* const* values) noexcept
-    : m_Count(count > 0 && values ? static_cast<std::size_t>(count) : 0), m_Values(values)
-{
-}
-
-std::string_view ApplicationCommandLineArguments::operator[](const std::size_t index) const noexcept
-{
-    if (index >= m_Count || !m_Values[index])
+    ApplicationCommandLineArguments::ApplicationCommandLineArguments(const int count, char* const* values) noexcept
+        : m_Count(count > 0 && values ? static_cast<std::size_t>(count) : 0), m_Values(values)
     {
-        return {};
     }
-    return m_Values[index];
-}
 
-std::string_view ApplicationCommandLineArguments::Executable() const noexcept
-{
-    const auto executable = (*this)[0];
-    return executable.empty() ? std::string_view{"KeireClient"} : executable;
-}
+    std::string_view ApplicationCommandLineArguments::operator[](const std::size_t index) const noexcept
+    {
+        if (index >= m_Count || !m_Values[index])
+        {
+            return {};
+        }
+        return m_Values[index];
+    }
+
+    std::string_view ApplicationCommandLineArguments::Executable() const noexcept
+    {
+        const auto executable = (*this)[0];
+        return executable.empty() ? std::string_view{"KeireClient"} : executable;
+    }
 } // namespace Keire
 
 int main(const int argc, char* argv[])

@@ -10,6 +10,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 - Thread-safe factory-only `Ref`/`WeakRef` ownership with polymorphic conversion and race-safe weak locking.
 - Generated runtime build identity and dependency-free KeireClient help/version commands.
 - A canonical SDK consumer example and validated package-only CMake imported target.
+- A managed SDK consumer that links the KeireCore-owned entrypoint and validates the client factory contract.
 - Identity and dependency lock manifests.
 - Transactional full-template rename support.
 - Doctor, LLVM coverage, SDK package, and script regression commands.
@@ -26,6 +27,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 - Extracted layer ownership, overlay ordering, deferred mutations, traversal, and teardown into a dedicated public `LayerStack`; `Application` now delegates layer operations while orchestrating frame boundaries.
 - Moved the executable entrypoint, informational command handling, exception boundary, application lifetime, and `Run` invocation into KeireCore; KeireClient now supplies `CreateApplication`.
+- Moved client-specific help text into a static client command-line descriptor while retaining core-owned help/version handling.
 - Public KeireCore headers now use the `Keire/` include prefix and the clean `KEIRE_*` macro family.
 - Logging owns reference-counted private asynchronous state, supports console suppression, and makes detached handles safely inert after shutdown.
 - Build identity refreshes immediately before KeireCore compilation and includes tracked and untracked dirty state.
@@ -37,6 +39,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 ### Fixed
 
 - Release packaging now compiles and runs a standalone consumer from the extracted SDK archive.
+- Nested layer traversal now defers structural mutation until the outermost callback returns, and layer operations enforce the application construction thread.
+- Detaching layers cannot create automatic subscriptions, and native window registration rolls back partial resource acquisition.
+- Ninja's transient lock file no longer contaminates runtime build identity or package manifests.
 - Windows packaging supports Git repositories without a first commit, and vendor probes suppress expected native Git errors.
 - Linux coverage resolves `llvm-profdata` and `llvm-cov` from the selected Clang major version.
 - Logger handles no longer expose spdlog or standard-library ownership and lock types in the public API.

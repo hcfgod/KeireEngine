@@ -8,7 +8,7 @@
 namespace Keire::Detail
 {
     [[noreturn]] KEIRE_API void AssertionFailure(std::string_view expression, std::source_location location,
-                                             std::string_view message = {}) noexcept;
+                                                 std::string_view message = {}) noexcept;
 }
 
 #if defined(KEIRE_ASSERTIONS_ENABLED)

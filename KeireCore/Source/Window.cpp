@@ -5,7 +5,9 @@
 #include <SDL3/SDL.h>
 
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -17,6 +19,19 @@ namespace Keire
     {
         std::mutex ActiveSystemMutex;
         bool HasActiveSystem = false;
+
+        struct NativeWindowDeleter final
+        {
+            void operator()(SDL_Window* window) const noexcept
+            {
+                if (window)
+                {
+                    SDL_DestroyWindow(window);
+                }
+            }
+        };
+
+        using UniqueNativeWindow = std::unique_ptr<SDL_Window, NativeWindowDeleter>;
 
         std::string LastSdlError()
         {
@@ -61,7 +76,8 @@ namespace Keire
         class NativeWindow final : public Window
         {
           public:
-            NativeWindow(Ref<Impl> implementation, const WindowId id) : m_Implementation(std::move(implementation)), m_Id(id)
+            NativeWindow(Ref<Impl> implementation, const WindowId id)
+                : m_Implementation(std::move(implementation)), m_Id(id)
             {
             }
 
@@ -85,11 +101,20 @@ namespace Keire
                 return m_Implementation->GetLogicalSize(m_Id);
             }
 
-            [[nodiscard]] PixelExtent PixelSize() const noexcept override { return m_Implementation->GetPixelSize(m_Id); }
+            [[nodiscard]] PixelExtent PixelSize() const noexcept override
+            {
+                return m_Implementation->GetPixelSize(m_Id);
+            }
 
-            [[nodiscard]] WindowPosition Position() const noexcept override { return m_Implementation->GetPosition(m_Id); }
+            [[nodiscard]] WindowPosition Position() const noexcept override
+            {
+                return m_Implementation->GetPosition(m_Id);
+            }
 
-            [[nodiscard]] float DisplayScale() const noexcept override { return m_Implementation->GetDisplayScale(m_Id); }
+            [[nodiscard]] float DisplayScale() const noexcept override
+            {
+                return m_Implementation->GetDisplayScale(m_Id);
+            }
 
             [[nodiscard]] std::string Title() const override { return m_Implementation->GetTitle(m_Id); }
 
@@ -208,21 +233,22 @@ namespace Keire
             if (specification.Mode == WindowMode::BorderlessFullscreen)
                 flags |= SDL_WINDOW_FULLSCREEN;
 
-            SDL_Window* native = SDL_CreateWindow(specification.Title.c_str(), static_cast<int>(specification.Width),
-                                                  static_cast<int>(specification.Height), flags);
+            UniqueNativeWindow native(SDL_CreateWindow(specification.Title.c_str(),
+                                                       static_cast<int>(specification.Width),
+                                                       static_cast<int>(specification.Height), flags));
             if (!native)
             {
                 throw WindowError("SDL_CreateWindow", LastSdlError());
             }
 
             CachedWindow cached;
-            cached.Native = native;
+            cached.Native = native.get();
             cached.Specification = specification;
-            cached.LogicalSize = QueryLogicalSize(native);
-            cached.PixelSize = QueryPixelSize(native);
-            cached.Position = QueryPosition(native);
-            cached.DisplayScale = SDL_GetWindowDisplayScale(native);
-            const auto actualFlags = SDL_GetWindowFlags(native);
+            cached.LogicalSize = QueryLogicalSize(native.get());
+            cached.PixelSize = QueryPixelSize(native.get());
+            cached.Position = QueryPosition(native.get());
+            cached.DisplayScale = SDL_GetWindowDisplayScale(native.get());
+            const auto actualFlags = SDL_GetWindowFlags(native.get());
             cached.Focused = (actualFlags & SDL_WINDOW_INPUT_FOCUS) != 0;
             cached.Visible = (actualFlags & SDL_WINDOW_HIDDEN) == 0;
             cached.Minimized = (actualFlags & SDL_WINDOW_MINIMIZED) != 0;
@@ -231,23 +257,41 @@ namespace Keire
                 (actualFlags & SDL_WINDOW_FULLSCREEN) != 0 ? WindowMode::BorderlessFullscreen : WindowMode::Windowed;
             cached.Open = true;
 
-            const auto nativeId = SDL_GetWindowID(native);
+            const auto nativeId = SDL_GetWindowID(native.get());
             if (nativeId == 0)
             {
-                const auto diagnostic = LastSdlError();
-                SDL_DestroyWindow(native);
-                throw WindowError("SDL_GetWindowID", diagnostic);
+                throw WindowError("SDL_GetWindowID", LastSdlError());
             }
 
             cached.NativeId = nativeId;
             const WindowId id(m_NextWindowId++);
+            auto handle = CreateRef<NativeWindow>(self, id);
             {
                 std::scoped_lock lock(m_StateMutex);
-                m_Windows.emplace(id.Value(), std::move(cached));
-                m_NativeToWindow.emplace(nativeId, id.Value());
+                const auto [windowIterator, windowInserted] = m_Windows.emplace(id.Value(), std::move(cached));
+                if (!windowInserted)
+                {
+                    throw std::logic_error("Window registration produced a duplicate opaque window ID.");
+                }
+
+                try
+                {
+                    const auto [nativeIterator, nativeInserted] = m_NativeToWindow.emplace(nativeId, id.Value());
+                    (void)nativeIterator;
+                    if (!nativeInserted)
+                    {
+                        throw std::logic_error("Window registration produced a duplicate SDL window ID.");
+                    }
+                }
+                catch (...)
+                {
+                    m_Windows.erase(windowIterator);
+                    throw;
+                }
             }
 
-            return CreateRef<NativeWindow>(self, id);
+            (void)native.release();
+            return handle;
         }
 
         std::optional<WindowEvent> PollEvent()
@@ -288,71 +332,71 @@ namespace Keire
                 auto& window = iterator->second;
                 switch (event.type)
                 {
-                    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                        window.CloseRequested = true;
-                        return WindowCloseRequestedEvent{header};
-                    case SDL_EVENT_WINDOW_SHOWN:
-                        window.Visible = true;
-                        window.Specification.Visible = true;
-                        return WindowShownEvent{header};
-                    case SDL_EVENT_WINDOW_HIDDEN:
-                        window.Visible = false;
-                        window.Specification.Visible = false;
-                        return WindowHiddenEvent{header};
-                    case SDL_EVENT_WINDOW_MOVED:
-                        window.Position = {event.window.data1, event.window.data2};
-                        return WindowMovedEvent{header, window.Position};
-                    case SDL_EVENT_WINDOW_RESIZED:
-                        window.LogicalSize = ToLogicalExtent(event.window.data1, event.window.data2);
-                        window.Specification.Width = window.LogicalSize.Width;
-                        window.Specification.Height = window.LogicalSize.Height;
-                        return WindowResizedEvent{header, window.LogicalSize};
-                    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                        window.PixelSize = ToPixelExtent(event.window.data1, event.window.data2);
-                        return WindowPixelSizeChangedEvent{header, window.PixelSize};
-                    case SDL_EVENT_WINDOW_MINIMIZED:
-                        window.Minimized = true;
-                        window.Maximized = false;
-                        window.Specification.Maximized = false;
-                        return WindowMinimizedEvent{header};
-                    case SDL_EVENT_WINDOW_MAXIMIZED:
-                        window.Maximized = true;
-                        window.Minimized = false;
-                        window.Specification.Maximized = true;
-                        return WindowMaximizedEvent{header};
-                    case SDL_EVENT_WINDOW_RESTORED:
-                        window.Minimized = false;
-                        window.Maximized = false;
-                        window.Specification.Maximized = false;
-                        return WindowRestoredEvent{header};
-                    case SDL_EVENT_WINDOW_FOCUS_GAINED:
-                        window.Focused = true;
-                        return WindowFocusGainedEvent{header};
-                    case SDL_EVENT_WINDOW_FOCUS_LOST:
-                        window.Focused = false;
-                        return WindowFocusLostEvent{header};
-                    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
-                        window.Position = QueryPosition(window.Native);
-                        window.LogicalSize = QueryLogicalSize(window.Native);
-                        window.PixelSize = QueryPixelSize(window.Native);
-                        window.DisplayScale = SDL_GetWindowDisplayScale(window.Native);
-                        window.Specification.Width = window.LogicalSize.Width;
-                        window.Specification.Height = window.LogicalSize.Height;
-                        return WindowDisplayChangedEvent{header};
-                    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-                        window.DisplayScale = SDL_GetWindowDisplayScale(window.Native);
-                        window.PixelSize = QueryPixelSize(window.Native);
-                        return WindowDisplayScaleChangedEvent{header, window.DisplayScale};
-                    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
-                        window.Mode = WindowMode::BorderlessFullscreen;
-                        window.Specification.Mode = window.Mode;
-                        return WindowEnteredFullscreenEvent{header};
-                    case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
-                        window.Mode = WindowMode::Windowed;
-                        window.Specification.Mode = window.Mode;
-                        return WindowLeftFullscreenEvent{header};
-                    default:
-                        break;
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                    window.CloseRequested = true;
+                    return WindowCloseRequestedEvent{header};
+                case SDL_EVENT_WINDOW_SHOWN:
+                    window.Visible = true;
+                    window.Specification.Visible = true;
+                    return WindowShownEvent{header};
+                case SDL_EVENT_WINDOW_HIDDEN:
+                    window.Visible = false;
+                    window.Specification.Visible = false;
+                    return WindowHiddenEvent{header};
+                case SDL_EVENT_WINDOW_MOVED:
+                    window.Position = {event.window.data1, event.window.data2};
+                    return WindowMovedEvent{header, window.Position};
+                case SDL_EVENT_WINDOW_RESIZED:
+                    window.LogicalSize = ToLogicalExtent(event.window.data1, event.window.data2);
+                    window.Specification.Width = window.LogicalSize.Width;
+                    window.Specification.Height = window.LogicalSize.Height;
+                    return WindowResizedEvent{header, window.LogicalSize};
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    window.PixelSize = ToPixelExtent(event.window.data1, event.window.data2);
+                    return WindowPixelSizeChangedEvent{header, window.PixelSize};
+                case SDL_EVENT_WINDOW_MINIMIZED:
+                    window.Minimized = true;
+                    window.Maximized = false;
+                    window.Specification.Maximized = false;
+                    return WindowMinimizedEvent{header};
+                case SDL_EVENT_WINDOW_MAXIMIZED:
+                    window.Maximized = true;
+                    window.Minimized = false;
+                    window.Specification.Maximized = true;
+                    return WindowMaximizedEvent{header};
+                case SDL_EVENT_WINDOW_RESTORED:
+                    window.Minimized = false;
+                    window.Maximized = false;
+                    window.Specification.Maximized = false;
+                    return WindowRestoredEvent{header};
+                case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                    window.Focused = true;
+                    return WindowFocusGainedEvent{header};
+                case SDL_EVENT_WINDOW_FOCUS_LOST:
+                    window.Focused = false;
+                    return WindowFocusLostEvent{header};
+                case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                    window.Position = QueryPosition(window.Native);
+                    window.LogicalSize = QueryLogicalSize(window.Native);
+                    window.PixelSize = QueryPixelSize(window.Native);
+                    window.DisplayScale = SDL_GetWindowDisplayScale(window.Native);
+                    window.Specification.Width = window.LogicalSize.Width;
+                    window.Specification.Height = window.LogicalSize.Height;
+                    return WindowDisplayChangedEvent{header};
+                case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                    window.DisplayScale = SDL_GetWindowDisplayScale(window.Native);
+                    window.PixelSize = QueryPixelSize(window.Native);
+                    return WindowDisplayScaleChangedEvent{header, window.DisplayScale};
+                case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+                    window.Mode = WindowMode::BorderlessFullscreen;
+                    window.Specification.Mode = window.Mode;
+                    return WindowEnteredFullscreenEvent{header};
+                case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+                    window.Mode = WindowMode::Windowed;
+                    window.Specification.Mode = window.Mode;
+                    return WindowLeftFullscreenEvent{header};
+                default:
+                    break;
                 }
             }
             return std::nullopt;
@@ -686,11 +730,13 @@ namespace Keire
         }
         static LogicalExtent ToLogicalExtent(const int width, const int height) noexcept
         {
-            return {static_cast<std::uint32_t>(width > 0 ? width : 0), static_cast<std::uint32_t>(height > 0 ? height : 0)};
+            return {static_cast<std::uint32_t>(width > 0 ? width : 0),
+                    static_cast<std::uint32_t>(height > 0 ? height : 0)};
         }
         static PixelExtent ToPixelExtent(const int width, const int height) noexcept
         {
-            return {static_cast<std::uint32_t>(width > 0 ? width : 0), static_cast<std::uint32_t>(height > 0 ? height : 0)};
+            return {static_cast<std::uint32_t>(width > 0 ? width : 0),
+                    static_cast<std::uint32_t>(height > 0 ? height : 0)};
         }
         static PixelExtent QueryPixelSize(SDL_Window* window)
         {
