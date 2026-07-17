@@ -63,6 +63,8 @@ assert_false grep -q 'AddDearImGuiSources()' "$ROOT/KeireClient/premake5.lua"
 assert_false grep -q 'AddDearImGuiSources()' "$ROOT/KeireTests/premake5.lua"
 assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
 assert_false grep -R -E 'SDL3/|nlohmann/json|imgui' "$ROOT/KeireCore/Include"
+assert_true grep -q 'class KEIRE_API UiWorkspace' "$ROOT/KeireCore/Include/Keire/UiWorkspace.h"
+assert_true grep -q 'BuildFactoryLayout' "$ROOT/KeireClient/Source/ClientApplication.cpp"
 assert_true grep -q 'dear-imgui-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'IMGUI_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 security_workflow="$ROOT/.github/workflows/security.yml"
@@ -86,6 +88,7 @@ for path in bin/Client lib/libCore.a Config/Client.json include/Core/Core.h incl
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 : > "$package_stage/include/Core/Ui.h"
+: > "$package_stage/include/Core/UiWorkspace.h"
 assert_true validate_package_stage "$package_stage" Client Core Core
 rm "$package_stage/third-party/licenses/dear-imgui-LICENSE.txt"
 assert_false validate_package_stage "$package_stage" Client Core Core

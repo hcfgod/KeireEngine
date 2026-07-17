@@ -242,6 +242,98 @@ namespace
             return specification;
         }
     };
+
+    class WorkspaceUiLayer final : public Keire::Layer
+    {
+      public:
+        explicit WorkspaceUiLayer(const bool create) : Layer("WorkspaceUiLayer"), m_Create(create) {}
+
+      protected:
+        void OnAttach() override { m_Panel = Owner().GetUiWorkspace().RegisterPanel({"test.panel", "Test Panel"}); }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            auto& workspace = Owner().GetUiWorkspace();
+            if (m_Create)
+            {
+                CHECK(workspace.Layouts().size() == 1);
+                CHECK(workspace.Themes().size() == 3);
+                workspace.SaveLayoutAs("Focused Work");
+                auto theme = workspace.ThemeDefinition(workspace.ActiveTheme());
+                theme.Accent = {0.12F, 0.44F, 0.91F, 1.0F};
+                const auto id = workspace.SaveThemeAs("Test Theme", theme);
+                CHECK(workspace.ActiveTheme() == id);
+                m_Panel.SetVisible(false);
+            }
+            else
+            {
+                CHECK(workspace.Layouts().size() == 2);
+                CHECK(workspace.Themes().size() == 4);
+                CHECK(workspace.Layouts().back().Name == "Focused Work");
+                CHECK(workspace.Layouts().back().Active);
+                CHECK(workspace.Themes().back().Name == "Test Theme");
+                CHECK(workspace.Themes().back().Active);
+                CHECK_FALSE(m_Panel.Visible());
+                CHECK_THROWS_AS(workspace.DeleteLayout(Keire::UiLayoutId(1)), std::invalid_argument);
+                CHECK_THROWS_AS(workspace.UpdateTheme(Keire::UiThemeId(1), {}), std::invalid_argument);
+                CHECK_THROWS_AS(workspace.ShowImportLayoutDialog(), Keire::UiError);
+
+                std::atomic<bool> rejected{false};
+                std::thread worker(
+                    [&workspace, &rejected]
+                    {
+                        try
+                        {
+                            (void)workspace.Layouts();
+                        }
+                        catch (const std::logic_error&)
+                        {
+                            rejected.store(true, std::memory_order_release);
+                        }
+                    });
+                worker.join();
+                CHECK(rejected.load(std::memory_order_acquire));
+
+                const auto malformed = std::filesystem::temp_directory_path() / "keire-malformed-theme.keiretheme";
+                {
+                    std::ofstream output(malformed, std::ios::binary | std::ios::trunc);
+                    output
+                        << R"({"schemaVersion":1,"kind":"theme","name":"Bad","colors":{},"metrics":{},"unexpected":true})";
+                }
+                CHECK_THROWS_AS(workspace.ImportTheme(malformed), Keire::UiError);
+                std::filesystem::remove(malformed);
+            }
+
+            if (auto panel = ui.BeginPanel(m_Panel); panel)
+                ui.Text("Workspace panel");
+            Owner().RequestExit();
+        }
+
+      private:
+        Keire::UiPanelRegistration m_Panel;
+        bool m_Create = false;
+    };
+
+    class WorkspaceUiApplication final : public Keire::Application
+    {
+      public:
+        WorkspaceUiApplication(const std::filesystem::path& directory, const bool create)
+            : Application(BuildSpecification(directory))
+        {
+            (void)PushLayer(std::make_unique<WorkspaceUiLayer>(create));
+        }
+
+      private:
+        static Keire::ApplicationSpecification BuildSpecification(const std::filesystem::path& directory)
+        {
+            auto specification = UiSpecification("ui-workspace", Keire::UiMode::Headless);
+            specification.Ui.Workspace.Enabled = true;
+            specification.Ui.Workspace.DirectoryOverride = directory;
+            specification.Ui.Workspace.BuildFactoryLayout = [](Keire::UiLayoutBuilder& layout)
+            { layout.Dock("test.panel", layout.Root()); };
+            return specification;
+        }
+    };
 } // namespace
 
 TEST_CASE("Disabled UI preserves the existing application lifecycle")
@@ -320,4 +412,43 @@ TEST_CASE("Kéire owns bounded UI layout persistence")
                              layout.string(),
                          Keire::UiError);
     std::filesystem::remove(layout);
+}
+
+TEST_CASE("UI workspace persists named layouts, themes, and registered panel visibility")
+{
+    UseDummyVideoDriver();
+    const auto directory = std::filesystem::temp_directory_path() / "keire-ui-workspace-test";
+    std::filesystem::remove_all(directory);
+    {
+        WorkspaceUiApplication application(directory, true);
+        CHECK(application.Run() == 0);
+    }
+    CHECK(std::filesystem::exists(directory / "catalog.json"));
+    CHECK(std::filesystem::exists(directory / "session.keirelayout"));
+    CHECK(std::filesystem::exists(directory / "Layouts" / "100.keirelayout"));
+    CHECK(std::filesystem::exists(directory / "Themes" / "100.keiretheme"));
+    {
+        WorkspaceUiApplication application(directory, false);
+        CHECK(application.Run() == 0);
+    }
+    std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("UI workspace and legacy single-file persistence are mutually exclusive")
+{
+    UseDummyVideoDriver();
+    auto specification = UiSpecification("ui-workspace-conflict", Keire::UiMode::Headless);
+    specification.Ui.LayoutPath = "legacy.ini";
+    specification.Ui.Workspace.Enabled = true;
+
+    class ConflictingUiApplication final : public Keire::Application
+    {
+      public:
+        explicit ConflictingUiApplication(Keire::ApplicationSpecification value) : Application(std::move(value)) {}
+    };
+
+    ConflictingUiApplication application(std::move(specification));
+    CHECK_THROWS_WITH_AS((void)application.Run(),
+                         "UiSpecification::LayoutPath and Workspace cannot be enabled together.",
+                         std::invalid_argument);
 }

@@ -256,6 +256,20 @@ namespace Keire
         return m_Impl->UserInterface ? m_Impl->UserInterface->Capture() : UiCaptureState{};
     }
 
+    UiWorkspace& Application::GetUiWorkspace()
+    {
+        if (!m_Impl->UserInterface || !m_Impl->UserInterface->Workspace())
+            throw std::logic_error("The UI workspace is not enabled for this application.");
+        return *m_Impl->UserInterface->Workspace();
+    }
+
+    const UiWorkspace& Application::GetUiWorkspace() const
+    {
+        if (!m_Impl->UserInterface || !m_Impl->UserInterface->Workspace())
+            throw std::logic_error("The UI workspace is not enabled for this application.");
+        return *m_Impl->UserInterface->Workspace();
+    }
+
     void Application::RequireOwnerThread(const char* operation) const
     {
         if (std::this_thread::get_id() != m_Impl->OwnerThread)

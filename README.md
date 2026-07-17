@@ -121,6 +121,8 @@ KeireClient accepts `--config <path>`, `--smoke-window`, and `--smoke-ui`. The d
 
 `Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to `UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi` runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, and ID scopes are move-only RAII values, so callback exceptions cannot leave the backend stack unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; detachable native viewports, images, renderer handles, and custom draw lists are intentionally unavailable.
 
+Enable `ApplicationSpecification::Ui.Workspace` for the editor-grade layout system. `Application::GetUiWorkspace()` provides named layouts, immutable Default reset, registered panels, Kéire Dark/Light/Classic themes, editable semantic theme tokens, and portable `.keirelayout`/`.keiretheme` import and export. Live layout changes autosave atomically to SDL's per-user preference directory; `DirectoryOverride` supports deterministic tools and tests, while `Ephemeral` keeps smoke runs off disk. A backend-independent `BuildFactoryLayout` callback declares the default dock recipe using stable panel IDs. The legacy single-file `LayoutPath` remains available for simple clients, but it is mutually exclusive with the workspace.
+
 ```cpp
 void EditorLayer::OnUi(Keire::UiFrame& ui)
 {
@@ -188,6 +190,8 @@ Logs default to `Logs` relative to the process working directory. IDE debug dire
 `Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers. SDL 3.4.10 is built as cached Debug and Release static archives by a dependency-only CMake step; Kéire itself remains Premake-driven. Debug, sanitizer, and Coverage configurations select Debug SDL, while Release and Dist select Release SDL. nlohmann/json 3.12.0 remains a private header-only implementation dependency.
 
 Dear ImGui 1.92.8 is pinned to the released `v1.92.8-docking` tag and compiled privately into KeireCore with its SDL3 platform, SDL_GPU renderer, and standard-string adapters. Kéire owns context, event forwarding, frame, docking, layout, GPU, swapchain, and shutdown lifecycles; clients use only `Keire::UiFrame`. SDL is built with GPU support and without SDL_Renderer. Dear ImGui types and headers never cross the public API, and its headers and sources are not redistributed. Multi-viewports remain disabled until Kéire has explicit multi-window renderer ownership.
+
+KeireClient demonstrates the workspace as a Unity-style editor shell with Scene, Game, Hierarchy, Inspector, Project, Console, Diagnostics, and Theme Editor panels. These panels are deliberate polished empty states around the UI foundation; this milestone does not introduce scene, renderer, asset, or serialization systems.
 
 Intentional updates are explicit:
 

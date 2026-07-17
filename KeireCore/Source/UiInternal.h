@@ -21,6 +21,8 @@ namespace Keire
 
         void BeginFrame(TimeStep deltaTime, LogicalExtent displaySize);
         [[nodiscard]] UiFrame& Frame() noexcept;
+        [[nodiscard]] UiWorkspace* Workspace() noexcept;
+        [[nodiscard]] const UiWorkspace* Workspace() const noexcept;
         void EndFrame();
         void Shutdown() noexcept;
         [[nodiscard]] UiCaptureState Capture() const noexcept;

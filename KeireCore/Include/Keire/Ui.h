@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/UiWorkspace.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -25,27 +26,6 @@ namespace Keire
         Immediate
     };
 
-    enum class UiTheme : std::uint8_t
-    {
-        Dark,
-        Light,
-        Classic
-    };
-
-    struct UiColor
-    {
-        float Red = 0.08F;
-        float Green = 0.09F;
-        float Blue = 0.11F;
-        float Alpha = 1.0F;
-    };
-
-    struct UiSize
-    {
-        float Width = 0.0F;
-        float Height = 0.0F;
-    };
-
     struct UiSpecification
     {
         UiMode Mode = UiMode::Disabled;
@@ -53,6 +33,7 @@ namespace Keire
         UiTheme Theme = UiTheme::Dark;
         UiColor ClearColor;
         std::filesystem::path LayoutPath;
+        UiWorkspaceSpecification Workspace;
         bool EnableDocking = true;
         bool EnableKeyboardNavigation = true;
         bool EnableGpuValidation = false;
@@ -113,7 +94,10 @@ namespace Keire
             TabItem,
             TreeNode,
             Disabled,
-            Id
+            Id,
+            MainMenuBar,
+            Combo,
+            Popup
         };
 
         UiScope(UiFrame& frame, Kind kind, bool visible, bool closeRequired) noexcept;
@@ -193,6 +177,39 @@ namespace Keire
         UiIdScope(UiFrame& frame) noexcept : UiScope(frame, Kind::Id, true, true) {}
     };
 
+    class KEIRE_API UiMainMenuBarScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiMainMenuBarScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::MainMenuBar, visible, visible)
+        {
+        }
+    };
+
+    class KEIRE_API UiComboScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiComboScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Combo, visible, visible) {}
+    };
+
+    class KEIRE_API UiPopupScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiPopupScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Popup, visible, visible) {}
+    };
+
+    class KEIRE_API UiPanelScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiPanelScope(UiFrame& frame, bool visible, bool submitted) noexcept
+            : UiScope(frame, Kind::Window, visible, submitted)
+        {
+        }
+    };
+
     class KEIRE_API UiFrame final
     {
       public:
@@ -212,6 +229,12 @@ namespace Keire
         [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label);
         [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
         [[nodiscard]] UiIdScope PushId(std::string_view id);
+        [[nodiscard]] UiMainMenuBarScope BeginMainMenuBar();
+        [[nodiscard]] UiComboScope BeginCombo(std::string_view label, std::string_view preview);
+        [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr);
+        [[nodiscard]] UiPanelScope BeginPanel(UiPanelRegistration& panel, UiWindowOptions options = {});
+        void OpenPopup(std::string_view id);
+        void CloseCurrentPopup();
 
         void Text(std::string_view text);
         void TextColored(UiColor color, std::string_view text);
@@ -225,8 +248,10 @@ namespace Keire
         [[nodiscard]] bool InputText(std::string_view label, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);
         [[nodiscard]] bool MenuItem(std::string_view label, bool selected = false, bool enabled = true);
+        [[nodiscard]] bool ColorEdit(std::string_view label, UiColor& color);
         void SetTooltip(std::string_view text);
         void SetNextWindowSize(UiSize size, bool firstUseOnly = true);
+        void SetNextWindowPosition(UiPosition position, bool firstUseOnly = true);
 
       private:
         friend class UiScope;

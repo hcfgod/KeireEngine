@@ -6,6 +6,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- A Unity-style editor workspace with stable panel registration, factory docking, named and portable layouts, per-user atomic autosave, semantic Kéire Dark/Light themes, custom theme editing, and a polished eight-panel client shell.
 - Static-first `KEIRE_API` annotations for same-toolchain shared-library preparation and a configurable assertion foundation.
 - Thread-safe factory-only `Ref`/`WeakRef` ownership with polymorphic conversion and race-safe weak locking.
 - Generated runtime build identity and dependency-free KeireClient help/version commands.
@@ -26,6 +27,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Changed
 
+- SDK packages now include the first-party `Keire/UiWorkspace.h` contract while keeping all Dear ImGui and JSON implementation headers private.
 - Dear ImGui now compiles only into KeireCore with SDL3 and SDL_GPU backends; KeireClient uses the public `Keire::UiFrame` facade, and SDK packages expose `Keire/Ui.h` without redistributing Dear ImGui headers or sources.
 - SDL dependency builds now enable SDL_GPU while keeping SDL_Renderer disabled. Docking is enabled for rendered UI; multi-viewports remain disabled pending explicit multi-window renderer ownership.
 - Extracted layer ownership, overlay ordering, deferred mutations, traversal, and teardown into a dedicated public `LayerStack`; `Application` now delegates layer operations while orchestrating frame boundaries.
@@ -41,6 +43,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Dirty theme preset changes now defer their confirmation modal until the preset combo or menu has closed, so Save, Discard, and Cancel can complete the requested switch reliably.
 - Release packaging now compiles and runs a standalone consumer from the extracted SDK archive.
 - Nested layer traversal now defers structural mutation until the outermost callback returns, and layer operations enforce the application construction thread.
 - Detaching layers cannot create automatic subscriptions, and native window registration rolls back partial resource acquisition.

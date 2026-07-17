@@ -11,6 +11,7 @@
 #include "Keire/Ref.h"
 #include "Keire/Time.h"
 #include "Keire/Ui.h"
+#include "Keire/UiWorkspace.h"
 #include "Keire/Window.h"
 #include "Keire/WindowConfig.h"
 

@@ -242,6 +242,15 @@ namespace Keire
             case UiScope::Kind::Id:
                 ImGui::PopID();
                 break;
+            case UiScope::Kind::MainMenuBar:
+                ImGui::EndMainMenuBar();
+                break;
+            case UiScope::Kind::Combo:
+                ImGui::EndCombo();
+                break;
+            case UiScope::Kind::Popup:
+                ImGui::EndPopup();
+                break;
             }
             Scopes.pop_back();
         }
@@ -381,6 +390,62 @@ namespace Keire
         return UiIdScope(*this);
     }
 
+    UiMainMenuBarScope UiFrame::BeginMainMenuBar()
+    {
+        m_Impl->RequireActive("BeginMainMenuBar");
+        const bool visible = ImGui::BeginMainMenuBar();
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::MainMenuBar);
+        return UiMainMenuBarScope(*this, visible);
+    }
+
+    UiComboScope UiFrame::BeginCombo(std::string_view label, std::string_view preview)
+    {
+        m_Impl->RequireActive("BeginCombo");
+        const std::string safeLabel(label);
+        const std::string safePreview(preview);
+        const bool visible = ImGui::BeginCombo(safeLabel.c_str(), safePreview.c_str());
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Combo);
+        return UiComboScope(*this, visible);
+    }
+
+    UiPopupScope UiFrame::BeginPopupModal(std::string_view id, bool* open)
+    {
+        m_Impl->RequireActive("BeginPopupModal");
+        const std::string safeId(id);
+        const bool visible = ImGui::BeginPopupModal(safeId.c_str(), open, ImGuiWindowFlags_AlwaysAutoResize);
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Popup);
+        return UiPopupScope(*this, visible);
+    }
+
+    UiPanelScope UiFrame::BeginPanel(UiPanelRegistration& panel, const UiWindowOptions options)
+    {
+        m_Impl->RequireActive("BeginPanel");
+        if (!panel.Visible())
+            return UiPanelScope(*this, false, false);
+        bool* visible = panel.VisibilityAddress();
+        const bool previous = *visible;
+        const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible, ToImGuiWindowFlags(options));
+        panel.NotifyVisibilityChanged(previous);
+        m_Impl->OpenScope(UiScope::Kind::Window);
+        return UiPanelScope(*this, submitted, true);
+    }
+
+    void UiFrame::OpenPopup(std::string_view id)
+    {
+        m_Impl->RequireActive("OpenPopup");
+        const std::string safeId(id);
+        ImGui::OpenPopup(safeId.c_str());
+    }
+
+    void UiFrame::CloseCurrentPopup()
+    {
+        m_Impl->RequireActive("CloseCurrentPopup");
+        ImGui::CloseCurrentPopup();
+    }
+
     void UiFrame::Text(std::string_view text)
     {
         m_Impl->RequireActive("Text");
@@ -468,6 +533,19 @@ namespace Keire
         return ImGui::MenuItem(safeLabel.c_str(), nullptr, selected, enabled);
     }
 
+    bool UiFrame::ColorEdit(std::string_view label, UiColor& color)
+    {
+        m_Impl->RequireActive("ColorEdit");
+        if (!ValidColor(color))
+            throw std::invalid_argument("UI color components must be finite values in the range 0..1.");
+        const std::string safeLabel(label);
+        float values[]{color.Red, color.Green, color.Blue, color.Alpha};
+        const bool changed = ImGui::ColorEdit4(safeLabel.c_str(), values, ImGuiColorEditFlags_AlphaBar);
+        if (changed)
+            color = {values[0], values[1], values[2], values[3]};
+        return changed;
+    }
+
     void UiFrame::SetTooltip(std::string_view text)
     {
         m_Impl->RequireActive("SetTooltip");
@@ -486,6 +564,14 @@ namespace Keire
         ImGui::SetNextWindowSize({size.Width, size.Height}, firstUseOnly ? ImGuiCond_FirstUseEver : ImGuiCond_Always);
     }
 
+    void UiFrame::SetNextWindowPosition(const UiPosition position, const bool firstUseOnly)
+    {
+        m_Impl->RequireActive("SetNextWindowPosition");
+        if (!std::isfinite(position.X) || !std::isfinite(position.Y))
+            throw std::invalid_argument("UI window positions must be finite.");
+        ImGui::SetNextWindowPos({position.X, position.Y}, firstUseOnly ? ImGuiCond_FirstUseEver : ImGuiCond_Always);
+    }
+
     void UiFrame::CloseScope(const UiScope::Kind kind, const std::uint64_t generation) noexcept
     {
         m_Impl->CloseScope(kind, generation);
@@ -502,6 +588,8 @@ namespace Keire
         {
             if (!ValidColor(Specification.ClearColor))
                 throw std::invalid_argument("UI clear color components must be finite values in the range 0..1.");
+            if (Specification.Workspace.Enabled && !Specification.LayoutPath.empty())
+                throw std::invalid_argument("UiSpecification::LayoutPath and Workspace cannot be enabled together.");
 
             PreviousContext = ImGui::GetCurrentContext();
             Context = ImGui::CreateContext();
@@ -511,7 +599,11 @@ namespace Keire
             try
             {
                 ConfigureContext();
-                LoadLayout(Specification.LayoutPath);
+                if (Specification.Workspace.Enabled)
+                    Workspace = std::unique_ptr<UiWorkspace>(new UiWorkspace(Specification.Workspace, windows, window,
+                                                                             Specification.Mode == UiMode::Rendered));
+                else
+                    LoadLayout(Specification.LayoutPath);
                 if (Specification.Mode == UiMode::Rendered)
                     InitializeRenderer(windows, window);
                 InitializationComplete = true;
@@ -609,6 +701,8 @@ namespace Keire
                 throw std::logic_error("A Kéire UI frame is already active.");
 
             ImGui::SetCurrentContext(Context);
+            if (Workspace)
+                Workspace->BeforeNewFrame();
             if (Specification.Mode == UiMode::Rendered)
             {
                 ImGui_ImplSDLGPU3_NewFrame();
@@ -622,8 +716,11 @@ namespace Keire
                 io.DeltaTime = std::max(static_cast<float>(deltaTime.Seconds()), 1.0F / 1000.0F);
             }
             ImGui::NewFrame();
+            if (Workspace)
+                Workspace->AfterNewFrame({static_cast<float>(std::max(displaySize.Width, 1U)),
+                                          static_cast<float>(std::max(displaySize.Height, 1U))});
             if (Specification.EnableDocking)
-                (void)ImGui::DockSpaceOverViewport();
+                (void)ImGui::DockSpaceOverViewport(Workspace ? Workspace->DockspaceId() : 0);
             Frame->m_Impl->Activate(OwnerThread);
             FrameActive = true;
         }
@@ -641,6 +738,9 @@ namespace Keire
             const auto& io = ImGui::GetIO();
             CaptureState = {io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput};
             FrameActive = false;
+
+            if (Workspace)
+                Workspace->AfterFrame();
 
             if (Specification.Mode == UiMode::Rendered)
                 Render();
@@ -717,9 +817,14 @@ namespace Keire
             }
             if (Context)
             {
+                if (Workspace)
+                {
+                    Workspace->Shutdown();
+                    Workspace.reset();
+                }
                 try
                 {
-                    if (InitializationComplete)
+                    if (InitializationComplete && !Specification.Workspace.Enabled)
                         SaveLayout(Specification.LayoutPath);
                 }
                 catch (const std::exception& error)
@@ -753,6 +858,7 @@ namespace Keire
         std::thread::id OwnerThread;
         std::unique_ptr<UiFrame> Frame;
         UiCaptureState CaptureState;
+        std::unique_ptr<UiWorkspace> Workspace;
         ImGuiContext* PreviousContext = nullptr;
         ImGuiContext* Context = nullptr;
         WindowSystem* Windowing = nullptr;
@@ -779,6 +885,8 @@ namespace Keire
         m_Impl->BeginFrame(deltaTime, displaySize);
     }
     UiFrame& UiSystem::Frame() noexcept { return *m_Impl->Frame; }
+    UiWorkspace* UiSystem::Workspace() noexcept { return m_Impl->Workspace.get(); }
+    const UiWorkspace* UiSystem::Workspace() const noexcept { return m_Impl->Workspace.get(); }
     void UiSystem::EndFrame() { m_Impl->EndFrame(); }
     void UiSystem::Shutdown() noexcept { m_Impl->Shutdown(); }
     UiCaptureState UiSystem::Capture() const noexcept { return m_Impl->CaptureState; }

@@ -74,6 +74,7 @@ $clientSources = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireClient") -
 Assert-True (-not ($clientSources -match '#include\s*[<\"]imgui|ImGui::|ImGui[A-Z]')) "KeireClient Dear ImGui isolation"
 $publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui')) "Public dependency isolation"
+Assert-True ($publicHeaders.Contains('class KEIRE_API UiWorkspace') -and $clientSources.Contains('BuildFactoryLayout')) "Kéire workspace facade and factory layout wiring"
 $packageScript = Get-Content (Join-Path $Windows "package.ps1") -Raw
 Assert-True ($packageScript.Contains('dear-imgui-LICENSE.txt') -and $packageScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui package metadata"
 
@@ -87,6 +88,7 @@ try {
     $uiHeader = Join-Path $packageStage "include\Core\Ui.h"
     New-Item -ItemType Directory -Force (Split-Path $uiHeader) | Out-Null
     New-Item -ItemType File -Force $uiHeader | Out-Null
+    New-Item -ItemType File -Force (Join-Path $packageStage "include\Core\UiWorkspace.h") | Out-Null
     Assert-WindowsPackageStage $packageStage Client Core Core
     Remove-Item (Join-Path $packageStage "third-party\licenses\dear-imgui-LICENSE.txt")
     Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing Dear ImGui package license validation"

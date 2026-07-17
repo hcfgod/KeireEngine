@@ -56,6 +56,8 @@ namespace Keire
         [[nodiscard]] const ApplicationSpecification& Specification() const noexcept;
         [[nodiscard]] bool UiEnabled() const noexcept;
         [[nodiscard]] UiCaptureState UiCapture() const noexcept;
+        [[nodiscard]] UiWorkspace& GetUiWorkspace();
+        [[nodiscard]] const UiWorkspace& GetUiWorkspace() const;
 
       protected:
         virtual void OnInitialize() {}
