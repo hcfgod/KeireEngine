@@ -10,6 +10,7 @@
 #include "Keire/Log.h"
 #include "Keire/Ref.h"
 #include "Keire/Time.h"
+#include "Keire/Ui.h"
 #include "Keire/Window.h"
 #include "Keire/WindowConfig.h"
 

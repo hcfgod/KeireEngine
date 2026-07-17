@@ -281,6 +281,19 @@ namespace Keire
         }
     }
 
+    void LayerStack::Ui(UiFrame& frame)
+    {
+        Impl::TraversalScope traversal(*m_Impl);
+        for (const auto& record : m_Impl->Layers)
+        {
+            record.Instance->OnUi(frame);
+            if (m_Impl->Owner->ExitRequested())
+            {
+                break;
+            }
+        }
+    }
+
     EventFlow LayerStack::Dispatch(const EventView& event)
     {
         Impl::TraversalScope traversal(*m_Impl);

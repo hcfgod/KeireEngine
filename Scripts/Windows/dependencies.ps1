@@ -26,7 +26,7 @@ else { "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion" }
 $options = @(
     "-DSDL_SHARED=OFF", "-DSDL_STATIC=ON", "-DSDL_TEST_LIBRARY=OFF", "-DSDL_TESTS=OFF",
     "-DSDL_EXAMPLES=OFF", "-DSDL_AUDIO=OFF", "-DSDL_CAMERA=OFF", "-DSDL_JOYSTICK=OFF",
-    "-DSDL_HAPTIC=OFF", "-DSDL_SENSOR=OFF", "-DSDL_RENDER=OFF", "-DSDL_GPU=OFF",
+    "-DSDL_HAPTIC=OFF", "-DSDL_SENSOR=OFF", "-DSDL_RENDER=OFF", "-DSDL_GPU=ON",
     "-DSDL_DUMMYVIDEO=ON", "-DSDL_OFFSCREEN=ON", "-DSDL_INSTALL=ON", "-DSDL_INSTALL_DOCS=OFF",
     "-DSDL_DEPS_SHARED=ON", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DCMAKE_INSTALL_LIBDIR=lib",
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`$<`$<CONFIG:Debug>:Debug>DLL"
@@ -76,7 +76,7 @@ DependencyManifest = {
     SDL3Include = "$debugInstall/include",
     SDL3DebugLibrary = "$debugInstall/lib/SDL3-static.lib",
     SDL3ReleaseLibrary = "$releaseInstall/lib/SDL3-static.lib",
-    SDL3PlatformLinks = { "user32", "gdi32", "winmm", "imm32", "setupapi", "version", "ole32", "oleaut32", "shell32", "advapi32" }
+    SDL3PlatformLinks = { "kernel32", "user32", "gdi32", "winmm", "imm32", "setupapi", "version", "ole32", "oleaut32", "shell32", "advapi32", "uuid" }
 }
 "@
 [IO.File]::WriteAllText((Join-Path $generated "Dependencies.lua"), $manifest, [Text.UTF8Encoding]::new($false))

@@ -1,0 +1,243 @@
+#pragma once
+
+#include "Keire/Api.h"
+
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+namespace Keire
+{
+    enum class UiMode : std::uint8_t
+    {
+        Disabled,
+        Headless,
+        Rendered
+    };
+
+    enum class UiPresentMode : std::uint8_t
+    {
+        VSync,
+        Mailbox,
+        Immediate
+    };
+
+    enum class UiTheme : std::uint8_t
+    {
+        Dark,
+        Light,
+        Classic
+    };
+
+    struct UiColor
+    {
+        float Red = 0.08F;
+        float Green = 0.09F;
+        float Blue = 0.11F;
+        float Alpha = 1.0F;
+    };
+
+    struct UiSize
+    {
+        float Width = 0.0F;
+        float Height = 0.0F;
+    };
+
+    struct UiSpecification
+    {
+        UiMode Mode = UiMode::Disabled;
+        UiPresentMode PresentMode = UiPresentMode::VSync;
+        UiTheme Theme = UiTheme::Dark;
+        UiColor ClearColor;
+        std::filesystem::path LayoutPath;
+        bool EnableDocking = true;
+        bool EnableKeyboardNavigation = true;
+        bool EnableGpuValidation = false;
+    };
+
+    struct UiCaptureState
+    {
+        bool Pointer = false;
+        bool Keyboard = false;
+        bool TextInput = false;
+    };
+
+    struct UiWindowOptions
+    {
+        bool MenuBar = false;
+        bool NoTitleBar = false;
+        bool NoResize = false;
+        bool NoMove = false;
+        bool NoCollapse = false;
+        bool NoSavedSettings = false;
+    };
+
+    class KEIRE_API UiError final : public std::runtime_error
+    {
+      public:
+        UiError(std::string operation, std::string diagnostic);
+
+        [[nodiscard]] const std::string& Operation() const noexcept { return m_Operation; }
+        [[nodiscard]] const std::string& Diagnostic() const noexcept { return m_Diagnostic; }
+
+      private:
+        std::string m_Operation;
+        std::string m_Diagnostic;
+    };
+
+    class UiFrame;
+
+    class KEIRE_API UiScope
+    {
+      public:
+        UiScope(const UiScope&) = delete;
+        UiScope& operator=(const UiScope&) = delete;
+        UiScope(UiScope&& other) noexcept;
+        UiScope& operator=(UiScope&& other) noexcept;
+        ~UiScope();
+
+        [[nodiscard]] explicit operator bool() const noexcept { return m_Visible; }
+        [[nodiscard]] bool Visible() const noexcept { return m_Visible; }
+
+      protected:
+        enum class Kind : std::uint8_t
+        {
+            Window,
+            Child,
+            MenuBar,
+            Menu,
+            TabBar,
+            TabItem,
+            TreeNode,
+            Disabled,
+            Id
+        };
+
+        UiScope(UiFrame& frame, Kind kind, bool visible, bool closeRequired) noexcept;
+
+      private:
+        friend class UiFrame;
+        void Reset() noexcept;
+
+        UiFrame* m_Frame = nullptr;
+        std::weak_ptr<void> m_Lifetime;
+        std::uint64_t m_Generation = 0;
+        Kind m_Kind = Kind::Window;
+        bool m_Visible = false;
+        bool m_CloseRequired = false;
+    };
+
+    class KEIRE_API UiWindowScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiWindowScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Window, visible, true) {}
+    };
+
+    class KEIRE_API UiChildScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiChildScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Child, visible, true) {}
+    };
+
+    class KEIRE_API UiMenuBarScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiMenuBarScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::MenuBar, visible, visible) {}
+    };
+
+    class KEIRE_API UiMenuScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiMenuScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Menu, visible, visible) {}
+    };
+
+    class KEIRE_API UiTabBarScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiTabBarScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::TabBar, visible, visible) {}
+    };
+
+    class KEIRE_API UiTabItemScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiTabItemScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::TabItem, visible, visible) {}
+    };
+
+    class KEIRE_API UiTreeNodeScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiTreeNodeScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::TreeNode, visible, visible) {}
+    };
+
+    class KEIRE_API UiDisabledScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiDisabledScope(UiFrame& frame) noexcept : UiScope(frame, Kind::Disabled, true, true) {}
+    };
+
+    class KEIRE_API UiIdScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiIdScope(UiFrame& frame) noexcept : UiScope(frame, Kind::Id, true, true) {}
+    };
+
+    class KEIRE_API UiFrame final
+    {
+      public:
+        UiFrame(const UiFrame&) = delete;
+        UiFrame& operator=(const UiFrame&) = delete;
+        UiFrame(UiFrame&&) = delete;
+        UiFrame& operator=(UiFrame&&) = delete;
+        ~UiFrame();
+
+        [[nodiscard]] UiWindowScope BeginWindow(std::string_view title, bool* open = nullptr,
+                                                UiWindowOptions options = {});
+        [[nodiscard]] UiChildScope BeginChild(std::string_view id, UiSize size = {}, bool border = false);
+        [[nodiscard]] UiMenuBarScope BeginMenuBar();
+        [[nodiscard]] UiMenuScope BeginMenu(std::string_view label, bool enabled = true);
+        [[nodiscard]] UiTabBarScope BeginTabBar(std::string_view id);
+        [[nodiscard]] UiTabItemScope BeginTabItem(std::string_view label, bool* open = nullptr);
+        [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label);
+        [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
+        [[nodiscard]] UiIdScope PushId(std::string_view id);
+
+        void Text(std::string_view text);
+        void TextColored(UiColor color, std::string_view text);
+        void Separator();
+        void SameLine();
+        void Spacing();
+        [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
+        [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
+        [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);
+        [[nodiscard]] bool SliderInt(std::string_view label, int& value, int minimum, int maximum);
+        [[nodiscard]] bool InputText(std::string_view label, std::string& value);
+        [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);
+        [[nodiscard]] bool MenuItem(std::string_view label, bool selected = false, bool enabled = true);
+        void SetTooltip(std::string_view text);
+        void SetNextWindowSize(UiSize size, bool firstUseOnly = true);
+
+      private:
+        friend class UiScope;
+        friend class UiSystem;
+        class Impl;
+
+        UiFrame();
+        void CloseScope(UiScope::Kind kind, std::uint64_t generation) noexcept;
+        [[nodiscard]] std::weak_ptr<void> Lifetime() const noexcept;
+        [[nodiscard]] std::uint64_t Generation() const noexcept;
+
+        std::unique_ptr<Impl> m_Impl;
+    };
+} // namespace Keire

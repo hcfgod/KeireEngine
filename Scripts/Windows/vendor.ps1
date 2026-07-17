@@ -9,7 +9,8 @@ $Dependencies = @(
     @{ Name = "spdlog"; Path = "Vendor/spdlog"; Url = $Lock.SPDLOG_URL; Commit = $Lock.SPDLOG_COMMIT },
     @{ Name = "doctest"; Path = "Vendor/doctest"; Url = $Lock.DOCTEST_URL; Commit = $Lock.DOCTEST_COMMIT },
     @{ Name = "SDL"; Path = "Vendor/SDL"; Url = $Lock.SDL_URL; Commit = $Lock.SDL_COMMIT },
-    @{ Name = "json"; Path = "Vendor/json"; Url = $Lock.JSON_URL; Commit = $Lock.JSON_COMMIT }
+    @{ Name = "json"; Path = "Vendor/json"; Url = $Lock.JSON_URL; Commit = $Lock.JSON_COMMIT },
+    @{ Name = "imgui"; Path = "Vendor/imgui"; Url = $Lock.IMGUI_URL; Commit = $Lock.IMGUI_COMMIT }
 )
 
 function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments) {

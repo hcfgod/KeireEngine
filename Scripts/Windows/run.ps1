@@ -9,6 +9,7 @@ param(
     [string]$Toolset = "default",
     [switch]$CI,
     [switch]$SmokeWindow,
+    [switch]$SmokeUi,
     [switch]$Update,
     [switch]$Generate
 )
@@ -36,7 +37,10 @@ try {
         $env:PATH = "$runtimeDirectory;$env:PATH"
     }
     Write-Host "==> Running KeireClient $Configuration for $Architecture"
-    if ($CI -or $SmokeWindow) {
+    if ($SmokeUi) {
+        & $ClientExe --smoke-ui
+    }
+    elseif ($CI -or $SmokeWindow) {
         $originalVideoDriver = $env:SDL_VIDEODRIVER
         $env:SDL_VIDEODRIVER = "dummy"
         & $ClientExe --smoke-window

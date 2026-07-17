@@ -219,6 +219,7 @@ namespace Keire
         [[nodiscard]] bool IsActive() const noexcept;
 
       private:
+        friend class WindowSystemInternalAccess;
         class Impl;
         Ref<Impl> m_Impl;
     };

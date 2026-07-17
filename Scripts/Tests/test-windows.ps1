@@ -54,22 +54,43 @@ Assert-Equal $lock.SPDLOG_COMMIT "79524ddd08a4ec981b7fea76afd08ee05f83755d" "spd
 Assert-Equal $lock.DOCTEST_COMMIT "2d0a9359a60c51affe2a9bebb1be1dca47868151" "doctest lock"
 Assert-Equal $lock.SDL_COMMIT "8e37db5e797b6167f3a00d697d816a684bd259c7" "SDL lock"
 Assert-Equal $lock.JSON_COMMIT "55f93686c01528224f448c19128836e7df245f72" "JSON lock"
+Assert-Equal $lock.IMGUI_COMMIT "b61e56346a92cfcaf1f43a545ca37b0b32239654" "Dear ImGui lock"
+$vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
+$vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
+Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
+Assert-True ($vendorUpdateScript.Contains('"imgui"')) "Dear ImGui vendor update support"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
+Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+Assert-True ($premakePolicy.Contains('imgui_impl_sdl3.cpp') -and $premakePolicy.Contains('imgui_impl_sdlgpu3.cpp') -and $premakePolicy.Contains('imgui_stdlib.cpp') -and $premakePolicy.Contains('warnings "Off"')) "Premake Dear ImGui source policy"
+$corePremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\premake5.lua") -Raw
+$clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
+$testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5.lua") -Raw
+Assert-True ($corePremake.Contains('AddDearImGuiSources()') -and -not $clientPremake.Contains('AddDearImGuiSources()') -and -not $testsPremake.Contains('AddDearImGuiSources()')) "KeireCore-only Dear ImGui ownership"
+$clientSources = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireClient") -File -Recurse | Get-Content -Raw) -join "`n"
+Assert-True (-not ($clientSources -match '#include\s*[<\"]imgui|ImGui::|ImGui[A-Z]')) "KeireClient Dear ImGui isolation"
 $publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include") -File -Recurse | Get-Content -Raw) -join "`n"
-Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json')) "Public dependency isolation"
+Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui')) "Public dependency isolation"
+$packageScript = Get-Content (Join-Path $Windows "package.ps1") -Raw
+Assert-True ($packageScript.Contains('dear-imgui-LICENSE.txt') -and $packageScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui package metadata"
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {
-    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Application.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\EntryPoint.h", "include\Core\Event.h", "include\Core\Layer.h", "include\Core\Ref.h", "include\Core\Time.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Application.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\EntryPoint.h", "include\Core\Event.h", "include\Core\Layer.h", "include\Core\Ref.h", "include\Core\Time.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
+    $uiHeader = Join-Path $packageStage "include\Core\Ui.h"
+    New-Item -ItemType Directory -Force (Split-Path $uiHeader) | Out-Null
+    New-Item -ItemType File -Force $uiHeader | Out-Null
     Assert-WindowsPackageStage $packageStage Client Core Core
+    Remove-Item (Join-Path $packageStage "third-party\licenses\dear-imgui-LICENSE.txt")
+    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing Dear ImGui package license validation"
+    New-Item -ItemType File (Join-Path $packageStage "third-party\licenses\dear-imgui-LICENSE.txt") | Out-Null
     Remove-Item (Join-Path $packageStage "third-party\licenses\spdlog-LICENSE.txt")
     Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing package license validation"
 }

@@ -3,6 +3,7 @@
 #include "Keire/Api.h"
 #include "Keire/Event.h"
 #include "Keire/Time.h"
+#include "Keire/Ui.h"
 
 #include <compare>
 #include <cstddef>
@@ -51,6 +52,7 @@ namespace Keire
         virtual void OnDetach() noexcept {}
         virtual void OnFixedUpdate(const Time&) {}
         virtual void OnUpdate(const Time&) {}
+        virtual void OnUi(UiFrame&) {}
         virtual EventFlow OnEvent(const EventView&) { return EventFlow::Continue; }
 
         [[nodiscard]] Application& Owner();
@@ -110,6 +112,7 @@ namespace Keire
         void Deactivate() noexcept;
         void FixedUpdate(const Time& time);
         void Update(const Time& time);
+        void Ui(UiFrame& frame);
         EventFlow Dispatch(const EventView& event);
 
         std::unique_ptr<Impl> m_Impl;

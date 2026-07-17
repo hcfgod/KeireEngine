@@ -44,12 +44,27 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)" 79
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)" 2d0a9359a60c51affe2a9bebb1be1dca47868151 'doctest lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)" 8e37db5e797b6167f3a00d697d816a684bd259c7 'SDL lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)" 55f93686c01528224f448c19128836e7df245f72 'JSON lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" IMGUI_COMMIT)" b61e56346a92cfcaf1f43a545ca37b0b32239654 'Dear ImGui lock'
+assert_true grep -q 'Vendor/imgui' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -q 'imgui)' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_OFFSCREEN=ON' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL_GPU=ON' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -q 'SDL_RENDER=OFF' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
-assert_false grep -R -E 'SDL3/|nlohmann/json' "$ROOT/KeireCore/Include"
+assert_true grep -q 'imgui_impl_sdl3.cpp' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -q 'imgui_impl_sdlgpu3.cpp' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -q 'imgui_stdlib.cpp' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -q 'warnings "Off"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -q 'AddDearImGuiSources()' "$ROOT/KeireCore/premake5.lua"
+assert_false grep -q 'AddDearImGuiSources()' "$ROOT/KeireClient/premake5.lua"
+assert_false grep -q 'AddDearImGuiSources()' "$ROOT/KeireTests/premake5.lua"
+assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
+assert_false grep -R -E 'SDL3/|nlohmann/json|imgui' "$ROOT/KeireCore/Include"
+assert_true grep -q 'dear-imgui-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -q 'IMGUI_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 security_workflow="$ROOT/.github/workflows/security.yml"
 grep -q '^  security-status:$' "$security_workflow" || fail 'Security activation sentinel is missing'
 grep -q '^    if: always()$' "$security_workflow" || fail 'Security activation sentinel is not unconditional'
@@ -67,10 +82,14 @@ assert_equal "$(resolve_llvm_tool llvm-cov clang++)" "$llvm_fixture/llvm-cov-18"
 PATH="$old_path"; rm -rf "$llvm_fixture"
 
 package_stage="$(mktemp -d)"
-for path in bin/Client lib/libCore.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Window.h include/Core/WindowConfig.h examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
+for path in bin/Client lib/libCore.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Window.h include/Core/WindowConfig.h examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt third-party/licenses/dear-imgui-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
+: > "$package_stage/include/Core/Ui.h"
 assert_true validate_package_stage "$package_stage" Client Core Core
+rm "$package_stage/third-party/licenses/dear-imgui-LICENSE.txt"
+assert_false validate_package_stage "$package_stage" Client Core Core
+: > "$package_stage/third-party/licenses/dear-imgui-LICENSE.txt"
 rm "$package_stage/third-party/licenses/spdlog-LICENSE.txt"
 assert_false validate_package_stage "$package_stage" Client Core Core
 rm -rf "$package_stage"

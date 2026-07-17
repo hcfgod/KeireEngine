@@ -11,13 +11,29 @@ namespace
         Keire::ApplicationCommandLineOption{"--managed-smoke", "Run the managed SDK entrypoint smoke test."},
     };
 
+    class ManagedUiLayer final : public Keire::Layer
+    {
+      public:
+        ManagedUiLayer() : Layer("ManagedUiLayer") {}
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            if (auto window = ui.BeginWindow("Managed SDK UI"); window)
+            {
+                ui.Text("Headless Kéire UI frame completed.");
+            }
+            Owner().RequestExit();
+        }
+    };
+
     class ManagedConsumerApplication final : public Keire::Application
     {
       public:
         ManagedConsumerApplication() : Application(BuildSpecification()) {}
 
       protected:
-        void OnInitialize() override { RequestExit(); }
+        void OnInitialize() override { (void)PushLayer(std::make_unique<ManagedUiLayer>()); }
 
       private:
         static Keire::ApplicationSpecification BuildSpecification()
@@ -27,6 +43,7 @@ namespace
             specification.MainWindow.Visible = false;
             specification.SuspendWhenMainWindowMinimized = false;
             specification.ManageLogging = false;
+            specification.Ui.Mode = Keire::UiMode::Headless;
             return specification;
         }
     };

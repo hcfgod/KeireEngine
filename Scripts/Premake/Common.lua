@@ -3,8 +3,37 @@ OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
     doctest = "../Vendor/doctest",
-    json = "../Vendor/json/include"
+    json = "../Vendor/json/include",
+    imgui = "../Vendor/imgui",
+    imguiBackends = "../Vendor/imgui/backends",
+    imguiMisc = "../Vendor/imgui/misc/cpp"
 }
+
+function AddDearImGuiSources()
+    files
+    {
+        "../Vendor/imgui/imgui.cpp",
+        "../Vendor/imgui/imgui_demo.cpp",
+        "../Vendor/imgui/imgui_draw.cpp",
+        "../Vendor/imgui/imgui_tables.cpp",
+        "../Vendor/imgui/imgui_widgets.cpp",
+        "../Vendor/imgui/backends/imgui_impl_sdl3.cpp",
+        "../Vendor/imgui/backends/imgui_impl_sdlgpu3.cpp",
+        "../Vendor/imgui/misc/cpp/imgui_stdlib.cpp"
+    }
+
+    externalincludedirs
+    {
+        VendorIncludeDirs.imgui,
+        VendorIncludeDirs.imguiBackends,
+        VendorIncludeDirs.imguiMisc
+    }
+
+    filter "files:../Vendor/imgui/**.cpp"
+        warnings "Off"
+
+    filter {}
+end
 
 function LinkSDL3()
     externalincludedirs { DependencyManifest.SDL3Include }

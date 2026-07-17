@@ -9,7 +9,7 @@ param(
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
     [string]$Target = "",
-    [ValidateSet("spdlog", "doctest")]
+    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui")]
     [string]$Dependency = "spdlog",
     [string]$Tag = "",
     [string]$Name = "",
@@ -19,6 +19,7 @@ param(
     [switch]$InstallOptional,
     [switch]$Update,
     [switch]$CI,
+    [switch]$SmokeUi,
     [switch]$Force
 )
 
@@ -59,7 +60,7 @@ function Invoke-ProjectCommand {
         }
         "run" {
             & (Join-Path $WindowsScripts "run.ps1") -Generator $Generator -Configuration $Configuration `
-                -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
+                -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeUi:$SmokeUi -Update:$Update -Generate:$Force
         }
         "clean" { & (Join-Path $WindowsScripts "clean.ps1") -Scope $CleanScope }
         "coverage" { & (Join-Path $WindowsScripts "coverage.ps1") -Architecture $Architecture -CI:$CI -Update:$Update -Generate:$Force }
@@ -88,6 +89,7 @@ Common options:
   -Generator <vs2026|vs2022|vs2019|ninja|gmake|compilecommands>
   -Configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   -Architecture <x86_64|ARM64>  -Toolset <default|msc|gcc|clang>
+  -SmokeUi (run command only; requires a graphics-capable environment)
 "@
 }
 
@@ -138,7 +140,7 @@ function Show-Menu {
                 "7" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
                 "8" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
                 "9" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
-                "10" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
+                "10" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest, SDL, json, imgui)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
                 "11" {
                     # Keep proposed values local so a failed rename cannot poison
                     # the defaults shown by the next menu attempt.

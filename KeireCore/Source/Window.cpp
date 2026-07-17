@@ -2,6 +2,8 @@
 
 #include "Keire/BuildInfo.h"
 
+#include "WindowInternal.h"
+
 #include <SDL3/SDL.h>
 
 #include <atomic>
@@ -301,6 +303,9 @@ namespace Keire
             SDL_Event event{};
             while (SDL_PollEvent(&event))
             {
+                if (m_EventSink)
+                    m_EventSink(m_EventSinkContext, event);
+
                 if (event.type == SDL_EVENT_QUIT)
                 {
                     return QuitEvent{{event.common.timestamp, {}}};
@@ -437,6 +442,19 @@ namespace Keire
         }
 
         [[nodiscard]] bool Active() const noexcept { return m_Active.load(std::memory_order_acquire); }
+
+        [[nodiscard]] SDL_Window* NativeHandle(const WindowId id)
+        {
+            RequireOwner("NativeWindow");
+            return NativeFor(id);
+        }
+
+        void SetEventSink(void* context, const WindowSystemInternalAccess::EventSink sink)
+        {
+            RequireOwner("SetEventSink");
+            m_EventSinkContext = context;
+            m_EventSink = sink;
+        }
 
         void ReleaseWindow(const WindowId id) noexcept
         {
@@ -768,6 +786,8 @@ namespace Keire
         std::uint32_t m_NextWindowId = 1;
         std::mutex m_DeferredMutex;
         std::vector<WindowId> m_DeferredDestruction;
+        void* m_EventSinkContext = nullptr;
+        WindowSystemInternalAccess::EventSink m_EventSink = nullptr;
     };
 
     WindowSystem::WindowSystem() : m_Impl(CreateRef<Impl>()) {}
@@ -794,4 +814,14 @@ namespace Keire
     }
 
     bool WindowSystem::IsActive() const noexcept { return m_Impl && m_Impl->Active(); }
+
+    SDL_Window* WindowSystemInternalAccess::NativeWindow(WindowSystem& system, const WindowId id)
+    {
+        return system.m_Impl->NativeHandle(id);
+    }
+
+    void WindowSystemInternalAccess::SetEventSink(WindowSystem& system, void* context, const EventSink sink)
+    {
+        system.m_Impl->SetEventSink(context, sink);
+    }
 } // namespace Keire

@@ -18,7 +18,7 @@ bridge="$ROOT/Scripts/Dependencies/CMakeLists.txt"
 if command -v sha256sum >/dev/null 2>&1; then bridge_hash="$(sha256sum "$bridge" | awk '{print $1}')"; else bridge_hash="$(shasum -a 256 "$bridge" | awk '{print $1}')"; fi
 options=(-DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
   -DSDL_AUDIO=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_SENSOR=OFF
-  -DSDL_RENDER=OFF -DSDL_GPU=OFF -DSDL_DUMMYVIDEO=ON -DSDL_OFFSCREEN=ON -DSDL_INSTALL=ON
+  -DSDL_RENDER=OFF -DSDL_GPU=ON -DSDL_DUMMYVIDEO=ON -DSDL_OFFSCREEN=ON -DSDL_INSTALL=ON
   -DSDL_INSTALL_DOCS=OFF -DSDL_DEPS_SHARED=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_LIBDIR=lib)
 if [[ "$platform" == Mac ]]; then
   cmake_architecture=x86_64; [[ "$architecture" == ARM64 ]] && cmake_architecture=arm64

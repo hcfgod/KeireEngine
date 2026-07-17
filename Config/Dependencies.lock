@@ -24,3 +24,6 @@ SDL_COMMIT=8e37db5e797b6167f3a00d697d816a684bd259c7
 JSON_URL=https://github.com/nlohmann/json.git
 JSON_TAG=v3.12.0
 JSON_COMMIT=55f93686c01528224f448c19128836e7df245f72
+IMGUI_URL=https://github.com/ocornut/imgui.git
+IMGUI_TAG=v1.92.8-docking
+IMGUI_COMMIT=b61e56346a92cfcaf1f43a545ca37b0b32239654

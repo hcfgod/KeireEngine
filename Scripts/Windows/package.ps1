@@ -25,6 +25,7 @@ Copy-Item "$Root\Vendor\spdlog\LICENSE" "$stage\third-party\licenses\spdlog-LICE
 Copy-Item "$Root\Vendor\spdlog\include\spdlog\fmt\bundled\fmt.license.rst" "$stage\third-party\licenses\fmt-LICENSE.rst"
 Copy-Item "$Root\Vendor\doctest\LICENSE.txt" "$stage\third-party\licenses\doctest-LICENSE.txt"
 Copy-Item "$Root\Vendor\json\LICENSE.MIT" "$stage\third-party\licenses\nlohmann-json-LICENSE.MIT.txt"
+Copy-Item "$Root\Vendor\imgui\LICENSE.txt" "$stage\third-party\licenses\dear-imgui-LICENSE.txt"
 $sdlInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
 if (-not (Test-Path (Join-Path $sdlInstall "lib\SDL3-static.lib"))) { throw "Packaged SDL Release dependency is missing." }
 Copy-Item "$sdlInstall\*" "$stage\third-party\SDL3\" -Recurse
@@ -43,10 +44,11 @@ elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
 $dirty = if (Test-GitRepository $Root) { [bool]((& git -C $Root status --porcelain --untracked-files=normal) -join "") } else { $false }
 $commit = Get-GitHeadCommit $Root "unknown"
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT }
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
-Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json | Out-Null
+$parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
+if ($parsedManifest.imgui -ne $Lock.IMGUI_COMMIT) { throw "Packaged Dear ImGui identity does not match the dependency lock." }
 $versionOutput = (& (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") --version) -join "`n"
 if ($LASTEXITCODE -ne 0) { throw "Packaged client version query failed with exit code $LASTEXITCODE." }
 $commitPrefix = $commit.Substring(0, [Math]::Min(12, $commit.Length))

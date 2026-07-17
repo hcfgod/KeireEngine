@@ -23,6 +23,7 @@ cp "$ROOT/Vendor/spdlog/LICENSE" "$stage/third-party/licenses/spdlog-LICENSE.txt
 cp "$ROOT/Vendor/spdlog/include/spdlog/fmt/bundled/fmt.license.rst" "$stage/third-party/licenses/fmt-LICENSE.rst"
 cp "$ROOT/Vendor/doctest/LICENSE.txt" "$stage/third-party/licenses/doctest-LICENSE.txt"
 cp "$ROOT/Vendor/json/LICENSE.MIT" "$stage/third-party/licenses/nlohmann-json-LICENSE.MIT.txt"
+cp "$ROOT/Vendor/imgui/LICENSE.txt" "$stage/third-party/licenses/dear-imgui-LICENSE.txt"
 sdl_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
 [[ -f "$sdl_install/lib/libSDL3.a" ]] || { printf 'Packaged SDL Release dependency is missing.\n' >&2; exit 1; }
 cp -R "$sdl_install/"* "$stage/third-party/SDL3/"
@@ -30,12 +31,13 @@ cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/
 cp -R "$ROOT/Examples/Consumer/"* "$stage/examples/consumer/"
 cp -R "$ROOT/Examples/ManagedConsumer/"* "$stage/examples/managed-consumer/"
 sed -e "s/@CORE_TARGET@/$CORE_TARGET/g" -e "s/@PROJECT_NAMESPACE@/$PROJECT_NAMESPACE/g" -e "s/@PACKAGE_CONFIGURATION@/$CONFIGURATION/g" "$ROOT/Config/PackageConfig.cmake.in" > "$stage/lib/cmake/$PROJECT_IDENTIFIER/${PROJECT_IDENTIFIER}Config.cmake"
-commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"; sdl="$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)"; json="$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)"
+commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"; sdl="$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)"; json="$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)"; imgui="$(config_value "$ROOT/Config/Dependencies.lock" IMGUI_COMMIT)"
 dirty=false; [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal 2>/dev/null || true)" ]] && dirty=true
 platform_name=Linux; [[ "$PLATFORM" == Mac ]] && platform_name=macOS
 if [[ "$TOOLSET" == clang ]]; then compiler="Clang $(clang++ -dumpversion)"; else compiler="GCC $(g++ -dumpfullversion -dumpversion)"; fi
-printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" > "$stage/build-manifest.json"
+printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" > "$stage/build-manifest.json"
 validate_package_stage "$stage" "$CLIENT_TARGET" "$CORE_TARGET" "$PROJECT_NAMESPACE"
+grep -Fq "\"imgui\": \"$imgui\"" "$stage/build-manifest.json" || { printf 'Packaged Dear ImGui identity does not match the dependency lock.\n' >&2; exit 1; }
 version_output="$("$stage/bin/$CLIENT_TARGET" --version)"
 commit_prefix="${commit:0:12}"
 expected_identity="$commit_prefix"; [[ "$dirty" == true ]] && expected_identity="${commit_prefix}-dirty"

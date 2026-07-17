@@ -5,6 +5,7 @@
 #include "Keire/Layer.h"
 #include "Keire/Log.h"
 #include "Keire/Time.h"
+#include "Keire/Ui.h"
 #include "Keire/Window.h"
 
 #include <cstdint>
@@ -18,6 +19,7 @@ namespace Keire
         EventBusSpecification Events;
         TimeSpecification Timing;
         LogConfig Logging;
+        UiSpecification Ui;
         std::uint32_t TargetFrameRate = 0;
         std::uint32_t MinimizedPumpRate = 30;
         bool SuspendWhenMainWindowMinimized = true;
@@ -52,6 +54,8 @@ namespace Keire
         [[nodiscard]] Ref<WindowSystem> Windows() const noexcept;
         [[nodiscard]] Ref<Window> MainWindow() const noexcept;
         [[nodiscard]] const ApplicationSpecification& Specification() const noexcept;
+        [[nodiscard]] bool UiEnabled() const noexcept;
+        [[nodiscard]] UiCaptureState UiCapture() const noexcept;
 
       protected:
         virtual void OnInitialize() {}

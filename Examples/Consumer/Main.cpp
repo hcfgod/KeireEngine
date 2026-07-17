@@ -30,6 +30,8 @@ int main(const int argc, char* argv[])
     setenv("SDL_VIDEODRIVER", "dummy", 1);
 #endif
     const auto& build = Keire::GetBuildInfo();
+    Keire::UiSpecification uiSpecification;
+    uiSpecification.Mode = Keire::UiMode::Headless;
     Keire::LogConfig config;
     config.EnableConsole = false;
     config.LogDirectory = "Logs";
@@ -58,7 +60,8 @@ int main(const int argc, char* argv[])
     events->Close();
     events.Reset();
     Keire::Log::Shutdown();
-    return std::string(Keire::GetName()).empty() || build.Version.empty() || eventValue != 42 || time.FrameCount() != 1
+    return std::string(Keire::GetName()).empty() || build.Version.empty() || eventValue != 42 ||
+                   time.FrameCount() != 1 || uiSpecification.Mode != Keire::UiMode::Headless
                ? 1
                : 0;
 }

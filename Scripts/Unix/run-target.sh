@@ -14,7 +14,9 @@ system=linux; [[ "$PLATFORM" == Mac ]] && system=macosx
 executable="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$TARGET/$TARGET"
 [[ -x "$executable" ]] || { printf 'Executable not found: %s\n' "$executable" >&2; exit 1; }
 printf '==> Running %s %s for %s\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"
-if [[ "$MODE" == run && ($CI -eq 1 || "${KEIRE_SMOKE_WINDOW:-0}" == 1) ]]; then
+if [[ "$MODE" == run && "${KEIRE_SMOKE_UI:-0}" == 1 ]]; then
+    (cd "$ROOT" && "$executable" --smoke-ui)
+elif [[ "$MODE" == run && ($CI -eq 1 || "${KEIRE_SMOKE_WINDOW:-0}" == 1) ]]; then
     (cd "$ROOT" && SDL_VIDEODRIVER=dummy "$executable" --smoke-window)
 else
     (cd "$ROOT" && "$executable")

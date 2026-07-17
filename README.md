@@ -4,7 +4,7 @@
 [![Security](https://github.com/hcfgod/KeireEngine/actions/workflows/security.yml/badge.svg)](https://github.com/hcfgod/KeireEngine/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
-A reproducible C++20 foundation with a static KeireCore library, a production application/layer runtime, typed immediate and queued events, Unity-style frame timing, an SDL3 multi-window platform layer, strict typed JSON configuration, reusable strong/weak references, private asynchronous logging, Premake generation, sanitizers, SDK packaging, and Windows/Linux/macOS automation.
+A reproducible C++20 foundation with a static KeireCore library, a production application/layer runtime, typed immediate and queued events, Unity-style frame timing and UI, an SDL3 multi-window and SDL_GPU platform layer, strict typed JSON configuration, reusable strong/weak references, private asynchronous logging, Premake generation, sanitizers, SDK packaging, and Windows/Linux/macOS automation.
 
 KeireCore is static by default. Its export annotations prepare for a possible same-toolchain C++ shared-library build; they are not a stable cross-compiler ABI. Generated build identity, development assertions, and a core-owned entrypoint keep startup policy consistent while the client supplies only its application factory.
 
@@ -95,7 +95,7 @@ Config/                 Project identity, client JSON, and immutable dependency 
 KeireCore/              Static library and public Keire/<header> API
 KeireClient/            Console application
 KeireTests/             Independent doctest cases
-Vendor/                 Pinned spdlog, doctest, SDL3, and nlohmann/json submodules
+Vendor/                 Pinned spdlog, doctest, SDL3, nlohmann/json, and Dear ImGui submodules
 Scripts/Premake/        Shared Premake policy
 Scripts/Unix/           Shared macOS/Linux implementation
 Scripts/<platform>/     Platform bootstrap and wrappers
@@ -113,11 +113,24 @@ Logical sizes describe UI coordinates while pixel sizes describe the high-DPI dr
 
 `LoadWindowSpecification` parses `Config/Client.json` without exposing nlohmann/json. The root `window` object accepts `title`, `width`, `height`, `resizable`, `highPixelDensity`, `visible`, `maximized`, and `mode` (`windowed` or `borderlessFullscreen`). Missing optional fields retain API defaults; unknown/duplicate keys, malformed UTF-8, wrong types, invalid dimensions, oversized titles/files, and incompatible fullscreen/maximized state are errors with file and JSON-pointer-style locations.
 
-KeireClient accepts `--config <path>` and `--smoke-window`. The default `Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. `--smoke-window` is bounded and used with `SDL_VIDEODRIVER=dummy` by CI and package validation.
+KeireClient accepts `--config <path>`, `--smoke-window`, and `--smoke-ui`. The default `Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. `--smoke-window` is bounded, disables UI, and is used with `SDL_VIDEODRIVER=dummy` by CI and package validation. `--smoke-ui` renders a bounded set of frames and requires a graphics-capable environment.
 
 ## Application, Layers, Events, And Time
 
 `Keire::Application` owns logging, a standalone `EventBus`, `Time`, `WindowSystem`, the primary window, and a dedicated `LayerStack`. KeireCore supplies `main`, handles dependency-free help/version commands, owns the top-level exception boundary and application lifetime, and calls `Run()`. A managed client supplies a static command-line description plus `CreateApplication(const ApplicationCommandLineArguments&)`; custom help remains client-owned without initializing engine services. The stack owns layer lifetimes, overlay partitioning, attachment, detachment, deferred structural changes, and traversal. Access it through `Application::Layers()`; the `PushLayer`, `PushOverlay`, and `RemoveLayer` application helpers remain as convenient delegates. The application construction thread owns `Run` and all layer mutations, while `RequestExit` remains safe from workers. Layers update bottom-to-top, receive events top-to-bottom, and may safely request structural changes during nested callbacks; those changes apply at the next frame boundary. Automatic layer subscriptions cannot be created during `OnDetach` and never survive detachment.
+
+`Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to `UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi` runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, and ID scopes are move-only RAII values, so callback exceptions cannot leave the backend stack unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; detachable native viewports, images, renderer handles, and custom draw lists are intentionally unavailable.
+
+```cpp
+void EditorLayer::OnUi(Keire::UiFrame& ui)
+{
+    if (auto window = ui.BeginWindow("Inspector"); window)
+    {
+        ui.Text("Kéire owns the UI lifecycle and renderer.");
+        (void)ui.Checkbox("Visible", m_Visible);
+    }
+}
+```
 
 ```cpp
 constexpr Keire::ApplicationCommandLineOption Options[]{
@@ -174,14 +187,18 @@ Logs default to `Logs` relative to the process working directory. IDE debug dire
 
 `Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers. SDL 3.4.10 is built as cached Debug and Release static archives by a dependency-only CMake step; Kéire itself remains Premake-driven. Debug, sanitizer, and Coverage configurations select Debug SDL, while Release and Dist select Release SDL. nlohmann/json 3.12.0 remains a private header-only implementation dependency.
 
+Dear ImGui 1.92.8 is pinned to the released `v1.92.8-docking` tag and compiled privately into KeireCore with its SDL3 platform, SDL_GPU renderer, and standard-string adapters. Kéire owns context, event forwarding, frame, docking, layout, GPU, swapchain, and shutdown lifecycles; clients use only `Keire::UiFrame`. SDL is built with GPU support and without SDL_Renderer. Dear ImGui types and headers never cross the public API, and its headers and sources are not redistributed. Multi-viewports remain disabled until Kéire has explicit multi-window renderer ownership.
+
 Intentional updates are explicit:
 
 ```powershell
 ./Scripts/project.ps1 vendor-update -Dependency spdlog -Tag v1.18.0
+./Scripts/project.ps1 vendor-update -Dependency imgui -Tag v1.92.8-docking
 ```
 
 ```sh
 bash Scripts/project.sh vendor-update --dependency spdlog --tag v1.18.0
+bash Scripts/project.sh vendor-update --dependency imgui --tag v1.92.8-docking
 ```
 
 Review the diff and upstream changes before running the Git commands printed by the updater.
@@ -206,7 +223,7 @@ Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke b
 
 CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in the `master` branch protection rules. Once enabled, the status job fails if any eligible security job is skipped or unsuccessful; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
 
-Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain KeireClient, KeireCore, public headers, spdlog headers, SDL's static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build manifest containing SDL and JSON commits. Every package extracts and validates both a low-level consumer with its own `main` and a managed consumer whose `main` comes from KeireCore, using direct compiler invocation and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links `SDL3::SDL3-static`. nlohmann/json headers are intentionally absent. SHA-256 files and separate symbol archives are included where available; Dist packages are stripped.
+Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain KeireClient, KeireCore, public headers including `Keire/Ui.h`, spdlog headers, SDL's static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build manifest containing SDL, JSON, and Dear ImGui commits. Every package extracts and validates both a low-level consumer with its own `main` and a managed headless-UI consumer whose `main` comes from KeireCore, using direct compiler invocation and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links `SDL3::SDL3-static`. nlohmann/json and Dear ImGui headers are intentionally absent because neither dependency crosses the public API. SHA-256 files and separate symbol archives are included where available; Dist packages are stripped.
 
 ## Troubleshooting
 

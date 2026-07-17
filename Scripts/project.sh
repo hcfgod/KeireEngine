@@ -31,6 +31,7 @@ INSTALL_OPTIONAL=0
 UPDATE=0
 FORCE=0
 CI=0
+SMOKE_UI=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -49,6 +50,7 @@ while [[ $# -gt 0 ]]; do
         --update) UPDATE=1; shift ;;
         --force) FORCE=1; shift ;;
         --ci) CI=1; shift ;;
+        --smoke-ui) SMOKE_UI=1; shift ;;
         *) printf "Unknown argument '%s'.\n" "$1" >&2; exit 1 ;;
     esac
 done
@@ -70,7 +72,7 @@ run_command() {
         generate) bash "$PLATFORM_DIR/generate.sh" "${common[@]}" ;;
         build) bash "$PLATFORM_DIR/build.sh" "${common[@]}" --configuration "$CONFIGURATION" --target "$TARGET" ;;
         test) bash "$PLATFORM_DIR/test.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
-        run) bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
+        run) KEIRE_SMOKE_UI="$SMOKE_UI" bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
         clean) bash "$PLATFORM_DIR/clean.sh" "$CLEAN_SCOPE" ;;
         coverage) bash "$SCRIPT_DIR/Unix/coverage.sh" "$PLATFORM_NAME" "${common[@]}" ;;
         package) bash "$SCRIPT_DIR/Unix/package.sh" "$PLATFORM_NAME" "${common[@]}" --configuration "$CONFIGURATION" ;;
@@ -101,6 +103,7 @@ Common options:
   --generator <ninja|gmake|xcode4|compilecommands>
   --configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
+  --smoke-ui (run command only; requires a graphics-capable environment)
 EOF
 }
 
@@ -131,7 +134,7 @@ show_menu() {
             7) CONFIGURATION="$(normalize_configuration "$(read_setting 'Package configuration (Release, Dist)' Release)")"; run_command package || printf '\nCommand failed.\n' >&2 ;;
             8) run_command doctor || printf '\nCommand failed.\n' >&2 ;;
             9) CLEAN_SCOPE="$(read_setting 'Clean scope (full, build, generated)' "$CLEAN_SCOPE")"; run_command clean || printf '\nCommand failed.\n' >&2 ;;
-            10) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
+            10) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, SDL, json, imgui)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
             11) NAME="$(read_setting 'PascalCase identifier' "$NAME")"; DISPLAY_NAME="$(read_setting 'Display name' "$NAME")"; REPOSITORY="$(read_setting 'Repository (owner/name, optional)' "$REPOSITORY")"; run_command rename || printf '\nCommand failed.\n' >&2 ;;
             12) return ;;
             *) printf 'Invalid menu choice.\n' >&2 ;;

@@ -40,3 +40,5 @@ project(ProjectConfig.CORE_TARGET)
         VendorIncludeDirs.json,
         DependencyManifest.SDL3Include
     }
+
+    AddDearImGuiSources()

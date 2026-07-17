@@ -1,5 +1,7 @@
 #include "Keire/Application.h"
 
+#include "UiInternal.h"
+
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -46,6 +48,7 @@ namespace Keire
         Ref<Window> PrimaryWindow;
         EventSubscription LayerListener;
         std::unique_ptr<LayerStack> LayerSystem;
+        std::unique_ptr<UiSystem> UserInterface;
     };
 
     Application::Application(ApplicationSpecification specification)
@@ -86,6 +89,11 @@ namespace Keire
             m_Impl->Clock = std::make_unique<Time>(m_Impl->Specification.Timing);
             m_Impl->Windowing = CreateRef<WindowSystem>();
             m_Impl->PrimaryWindow = m_Impl->Windowing->CreateWindow(m_Impl->Specification.MainWindow);
+            if (m_Impl->Specification.Ui.Mode != UiMode::Disabled)
+            {
+                m_Impl->UserInterface =
+                    std::make_unique<UiSystem>(m_Impl->Specification.Ui, *m_Impl->Windowing, *m_Impl->PrimaryWindow);
+            }
             m_Impl->LayerListener = m_Impl->EventSystem->SubscribeAny([this](const EventView& event)
                                                                       { return m_Impl->LayerSystem->Dispatch(event); },
                                                                       EventPriorities::Normal);
@@ -137,6 +145,14 @@ namespace Keire
                     if (!ExitRequested())
                     {
                         m_Impl->LayerSystem->Update(*m_Impl->Clock);
+                    }
+
+                    if (!ExitRequested() && m_Impl->UserInterface)
+                    {
+                        m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
+                                                          m_Impl->PrimaryWindow->LogicalSize());
+                        m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
+                        m_Impl->UserInterface->EndFrame();
                     }
                 }
 
@@ -233,6 +249,13 @@ namespace Keire
 
     const ApplicationSpecification& Application::Specification() const noexcept { return m_Impl->Specification; }
 
+    bool Application::UiEnabled() const noexcept { return m_Impl->UserInterface != nullptr; }
+
+    UiCaptureState Application::UiCapture() const noexcept
+    {
+        return m_Impl->UserInterface ? m_Impl->UserInterface->Capture() : UiCaptureState{};
+    }
+
     void Application::RequireOwnerThread(const char* operation) const
     {
         if (std::this_thread::get_id() != m_Impl->OwnerThread)
@@ -279,6 +302,12 @@ namespace Keire
         }
 
         m_Impl->LayerListener.Disconnect();
+
+        if (m_Impl->UserInterface)
+        {
+            m_Impl->UserInterface->Shutdown();
+            m_Impl->UserInterface.reset();
+        }
 
         if (m_Impl->EventSystem && m_Impl->EventSystem->IsOpen())
         {
