@@ -184,18 +184,18 @@ namespace Keire
 
         [[nodiscard]] virtual WindowId Id() const noexcept = 0;
         [[nodiscard]] virtual WindowSpecification Specification() const = 0;
-        [[nodiscard]] virtual LogicalExtent LogicalSize() const noexcept = 0;
-        [[nodiscard]] virtual PixelExtent PixelSize() const noexcept = 0;
-        [[nodiscard]] virtual WindowPosition Position() const noexcept = 0;
-        [[nodiscard]] virtual float DisplayScale() const noexcept = 0;
+        [[nodiscard]] virtual LogicalExtent LogicalSize() const = 0;
+        [[nodiscard]] virtual PixelExtent PixelSize() const = 0;
+        [[nodiscard]] virtual WindowPosition Position() const = 0;
+        [[nodiscard]] virtual float DisplayScale() const = 0;
         [[nodiscard]] virtual std::string Title() const = 0;
-        [[nodiscard]] virtual bool Focused() const noexcept = 0;
-        [[nodiscard]] virtual bool Visible() const noexcept = 0;
-        [[nodiscard]] virtual bool Minimized() const noexcept = 0;
-        [[nodiscard]] virtual bool Maximized() const noexcept = 0;
-        [[nodiscard]] virtual WindowMode Mode() const noexcept = 0;
-        [[nodiscard]] virtual bool CloseRequested() const noexcept = 0;
-        [[nodiscard]] virtual bool IsOpen() const noexcept = 0;
+        [[nodiscard]] virtual bool Focused() const = 0;
+        [[nodiscard]] virtual bool Visible() const = 0;
+        [[nodiscard]] virtual bool Minimized() const = 0;
+        [[nodiscard]] virtual bool Maximized() const = 0;
+        [[nodiscard]] virtual WindowMode Mode() const = 0;
+        [[nodiscard]] virtual bool CloseRequested() const = 0;
+        [[nodiscard]] virtual bool IsOpen() const = 0;
 
         virtual void SetTitle(std::string title) = 0;
         virtual void SetSize(LogicalExtent size) = 0;

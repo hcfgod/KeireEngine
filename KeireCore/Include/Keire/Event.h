@@ -91,7 +91,7 @@ namespace Keire
         ~EventSubscription();
 
         void Disconnect() noexcept;
-        [[nodiscard]] bool Connected() const noexcept;
+        [[nodiscard]] bool Connected() const;
 
       private:
         friend class EventBus;
@@ -147,7 +147,7 @@ namespace Keire
         }
 
         [[nodiscard]] std::size_t DispatchQueued();
-        [[nodiscard]] EventBusStatistics Statistics() const noexcept;
+        [[nodiscard]] EventBusStatistics Statistics() const;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close();
 

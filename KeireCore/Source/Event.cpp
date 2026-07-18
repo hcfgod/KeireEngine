@@ -148,7 +148,7 @@ namespace Keire::Detail
             return queued.size();
         }
 
-        EventBusStatistics Statistics() const noexcept
+        EventBusStatistics Statistics() const
         {
             EventBusStatistics statistics;
             {
@@ -164,7 +164,7 @@ namespace Keire::Detail
 
         bool IsOpen() const noexcept { return m_Open.load(std::memory_order_acquire); }
 
-        bool IsConnected(const std::uint64_t id) const noexcept
+        bool IsConnected(const std::uint64_t id) const
         {
             std::scoped_lock lock(m_ListenerMutex);
             const auto iterator = m_ListenerLookup.find(id);
@@ -173,11 +173,17 @@ namespace Keire::Detail
 
         void Disconnect(const std::uint64_t id) noexcept
         {
-            std::scoped_lock lock(m_ListenerMutex);
-            if (const auto iterator = m_ListenerLookup.find(id); iterator != m_ListenerLookup.end())
+            try
             {
-                iterator->second->Active.store(false, std::memory_order_release);
-                m_ListenerLookup.erase(iterator);
+                std::scoped_lock lock(m_ListenerMutex);
+                if (const auto iterator = m_ListenerLookup.find(id); iterator != m_ListenerLookup.end())
+                {
+                    iterator->second->Active.store(false, std::memory_order_release);
+                    m_ListenerLookup.erase(iterator);
+                }
+            }
+            catch (...)
+            {
             }
         }
 
@@ -239,6 +245,7 @@ namespace Keire::Detail
                 return;
             }
 
+            try
             {
                 std::scoped_lock lock(m_ListenerMutex);
                 for (const auto& [id, listener] : m_ListenerLookup)
@@ -248,9 +255,16 @@ namespace Keire::Detail
                 }
                 m_ListenerLookup.clear();
             }
+            catch (...)
+            {
+            }
+            try
             {
                 std::scoped_lock lock(m_QueueMutex);
                 m_Queue.clear();
+            }
+            catch (...)
+            {
             }
             if (m_DispatchDepth == 0)
             {
@@ -316,7 +330,7 @@ namespace Keire
         }
     }
 
-    bool EventSubscription::Connected() const noexcept
+    bool EventSubscription::Connected() const
     {
         if (m_Id == 0)
         {
@@ -345,7 +359,7 @@ namespace Keire
 
     std::size_t EventBus::DispatchQueued() { return m_State->DispatchQueued(); }
 
-    EventBusStatistics EventBus::Statistics() const noexcept { return m_State->Statistics(); }
+    EventBusStatistics EventBus::Statistics() const { return m_State->Statistics(); }
 
     bool EventBus::IsOpen() const noexcept { return m_State->IsOpen(); }
 

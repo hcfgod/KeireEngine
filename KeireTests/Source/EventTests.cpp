@@ -8,10 +8,14 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
 {
+    static_assert(!noexcept(std::declval<const Keire::EventSubscription&>().Connected()));
+    static_assert(!noexcept(std::declval<const Keire::EventBus&>().Statistics()));
+
     struct TestEvent
     {
         int Value = 0;

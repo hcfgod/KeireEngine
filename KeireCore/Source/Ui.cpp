@@ -800,7 +800,13 @@ namespace Keire
             }
             if (EventSinkInstalled && Windowing)
             {
-                WindowSystemInternalAccess::SetEventSink(*Windowing, nullptr, nullptr);
+                try
+                {
+                    WindowSystemInternalAccess::SetEventSink(*Windowing, nullptr, nullptr);
+                }
+                catch (...)
+                {
+                }
                 EventSinkInstalled = false;
             }
             if (Device)

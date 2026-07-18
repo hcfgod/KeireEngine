@@ -6,10 +6,23 @@
 #include <atomic>
 #include <cstdlib>
 #include <thread>
+#include <utility>
 #include <variant>
 
 namespace
 {
+    static_assert(!noexcept(std::declval<const Keire::Window&>().LogicalSize()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().PixelSize()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().Position()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().DisplayScale()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().Focused()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().Visible()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().Minimized()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().Maximized()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().Mode()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().CloseRequested()));
+    static_assert(!noexcept(std::declval<const Keire::Window&>().IsOpen()));
+
     void UseDummyVideoDriver()
     {
 #if defined(_WIN32)

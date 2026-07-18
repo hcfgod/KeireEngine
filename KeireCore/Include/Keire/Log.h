@@ -65,7 +65,7 @@ namespace Keire
         LoggerHandle& operator=(LoggerHandle&&) noexcept = default;
 
         explicit operator bool() const noexcept;
-        std::size_t SinkCount() const noexcept;
+        [[nodiscard]] std::size_t SinkCount() const noexcept;
         void Flush() const;
         void SetLevel(LogLevel level) const;
         void Write(LogLevel level, std::string_view message,
@@ -88,8 +88,8 @@ namespace Keire
         static void Flush();
         static void SetLevel(LogLevel level);
 
-        static LoggerHandle GetCoreLogger();
-        static LoggerHandle GetClientLogger();
+        [[nodiscard]] static LoggerHandle GetCoreLogger();
+        [[nodiscard]] static LoggerHandle GetClientLogger();
     };
 } // namespace Keire
 

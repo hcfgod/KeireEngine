@@ -19,8 +19,7 @@ namespace Keire
 {
     namespace
     {
-        std::mutex ActiveSystemMutex;
-        bool HasActiveSystem = false;
+        std::atomic<bool> HasActiveSystem = false;
 
         struct NativeWindowDeleter final
         {
@@ -98,59 +97,44 @@ namespace Keire
                 return m_Implementation->GetSpecification(m_Id);
             }
 
-            [[nodiscard]] LogicalExtent LogicalSize() const noexcept override
-            {
-                return m_Implementation->GetLogicalSize(m_Id);
-            }
+            [[nodiscard]] LogicalExtent LogicalSize() const override { return m_Implementation->GetLogicalSize(m_Id); }
 
-            [[nodiscard]] PixelExtent PixelSize() const noexcept override
-            {
-                return m_Implementation->GetPixelSize(m_Id);
-            }
+            [[nodiscard]] PixelExtent PixelSize() const override { return m_Implementation->GetPixelSize(m_Id); }
 
-            [[nodiscard]] WindowPosition Position() const noexcept override
-            {
-                return m_Implementation->GetPosition(m_Id);
-            }
+            [[nodiscard]] WindowPosition Position() const override { return m_Implementation->GetPosition(m_Id); }
 
-            [[nodiscard]] float DisplayScale() const noexcept override
-            {
-                return m_Implementation->GetDisplayScale(m_Id);
-            }
+            [[nodiscard]] float DisplayScale() const override { return m_Implementation->GetDisplayScale(m_Id); }
 
             [[nodiscard]] std::string Title() const override { return m_Implementation->GetTitle(m_Id); }
 
-            [[nodiscard]] bool Focused() const noexcept override
+            [[nodiscard]] bool Focused() const override
             {
                 return m_Implementation->GetFlag(m_Id, &CachedWindow::Focused);
             }
 
-            [[nodiscard]] bool Visible() const noexcept override
+            [[nodiscard]] bool Visible() const override
             {
                 return m_Implementation->GetFlag(m_Id, &CachedWindow::Visible);
             }
 
-            [[nodiscard]] bool Minimized() const noexcept override
+            [[nodiscard]] bool Minimized() const override
             {
                 return m_Implementation->GetFlag(m_Id, &CachedWindow::Minimized);
             }
 
-            [[nodiscard]] bool Maximized() const noexcept override
+            [[nodiscard]] bool Maximized() const override
             {
                 return m_Implementation->GetFlag(m_Id, &CachedWindow::Maximized);
             }
 
-            [[nodiscard]] WindowMode Mode() const noexcept override { return m_Implementation->GetMode(m_Id); }
+            [[nodiscard]] WindowMode Mode() const override { return m_Implementation->GetMode(m_Id); }
 
-            [[nodiscard]] bool CloseRequested() const noexcept override
+            [[nodiscard]] bool CloseRequested() const override
             {
                 return m_Implementation->GetFlag(m_Id, &CachedWindow::CloseRequested);
             }
 
-            [[nodiscard]] bool IsOpen() const noexcept override
-            {
-                return m_Implementation->GetFlag(m_Id, &CachedWindow::Open);
-            }
+            [[nodiscard]] bool IsOpen() const override { return m_Implementation->GetFlag(m_Id, &CachedWindow::Open); }
 
             void SetTitle(std::string title) override { m_Implementation->SetTitle(m_Id, std::move(title)); }
 
@@ -175,13 +159,10 @@ namespace Keire
 
         Impl() : m_OwnerThread(std::this_thread::get_id())
         {
+            bool expected = false;
+            if (!HasActiveSystem.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
             {
-                std::scoped_lock lock(ActiveSystemMutex);
-                if (HasActiveSystem)
-                {
-                    throw std::logic_error("Only one WindowSystem may be active in a process.");
-                }
-                HasActiveSystem = true;
+                throw std::logic_error("Only one WindowSystem may be active in a process.");
             }
 
             try
@@ -203,8 +184,7 @@ namespace Keire
             }
             catch (...)
             {
-                std::scoped_lock lock(ActiveSystemMutex);
-                HasActiveSystem = false;
+                HasActiveSystem.store(false, std::memory_order_release);
                 throw;
             }
         }
@@ -213,7 +193,13 @@ namespace Keire
         {
             if (m_Active.load(std::memory_order_acquire) && std::this_thread::get_id() == m_OwnerThread)
             {
-                Shutdown();
+                try
+                {
+                    Shutdown();
+                }
+                catch (...)
+                {
+                }
             }
         }
 
@@ -437,8 +423,7 @@ namespace Keire
             SDL_Quit();
 
             m_Active.store(false, std::memory_order_release);
-            std::scoped_lock activeLock(ActiveSystemMutex);
-            HasActiveSystem = false;
+            HasActiveSystem.store(false, std::memory_order_release);
         }
 
         [[nodiscard]] bool Active() const noexcept { return m_Active.load(std::memory_order_acquire); }
@@ -458,16 +443,23 @@ namespace Keire
 
         void ReleaseWindow(const WindowId id) noexcept
         {
-            if (!Active())
-                return;
-            if (std::this_thread::get_id() == m_OwnerThread)
+            try
             {
-                DestroyWindow(id, true);
-                return;
-            }
+                if (!Active())
+                    return;
+                if (std::this_thread::get_id() == m_OwnerThread)
+                {
+                    DestroyWindow(id, true);
+                    return;
+                }
 
-            std::scoped_lock lock(m_DeferredMutex);
-            m_DeferredDestruction.push_back(id);
+                std::scoped_lock lock(m_DeferredMutex);
+                m_DeferredDestruction.push_back(id);
+            }
+            catch (...)
+            {
+                // WindowSystem retains the native window and reclaims it during shutdown.
+            }
         }
 
         [[nodiscard]] WindowSpecification GetSpecification(const WindowId id) const
@@ -478,7 +470,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] LogicalExtent GetLogicalSize(const WindowId id) const noexcept
+        [[nodiscard]] LogicalExtent GetLogicalSize(const WindowId id) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -486,7 +478,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] PixelExtent GetPixelSize(const WindowId id) const noexcept
+        [[nodiscard]] PixelExtent GetPixelSize(const WindowId id) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -494,7 +486,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] WindowPosition GetPosition(const WindowId id) const noexcept
+        [[nodiscard]] WindowPosition GetPosition(const WindowId id) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -502,7 +494,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] float GetDisplayScale(const WindowId id) const noexcept
+        [[nodiscard]] float GetDisplayScale(const WindowId id) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -518,7 +510,7 @@ namespace Keire
             return {};
         }
 
-        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::* member) const noexcept
+        [[nodiscard]] bool GetFlag(const WindowId id, const bool CachedWindow::* member) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -526,7 +518,7 @@ namespace Keire
             return false;
         }
 
-        [[nodiscard]] WindowMode GetMode(const WindowId id) const noexcept
+        [[nodiscard]] WindowMode GetMode(const WindowId id) const
         {
             std::scoped_lock lock(m_StateMutex);
             if (const auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
@@ -718,7 +710,7 @@ namespace Keire
                 throw WindowError(operation, LastSdlError());
             return true;
         }
-        void DestroyWindow(const WindowId id, const bool erase) noexcept
+        void DestroyWindow(const WindowId id, const bool erase)
         {
             SDL_Window* native = nullptr;
             {
@@ -796,7 +788,13 @@ namespace Keire
     {
         if (m_Impl && m_Impl->Active())
         {
-            m_Impl->Shutdown();
+            try
+            {
+                m_Impl->Shutdown();
+            }
+            catch (...)
+            {
+            }
         }
     }
 

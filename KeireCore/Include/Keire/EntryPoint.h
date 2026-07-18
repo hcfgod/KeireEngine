@@ -25,7 +25,7 @@ namespace Keire
         char* const* m_Values = nullptr;
     };
 
-    class CommandLineError final : public std::runtime_error
+    class KEIRE_API CommandLineError final : public std::runtime_error
     {
       public:
         using std::runtime_error::runtime_error;

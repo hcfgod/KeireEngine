@@ -193,6 +193,8 @@ Logs default to `Logs` relative to the process working directory. IDE debug dire
 
 `KEIRE_ASSERT(condition)` and `KEIRE_ASSERT(condition, "message")` diagnose and abort in Debug and sanitizer configurations. They compile out without evaluating arguments in Release, Dist, and Coverage. Logging uses `KEIRE_CORE_*` and `KEIRE_CLIENT_*` for every severity.
 
+`KEIRE_API` marks KeireCore-owned public symbols and cross-boundary exception types for same-toolchain shared-library preparation. Header-only values and templates remain unannotated, while the managed-client factory hooks remain executable-defined reverse imports. The SDK is still distributed as a static library and does not promise a compiler-independent C++ ABI.
+
 ## Dependencies
 
 `Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers. SDL 3.4.10 is built as cached Debug and Release static archives by a dependency-only CMake step; Kéire itself remains Premake-driven. Debug, sanitizer, and Coverage configurations select Debug SDL, while Release and Dist select Release SDL. nlohmann/json 3.12.0 remains a private header-only implementation dependency.

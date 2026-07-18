@@ -65,6 +65,17 @@ assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROO
 assert_false grep -R -E 'SDL3/|nlohmann/json|imgui' "$ROOT/KeireCore/Include"
 assert_true grep -q 'class KEIRE_API UiWorkspace' "$ROOT/KeireCore/Include/Keire/UiWorkspace.h"
 assert_true grep -q 'BuildFactoryLayout' "$ROOT/KeireClient/Source/ClientApplication.cpp"
+for exported_type in \
+  Application ApplicationCommandLineArguments CommandLineError EventView EventSubscription EventBus Layer LayerStack \
+  LoggerHandle Log Time UiError UiScope UiWindowScope UiChildScope UiMenuBarScope UiMenuScope UiTabBarScope \
+  UiTabItemScope UiTreeNodeScope UiDisabledScope UiIdScope UiMainMenuBarScope UiComboScope UiPopupScope UiPanelScope \
+  UiFrame UiLayoutBuilder UiPanelRegistration UiWorkspace WindowError Window WindowSystem ConfigurationError; do
+  assert_true grep -R -E -q "class[[:space:]]+KEIRE_API[[:space:]]+$exported_type([^[:alnum:]_]|$)" "$ROOT/KeireCore/Include/Keire"
+done
+for exported_function in AssertionFailure GetName GetBuildInfo GetVersionString LoadWindowSpecification; do
+  assert_true grep -R -E -q "KEIRE_API[^;{}]*$exported_function[[:space:]]*\\(" "$ROOT/KeireCore/Include/Keire"
+done
+assert_false grep -R -E -q 'KEIRE_API[^;{}]*(GetApplicationCommandLineDescription|CreateApplication)[[:space:]]*\(' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'dear-imgui-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'IMGUI_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 security_workflow="$ROOT/.github/workflows/security.yml"

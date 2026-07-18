@@ -19,6 +19,6 @@ namespace Keire
         bool Dirty;
     };
 
-    KEIRE_API const BuildInfo& GetBuildInfo() noexcept;
-    KEIRE_API std::string GetVersionString();
+    [[nodiscard]] KEIRE_API const BuildInfo& GetBuildInfo() noexcept;
+    [[nodiscard]] KEIRE_API std::string GetVersionString();
 } // namespace Keire

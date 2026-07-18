@@ -27,6 +27,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Changed
 
+- Public mutex-backed snapshot observers now accurately permit synchronization failures instead of declaring `noexcept`, and ignored return-value diagnostics cover the remaining query-style build and logging APIs.
 - SDK packages now include the first-party `Keire/UiWorkspace.h` contract while keeping all Dear ImGui and JSON implementation headers private.
 - Dear ImGui now compiles only into KeireCore with SDL3 and SDL_GPU backends; KeireClient uses the public `Keire::UiFrame` facade, and SDK packages expose `Keire/Ui.h` without redistributing Dear ImGui headers or sources.
 - SDL dependency builds now enable SDL_GPU while keeping SDL_Renderer disabled. Docking is enabled for rendered UI; multi-viewports remain disabled pending explicit multi-window renderer ownership.
@@ -43,6 +44,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- `CommandLineError` now participates in the `KEIRE_API` boundary, script regressions cover every exported class and free function, and mandatory event, UI, and window teardown paths contain synchronization failures.
 - Workspace dock splits now preserve their proportions across fullscreen, maximized, and windowed host sizes instead
   of retaining fullscreen side-panel widths and collapsing the central region.
 - Dirty theme preset changes now defer their confirmation modal until the preset combo or menu has closed, so Save, Discard, and Cancel can complete the requested switch reliably.

@@ -75,6 +75,20 @@ Assert-True (-not ($clientSources -match '#include\s*[<\"]imgui|ImGui::|ImGui[A-
 $publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui')) "Public dependency isolation"
 Assert-True ($publicHeaders.Contains('class KEIRE_API UiWorkspace') -and $clientSources.Contains('BuildFactoryLayout')) "Kéire workspace facade and factory layout wiring"
+$exportedTypes = @(
+    "Application", "ApplicationCommandLineArguments", "CommandLineError", "EventView", "EventSubscription",
+    "EventBus", "Layer", "LayerStack", "LoggerHandle", "Log", "Time", "UiError", "UiScope", "UiWindowScope",
+    "UiChildScope", "UiMenuBarScope", "UiMenuScope", "UiTabBarScope", "UiTabItemScope", "UiTreeNodeScope",
+    "UiDisabledScope", "UiIdScope", "UiMainMenuBarScope", "UiComboScope", "UiPopupScope", "UiPanelScope", "UiFrame",
+    "UiLayoutBuilder", "UiPanelRegistration", "UiWorkspace", "WindowError", "Window", "WindowSystem", "ConfigurationError"
+)
+foreach ($exportedType in $exportedTypes) {
+    Assert-True ($publicHeaders -match "class\s+KEIRE_API\s+$exportedType\b") "KEIRE_API annotation for $exportedType"
+}
+foreach ($exportedFunction in @("AssertionFailure", "GetName", "GetBuildInfo", "GetVersionString", "LoadWindowSpecification")) {
+    Assert-True ($publicHeaders -match "KEIRE_API[^;{}]*\b$exportedFunction\s*\(") "KEIRE_API annotation for $exportedFunction"
+}
+Assert-True (-not ($publicHeaders -match 'KEIRE_API[^;{}]*\b(?:GetApplicationCommandLineDescription|CreateApplication)\s*\(')) "Managed-client reverse API ownership"
 $packageScript = Get-Content (Join-Path $Windows "package.ps1") -Raw
 Assert-True ($packageScript.Contains('dear-imgui-LICENSE.txt') -and $packageScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui package metadata"
 

@@ -1562,9 +1562,13 @@ namespace Keire
         if (!m_Impl || m_Impl->ShutdownComplete)
             return;
         m_Impl->ShutdownComplete = true;
+        try
         {
             std::lock_guard lock(m_Impl->Mailbox->Mutex);
             m_Impl->Mailbox->Alive = false;
+        }
+        catch (...)
+        {
         }
         m_Impl->Panels->Alive = false;
     }
