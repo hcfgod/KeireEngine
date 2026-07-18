@@ -100,10 +100,16 @@ Scripts/Premake/        Shared Premake policy
 Scripts/Unix/           Shared macOS/Linux implementation
 Scripts/<platform>/     Platform bootstrap and wrappers
 Tools/<platform>/       Ignored, checksum-verified local tools
+docs/                   Architecture and focused subsystem guides
 .github/workflows/      CI, compatibility, security, and packaging
 ```
 
 The root Premake file owns the workspace. Each target owns its project definition. Public consumers include `Keire/Core.h` or `Keire/Log.h`.
+
+## Documentation
+
+The [documentation index](docs/README.md) links focused guides for getting started, architecture, runtime lifecycle,
+the UI workspace, and testing/release workflows.
 
 ## Windowing And Configuration
 
@@ -122,6 +128,8 @@ KeireClient accepts `--config <path>`, `--smoke-window`, and `--smoke-ui`. The d
 `Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to `UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi` runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, and ID scopes are move-only RAII values, so callback exceptions cannot leave the backend stack unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; detachable native viewports, images, renderer handles, and custom draw lists are intentionally unavailable.
 
 Enable `ApplicationSpecification::Ui.Workspace` for the editor-grade layout system. `Application::GetUiWorkspace()` provides named layouts, immutable Default reset, registered panels, Kéire Dark/Light/Classic themes, editable semantic theme tokens, and portable `.keirelayout`/`.keiretheme` import and export. Live layout changes autosave atomically to SDL's per-user preference directory; `DirectoryOverride` supports deterministic tools and tests, while `Ephemeral` keeps smoke runs off disk. A backend-independent `BuildFactoryLayout` callback declares the default dock recipe using stable panel IDs. The legacy single-file `LayoutPath` remains available for simple clients, but it is mutually exclusive with the workspace.
+
+The [UI Workspace Guide](docs/UiWorkspace.md) documents configuration, panel ownership, factory docking, layout and theme workflows, persistence, recovery, and troubleshooting.
 
 ```cpp
 void EditorLayer::OnUi(Keire::UiFrame& ui)
