@@ -1034,6 +1034,62 @@ namespace Keire
             IgnoreNextSaveSignal = true;
         }
 
+        static void ScaleDockTree(ImGuiDockNode& node, const ImVec2 scale) noexcept
+        {
+            node.Size.x *= scale.x;
+            node.Size.y *= scale.y;
+            node.SizeRef.x *= scale.x;
+            node.SizeRef.y *= scale.y;
+            for (auto* child : node.ChildNodes)
+            {
+                if (child)
+                    ScaleDockTree(*child, scale);
+            }
+        }
+
+        [[nodiscard]] ImVec2 CurrentDockspaceSize(const UiSize fallback) const noexcept
+        {
+            ImVec2 size{std::max(fallback.Width, 1.0F), std::max(fallback.Height, 1.0F)};
+            const auto* viewport = ImGui::GetMainViewport();
+            if (LastDockspaceSize && viewport && std::isfinite(viewport->WorkSize.x) &&
+                std::isfinite(viewport->WorkSize.y) && viewport->WorkSize.x > 0.0F && viewport->WorkSize.y > 0.0F)
+            {
+                size = viewport->WorkSize;
+            }
+            return size;
+        }
+
+        void ResizeDockTree(const ImVec2 targetSize)
+        {
+            auto* root = ImGui::DockBuilderGetNode(ImHashStr("Keire.RootDockSpace"));
+            if (!root)
+            {
+                LastDockspaceSize = targetSize;
+                return;
+            }
+
+            ImVec2 previousSize = LastDockspaceSize.value_or(root->Size);
+            if (previousSize.x <= 0.0F || previousSize.y <= 0.0F)
+                previousSize = root->SizeRef;
+            if (!std::isfinite(previousSize.x) || !std::isfinite(previousSize.y) || previousSize.x <= 0.0F ||
+                previousSize.y <= 0.0F)
+            {
+                LastDockspaceSize = targetSize;
+                return;
+            }
+
+            if (std::abs(previousSize.x - targetSize.x) < 0.5F && std::abs(previousSize.y - targetSize.y) < 0.5F)
+            {
+                LastDockspaceSize = targetSize;
+                return;
+            }
+
+            ScaleDockTree(*root, {targetSize.x / previousSize.x, targetSize.y / previousSize.y});
+            LastDockspaceSize = targetSize;
+            DockTreeResizePendingSave = true;
+            ImGui::MarkIniSettingsDirty();
+        }
+
         void StartDialog(const DialogAction action, const std::uint64_t id, const bool save)
         {
             if (!NativeWindow)
@@ -1161,6 +1217,8 @@ namespace Keire
         UiThemeId ActiveThemeId{DarkThemeValue};
         std::uint64_t NextLayoutId = FirstUserValue;
         std::uint64_t NextThemeId = FirstUserValue;
+        std::optional<ImVec2> LastDockspaceSize;
+        bool DockTreeResizePendingSave = false;
         std::optional<std::string> PendingIni;
         std::optional<UiThemeDefinition> PendingTheme;
         SDL_Window* NativeWindow = nullptr;
@@ -1450,19 +1508,25 @@ namespace Keire
             ImGui::ClearIniSettings();
             ImGui::LoadIniSettingsFromMemory(m_Impl->PendingIni->data(), m_Impl->PendingIni->size());
             m_Impl->PendingIni.reset();
+            m_Impl->LastDockspaceSize.reset();
             m_Impl->IgnoreNextSaveSignal = true;
         }
     }
 
     void UiWorkspace::AfterNewFrame(const UiSize viewportSize)
     {
+        const ImVec2 dockspaceSize = m_Impl->CurrentDockspaceSize(viewportSize);
         if (!m_Impl->FactoryPending)
+        {
+            m_Impl->ResizeDockTree(dockspaceSize);
             return;
+        }
         ImGui::ClearIniSettings();
         UiLayoutBuilder builder;
         if (m_Impl->Specification.BuildFactoryLayout)
             m_Impl->Specification.BuildFactoryLayout(builder);
-        m_Impl->ApplyFactory(*builder.m_Impl, viewportSize);
+        m_Impl->ApplyFactory(*builder.m_Impl, {dockspaceSize.x, dockspaceSize.y});
+        m_Impl->LastDockspaceSize = dockspaceSize;
     }
 
     void UiWorkspace::AfterFrame()
@@ -1478,12 +1542,13 @@ namespace Keire
         if (m_Impl->IgnoreNextSaveSignal)
         {
             m_Impl->IgnoreNextSaveSignal = false;
-            if (!visibilityRequested)
+            if (!visibilityRequested && !m_Impl->DockTreeResizePendingSave)
                 return;
         }
         try
         {
             m_Impl->SaveLiveLayout();
+            m_Impl->DockTreeResizePendingSave = false;
         }
         catch (const std::exception& error)
         {

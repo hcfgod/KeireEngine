@@ -23,7 +23,8 @@ project(ProjectConfig.TESTS_TARGET)
     externalincludedirs
     {
         VendorIncludeDirs.doctest,
-        VendorIncludeDirs.spdlog
+        VendorIncludeDirs.spdlog,
+        VendorIncludeDirs.imgui
     }
 
     links

@@ -3,6 +3,8 @@
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
+#include <imgui.h>
+#include <imgui_internal.h>
 
 #include <atomic>
 #include <filesystem>
@@ -334,6 +336,100 @@ namespace
             return specification;
         }
     };
+
+    struct ResponsiveDockWidths
+    {
+        float InitialLeft = 0.0F;
+        float InitialCenter = 0.0F;
+        float ResizedLeft = 0.0F;
+        float ResizedCenter = 0.0F;
+        float RestoredLeft = 0.0F;
+        float RestoredCenter = 0.0F;
+    };
+
+    class ResponsiveWorkspaceLayer final : public Keire::Layer
+    {
+      public:
+        explicit ResponsiveWorkspaceLayer(ResponsiveDockWidths& widths)
+            : Layer("ResponsiveWorkspaceLayer"), m_Widths(widths)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            auto& workspace = Owner().GetUiWorkspace();
+            m_Left = workspace.RegisterPanel({"responsive.left", "Left"});
+            m_Center = workspace.RegisterPanel({"responsive.center", "Center"});
+        }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            const float left = DrawPanel(ui, m_Left);
+            const float center = DrawPanel(ui, m_Center);
+            if (m_Frame == 1)
+            {
+                m_Widths.InitialLeft = left;
+                m_Widths.InitialCenter = center;
+                Owner().MainWindow()->SetSize({640, 360});
+            }
+            else if (m_Frame == 2)
+            {
+                m_Widths.ResizedLeft = left;
+                m_Widths.ResizedCenter = center;
+                Owner().MainWindow()->SetSize({1280, 720});
+            }
+            else if (m_Frame == 3)
+            {
+                m_Widths.RestoredLeft = left;
+                m_Widths.RestoredCenter = center;
+                Owner().RequestExit();
+            }
+            ++m_Frame;
+        }
+
+      private:
+        static float DrawPanel(Keire::UiFrame& ui, Keire::UiPanelRegistration& registration)
+        {
+            if (auto panel = ui.BeginPanel(registration); panel)
+            {
+                const auto* node = ImGui::DockBuilderGetNode(ImGui::GetWindowDockID());
+                return node ? node->Size.x : 0.0F;
+            }
+            return 0.0F;
+        }
+
+        ResponsiveDockWidths& m_Widths;
+        Keire::UiPanelRegistration m_Left;
+        Keire::UiPanelRegistration m_Center;
+        int m_Frame = 0;
+    };
+
+    class ResponsiveWorkspaceApplication final : public Keire::Application
+    {
+      public:
+        explicit ResponsiveWorkspaceApplication(ResponsiveDockWidths& widths) : Application(BuildSpecification())
+        {
+            (void)PushLayer(std::make_unique<ResponsiveWorkspaceLayer>(widths));
+        }
+
+      private:
+        static Keire::ApplicationSpecification BuildSpecification()
+        {
+            auto specification = UiSpecification("responsive-ui-workspace", Keire::UiMode::Headless);
+            specification.MainWindow.Width = 1280;
+            specification.MainWindow.Height = 720;
+            specification.Ui.Workspace.Enabled = true;
+            specification.Ui.Workspace.Ephemeral = true;
+            specification.Ui.Workspace.BuildFactoryLayout = [](Keire::UiLayoutBuilder& layout)
+            {
+                const auto left = layout.Split(layout.Root(), Keire::UiDockDirection::Left, 0.25F);
+                layout.Dock("responsive.left", left.Near);
+                layout.Dock("responsive.center", left.Far);
+            };
+            return specification;
+        }
+    };
 } // namespace
 
 TEST_CASE("Disabled UI preserves the existing application lifecycle")
@@ -432,6 +528,27 @@ TEST_CASE("UI workspace persists named layouts, themes, and registered panel vis
         CHECK(application.Run() == 0);
     }
     std::filesystem::remove_all(directory);
+}
+
+TEST_CASE("UI workspace preserves dock proportions when its host window is resized")
+{
+    UseDummyVideoDriver();
+    ResponsiveDockWidths widths;
+    ResponsiveWorkspaceApplication application(widths);
+    CHECK(application.Run() == 0);
+
+    REQUIRE(widths.InitialLeft > 0.0F);
+    REQUIRE(widths.InitialCenter > 0.0F);
+    REQUIRE(widths.ResizedLeft > 0.0F);
+    REQUIRE(widths.ResizedCenter > 0.0F);
+    REQUIRE(widths.RestoredLeft > 0.0F);
+    REQUIRE(widths.RestoredCenter > 0.0F);
+    const float initialRatio = widths.InitialLeft / (widths.InitialLeft + widths.InitialCenter);
+    const float resizedRatio = widths.ResizedLeft / (widths.ResizedLeft + widths.ResizedCenter);
+    const float restoredRatio = widths.RestoredLeft / (widths.RestoredLeft + widths.RestoredCenter);
+    CHECK(initialRatio == doctest::Approx(0.25F).epsilon(0.02));
+    CHECK(resizedRatio == doctest::Approx(initialRatio).epsilon(0.02));
+    CHECK(restoredRatio == doctest::Approx(initialRatio).epsilon(0.02));
 }
 
 TEST_CASE("UI workspace and legacy single-file persistence are mutually exclusive")

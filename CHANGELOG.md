@@ -43,6 +43,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Workspace dock splits now preserve their proportions across fullscreen, maximized, and windowed host sizes instead
+  of retaining fullscreen side-panel widths and collapsing the central region.
 - Dirty theme preset changes now defer their confirmation modal until the preset combo or menu has closed, so Save, Discard, and Cancel can complete the requested switch reliably.
 - Release packaging now compiles and runs a standalone consumer from the extracted SDK archive.
 - Nested layer traversal now defers structural mutation until the outermost callback returns, and layer operations enforce the application construction thread.

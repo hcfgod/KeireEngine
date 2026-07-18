@@ -88,6 +88,9 @@ status, and whether Default has live modifications.
 - Custom layouts may be renamed or deleted. Built-in layouts are immutable.
 - `ResetFactoryLayout()` selects Default, restores default panel visibility, and reapplies the factory dock recipe.
 - Live docking and panel visibility changes autosave. There is intentionally no manual "save current layout" step.
+- Dock split ratios remain stable when the host transitions between fullscreen, maximized, and windowed sizes. The
+  workspace proportionally rescales the dock tree before rendering instead of allowing the central panel to absorb
+  the entire size change.
 - `.keirelayout` files provide explicit portable import and export. Native dialog helpers are available only in
   rendered mode; path-based methods also work in headless tools and tests.
 
@@ -152,6 +155,12 @@ exports execute later on the UI owner thread. A late callback after shutdown is 
 
 Confirm that registration happens before the first UI frame and that the panel uses the same stable ID in registration,
 the factory recipe, and every release. Reset Default after intentionally changing the factory recipe.
+
+### Panels become narrow after leaving fullscreen
+
+Current workspace layouts are normalized to the host work area whenever its size changes, including when a saved
+layout was captured at a different resolution. If an older session already contains a collapsed panel, reset Default
+once to restore the factory ratios; subsequent fullscreen and windowed transitions preserve those proportions.
 
 ### A preset does not switch after editing a theme
 
