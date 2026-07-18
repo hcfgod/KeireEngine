@@ -11,12 +11,14 @@ common=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture
 test_args=("${common[@]}"); [[ $UPDATE -eq 1 ]] && test_args+=(--update); [[ $FORCE -eq 1 ]] && test_args+=(--force)
 bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"; KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
 output_arch="$(architecture_output_name "$ARCHITECTURE")"; name="$ARTIFACT_PREFIX-$os_name-$ARCHITECTURE-$CONFIGURATION"; stage="$ROOT/Artifacts/$name"
+imgui_library="${PROJECT_NAMESPACE}ImGui"
 archive="$ROOT/Artifacts/$name.tar.gz"; symbols="$ROOT/Artifacts/$name-symbols.tar.gz"; symbol_stage="$ROOT/Artifacts/$name-symbols"
 rm -rf "$stage" "$symbol_stage"; rm -f "$archive" "$archive.sha256" "$symbols" "$symbols.sha256"
 mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/third-party/spdlog" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
 client_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"
 core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/lib$CORE_TARGET.a"
-cp "$client_source" "$stage/bin/"; cp "$core_source" "$stage/lib/"
+imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
+cp "$client_source" "$stage/bin/"; cp "$core_source" "$imgui_source" "$stage/lib/"
 cp "$ROOT/Config/Client.json" "$stage/Config/Client.json"
 cp -R "$ROOT/$CORE_DIRECTORY/Include/"* "$stage/include/"; cp -R "$ROOT/Vendor/spdlog/include/spdlog/"* "$stage/third-party/spdlog/"
 cp "$ROOT/Vendor/spdlog/LICENSE" "$stage/third-party/licenses/spdlog-LICENSE.txt"
@@ -46,12 +48,14 @@ expected_identity="$commit_prefix"; [[ "$dirty" == true ]] && expected_identity=
 
 if [[ "$CONFIGURATION" == Release && "$PLATFORM" == Linux ]]; then
   command -v objcopy >/dev/null 2>&1 || { printf 'objcopy is required to package Linux Release symbols.\n' >&2; exit 1; }
-  mkdir -p "$symbol_stage/KeireClient" "$symbol_stage/KeireCore"
+  mkdir -p "$symbol_stage/KeireClient" "$symbol_stage/KeireCore" "$symbol_stage/DearImGui"
   objcopy --only-keep-debug "$client_source" "$symbol_stage/KeireClient/$CLIENT_TARGET.debug"
   cp "$core_source" "$symbol_stage/KeireCore/lib$CORE_TARGET.a"
+  cp "$imgui_source" "$symbol_stage/DearImGui/lib$imgui_library.a"
   objcopy --strip-debug "$stage/bin/$CLIENT_TARGET"
   objcopy --add-gnu-debuglink="$symbol_stage/KeireClient/$CLIENT_TARGET.debug" "$stage/bin/$CLIENT_TARGET"
   objcopy --strip-debug "$stage/lib/lib$CORE_TARGET.a"
+  objcopy --strip-debug "$stage/lib/lib$imgui_library.a"
 elif [[ "$CONFIGURATION" == Release && "$PLATFORM" == Mac ]]; then
   mkdir -p "$symbol_stage/KeireClient"
   xcrun dsymutil "$client_source" -o "$symbol_stage/KeireClient/$CLIENT_TARGET.dSYM"
@@ -73,13 +77,13 @@ fi
 validation_root="$ROOT/Artifacts/$name-validation"; rm -rf "$validation_root"; mkdir -p "$validation_root/sdk"
 tar -C "$validation_root/sdk" -xzf "$archive"
 cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
-consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "-I$validation_root/sdk/third-party" "$validation_root/sdk/examples/consumer/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
+consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "-I$validation_root/sdk/third-party" "$validation_root/sdk/examples/consumer/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
 [[ "$CONFIGURATION" == Dist ]] && consumer_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && consumer_compile+=(-pthread -ldl -lm)
 [[ "$PLATFORM" == Mac ]] && consumer_compile+=(-framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
 "${consumer_compile[@]}"
 (cd "$validation_root" && ./consumer "$validation_root/sdk/examples/consumer/Client.json")
-managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "-I$validation_root/sdk/third-party" "$validation_root/sdk/examples/managed-consumer/ClientApplication.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/managed-consumer")
+managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "-I$validation_root/sdk/third-party" "$validation_root/sdk/examples/managed-consumer/ClientApplication.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/managed-consumer")
 [[ "$CONFIGURATION" == Dist ]] && managed_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && managed_compile+=(-pthread -ldl -lm)
 [[ "$PLATFORM" == Mac ]] && managed_compile+=(-framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)

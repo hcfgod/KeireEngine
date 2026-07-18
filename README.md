@@ -96,7 +96,7 @@ KeireCore/              Static library and public Keire/<header> API
 KeireClient/            Console application
 KeireTests/             Independent doctest cases
 Vendor/                 Pinned spdlog, doctest, SDL3, nlohmann/json, and Dear ImGui submodules
-Scripts/Premake/        Shared Premake policy
+Scripts/Premake/        Shared policy and the tracked DearImGui project definition
 Scripts/Unix/           Shared macOS/Linux implementation
 Scripts/<platform>/     Platform bootstrap and wrappers
 Tools/<platform>/       Ignored, checksum-verified local tools
@@ -104,7 +104,11 @@ docs/                   Architecture and focused subsystem guides
 .github/workflows/      CI, compatibility, security, and packaging
 ```
 
-The root Premake file owns the workspace. Each target owns its project definition. Public consumers include `Keire/Core.h` or `Keire/Log.h`.
+The root Premake file owns a four-project workspace. `KeireCore`, `KeireClient`, and `KeireTests` own local project
+definitions; the private `DearImGui` static-library project is grouped under `Dependencies` and defined by
+`Scripts/Premake/DearImGui.lua`. Its generated IDE and Ninja metadata remains below ignored
+`Build/Projects/DearImGui`. Public consumers include `Keire/Core.h` or `Keire/Log.h` and never depend on the Dear ImGui
+project directly.
 
 ## Documentation
 
@@ -199,7 +203,12 @@ Logs default to `Logs` relative to the process working directory. IDE debug dire
 
 `Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers. SDL 3.4.10 is built as cached Debug and Release static archives by a dependency-only CMake step; Kéire itself remains Premake-driven. Debug, sanitizer, and Coverage configurations select Debug SDL, while Release and Dist select Release SDL. nlohmann/json 3.12.0 remains a private header-only implementation dependency.
 
-Dear ImGui 1.92.8 is pinned to the released `v1.92.8-docking` tag and compiled privately into KeireCore with its SDL3 platform, SDL_GPU renderer, and standard-string adapters. Kéire owns context, event forwarding, frame, docking, layout, GPU, swapchain, and shutdown lifecycles; clients use only `Keire::UiFrame`. SDL is built with GPU support and without SDL_Renderer. Dear ImGui types and headers never cross the public API, and its headers and sources are not redistributed. Multi-viewports remain disabled until Kéire has explicit multi-window renderer ownership.
+Dear ImGui 1.92.8 is pinned to the released `v1.92.8-docking` tag. Its core, demo, SDL3 platform, SDL_GPU renderer,
+and standard-string adapter translation units build in the private `DearImGui` project as `KeireImGui.lib` on Windows
+or `libKeireImGui.a` on Unix. Kéire owns context, event forwarding, frame, docking, layout, GPU, swapchain, and shutdown
+lifecycles; clients use only `Keire::UiFrame`. SDL is built with GPU support and without SDL_Renderer. Dear ImGui types
+and headers never cross the public API, and its headers and sources are not redistributed. Multi-viewports remain
+disabled until Kéire has explicit multi-window renderer ownership.
 
 KeireClient demonstrates the workspace as a Unity-style editor shell with Scene, Game, Hierarchy, Inspector, Project, Console, Diagnostics, and Theme Editor panels. These panels are deliberate polished empty states around the UI foundation; this milestone does not introduce scene, renderer, asset, or serialization systems.
 
@@ -237,7 +246,15 @@ Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke b
 
 CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in the `master` branch protection rules. Once enabled, the status job fails if any eligible security job is skipped or unsuccessful; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
 
-Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain KeireClient, KeireCore, public headers including `Keire/Ui.h`, spdlog headers, SDL's static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build manifest containing SDL, JSON, and Dear ImGui commits. Every package extracts and validates both a low-level consumer with its own `main` and a managed headless-UI consumer whose `main` comes from KeireCore, using direct compiler invocation and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links `SDL3::SDL3-static`. nlohmann/json and Dear ImGui headers are intentionally absent because neither dependency crosses the public API. SHA-256 files and separate symbol archives are included where available; Dist packages are stripped.
+Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain
+KeireClient, KeireCore, the private KeireImGui archive, public headers including `Keire/Ui.h`, spdlog headers, SDL's
+static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build
+manifest containing SDL, JSON, and Dear ImGui commits. Every package extracts and validates both a low-level consumer
+with its own `main` and a managed headless-UI consumer whose `main` comes from KeireCore, using direct compiler invocation
+and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links the private ImGui archive before
+`SDL3::SDL3-static`, so CMake consumers still link only `Keire::Core`. nlohmann/json and Dear ImGui headers are
+intentionally absent because neither dependency crosses the public API. SHA-256 files and separate symbol archives are
+included where available; Dist packages are stripped.
 
 ## Troubleshooting
 

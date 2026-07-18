@@ -25,9 +25,6 @@ project(ProjectConfig.CLIENT_TARGET)
         VendorIncludeDirs.spdlog
     }
 
-    links
-    {
-        ProjectConfig.CORE_TARGET
-    }
+    LinkKeireCore()
 
     LinkSDL3()

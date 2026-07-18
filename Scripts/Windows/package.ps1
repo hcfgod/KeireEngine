@@ -7,6 +7,7 @@ $CMake = Get-CMakeExecutable
 if (-not $CMake) { throw "CMake 3.20 or newer is required for SDK package validation." }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset; $outputArchitecture = Get-ArchitectureOutputName $Architecture
+$imguiLibraryName = "$($Project.PROJECT_NAMESPACE)ImGui"
 & (Join-Path $PSScriptRoot "build-info.ps1")
 & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate
 & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow
@@ -18,6 +19,7 @@ Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -Err
 New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
 Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\*" "$stage\include\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\include\spdlog" "$stage\third-party\spdlog\" -Recurse
@@ -61,11 +63,13 @@ Compress-Archive "$stage\*" $archive
 $symbolStage = Join-Path $Root "Artifacts\$name-symbols"
 Remove-Item $symbolStage -Recurse -Force -ErrorAction SilentlyContinue
 if ($Configuration -eq "Release") {
-    New-Item -ItemType Directory -Force "$symbolStage\KeireClient", "$symbolStage\KeireCore" | Out-Null
+    New-Item -ItemType Directory -Force "$symbolStage\KeireClient", "$symbolStage\KeireCore", "$symbolStage\DearImGui" | Out-Null
     $clientPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).pdb"
     $corePdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).pdb"
+    $imguiPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.pdb"
     if (Test-Path $clientPdb) { Copy-Item $clientPdb "$symbolStage\KeireClient\" }
     if (Test-Path $corePdb) { Copy-Item $corePdb "$symbolStage\KeireCore\" }
+    if (Test-Path $imguiPdb) { Copy-Item $imguiPdb "$symbolStage\DearImGui\" }
 }
 if ((Test-Path $symbolStage) -and (Get-ChildItem $symbolStage -File -Recurse | Select-Object -First 1)) {
     Compress-Archive "$symbolStage\*" $symbols -Force
@@ -84,7 +88,8 @@ try {
         $consumerLinkOptions = if ($Configuration -eq "Dist") { @("/link", "/LTCG") } else { @() }
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
             "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $consumerSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
     }
@@ -92,7 +97,8 @@ try {
         $compilerCommand = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
             "-I$(Join-Path $sdkRoot 'third-party')" $consumerSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $consumerExe
     }
     if ($LASTEXITCODE -ne 0) { throw "Extracted SDK consumer compilation failed with exit code $LASTEXITCODE." }
@@ -106,14 +112,16 @@ try {
     if ($Toolset -eq "msc") {
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
             "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $managedSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
     }
     else {
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
             "-I$(Join-Path $sdkRoot 'third-party')" $managedSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $managedExe
     }
     if ($LASTEXITCODE -ne 0) { throw "Managed SDK consumer compilation failed with exit code $LASTEXITCODE." }

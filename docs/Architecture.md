@@ -2,7 +2,12 @@
 
 ## Ownership
 
-`KeireCore` is a static C++20 library and owns reusable application behavior, including reference-counted ownership, logging, and the Kéire UI runtime. `KeireClient` is the runnable application and depends on KeireCore. `KeireTests` is a separate executable that depends on KeireCore and doctest. Dear ImGui is a private implementation dependency of KeireCore. Each project owns a local `premake5.lua`; the root file only defines workspace identity and loads projects.
+`KeireCore` is a static C++20 library and owns reusable application behavior, including reference-counted ownership,
+logging, and the Kéire UI runtime. `KeireClient` is the runnable application and depends on KeireCore. `KeireTests` is
+a separate executable that depends on KeireCore and doctest. `DearImGui` is a private static-library build dependency
+grouped under `Dependencies`; its reviewed definition lives in `Scripts/Premake/DearImGui.lua`, while generated project
+metadata lives below ignored `Build/Projects/DearImGui`. The three Kéire targets retain local `premake5.lua` files, and
+the root file defines workspace identity, dependency grouping, and project load order.
 
 `Config/Project.conf` defines names and folders. `Config/Dependencies.lock` defines immutable external inputs. Premake and launchers read these files so renaming and dependency verification have one source of truth.
 
@@ -76,12 +81,29 @@ Configuration examples, application-facing workflows, storage details, and troub
 
 ## Dependency Build Boundary
 
-Premake remains the Kéire build authority. A dependency-only CMake invocation builds and installs pinned SDL3 Debug and Release variants into ignored, compiler-keyed caches. A generated Lua manifest supplies Premake with the selected include/archive paths and platform requirements. SDK packages preserve SDL's official CMake target and make `Keire::Core` transitively depend on `SDL3::SDL3-static`.
+Premake remains the Kéire build authority. A dependency-only CMake invocation builds and installs pinned SDL3 Debug
+and Release variants into ignored, compiler-keyed caches. A generated Lua manifest supplies Premake with the selected
+include/archive paths and platform requirements. SDK packages preserve SDL's official CMake target and make
+`Keire::Core` transitively depend on the private ImGui archive followed by `SDL3::SDL3-static`.
 
-The pinned Dear ImGui docking sources, standard-string adapter, SDL3 platform backend, and SDL_GPU renderer compile directly into KeireCore, following Dear ImGui's source-integration model. Third-party warnings are disabled only for vendor translation units. KeireClient and KeireTests have no direct Dear ImGui includes or symbols. SDL_GPU selects D3D12 or Vulkan on Windows, Vulkan on Linux, and Metal on macOS; SDL_Renderer remains disabled.
+The pinned Dear ImGui docking sources, standard-string adapter, SDL3 platform backend, and SDL_GPU renderer compile in
+the dedicated `DearImGui` static-library project. It emits `KeireImGui.lib` on Windows and `libKeireImGui.a` on Unix,
+uses the workspace runtime/configuration/architecture/sanitizer policies, and alone disables compiler warnings for its
+third-party translation units. KeireCore retains private include access for its UI implementation and links the archive;
+KeireClient remains free of Dear ImGui includes and symbols. KeireTests may include ImGui privately only for dependency
+and lifecycle verification. The internal link closure preserves `KeireCore` → `KeireImGui` → SDL3 for final binaries.
+SDL_GPU selects D3D12 or Vulkan on Windows, Vulkan on Linux, and Metal on macOS; SDL_Renderer remains disabled.
 
 ## Release Shape
 
-Packages include the KeireClient runtime, KeireCore static library, public `Keire/<header>` headers, required spdlog headers, SDL static SDK, complete license texts including Dear ImGui's MIT license, notices, README, and a validated machine-readable build manifest. Dear ImGui headers and sources are not redistributed because Kéire's public UI facade owns the supported contract. Packaging extracts the archive and compiles, links, and runs both the low-level C++20 consumer and a managed headless-UI consumer that resolves `main` from KeireCore, using direct compiler commands and the generated CMake package. CMake builds SDL and serves consumers; Premake builds Kéire. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is intentionally stripped. Export annotations describe same-toolchain shared-library preparation only, not a compiler-independent C++ ABI.
+Packages include the KeireClient runtime, KeireCore and private KeireImGui static libraries, public `Keire/<header>`
+headers, required spdlog headers, SDL static SDK, complete license texts including Dear ImGui's MIT license, notices,
+README, and a validated machine-readable build manifest. Dear ImGui headers and sources are not redistributed because
+Kéire's public UI facade owns the supported contract. Direct validation links Core, ImGui, then SDL; the generated CMake
+package carries ImGui and SDL through `Keire::Core`, so both low-level and managed consumers still name one Kéire target.
+Packaging extracts the archive and compiles, links, and runs both consumers. CMake builds SDL and serves consumers;
+Premake builds Kéire. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is
+intentionally stripped. Export annotations describe same-toolchain shared-library preparation only, not a
+compiler-independent C++ ABI.
 
 A KeireCore prebuild step refreshes version and source-control identity under `Build/Generated` immediately before compilation, including tracked and untracked dirty state. The generator C-escapes configured strings and only rewrites the header when its content changes. The compiler supplies configuration, compiler, platform, and architecture identity. Packaging regenerates identity and verifies the staged binary's commit prefix and dirty marker against its manifest. The resulting `Keire::BuildInfo` describes the binary itself rather than the machine inspecting it.

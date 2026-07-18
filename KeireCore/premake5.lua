@@ -38,7 +38,10 @@ project(ProjectConfig.CORE_TARGET)
     {
         VendorIncludeDirs.spdlog,
         VendorIncludeDirs.json,
+        VendorIncludeDirs.imgui,
+        VendorIncludeDirs.imguiBackends,
+        VendorIncludeDirs.imguiMisc,
         DependencyManifest.SDL3Include
     }
 
-    AddDearImGuiSources()
+    links { DearImGuiProject }

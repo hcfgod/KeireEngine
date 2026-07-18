@@ -27,9 +27,14 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Changed
 
+- Dear ImGui now builds as the dedicated private `DearImGui` static-library project under the generated solution's
+  `Dependencies` group. SDKs carry its separate archive transitively through `Keire::Core` without exposing or
+  redistributing ImGui headers and sources.
 - Public mutex-backed snapshot observers now accurately permit synchronization failures instead of declaring `noexcept`, and ignored return-value diagnostics cover the remaining query-style build and logging APIs.
 - SDK packages now include the first-party `Keire/UiWorkspace.h` contract while keeping all Dear ImGui and JSON implementation headers private.
-- Dear ImGui now compiles only into KeireCore with SDL3 and SDL_GPU backends; KeireClient uses the public `Keire::UiFrame` facade, and SDK packages expose `Keire/Ui.h` without redistributing Dear ImGui headers or sources.
+- Dear ImGui remains private to KeireCore's UI implementation with SDL3 and SDL_GPU backends; KeireClient uses the
+  public `Keire::UiFrame` facade, and SDK packages expose `Keire/Ui.h` without redistributing Dear ImGui headers or
+  sources.
 - SDL dependency builds now enable SDL_GPU while keeping SDL_Renderer disabled. Docking is enabled for rendered UI; multi-viewports remain disabled pending explicit multi-window renderer ownership.
 - Extracted layer ownership, overlay ordering, deferred mutations, traversal, and teardown into a dedicated public `LayerStack`; `Application` now delegates layer operations while orchestrating frame boundaries.
 - Moved the executable entrypoint, informational command handling, exception boundary, application lifetime, and `Run` invocation into KeireCore; KeireClient now supplies `CreateApplication`.

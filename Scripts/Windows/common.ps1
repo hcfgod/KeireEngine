@@ -78,7 +78,7 @@ function ConvertTo-MacroPrefix {
 function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
-        "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h",
         "include\$Namespace\Time.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h",

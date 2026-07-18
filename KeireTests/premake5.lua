@@ -27,9 +27,6 @@ project(ProjectConfig.TESTS_TARGET)
         VendorIncludeDirs.imgui
     }
 
-    links
-    {
-        ProjectConfig.CORE_TARGET
-    }
+    LinkKeireCore()
 
     LinkSDL3()

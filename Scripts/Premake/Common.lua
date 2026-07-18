@@ -1,4 +1,6 @@
 OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
+DearImGuiProject = "DearImGui"
+DearImGuiLibrary = ProjectConfig.PROJECT_NAMESPACE .. "ImGui"
 
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
@@ -9,30 +11,12 @@ VendorIncludeDirs = {
     imguiMisc = "../Vendor/imgui/misc/cpp"
 }
 
-function AddDearImGuiSources()
-    files
+function LinkKeireCore()
+    links
     {
-        "../Vendor/imgui/imgui.cpp",
-        "../Vendor/imgui/imgui_demo.cpp",
-        "../Vendor/imgui/imgui_draw.cpp",
-        "../Vendor/imgui/imgui_tables.cpp",
-        "../Vendor/imgui/imgui_widgets.cpp",
-        "../Vendor/imgui/backends/imgui_impl_sdl3.cpp",
-        "../Vendor/imgui/backends/imgui_impl_sdlgpu3.cpp",
-        "../Vendor/imgui/misc/cpp/imgui_stdlib.cpp"
+        ProjectConfig.CORE_TARGET,
+        DearImGuiProject
     }
-
-    externalincludedirs
-    {
-        VendorIncludeDirs.imgui,
-        VendorIncludeDirs.imguiBackends,
-        VendorIncludeDirs.imguiMisc
-    }
-
-    filter "files:../Vendor/imgui/**.cpp"
-        warnings "Off"
-
-    filter {}
 end
 
 function LinkSDL3()
@@ -48,16 +32,17 @@ function LinkSDL3()
     filter {}
 end
 
-function ApplyCommonProjectSettings()
+function ApplyCommonProjectSettings(repositoryRoot)
+    repositoryRoot = repositoryRoot or ".."
     language "C++"
     cppdialect "C++20"
     staticruntime "off"
     warnings "Extra"
     defines { "KEIRE_STATIC", 'KEIRE_BUILD_CONFIGURATION="%{cfg.buildcfg}"', 'KEIRE_BUILD_ARCHITECTURE="%{cfg.architecture}"' }
 
-    targetdir ("../Build/Bin/" .. OutputDir .. "/%{prj.name}")
-    objdir ("../Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
-    debugdir "../"
+    targetdir (repositoryRoot .. "/Build/Bin/" .. OutputDir .. "/%{prj.name}")
+    objdir (repositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/%{prj.name}")
+    debugdir (repositoryRoot)
 
     filter "options:ci"
         fatalwarnings "All"

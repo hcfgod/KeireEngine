@@ -125,7 +125,7 @@ bash Scripts/project.sh package --generator ninja --configuration Release --tool
 
 Packaging performs tests and a runtime smoke before staging the SDK. It then validates:
 
-- KeireClient and the KeireCore static library;
+- KeireClient plus the KeireCore and private KeireImGui static libraries;
 - every supported public `Keire/` header;
 - the required spdlog and SDL static SDK inputs;
 - complete third-party license attribution, including Dear ImGui;
@@ -133,6 +133,11 @@ Packaging performs tests and a runtime smoke before staging the SDK. It then val
 - the low-level consumer with its own `main`;
 - the managed consumer using the KeireCore-owned entrypoint;
 - both consumers through direct compiler commands and the generated CMake package.
+
+Direct compiler validation links the static archives in `KeireCore`, `KeireImGui`, SDL order. The package CMake target
+encodes that private closure transitively, so supported consumers continue linking only `Keire::Core`. Package validation
+also rejects a missing platform-specific ImGui archive or missing MIT attribution; Dear ImGui headers and sources remain
+outside the SDK.
 
 Archives and symbol packages are written under `Artifacts/` with SHA-256 files. They are generated outputs and must not
 be committed.

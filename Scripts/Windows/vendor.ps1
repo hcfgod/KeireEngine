@@ -55,4 +55,22 @@ foreach ($dependency in $Dependencies) {
     Write-Host "==> $($dependency.Name) verified at $actualCommit"
 }
 
+$imguiIntegration = Join-Path $Root "Scripts\Premake\DearImGui.lua"
+$imguiFiles = @(
+    $imguiIntegration,
+    (Join-Path $Root "Vendor\imgui\imgui.cpp"),
+    (Join-Path $Root "Vendor\imgui\imgui_demo.cpp"),
+    (Join-Path $Root "Vendor\imgui\imgui_draw.cpp"),
+    (Join-Path $Root "Vendor\imgui\imgui_tables.cpp"),
+    (Join-Path $Root "Vendor\imgui\imgui_widgets.cpp"),
+    (Join-Path $Root "Vendor\imgui\backends\imgui_impl_sdl3.cpp"),
+    (Join-Path $Root "Vendor\imgui\backends\imgui_impl_sdlgpu3.cpp"),
+    (Join-Path $Root "Vendor\imgui\misc\cpp\imgui_stdlib.cpp")
+)
+foreach ($file in $imguiFiles) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+        throw "Dear ImGui build integration is incomplete: $file"
+    }
+}
+
 Write-Host "==> Vendor libraries are ready; Git staging was not modified"

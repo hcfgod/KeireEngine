@@ -150,6 +150,11 @@ or format vendored sources as part of unrelated engine work.
 
 Regenerate the selected build system. Premake source globs are evaluated during generation, not during compilation.
 
+The generated solution contains four projects. `DearImGui` appears under the `Dependencies` solution folder and writes
+its generated metadata below `Build/Projects/DearImGui`; its reviewed Premake definition remains at
+`Scripts/Premake/DearImGui.lua`. If that project or its sources are missing after a vendor restore, rerun bootstrap and
+regenerate rather than adding vendor files to KeireCore manually.
+
 ### The UI smoke cannot create a renderer
 
 Run it from an interactive graphics-capable desktop. Use the headless doctest UI mode for deterministic automated

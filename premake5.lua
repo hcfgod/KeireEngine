@@ -137,6 +137,10 @@ filter "system:windows"
 
 filter {}
 
+group "Dependencies"
+include "Scripts/Premake/DearImGui.lua"
+group ""
+
 include(ProjectConfig.CORE_DIRECTORY .. "/premake5.lua")
 include(ProjectConfig.CLIENT_DIRECTORY .. "/premake5.lua")
 include(ProjectConfig.TESTS_DIRECTORY .. "/premake5.lua")
