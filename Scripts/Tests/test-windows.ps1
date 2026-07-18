@@ -16,6 +16,9 @@ function Assert-True([bool]$Condition, [string]$Message) {
 $project = Get-ProjectConfig
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
+Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
+$bootstrapScript = Get-Content (Join-Path $Windows "bootstrap.ps1") -Raw
+Assert-True ($bootstrapScript.Contains('GetTempPath') -and $bootstrapScript.Contains('$PremakeExe --version')) "Unicode-safe Premake version validation"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
 Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
@@ -55,17 +58,22 @@ Assert-Equal $lock.DOCTEST_COMMIT "2d0a9359a60c51affe2a9bebb1be1dca47868151" "do
 Assert-Equal $lock.SDL_COMMIT "8e37db5e797b6167f3a00d697d816a684bd259c7" "SDL lock"
 Assert-Equal $lock.JSON_COMMIT "55f93686c01528224f448c19128836e7df245f72" "JSON lock"
 Assert-Equal $lock.IMGUI_COMMIT "b61e56346a92cfcaf1f43a545ca37b0b32239654" "Dear ImGui lock"
+Assert-Equal $lock.ZSTD_COMMIT "f8745da6ff1ad1e7bab384bd1f9d742439278e99" "Zstandard lock"
 $vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
 $vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
 Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
 Assert-True ($vendorScript.Contains('Scripts\Premake\DearImGui.lua') -and $vendorScript.Contains('imgui_impl_sdlgpu3.cpp')) "Dear ImGui integration validation"
 Assert-True ($vendorUpdateScript.Contains('"imgui"')) "Dear ImGui vendor update support"
+Assert-True ($vendorScript.Contains('Vendor/zstd') -and $vendorScript.Contains('$Lock.ZSTD_COMMIT') -and $vendorScript.Contains('Scripts\Premake\Zstd.lua')) "Zstandard vendor mapping"
+Assert-True ($vendorUpdateScript.Contains('"zstd"')) "Zstandard vendor update support"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+$windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
+Assert-True ($windowsCommon.Contains('KEIRE_VSDEV_ENVIRONMENT_KEY')) "Idempotent Visual Studio environment setup"
 $imguiPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\DearImGui.lua") -Raw
 Assert-True ($imguiPremake.Contains('project(DearImGuiProject)') -and $imguiPremake.Contains('kind "StaticLib"') -and $imguiPremake.Contains('targetname(DearImGuiLibrary)')) "Dear ImGui static project"
 Assert-True ($imguiPremake.Contains('imgui_impl_sdl3.cpp') -and $imguiPremake.Contains('imgui_impl_sdlgpu3.cpp') -and $imguiPremake.Contains('imgui_stdlib.cpp') -and $imguiPremake.Contains('warnings "Off"')) "Premake Dear ImGui source policy"
@@ -75,19 +83,26 @@ Assert-True ($rootPremake.Contains('group "Dependencies"') -and $rootPremake.Con
 $corePremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\premake5.lua") -Raw
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
 $testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5.lua") -Raw
-Assert-True ($corePremake.Contains('links { DearImGuiProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Dear ImGui project ownership"
+Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
 Assert-True ($clientPremake.Contains('LinkKeireCore()') -and $testsPremake.Contains('LinkKeireCore()') -and $premakePolicy.Contains('ProjectConfig.CORE_TARGET') -and $premakePolicy.Contains('DearImGuiProject')) "Static dependency link closure"
 $clientSources = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireClient") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True (-not ($clientSources -match '#include\s*[<\"]imgui|ImGui::|ImGui[A-Z]')) "KeireClient Dear ImGui isolation"
-$publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include") -File -Recurse | Get-Content -Raw) -join "`n"
+$sourceHeaders = Get-ChildItem (Get-RepositoryRoot) -Directory | Where-Object { $_.Name -in @("KeireCore", "KeireClient", "KeireHub", "KeireTests", "AssetTool") } | ForEach-Object { Get-ChildItem (Join-Path $_.FullName "Source") -Filter "*.h" -File -Recurse -ErrorAction SilentlyContinue }
+Assert-True (-not $sourceHeaders) "First-party headers live under Include, never Source"
+Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Assets\Asset.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Assets\AssetSystem.cpp"))) "Asset subsystem directory organization"
+Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Input\Input.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Input\InputSystem.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Input\DefaultInput.keireinput"))) "Input subsystem and sample project organization"
+Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Project\Project.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Scenes\SceneSystem.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp"))) "Project, scene, and hub organization"
+$publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui')) "Public dependency isolation"
 Assert-True ($publicHeaders.Contains('class KEIRE_API UiWorkspace') -and $clientSources.Contains('BuildFactoryLayout')) "Kéire workspace facade and factory layout wiring"
 $exportedTypes = @(
     "Application", "ApplicationCommandLineArguments", "CommandLineError", "EventView", "EventSubscription",
     "EventBus", "Layer", "LayerStack", "LoggerHandle", "Log", "Time", "UiError", "UiScope", "UiWindowScope",
     "UiChildScope", "UiMenuBarScope", "UiMenuScope", "UiTabBarScope", "UiTabItemScope", "UiTreeNodeScope",
-    "UiDisabledScope", "UiIdScope", "UiMainMenuBarScope", "UiComboScope", "UiPopupScope", "UiPanelScope", "UiFrame",
-    "UiLayoutBuilder", "UiPanelRegistration", "UiWorkspace", "WindowError", "Window", "WindowSystem", "ConfigurationError"
+    "UiDisabledScope", "UiIdScope", "UiMainMenuBarScope", "UiComboScope", "UiPopupScope", "UiTableScope", "UiDragSourceScope", "UiDragTargetScope", "UiPanelScope", "UiFrame",
+    "UiLayoutBuilder", "UiPanelRegistration", "UiWorkspace", "WindowError", "Window", "FolderDialogOperation", "WindowSystem", "ConfigurationError",
+    "Asset", "BinaryAsset", "TextAsset", "AssetLoadError", "AssetSystem", "AssetDatabase", "AssetCooker", "InputActionAsset", "InputActionSubscription", "InputActionHandle", "InputActionContext", "InteractiveRebindOperation", "InputSystem", "InputCaptureOverride",
+    "Project", "ProjectRegistry", "SceneAsset", "Scene", "SceneObjectHandle", "SceneLoadOperation", "SceneSystem"
 )
 foreach ($exportedType in $exportedTypes) {
     Assert-True ($publicHeaders -match "class\s+KEIRE_API\s+$exportedType\b") "KEIRE_API annotation for $exportedType"
@@ -98,12 +113,18 @@ foreach ($exportedFunction in @("AssertionFailure", "GetName", "GetBuildInfo", "
 Assert-True (-not ($publicHeaders -match 'KEIRE_API[^;{}]*\b(?:GetApplicationCommandLineDescription|CreateApplication)\s*\(')) "Managed-client reverse API ownership"
 $packageScript = Get-Content (Join-Path $Windows "package.ps1") -Raw
 Assert-True ($packageScript.Contains('dear-imgui-LICENSE.txt') -and $packageScript.Contains('$Lock.IMGUI_COMMIT') -and $packageScript.Contains('$imguiLibraryName.lib')) "Dear ImGui package metadata and archive"
+Assert-True ($packageScript.Contains('zstandard-LICENSE.txt') -and $packageScript.Contains('$Lock.ZSTD_COMMIT') -and $packageScript.Contains('$zstdLibraryName.lib')) "Zstandard package metadata and archive"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
-Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.a') -and $packageConfig.Contains('"${_imgui_sdk_library}" SDL3::SDL3-static')) "Dear ImGui CMake transitive link"
+Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and $packageConfig.Contains('"${_imgui_sdk_library}" "${_zstd_sdk_library}" SDL3::SDL3-static')) "Private archive CMake transitive link"
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {
-    foreach ($path in @("bin\Client.exe", "lib\Core.lib", "lib\CoreImGui.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Application.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\EntryPoint.h", "include\Core\Event.h", "include\Core\Layer.h", "include\Core\Ref.h", "include\Core\Time.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+    foreach ($path in @("bin\Client.exe", "bin\Hub.exe", "lib\Core.lib", "lib\CoreImGui.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Application.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\EntryPoint.h", "include\Core\Event.h", "include\Core\Layer.h", "include\Core\Ref.h", "include\Core\Time.h", "include\Core\Project\Project.h", "include\Core\Scenes\Scene.h", "include\Core\Scenes\SceneAsset.h", "include\Core\Scenes\SceneSystem.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+        $file = Join-Path $packageStage $path
+        New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+        New-Item -ItemType File -Force $file | Out-Null
+    }
+    foreach ($path in @("bin\CoreAssetTool.exe", "lib\CoreZstd.lib", "include\Core\Assets\Asset.h", "include\Core\Assets\AssetSystem.h", "include\Core\Assets\AssetPipeline.h", "include\Core\Assets\InputActionAsset.h", "include\Core\Input\Input.h", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput.keiremeta", "third-party\licenses\zstandard-LICENSE.txt")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
@@ -112,15 +133,15 @@ try {
     New-Item -ItemType Directory -Force (Split-Path $uiHeader) | Out-Null
     New-Item -ItemType File -Force $uiHeader | Out-Null
     New-Item -ItemType File -Force (Join-Path $packageStage "include\Core\UiWorkspace.h") | Out-Null
-    Assert-WindowsPackageStage $packageStage Client Core Core
+    Assert-WindowsPackageStage $packageStage Client Hub Core Core
     Remove-Item (Join-Path $packageStage "lib\CoreImGui.lib")
-    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing Dear ImGui package archive validation"
+    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } "Missing Dear ImGui package archive validation"
     New-Item -ItemType File (Join-Path $packageStage "lib\CoreImGui.lib") | Out-Null
     Remove-Item (Join-Path $packageStage "third-party\licenses\dear-imgui-LICENSE.txt")
-    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing Dear ImGui package license validation"
+    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } "Missing Dear ImGui package license validation"
     New-Item -ItemType File (Join-Path $packageStage "third-party\licenses\dear-imgui-LICENSE.txt") | Out-Null
     Remove-Item (Join-Path $packageStage "third-party\licenses\spdlog-LICENSE.txt")
-    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Core Core } "Missing package license validation"
+    Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } "Missing package license validation"
 }
 finally {
     Remove-Item $packageStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -133,7 +154,7 @@ try {
     $identityConfig = @(
         "PROJECT_IDENTIFIER=IdentityFixture", 'PROJECT_DISPLAY_NAME=Quoted "Kéire" \\ Client',
         "PROJECT_VERSION=1.2.3-alpha.1+build.5", "PROJECT_NAMESPACE=IdentityFixture", "PROJECT_MACRO_PREFIX=IDENTITY_FIXTURE",
-        "CORE_TARGET=IdentityFixtureCore", "CORE_DIRECTORY=IdentityFixtureCore", "CLIENT_TARGET=IdentityFixtureClient", "CLIENT_DIRECTORY=IdentityFixtureClient",
+        "CORE_TARGET=IdentityFixtureCore", "CORE_DIRECTORY=IdentityFixtureCore", "CLIENT_TARGET=IdentityFixtureClient", "CLIENT_DIRECTORY=IdentityFixtureClient", "HUB_TARGET=IdentityFixtureHub", "HUB_DIRECTORY=IdentityFixtureHub",
         "TESTS_TARGET=IdentityFixtureTests", "TESTS_DIRECTORY=IdentityFixtureTests", "ARTIFACT_PREFIX=identityfixture", "REPOSITORY_SLUG=example/identity-fixture"
     )
     [IO.File]::WriteAllLines((Join-Path $identityFixture "Config\Project.conf"), $identityConfig, [Text.UTF8Encoding]::new($false))
@@ -179,9 +200,10 @@ New-Item -ItemType Directory -Path $fixture | Out-Null
 try {
     $coreDirectory = $project.CORE_DIRECTORY
     $clientDirectory = $project.CLIENT_DIRECTORY
+    $hubDirectory = $project.HUB_DIRECTORY
     $testsDirectory = $project.TESTS_DIRECTORY
     $projectNamespace = $project.PROJECT_NAMESPACE
-    foreach ($directory in @("Scripts\Windows", "Config", "Examples\Consumer", "Examples\ManagedConsumer", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
+    foreach ($directory in @("Scripts\Windows", "Config", "Examples\Consumer", "Examples\ManagedConsumer", "$coreDirectory\Include\$projectNamespace", "$coreDirectory\Source", "$clientDirectory\Source", "$hubDirectory\Source", "$testsDirectory\Source", "Vendor", "Build\Bin")) {
         New-Item -ItemType Directory -Force (Join-Path $fixture $directory) | Out-Null
     }
     Copy-Item (Join-Path $Windows "common.ps1"), (Join-Path $Windows "rename.ps1"), (Join-Path $Windows "clean.ps1"), (Join-Path $Windows "doctor.ps1") (Join-Path $fixture "Scripts\Windows")
@@ -205,6 +227,7 @@ namespace $projectNamespace { class Log; }
 "@
     Set-Content (Join-Path $fixture "$coreDirectory\Source\Library.cpp") "#include `"$projectNamespace/Core.h`""
     Set-Content (Join-Path $fixture "$clientDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
+    Set-Content (Join-Path $fixture "$hubDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
     Set-Content (Join-Path $fixture "$testsDirectory\Source\Main.cpp") "#include `"$projectNamespace/Core.h`""
     Set-Content (Join-Path $fixture "README.md") "$($project.PROJECT_IDENTIFIER) $($project.REPOSITORY_SLUG) Scripts/Tests Core.log Client.log"
     Set-Content (Join-Path $fixture "Vendor\keep.txt") 'vendor'
@@ -223,6 +246,7 @@ namespace $projectNamespace { class Log; }
     & (Join-Path $fixture "Scripts\Windows\rename.ps1") -Name ScriptFixture -DisplayName $unicodeDisplayName -Repository example/script-fixture
     Assert-True (-not (Test-Path (Join-Path $fixture ".git"))) "Nested Git repository prevention"
     Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureCore\Include\ScriptFixture\Core.h")) "Rename structure"
+    Assert-True (Test-Path (Join-Path $fixture "ScriptFixtureHub\Source\Main.cpp")) "Rename hub structure"
     $renamed = Get-Content (Join-Path $fixture "Config\Project.conf") -Raw -Encoding UTF8
     Assert-True ($renamed.Contains("CORE_TARGET=ScriptFixtureCore")) "Rename manifest"
     Assert-True ($renamed.Contains("PROJECT_MACRO_PREFIX=SCRIPT_FIXTURE")) "Rename macro manifest"

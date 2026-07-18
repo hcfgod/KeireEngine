@@ -59,8 +59,9 @@ Xcode generation is also supported, but command-line validation should still use
 
 ## Daily Workflow
 
-Generation is required after adding source files, changing Premake policy, switching generator or architecture, or
-removing generated outputs. Ordinary C++ edits only require build or test:
+Build/test automatically regenerate after source files are added/removed, Premake/config inputs change, generator or
+architecture changes, or generated outputs disappear. The generation fingerprint prevents the stale-project linker
+failure that otherwise follows a new translation unit. Ordinary C++ content edits only rebuild affected targets:
 
 ```powershell
 ./Scripts/project.ps1 build -Generator ninja -Configuration Debug -Toolset msc
@@ -85,6 +86,18 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset cl
 The smoke requires a graphics-capable session. Headless CI and package validation use the window-only smoke where
 appropriate.
 
+Normal `run` opens KeireHub. To exercise a real project lifecycle or bypass the Hub deliberately:
+
+```powershell
+./Scripts/project.ps1 run -SmokeProject
+./Scripts/project.ps1 run -Editor -ProjectPath C:\Projects\MyGame
+```
+
+```sh
+bash Scripts/project.sh run --smoke-project
+bash Scripts/project.sh run --editor --project /projects/MyGame
+```
+
 ## Configurations
 
 | Configuration | Intended use |
@@ -102,8 +115,9 @@ platform and compiler; unsupported combinations are rejected before generation.
 
 ## Project Configuration
 
-`Config/Client.json` configures the sample client window. An implicit missing default file is allowed; an explicitly
-requested missing `--config` path is an error. Configuration parsing is strict and rejects unknown or duplicate fields.
+`Config/Client.json` configures the editor window. An implicit missing default file is allowed; an explicitly requested
+missing `--config` path is an error. Interactive KeireClient startup also requires `--project` naming a directory with
+`ProjectSettings/Project.keireproject`; use KeireHub for the normal create/open workflow.
 
 Project identity belongs in `Config/Project.conf`. Use the repository rename command for an intentional template-wide
 rename rather than editing duplicated names manually.

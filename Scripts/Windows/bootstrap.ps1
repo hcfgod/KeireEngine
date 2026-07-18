@@ -77,7 +77,13 @@ function Install-Premake {
     New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
     $valid = $false
     if (-not $Force -and (Test-Path $PremakeExe)) {
-        $valid = ((& $PremakeExe --version 2>$null) -join "`n") -match [regex]::Escape($PremakeVersion)
+        # Premake beta8 attempts to resolve the current working directory as
+        # UTF-8 even for --version. Query from an ASCII temporary directory so
+        # repositories with names such as Kéire do not trigger a false reinstall.
+        Push-Location ([IO.Path]::GetTempPath())
+        try { $versionText = (& $PremakeExe --version 2>$null) -join "`n" }
+        finally { Pop-Location }
+        $valid = $versionText -match [regex]::Escape($PremakeVersion)
     }
     if ($valid) { Write-Step "Premake $PremakeVersion already installed"; return }
 

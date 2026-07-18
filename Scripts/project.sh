@@ -32,6 +32,9 @@ UPDATE=0
 FORCE=0
 CI=0
 SMOKE_UI=0
+SMOKE_PROJECT=0
+EDITOR=0
+PROJECT_PATH=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -51,6 +54,9 @@ while [[ $# -gt 0 ]]; do
         --force) FORCE=1; shift ;;
         --ci) CI=1; shift ;;
         --smoke-ui) SMOKE_UI=1; shift ;;
+        --smoke-project) SMOKE_PROJECT=1; shift ;;
+        --editor) EDITOR=1; shift ;;
+        --project) PROJECT_PATH="$2"; shift 2 ;;
         *) printf "Unknown argument '%s'.\n" "$1" >&2; exit 1 ;;
     esac
 done
@@ -72,7 +78,7 @@ run_command() {
         generate) bash "$PLATFORM_DIR/generate.sh" "${common[@]}" ;;
         build) bash "$PLATFORM_DIR/build.sh" "${common[@]}" --configuration "$CONFIGURATION" --target "$TARGET" ;;
         test) bash "$PLATFORM_DIR/test.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
-        run) KEIRE_SMOKE_UI="$SMOKE_UI" bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
+        run) KEIRE_SMOKE_UI="$SMOKE_UI" KEIRE_SMOKE_PROJECT="$SMOKE_PROJECT" KEIRE_EDITOR="$EDITOR" KEIRE_PROJECT_PATH="$PROJECT_PATH" bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
         clean) bash "$PLATFORM_DIR/clean.sh" "$CLEAN_SCOPE" ;;
         coverage) bash "$SCRIPT_DIR/Unix/coverage.sh" "$PLATFORM_NAME" "${common[@]}" ;;
         package) bash "$SCRIPT_DIR/Unix/package.sh" "$PLATFORM_NAME" "${common[@]}" --configuration "$CONFIGURATION" ;;
@@ -104,6 +110,8 @@ Common options:
   --configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
   --smoke-ui (run command only; requires a graphics-capable environment)
+  --smoke-project (run the sample project editor and exit after several frames)
+  --editor --project <path> (open the editor directly instead of the project hub)
 EOF
 }
 
@@ -116,7 +124,7 @@ read_setting() {
 
 show_menu() {
     while true; do
-        printf '\n%s\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run %s\n6. Coverage report\n7. Package SDK\n8. Doctor\n9. Clean\n10. Vendor update\n11. Rename template\n12. Exit\n\nChoose an option: ' "$PROJECT_IDENTIFIER" "$CLIENT_TARGET"
+        printf '\n%s\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run %s\n6. Coverage report\n7. Package SDK\n8. Doctor\n9. Clean\n10. Vendor update\n11. Rename template\n12. Exit\n\nChoose an option: ' "$PROJECT_IDENTIFIER" "$HUB_TARGET"
         read -r choice
         case "$choice" in
             1|2|3|4|5)

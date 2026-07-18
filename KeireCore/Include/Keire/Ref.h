@@ -18,6 +18,8 @@ namespace Keire
 
     template <typename T, typename... Args> Ref<T> CreateRef(Args&&... args);
 
+    template <typename T, typename U> Ref<T> DynamicRefCast(const Ref<U>& reference) noexcept;
+
     namespace Detail
     {
         struct RefControlBlock
@@ -220,6 +222,7 @@ namespace Keire
         template <typename U> friend class Ref;
         template <typename U> friend class WeakRef;
         template <typename U, typename... Args> friend Ref<U> CreateRef(Args&&... args);
+        template <typename U, typename V> friend Ref<U> DynamicRefCast(const Ref<V>& reference) noexcept;
 
         Ref(T* instance, Detail::RefControlBlock* controlBlock, AdoptStrongTag) noexcept
             : m_Instance(instance), m_ControlBlock(controlBlock)
@@ -401,7 +404,8 @@ namespace Keire
         static_assert(std::derived_from<T, RefCounted>, "CreateRef<T> requires public RefCounted inheritance.");
         static_assert(!std::is_array_v<T>, "CreateRef<T> does not support array types.");
 
-        auto instance = std::make_unique<T>(std::forward<Args>(args)...);
+        // Construct directly in the befriended factory so ref-counted types can keep constructors private.
+        auto instance = std::unique_ptr<T>(new T(std::forward<Args>(args)...));
         auto controlBlock = std::make_unique<Detail::RefControlBlock>();
         controlBlock->Instance = instance.get();
         controlBlock->DestroyInstance = [](void* value) noexcept { delete static_cast<T*>(value); };
@@ -413,6 +417,24 @@ namespace Keire
         T* releasedInstance = instance.release();
         Detail::RefControlBlock* releasedControlBlock = controlBlock.release();
         return Ref<T>(releasedInstance, releasedControlBlock, typename Ref<T>::AdoptStrongTag{});
+    }
+
+    template <typename T, typename U> Ref<T> DynamicRefCast(const Ref<U>& reference) noexcept
+    {
+        static_assert(std::is_polymorphic_v<std::remove_const_t<U>>, "DynamicRefCast requires a polymorphic source.");
+        if (!reference.m_Instance)
+        {
+            return {};
+        }
+
+        auto* instance = dynamic_cast<T*>(reference.m_Instance);
+        if (!instance)
+        {
+            return {};
+        }
+
+        Detail::RetainStrong(reference.m_ControlBlock);
+        return Ref<T>(instance, reference.m_ControlBlock, typename Ref<T>::AdoptStrongTag{});
     }
 
     template <typename T> void swap(Ref<T>& left, Ref<T>& right) noexcept { left.Swap(right); }

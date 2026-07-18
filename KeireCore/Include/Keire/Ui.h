@@ -3,12 +3,15 @@
 #include "Keire/Api.h"
 #include "Keire/UiWorkspace.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Keire
 {
@@ -44,6 +47,41 @@ namespace Keire
         bool Pointer = false;
         bool Keyboard = false;
         bool TextInput = false;
+    };
+
+    enum class UiAxis : std::uint8_t
+    {
+        Horizontal,
+        Vertical
+    };
+
+    enum class UiKey : std::uint8_t
+    {
+        Enter,
+        Escape,
+        Delete,
+        F2,
+        S,
+        Y,
+        Z
+    };
+
+    struct UiShortcut
+    {
+        UiKey Key = UiKey::Enter;
+        bool Control = false;
+        bool Shift = false;
+        bool Alt = false;
+    };
+
+    struct UiItemState
+    {
+        bool Hovered = false;
+        bool Active = false;
+        bool Activated = false;
+        bool Edited = false;
+        bool DeactivatedAfterEdit = false;
+        bool DoubleClicked = false;
     };
 
     struct UiWindowOptions
@@ -97,7 +135,10 @@ namespace Keire
             Id,
             MainMenuBar,
             Combo,
-            Popup
+            Popup,
+            Table,
+            DragSource,
+            DragTarget
         };
 
         UiScope(UiFrame& frame, Kind kind, bool visible, bool closeRequired) noexcept;
@@ -200,6 +241,27 @@ namespace Keire
         UiPopupScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Popup, visible, visible) {}
     };
 
+    class KEIRE_API UiTableScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiTableScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::Table, visible, visible) {}
+    };
+
+    class KEIRE_API UiDragSourceScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiDragSourceScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::DragSource, visible, visible) {}
+    };
+
+    class KEIRE_API UiDragTargetScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiDragTargetScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::DragTarget, visible, visible) {}
+    };
+
     class KEIRE_API UiPanelScope final : public UiScope
     {
       private:
@@ -232,15 +294,29 @@ namespace Keire
         [[nodiscard]] UiMainMenuBarScope BeginMainMenuBar();
         [[nodiscard]] UiComboScope BeginCombo(std::string_view label, std::string_view preview);
         [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr);
+        [[nodiscard]] UiPopupScope BeginItemContextMenu(std::string_view id = {});
+        [[nodiscard]] UiTableScope BeginTable(std::string_view id, std::size_t columns);
+        [[nodiscard]] UiDragSourceScope BeginDragSource();
+        [[nodiscard]] UiDragTargetScope BeginDragTarget();
         [[nodiscard]] UiPanelScope BeginPanel(UiPanelRegistration& panel, UiWindowOptions options = {});
         void OpenPopup(std::string_view id);
         void CloseCurrentPopup();
+        void TableNextRow();
+        [[nodiscard]] bool TableNextColumn();
+        void SetDragPayload(std::string_view type, std::span<const std::byte> bytes);
+        [[nodiscard]] bool AcceptDragPayload(std::string_view type, std::vector<std::byte>& bytes);
 
         void Text(std::string_view text);
         void TextColored(UiColor color, std::string_view text);
         void Separator();
         void SameLine();
         void Spacing();
+        void ProgressBar(float fraction, UiSize size = {}, std::string_view overlay = {});
+        [[nodiscard]] bool Splitter(UiAxis axis, std::string_view id, float& leadingSize, float& trailingSize,
+                                    float minimumLeading = 80.0F, float minimumTrailing = 80.0F,
+                                    float thickness = 4.0F);
+        [[nodiscard]] bool Shortcut(UiShortcut shortcut);
+        [[nodiscard]] UiItemState LastItemState() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
         [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);

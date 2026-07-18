@@ -1,6 +1,6 @@
 #include "Keire/Core.h"
 
-#include "EditorWorkspaceLayer.h"
+#include "KeireClient/EditorWorkspaceLayer.h"
 
 #include <array>
 #include <cstdint>
@@ -13,16 +13,20 @@ namespace
 {
     constexpr std::array ClientCommandLineOptions{
         Keire::ApplicationCommandLineOption{"--config <path>", "Load a specific client configuration file."},
+        Keire::ApplicationCommandLineOption{"--project <path>", "Open a Kéire editor project."},
         Keire::ApplicationCommandLineOption{"--smoke-window", "Create a window, pump several iterations, and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-ui", "Render several UI frames and exit."},
+        Keire::ApplicationCommandLineOption{"--smoke-project", "Open a project, render several frames, and exit."},
     };
 
     struct CommandLine
     {
         std::filesystem::path ConfigurationPath = "Config/Client.json";
+        std::filesystem::path ProjectPath;
         bool ConfigurationExplicit = false;
         bool SmokeWindow = false;
         bool SmokeUi = false;
+        bool SmokeProject = false;
     };
 
     CommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
@@ -39,6 +43,10 @@ namespace
             {
                 result.SmokeUi = true;
             }
+            else if (argument == "--smoke-project")
+            {
+                result.SmokeProject = true;
+            }
             else if (argument == "--config")
             {
                 if (++index >= arguments.Size())
@@ -46,14 +54,24 @@ namespace
                 result.ConfigurationPath = std::string(arguments[index]);
                 result.ConfigurationExplicit = true;
             }
+            else if (argument == "--project")
+            {
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError("--project requires a path.");
+                result.ProjectPath = std::string(arguments[index]);
+            }
             else
             {
                 throw Keire::CommandLineError("Unknown argument '" + std::string(argument) + "'. Run '" +
                                               std::string(arguments.Executable()) + " --help' for usage.");
             }
         }
-        if (result.SmokeWindow && result.SmokeUi)
-            throw Keire::CommandLineError("--smoke-window and --smoke-ui are mutually exclusive.");
+        const auto smokeModes = static_cast<unsigned>(result.SmokeWindow) + static_cast<unsigned>(result.SmokeUi) +
+                                static_cast<unsigned>(result.SmokeProject);
+        if (smokeModes > 1)
+            throw Keire::CommandLineError("Smoke modes are mutually exclusive.");
+        if (!result.SmokeWindow && !result.SmokeUi && result.ProjectPath.empty())
+            throw Keire::CommandLineError("KeireClient requires --project <path>; launch the Kéire Project Hub.");
         return result;
     }
 
@@ -65,6 +83,7 @@ namespace
         layout.Dock("editor.hierarchy", left.Near);
         layout.Dock("editor.inspector", right.Near);
         layout.Dock("editor.theme", right.Near);
+        layout.Dock("editor.input-actions", bottom.Far);
         layout.Dock("editor.project", bottom.Near);
         layout.Dock("editor.console", bottom.Near);
         layout.Dock("editor.diagnostics", bottom.Near);
@@ -91,8 +110,10 @@ namespace
     class ClientApplication final : public Keire::Application
     {
       public:
-        ClientApplication(Keire::ApplicationSpecification specification, const bool smokeWindow, const bool smokeUi)
-            : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeUi(smokeUi)
+        ClientApplication(Keire::ApplicationSpecification specification, const bool smokeWindow, const bool smokeUi,
+                          const bool smokeProject)
+            : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeUi(smokeUi),
+              m_SmokeProject(smokeProject)
         {
         }
 
@@ -106,12 +127,14 @@ namespace
             if (m_SmokeWindow)
                 (void)Layers().PushLayer(std::make_unique<SmokeLayer>());
             else
-                (void)Layers().PushOverlay(std::make_unique<EditorWorkspaceLayer>(m_SmokeUi));
+                (void)Layers().PushOverlay(
+                    std::make_unique<EditorWorkspaceLayer>(m_SmokeUi || m_SmokeProject, m_SmokeProject));
         }
 
       private:
         bool m_SmokeWindow = false;
         bool m_SmokeUi = false;
+        bool m_SmokeProject = false;
     };
 } // namespace
 
@@ -119,7 +142,8 @@ namespace Keire
 {
     ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
     {
-        return {"[--config <path>] [--smoke-window | --smoke-ui]", ClientCommandLineOptions};
+        return {"--project <path> [--config <path>] [--smoke-window | --smoke-ui | --smoke-project]",
+                ClientCommandLineOptions};
     }
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
@@ -137,7 +161,16 @@ namespace Keire
         specification.Ui.Workspace.Enabled = !commandLine.SmokeWindow;
         specification.Ui.Workspace.Ephemeral = commandLine.SmokeUi;
         specification.Ui.Workspace.BuildFactoryLayout = BuildEditorLayout;
+        specification.Assets.Mode =
+            commandLine.SmokeWindow || commandLine.SmokeUi ? AssetMode::Disabled : AssetMode::Development;
+        specification.Projects.Mode =
+            commandLine.SmokeWindow || commandLine.SmokeUi ? ProjectMode::Disabled : ProjectMode::Editor;
+        specification.Projects.Root = commandLine.ProjectPath;
+        specification.Scenes.Mode =
+            commandLine.SmokeWindow || commandLine.SmokeUi ? SceneMode::Disabled : SceneMode::Enabled;
+        specification.Input.Mode =
+            commandLine.SmokeWindow || commandLine.SmokeUi ? InputMode::Disabled : InputMode::Enabled;
         return std::make_unique<ClientApplication>(std::move(specification), commandLine.SmokeWindow,
-                                                   commandLine.SmokeUi);
+                                                   commandLine.SmokeUi, commandLine.SmokeProject);
     }
 } // namespace Keire

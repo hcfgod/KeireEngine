@@ -1,0 +1,449 @@
+{
+  "actionMaps": [
+    {
+      "actions": [
+        {
+          "id": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "interactions": [],
+          "name": "Move",
+          "processors": [],
+          "type": "Value",
+          "valueType": "Axis2D"
+        },
+        {
+          "id": "622ffac4-6370-489e-8276-74376ef57102",
+          "interactions": [],
+          "name": "Look",
+          "processors": [],
+          "type": "Value",
+          "valueType": "Axis2D"
+        },
+        {
+          "id": "1a7b9aa8-1d99-4ea0-95ec-bce2b1227103",
+          "interactions": [],
+          "name": "Fire",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        }
+      ],
+      "bindings": [
+        {
+          "action": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "composite": "Vector2",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "04cde53d-42c8-48ab-b3a5-e1a0d3007201",
+          "interactions": [],
+          "name": "WASD",
+          "part": "",
+          "path": "",
+          "processors": []
+        },
+        {
+          "action": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "bc2c4422-4938-4b1c-a03a-d07551277202",
+          "interactions": [],
+          "name": "",
+          "part": "Up",
+          "path": "<Keyboard>/w",
+          "processors": []
+        },
+        {
+          "action": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "c61a405e-a213-49c6-a5a6-b062e2bc7203",
+          "interactions": [],
+          "name": "",
+          "part": "Down",
+          "path": "<Keyboard>/s",
+          "processors": []
+        },
+        {
+          "action": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "f8d7929e-b3dd-4317-bfd7-e5ab482a7204",
+          "interactions": [],
+          "name": "",
+          "part": "Left",
+          "path": "<Keyboard>/a",
+          "processors": []
+        },
+        {
+          "action": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "d3464d73-3634-4657-9b63-135fc6a07205",
+          "interactions": [],
+          "name": "",
+          "part": "Right",
+          "path": "<Keyboard>/d",
+          "processors": []
+        },
+        {
+          "action": "c220a08c-d4dd-433f-b9f4-c2b5b6757101",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "733a3e68-7ba4-4081-82b8-e4a6281f7206",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/leftStick",
+          "processors": [
+            {
+              "name": "Deadzone",
+              "parameters": {
+                "maximum": 0.925,
+                "minimum": 0.125
+              }
+            }
+          ]
+        },
+        {
+          "action": "622ffac4-6370-489e-8276-74376ef57102",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "36f15973-bc70-470f-a758-c30c23587207",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/delta",
+          "processors": []
+        },
+        {
+          "action": "622ffac4-6370-489e-8276-74376ef57102",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "6fd6c682-f65b-4270-9743-d69de10a7208",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/rightStick",
+          "processors": [
+            {
+              "name": "Deadzone",
+              "parameters": {
+                "maximum": 0.925,
+                "minimum": 0.125
+              }
+            }
+          ]
+        },
+        {
+          "action": "1a7b9aa8-1d99-4ea0-95ec-bce2b1227103",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "e3afdb73-a3ec-43a7-96bb-871fe3007209",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {}
+            }
+          ],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/leftButton",
+          "processors": []
+        },
+        {
+          "action": "1a7b9aa8-1d99-4ea0-95ec-bce2b1227103",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "2e63c258-6aa8-4d2f-99f4-c034be7d7210",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {}
+            }
+          ],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/rightTrigger",
+          "processors": []
+        }
+      ],
+      "capturePolicy": "RespectUiCapture",
+      "id": "a6b6db76-6436-4aa4-b96a-a72a0f987101",
+      "name": "Player"
+    },
+    {
+      "actions": [
+        {
+          "id": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "interactions": [],
+          "name": "Navigate",
+          "processors": [],
+          "type": "Value",
+          "valueType": "Axis2D"
+        },
+        {
+          "id": "103bbf24-6584-4bee-b7b1-e510cba27302",
+          "interactions": [],
+          "name": "Submit",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "606e853c-92ae-4f51-9f3f-27231a317303",
+          "interactions": [],
+          "name": "Cancel",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "72ee241d-b1d5-4f0e-a411-1324a0d27304",
+          "interactions": [],
+          "name": "Point",
+          "processors": [],
+          "type": "PassThrough",
+          "valueType": "Axis2D"
+        },
+        {
+          "id": "f39d8912-2ae8-472c-a833-ab329eb97305",
+          "interactions": [],
+          "name": "Click",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "ed633def-e7f8-4be5-a380-702f73fb7306",
+          "interactions": [],
+          "name": "Scroll",
+          "processors": [],
+          "type": "PassThrough",
+          "valueType": "Axis2D"
+        }
+      ],
+      "bindings": [
+        {
+          "action": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "composite": "Vector2",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "a327a4af-8f4e-4419-9acc-bdff662f7401",
+          "interactions": [],
+          "name": "Arrows",
+          "part": "",
+          "path": "",
+          "processors": []
+        },
+        {
+          "action": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "c40b3ad2-f560-47e5-b026-9ee42d677402",
+          "interactions": [],
+          "name": "",
+          "part": "Up",
+          "path": "<Keyboard>/upArrow",
+          "processors": []
+        },
+        {
+          "action": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "cf3ea809-e942-4572-9c86-caa99fde7403",
+          "interactions": [],
+          "name": "",
+          "part": "Down",
+          "path": "<Keyboard>/downArrow",
+          "processors": []
+        },
+        {
+          "action": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "1e3832f8-55e1-4038-a465-921d4e4d7404",
+          "interactions": [],
+          "name": "",
+          "part": "Left",
+          "path": "<Keyboard>/leftArrow",
+          "processors": []
+        },
+        {
+          "action": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "8f113c2f-ddb5-49d0-9b99-574da92c7405",
+          "interactions": [],
+          "name": "",
+          "part": "Right",
+          "path": "<Keyboard>/rightArrow",
+          "processors": []
+        },
+        {
+          "action": "9a4e4ed3-a7e6-48d0-931d-1939715b7301",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "27a255f1-3bce-4a2e-b110-17768a637406",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/dpad",
+          "processors": []
+        },
+        {
+          "action": "103bbf24-6584-4bee-b7b1-e510cba27302",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "bd446985-61d9-4f93-b4b0-486005177407",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/enter",
+          "processors": []
+        },
+        {
+          "action": "103bbf24-6584-4bee-b7b1-e510cba27302",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "26f89329-20a7-491f-a41b-1bf753367408",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/buttonSouth",
+          "processors": []
+        },
+        {
+          "action": "606e853c-92ae-4f51-9f3f-27231a317303",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "35954b9f-4cc9-4aa6-9903-51637f477409",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/escape",
+          "processors": []
+        },
+        {
+          "action": "606e853c-92ae-4f51-9f3f-27231a317303",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "dcc6340f-437c-4465-a049-4f8a829b7410",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/buttonEast",
+          "processors": []
+        },
+        {
+          "action": "72ee241d-b1d5-4f0e-a411-1324a0d27304",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "9a9af445-0099-45b5-9410-06c404167411",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/position",
+          "processors": []
+        },
+        {
+          "action": "f39d8912-2ae8-472c-a833-ab329eb97305",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "ea824390-c6b7-49f7-a2c8-477fac827412",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/leftButton",
+          "processors": []
+        },
+        {
+          "action": "ed633def-e7f8-4be5-a380-702f73fb7306",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "c0efb3dc-edce-4f34-8896-512098f77413",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/scroll",
+          "processors": []
+        }
+      ],
+      "capturePolicy": "AlwaysReceive",
+      "id": "782ef248-38bd-4931-831c-ce2bfa887201",
+      "name": "UI"
+    }
+  ],
+  "controlSchemes": [
+    {
+      "bindingGroup": "KeyboardMouse",
+      "devices": [
+        {
+          "device": "Keyboard",
+          "optional": false
+        },
+        {
+          "device": "Mouse",
+          "optional": false
+        }
+      ],
+      "id": "d0117eb9-bf9b-49c4-95fc-82c4046ab101",
+      "name": "Keyboard & Mouse"
+    },
+    {
+      "bindingGroup": "Gamepad",
+      "devices": [
+        {
+          "device": "Gamepad",
+          "optional": false
+        }
+      ],
+      "id": "2e8eb4db-4578-4e0d-a235-5e26686daf02",
+      "name": "Gamepad"
+    }
+  ],
+  "name": "DefaultInput",
+  "schemaVersion": 1
+}

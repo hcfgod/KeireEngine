@@ -1,7 +1,8 @@
 #include "Keire/Application.h"
 
-#include "UiInternal.h"
+#include "KeireInternal/UiInternal.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -43,6 +44,10 @@ namespace Keire
         State RuntimeState = State::Constructed;
         std::atomic<int> ExitCode{NoExitRequested};
         Ref<EventBus> EventSystem;
+        Ref<Project> ProjectService;
+        Ref<AssetSystem> Assets;
+        Ref<SceneSystem> SceneService;
+        Ref<InputSystem> InputService;
         std::unique_ptr<Time> Clock;
         Ref<WindowSystem> Windowing;
         Ref<Window> PrimaryWindow;
@@ -80,15 +85,73 @@ namespace Keire
 
         try
         {
+            if (m_Impl->Specification.Projects.Mode == ProjectMode::Editor)
+            {
+                if (m_Impl->Specification.Assets.Mode != AssetMode::Development)
+                    throw std::invalid_argument("Editor projects require Development assets.");
+                m_Impl->ProjectService = Project::Open(m_Impl->Specification.Projects.Root, ProjectOpenMode::Exclusive);
+                m_Impl->Specification.Assets.DevelopmentCatalog = m_Impl->ProjectService->AssetCatalog();
+                if (m_Impl->Specification.Input.BindingOverrideDirectory.empty())
+                {
+                    m_Impl->Specification.Input.BindingOverrideDirectory =
+                        m_Impl->ProjectService->InputOverridesDirectory();
+                }
+                if (m_Impl->Specification.Ui.Workspace.DirectoryOverride.empty())
+                {
+                    m_Impl->Specification.Ui.Workspace.DirectoryOverride = m_Impl->ProjectService->WorkspaceDirectory();
+                }
+                if (m_Impl->Specification.Logging.LogDirectory == "Logs")
+                    m_Impl->Specification.Logging.LogDirectory = (m_Impl->ProjectService->Root() / "Logs").string();
+            }
             if (m_Impl->Specification.ManageLogging)
             {
                 Log::Initialize(m_Impl->Specification.Logging);
             }
 
             m_Impl->EventSystem = CreateRef<EventBus>(m_Impl->Specification.Events);
+            if (m_Impl->Specification.Input.Mode == InputMode::Enabled &&
+                m_Impl->Specification.Assets.Mode == AssetMode::Disabled)
+            {
+                throw std::invalid_argument("Enabled input requires enabled assets.");
+            }
+            if (m_Impl->Specification.Scenes.Mode == SceneMode::Enabled &&
+                m_Impl->Specification.Assets.Mode == AssetMode::Disabled)
+            {
+                throw std::invalid_argument("Enabled scenes require enabled assets.");
+            }
+            if (m_Impl->Specification.Input.Mode == InputMode::Enabled)
+            {
+                const auto inputType = InputActionAsset::StaticType();
+                const auto decoder = std::ranges::find(m_Impl->Specification.Assets.Decoders, inputType,
+                                                       &AssetDecoderRegistration::Type);
+                if (decoder == m_Impl->Specification.Assets.Decoders.end())
+                    m_Impl->Specification.Assets.Decoders.push_back(CreateInputActionAssetDecoder());
+            }
+            if (m_Impl->Specification.Scenes.Mode == SceneMode::Enabled)
+            {
+                const auto sceneType = SceneAsset::StaticType();
+                const auto decoder = std::ranges::find(m_Impl->Specification.Assets.Decoders, sceneType,
+                                                       &AssetDecoderRegistration::Type);
+                if (decoder == m_Impl->Specification.Assets.Decoders.end())
+                    m_Impl->Specification.Assets.Decoders.push_back(CreateSceneAssetDecoder());
+            }
+            if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
+            {
+                m_Impl->Assets = CreateRef<AssetSystem>(m_Impl->Specification.Assets, m_Impl->EventSystem);
+            }
+            if (m_Impl->Specification.Scenes.Mode == SceneMode::Enabled)
+            {
+                m_Impl->SceneService =
+                    CreateRef<SceneSystem>(m_Impl->Specification.Scenes, m_Impl->Assets, m_Impl->EventSystem);
+            }
             m_Impl->Clock = std::make_unique<Time>(m_Impl->Specification.Timing);
             m_Impl->Windowing = CreateRef<WindowSystem>();
             m_Impl->PrimaryWindow = m_Impl->Windowing->CreateWindow(m_Impl->Specification.MainWindow);
+            if (m_Impl->Specification.Input.Mode == InputMode::Enabled)
+            {
+                m_Impl->InputService = CreateRef<InputSystem>(m_Impl->Specification.Input, m_Impl->Windowing,
+                                                              m_Impl->Assets, m_Impl->EventSystem);
+            }
             if (m_Impl->Specification.Ui.Mode != UiMode::Disabled)
             {
                 m_Impl->UserInterface =
@@ -127,10 +190,21 @@ namespace Keire
                 if (!ExitRequested())
                 {
                     (void)m_Impl->EventSystem->DispatchQueued();
+                    if (m_Impl->Assets)
+                    {
+                        (void)m_Impl->Assets->PumpCompletions();
+                    }
+                    if (m_Impl->SceneService)
+                        m_Impl->SceneService->AdvanceFrame();
                 }
 
                 const bool nowSuspended =
                     m_Impl->Specification.SuspendWhenMainWindowMinimized && m_Impl->PrimaryWindow->Minimized();
+
+                if (!ExitRequested() && m_Impl->InputService)
+                {
+                    m_Impl->InputService->AdvanceFrame(m_Impl->Clock->UnscaledDeltaTime(), UiCapture(), nowSuspended);
+                }
 
                 if (!ExitRequested() && !nowSuspended)
                 {
@@ -222,6 +296,14 @@ namespace Keire
     const LayerStack& Application::Layers() const noexcept { return *m_Impl->LayerSystem; }
 
     Ref<EventBus> Application::Events() const noexcept { return m_Impl->EventSystem; }
+
+    Ref<AssetSystem> Application::Assets() const noexcept { return m_Impl->Assets; }
+
+    Ref<Project> Application::GetProject() const noexcept { return m_Impl->ProjectService; }
+
+    Ref<SceneSystem> Application::Scenes() const noexcept { return m_Impl->SceneService; }
+
+    Ref<InputSystem> Application::Input() const noexcept { return m_Impl->InputService; }
 
     Time& Application::GetTime()
     {
@@ -323,6 +405,18 @@ namespace Keire
             m_Impl->UserInterface.reset();
         }
 
+        if (m_Impl->InputService)
+        {
+            m_Impl->InputService->Close();
+            m_Impl->InputService.Reset();
+        }
+
+        if (m_Impl->SceneService)
+        {
+            m_Impl->SceneService->Close();
+            m_Impl->SceneService.Reset();
+        }
+
         if (m_Impl->EventSystem && m_Impl->EventSystem->IsOpen())
         {
             try
@@ -349,6 +443,15 @@ namespace Keire
 
         m_Impl->Windowing.Reset();
         m_Impl->Clock.reset();
+
+        if (m_Impl->Assets)
+        {
+            m_Impl->Assets->Close();
+            m_Impl->Assets.Reset();
+        }
+
+        m_Impl->ProjectService.Reset();
+
         m_Impl->EventSystem.Reset();
 
         if (m_Impl->Specification.ManageLogging)

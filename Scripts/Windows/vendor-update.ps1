@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui")]
+    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui", "zstd")]
     [string]$Dependency,
     [Parameter(Mandatory=$true)]
     [string]$Tag

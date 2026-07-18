@@ -7,10 +7,11 @@ parse_build_arguments "$@"
 load_project_config "$ROOT"
 TOOLSET="$(resolve_unix_toolset Mac "$TOOLSET")"
 [[ "$TARGET" == KeireClient ]] && TARGET="$CLIENT_TARGET"
+[[ "$TARGET" == KeireHub ]] && TARGET="$HUB_TARGET"
 [[ "$TARGET" == KeireTests ]] && TARGET="$TESTS_TARGET"
 validate_unix_combination Mac "$GENERATOR" "$TOOLSET"
 if [[ "$CONFIGURATION" == Coverage && ( "$GENERATOR" != ninja || "$TOOLSET" != clang ) ]]; then printf 'Coverage requires Ninja and Clang.\n' >&2; exit 1; fi
-expected="$GENERATOR|$ARCHITECTURE|$TOOLSET|$CI"; stamp="$ROOT/Build/Generated/$GENERATOR.stamp"
+expected="$GENERATOR|$ARCHITECTURE|$TOOLSET|$CI|$(project_generation_fingerprint "$ROOT")"; stamp="$ROOT/Build/Generated/$GENERATOR.stamp"
 
 case "$GENERATOR" in
     xcode4) generated="$PROJECT_IDENTIFIER.xcworkspace" ;;

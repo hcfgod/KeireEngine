@@ -75,4 +75,4 @@ if ($Generator -eq "compilecommands") {
 $stampDirectory = Join-Path $Root "Build\Generated"
 New-Item -ItemType Directory -Force -Path $stampDirectory | Out-Null
 Set-Content -Path (Join-Path $stampDirectory "$Generator.stamp") `
-    -Value "$Generator|$Architecture|$Toolset|$([bool]$CI)" -Encoding ASCII
+    -Value "$Generator|$Architecture|$Toolset|$([bool]$CI)|$(Get-ProjectGenerationFingerprint $Root)" -Encoding ASCII

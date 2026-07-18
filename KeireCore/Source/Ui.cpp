@@ -1,7 +1,7 @@
 #include "Keire/Ui.h"
 
-#include "UiInternal.h"
-#include "WindowInternal.h"
+#include "KeireInternal/UiInternal.h"
+#include "KeireInternal/WindowInternal.h"
 
 #include "Keire/Log.h"
 
@@ -251,6 +251,15 @@ namespace Keire
             case UiScope::Kind::Popup:
                 ImGui::EndPopup();
                 break;
+            case UiScope::Kind::Table:
+                ImGui::EndTable();
+                break;
+            case UiScope::Kind::DragSource:
+                ImGui::EndDragDropSource();
+                break;
+            case UiScope::Kind::DragTarget:
+                ImGui::EndDragDropTarget();
+                break;
             }
             Scopes.pop_back();
         }
@@ -420,6 +429,48 @@ namespace Keire
         return UiPopupScope(*this, visible);
     }
 
+    UiPopupScope UiFrame::BeginItemContextMenu(const std::string_view id)
+    {
+        m_Impl->RequireActive("BeginItemContextMenu");
+        const std::string safeId(id);
+        const bool visible = ImGui::BeginPopupContextItem(safeId.empty() ? nullptr : safeId.c_str());
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Popup);
+        return UiPopupScope(*this, visible);
+    }
+
+    UiTableScope UiFrame::BeginTable(const std::string_view id, const std::size_t columns)
+    {
+        m_Impl->RequireActive("BeginTable");
+        if (columns == 0 || columns > 64)
+            throw std::invalid_argument("UI tables require between 1 and 64 columns.");
+        const std::string safeId(id);
+        const auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg |
+                           ImGuiTableFlags_SizingStretchProp;
+        const bool visible = ImGui::BeginTable(safeId.c_str(), static_cast<int>(columns), flags);
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Table);
+        return UiTableScope(*this, visible);
+    }
+
+    UiDragSourceScope UiFrame::BeginDragSource()
+    {
+        m_Impl->RequireActive("BeginDragSource");
+        const bool visible = ImGui::BeginDragDropSource();
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::DragSource);
+        return UiDragSourceScope(*this, visible);
+    }
+
+    UiDragTargetScope UiFrame::BeginDragTarget()
+    {
+        m_Impl->RequireActive("BeginDragTarget");
+        const bool visible = ImGui::BeginDragDropTarget();
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::DragTarget);
+        return UiDragTargetScope(*this, visible);
+    }
+
     UiPanelScope UiFrame::BeginPanel(UiPanelRegistration& panel, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginPanel");
@@ -444,6 +495,41 @@ namespace Keire
     {
         m_Impl->RequireActive("CloseCurrentPopup");
         ImGui::CloseCurrentPopup();
+    }
+
+    void UiFrame::TableNextRow()
+    {
+        m_Impl->RequireActive("TableNextRow");
+        ImGui::TableNextRow();
+    }
+
+    bool UiFrame::TableNextColumn()
+    {
+        m_Impl->RequireActive("TableNextColumn");
+        return ImGui::TableNextColumn();
+    }
+
+    void UiFrame::SetDragPayload(const std::string_view type, const std::span<const std::byte> bytes)
+    {
+        m_Impl->RequireActive("SetDragPayload");
+        if (type.empty() || type.size() > 32)
+            throw std::invalid_argument("UI drag payload types must contain between 1 and 32 bytes.");
+        const std::string safeType(type);
+        (void)ImGui::SetDragDropPayload(safeType.c_str(), bytes.data(), bytes.size());
+    }
+
+    bool UiFrame::AcceptDragPayload(const std::string_view type, std::vector<std::byte>& bytes)
+    {
+        m_Impl->RequireActive("AcceptDragPayload");
+        if (type.empty() || type.size() > 32)
+            throw std::invalid_argument("UI drag payload types must contain between 1 and 32 bytes.");
+        const std::string safeType(type);
+        const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(safeType.c_str());
+        if (!payload)
+            return false;
+        const auto* begin = static_cast<const std::byte*>(payload->Data);
+        bytes.assign(begin, begin + payload->DataSize);
+        return true;
     }
 
     void UiFrame::Text(std::string_view text)
@@ -478,6 +564,88 @@ namespace Keire
     {
         m_Impl->RequireActive("Spacing");
         ImGui::Spacing();
+    }
+
+    void UiFrame::ProgressBar(const float fraction, const UiSize size, const std::string_view overlay)
+    {
+        m_Impl->RequireActive("ProgressBar");
+        if (!std::isfinite(fraction))
+            throw std::invalid_argument("UI progress fractions must be finite.");
+        const std::string safeOverlay(overlay);
+        ImGui::ProgressBar(std::clamp(fraction, 0.0F, 1.0F), {size.Width, size.Height},
+                           safeOverlay.empty() ? nullptr : safeOverlay.c_str());
+    }
+
+    bool UiFrame::Splitter(const UiAxis axis, const std::string_view id, float& leadingSize, float& trailingSize,
+                           const float minimumLeading, const float minimumTrailing, const float thickness)
+    {
+        m_Impl->RequireActive("Splitter");
+        if (id.empty() || minimumLeading < 0.0F || minimumTrailing < 0.0F || thickness <= 0.0F ||
+            !std::isfinite(leadingSize) || !std::isfinite(trailingSize))
+            throw std::invalid_argument("UI splitter dimensions and identifier are invalid.");
+        const std::string safeId(id);
+        const auto available = ImGui::GetContentRegionAvail();
+        const ImVec2 size = axis == UiAxis::Horizontal ? ImVec2(thickness, std::max(available.y, thickness))
+                                                       : ImVec2(std::max(available.x, thickness), thickness);
+        (void)ImGui::InvisibleButton(safeId.c_str(), size);
+        if (!ImGui::IsItemActive())
+            return false;
+        const float delta = axis == UiAxis::Horizontal ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
+        const float adjusted = std::clamp(delta, minimumLeading - leadingSize, trailingSize - minimumTrailing);
+        if (adjusted == 0.0F)
+            return false;
+        leadingSize += adjusted;
+        trailingSize -= adjusted;
+        return true;
+    }
+
+    bool UiFrame::Shortcut(const UiShortcut shortcut)
+    {
+        m_Impl->RequireActive("Shortcut");
+        ImGuiKeyChord chord = ImGuiKey_None;
+        switch (shortcut.Key)
+        {
+        case UiKey::Enter:
+            chord = ImGuiKey_Enter;
+            break;
+        case UiKey::Escape:
+            chord = ImGuiKey_Escape;
+            break;
+        case UiKey::Delete:
+            chord = ImGuiKey_Delete;
+            break;
+        case UiKey::F2:
+            chord = ImGuiKey_F2;
+            break;
+        case UiKey::S:
+            chord = ImGuiKey_S;
+            break;
+        case UiKey::Y:
+            chord = ImGuiKey_Y;
+            break;
+        case UiKey::Z:
+            chord = ImGuiKey_Z;
+            break;
+        }
+        if (shortcut.Control)
+            chord |= ImGuiMod_Ctrl;
+        if (shortcut.Shift)
+            chord |= ImGuiMod_Shift;
+        if (shortcut.Alt)
+            chord |= ImGuiMod_Alt;
+        return ImGui::Shortcut(chord);
+    }
+
+    UiItemState UiFrame::LastItemState() const
+    {
+        m_Impl->RequireActive("LastItemState");
+        const bool hovered = ImGui::IsItemHovered();
+        return {hovered,
+                ImGui::IsItemActive(),
+                ImGui::IsItemActivated(),
+                ImGui::IsItemEdited(),
+                ImGui::IsItemDeactivatedAfterEdit(),
+                hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)};
     }
 
     bool UiFrame::Button(std::string_view label, const UiSize size)
@@ -682,8 +850,7 @@ namespace Keire
             RendererInitialized = true;
 
             Windowing = &windows;
-            WindowSystemInternalAccess::SetEventSink(windows, this, ProcessEvent);
-            EventSinkInstalled = true;
+            EventSink = WindowSystemInternalAccess::AddEventSink(windows, this, ProcessEvent);
         }
 
         static void ProcessEvent(void* context, const SDL_Event& event) noexcept
@@ -798,16 +965,16 @@ namespace Keire
                 ImGui::EndFrame();
                 FrameActive = false;
             }
-            if (EventSinkInstalled && Windowing)
+            if (EventSink && Windowing)
             {
                 try
                 {
-                    WindowSystemInternalAccess::SetEventSink(*Windowing, nullptr, nullptr);
+                    WindowSystemInternalAccess::RemoveEventSink(*Windowing, EventSink);
                 }
                 catch (...)
                 {
                 }
-                EventSinkInstalled = false;
+                EventSink = 0;
             }
             if (Device)
                 (void)SDL_WaitForGPUIdle(Device);
@@ -874,7 +1041,7 @@ namespace Keire
         bool WindowClaimed = false;
         bool PlatformInitialized = false;
         bool RendererInitialized = false;
-        bool EventSinkInstalled = false;
+        WindowSystemInternalAccess::EventSinkToken EventSink = 0;
         bool FrameActive = false;
         bool InitializationComplete = false;
         bool ShutdownComplete = false;

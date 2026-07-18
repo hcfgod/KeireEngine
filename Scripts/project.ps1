@@ -20,6 +20,9 @@ param(
     [switch]$Update,
     [switch]$CI,
     [switch]$SmokeUi,
+    [switch]$SmokeProject,
+    [switch]$Editor,
+    [string]$ProjectPath = "",
     [switch]$Force
 )
 
@@ -60,7 +63,8 @@ function Invoke-ProjectCommand {
         }
         "run" {
             & (Join-Path $WindowsScripts "run.ps1") -Generator $Generator -Configuration $Configuration `
-                -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeUi:$SmokeUi -Update:$Update -Generate:$Force
+                -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeUi:$SmokeUi -SmokeProject:$SmokeProject `
+                -Editor:$Editor -ProjectPath $ProjectPath -Update:$Update -Generate:$Force
         }
         "clean" { & (Join-Path $WindowsScripts "clean.ps1") -Scope $CleanScope }
         "coverage" { & (Join-Path $WindowsScripts "coverage.ps1") -Architecture $Architecture -CI:$CI -Update:$Update -Generate:$Force }
@@ -90,6 +94,8 @@ Common options:
   -Configuration <Debug|Release|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   -Architecture <x86_64|ARM64>  -Toolset <default|msc|gcc|clang>
   -SmokeUi (run command only; requires a graphics-capable environment)
+  -SmokeProject (run the sample project editor and exit after several frames)
+  -Editor -ProjectPath <path> (open the editor directly instead of the project hub)
 "@
 }
 
@@ -119,7 +125,7 @@ function Show-Menu {
         Write-Host "2. Generate project files"
         Write-Host "3. Build"
         Write-Host "4. Run tests"
-        Write-Host "5. Run $($Project.CLIENT_TARGET)"
+        Write-Host "5. Run $($Project.HUB_TARGET)"
         Write-Host "6. Coverage report"
         Write-Host "7. Package SDK"
         Write-Host "8. Doctor"

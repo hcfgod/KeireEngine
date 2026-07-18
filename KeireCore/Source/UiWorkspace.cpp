@@ -1,6 +1,6 @@
 #include "Keire/UiWorkspace.h"
 
-#include "WindowInternal.h"
+#include "KeireInternal/WindowInternal.h"
 
 #include "Keire/BuildInfo.h"
 #include "Keire/Ui.h"

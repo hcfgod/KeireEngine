@@ -31,6 +31,7 @@ install_dependency doctest Vendor/doctest "$(config_value "$LOCK" DOCTEST_URL)" 
 install_dependency SDL Vendor/SDL "$(config_value "$LOCK" SDL_URL)" "$(config_value "$LOCK" SDL_COMMIT)"
 install_dependency json Vendor/json "$(config_value "$LOCK" JSON_URL)" "$(config_value "$LOCK" JSON_COMMIT)"
 install_dependency imgui Vendor/imgui "$(config_value "$LOCK" IMGUI_URL)" "$(config_value "$LOCK" IMGUI_COMMIT)"
+install_dependency zstd Vendor/zstd "$(config_value "$LOCK" ZSTD_URL)" "$(config_value "$LOCK" ZSTD_COMMIT)"
 imgui_files=(
     Scripts/Premake/DearImGui.lua
     Vendor/imgui/imgui.cpp
@@ -44,5 +45,9 @@ imgui_files=(
 )
 for file in "${imgui_files[@]}"; do
     [[ -f "$ROOT/$file" ]] || { printf 'Dear ImGui build integration is incomplete: %s\n' "$file" >&2; exit 1; }
+done
+zstd_files=(Scripts/Premake/Zstd.lua Vendor/zstd/lib/zstd.h Vendor/zstd/lib/compress/zstd_compress.c Vendor/zstd/lib/decompress/zstd_decompress.c Vendor/zstd/LICENSE)
+for file in "${zstd_files[@]}"; do
+    [[ -f "$ROOT/$file" ]] || { printf 'Zstandard build integration is incomplete: %s\n' "$file" >&2; exit 1; }
 done
 printf '==> Vendor libraries are ready; Git staging was not modified\n'

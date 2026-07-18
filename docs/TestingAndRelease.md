@@ -1,5 +1,25 @@
 # Testing And Release
 
+## Asset Validation
+
+Asset changes require the focused `AssetTests.cpp` coverage plus Debug, DebugASan, and Release runs. The tests exercise
+stable metadata identity, cache hits, pack validation, typed fallbacks, async completion, failure diagnostics, and
+last-good reload behavior. For a manual content check, run `KeireAssetTool import`, then `KeireAssetTool validate` on
+the generated development catalog. Never format or modify `Vendor/zstd`.
+
+SDK validation requires `KeireAssetTool`, the platform `KeireZstd` archive, the Zstandard license, and its locked commit
+in `build-manifest.json`. Direct consumers link Core, ImGui, Zstd, then SDL; CMake consumers continue naming only
+`Keire::Core`.
+
+Input changes additionally run canonical schema/import tests, an SDL-dummy outer-frame keyboard action test, cursor
+focus restoration, public dependency isolation/`KEIRE_API` assertions, and headless UI facade tests. Packages must
+contain the complete `samples/KeireSandbox` project; the staged asset tool imports its input and scene assets before
+archive publication and the temporary project cache is removed afterward.
+
+Project/scene changes run descriptor, template rollback, lock, registry recovery, canonical scene, hierarchy, weak-handle,
+thread rejection, single/additive activation, failed-load preservation, and project-aware rendered smoke coverage. SDKs
+must include KeireHub, project/scene public headers, and the sample project.
+
 Kéire validation is proportional to risk. The repository launchers select the correct dependency variant, refresh
 build identity, build the requested target, and run the executable with the expected environment.
 
@@ -29,6 +49,7 @@ Never format or patch vendored code during ordinary engine work.
 | `NDEBUG` or assertion behavior | Release |
 | Window or application behavior | SDL dummy-driver tests and explicit shutdown |
 | Rendered UI | Headless focused tests plus graphics-capable `--smoke-ui` |
+| Project/scene lifecycle | Focused project/scene tests plus graphics-capable `--smoke-project` |
 | Script changes | Matching Windows and Unix regression harnesses |
 | Packaging | Release package with direct and CMake low-level/managed consumers |
 
@@ -81,6 +102,17 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset cl
 ```
 
 The UI workspace is ephemeral in this mode, so smoke validation does not read or write the user's layouts and themes.
+
+The project smoke opens `Samples/KeireSandbox`, imports project-local assets, activates the startup scene, attaches the
+default input context, renders the editor, and releases its lock after a bounded run:
+
+```powershell
+./Scripts/project.ps1 run -Generator ninja -Configuration Debug -Toolset msc -SmokeProject
+```
+
+```sh
+bash Scripts/project.sh run --generator ninja --configuration Debug --toolset clang --smoke-project
+```
 
 ## Script Regression Harnesses
 

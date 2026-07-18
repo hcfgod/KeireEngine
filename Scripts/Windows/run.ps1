@@ -10,6 +10,9 @@ param(
     [switch]$CI,
     [switch]$SmokeWindow,
     [switch]$SmokeUi,
+    [switch]$SmokeProject,
+    [switch]$Editor,
+    [string]$ProjectPath = "",
     [switch]$Update,
     [switch]$Generate
 )
@@ -22,10 +25,16 @@ $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $ClientExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe"
+$HubExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe"
 
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
     -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI -Update:$Update -Generate:$Generate
 if (-not (Test-Path $ClientExe)) { throw "KeireClient executable was not found: $ClientExe" }
+if (-not $Editor -and -not $SmokeWindow -and -not $SmokeProject -and -not $ProjectPath) {
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI
+    if (-not (Test-Path $HubExe)) { throw "Project hub executable was not found: $HubExe" }
+}
 
 Push-Location $Root
 $originalPath = $env:PATH
@@ -36,18 +45,32 @@ try {
         $runtimeDirectory = Get-MSVCASanRuntimeDirectory $majorVersion $Architecture
         $env:PATH = "$runtimeDirectory;$env:PATH"
     }
-    Write-Host "==> Running KeireClient $Configuration for $Architecture"
-    if ($SmokeUi) {
-        & $ClientExe --smoke-ui
+    if ($SmokeUi -and -not $Editor) {
+        Write-Host "==> Running project hub UI smoke $Configuration for $Architecture"
+        & $HubExe --smoke-ui
+    }
+    elseif ($SmokeProject) {
+        $smokeProjectPath = if ($ProjectPath) { $ProjectPath } else { Join-Path $Root "Samples\KeireSandbox" }
+        Write-Host "==> Running project-aware editor smoke $Configuration for $Architecture"
+        & $ClientExe --project $smokeProjectPath --smoke-project
     }
     elseif ($CI -or $SmokeWindow) {
+        Write-Host "==> Running KeireClient window smoke $Configuration for $Architecture"
         $originalVideoDriver = $env:SDL_VIDEODRIVER
         $env:SDL_VIDEODRIVER = "dummy"
         & $ClientExe --smoke-window
         if ($null -eq $originalVideoDriver) { Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue }
         else { $env:SDL_VIDEODRIVER = $originalVideoDriver }
     }
-    else { & $ClientExe }
+    elseif ($Editor -or $ProjectPath) {
+        if (-not $ProjectPath) { throw "-ProjectPath is required when launching the editor directly." }
+        Write-Host "==> Running KeireClient for project $ProjectPath"
+        & $ClientExe --project $ProjectPath
+    }
+    else {
+        Write-Host "==> Running $($Project.HUB_TARGET) $Configuration for $Architecture"
+        & $HubExe
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $cliRoot = Join-Path $env:TEMP ("client-cli-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory $cliRoot | Out-Null

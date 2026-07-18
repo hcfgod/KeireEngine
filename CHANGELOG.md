@@ -6,6 +6,22 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- A project-first editor workflow with transactional Empty/Starter creation, versioned descriptors, canonical roots,
+  OS-exclusive editor locks, project-local service paths, a recoverable recent-project registry, and packaged Sandbox.
+- A dedicated KeireHub with searchable/pinnable recent projects, async native folder browsing, reveal/open actions,
+  detached editor launch, project status diagnostics, and Hub/project smoke modes.
+- Typed `.keirescene` assets, owner-thread mutable scenes with weak object handles and validated hierarchy mutation,
+  plus asynchronous single/additive SceneSystem loading and frame-boundary activation events.
+- Scene authoring across Project, Scene, Hierarchy, Inspector, and Console with atomic save, bounded undo/redo,
+  Save/Discard/Cancel transitions, transform editing, subtree operations, and crash-recovery snapshots.
+- A dockable Input Debugger with scoped UI-capture bypass, device/user inspection, transactional map subscriptions, and
+  bounded searchable Console logging of action phase, processed value, scheme, device/user, duration, and timestamp.
+
+- A reference-counted asynchronous asset runtime with typed fallbacks, priority loading, integrity-checked Zstandard packs, last-good hot reload, mount overrides, owner-thread completion events, and bounded eviction.
+- A Unity-style source database with stable `.keiremeta` identities, content-addressed import cache, transactional file operations, deterministic cooker/validator, dedicated `KeireAssetTool`, and Project/Inspector editor integration.
+- An application-owned action input system with typed `.keireinput` assets, keyboard/mouse/gamepad devices, local users and pairing, control schemes, frame snapshots, interactions/processors/composites, hot reload, UI capture, cursor modes, interactive rebinding, and atomic profile overrides.
+- A dockable Input Actions editor with four creation templates, master-detail authoring, bounded undo/redo, canonical Save/Revert/Validate, searchable bindings, conflict-aware Listen capture, and live device/action monitoring.
+
 - A Unity-style editor workspace with stable panel registration, factory docking, named and portable layouts, per-user atomic autosave, semantic Kéire Dark/Light themes, custom theme editing, and a polished eight-panel client shell.
 - Static-first `KEIRE_API` annotations for same-toolchain shared-library preparation and a configurable assertion foundation.
 - Thread-safe factory-only `Ref`/`WeakRef` ownership with polymorphic conversion and race-safe weak locking.
@@ -26,6 +42,15 @@ All notable template changes are documented here. The format follows Keep a Chan
 - A Kéire-owned immediate UI API with frame-scoped RAII widgets, application/layer lifecycle integration, headless testing, docking, layout persistence, SDL3 input, and cross-platform SDL_GPU rendering backed privately by Dear ImGui 1.92.8-docking.
 
 ### Changed
+
+- Normal repository `run` launches KeireHub; direct editor launches require an explicit project. SDKs now carry the Hub,
+  project/scene headers, and a complete validated sample project instead of a root-level standalone input asset.
+- Generation stamps include Premake/config content and the first-party source inventory, automatically regenerating when
+  translation units are added or removed. Windows Premake version checks now work from Unicode repository paths.
+
+- First-party headers now live exclusively beneath each project's `Include` directory. Asset public headers and implementation sources are grouped under `Keire/Assets` and `Source/Assets`, while non-SDK Core headers remain isolated under `KeireInternal`.
+- `Application` can own an opt-in `AssetSystem`; SDKs now include the asset APIs, asset CLI, private `KeireZstd` archive, Zstandard attribution, and transitive Core → ImGui → Zstd → SDL link closure.
+- `Application` can own Input after Assets/Windowing and before UI. Windowing routes native events to multiple private sinks, and SDKs include the public Input API plus a validated Default Input source asset without exposing SDL or JSON.
 
 - Dear ImGui now builds as the dedicated private `DearImGui` static-library project under the generated solution's
   `Dependencies` group. SDKs carry its separate archive transitively through `Keire::Core` without exposing or
@@ -48,6 +73,11 @@ All notable template changes are documented here. The format follows Keep a Chan
 - SDL is built through a compiler-keyed dependency-only CMake cache while Kéire remains Premake-driven; SDK CMake consumers receive SDL transitively.
 
 ### Fixed
+
+- Project Hub recent-project persistence now encodes filesystem paths as UTF-8, allowing projects beneath Unicode
+  directories such as `KéireEngine` to open on Windows.
+- Project generation can no longer silently omit a newly added implementation file and surface as unresolved editor
+  symbols at link time.
 
 - `CommandLineError` now participates in the `KEIRE_API` boundary, script regressions cover every exported class and free function, and mandatory event, UI, and window teardown paths contain synchronization failures.
 - Workspace dock splits now preserve their proportions across fullscreen, maximized, and windowed host sizes instead

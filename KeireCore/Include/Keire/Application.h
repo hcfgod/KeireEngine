@@ -1,9 +1,13 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/Assets/AssetSystem.h"
 #include "Keire/Event.h"
+#include "Keire/Input/Input.h"
 #include "Keire/Layer.h"
 #include "Keire/Log.h"
+#include "Keire/Project/Project.h"
+#include "Keire/Scenes/SceneSystem.h"
 #include "Keire/Time.h"
 #include "Keire/Ui.h"
 #include "Keire/Window.h"
@@ -17,6 +21,10 @@ namespace Keire
     {
         WindowSpecification MainWindow;
         EventBusSpecification Events;
+        AssetSystemSpecification Assets;
+        ProjectSystemSpecification Projects;
+        SceneSystemSpecification Scenes;
+        InputSystemSpecification Input;
         TimeSpecification Timing;
         LogConfig Logging;
         UiSpecification Ui;
@@ -49,6 +57,10 @@ namespace Keire
         [[nodiscard]] const LayerStack& Layers() const noexcept;
 
         [[nodiscard]] Ref<EventBus> Events() const noexcept;
+        [[nodiscard]] Ref<AssetSystem> Assets() const noexcept;
+        [[nodiscard]] Ref<Project> GetProject() const noexcept;
+        [[nodiscard]] Ref<SceneSystem> Scenes() const noexcept;
+        [[nodiscard]] Ref<InputSystem> Input() const noexcept;
         [[nodiscard]] Time& GetTime();
         [[nodiscard]] const Time& GetTime() const;
         [[nodiscard]] Ref<WindowSystem> Windows() const noexcept;

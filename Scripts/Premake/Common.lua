@@ -1,6 +1,8 @@
 OutputDir = "%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}"
 DearImGuiProject = "DearImGui"
 DearImGuiLibrary = ProjectConfig.PROJECT_NAMESPACE .. "ImGui"
+ZstdProject = "Zstd"
+ZstdLibrary = ProjectConfig.PROJECT_NAMESPACE .. "Zstd"
 
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
@@ -8,14 +10,16 @@ VendorIncludeDirs = {
     json = "../Vendor/json/include",
     imgui = "../Vendor/imgui",
     imguiBackends = "../Vendor/imgui/backends",
-    imguiMisc = "../Vendor/imgui/misc/cpp"
+    imguiMisc = "../Vendor/imgui/misc/cpp",
+    zstd = "../Vendor/zstd/lib"
 }
 
 function LinkKeireCore()
     links
     {
         ProjectConfig.CORE_TARGET,
-        DearImGuiProject
+        DearImGuiProject,
+        ZstdProject
     }
 end
 

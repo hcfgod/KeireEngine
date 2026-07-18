@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = Get-RepositoryRoot
 $Project = Get-ProjectConfig
-$required = @("PROJECT_IDENTIFIER", "PROJECT_DISPLAY_NAME", "PROJECT_VERSION", "PROJECT_NAMESPACE", "PROJECT_MACRO_PREFIX", "CORE_TARGET", "CORE_DIRECTORY", "CLIENT_TARGET", "CLIENT_DIRECTORY", "TESTS_TARGET", "TESTS_DIRECTORY", "ARTIFACT_PREFIX", "REPOSITORY_SLUG")
+$required = @("PROJECT_IDENTIFIER", "PROJECT_DISPLAY_NAME", "PROJECT_VERSION", "PROJECT_NAMESPACE", "PROJECT_MACRO_PREFIX", "CORE_TARGET", "CORE_DIRECTORY", "CLIENT_TARGET", "CLIENT_DIRECTORY", "HUB_TARGET", "HUB_DIRECTORY", "TESTS_TARGET", "TESTS_DIRECTORY", "ARTIFACT_PREFIX", "REPOSITORY_SLUG")
 foreach ($key in $required) {
     if (-not $Project.ContainsKey($key)) { throw "Project configuration is missing '$key'." }
     if ([string]$Project[$key] -match '[\r\n]') { throw "Project configuration '$key' contains a line break." }

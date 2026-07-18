@@ -13,10 +13,10 @@ if ($reserved -contains $Name) { throw "Name '$Name' is a reserved C++ keyword."
 if (-not $DisplayName) { $DisplayName = $Name }
 if ($Name -match '[\r\n]' -or $DisplayName -match '[\r\n]' -or $Repository -match '[\r\n]') { throw "Rename values must not contain line breaks." }
 if ($Repository -and $Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Repository must use owner/name format." }
-$newCore = "${Name}Core"; $newClient = "${Name}Client"; $newTests = "${Name}Tests"
+$newCore = "${Name}Core"; $newClient = "${Name}Client"; $newHub = "${Name}Hub"; $newTests = "${Name}Tests"
 $newMacroPrefix = ConvertTo-MacroPrefix $Name
-foreach ($path in @($newCore, $newClient, $newTests)) {
-    if ((Join-Path $Root $path) -notin @((Join-Path $Root $Project.CORE_DIRECTORY), (Join-Path $Root $Project.CLIENT_DIRECTORY), (Join-Path $Root $Project.TESTS_DIRECTORY)) -and (Test-Path (Join-Path $Root $path))) { throw "Destination '$path' already exists." }
+foreach ($path in @($newCore, $newClient, $newHub, $newTests)) {
+    if ((Join-Path $Root $path) -notin @((Join-Path $Root $Project.CORE_DIRECTORY), (Join-Path $Root $Project.CLIENT_DIRECTORY), (Join-Path $Root $Project.HUB_DIRECTORY), (Join-Path $Root $Project.TESTS_DIRECTORY)) -and (Test-Path (Join-Path $Root $path))) { throw "Destination '$path' already exists." }
 }
 # Work directly from the filesystem so clones, copies, archives, nested
 # worktrees, and Unicode paths all behave identically.
@@ -45,10 +45,12 @@ try {
             $content = $content.Replace('"' + $Project.PROJECT_NAMESPACE + '/', '"' + $Name + '/')
             $content = $content.Replace('"' + $Project.CORE_TARGET + '"', '"' + $newCore + '"')
             $content = $content.Replace('"' + $Project.CLIENT_TARGET + '"', '"' + $newClient + '"')
+            $content = $content.Replace('"' + $Project.HUB_TARGET + '"', '"' + $newHub + '"')
         }
         else {
             $content = [regex]::Replace($content, "\b$([regex]::Escape($Project.CORE_TARGET))\b", $newCore)
             $content = [regex]::Replace($content, "\b$([regex]::Escape($Project.CLIENT_TARGET))\b", $newClient)
+            $content = [regex]::Replace($content, "\b$([regex]::Escape($Project.HUB_TARGET))\b", $newHub)
             $content = [regex]::Replace($content, "\b$([regex]::Escape($Project.TESTS_TARGET))\b", $newTests)
             $content = $content.Replace("$newCore.h", "Core.h")
             $content = $content.Replace("$newCore::", "${Name}::")
@@ -61,11 +63,11 @@ try {
         [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
     }
     $configPath = Join-Path $Root "Config\Project.conf"
-    $config = @("PROJECT_IDENTIFIER=$Name", "PROJECT_DISPLAY_NAME=$DisplayName", "PROJECT_VERSION=$($Project.PROJECT_VERSION)", "PROJECT_NAMESPACE=$Name", "PROJECT_MACRO_PREFIX=$newMacroPrefix", "CORE_TARGET=$newCore", "CORE_DIRECTORY=$newCore", "CLIENT_TARGET=$newClient", "CLIENT_DIRECTORY=$newClient", "TESTS_TARGET=$newTests", "TESTS_DIRECTORY=$newTests", "ARTIFACT_PREFIX=$($Name.ToLowerInvariant())", "REPOSITORY_SLUG=$Repository")
+    $config = @("PROJECT_IDENTIFIER=$Name", "PROJECT_DISPLAY_NAME=$DisplayName", "PROJECT_VERSION=$($Project.PROJECT_VERSION)", "PROJECT_NAMESPACE=$Name", "PROJECT_MACRO_PREFIX=$newMacroPrefix", "CORE_TARGET=$newCore", "CORE_DIRECTORY=$newCore", "CLIENT_TARGET=$newClient", "CLIENT_DIRECTORY=$newClient", "HUB_TARGET=$newHub", "HUB_DIRECTORY=$newHub", "TESTS_TARGET=$newTests", "TESTS_DIRECTORY=$newTests", "ARTIFACT_PREFIX=$($Name.ToLowerInvariant())", "REPOSITORY_SLUG=$Repository")
     [IO.File]::WriteAllLines($configPath, $config, [Text.UTF8Encoding]::new($false))
     $publicInclude = Join-Path $Root "$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)"
     if (Test-Path $publicInclude) { $newInclude = Join-Path (Split-Path $publicInclude) $Name; Move-Item $publicInclude $newInclude; $moves += @($newInclude, $publicInclude) }
-    foreach ($pair in @(@($Project.CORE_DIRECTORY,$newCore), @($Project.CLIENT_DIRECTORY,$newClient), @($Project.TESTS_DIRECTORY,$newTests))) {
+    foreach ($pair in @(@($Project.CORE_DIRECTORY,$newCore), @($Project.CLIENT_DIRECTORY,$newClient), @($Project.HUB_DIRECTORY,$newHub), @($Project.TESTS_DIRECTORY,$newTests))) {
         if ($pair[0] -ne $pair[1]) { $from=Join-Path $Root $pair[0]; $to=Join-Path $Root $pair[1]; Move-Item $from $to; $moves += @($to,$from) }
     }
 }

@@ -25,4 +25,4 @@ if [[ "$GENERATOR" == compilecommands ]]; then
 else
     (cd "$ROOT" && "$ROOT/Tools/Mac/premake5" "${args[@]}" "$GENERATOR")
 fi
-printf '%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$CI" > "$ROOT/Build/Generated/$GENERATOR.stamp"
+printf '%s|%s|%s|%s|%s\n' "$GENERATOR" "$ARCHITECTURE" "$TOOLSET" "$CI" "$(project_generation_fingerprint "$ROOT")" > "$ROOT/Build/Generated/$GENERATOR.stamp"

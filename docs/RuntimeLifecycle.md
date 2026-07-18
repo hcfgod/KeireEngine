@@ -17,14 +17,17 @@ entry points.
 
 Startup is transactional inside the top-level exception boundary:
 
-1. Initialize managed logging when requested.
-2. Create the event bus and application-owned time service.
-3. Create the window system and primary window.
-4. Create the optional UI system and workspace.
-5. Connect the layer event listener.
-6. Activate the layer stack.
-7. Call the client `OnInitialize()` hook.
-8. Apply pending layer attachment operations at the first safe boundary.
+1. Open and exclusively lock an editor project when requested, rebasing all project-local service paths.
+2. Initialize managed logging when requested.
+3. Create the event bus.
+4. Create the optional asset system with the event bus as its completion sink.
+5. Create optional Scenes after Assets.
+6. Create the application-owned time service.
+7. Create the window system and primary window.
+8. Create optional Input after Assets and Windowing.
+9. Create the optional UI system and workspace after Input.
+10. Connect the layer event listener.
+11. Activate the layer stack, call client `OnInitialize()`, and apply pending attachment operations.
 
 If any step fails, shutdown runs for the resources that were acquired. The original exception is rethrown after cleanup.
 
@@ -35,7 +38,10 @@ flowchart TD
     Start["Sample frame time"] --> PendingA["Apply pending layer changes"]
     PendingA --> Poll["Poll and translate window events"]
     Poll --> Queued["Dispatch queued event snapshot"]
-    Queued --> Fixed{"Fixed steps available?"}
+    Queued --> Assets["Commit asset completions and events"]
+    Assets --> Scenes["Commit scene load/unload/activation"]
+    Scenes --> Input["Publish one input snapshot"]
+    Input --> Fixed{"Fixed steps available?"}
     Fixed -->|Yes| FixedUpdate["LayerStack fixed update"]
     FixedUpdate --> Fixed
     Fixed -->|No| Update["LayerStack variable update"]
@@ -108,10 +114,12 @@ Shutdown is deterministic and idempotent at service boundaries:
 2. Call client `OnShutdown()` if initialization completed.
 3. Disconnect the application layer-event listener.
 4. Shut down UI event forwarding, renderer state, workspace, and context.
-5. Close the event bus.
-6. Release the primary window and shut down the window system.
-7. Release windowing, time, and event services.
-8. Shut down managed logging last.
+5. Close Input and its native-event registration/gamepad handles.
+6. Close Scenes and invalidate loaded mutable scene instances.
+7. Close the event bus.
+8. Release the primary window and shut down the window system.
+9. Close the asset system and join its workers.
+10. Release the project lock, time/event services, and managed logging.
 
 Cleanup that is required to be `noexcept` contains secondary failures. A failure from application work remains the
 exception observed by the caller rather than being replaced by a teardown diagnostic.

@@ -7,6 +7,7 @@ load_project_config "$ROOT"
 
 for value in "$PROJECT_IDENTIFIER" "$PROJECT_DISPLAY_NAME" "$PROJECT_VERSION" "$PROJECT_NAMESPACE" \
   "$PROJECT_MACRO_PREFIX" "$CORE_TARGET" "$CORE_DIRECTORY" "$CLIENT_TARGET" "$CLIENT_DIRECTORY" \
+  "$HUB_TARGET" "$HUB_DIRECTORY" \
   "$TESTS_TARGET" "$TESTS_DIRECTORY" "$ARTIFACT_PREFIX" "$REPOSITORY_SLUG"; do
   [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || { printf 'Project configuration values must not contain line breaks.\n' >&2; exit 1; }
 done

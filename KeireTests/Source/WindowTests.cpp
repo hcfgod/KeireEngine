@@ -139,6 +139,38 @@ TEST_CASE("WindowSystem creates and routes multiple opaque window identities")
     system->Shutdown();
 }
 
+TEST_CASE("WindowSystem preserves requested cursor modes across focus changes")
+{
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto window = system->CreateWindow(HiddenSpecification("cursor-modes"));
+    CHECK(system->GetCursorMode(window->Id()) == Keire::CursorMode::Normal);
+    system->SetCursorMode(window->Id(), Keire::CursorMode::Hidden);
+    CHECK(system->GetCursorMode(window->Id()) == Keire::CursorMode::Hidden);
+
+    SDL_Event lost{};
+    lost.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    lost.window.windowID = OnlyNativeWindowId();
+    REQUIRE(SDL_PushEvent(&lost));
+    while (system->PollEvent())
+    {
+    }
+    CHECK(system->GetCursorMode(window->Id()) == Keire::CursorMode::Hidden);
+
+    SDL_Event gained{};
+    gained.type = SDL_EVENT_WINDOW_FOCUS_GAINED;
+    gained.window.windowID = OnlyNativeWindowId();
+    REQUIRE(SDL_PushEvent(&gained));
+    while (system->PollEvent())
+    {
+    }
+    CHECK(system->GetCursorMode(window->Id()) == Keire::CursorMode::Hidden);
+    system->SetCursorMode(window->Id(), Keire::CursorMode::Normal);
+    window->Close();
+    window.Reset();
+    system->Shutdown();
+}
+
 TEST_CASE("WindowSystem translates movement before exposing cached state")
 {
     UseDummyVideoDriver();

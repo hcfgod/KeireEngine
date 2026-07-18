@@ -24,6 +24,53 @@ function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\
 function Get-ProjectConfig { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Project.conf") }
 function Get-DependencyLock { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") }
 
+function Get-ProjectGenerationFingerprint {
+    param([string]$Root = (Get-RepositoryRoot))
+
+    $project = Read-KeyValueFile (Join-Path $Root "Config\Project.conf")
+    $sourceRoots = @(
+        $project.CORE_DIRECTORY,
+        $project.CLIENT_DIRECTORY,
+        $project.HUB_DIRECTORY,
+        $project.TESTS_DIRECTORY,
+        "AssetTool",
+        "Scripts\Premake"
+    )
+    $inventory = foreach ($sourceRoot in $sourceRoots) {
+        $absoluteRoot = Join-Path $Root $sourceRoot
+        if (-not (Test-Path -LiteralPath $absoluteRoot -PathType Container)) { continue }
+        Get-ChildItem -LiteralPath $absoluteRoot -Recurse -File | Where-Object {
+            $_.Extension -in @(".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".lua")
+        } | ForEach-Object {
+            $_.FullName.Substring($Root.ToString().Length).TrimStart("\", "/").Replace("\", "/")
+        }
+    }
+    $premakeInputs = @(
+        (Join-Path $Root "premake5.lua"),
+        (Join-Path $Root "Config\Project.conf"),
+        (Join-Path $Root "Config\Dependencies.lock")
+    ) + @(Get-ChildItem -LiteralPath $Root -Recurse -Filter "premake5.lua" -File | Where-Object {
+        $_.FullName -notmatch '[\\/](Build|Vendor|Tools)[\\/]'
+    } | ForEach-Object FullName)
+
+    $lines = @($inventory | Sort-Object -Unique)
+    foreach ($path in $premakeInputs | Sort-Object -Unique) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $relative = $path.Substring($Root.ToString().Length).TrimStart("\", "/").Replace("\", "/")
+            $lines += "$relative|$((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash)"
+        }
+    }
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace("-", "").ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function Get-CMakeExecutable {
     $command = Get-Command cmake -ErrorAction SilentlyContinue
     if ($command) { return $command.Source }
@@ -76,15 +123,15 @@ function ConvertTo-MacroPrefix {
 }
 
 function Assert-WindowsPackageStage {
-    param([string]$Stage, [string]$ClientTarget, [string]$CoreTarget, [string]$Namespace)
+    param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
-        "bin\$ClientTarget.exe", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h",
-        "include\$Namespace\Time.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h",
+        "include\$Namespace\Time.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene",
         "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt",
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
-        "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt",
+        "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\zstandard-LICENSE.txt",
         "third-party\SDL3\include\SDL3\SDL.h",
         "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake",
         "third-party\SDL3\licenses\SDL3\LICENSE.txt",
@@ -94,6 +141,9 @@ function Assert-WindowsPackageStage {
     )
     foreach ($path in $required) {
         if (-not (Test-Path (Join-Path $Stage $path) -PathType Leaf)) { throw "Package is missing required content: $path" }
+    }
+    if (Test-Path (Join-Path $Stage "include\KeireInternal")) {
+        throw "Package contains private KeireInternal headers."
     }
     if (-not (Get-ChildItem (Join-Path $Stage "lib\cmake") -Filter "*Config.cmake" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw "Package is missing its CMake package configuration."
@@ -213,6 +263,11 @@ function Enter-VSDeveloperEnvironment {
 
     $environment = Get-VSBuildEnvironment $MajorVersion
     $targetArchitecture = if ((Normalize-Architecture $Architecture) -eq "ARM64") { "arm64" } else { "amd64" }
+    $environmentKey = "$MajorVersion-$targetArchitecture"
+    if ($env:KEIRE_VSDEV_ENVIRONMENT_KEY -eq $environmentKey) {
+        return $environment
+    }
+
     $output = & $env:ComSpec /s /c "`"$($environment.VsDevCmd)`" -no_logo -arch=$targetArchitecture -host_arch=amd64 >nul && set"
     if ($LASTEXITCODE -ne 0) {
         throw "Visual Studio developer environment setup failed with exit code $LASTEXITCODE."
@@ -226,6 +281,7 @@ function Enter-VSDeveloperEnvironment {
                 "Process")
         }
     }
+    [System.Environment]::SetEnvironmentVariable("KEIRE_VSDEV_ENVIRONMENT_KEY", $environmentKey, "Process")
     return $environment
 }
 

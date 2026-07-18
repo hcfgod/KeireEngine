@@ -1,7 +1,7 @@
 #include "doctest/doctest.h"
 
 #include "Keire/Core.h"
-#include "TestSupport.h"
+#include "KeireTests/TestSupport.h"
 
 #include <atomic>
 #include <filesystem>

@@ -94,6 +94,21 @@ namespace
                 (void)ui.SliderFloat("Value", value, 0.0F, 1.0F);
                 std::string text = "editable";
                 (void)ui.InputText("Text", text);
+                const auto item = ui.LastItemState();
+                CHECK_FALSE(item.DoubleClicked);
+                ui.ProgressBar(0.5F, {120.0F, 4.0F}, "50%");
+                if (auto table = ui.BeginTable("ActionBindings", 2); table)
+                {
+                    ui.TableNextRow();
+                    CHECK(ui.TableNextColumn());
+                    ui.Text("Action");
+                    CHECK(ui.TableNextColumn());
+                    ui.Text("Binding");
+                }
+                float leading = 100.0F;
+                float trailing = 100.0F;
+                (void)ui.Splitter(Keire::UiAxis::Horizontal, "EditorSplitter", leading, trailing);
+                (void)ui.Shortcut({Keire::UiKey::S, true});
                 if (auto disabled = ui.BeginDisabled(); disabled)
                 {
                     (void)ui.Button("Disabled");

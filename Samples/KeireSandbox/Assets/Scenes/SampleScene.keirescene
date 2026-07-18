@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "SampleScene",
+  "objects": [
+    {
+      "id": "a1b2c3d4-1000-4000-8000-000000000001",
+      "name": "Main Camera",
+      "active": true,
+      "transform": {
+        "position": [0.0, 1.0, -10.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "parent": null
+    },
+    {
+      "id": "a1b2c3d4-1000-4000-8000-000000000002",
+      "name": "Directional Light",
+      "active": true,
+      "transform": {
+        "position": [0.0, 3.0, 0.0],
+        "rotation": [0.0, 0.0, 0.0, 1.0],
+        "scale": [1.0, 1.0, 1.0]
+      },
+      "parent": null
+    }
+  ]
+}

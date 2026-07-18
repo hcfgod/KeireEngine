@@ -18,7 +18,8 @@ ProjectConfig = loadConfig("Config/Project.conf")
 
 local requiredKeys = {
     "PROJECT_IDENTIFIER", "PROJECT_DISPLAY_NAME", "PROJECT_VERSION", "PROJECT_NAMESPACE", "PROJECT_MACRO_PREFIX",
-    "CORE_TARGET", "CORE_DIRECTORY", "CLIENT_TARGET", "CLIENT_DIRECTORY", "TESTS_TARGET", "TESTS_DIRECTORY",
+    "CORE_TARGET", "CORE_DIRECTORY", "CLIENT_TARGET", "CLIENT_DIRECTORY", "HUB_TARGET", "HUB_DIRECTORY",
+    "TESTS_TARGET", "TESTS_DIRECTORY",
     "ARTIFACT_PREFIX", "REPOSITORY_SLUG"
 }
 for _, key in ipairs(requiredKeys) do
@@ -109,6 +110,7 @@ end
 
 local selectedArchitecture = os.targetarch() or os.hostarch()
 SelectedToolset = resolveToolset(_OPTIONS["toolset"] or "default")
+AssetToolTarget = ProjectConfig.PROJECT_NAMESPACE .. "AssetTool"
 
 if _ACTION and _ACTION:match("^vs") and SelectedToolset == "gcc" then
     error("Visual Studio generators do not support the GCC toolset in this template.")
@@ -119,7 +121,7 @@ end
 
 workspace(ProjectConfig.PROJECT_IDENTIFIER)
     architecture(selectedArchitecture)
-    startproject(ProjectConfig.CLIENT_TARGET)
+    startproject(ProjectConfig.HUB_TARGET)
     toolset(SelectedToolset)
 
     configurations {
@@ -139,8 +141,11 @@ filter {}
 
 group "Dependencies"
 include "Scripts/Premake/DearImGui.lua"
+include "Scripts/Premake/Zstd.lua"
 group ""
 
 include(ProjectConfig.CORE_DIRECTORY .. "/premake5.lua")
 include(ProjectConfig.CLIENT_DIRECTORY .. "/premake5.lua")
+include(ProjectConfig.HUB_DIRECTORY .. "/premake5.lua")
+include "AssetTool/premake5.lua"
 include(ProjectConfig.TESTS_DIRECTORY .. "/premake5.lua")

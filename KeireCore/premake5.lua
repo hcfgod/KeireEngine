@@ -41,7 +41,8 @@ project(ProjectConfig.CORE_TARGET)
         VendorIncludeDirs.imgui,
         VendorIncludeDirs.imguiBackends,
         VendorIncludeDirs.imguiMisc,
+        VendorIncludeDirs.zstd,
         DependencyManifest.SDL3Include
     }
 
-    links { DearImGuiProject }
+    links { DearImGuiProject, ZstdProject }

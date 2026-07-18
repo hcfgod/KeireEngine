@@ -2,11 +2,12 @@
 
 ## Ownership
 
-`KeireCore` is a static C++20 library and owns reusable application behavior, including reference-counted ownership,
-logging, and the Kéire UI runtime. `KeireClient` is the runnable application and depends on KeireCore. `KeireTests` is
-a separate executable that depends on KeireCore and doctest. `DearImGui` is a private static-library build dependency
+`KeireCore` is a static C++20 library and owns reusable application behavior, including projects, scenes,
+reference-counted ownership, logging, and the Kéire UI runtime. `KeireClient` is the project editor, `KeireHub` owns
+project discovery/creation and editor process launch, `KeireAssetTool` owns headless import/cook validation, and
+`KeireTests` is independent. `DearImGui` is a private static-library build dependency
 grouped under `Dependencies`; its reviewed definition lives in `Scripts/Premake/DearImGui.lua`, while generated project
-metadata lives below ignored `Build/Projects/DearImGui`. The three Kéire targets retain local `premake5.lua` files, and
+metadata lives below ignored `Build/Projects/DearImGui`. First-party targets retain local `premake5.lua` files, and
 the root file defines workspace identity, dependency grouping, and project load order.
 
 `Config/Project.conf` defines names and folders. `Config/Dependencies.lock` defines immutable external inputs. Premake and launchers read these files so renaming and dependency verification have one source of truth.
@@ -30,7 +31,32 @@ flowchart LR
     KeireTests --> Package["Runtime and SDK archive"]
 ```
 
-The scripts resolve `default` to a concrete compiler before generation. Architecture defaults to the native host and may be overridden with x86_64 or ARM64. A generation stamp prevents reuse with mismatched generator, architecture, toolset, or CI warning policy.
+The scripts resolve `default` to a concrete compiler before generation. Architecture defaults to the native host and may
+be overridden with x86_64 or ARM64. A generation stamp covers generator, architecture, toolset, CI warning policy,
+Premake/config content, and the first-party source inventory, so adding or removing translation units regenerates stale
+IDE/Ninja metadata automatically.
+
+## Project Ownership
+
+Project identity is separate from repository/template identity. `Project` validates the fixed marker, owns the canonical
+root and exclusive editor lock, and supplies derived paths for Assets, catalogs, workspace state, input overrides, scene
+recovery, logs, and builds. `Application` opens a project before logging and all project-backed services, then releases it
+after layers, Input, Scenes, and Assets stop. No service consults the process working directory as an implicit project.
+
+`ProjectRegistry` is Hub-owned per-user discovery state. `KeireHub` may inspect and launch projects but never owns editor
+assets or the exclusive lock. Each detached KeireClient process revalidates and locks its requested project. The packaged
+`samples/KeireSandbox` is a complete project and is validated through the same asset tool contract as user projects.
+
+## Scene Ownership
+
+`SceneAsset` is immutable imported data. `Scene` is an owner-thread mutable instance with weak object handles, validated
+transactional hierarchy mutation, and explicit dirty/open lifecycle. `SceneSystem` owns loaded runtime instances and
+pending operations. Asset workers decode immutable data; `Application` pumps completions, then Scenes commit loads,
+unloads, and active changes at a safe frame boundary before Input and layer updates. Failed loads never replace the
+last-good loaded set.
+
+The editor owns authoring selection, undo/redo, atomic source writes, dirty decisions, and recovery files. Runtime scene
+activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
 
 ## Reference Ownership
 
@@ -46,7 +72,10 @@ File paths are intentionally relative to the process working directory. Scripts 
 
 Public headers contain only Kéire value types. SDL pointers, flags, identifiers, headers, and raw events live in `Window.cpp`. `WindowSystem` owns SDL video state and is unique while active; each abstract `Window` delegates through a reference-counted private implementation. The creating thread owns SDL calls. Native window creation remains under an RAII guard until the handle and both internal indexes commit as one transaction. A final window release on another thread adds its opaque ID to a destruction queue, which event polling and shutdown drain on the owner thread.
 
-The polling translator updates cached state before returning each `WindowEvent`, preserving SDL ordering without callbacks or re-entrancy. Logical dimensions, pixel dimensions, and display scale remain distinct so high-DPI changes are observable. Unknown input events are ignored until a dedicated input subsystem extends this central translator.
+The polling translator updates cached state before returning each `WindowEvent`, preserving SDL ordering. A private
+tokenized router forwards every native event to application-owned UI and Input sinks before public translation, so
+neither subsystem can consume events away from the other. Logical dimensions, pixel dimensions, display scale, and
+requested cursor mode remain distinct and observable without exposing SDL.
 
 Configuration is a separate typed boundary. nlohmann/json parses implementation-side input into `WindowSpecification`; callers never depend on JSON types. Strict keys and bounds make configuration mistakes deterministic rather than silently accepting typos.
 
@@ -73,6 +102,42 @@ Themes cross the public boundary only as stable semantic tokens: canvas, panel s
 Configuration examples, application-facing workflows, storage details, and troubleshooting live in the
 [UI Workspace Guide](UiWorkspace.md).
 
+## Asset Runtime And Pipeline
+
+`AssetSystem` is optionally created after `EventBus` and closed before it. Its bounded priority scheduler owns worker
+threads, while handles own reference-counted shared state and immutable payload revisions. Workers perform I/O,
+decompression, integrity verification, and decode; `Application` commits completions and dispatches typed events at a
+safe owner-thread frame boundary. Typed fallbacks cover queued and initial-failure states. Reload failure preserves the
+last committed payload and records diagnostics rather than replacing working content.
+
+Catalog mounts are transactional resolved views over versioned packs. Explicit priority and override permission prevent
+silent identity replacement; bounded ranges, dependency closure/cycle checks, Zstandard result sizes, and SHA-256
+protect decode inputs. Core owns Binary/Text lifecycle types only. No GPU, audio, model, scene, or native backend type
+crosses this boundary.
+
+`AssetDatabase` owns source-side identity through adjacent `.keiremeta` files, a content-addressed import cache, and
+confined rollback-capable file operations. `AssetCooker` sorts stable IDs, writes deterministic sharded packs and a
+versioned build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the
+same public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
+
+Asset code is grouped by subsystem: supported headers live in `KeireCore/Include/Keire/Assets`, implementation sources
+live in `KeireCore/Source/Assets`, and implementation-only declarations live in
+`KeireCore/Include/KeireInternal/Assets`. SDK packaging copies only the `Keire` public include tree, so internal headers
+remain available to first-party builds without becoming part of the SDK contract. No first-party header is stored under
+a `Source` directory.
+
+## Input Runtime And Authoring
+
+`InputSystem` is constructed after Assets and Windowing and before UI. It owns logical keyboard/mouse devices, SDL
+gamepad RAII handles, users, pairing, control-scheme selection, action contexts, frame snapshots, and interactive
+rebinding. Action definitions are immutable `InputActionAsset` revisions; runtime state and per-profile overrides stay
+outside source assets. Stable IDs preserve context state across rename and hot reload. Input shuts down before Windowing
+and Assets. Full contracts live in [Input System](InputSystem.md).
+
+`.keireinput` is the first registered typed source importer. It validates bounded versioned JSON and emits deterministic
+canonical bytes into the normal content-addressed cache and cooker. The dockable editor owns only mutable authoring
+documents and uses the public Kéire UI facade. Details live in [Input Actions Editor](InputActionsEditor.md).
+
 ## Event And Time Runtime
 
 `EventBus` uses exact C++ payload types without a base-event hierarchy. Typed and generic listeners share one priority/registration order; inactive tombstones allow safe unsubscribe and nested dispatch without allocating on the immediate path. Owner-thread dispatch and subscription keep callback mutation deterministic. A bounded mutex-protected queue accepts owned events from any thread, rejects overflow without blocking, and drains a fixed snapshot so producers cannot starve a frame. Closing a bus makes retained references and subscription tokens safely inert.
@@ -84,7 +149,7 @@ Configuration examples, application-facing workflows, storage details, and troub
 Premake remains the Kéire build authority. A dependency-only CMake invocation builds and installs pinned SDL3 Debug
 and Release variants into ignored, compiler-keyed caches. A generated Lua manifest supplies Premake with the selected
 include/archive paths and platform requirements. SDK packages preserve SDL's official CMake target and make
-`Keire::Core` transitively depend on the private ImGui archive followed by `SDL3::SDL3-static`.
+`Keire::Core` transitively depend on the private ImGui and Zstd archives followed by `SDL3::SDL3-static`.
 
 The pinned Dear ImGui docking sources, standard-string adapter, SDL3 platform backend, and SDL_GPU renderer compile in
 the dedicated `DearImGui` static-library project. It emits `KeireImGui.lib` on Windows and `libKeireImGui.a` on Unix,
@@ -94,13 +159,18 @@ KeireClient remains free of Dear ImGui includes and symbols. KeireTests may incl
 and lifecycle verification. The internal link closure preserves `KeireCore` → `KeireImGui` → SDL3 for final binaries.
 SDL_GPU selects D3D12 or Vulkan on Windows, Vulkan on Linux, and Metal on macOS; SDL_Renderer remains disabled.
 
+Pinned Zstandard sources compile in the dedicated warning-isolated `Zstd` project as `KeireZstd.lib` or
+`libKeireZstd.a`. KeireCore privately includes `zstd.h` for pack compression/decompression. Neither its headers nor
+implementation types cross the public API. SDK targets preserve the Core → ImGui → Zstd → SDL static link order.
+
 ## Release Shape
 
-Packages include the KeireClient runtime, KeireCore and private KeireImGui static libraries, public `Keire/<header>`
-headers, required spdlog headers, SDL static SDK, complete license texts including Dear ImGui's MIT license, notices,
-README, and a validated machine-readable build manifest. Dear ImGui headers and sources are not redistributed because
-Kéire's public UI facade owns the supported contract. Direct validation links Core, ImGui, then SDL; the generated CMake
-package carries ImGui and SDL through `Keire::Core`, so both low-level and managed consumers still name one Kéire target.
+Packages include KeireHub, the KeireClient editor, KeireAssetTool, KeireCore plus private KeireImGui/KeireZstd archives,
+public `Keire/<header>` APIs, required spdlog headers, the SDL static SDK, complete license texts, notices, README, and a
+complete `samples/KeireSandbox` project. The packaged asset tool imports and validates the sample input and scene assets
+before archive publication. Dear ImGui and Zstd headers/sources are not redistributed because Kéire's public facades own
+the supported contracts. Direct validation links Core, ImGui, Zstd, then SDL; the generated CMake package carries those
+private archives through `Keire::Core`, so low-level and managed consumers still name one Kéire target.
 Packaging extracts the archive and compiles, links, and runs both consumers. CMake builds SDL and serves consumers;
 Premake builds Kéire. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is
 intentionally stripped. Export annotations describe same-toolchain shared-library preparation only, not a

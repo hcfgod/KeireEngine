@@ -8,26 +8,35 @@ if (-not $CMake) { throw "CMake 3.20 or newer is required for SDK package valida
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset; $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $imguiLibraryName = "$($Project.PROJECT_NAMESPACE)ImGui"
+$zstdLibraryName = "$($Project.PROJECT_NAMESPACE)Zstd"
+$assetToolName = "$($Project.PROJECT_NAMESPACE)AssetTool"
 & (Join-Path $PSScriptRoot "build-info.ps1")
 & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate
 & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow
+& (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI
+& (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $stage = Join-Path $Root "Artifacts\$name"
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
+New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
-Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\*" "$stage\include\" -Recurse
+Copy-Item "$Root\Samples\KeireSandbox" "$stage\samples\" -Recurse
+Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)" "$stage\include\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\include\spdlog" "$stage\third-party\spdlog\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\LICENSE" "$stage\third-party\licenses\spdlog-LICENSE.txt"
 Copy-Item "$Root\Vendor\spdlog\include\spdlog\fmt\bundled\fmt.license.rst" "$stage\third-party\licenses\fmt-LICENSE.rst"
 Copy-Item "$Root\Vendor\doctest\LICENSE.txt" "$stage\third-party\licenses\doctest-LICENSE.txt"
 Copy-Item "$Root\Vendor\json\LICENSE.MIT" "$stage\third-party\licenses\nlohmann-json-LICENSE.MIT.txt"
 Copy-Item "$Root\Vendor\imgui\LICENSE.txt" "$stage\third-party\licenses\dear-imgui-LICENSE.txt"
+Copy-Item "$Root\Vendor\zstd\LICENSE" "$stage\third-party\licenses\zstandard-LICENSE.txt"
 $sdlInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
 if (-not (Test-Path (Join-Path $sdlInstall "lib\SDL3-static.lib"))) { throw "Packaged SDL Release dependency is missing." }
 Copy-Item "$sdlInstall\*" "$stage\third-party\SDL3\" -Recurse
@@ -46,11 +55,18 @@ elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
 $dirty = if (Test-GitRepository $Root) { [bool]((& git -C $Root status --porcelain --untracked-files=normal) -join "") } else { $false }
 $commit = Get-GitHeadCommit $Root "unknown"
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT }
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
-Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
+Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
 if ($parsedManifest.imgui -ne $Lock.IMGUI_COMMIT) { throw "Packaged Dear ImGui identity does not match the dependency lock." }
+if ($parsedManifest.zstd -ne $Lock.ZSTD_COMMIT) { throw "Packaged Zstandard identity does not match the dependency lock." }
+$assetToolHelp = (& (Join-Path $stage "bin\$assetToolName.exe") --help) -join "`n"
+if ($LASTEXITCODE -ne 0 -or -not $assetToolHelp.Contains("KeireAssetTool cook")) { throw "Packaged asset tool validation failed." }
+$sampleProject = Join-Path $stage "samples\KeireSandbox"
+$assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") import --project $sampleProject) -join "`n"
+if ($LASTEXITCODE -ne 0 -or -not $assetImportOutput.Contains("Imported")) { throw "Packaged sample project asset validation failed." }
+Remove-Item (Join-Path $sampleProject "Library") -Recurse -Force -ErrorAction SilentlyContinue
 $versionOutput = (& (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") --version) -join "`n"
 if ($LASTEXITCODE -ne 0) { throw "Packaged client version query failed with exit code $LASTEXITCODE." }
 $commitPrefix = $commit.Substring(0, [Math]::Min(12, $commit.Length))
@@ -63,13 +79,17 @@ Compress-Archive "$stage\*" $archive
 $symbolStage = Join-Path $Root "Artifacts\$name-symbols"
 Remove-Item $symbolStage -Recurse -Force -ErrorAction SilentlyContinue
 if ($Configuration -eq "Release") {
-    New-Item -ItemType Directory -Force "$symbolStage\KeireClient", "$symbolStage\KeireCore", "$symbolStage\DearImGui" | Out-Null
+    New-Item -ItemType Directory -Force "$symbolStage\KeireClient", "$symbolStage\KeireHub", "$symbolStage\KeireCore", "$symbolStage\DearImGui", "$symbolStage\Zstd" | Out-Null
     $clientPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).pdb"
+    $hubPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).pdb"
     $corePdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).pdb"
     $imguiPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.pdb"
+    $zstdPdb = "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.pdb"
     if (Test-Path $clientPdb) { Copy-Item $clientPdb "$symbolStage\KeireClient\" }
+    if (Test-Path $hubPdb) { Copy-Item $hubPdb "$symbolStage\KeireHub\" }
     if (Test-Path $corePdb) { Copy-Item $corePdb "$symbolStage\KeireCore\" }
     if (Test-Path $imguiPdb) { Copy-Item $imguiPdb "$symbolStage\DearImGui\" }
+    if (Test-Path $zstdPdb) { Copy-Item $zstdPdb "$symbolStage\Zstd\" }
 }
 if ((Test-Path $symbolStage) -and (Get-ChildItem $symbolStage -File -Recurse | Select-Object -First 1)) {
     Compress-Archive "$symbolStage\*" $symbols -Force
@@ -88,7 +108,7 @@ try {
         $consumerLinkOptions = if ($Configuration -eq "Dist") { @("/link", "/LTCG") } else { @() }
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
             "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $consumerSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
@@ -97,7 +117,7 @@ try {
         $compilerCommand = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
             "-I$(Join-Path $sdkRoot 'third-party')" $consumerSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $consumerExe
     }
@@ -112,7 +132,7 @@ try {
     if ($Toolset -eq "msc") {
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
             "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $managedSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
@@ -120,7 +140,7 @@ try {
     else {
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
             "-I$(Join-Path $sdkRoot 'third-party')" $managedSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $managedExe
     }

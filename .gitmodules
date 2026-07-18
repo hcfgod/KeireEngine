@@ -13,3 +13,6 @@
 [submodule "Vendor/imgui"]
 	path = Vendor/imgui
 	url = https://github.com/ocornut/imgui.git
+[submodule "Vendor/zstd"]
+	path = Vendor/zstd
+	url = https://github.com/facebook/zstd.git

@@ -5,6 +5,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -16,10 +17,23 @@
 
 namespace Keire
 {
+    namespace Detail
+    {
+        class FolderDialogState;
+    }
+
     enum class WindowMode : std::uint8_t
     {
         Windowed,
         BorderlessFullscreen
+    };
+
+    enum class CursorMode : std::uint8_t
+    {
+        Normal,
+        Hidden,
+        Confined,
+        RelativeLocked
     };
 
     struct WindowSpecification
@@ -207,6 +221,29 @@ namespace Keire
         virtual void Close() = 0;
     };
 
+    enum class FolderDialogStatus : std::uint8_t
+    {
+        Pending,
+        Selected,
+        Cancelled,
+        Failed
+    };
+
+    class KEIRE_API FolderDialogOperation final : public RefCounted
+    {
+      public:
+        ~FolderDialogOperation() override;
+        [[nodiscard]] FolderDialogStatus Status() const noexcept;
+        [[nodiscard]] std::filesystem::path SelectedPath() const;
+        [[nodiscard]] std::string Diagnostic() const;
+
+      private:
+        friend class WindowSystem;
+        template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
+        explicit FolderDialogOperation(Ref<Detail::FolderDialogState> state);
+        Ref<Detail::FolderDialogState> m_State;
+    };
+
     class KEIRE_API WindowSystem final : public RefCounted
     {
       public:
@@ -215,6 +252,10 @@ namespace Keire
 
         [[nodiscard]] Ref<Window> CreateWindow(const WindowSpecification& specification = {});
         [[nodiscard]] std::optional<WindowEvent> PollEvent();
+        [[nodiscard]] Ref<FolderDialogOperation> ShowFolderDialog(WindowId parent,
+                                                                  const std::filesystem::path& defaultLocation = {});
+        void SetCursorMode(WindowId window, CursorMode mode);
+        [[nodiscard]] CursorMode GetCursorMode(WindowId window) const;
         void Shutdown();
         [[nodiscard]] bool IsActive() const noexcept;
 

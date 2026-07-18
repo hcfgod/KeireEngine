@@ -4,7 +4,11 @@
 [![Security](https://github.com/hcfgod/KeireEngine/actions/workflows/security.yml/badge.svg)](https://github.com/hcfgod/KeireEngine/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
-A reproducible C++20 foundation with a static KeireCore library, a production application/layer runtime, typed immediate and queued events, Unity-style frame timing and UI, an SDL3 multi-window and SDL_GPU platform layer, strict typed JSON configuration, reusable strong/weak references, private asynchronous logging, Premake generation, sanitizers, SDK packaging, and Windows/Linux/macOS automation.
+A reproducible C++20 foundation with a static KeireCore library, a project-first editor Hub, typed scene and input assets,
+asynchronous reference-counted loading, deterministic cooked packs, a production application/layer runtime, typed events,
+Unity-style frame timing, an SDL3 multi-window and SDL_GPU platform layer, private Dear ImGui UI, reusable strong/weak
+references, private asynchronous logging, Premake generation, sanitizers, SDK packaging, and Windows/Linux/macOS
+automation.
 
 KeireCore is static by default. Its export annotations prepare for a possible same-toolchain C++ shared-library build; they are not a stable cross-compiler ABI. Generated build identity, development assertions, and a core-owned entrypoint keep startup policy consistent while the client supplies only its application factory.
 
@@ -51,7 +55,7 @@ Run `Scripts/project.bat` on Windows or `Scripts/project.sh` on Unix without a c
 | `generate` | Generate IDE, Ninja, Make, or compile-database files |
 | `build` | Build a selected target and configuration |
 | `test` | Build and run the doctest executable |
-| `run` | Build and run the interactive KeireClient window loop |
+| `run` | Build and run the Project Hub; optional flags open a project editor directly |
 | `coverage` | Run Clang source coverage and enforce 80% line coverage |
 | `package` | Test, smoke-run, and create runtime/SDK archives and checksums |
 | `doctor` | Report detected tools, versions, identity, and environment |
@@ -94,9 +98,12 @@ ASan is supported on all three operating systems. UBSan and TSan are supported w
 Config/                 Project identity, client JSON, and immutable dependency lock
 KeireCore/              Static library and public Keire/<header> API
 KeireClient/            Console application
+KeireHub/               Project discovery, creation, and editor launcher
+AssetTool/              Source scan, import, cook, and package validation CLI
 KeireTests/             Independent doctest cases
-Vendor/                 Pinned spdlog, doctest, SDL3, nlohmann/json, and Dear ImGui submodules
-Scripts/Premake/        Shared policy and the tracked DearImGui project definition
+Samples/KeireSandbox/   Validated starter project packaged with the SDK
+Vendor/                 Pinned spdlog, doctest, SDL3, JSON, Dear ImGui, and Zstandard submodules
+Scripts/Premake/        Shared policy and tracked private dependency project definitions
 Scripts/Unix/           Shared macOS/Linux implementation
 Scripts/<platform>/     Platform bootstrap and wrappers
 Tools/<platform>/       Ignored, checksum-verified local tools
@@ -104,16 +111,16 @@ docs/                   Architecture and focused subsystem guides
 .github/workflows/      CI, compatibility, security, and packaging
 ```
 
-The root Premake file owns a four-project workspace. `KeireCore`, `KeireClient`, and `KeireTests` own local project
-definitions; the private `DearImGui` static-library project is grouped under `Dependencies` and defined by
-`Scripts/Premake/DearImGui.lua`. Its generated IDE and Ninja metadata remains below ignored
-`Build/Projects/DearImGui`. Public consumers include `Keire/Core.h` or `Keire/Log.h` and never depend on the Dear ImGui
-project directly.
+The root Premake file owns a seven-project workspace. `KeireCore`, `KeireClient`, `KeireHub`, `KeireAssetTool`, and
+`KeireTests` own first-party definitions; private `DearImGui` and `Zstd` static-library projects are grouped under
+`Dependencies`.
+Generated dependency metadata remains below ignored `Build/Projects`. Public consumers include `Keire/Core.h` and link
+only the supported `Keire::Core` package target.
 
 ## Documentation
 
-The [documentation index](docs/README.md) links focused guides for getting started, architecture, runtime lifecycle,
-the UI workspace, and testing/release workflows.
+The [documentation index](docs/README.md) links focused guides for projects, the Hub, scene runtime/authoring, input
+debugging, architecture, runtime lifecycle, the UI workspace, and testing/release workflows.
 
 ## Windowing And Configuration
 
@@ -123,7 +130,11 @@ Logical sizes describe UI coordinates while pixel sizes describe the high-DPI dr
 
 `LoadWindowSpecification` parses `Config/Client.json` without exposing nlohmann/json. The root `window` object accepts `title`, `width`, `height`, `resizable`, `highPixelDensity`, `visible`, `maximized`, and `mode` (`windowed` or `borderlessFullscreen`). Missing optional fields retain API defaults; unknown/duplicate keys, malformed UTF-8, wrong types, invalid dimensions, oversized titles/files, and incompatible fullscreen/maximized state are errors with file and JSON-pointer-style locations.
 
-KeireClient accepts `--config <path>`, `--smoke-window`, and `--smoke-ui`. The default `Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. `--smoke-window` is bounded, disables UI, and is used with `SDL_VIDEODRIVER=dummy` by CI and package validation. `--smoke-ui` renders a bounded set of frames and requires a graphics-capable environment.
+KeireClient accepts `--project <path>`, `--config <path>`, `--smoke-window`, `--smoke-ui`, and `--smoke-project`.
+Interactive editor startup requires a validated project; the normal launcher opens KeireHub first. The default
+`Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. Window, Hub UI, and
+full project editor smoke modes are bounded; the latter exercises project locks, assets, scenes, input, workspace, and
+clean shutdown.
 
 ## Application, Layers, Events, And Time
 
@@ -199,6 +210,64 @@ Logs default to `Logs` relative to the process working directory. IDE debug dire
 
 `KEIRE_API` marks KeireCore-owned public symbols and cross-boundary exception types for same-toolchain shared-library preparation. Header-only values and templates remain unannotated, while the managed-client factory hooks remain executable-defined reverse imports. The SDK is still distributed as a static library and does not promise a compiler-independent C++ ABI.
 
+## Asset Workflow
+
+Set `ApplicationSpecification::Assets.Mode` to `Development` for editor catalogs or `Cooked` with explicit mounts for a
+distribution runtime. `AssetHandle<T>::Get()` immediately returns a typed fallback, workers load and validate content,
+and frame-boundary completion swaps in immutable data. Initial failure is explicit; failed reload keeps the last
+known-good revision. Built-in `BinaryAsset` and UTF-8 `TextAsset` types establish the lifecycle without prematurely
+introducing renderer, audio, model, or scene ownership.
+
+The editor discovers the opened project's `Assets/`, creates stable `.keiremeta` sidecars, caches immutable imports under
+`Library/AssetCache`, and exposes Project/Inspector browsing plus import and Dist cook actions. The same workflow is
+available without the editor:
+
+```powershell
+./Build/Bin/Debug-windows-x86_64/KeireAssetTool/KeireAssetTool.exe import --project Samples/KeireSandbox
+./Build/Bin/Debug-windows-x86_64/KeireAssetTool/KeireAssetTool.exe cook --project Samples/KeireSandbox --output Build/Assets --profile Dist
+```
+
+See [Asset Runtime](docs/AssetRuntime.md) and [Asset Pipeline](docs/AssetPipeline.md) for threading, mount, metadata,
+integrity, file-operation, cook, and packaging contracts.
+
+Asset APIs are organized beneath `Keire/Assets` (for example, `#include "Keire/Assets/AssetSystem.h"`). The umbrella
+`Keire/Core.h` continues to include the supported asset surface for consumers that prefer the aggregate header.
+
+## Projects And Scenes
+
+`ProjectSettings/Project.keireproject` is the fixed marker for an isolated Kéire project. `Project::Create` produces
+transactional Empty or Starter roots; `Project::Open` validates schema/version and the editor holds an OS-exclusive lock
+for its lifetime. Assets, import caches, input profiles, workspace state, recovery, logs, and cooked output are rebased
+under that root. The Project Hub manages a per-user recent registry without deleting projects and launches each editor as
+an independent process.
+
+`.keirescene` is the first scene asset. `SceneSystem` loads it asynchronously and commits single/additive activation only
+at application frame boundaries; failures preserve the last-good scene set. Mutable `Scene` instances support stable
+weak object handles, hierarchy edits, transforms, subtree duplication/deletion, cycle-safe reparenting, and dirty state.
+The editor adds atomic Save, bounded undo/redo, Save/Discard/Cancel transitions, and project-local crash recovery.
+
+See [Project System](docs/ProjectSystem.md), [Project Hub](docs/ProjectHub.md), [Scene System](docs/SceneSystem.md), and
+[Scene Authoring](docs/SceneAuthoring.md).
+
+## Input Actions
+
+Input is disabled by default. Enable `ApplicationSpecification::Assets` and set
+`ApplicationSpecification::Input.Mode = InputMode::Enabled`; Kéire rejects Input without Assets. The application then
+publishes `Application::Input()` after window events and asset completions once per outer frame. Action contexts expose
+stable map/action lookup, polling, RAII phase callbacks, users and exclusive/shared pairing, control schemes, hot
+reload, interactive rebinding, and atomic profile overrides without exposing SDL.
+
+`Samples/KeireSandbox/Assets/Input/DefaultInput.keireinput` provides Player Move/Look/Fire and UI
+Navigate/Submit/Cancel/Point/Click/Scroll maps
+for keyboard/mouse and gamepad. KeireClient enables Development Assets and Input for its editor. Create or select a
+`.keireinput` asset, then open the dockable Input Actions panel from Inspector, Project double-click/context menu, or
+Window. The editor provides four templates, searchable master-detail authoring, bounded undo/redo, Save/Revert,
+validation, conflict-aware Listen rebinding, and a live monitor entirely through `Keire::UiFrame`.
+
+The Input Debugger can enable the project maps with a scoped UI-capture override and records processed phase/value,
+user/device, scheme, duration, and timestamp data in the bounded Console. See [Input System](docs/InputSystem.md),
+[Input Actions Editor](docs/InputActionsEditor.md), and [Input Debugger](docs/InputDebugger.md).
+
 ## Dependencies
 
 `Config/Dependencies.lock` is the source of truth for tool URLs, archive hashes, installer pins, and submodule commits. Normal bootstrap verifies immutable state and never stages files or advances dependency pointers. SDL 3.4.10 is built as cached Debug and Release static archives by a dependency-only CMake step; Kéire itself remains Premake-driven. Debug, sanitizer, and Coverage configurations select Debug SDL, while Release and Dist select Release SDL. nlohmann/json 3.12.0 remains a private header-only implementation dependency.
@@ -210,13 +279,19 @@ lifecycles; clients use only `Keire::UiFrame`. SDL is built with GPU support and
 and headers never cross the public API, and its headers and sources are not redistributed. Multi-viewports remain
 disabled until Kéire has explicit multi-window renderer ownership.
 
-KeireClient demonstrates the workspace as a Unity-style editor shell with Scene, Game, Hierarchy, Inspector, Project, Console, Diagnostics, and Theme Editor panels. These panels are deliberate polished empty states around the UI foundation; this milestone does not introduce scene, renderer, asset, or serialization systems.
+Zstandard 1.5.7 is pinned and compiled as the private `KeireZstd` archive. Asset packs use it with deterministic build
+profiles and SHA-256 payload verification. Zstandard headers never cross the public API and are not redistributed.
+
+KeireClient demonstrates the workspace as a Unity-style project editor. Project and Inspector are backed by the asset
+database; Scene and Hierarchy author typed scene assets, Console captures editor/input diagnostics, and Game remains a
+deliberate renderer-owned preview boundary.
 
 Intentional updates are explicit:
 
 ```powershell
 ./Scripts/project.ps1 vendor-update -Dependency spdlog -Tag v1.18.0
 ./Scripts/project.ps1 vendor-update -Dependency imgui -Tag v1.92.8-docking
+./Scripts/project.ps1 vendor-update -Dependency zstd -Tag v1.5.7
 ```
 
 ```sh
@@ -249,11 +324,12 @@ CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependenc
 Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain
 KeireClient, KeireCore, the private KeireImGui archive, public headers including `Keire/Ui.h`, spdlog headers, SDL's
 static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build
-manifest containing SDL, JSON, and Dear ImGui commits. Every package extracts and validates both a low-level consumer
+manifest containing SDL, JSON, Dear ImGui, and Zstandard commits. Packages also include the canonical Default Input
+source/metadata pair and validate it with the packaged asset tool. Every package extracts and validates both a low-level consumer
 with its own `main` and a managed headless-UI consumer whose `main` comes from KeireCore, using direct compiler invocation
-and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links the private ImGui archive before
-`SDL3::SDL3-static`, so CMake consumers still link only `Keire::Core`. nlohmann/json and Dear ImGui headers are
-intentionally absent because neither dependency crosses the public API. SHA-256 files and separate symbol archives are
+and `find_package(Keire CONFIG REQUIRED)`. `Keire::Core` transitively links Core → ImGui → Zstd → SDL, so CMake
+consumers still name only `Keire::Core`. nlohmann/json, Dear ImGui, and Zstandard headers are intentionally absent
+because those dependencies do not cross the public API. The asset CLI is included under `bin`. SHA-256 files and separate symbol archives are
 included where available; Dist packages are stripped.
 
 ## Troubleshooting

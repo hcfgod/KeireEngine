@@ -18,7 +18,7 @@ load_project_config() {
         [[ -z "${seen[$key]+present}" ]] || { printf "Duplicate key '%s' in %s.\n" "$key" "$file" >&2; return 1; }
         seen[$key]=1
     done < "$file"
-    for required in PROJECT_IDENTIFIER PROJECT_DISPLAY_NAME PROJECT_VERSION PROJECT_NAMESPACE PROJECT_MACRO_PREFIX CORE_TARGET CORE_DIRECTORY CLIENT_TARGET CLIENT_DIRECTORY TESTS_TARGET TESTS_DIRECTORY ARTIFACT_PREFIX REPOSITORY_SLUG; do
+    for required in PROJECT_IDENTIFIER PROJECT_DISPLAY_NAME PROJECT_VERSION PROJECT_NAMESPACE PROJECT_MACRO_PREFIX CORE_TARGET CORE_DIRECTORY CLIENT_TARGET CLIENT_DIRECTORY HUB_TARGET HUB_DIRECTORY TESTS_TARGET TESTS_DIRECTORY ARTIFACT_PREFIX REPOSITORY_SLUG; do
         [[ -n "${seen[$required]+present}" ]] || { printf "Project configuration is missing '%s'.\n" "$required" >&2; return 1; }
     done
     PROJECT_IDENTIFIER="$(config_value "$file" PROJECT_IDENTIFIER)"
@@ -30,11 +30,27 @@ load_project_config() {
     CORE_DIRECTORY="$(config_value "$file" CORE_DIRECTORY)"
     CLIENT_TARGET="$(config_value "$file" CLIENT_TARGET)"
     CLIENT_DIRECTORY="$(config_value "$file" CLIENT_DIRECTORY)"
+    HUB_TARGET="$(config_value "$file" HUB_TARGET)"
+    HUB_DIRECTORY="$(config_value "$file" HUB_DIRECTORY)"
     TESTS_TARGET="$(config_value "$file" TESTS_TARGET)"
     TESTS_DIRECTORY="$(config_value "$file" TESTS_DIRECTORY)"
     ARTIFACT_PREFIX="$(config_value "$file" ARTIFACT_PREFIX)"
     REPOSITORY_SLUG="$(config_value "$file" REPOSITORY_SLUG)"
     is_semantic_version "$PROJECT_VERSION" || { printf 'PROJECT_VERSION must be a valid Semantic Version 2.0.0 value.\n' >&2; return 1; }
+}
+
+project_generation_fingerprint() {
+    local root="$1" source_root
+    {
+        for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" AssetTool Scripts/Premake; do
+            [[ -d "$root/$source_root" ]] || continue
+            find "$root/$source_root" -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.lua' \) -print
+        done | LC_ALL=C sort
+        find "$root" -type f -name 'premake5.lua' -not -path "$root/Build/*" -not -path "$root/Vendor/*" -not -path "$root/Tools/*" -print | LC_ALL=C sort | while IFS= read -r source_root; do
+            cksum "$source_root"
+        done
+        cksum "$root/Config/Project.conf" "$root/Config/Dependencies.lock"
+    } | cksum | awk '{ print $1 "-" $2 }'
 }
 
 is_semantic_version() {
@@ -56,11 +72,16 @@ identifier_to_macro_prefix() {
 }
 
 validate_package_stage() {
-    local stage="$1" client="$2" core="$3" namespace="$4" path
-    local required=("bin/$client" "lib/lib$core.a" "lib/lib${namespace}ImGui.a" "Config/Client.json" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Application.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "include/$namespace/EntryPoint.h" "include/$namespace/Event.h" "include/$namespace/Layer.h" "include/$namespace/Ref.h" "include/$namespace/Time.h" "include/$namespace/Ui.h" "include/$namespace/UiWorkspace.h" "include/$namespace/Window.h" "include/$namespace/WindowConfig.h" "examples/consumer/Main.cpp" "examples/consumer/Client.json" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "examples/managed-consumer/ClientApplication.cpp" "examples/managed-consumer/CMakeLists.txt" "examples/managed-consumer/README.md" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/SDL3/include/SDL3/SDL.h" "third-party/SDL3/lib/libSDL3.a" "third-party/SDL3/cmake/SDL3Config.cmake" "third-party/SDL3/licenses/SDL3/LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
+    local stage="$1" client="$2" hub="$3" core="$4" namespace="$5" path
+    local required=("bin/$client" "bin/$hub" "lib/lib$core.a" "lib/lib${namespace}ImGui.a" "Config/Client.json" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Application.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "include/$namespace/EntryPoint.h" "include/$namespace/Event.h" "include/$namespace/Layer.h" "include/$namespace/Ref.h" "include/$namespace/Time.h" "include/$namespace/Project/Project.h" "include/$namespace/Scenes/Scene.h" "include/$namespace/Scenes/SceneAsset.h" "include/$namespace/Scenes/SceneSystem.h" "include/$namespace/Ui.h" "include/$namespace/UiWorkspace.h" "include/$namespace/Window.h" "include/$namespace/WindowConfig.h" "samples/KeireSandbox/ProjectSettings/Project.keireproject" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput" "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "examples/consumer/Main.cpp" "examples/consumer/Client.json" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "examples/managed-consumer/ClientApplication.cpp" "examples/managed-consumer/CMakeLists.txt" "examples/managed-consumer/README.md" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/SDL3/include/SDL3/SDL.h" "third-party/SDL3/lib/libSDL3.a" "third-party/SDL3/cmake/SDL3Config.cmake" "third-party/SDL3/licenses/SDL3/LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
     for path in "${required[@]}"; do
         [[ -f "$stage/$path" ]] || { printf 'Package is missing required content: %s\n' "$path" >&2; return 1; }
     done
+    local asset_required=("bin/${namespace}AssetTool" "lib/lib${namespace}Zstd.a" "include/$namespace/Assets/Asset.h" "include/$namespace/Assets/AssetSystem.h" "include/$namespace/Assets/AssetPipeline.h" "include/$namespace/Assets/InputActionAsset.h" "include/$namespace/Input/Input.h" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta" "third-party/licenses/zstandard-LICENSE.txt")
+    for path in "${asset_required[@]}"; do
+        [[ -f "$stage/$path" ]] || { printf 'Package is missing required asset content: %s\n' "$path" >&2; return 1; }
+    done
+    [[ ! -e "$stage/include/KeireInternal" ]] || { printf 'Package contains private KeireInternal headers.\n' >&2; return 1; }
     find "$stage/lib/cmake" -type f -name '*Config.cmake' -print -quit 2>/dev/null | grep -q . || { printf 'Package is missing its CMake package configuration.\n' >&2; return 1; }
 }
 

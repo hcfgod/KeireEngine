@@ -2,10 +2,11 @@
 
 #include "Keire/BuildInfo.h"
 
-#include "WindowInternal.h"
+#include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -17,6 +18,18 @@
 
 namespace Keire
 {
+    namespace Detail
+    {
+        class FolderDialogState final : public RefCounted
+        {
+          public:
+            mutable std::mutex Mutex;
+            FolderDialogStatus Status = FolderDialogStatus::Pending;
+            std::filesystem::path Path;
+            std::string Error;
+        };
+    } // namespace Detail
+
     namespace
     {
         std::atomic<bool> HasActiveSystem = false;
@@ -40,9 +53,41 @@ namespace Keire
             return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
         }
 
+        [[nodiscard]] std::string Utf8PathString(const std::filesystem::path& path)
+        {
+            const auto value = path.generic_u8string();
+            return {reinterpret_cast<const char*>(value.data()), value.size()};
+        }
+
         std::string BuildWindowErrorMessage(const std::string& operation, const std::string& diagnostic)
         {
             return "Window operation '" + operation + "' failed: " + diagnostic;
+        }
+
+        struct FolderDialogRequest final
+        {
+            WeakRef<Detail::FolderDialogState> State;
+        };
+
+        void SDLCALL FolderDialogCompleted(void* userData, const char* const* files, int)
+        {
+            std::unique_ptr<FolderDialogRequest> request(static_cast<FolderDialogRequest*>(userData));
+            const auto state = request->State.Lock();
+            if (!state)
+                return;
+            std::scoped_lock lock(state->Mutex);
+            if (!files)
+            {
+                state->Status = FolderDialogStatus::Failed;
+                state->Error = LastSdlError();
+            }
+            else if (!files[0])
+                state->Status = FolderDialogStatus::Cancelled;
+            else
+            {
+                state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
+                state->Status = FolderDialogStatus::Selected;
+            }
         }
 
         void ValidateSpecification(const WindowSpecification& specification)
@@ -67,6 +112,28 @@ namespace Keire
         : std::runtime_error(BuildWindowErrorMessage(operation, diagnostic)), m_Operation(std::move(operation)),
           m_Diagnostic(std::move(diagnostic))
     {
+    }
+
+    FolderDialogOperation::FolderDialogOperation(Ref<Detail::FolderDialogState> state) : m_State(std::move(state)) {}
+
+    FolderDialogOperation::~FolderDialogOperation() = default;
+
+    FolderDialogStatus FolderDialogOperation::Status() const noexcept
+    {
+        std::scoped_lock lock(m_State->Mutex);
+        return m_State->Status;
+    }
+
+    std::filesystem::path FolderDialogOperation::SelectedPath() const
+    {
+        std::scoped_lock lock(m_State->Mutex);
+        return m_State->Path;
+    }
+
+    std::string FolderDialogOperation::Diagnostic() const
+    {
+        std::scoped_lock lock(m_State->Mutex);
+        return m_State->Error;
     }
 
     class WindowSystem::Impl final : public RefCounted
@@ -289,8 +356,11 @@ namespace Keire
             SDL_Event event{};
             while (SDL_PollEvent(&event))
             {
-                if (m_EventSink)
-                    m_EventSink(m_EventSinkContext, event);
+                for (const auto& sink : m_EventSinks)
+                {
+                    if (sink.Callback)
+                        sink.Callback(sink.Context, event);
+                }
 
                 if (event.type == SDL_EVENT_QUIT)
                 {
@@ -362,9 +432,11 @@ namespace Keire
                     return WindowRestoredEvent{header};
                 case SDL_EVENT_WINDOW_FOCUS_GAINED:
                     window.Focused = true;
+                    ApplyCursorMode(window, window.Cursor);
                     return WindowFocusGainedEvent{header};
                 case SDL_EVENT_WINDOW_FOCUS_LOST:
                     window.Focused = false;
+                    ApplyCursorMode(window, CursorMode::Normal);
                     return WindowFocusLostEvent{header};
                 case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
                     window.Position = QueryPosition(window.Native);
@@ -434,11 +506,27 @@ namespace Keire
             return NativeFor(id);
         }
 
-        void SetEventSink(void* context, const WindowSystemInternalAccess::EventSink sink)
+        [[nodiscard]] WindowSystemInternalAccess::EventSinkToken
+        AddEventSink(void* context, const WindowSystemInternalAccess::EventSink sink)
         {
-            RequireOwner("SetEventSink");
-            m_EventSinkContext = context;
-            m_EventSink = sink;
+            RequireOwner("AddEventSink");
+            if (!context || !sink)
+                throw std::invalid_argument("Window event sink requires a context and callback.");
+            const auto token = m_NextEventSinkToken++;
+            m_EventSinks.push_back({token, context, sink});
+            return token;
+        }
+
+        void RemoveEventSink(const WindowSystemInternalAccess::EventSinkToken token) noexcept
+        {
+            if (!token || std::this_thread::get_id() != m_OwnerThread)
+                return;
+            const auto found = std::ranges::find(m_EventSinks, token, &EventSinkRecord::Token);
+            if (found != m_EventSinks.end())
+            {
+                found->Context = nullptr;
+                found->Callback = nullptr;
+            }
         }
 
         void ReleaseWindow(const WindowId id) noexcept
@@ -656,6 +744,24 @@ namespace Keire
             DestroyWindow(id, false);
         }
 
+        void SetCursorMode(const WindowId id, const CursorMode mode)
+        {
+            RequireOwner("SetCursorMode");
+            std::scoped_lock lock(m_StateMutex);
+            const auto found = m_Windows.find(id.Value());
+            if (found == m_Windows.end() || !found->second.Open)
+                throw std::invalid_argument("Cannot set cursor mode for an unknown or closed window.");
+            ApplyCursorMode(found->second, found->second.Focused ? mode : CursorMode::Normal);
+            found->second.Cursor = mode;
+        }
+
+        [[nodiscard]] CursorMode GetCursorMode(const WindowId id) const
+        {
+            std::scoped_lock lock(m_StateMutex);
+            const auto found = m_Windows.find(id.Value());
+            return found == m_Windows.end() ? CursorMode::Normal : found->second.Cursor;
+        }
+
       private:
         struct CachedWindow
         {
@@ -671,9 +777,23 @@ namespace Keire
             bool Minimized = false;
             bool Maximized = false;
             WindowMode Mode = WindowMode::Windowed;
+            CursorMode Cursor = CursorMode::Normal;
             bool CloseRequested = false;
             bool Open = false;
         };
+
+        static void ApplyCursorMode(CachedWindow& window, const CursorMode mode) noexcept
+        {
+            if (!window.Native)
+                return;
+            (void)SDL_SetWindowRelativeMouseMode(window.Native, mode == CursorMode::RelativeLocked);
+            (void)SDL_SetWindowMouseGrab(window.Native,
+                                         mode == CursorMode::Confined || mode == CursorMode::RelativeLocked);
+            if (mode == CursorMode::Hidden || mode == CursorMode::RelativeLocked)
+                (void)SDL_HideCursor();
+            else
+                (void)SDL_ShowCursor();
+        }
 
         void RequireOwner(const char* operation) const
         {
@@ -778,8 +898,14 @@ namespace Keire
         std::uint32_t m_NextWindowId = 1;
         std::mutex m_DeferredMutex;
         std::vector<WindowId> m_DeferredDestruction;
-        void* m_EventSinkContext = nullptr;
-        WindowSystemInternalAccess::EventSink m_EventSink = nullptr;
+        struct EventSinkRecord
+        {
+            WindowSystemInternalAccess::EventSinkToken Token = 0;
+            void* Context = nullptr;
+            WindowSystemInternalAccess::EventSink Callback = nullptr;
+        };
+        std::vector<EventSinkRecord> m_EventSinks;
+        WindowSystemInternalAccess::EventSinkToken m_NextEventSinkToken = 1;
     };
 
     WindowSystem::WindowSystem() : m_Impl(CreateRef<Impl>()) {}
@@ -805,6 +931,26 @@ namespace Keire
 
     std::optional<WindowEvent> WindowSystem::PollEvent() { return m_Impl->PollEvent(); }
 
+    Ref<FolderDialogOperation> WindowSystem::ShowFolderDialog(const WindowId parent,
+                                                              const std::filesystem::path& defaultLocation)
+    {
+        auto state = CreateRef<Detail::FolderDialogState>();
+        auto operation = CreateRef<FolderDialogOperation>(state);
+        auto request = std::make_unique<FolderDialogRequest>();
+        request->State = WeakRef<Detail::FolderDialogState>(state);
+        const auto location = defaultLocation.empty() ? std::string{} : Utf8PathString(defaultLocation);
+        SDL_ShowOpenFolderDialog(FolderDialogCompleted, request.release(), m_Impl->NativeHandle(parent),
+                                 location.empty() ? nullptr : location.c_str(), false);
+        return operation;
+    }
+
+    void WindowSystem::SetCursorMode(const WindowId window, const CursorMode mode)
+    {
+        m_Impl->SetCursorMode(window, mode);
+    }
+
+    CursorMode WindowSystem::GetCursorMode(const WindowId window) const { return m_Impl->GetCursorMode(window); }
+
     void WindowSystem::Shutdown()
     {
         if (m_Impl)
@@ -818,8 +964,14 @@ namespace Keire
         return system.m_Impl->NativeHandle(id);
     }
 
-    void WindowSystemInternalAccess::SetEventSink(WindowSystem& system, void* context, const EventSink sink)
+    WindowSystemInternalAccess::EventSinkToken
+    WindowSystemInternalAccess::AddEventSink(WindowSystem& system, void* context, const EventSink sink)
     {
-        system.m_Impl->SetEventSink(context, sink);
+        return system.m_Impl->AddEventSink(context, sink);
+    }
+
+    void WindowSystemInternalAccess::RemoveEventSink(WindowSystem& system, const EventSinkToken token) noexcept
+    {
+        system.m_Impl->RemoveEventSink(token);
     }
 } // namespace Keire

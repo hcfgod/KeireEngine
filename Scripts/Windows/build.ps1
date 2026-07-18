@@ -22,7 +22,7 @@ $WorkspaceName = $Project.PROJECT_IDENTIFIER
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
-$expectedStamp = "$Generator|$Architecture|$Toolset|$([bool]$CI)"
+$expectedStamp = "$Generator|$Architecture|$Toolset|$([bool]$CI)|$(Get-ProjectGenerationFingerprint $Root)"
 $stamp = Join-Path $Root "Build\Generated\$Generator.stamp"
 
 Assert-SupportedBuildCombination $Generator $Configuration $Architecture $Toolset
