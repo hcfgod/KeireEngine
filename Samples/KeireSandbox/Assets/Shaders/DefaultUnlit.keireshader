@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "source": "Assets/Shaders/DefaultUnlit.hlsl",
+  "stages": {
+    "vertex": "VSMain",
+    "fragment": "PSMain"
+  },
+  "defines": {},
+  "includeRoots": [
+    "Assets/Shaders"
+  ],
+  "renderState": {
+    "topology": "TriangleList",
+    "culling": "Back",
+    "depthTest": true,
+    "depthWrite": true,
+    "blend": false
+  },
+  "properties": [
+    {
+      "name": "Tint",
+      "type": "Color",
+      "default": [
+        0.25,
+        0.55,
+        1.0,
+        1.0
+      ]
+    }
+  ]
+}

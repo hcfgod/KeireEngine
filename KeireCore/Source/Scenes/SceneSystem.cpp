@@ -60,6 +60,8 @@ namespace Keire
                 throw std::invalid_argument("SceneSystem requires an open AssetSystem.");
             if (Specification.MaximumLoadedScenes == 0 || Specification.MaximumLoadedScenes > 1024)
                 throw std::invalid_argument("Maximum loaded scenes must be in the range 1..1024.");
+            if (!Specification.Components)
+                Specification.Components = ComponentRegistry::CreateDefault();
         }
 
         void RequireOwner(const char* operation) const
@@ -185,6 +187,8 @@ namespace Keire
         return m_Impl->Loaded;
     }
 
+    Ref<ComponentRegistry> SceneSystem::Components() const noexcept { return m_Impl->Specification.Components; }
+
     bool SceneSystem::IsOpen() const noexcept { return m_Impl->Open; }
 
     void SceneSystem::AdvanceFrame()
@@ -243,7 +247,8 @@ namespace Keire
                 continue;
             }
 
-            auto loadedScene = CreateRef<Scene>(state.AssetIdValue, asset->Definition());
+            auto loadedScene =
+                CreateRef<Scene>(state.AssetIdValue, asset->Definition(), m_Impl->Specification.Components);
             loadedScene->MarkSaved();
             if (state.LoadMode == SceneLoadMode::Single)
             {

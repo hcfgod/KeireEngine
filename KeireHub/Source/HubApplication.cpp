@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -69,13 +70,45 @@ namespace
             {
                 try
                 {
+                    Keire::SystemTraySpecification tray;
+                    tray.Tooltip = "Kéire Project Hub";
+                    tray.Actions = {{"Show Hub", [this] { ShowHub(); }}, {"Quit", [this] { Owner().RequestExit(); }}};
+                    m_Tray = Owner().Windows()->CreateSystemTray(std::move(tray));
+                    if (!m_Tray->IsAvailable())
+                        m_Notice = "System tray unavailable; the Hub will minimize after launching an editor: " +
+                                   m_Tray->Diagnostic();
+                }
+                catch (const std::exception& error)
+                {
+                    SetError(std::string("System tray unavailable: ") + error.what());
+                }
+                Listen<Keire::WindowMinimizedEvent>(
+                    [this](const auto& event)
+                    {
+                        if (event.Header.Window != Owner().MainWindow()->Id() || !TrayAvailable())
+                            return Keire::EventFlow::Continue;
+                        Owner().MainWindow()->SetVisible(false);
+                        return Keire::EventFlow::Handled;
+                    });
+            }
+            if (!m_Smoke)
+            {
+                try
+                {
                     m_Registry = Keire::CreateRef<Keire::ProjectRegistry>();
                 }
                 catch (const std::exception& error)
                 {
-                    m_Notice = std::string("Project registry unavailable: ") + error.what();
+                    SetError(std::string("Project registry unavailable: ") + error.what());
                 }
             }
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Tray)
+                m_Tray->Close();
+            m_Tray.Reset();
         }
 
         void OnUpdate(const Keire::Time&) override
@@ -96,8 +129,7 @@ namespace
             }
             else if (status == Keire::FolderDialogStatus::Failed)
             {
-                m_Notice = "Folder dialog failed: " + m_FolderDialog->Diagnostic();
-                m_NoticeError = true;
+                SetError("Folder dialog failed: " + m_FolderDialog->Diagnostic());
             }
             m_FolderDialog.Reset();
             m_FolderTarget = FolderTarget::None;
@@ -152,6 +184,51 @@ namespace
             OpenProject
         };
 
+        [[nodiscard]] bool TrayAvailable() const noexcept { return m_Tray && m_Tray->IsAvailable(); }
+
+        void SetError(std::string message) noexcept
+        {
+            try
+            {
+                m_Notice = message;
+                m_NoticeError = true;
+            }
+            catch (...)
+            {
+            }
+            try
+            {
+                KEIRE_CLIENT_ERROR("[Project Hub] {}", message);
+            }
+            catch (...)
+            {
+                std::fprintf(stderr, "[Project Hub] %s\n", message.c_str());
+            }
+        }
+
+        void HideHub()
+        {
+            const auto window = Owner().MainWindow();
+            if (TrayAvailable())
+            {
+                // Keep the cached minimized state so the hidden Hub uses the bounded background pump rate.
+                window->Minimize();
+                window->SetVisible(false);
+            }
+            else
+            {
+                window->Minimize();
+            }
+        }
+
+        void ShowHub()
+        {
+            const auto window = Owner().MainWindow();
+            window->SetVisible(true);
+            window->Restore();
+            window->Raise();
+        }
+
         void Refresh()
         {
             try
@@ -162,8 +239,7 @@ namespace
             }
             catch (const std::exception& error)
             {
-                m_Notice = error.what();
-                m_NoticeError = true;
+                SetError(error.what());
             }
         }
 
@@ -197,11 +273,11 @@ namespace
                     throw std::runtime_error("Could not launch editor: " + diagnostic);
                 m_Notice = "Opened " + project->Descriptor().Name + ".";
                 m_NoticeError = false;
+                HideHub();
             }
             catch (const std::exception& error)
             {
-                m_Notice = error.what();
-                m_NoticeError = true;
+                SetError(error.what());
             }
         }
 
@@ -214,8 +290,7 @@ namespace
             }
             catch (const std::exception& error)
             {
-                m_Notice = error.what();
-                m_NoticeError = true;
+                SetError(error.what());
             }
         }
 
@@ -223,10 +298,7 @@ namespace
         {
             std::string diagnostic;
             if (!Keire::Detail::RevealInFileManager(path, diagnostic))
-            {
-                m_Notice = "Could not reveal project: " + diagnostic;
-                m_NoticeError = true;
-            }
+                SetError("Could not reveal project: " + diagnostic);
         }
 
         void Open(const std::filesystem::path& path)
@@ -239,8 +311,7 @@ namespace
             }
             catch (const std::exception& error)
             {
-                m_Notice = error.what();
-                m_NoticeError = true;
+                SetError(error.what());
             }
         }
 
@@ -276,8 +347,7 @@ namespace
                         }
                         catch (const std::exception& error)
                         {
-                            m_Notice = error.what();
-                            m_NoticeError = true;
+                            SetError(error.what());
                         }
                     }
                     ui.SameLine();
@@ -289,8 +359,7 @@ namespace
                         }
                         catch (const std::exception& error)
                         {
-                            m_Notice = error.what();
-                            m_NoticeError = true;
+                            SetError(error.what());
                         }
                     }
                     ui.SameLine();
@@ -352,8 +421,7 @@ namespace
                     }
                     catch (const std::exception& error)
                     {
-                        m_Notice = error.what();
-                        m_NoticeError = true;
+                        SetError(error.what());
                     }
                 }
                 ui.SameLine();
@@ -386,6 +454,7 @@ namespace
 
         std::filesystem::path m_Executable;
         Keire::Ref<Keire::ProjectRegistry> m_Registry;
+        Keire::Ref<Keire::SystemTray> m_Tray;
         Keire::Ref<Keire::FolderDialogOperation> m_FolderDialog;
         FolderTarget m_FolderTarget = FolderTarget::None;
         std::string m_Search;
@@ -440,7 +509,7 @@ namespace Keire
         specification.MainWindow.Height = 720;
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.EnableDocking = false;
-        specification.TargetFrameRate = smoke ? 240 : 0;
+        specification.TargetFrameRate = smoke ? 240 : 30;
         return std::make_unique<HubApplication>(std::move(specification), std::string(arguments.Executable()), smoke);
     }
 } // namespace Keire

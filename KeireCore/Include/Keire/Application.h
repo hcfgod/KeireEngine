@@ -7,9 +7,11 @@
 #include "Keire/Layer.h"
 #include "Keire/Log.h"
 #include "Keire/Project/Project.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneSystem.h"
 #include "Keire/Time.h"
 #include "Keire/Ui.h"
+#include "Keire/Undo.h"
 #include "Keire/Window.h"
 
 #include <cstdint>
@@ -27,7 +29,9 @@ namespace Keire
         InputSystemSpecification Input;
         TimeSpecification Timing;
         LogConfig Logging;
+        RenderSpecification Render;
         UiSpecification Ui;
+        UndoSpecification Undo;
         std::uint32_t TargetFrameRate = 0;
         std::uint32_t MinimizedPumpRate = 30;
         bool SuspendWhenMainWindowMinimized = true;
@@ -65,6 +69,8 @@ namespace Keire
         [[nodiscard]] const Time& GetTime() const;
         [[nodiscard]] Ref<WindowSystem> Windows() const noexcept;
         [[nodiscard]] Ref<Window> MainWindow() const noexcept;
+        [[nodiscard]] Ref<RenderSystem> Renderer() const noexcept;
+        [[nodiscard]] Ref<UndoService> Undo() const noexcept;
         [[nodiscard]] const ApplicationSpecification& Specification() const noexcept;
         [[nodiscard]] bool UiEnabled() const noexcept;
         [[nodiscard]] UiCaptureState UiCapture() const noexcept;

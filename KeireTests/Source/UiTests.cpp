@@ -92,6 +92,9 @@ namespace
                 (void)ui.Checkbox("Check", checked);
                 float value = 0.5F;
                 (void)ui.SliderFloat("Value", value, 0.0F, 1.0F);
+                Keire::Vector3 vector{1.0F, 2.0F, 3.0F};
+                CHECK_FALSE(ui.DragVector3("Vector", vector));
+                CHECK_THROWS_AS((void)ui.DragVector3("", vector), std::invalid_argument);
                 std::string text = "editable";
                 (void)ui.InputText("Text", text);
                 const auto item = ui.LastItemState();
@@ -104,6 +107,21 @@ namespace
                     ui.Text("Action");
                     CHECK(ui.TableNextColumn());
                     ui.Text("Binding");
+                }
+                const Keire::UiTableOptions gridOptions{.Sizing = Keire::UiTableSizing::Equal,
+                                                        .Borders = false,
+                                                        .Resizable = false,
+                                                        .RowBackground = false,
+                                                        .PersistSettings = false};
+                const std::size_t gridColumns = m_UiFrames == 0 ? 6 : 2;
+                if (auto table = ui.BeginTable("ResponsiveGrid", gridColumns, gridOptions); table)
+                {
+                    ui.TableNextRow();
+                    for (std::size_t column = 0; column < gridColumns; ++column)
+                    {
+                        CHECK(ui.TableNextColumn());
+                        ui.Text("Cell");
+                    }
                 }
                 float leading = 100.0F;
                 float trailing = 100.0F;

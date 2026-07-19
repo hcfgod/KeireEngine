@@ -3,6 +3,8 @@ DearImGuiProject = "DearImGui"
 DearImGuiLibrary = ProjectConfig.PROJECT_NAMESPACE .. "ImGui"
 ZstdProject = "Zstd"
 ZstdLibrary = ProjectConfig.PROJECT_NAMESPACE .. "Zstd"
+EnTTProject = "EnTT"
+GLMProject = "GLM"
 
 VendorIncludeDirs = {
     spdlog = "../Vendor/spdlog/include",
@@ -11,7 +13,9 @@ VendorIncludeDirs = {
     imgui = "../Vendor/imgui",
     imguiBackends = "../Vendor/imgui/backends",
     imguiMisc = "../Vendor/imgui/misc/cpp",
-    zstd = "../Vendor/zstd/lib"
+    zstd = "../Vendor/zstd/lib",
+    entt = "../Vendor/entt/src",
+    glm = "../Vendor/glm"
 }
 
 function LinkKeireCore()

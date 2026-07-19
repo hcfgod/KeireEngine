@@ -1,5 +1,6 @@
 #include "Keire/Ui.h"
 
+#include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
@@ -9,16 +10,20 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlgpu3.h>
+#include <imgui_internal.h>
 #include <imgui_stdlib.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -30,6 +35,122 @@ static_assert(IMGUI_VERSION_NUM == 19280, "The Kéire UI runtime must use the de
 
 namespace Keire
 {
+    namespace
+    {
+        class UiImageOwner final
+        {
+          public:
+            [[nodiscard]] ImTextureData* Create(const std::uint32_t width, const std::uint32_t height,
+                                                const std::span<const std::byte> pixels)
+            {
+                std::scoped_lock lock(Mutex);
+                if (!Open || !Context)
+                    throw std::logic_error("UI image owner is closed.");
+                ImGui::SetCurrentContext(Context);
+                auto texture = std::make_unique<ImTextureData>();
+                texture->Create(ImTextureFormat_RGBA32, static_cast<int>(width), static_cast<int>(height));
+                std::memcpy(texture->GetPixels(), pixels.data(), pixels.size());
+                ImGui::RegisterUserTexture(texture.get());
+                ImTextureData* result = texture.release();
+                Active.insert(result);
+                return result;
+            }
+
+            void Retire(ImTextureData* texture) noexcept
+            {
+                std::scoped_lock lock(Mutex);
+                if (Open && texture && Active.contains(texture) && std::ranges::find(Retired, texture) == Retired.end())
+                    Retired.push_back(texture);
+            }
+
+            void ProcessRetired()
+            {
+                std::vector<ImTextureData*> retired;
+                {
+                    std::scoped_lock lock(Mutex);
+                    retired.swap(Retired);
+                }
+                if (retired.empty())
+                    return;
+                if (Device)
+                    (void)SDL_WaitForGPUIdle(Device);
+                ImGui::SetCurrentContext(Context);
+                for (auto* texture : retired)
+                {
+                    if (!Active.erase(texture))
+                        continue;
+                    ImGui::UnregisterUserTexture(texture);
+                    if (Device && texture->GetTexID() != ImTextureID_Invalid)
+                        SDL_ReleaseGPUTexture(
+                            Device, reinterpret_cast<SDL_GPUTexture*>(static_cast<intptr_t>(texture->GetTexID())));
+                    delete texture;
+                }
+            }
+
+            void Close() noexcept
+            {
+                std::scoped_lock lock(Mutex);
+                if (!Open)
+                    return;
+                Open = false;
+                try
+                {
+                    if (Device)
+                        (void)SDL_WaitForGPUIdle(Device);
+                    ImGui::SetCurrentContext(Context);
+                    for (auto* texture : Active)
+                    {
+                        ImGui::UnregisterUserTexture(texture);
+                        if (Device && texture->GetTexID() != ImTextureID_Invalid)
+                            SDL_ReleaseGPUTexture(
+                                Device, reinterpret_cast<SDL_GPUTexture*>(static_cast<intptr_t>(texture->GetTexID())));
+                        delete texture;
+                    }
+                }
+                catch (...)
+                {
+                }
+                Active.clear();
+                Retired.clear();
+                Context = nullptr;
+                Device = nullptr;
+            }
+
+            std::mutex Mutex;
+            ImGuiContext* Context = nullptr;
+            SDL_GPUDevice* Device = nullptr;
+            std::unordered_set<ImTextureData*> Active;
+            std::vector<ImTextureData*> Retired;
+            bool Open = true;
+        };
+    } // namespace
+
+    class UiImage::Impl final
+    {
+      public:
+        Impl(std::shared_ptr<UiImageOwner> owner, ImTextureData* texture, const std::uint32_t width,
+             const std::uint32_t height)
+            : Owner(std::move(owner)), Texture(texture), Width(width), Height(height)
+        {
+        }
+
+        ~Impl()
+        {
+            if (const auto owner = Owner.lock())
+                owner->Retire(Texture);
+        }
+
+        std::weak_ptr<UiImageOwner> Owner;
+        ImTextureData* Texture = nullptr;
+        std::uint32_t Width = 0;
+        std::uint32_t Height = 0;
+    };
+
+    UiImage::UiImage(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
+    UiImage::~UiImage() = default;
+    std::uint32_t UiImage::Width() const noexcept { return m_Impl->Width; }
+    std::uint32_t UiImage::Height() const noexcept { return m_Impl->Height; }
+
     namespace
     {
         constexpr std::uintmax_t MaximumLayoutBytes = 1024U * 1024U;
@@ -68,20 +189,6 @@ namespace Keire
             if (options.NoSavedSettings)
                 flags |= ImGuiWindowFlags_NoSavedSettings;
             return flags;
-        }
-
-        [[nodiscard]] SDL_GPUPresentMode ToSdlPresentMode(const UiPresentMode mode) noexcept
-        {
-            switch (mode)
-            {
-            case UiPresentMode::Mailbox:
-                return SDL_GPU_PRESENTMODE_MAILBOX;
-            case UiPresentMode::Immediate:
-                return SDL_GPU_PRESENTMODE_IMMEDIATE;
-            case UiPresentMode::VSync:
-            default:
-                return SDL_GPU_PRESENTMODE_VSYNC;
-            }
         }
 
         void ApplyTheme(const UiTheme theme)
@@ -271,6 +378,7 @@ namespace Keire
         std::vector<UiScope::Kind> Scopes;
         std::uint64_t Generation = 0;
         std::atomic<bool> Active{false};
+        std::shared_ptr<UiImageOwner> Images;
     };
 
     UiScope::UiScope(UiFrame& frame, const Kind kind, const bool visible, const bool closeRequired) noexcept
@@ -429,6 +537,16 @@ namespace Keire
         return UiPopupScope(*this, visible);
     }
 
+    UiPopupScope UiFrame::BeginPopup(const std::string_view id)
+    {
+        m_Impl->RequireActive("BeginPopup");
+        const std::string safeId(id);
+        const bool visible = ImGui::BeginPopup(safeId.c_str());
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Popup);
+        return UiPopupScope(*this, visible);
+    }
+
     UiPopupScope UiFrame::BeginItemContextMenu(const std::string_view id)
     {
         m_Impl->RequireActive("BeginItemContextMenu");
@@ -439,24 +557,51 @@ namespace Keire
         return UiPopupScope(*this, visible);
     }
 
-    UiTableScope UiFrame::BeginTable(const std::string_view id, const std::size_t columns)
+    UiPopupScope UiFrame::BeginWindowContextMenu(const std::string_view id)
+    {
+        m_Impl->RequireActive("BeginWindowContextMenu");
+        const std::string safeId(id);
+        const bool visible =
+            ImGui::BeginPopupContextWindow(safeId.empty() ? nullptr : safeId.c_str(),
+                                           ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems);
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Popup);
+        return UiPopupScope(*this, visible);
+    }
+
+    UiTableScope UiFrame::BeginTable(const std::string_view id, const std::size_t columns, const UiTableOptions options)
     {
         m_Impl->RequireActive("BeginTable");
         if (columns == 0 || columns > 64)
             throw std::invalid_argument("UI tables require between 1 and 64 columns.");
         const std::string safeId(id);
-        const auto flags = ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg |
-                           ImGuiTableFlags_SizingStretchProp;
+        ImGuiTableFlags flags = options.Sizing == UiTableSizing::Equal ? ImGuiTableFlags_SizingStretchSame
+                                                                       : ImGuiTableFlags_SizingStretchProp;
+        if (options.Borders)
+            flags |= ImGuiTableFlags_Borders;
+        if (options.Resizable)
+            flags |= ImGuiTableFlags_Resizable;
+        if (options.RowBackground)
+            flags |= ImGuiTableFlags_RowBg;
+        if (!options.PersistSettings)
+            flags |= ImGuiTableFlags_NoSavedSettings;
         const bool visible = ImGui::BeginTable(safeId.c_str(), static_cast<int>(columns), flags);
         if (visible)
+        {
+            if (options.Sizing == UiTableSizing::Equal)
+                for (std::size_t column = 0; column < columns; ++column)
+                    ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch, 1.0F);
             m_Impl->OpenScope(UiScope::Kind::Table);
+        }
         return UiTableScope(*this, visible);
     }
 
     UiDragSourceScope UiFrame::BeginDragSource()
     {
         m_Impl->RequireActive("BeginDragSource");
-        const bool visible = ImGui::BeginDragDropSource();
+        // The Kéire facade permits display-only items as drag handles. ImGui requires this flag to synthesize a
+        // temporary identifier for Text/Image items instead of asserting inside third-party code.
+        const bool visible = ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::DragSource);
         return UiDragSourceScope(*this, visible);
@@ -617,8 +762,50 @@ namespace Keire
         case UiKey::F2:
             chord = ImGuiKey_F2;
             break;
+        case UiKey::A:
+            chord = ImGuiKey_A;
+            break;
+        case UiKey::Backspace:
+            chord = ImGuiKey_Backspace;
+            break;
+        case UiKey::C:
+            chord = ImGuiKey_C;
+            break;
+        case UiKey::D:
+            chord = ImGuiKey_D;
+            break;
+        case UiKey::Down:
+            chord = ImGuiKey_DownArrow;
+            break;
+        case UiKey::E:
+            chord = ImGuiKey_E;
+            break;
+        case UiKey::F:
+            chord = ImGuiKey_F;
+            break;
+        case UiKey::Left:
+            chord = ImGuiKey_LeftArrow;
+            break;
+        case UiKey::Q:
+            chord = ImGuiKey_Q;
+            break;
+        case UiKey::Right:
+            chord = ImGuiKey_RightArrow;
+            break;
         case UiKey::S:
             chord = ImGuiKey_S;
+            break;
+        case UiKey::Up:
+            chord = ImGuiKey_UpArrow;
+            break;
+        case UiKey::V:
+            chord = ImGuiKey_V;
+            break;
+        case UiKey::W:
+            chord = ImGuiKey_W;
+            break;
+        case UiKey::X:
+            chord = ImGuiKey_X;
             break;
         case UiKey::Y:
             chord = ImGuiKey_Y;
@@ -633,6 +820,8 @@ namespace Keire
             chord |= ImGuiMod_Shift;
         if (shortcut.Alt)
             chord |= ImGuiMod_Alt;
+        if (shortcut.Primary)
+            chord |= ImGuiMod_Shortcut;
         return ImGui::Shortcut(chord);
     }
 
@@ -660,6 +849,51 @@ namespace Keire
         m_Impl->RequireActive("Checkbox");
         const std::string safeLabel(label);
         return ImGui::Checkbox(safeLabel.c_str(), &value);
+    }
+
+    bool UiFrame::DragVector3(const std::string_view label, Vector3& value, const float speed)
+    {
+        m_Impl->RequireActive("DragVector3");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
+            throw std::invalid_argument("DragVector3 requires a label and a finite positive speed.");
+
+        const std::string safeLabel(label);
+        ImGui::PushID(safeLabel.c_str());
+        ImGui::BeginGroup();
+
+        const float rowStart = ImGui::GetCursorPosX();
+        const float available = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
+        const bool compact = available < 300.0F;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(safeLabel.c_str());
+        if (!compact)
+        {
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), rowStart + 72.0F));
+        }
+
+        const auto drawAxis = [speed](const char* axis, float& component, const ImVec4 color, const float width)
+        {
+            ImGui::TextColored(color, "%s", axis);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(width);
+            return ImGui::DragFloat((std::string("##") + axis).c_str(), &component, speed, 0.0F, 0.0F, "%.3f");
+        };
+
+        const auto& style = ImGui::GetStyle();
+        const float controlsWidth = std::max(ImGui::GetContentRegionAvail().x, 90.0F);
+        const float axisLabelWidth = ImGui::CalcTextSize("X").x;
+        const float fieldWidth =
+            std::max(24.0F, (controlsWidth - axisLabelWidth * 3.0F - style.ItemSpacing.x * 5.0F) / 3.0F);
+        bool changed = drawAxis("X", value.X, {0.95F, 0.35F, 0.35F, 1.0F}, fieldWidth);
+        ImGui::SameLine();
+        changed |= drawAxis("Y", value.Y, {0.40F, 0.85F, 0.45F, 1.0F}, fieldWidth);
+        ImGui::SameLine();
+        changed |= drawAxis("Z", value.Z, {0.35F, 0.60F, 1.0F, 1.0F}, fieldWidth);
+
+        ImGui::EndGroup();
+        ImGui::PopID();
+        return changed;
     }
 
     bool UiFrame::SliderFloat(std::string_view label, float& value, const float minimum, const float maximum)
@@ -714,9 +948,190 @@ namespace Keire
         return changed;
     }
 
-    void UiFrame::SetTooltip(std::string_view text)
+    Ref<UiImage> UiFrame::CreateImage(const std::uint32_t width, const std::uint32_t height,
+                                      const std::span<const std::byte> rgbaPixels)
+    {
+        m_Impl->RequireActive("CreateImage");
+        if (!m_Impl->Images || width == 0 || height == 0 || width > 4096 || height > 4096 ||
+            static_cast<std::uint64_t>(width) * height * 4ULL != rgbaPixels.size())
+            throw std::invalid_argument("UI images require bounded dimensions and exactly four RGBA bytes per pixel.");
+        auto* texture = m_Impl->Images->Create(width, height, rgbaPixels);
+        return CreateRef<UiImage>(std::make_unique<UiImage::Impl>(m_Impl->Images, texture, width, height));
+    }
+
+    void UiFrame::Image(const Ref<UiImage>& image, UiSize size)
+    {
+        m_Impl->RequireActive("Image");
+        if (!image || !image->m_Impl->Texture)
+            throw std::invalid_argument("UiFrame::Image requires a valid UI image.");
+        if (size.Width <= 0.0F)
+            size.Width = static_cast<float>(image->Width());
+        if (size.Height <= 0.0F)
+            size.Height = static_cast<float>(image->Height());
+        ImGui::Image(image->m_Impl->Texture->GetTexRef(), {size.Width, size.Height});
+    }
+
+    void UiFrame::Image(const Ref<RenderSurface>& surface, UiSize size)
+    {
+        m_Impl->RequireActive("Image(RenderSurface)");
+        if (!surface)
+            throw std::invalid_argument("UiFrame::Image requires a valid render surface.");
+        if (size.Width <= 0.0F)
+            size.Width = static_cast<float>(std::max(surface->Width(), 1U));
+        if (size.Height <= 0.0F)
+            size.Height = static_cast<float>(std::max(surface->Height(), 1U));
+
+        if (auto* texture = RenderSystemInternalAccess::Texture(*surface))
+        {
+            ImGui::Image(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture))),
+                         {size.Width, size.Height});
+        }
+        else
+            ImGui::Dummy({size.Width, size.Height});
+    }
+
+    bool UiFrame::ImageButton(const std::string_view id, const Ref<UiImage>& image, UiSize size)
+    {
+        m_Impl->RequireActive("ImageButton");
+        if (!image || !image->m_Impl->Texture)
+            throw std::invalid_argument("UiFrame::ImageButton requires a valid UI image.");
+        if (size.Width <= 0.0F)
+            size.Width = static_cast<float>(image->Width());
+        if (size.Height <= 0.0F)
+            size.Height = static_cast<float>(image->Height());
+        const std::string safeId(id);
+        return ImGui::ImageButton(safeId.c_str(), image->m_Impl->Texture->GetTexRef(), {size.Width, size.Height});
+    }
+
+    UiSize UiFrame::ContentAvailable() const
+    {
+        m_Impl->RequireActive("ContentAvailable");
+        const auto available = ImGui::GetContentRegionAvail();
+        return {available.x, available.y};
+    }
+
+    bool UiFrame::WindowFocused() const
+    {
+        m_Impl->RequireActive("WindowFocused");
+        return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    }
+
+    UiPointerState UiFrame::PointerState() const
+    {
+        m_Impl->RequireActive("PointerState");
+        const auto& io = ImGui::GetIO();
+        return {{io.MousePos.x, io.MousePos.y},
+                {io.MouseDelta.x, io.MouseDelta.y},
+                io.MouseWheel,
+                ImGui::IsMouseDown(ImGuiMouseButton_Left),
+                ImGui::IsMouseDown(ImGuiMouseButton_Middle),
+                ImGui::IsMouseDown(ImGuiMouseButton_Right),
+                ImGui::IsMouseClicked(ImGuiMouseButton_Left),
+                ImGui::IsMouseClicked(ImGuiMouseButton_Middle),
+                ImGui::IsMouseClicked(ImGuiMouseButton_Right),
+                ImGui::IsMouseReleased(ImGuiMouseButton_Left),
+                ImGui::IsMouseReleased(ImGuiMouseButton_Middle),
+                ImGui::IsMouseReleased(ImGuiMouseButton_Right)};
+    }
+
+    bool UiFrame::KeyDown(const UiKey key) const
+    {
+        m_Impl->RequireActive("KeyDown");
+        ImGuiKey imguiKey = ImGuiKey_None;
+        switch (key)
+        {
+        case UiKey::Enter:
+            imguiKey = ImGuiKey_Enter;
+            break;
+        case UiKey::Escape:
+            imguiKey = ImGuiKey_Escape;
+            break;
+        case UiKey::Delete:
+            imguiKey = ImGuiKey_Delete;
+            break;
+        case UiKey::F2:
+            imguiKey = ImGuiKey_F2;
+            break;
+        case UiKey::A:
+            imguiKey = ImGuiKey_A;
+            break;
+        case UiKey::Backspace:
+            imguiKey = ImGuiKey_Backspace;
+            break;
+        case UiKey::C:
+            imguiKey = ImGuiKey_C;
+            break;
+        case UiKey::D:
+            imguiKey = ImGuiKey_D;
+            break;
+        case UiKey::Down:
+            imguiKey = ImGuiKey_DownArrow;
+            break;
+        case UiKey::E:
+            imguiKey = ImGuiKey_E;
+            break;
+        case UiKey::F:
+            imguiKey = ImGuiKey_F;
+            break;
+        case UiKey::Left:
+            imguiKey = ImGuiKey_LeftArrow;
+            break;
+        case UiKey::Q:
+            imguiKey = ImGuiKey_Q;
+            break;
+        case UiKey::Right:
+            imguiKey = ImGuiKey_RightArrow;
+            break;
+        case UiKey::S:
+            imguiKey = ImGuiKey_S;
+            break;
+        case UiKey::Up:
+            imguiKey = ImGuiKey_UpArrow;
+            break;
+        case UiKey::V:
+            imguiKey = ImGuiKey_V;
+            break;
+        case UiKey::W:
+            imguiKey = ImGuiKey_W;
+            break;
+        case UiKey::X:
+            imguiKey = ImGuiKey_X;
+            break;
+        case UiKey::Y:
+            imguiKey = ImGuiKey_Y;
+            break;
+        case UiKey::Z:
+            imguiKey = ImGuiKey_Z;
+            break;
+        }
+        return ImGui::IsKeyDown(imguiKey);
+    }
+
+    bool UiFrame::ControlDown() const
+    {
+        m_Impl->RequireActive("ControlDown");
+        return ImGui::GetIO().KeyCtrl;
+    }
+
+    bool UiFrame::ShiftDown() const
+    {
+        m_Impl->RequireActive("ShiftDown");
+        return ImGui::GetIO().KeyShift;
+    }
+
+    bool UiFrame::AltDown() const
+    {
+        m_Impl->RequireActive("AltDown");
+        return ImGui::GetIO().KeyAlt;
+    }
+
+    void UiFrame::SetTooltip(const std::string_view text) { SetTooltip(text, {}); }
+
+    void UiFrame::SetTooltip(const std::string_view text, const UiTooltipOptions options)
     {
         m_Impl->RequireActive("SetTooltip");
+        if (!ImGui::IsItemHovered(options.Delayed ? ImGuiHoveredFlags_DelayNormal : ImGuiHoveredFlags_None))
+            return;
         if (ImGui::BeginTooltip())
         {
             ImGui::TextUnformatted(text.data(), text.data() + text.size());
@@ -751,8 +1166,9 @@ namespace Keire
     class UiSystem::Impl final
     {
       public:
-        Impl(UiSpecification value, WindowSystem& windows, Window& window)
-            : Specification(std::move(value)), OwnerThread(std::this_thread::get_id()), Frame(new UiFrame())
+        Impl(UiSpecification value, WindowSystem& windows, Window& window, RenderSystem& renderer)
+            : Specification(std::move(value)), OwnerThread(std::this_thread::get_id()), Frame(new UiFrame()),
+              Renderer(&renderer)
         {
             if (!ValidColor(Specification.ClearColor))
                 throw std::invalid_argument("UI clear color components must be finite values in the range 0..1.");
@@ -766,6 +1182,9 @@ namespace Keire
 
             try
             {
+                Images = std::make_shared<UiImageOwner>();
+                Images->Context = Context;
+                Frame->m_Impl->Images = Images;
                 ConfigureContext();
                 if (Specification.Workspace.Enabled)
                     Workspace = std::unique_ptr<UiWorkspace>(new UiWorkspace(Specification.Workspace, windows, window,
@@ -773,7 +1192,7 @@ namespace Keire
                 else
                     LoadLayout(Specification.LayoutPath);
                 if (Specification.Mode == UiMode::Rendered)
-                    InitializeRenderer(windows, window);
+                    InitializeRenderer(windows, renderer);
                 InitializationComplete = true;
             }
             catch (...)
@@ -808,31 +1227,16 @@ namespace Keire
             }
         }
 
-        void InitializeRenderer(WindowSystem& windows, Window& window)
+        void InitializeRenderer(WindowSystem& windows, RenderSystem& renderer)
         {
-            NativeWindow = WindowSystemInternalAccess::NativeWindow(windows, window.Id());
+            NativeWindow = RenderSystemInternalAccess::NativeWindow(renderer);
             if (!NativeWindow)
                 throw UiError("ResolveNativeWindow", "the primary window is not available");
-
-            constexpr SDL_GPUShaderFormat formats = static_cast<SDL_GPUShaderFormat>(
-                SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXBC | SDL_GPU_SHADERFORMAT_DXIL |
-                SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_METALLIB);
-            Device = SDL_CreateGPUDevice(formats, Specification.EnableGpuValidation, nullptr);
+            Device = RenderSystemInternalAccess::Device(renderer);
             if (!Device)
-                throw UiError("SDL_CreateGPUDevice", LastSdlError());
-
-            if (!SDL_ClaimWindowForGPUDevice(Device, NativeWindow))
-                throw UiError("SDL_ClaimWindowForGPUDevice", LastSdlError());
-            WindowClaimed = true;
-
-            PresentMode = ToSdlPresentMode(Specification.PresentMode);
-            if (!SDL_WindowSupportsGPUPresentMode(Device, NativeWindow, PresentMode))
-            {
-                KEIRE_CORE_WARN("Requested UI present mode is unavailable; falling back to VSync.");
-                PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
-            }
-            if (!SDL_SetGPUSwapchainParameters(Device, NativeWindow, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, PresentMode))
-                throw UiError("SDL_SetGPUSwapchainParameters", LastSdlError());
+                throw UiError("ResolveGpuDevice", "the application renderer is not in rendered mode");
+            Images->Device = Device;
+            PresentMode = RenderSystemInternalAccess::PresentMode(renderer);
 
             ImGui::SetCurrentContext(Context);
             if (!ImGui_ImplSDL3_InitForSDLGPU(NativeWindow))
@@ -868,6 +1272,7 @@ namespace Keire
                 throw std::logic_error("A Kéire UI frame is already active.");
 
             ImGui::SetCurrentContext(Context);
+            Images->ProcessRetired();
             if (Workspace)
                 Workspace->BeforeNewFrame();
             if (Specification.Mode == UiMode::Rendered)
@@ -909,46 +1314,9 @@ namespace Keire
             if (Workspace)
                 Workspace->AfterFrame();
 
-            if (Specification.Mode == UiMode::Rendered)
-                Render();
-        }
-
-        void Render()
-        {
-            ImDrawData* drawData = ImGui::GetDrawData();
-            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
-            if (!commands)
-                throw UiError("SDL_AcquireGPUCommandBuffer", LastSdlError());
-
-            SDL_GPUTexture* swapchain = nullptr;
-            if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, NativeWindow, &swapchain, nullptr, nullptr))
-            {
-                (void)SDL_CancelGPUCommandBuffer(commands);
-                throw UiError("SDL_WaitAndAcquireGPUSwapchainTexture", LastSdlError());
-            }
-
-            if (swapchain && drawData->DisplaySize.x > 0.0F && drawData->DisplaySize.y > 0.0F)
-            {
-                ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commands);
-                SDL_GPUColorTargetInfo target{};
-                target.texture = swapchain;
-                target.clear_color = {Specification.ClearColor.Red, Specification.ClearColor.Green,
-                                      Specification.ClearColor.Blue, Specification.ClearColor.Alpha};
-                target.load_op = SDL_GPU_LOADOP_CLEAR;
-                target.store_op = SDL_GPU_STOREOP_STORE;
-                SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
-                if (!pass)
-                {
-                    const auto diagnostic = LastSdlError();
-                    (void)SDL_SubmitGPUCommandBuffer(commands);
-                    throw UiError("SDL_BeginGPURenderPass", diagnostic);
-                }
-                ImGui_ImplSDLGPU3_RenderDrawData(drawData, commands, pass);
-                SDL_EndGPURenderPass(pass);
-            }
-
-            if (!SDL_SubmitGPUCommandBuffer(commands))
-                throw UiError("SDL_SubmitGPUCommandBuffer", LastSdlError());
+            if (Renderer)
+                RenderSystemInternalAccess::EndFrame(
+                    *Renderer, Specification.Mode == UiMode::Rendered ? ImGui::GetDrawData() : nullptr);
         }
 
         void Shutdown() noexcept
@@ -976,8 +1344,10 @@ namespace Keire
                 }
                 EventSink = 0;
             }
-            if (Device)
-                (void)SDL_WaitForGPUIdle(Device);
+            if (Renderer)
+                RenderSystemInternalAccess::WaitIdle(*Renderer);
+            if (Images)
+                Images->Close();
             if (RendererInitialized)
             {
                 ImGui_ImplSDLGPU3_Shutdown();
@@ -1013,17 +1383,12 @@ namespace Keire
                 ImGui::DestroyContext(Context);
                 Context = nullptr;
             }
-            if (WindowClaimed && Device && NativeWindow)
-            {
-                SDL_ReleaseWindowFromGPUDevice(Device, NativeWindow);
-                WindowClaimed = false;
-            }
-            if (Device)
-            {
-                SDL_DestroyGPUDevice(Device);
-                Device = nullptr;
-            }
+            Device = nullptr;
+            NativeWindow = nullptr;
+            Renderer = nullptr;
             Frame->m_Impl->Lifetime.reset();
+            Frame->m_Impl->Images.reset();
+            Images.reset();
             ImGui::SetCurrentContext(PreviousContext);
         }
 
@@ -1038,17 +1403,19 @@ namespace Keire
         SDL_Window* NativeWindow = nullptr;
         SDL_GPUDevice* Device = nullptr;
         SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
-        bool WindowClaimed = false;
+        RenderSystem* Renderer = nullptr;
         bool PlatformInitialized = false;
         bool RendererInitialized = false;
         WindowSystemInternalAccess::EventSinkToken EventSink = 0;
         bool FrameActive = false;
         bool InitializationComplete = false;
         bool ShutdownComplete = false;
+        std::shared_ptr<UiImageOwner> Images;
     };
 
-    UiSystem::UiSystem(const UiSpecification& specification, WindowSystem& windows, Window& window)
-        : m_Impl(std::make_unique<Impl>(specification, windows, window))
+    UiSystem::UiSystem(const UiSpecification& specification, WindowSystem& windows, Window& window,
+                       RenderSystem& renderer)
+        : m_Impl(std::make_unique<Impl>(specification, windows, window, renderer))
     {
     }
 

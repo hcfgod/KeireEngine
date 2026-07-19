@@ -9,7 +9,7 @@ param(
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "default",
     [string]$Target = "",
-    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui")]
+    [ValidateSet("spdlog", "doctest", "SDL", "json", "imgui", "zstd", "entt", "glm")]
     [string]$Dependency = "spdlog",
     [string]$Tag = "",
     [string]$Name = "",

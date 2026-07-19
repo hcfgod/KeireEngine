@@ -24,10 +24,11 @@ Startup is transactional inside the top-level exception boundary:
 5. Create optional Scenes after Assets.
 6. Create the application-owned time service.
 7. Create the window system and primary window.
-8. Create optional Input after Assets and Windowing.
-9. Create the optional UI system and workspace after Input.
-10. Connect the layer event listener.
-11. Activate the layer stack, call client `OnInitialize()`, and apply pending attachment operations.
+8. Create optional RenderSystem after Windowing and claim the primary window when rendered.
+9. Create optional Input after Assets and Windowing.
+10. Create the optional UI system and workspace after Input, bridging presentation through RenderSystem.
+11. Connect the layer event listener.
+12. Activate the layer stack, call client `OnInitialize()`, and apply pending attachment operations.
 
 If any step fails, shutdown runs for the resources that were acquired. The original exception is rethrown after cleanup.
 
@@ -48,7 +49,7 @@ flowchart TD
     Update --> UI{"UI enabled and frame active?"}
     UI -->|Yes| BeginUI["Begin UI frame and root dockspace"]
     BeginUI --> LayerUI["LayerStack UI traversal"]
-    LayerUI --> EndUI["Render, capture state, and autosave"]
+    LayerUI --> EndUI["Resize targets; scene, grid, UI, present"]
     UI -->|No| PendingB["Apply pending layer changes"]
     EndUI --> PendingB
     PendingB --> Pace["Optional frame pacing"]
@@ -58,10 +59,23 @@ Window events are pumped before simulation. Queued events drain a fixed snapshot
 wait for the next frame. Fixed simulation consumes scaled time before variable update. UI runs after simulation and is
 skipped when the application is suspended by a minimized primary window.
 
+Minimized suspension is sampled with the time advance at the outer-frame boundary. If a minimize event arrives while
+that frame is being pumped, the fixed and variable work already produced for the frame completes, rendering is skipped,
+and suspension begins on the next frame. This guarantees that no pending fixed tick can be abandoned across a minimize
+transition. A restore event similarly resumes simulation at the following frame boundary.
+
+An editor `SceneRuntimeSession` receives fixed and variable updates from its owning layer. Playing dispatches component
+lifecycle callbacks against a private scene clone. Paused sessions receive neither update phase unless Step explicitly
+requests one fixed tick. Faulted sessions retain their diagnostic until Stop and never mutate the authored scene.
+
 Exit requests are checked between phases. A request does not force callbacks already on the stack to unwind, but later
 frame phases are skipped as soon as the loop reaches a safe check.
 
 ## Layer Ownership And Traversal
+
+The application creates `UndoService` before layers attach. A layer may create document contexts in `OnAttach`, but all
+history mutation remains owner-thread-affine. `LayerStack::Deactivate` gives panels an opportunity to close those
+contexts before the application closes the service and continues subsystem teardown.
 
 `LayerStack` owns every layer through `std::unique_ptr`. Layers attach exactly once after activation and detach in
 reverse order. The stack maintains a layer partition followed by an overlay partition.
@@ -98,7 +112,8 @@ smoothing, tick caps, or remainder behavior are observable and require determini
 
 ## UI
 
-`UiSystem` owns the Dear ImGui context and optional SDL_GPU renderer privately. `UiFrame` is valid only during
+`UiSystem` owns the Dear ImGui context while application-owned `RenderSystem` exclusively owns SDL_GPU and presentation.
+`UiFrame` is valid only during
 `Layer::OnUi()` on the owner thread. Its move-only scopes balance backend begin/end operations during normal returns and
 exception unwinding; a scope cannot escape its frame or close out of nesting order.
 
@@ -113,13 +128,15 @@ Shutdown is deterministic and idempotent at service boundaries:
 1. Deactivate the layer stack and detach layers in reverse order.
 2. Call client `OnShutdown()` if initialization completed.
 3. Disconnect the application layer-event listener.
-4. Shut down UI event forwarding, renderer state, workspace, and context.
-5. Close Input and its native-event registration/gamepad handles.
-6. Close Scenes and invalidate loaded mutable scene instances.
-7. Close the event bus.
-8. Release the primary window and shut down the window system.
-9. Close the asset system and join its workers.
-10. Release the project lock, time/event services, and managed logging.
+4. Close the undo service after document panels have released their contexts.
+5. Shut down UI event forwarding, workspace, renderer bridge, and context.
+6. Close the render system, wait for its final fences, and release its window claim/device.
+7. Close Input and its native-event registration/gamepad handles.
+8. Close Scenes and invalidate loaded mutable scene instances.
+9. Close the event bus.
+10. Release the primary window and shut down the window system and tray.
+11. Close the asset system and join its workers.
+12. Release the project lock, time/event services, and managed logging.
 
 Cleanup that is required to be `noexcept` contains secondary failures. A failure from application work remains the
 exception observed by the caller rather than being replaced by a teardown diagnostic.

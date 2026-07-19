@@ -12,6 +12,11 @@ Rename moves source and metadata as one rollback-capable operation. Duplicate co
 Delete is represented by `MoveToTrash()`, which moves both files under `Library/Trash/<asset-id>` for recovery. Public
 operations confine destinations below the configured source root.
 
+`MoveAsset`, `MoveFolder`, `DuplicateFolder`, `TrashAsset`, `TrashFolder`, `RestoreTrash`, and
+`PermanentlyDeleteTrash` provide the Project panel's transactional file boundary. Folder operations include metadata
+recursively, reject self-descendant moves and collisions before mutation, and roll back a partially completed move.
+Trash manifests persist the original relative location so editor Undo can restore the same identity across sessions.
+
 ## Import And Change Detection
 
 `ImportAll()` hashes sources with SHA-256 and stores immutable raw objects below `Library/AssetCache/Objects`. Existing
@@ -26,10 +31,21 @@ bytes, and emit deterministic canonical bytes before cache hashing. The Input re
 KeireClient and `KeireAssetTool` install it explicitly. `CreateAsset()` validates through the registered importer
 before transactionally publishing the source and metadata identity.
 
+Contextual importers additionally receive the project root, source path, and a bounded project-relative dependency
+reader. They return canonical bytes, structured diagnostics, and dependency path/digest records. This is used by shader
+manifests and preserves the byte-only callback for existing importers. Dependency digests participate in the cache key,
+and failed reimports never replace a last-good runtime object.
+
+Interactive editors may call `ImportAll(AssetImportPolicy::KeepLastGood)`. Each source receives an `AssetImportStatus`;
+a failed new source stays visible but is omitted from the runtime catalog, while an existing asset keeps its last
+successful runtime revision. Structured diagnostics are mirrored to the editor Console and the rotating Core/Client
+logs; failed shaders expose the full bounded diagnostic list in Inspector. `Strict` remains the default and is
+mandatory for cooking and release packaging.
+
 ## Deterministic Cooking
 
 `AssetCooker::Cook()` sorts entries by stable ID, compresses each payload with pinned Zstandard and the selected
-versioned `AssetBuildProfile`, and shards packs at a 2 GiB default limit. Catalog entries contain relative pack paths,
+versioned `AssetBuildProfile`, target platform, and shards packs at a 2 GiB default limit. Catalog entries contain relative pack paths,
 bounded offsets/sizes, type, SHA-256, and dependency IDs. Output is assembled in a sibling temporary directory, then
 published with a recoverable directory swap. The accompanying `build-profile.json` records schema, profile name,
 compression algorithm/level, shard limit, and strictness.
@@ -45,10 +61,11 @@ The dedicated `KeireAssetTool` target exposes the same APIs:
 ```text
 KeireAssetTool scan --project <path>
 KeireAssetTool import --project <path>
-KeireAssetTool cook --project <path> --output <path> --profile Dist
+KeireAssetTool cook --project <path> --output <path> --profile Dist --target windows
 KeireAssetTool validate --catalog <path>
 ```
 
-Optional cook controls are `--compression-level` and `--pack-mib`. SDK archives include this tool and the asset public
+Target values are `host`, `windows`, `linux`, and `macos`; contextual cook transforms use them to strip unused shader
+variants. Optional cook controls are `--compression-level` and `--pack-mib`. SDK archives include this tool and the asset public
 headers; they carry the private `KeireZstd` archive transitively through `Keire::Core` but do not redistribute Zstandard
 headers.

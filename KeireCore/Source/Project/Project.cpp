@@ -2,6 +2,7 @@
 
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/InputActionAsset.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/BuildInfo.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "KeireInternal/FileSystem.h"
@@ -14,6 +15,7 @@
 #include <cctype>
 #include <chrono>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <system_error>
 #include <tuple>
@@ -259,12 +261,75 @@ namespace Keire
             if (specification.Template == ProjectTemplate::Starter)
             {
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
-                databaseSpecification.Importers = {CreateInputActionAssetImporter(), CreateSceneAssetImporter()};
+                databaseSpecification.Importers = {CreateInputActionAssetImporter(), CreateSceneAssetImporter(),
+                                                   CreateShaderAssetImporter(), CreateMaterialAssetImporter()};
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
                 const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",
                                                                 CreateInputActionAssetImporter(), inputBytes);
-                const auto sceneBytes = SceneAsset::Encode(SceneAsset::SampleDefinition());
+
+                constexpr std::string_view hlsl = R"(struct VertexInput
+{
+    float3 Position : TEXCOORD0;
+    float3 Color : TEXCOORD1;
+};
+
+struct VertexOutput
+{
+    float4 Color : TEXCOORD0;
+    float4 Position : SV_Position;
+};
+
+cbuffer CameraObjectConstants : register(b0, space1)
+{
+    float4x4 ModelViewProjection;
+};
+
+VertexOutput VSMain(VertexInput input)
+{
+    VertexOutput output;
+    output.Color = float4(input.Color, 1.0F);
+    output.Position = mul(ModelViewProjection, float4(input.Position, 1.0F));
+    return output;
+}
+
+float4 PSMain(VertexOutput input) : SV_Target0
+{
+    return input.Color;
+}
+)";
+                const auto shaderSource = root / "Assets/Shaders/DefaultUnlit.hlsl";
+                std::filesystem::create_directories(shaderSource.parent_path());
+                Detail::WriteTextFileAtomically(shaderSource, hlsl);
+                const auto shaderManifest =
+                    Json{{"schemaVersion", 1},
+                         {"source", "Assets/Shaders/DefaultUnlit.hlsl"},
+                         {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
+                         {"defines", Json::object()},
+                         {"includeRoots", Json::array({"Assets/Shaders"})},
+                         {"renderState",
+                          {{"topology", "TriangleList"},
+                           {"culling", "Back"},
+                           {"depthTest", true},
+                           {"depthWrite", true},
+                           {"blend", false}}},
+                         {"properties", Json::array({{{"name", "Tint"},
+                                                      {"type", "Color"},
+                                                      {"default", Json::array({0.25F, 0.55F, 1.0F, 1.0F})}}})}}
+                        .dump(2) +
+                    '\n';
+                const auto shaderBytes = std::as_bytes(std::span(shaderManifest.data(), shaderManifest.size()));
+                const auto shader =
+                    database->CreateAsset("Shaders/DefaultUnlit.keireshader", CreateShaderAssetImporter(), shaderBytes);
+                const auto materialSource = Json{{"schemaVersion", 1},
+                                                 {"shader", shader.ToString()},
+                                                 {"properties", {{"Tint", Json::array({0.25F, 0.55F, 1.0F, 1.0F})}}}}
+                                                .dump(2) +
+                                            '\n';
+                const auto materialBytes = std::as_bytes(std::span(materialSource.data(), materialSource.size()));
+                const auto material = database->CreateAsset("Materials/DefaultUnlit.keirematerial",
+                                                            CreateMaterialAssetImporter(), materialBytes);
+                const auto sceneBytes = SceneAsset::Encode(SceneAsset::SampleDefinition(material));
                 descriptor.StartupScene =
                     database->CreateAsset("Scenes/SampleScene.keirescene", CreateSceneAssetImporter(), sceneBytes);
                 (void)database->ImportAll();

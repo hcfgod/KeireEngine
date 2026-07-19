@@ -6,10 +6,12 @@
 #include <compare>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
+#include <vector>
 
 #if defined(CreateWindow)
 #undef CreateWindow
@@ -217,6 +219,7 @@ namespace Keire
         virtual void Minimize() = 0;
         virtual void Maximize() = 0;
         virtual void Restore() = 0;
+        virtual void Raise() = 0;
         virtual void SetMode(WindowMode mode) = 0;
         virtual void Close() = 0;
     };
@@ -244,6 +247,67 @@ namespace Keire
         Ref<Detail::FolderDialogState> m_State;
     };
 
+    enum class SaveFileDialogStatus : std::uint8_t
+    {
+        Pending,
+        Selected,
+        Cancelled,
+        Failed
+    };
+
+    struct SaveFileDialogSpecification
+    {
+        std::string Title = "Save File";
+        std::filesystem::path DefaultLocation;
+        std::string DefaultName;
+        std::string FilterName;
+        std::string Extension;
+    };
+
+    class KEIRE_API SaveFileDialogOperation final : public RefCounted
+    {
+      public:
+        class Impl;
+        ~SaveFileDialogOperation() override;
+        [[nodiscard]] SaveFileDialogStatus Status() const noexcept;
+        [[nodiscard]] std::filesystem::path SelectedPath() const;
+        [[nodiscard]] std::string Diagnostic() const;
+
+      private:
+        friend class WindowSystem;
+        template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
+        explicit SaveFileDialogOperation(std::unique_ptr<Impl> implementation);
+        std::unique_ptr<Impl> m_Impl;
+    };
+
+    struct SystemTrayAction
+    {
+        std::string Label;
+        std::function<void()> Callback;
+    };
+
+    struct SystemTraySpecification
+    {
+        std::string Tooltip = "Kéire";
+        std::vector<SystemTrayAction> Actions;
+    };
+
+    class KEIRE_API SystemTray final : public RefCounted
+    {
+      public:
+        class Impl;
+        ~SystemTray() override;
+        [[nodiscard]] bool IsAvailable() const noexcept;
+        [[nodiscard]] std::string Diagnostic() const;
+        void Close() noexcept;
+
+      private:
+        friend class WindowSystem;
+        template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
+        explicit SystemTray(std::unique_ptr<Impl> implementation);
+        std::unique_ptr<Impl> m_Impl;
+    };
+
     class KEIRE_API WindowSystem final : public RefCounted
     {
       public:
@@ -254,6 +318,11 @@ namespace Keire
         [[nodiscard]] std::optional<WindowEvent> PollEvent();
         [[nodiscard]] Ref<FolderDialogOperation> ShowFolderDialog(WindowId parent,
                                                                   const std::filesystem::path& defaultLocation = {});
+        [[nodiscard]] Ref<SaveFileDialogOperation> ShowSaveFileDialog(WindowId parent,
+                                                                      const SaveFileDialogSpecification& specification);
+        void SetClipboardText(std::string_view text);
+        [[nodiscard]] std::string ClipboardText() const;
+        [[nodiscard]] Ref<SystemTray> CreateSystemTray(SystemTraySpecification specification);
         void SetCursorMode(WindowId window, CursorMode mode);
         [[nodiscard]] CursorMode GetCursorMode(WindowId window) const;
         void Shutdown();

@@ -12,6 +12,7 @@ test_args=("${common[@]}"); [[ $UPDATE -eq 1 ]] && test_args+=(--update); [[ $FO
 bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"; KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
 asset_tool="${PROJECT_NAMESPACE}AssetTool"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_tool"
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$HUB_TARGET"
+bash "$ROOT/Scripts/Unix/shader-compiler.sh" "$PLATFORM" "$ARCHITECTURE" "$TOOLSET"
 output_arch="$(architecture_output_name "$ARCHITECTURE")"; name="$ARTIFACT_PREFIX-$os_name-$ARCHITECTURE-$CONFIGURATION"; stage="$ROOT/Artifacts/$name"
 imgui_library="${PROJECT_NAMESPACE}ImGui"
 zstd_library="${PROJECT_NAMESPACE}Zstd"
@@ -24,6 +25,8 @@ core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/li
 imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
 zstd_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/Zstd/lib$zstd_library.a"
 cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
+cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
+find "$ROOT/Build/Tools/ShaderCompiler" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$stage/bin/" \;
 cp "$ROOT/Config/Client.json" "$stage/Config/Client.json"
 cp -R "$ROOT/Samples/KeireSandbox" "$stage/samples/"
 cp -R "$ROOT/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$stage/include/"; cp -R "$ROOT/Vendor/spdlog/include/spdlog/"* "$stage/third-party/spdlog/"
@@ -33,6 +36,14 @@ cp "$ROOT/Vendor/doctest/LICENSE.txt" "$stage/third-party/licenses/doctest-LICEN
 cp "$ROOT/Vendor/json/LICENSE.MIT" "$stage/third-party/licenses/nlohmann-json-LICENSE.MIT.txt"
 cp "$ROOT/Vendor/imgui/LICENSE.txt" "$stage/third-party/licenses/dear-imgui-LICENSE.txt"
 cp "$ROOT/Vendor/zstd/LICENSE" "$stage/third-party/licenses/zstandard-LICENSE.txt"
+cp "$ROOT/Vendor/entt/LICENSE" "$stage/third-party/licenses/entt-LICENSE.txt"
+cp "$ROOT/Vendor/glm/copying.txt" "$stage/third-party/licenses/glm-COPYING.txt"
+cp "$ROOT/Vendor/SDL_shadercross/LICENSE.txt" "$stage/third-party/licenses/SDL-shadercross-LICENSE.txt"
+cp "$ROOT/Vendor/SDL_shadercross/external/DirectXShaderCompiler/LICENSE.TXT" "$stage/third-party/licenses/DirectXShaderCompiler-LICENSE.txt"
+cp "$ROOT/Vendor/SDL_shadercross/external/DirectXShaderCompiler/ThirdPartyNotices.txt" "$stage/third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt"
+cp "$ROOT/Vendor/SDL_shadercross/external/SPIRV-Cross/LICENSE" "$stage/third-party/licenses/SPIRV-Cross-LICENSE.txt"
+cp "$ROOT/Vendor/SDL_shadercross/external/SPIRV-Headers/LICENSE" "$stage/third-party/licenses/SPIRV-Headers-LICENSE.txt"
+cp "$ROOT/Vendor/SDL_shadercross/external/SPIRV-Tools/LICENSE" "$stage/third-party/licenses/SPIRV-Tools-LICENSE.txt"
 sdl_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
 [[ -f "$sdl_install/lib/libSDL3.a" ]] || { printf 'Packaged SDL Release dependency is missing.\n' >&2; exit 1; }
 cp -R "$sdl_install/"* "$stage/third-party/SDL3/"
@@ -40,16 +51,20 @@ cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/
 cp -R "$ROOT/Examples/Consumer/"* "$stage/examples/consumer/"
 cp -R "$ROOT/Examples/ManagedConsumer/"* "$stage/examples/managed-consumer/"
 sed -e "s/@CORE_TARGET@/$CORE_TARGET/g" -e "s/@PROJECT_NAMESPACE@/$PROJECT_NAMESPACE/g" -e "s/@PACKAGE_CONFIGURATION@/$CONFIGURATION/g" "$ROOT/Config/PackageConfig.cmake.in" > "$stage/lib/cmake/$PROJECT_IDENTIFIER/${PROJECT_IDENTIFIER}Config.cmake"
-commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"; sdl="$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)"; json="$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)"; imgui="$(config_value "$ROOT/Config/Dependencies.lock" IMGUI_COMMIT)"; zstd="$(config_value "$ROOT/Config/Dependencies.lock" ZSTD_COMMIT)"
+commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"; sdl="$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)"; json="$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)"; imgui="$(config_value "$ROOT/Config/Dependencies.lock" IMGUI_COMMIT)"; zstd="$(config_value "$ROOT/Config/Dependencies.lock" ZSTD_COMMIT)"; entt="$(config_value "$ROOT/Config/Dependencies.lock" ENTT_COMMIT)"; glm="$(config_value "$ROOT/Config/Dependencies.lock" GLM_COMMIT)"; shadercross="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_COMMIT)"; dxc="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_DXC_COMMIT)"; spirv_cross="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)"; spirv_headers="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)"; spirv_tools="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)"
 dirty=false; [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal 2>/dev/null || true)" ]] && dirty=true
 platform_name=Linux; [[ "$PLATFORM" == Mac ]] && platform_name=macOS
 if [[ "$TOOLSET" == clang ]]; then compiler="Clang $(clang++ -dumpversion)"; else compiler="GCC $(g++ -dumpfullversion -dumpversion)"; fi
-printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s",\n  "zstd": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" "$(json_escape "$zstd")" > "$stage/build-manifest.json"
+printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s",\n  "zstd": "%s",\n  "entt": "%s",\n  "glm": "%s",\n  "sdlShadercross": "%s",\n  "dxc": "%s",\n  "spirvCross": "%s",\n  "spirvHeaders": "%s",\n  "spirvTools": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" "$(json_escape "$zstd")" "$(json_escape "$entt")" "$(json_escape "$glm")" "$(json_escape "$shadercross")" "$(json_escape "$dxc")" "$(json_escape "$spirv_cross")" "$(json_escape "$spirv_headers")" "$(json_escape "$spirv_tools")" > "$stage/build-manifest.json"
 validate_package_stage "$stage" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" "$PROJECT_NAMESPACE"
 grep -Fq "\"imgui\": \"$imgui\"" "$stage/build-manifest.json" || { printf 'Packaged Dear ImGui identity does not match the dependency lock.\n' >&2; exit 1; }
 grep -Fq "\"zstd\": \"$zstd\"" "$stage/build-manifest.json" || { printf 'Packaged Zstandard identity does not match the dependency lock.\n' >&2; exit 1; }
+grep -Fq "\"entt\": \"$entt\"" "$stage/build-manifest.json" || { printf 'Packaged EnTT identity does not match the dependency lock.\n' >&2; exit 1; }
+grep -Fq "\"glm\": \"$glm\"" "$stage/build-manifest.json" || { printf 'Packaged GLM identity does not match the dependency lock.\n' >&2; exit 1; }
+grep -Fq "\"sdlShadercross\": \"$shadercross\"" "$stage/build-manifest.json" || { printf 'Packaged SDL_shadercross identity does not match the dependency lock.\n' >&2; exit 1; }
+"$stage/bin/KeireShaderCompiler" --help 2>&1 | grep -Fq shadercross || { printf 'Packaged shader compiler validation failed.\n' >&2; exit 1; }
 "$stage/bin/$asset_tool" --help | grep -Fq 'KeireAssetTool cook' || { printf 'Packaged asset tool validation failed.\n' >&2; exit 1; }
-"$stage/bin/$asset_tool" import --project "$stage/samples/KeireSandbox" | grep -Fq 'Imported' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
+KEIRE_SHADER_COMPILER="$stage/bin/KeireShaderCompiler" "$stage/bin/$asset_tool" import --project "$stage/samples/KeireSandbox" | grep -Fq 'Imported' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
 rm -rf "$stage/samples/KeireSandbox/Library"
 version_output="$("$stage/bin/$CLIENT_TARGET" --version)"
 commit_prefix="${commit:0:12}"

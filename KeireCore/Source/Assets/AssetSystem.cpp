@@ -1,5 +1,7 @@
 #include "Keire/Assets/AssetSystem.h"
 
+#include "Keire/Log.h"
+
 #include "KeireInternal/Assets/AssetInternal.h"
 
 #include <zstd.h>
@@ -7,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
 #include <fstream>
 #include <functional>
@@ -552,6 +555,17 @@ namespace Keire
             else
             {
                 completion.State->Fail(completion.Diagnostic, completion.Reload);
+                try
+                {
+                    KEIRE_CORE_ERROR("Asset load failed for id={} type={} during {}{}: {}",
+                                     completion.State->Id().ToString(), completion.State->Type().ToString(),
+                                     completion.Diagnostic.Operation, completion.Reload ? " reload" : "",
+                                     completion.Diagnostic.Message);
+                }
+                catch (...)
+                {
+                    std::fprintf(stderr, "Asset load failed: %s\n", completion.Diagnostic.Message.c_str());
+                }
                 {
                     std::scoped_lock lock(m_Impl->Mutex);
                     ++m_Impl->FailedLoads;

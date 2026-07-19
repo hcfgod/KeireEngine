@@ -1,4 +1,6 @@
 #include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Log.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Scenes/SceneAsset.h"
 
@@ -28,6 +30,19 @@ namespace
         if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
             throw std::invalid_argument(std::string(option) + " requires an unsigned integer.");
         return result;
+    }
+
+    [[nodiscard]] Keire::AssetTargetPlatform ParseTarget(const std::string_view value)
+    {
+        if (value == "host")
+            return Keire::AssetTargetPlatform::Host;
+        if (value == "windows")
+            return Keire::AssetTargetPlatform::Windows;
+        if (value == "linux")
+            return Keire::AssetTargetPlatform::Linux;
+        if (value == "macos")
+            return Keire::AssetTargetPlatform::MacOS;
+        throw std::invalid_argument("--target requires host, windows, linux, or macos.");
     }
 
     [[nodiscard]] CommandLine Parse(const int argc, char** argv)
@@ -63,6 +78,8 @@ namespace
                     static_cast<int>(ParseUnsigned(requireValue(), "--compression-level"));
             else if (option == "--pack-mib")
                 result.Profile.MaximumPackBytes = ParseUnsigned(requireValue(), "--pack-mib") * 1024ULL * 1024ULL;
+            else if (option == "--target")
+                result.Profile.Target = ParseTarget(requireValue());
             else
                 throw std::invalid_argument("Unknown option: " + std::string(option));
         }
@@ -77,6 +94,7 @@ namespace
                      "  KeireAssetTool import [--project <path>]\n"
                      "  KeireAssetTool cook [--project <path>] [--output <path>] [--profile <name>]\n"
                      "                      [--compression-level <level>] [--pack-mib <size>]\n"
+                     "                      [--target <host|windows|linux|macos>]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
     }
 } // namespace
@@ -102,7 +120,8 @@ int main(const int argc, char** argv)
 
         const auto project = Keire::Project::Open(commandLine.Project);
         Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
-        databaseSpecification.Importers = {Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter()};
+        databaseSpecification.Importers = {Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
+                                           Keire::CreateShaderAssetImporter(), Keire::CreateMaterialAssetImporter()};
         auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
         if (commandLine.Command == "scan")
         {
@@ -134,6 +153,14 @@ int main(const int argc, char** argv)
     catch (const std::exception& error)
     {
         std::cerr << "error: " << error.what() << '\n';
+        try
+        {
+            KEIRE_CORE_ERROR("Asset tool failed: {}", error.what());
+            Keire::Log::Flush();
+        }
+        catch (...)
+        {
+        }
         return 1;
     }
 }

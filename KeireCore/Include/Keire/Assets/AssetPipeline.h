@@ -4,6 +4,7 @@
 #include "Keire/Assets/Asset.h"
 
 #include <chrono>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -16,6 +17,53 @@
 
 namespace Keire
 {
+    enum class AssetTargetPlatform : std::uint8_t
+    {
+        Host,
+        Windows,
+        Linux,
+        MacOS
+    };
+
+    struct AssetSourceDependency
+    {
+        std::filesystem::path RelativePath;
+        std::string Digest;
+    };
+
+    enum class AssetDiagnosticSeverity : std::uint8_t
+    {
+        Information,
+        Warning,
+        Error
+    };
+
+    struct AssetImportDiagnostic
+    {
+        AssetDiagnosticSeverity Severity = AssetDiagnosticSeverity::Error;
+        std::filesystem::path RelativePath;
+        std::uint32_t Line = 0;
+        std::uint32_t Column = 0;
+        std::string Message;
+    };
+
+    struct AssetImportContext
+    {
+        std::filesystem::path ProjectRoot;
+        std::filesystem::path SourceRoot;
+        std::filesystem::path SourcePath;
+        std::filesystem::path RelativePath;
+        std::size_t MaximumDependencyBytes = 64U * 1024U * 1024U;
+        std::function<std::vector<std::byte>(const std::filesystem::path&)> ReadProjectFile;
+    };
+
+    struct AssetImportOutput
+    {
+        std::vector<std::byte> Bytes;
+        std::vector<AssetSourceDependency> SourceDependencies;
+        std::vector<AssetImportDiagnostic> Diagnostics;
+    };
+
     struct AssetImporterRegistration
     {
         std::string Name;
@@ -23,6 +71,8 @@ namespace Keire
         AssetTypeId Type;
         std::vector<std::string> Extensions;
         std::function<std::vector<std::byte>(std::span<const std::byte>)> Import;
+        std::function<AssetImportOutput(const AssetImportContext&, std::span<const std::byte>)> ContextualImport;
+        std::function<std::vector<std::byte>(std::span<const std::byte>, AssetTargetPlatform)> Cook;
     };
 
     struct AssetSourceRecord
@@ -36,6 +86,7 @@ namespace Keire
         std::string SourceDigest;
         std::vector<AssetId> Dependencies;
         std::vector<AssetId> SubAssets;
+        std::vector<AssetSourceDependency> SourceDependencies;
     };
 
     struct AssetDatabaseSpecification
@@ -48,11 +99,57 @@ namespace Keire
         std::vector<AssetImporterRegistration> Importers;
     };
 
+    enum class AssetImportState : std::uint8_t
+    {
+        NotImported,
+        Imported,
+        CacheHit,
+        Failed
+    };
+
+    struct AssetImportStatus
+    {
+        AssetId Id;
+        AssetImportState State = AssetImportState::NotImported;
+        std::vector<AssetImportDiagnostic> Diagnostics;
+    };
+
     struct AssetImportResult
     {
         std::size_t Imported = 0;
         std::size_t CacheHits = 0;
         std::filesystem::path CatalogPath;
+        std::vector<AssetImportStatus> Statuses;
+    };
+
+    enum class AssetImportPolicy : std::uint8_t
+    {
+        FailFast,
+        KeepLastGood
+    };
+
+    class KEIRE_API AssetTrashId final
+    {
+      public:
+        constexpr AssetTrashId() noexcept = default;
+
+        [[nodiscard]] std::string ToString() const;
+        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(m_Value); }
+        [[nodiscard]] auto operator<=>(const AssetTrashId&) const noexcept = default;
+
+      private:
+        friend class AssetDatabase;
+        explicit AssetTrashId(AssetId value) noexcept : m_Value(value) {}
+        AssetId m_Value;
+    };
+
+    struct AssetTrashRecord
+    {
+        AssetTrashId Id;
+        std::filesystem::path OriginalPath;
+        std::filesystem::path TrashPath;
+        std::vector<AssetId> Assets;
+        bool Folder = false;
     };
 
     class KEIRE_API AssetDatabase final : public RefCounted
@@ -70,13 +167,24 @@ namespace Keire
         [[nodiscard]] std::optional<AssetSourceRecord> Find(const std::filesystem::path& relativePath) const;
         [[nodiscard]] std::vector<AssetId> PollChangedAssets();
         [[nodiscard]] AssetImportResult ImportAll();
+        [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy);
+        [[nodiscard]] AssetImportStatus ImportStatus(AssetId id) const;
 
         void CreateFolder(const std::filesystem::path& relativePath);
         [[nodiscard]] AssetId CreateAsset(const std::filesystem::path& relativePath,
                                           const AssetImporterRegistration& importer,
                                           std::span<const std::byte> sourceBytes);
         void Rename(AssetId id, std::string newName);
+        void MoveAsset(AssetId id, const std::filesystem::path& destination);
         [[nodiscard]] AssetId Duplicate(AssetId id, const std::filesystem::path& destination);
+        void MoveFolder(const std::filesystem::path& source, const std::filesystem::path& destination);
+        [[nodiscard]] std::vector<AssetId> DuplicateFolder(const std::filesystem::path& source,
+                                                           const std::filesystem::path& destination);
+        [[nodiscard]] AssetTrashRecord TrashAsset(AssetId id);
+        [[nodiscard]] AssetTrashRecord TrashFolder(const std::filesystem::path& relativePath);
+        [[nodiscard]] std::vector<AssetTrashRecord> TrashRecords() const;
+        void RestoreTrash(AssetTrashId id);
+        void PermanentlyDeleteTrash(AssetTrashId id);
         [[nodiscard]] std::filesystem::path MoveToTrash(AssetId id);
 
         [[nodiscard]] const AssetDatabaseSpecification& Specification() const noexcept;
@@ -90,6 +198,7 @@ namespace Keire
     struct AssetBuildProfile
     {
         std::string Name = "Development";
+        AssetTargetPlatform Target = AssetTargetPlatform::Host;
         int CompressionLevel = 6;
         std::uint64_t MaximumPackBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
         bool Strict = false;

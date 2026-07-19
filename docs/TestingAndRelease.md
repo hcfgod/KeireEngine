@@ -11,6 +11,12 @@ SDK validation requires `KeireAssetTool`, the platform `KeireZstd` archive, the 
 in `build-manifest.json`. Direct consumers link Core, ImGui, Zstd, then SDL; CMake consumers continue naming only
 `Keire::Core`.
 
+Rendering/shader changes additionally run canonical shader/material tests, target-variant stripping, component
+serialization, project-aware rendered smoke, and real compilation of the sample HLSL through the pinned host compiler.
+Conditional native GPU checks cover D3D12, Vulkan, or Metal where available; deterministic logic remains testable in
+headless mode. Packages require `KeireShaderCompiler`, its runtime libraries, every recursive lock identity, and all
+SDL_shadercross/DXC/SPIR-V license and notice files.
+
 Input changes additionally run canonical schema/import tests, an SDL-dummy outer-frame keyboard action test, cursor
 focus restoration, public dependency isolation/`KEIRE_API` assertions, and headless UI facade tests. Packages must
 contain the complete `samples/KeireSandbox` project; the staged asset tool imports its input and scene assets before
@@ -19,6 +25,18 @@ archive publication and the temporary project cache is removed afterward.
 Project/scene changes run descriptor, template rollback, lock, registry recovery, canonical scene, hierarchy, weak-handle,
 thread rejection, single/additive activation, failed-load preservation, and project-aware rendered smoke coverage. SDKs
 must include KeireHub, project/scene public headers, and the sample project.
+
+ECS changes additionally cover stale entity/component handles, registration rejection, required and single-instance
+components, typed queries, hierarchy world transforms, cycle rollback, activation, exact lifecycle order, deferred
+structural changes, Play/Pause/Step/Stop isolation, callback faults, v1 migration, and Missing Component round trips.
+Asset Browser changes cover bounded thumbnail requests, deterministic cache keys, cancellation, provider invalidation,
+owner-thread image upload, and project-local List/Grid preferences. Tray behavior is tested through backend-independent
+lifecycle checks where the native platform cannot expose a deterministic tray.
+
+Undo changes cover execution and record-applied paths, redo invalidation, merge behavior, isolated contexts, nested
+transaction rollback, bounded eviction, stale targets, shutdown inertness, and rejected worker calls. Scene-camera
+changes use the backend-independent controller tests for every gesture, framing, projection, snapping, and invalid state;
+rendered smoke remains responsible for cursor capture and viewport integration.
 
 Kéire validation is proportional to risk. The repository launchers select the correct dependency variant, refresh
 build identity, build the requested target, and run the executable with the expected environment.
@@ -49,7 +67,9 @@ Never format or patch vendored code during ordinary engine work.
 | `NDEBUG` or assertion behavior | Release |
 | Window or application behavior | SDL dummy-driver tests and explicit shutdown |
 | Rendered UI | Headless focused tests plus graphics-capable `--smoke-ui` |
-| Project/scene lifecycle | Focused project/scene tests plus graphics-capable `--smoke-project` |
+| Project/scene/ECS lifecycle | Focused component/play tests plus graphics-capable `--smoke-project` |
+| Asset Browser or thumbnails | Focused queue/cache tests plus rendered project smoke |
+| Hub tray behavior | Injected lifecycle tests plus conditional native smoke |
 | Script changes | Matching Windows and Unix regression harnesses |
 | Packaging | Release package with direct and CMake low-level/managed consumers |
 
@@ -157,16 +177,16 @@ bash Scripts/project.sh package --generator ninja --configuration Release --tool
 
 Packaging performs tests and a runtime smoke before staging the SDK. It then validates:
 
-- KeireClient plus the KeireCore and private KeireImGui static libraries;
+- KeireClient plus the KeireCore, private KeireImGui/KeireZstd static libraries, and host shader compiler;
 - every supported public `Keire/` header;
 - the required spdlog and SDL static SDK inputs;
-- complete third-party license attribution, including Dear ImGui;
+- complete third-party license attribution, including Dear ImGui and shader compiler dependencies;
 - a machine-readable build manifest with locked dependency commits;
 - the low-level consumer with its own `main`;
 - the managed consumer using the KeireCore-owned entrypoint;
 - both consumers through direct compiler commands and the generated CMake package.
 
-Direct compiler validation links the static archives in `KeireCore`, `KeireImGui`, SDL order. The package CMake target
+Direct compiler validation links the static archives in `KeireCore`, `KeireImGui`, `KeireZstd`, SDL order. The package CMake target
 encodes that private closure transitively, so supported consumers continue linking only `Keire::Core`. Package validation
 also rejects a missing platform-specific ImGui archive or missing MIT attribution; Dear ImGui headers and sources remain
 outside the SDK.

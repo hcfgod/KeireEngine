@@ -32,6 +32,10 @@ install_dependency SDL Vendor/SDL "$(config_value "$LOCK" SDL_URL)" "$(config_va
 install_dependency json Vendor/json "$(config_value "$LOCK" JSON_URL)" "$(config_value "$LOCK" JSON_COMMIT)"
 install_dependency imgui Vendor/imgui "$(config_value "$LOCK" IMGUI_URL)" "$(config_value "$LOCK" IMGUI_COMMIT)"
 install_dependency zstd Vendor/zstd "$(config_value "$LOCK" ZSTD_URL)" "$(config_value "$LOCK" ZSTD_COMMIT)"
+install_dependency entt Vendor/entt "$(config_value "$LOCK" ENTT_URL)" "$(config_value "$LOCK" ENTT_COMMIT)"
+install_dependency glm Vendor/glm "$(config_value "$LOCK" GLM_URL)" "$(config_value "$LOCK" GLM_COMMIT)"
+install_dependency SDL_shadercross Vendor/SDL_shadercross "$(config_value "$LOCK" SDL_SHADERCROSS_URL)" "$(config_value "$LOCK" SDL_SHADERCROSS_COMMIT)"
+git -C "$ROOT/Vendor/SDL_shadercross" submodule update --init --recursive
 imgui_files=(
     Scripts/Premake/DearImGui.lua
     Vendor/imgui/imgui.cpp
@@ -49,5 +53,23 @@ done
 zstd_files=(Scripts/Premake/Zstd.lua Vendor/zstd/lib/zstd.h Vendor/zstd/lib/compress/zstd_compress.c Vendor/zstd/lib/decompress/zstd_decompress.c Vendor/zstd/LICENSE)
 for file in "${zstd_files[@]}"; do
     [[ -f "$ROOT/$file" ]] || { printf 'Zstandard build integration is incomplete: %s\n' "$file" >&2; exit 1; }
+done
+header_dependency_files=(Scripts/Premake/HeaderDependencies.lua Vendor/entt/src/entt/entt.hpp Vendor/entt/LICENSE Vendor/glm/glm/glm.hpp Vendor/glm/copying.txt)
+for file in "${header_dependency_files[@]}"; do
+    [[ -f "$ROOT/$file" ]] || { printf 'ECS/math dependency integration is incomplete: %s\n' "$file" >&2; exit 1; }
+done
+declare -A shadercross_gitlinks=(
+  [external/DirectXShaderCompiler]="$(config_value "$LOCK" SDL_SHADERCROSS_DXC_COMMIT)"
+  [external/SPIRV-Cross]="$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)"
+  [external/SPIRV-Headers]="$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)"
+  [external/SPIRV-Tools]="$(config_value "$LOCK" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)"
+)
+for path in "${!shadercross_gitlinks[@]}"; do
+  actual="$(git -C "$ROOT/Vendor/SDL_shadercross" rev-parse "HEAD:$path")"
+  [[ "$actual" == "${shadercross_gitlinks[$path]}" ]] || { printf 'SDL_shadercross gitlink %s is %s; expected %s.\n' "$path" "$actual" "${shadercross_gitlinks[$path]}" >&2; exit 1; }
+done
+shadercross_files=(CMakeLists.txt LICENSE.txt src/cli.c include/SDL3_shadercross/SDL_shadercross.h)
+for file in "${shadercross_files[@]}"; do
+  [[ -f "$ROOT/Vendor/SDL_shadercross/$file" ]] || { printf 'SDL_shadercross source integration is incomplete: %s\n' "$file" >&2; exit 1; }
 done
 printf '==> Vendor libraries are ready; Git staging was not modified\n'

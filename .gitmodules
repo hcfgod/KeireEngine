@@ -16,3 +16,12 @@
 [submodule "Vendor/zstd"]
 	path = Vendor/zstd
 	url = https://github.com/facebook/zstd.git
+[submodule "Vendor/entt"]
+	path = Vendor/entt
+	url = https://github.com/skypjack/entt.git
+[submodule "Vendor/glm"]
+	path = Vendor/glm
+	url = https://github.com/g-truc/glm.git
+[submodule "Vendor/SDL_shadercross"]
+	path = Vendor/SDL_shadercross
+	url = https://github.com/libsdl-org/SDL_shadercross.git

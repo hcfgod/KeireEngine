@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/Math/Math.h"
+#include "Keire/Ref.h"
 #include "Keire/UiWorkspace.h"
 
 #include <cstddef>
@@ -15,6 +17,8 @@
 
 namespace Keire
 {
+    class RenderSurface;
+
     enum class UiMode : std::uint8_t
     {
         Disabled,
@@ -61,7 +65,21 @@ namespace Keire
         Escape,
         Delete,
         F2,
+        A,
+        Backspace,
+        C,
+        D,
+        Down,
+        E,
+        F,
+        Left,
+        Q,
+        Right,
         S,
+        Up,
+        V,
+        W,
+        X,
         Y,
         Z
     };
@@ -72,6 +90,7 @@ namespace Keire
         bool Control = false;
         bool Shift = false;
         bool Alt = false;
+        bool Primary = false;
     };
 
     struct UiItemState
@@ -82,6 +101,42 @@ namespace Keire
         bool Edited = false;
         bool DeactivatedAfterEdit = false;
         bool DoubleClicked = false;
+    };
+
+    struct UiPointerState
+    {
+        UiPosition Position;
+        UiPosition Delta;
+        float Wheel = 0.0F;
+        bool LeftDown = false;
+        bool MiddleDown = false;
+        bool RightDown = false;
+        bool LeftPressed = false;
+        bool MiddlePressed = false;
+        bool RightPressed = false;
+        bool LeftReleased = false;
+        bool MiddleReleased = false;
+        bool RightReleased = false;
+    };
+
+    struct UiTooltipOptions
+    {
+        bool Delayed = false;
+    };
+
+    enum class UiTableSizing : std::uint8_t
+    {
+        Proportional,
+        Equal
+    };
+
+    struct UiTableOptions
+    {
+        UiTableSizing Sizing = UiTableSizing::Proportional;
+        bool Borders = true;
+        bool Resizable = true;
+        bool RowBackground = true;
+        bool PersistSettings = true;
     };
 
     struct UiWindowOptions
@@ -108,6 +163,21 @@ namespace Keire
     };
 
     class UiFrame;
+
+    class KEIRE_API UiImage final : public RefCounted
+    {
+      public:
+        class Impl;
+        ~UiImage() override;
+        [[nodiscard]] std::uint32_t Width() const noexcept;
+        [[nodiscard]] std::uint32_t Height() const noexcept;
+
+      private:
+        friend class UiFrame;
+        template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
+        explicit UiImage(std::unique_ptr<Impl> implementation);
+        std::unique_ptr<Impl> m_Impl;
+    };
 
     class KEIRE_API UiScope
     {
@@ -294,8 +364,10 @@ namespace Keire
         [[nodiscard]] UiMainMenuBarScope BeginMainMenuBar();
         [[nodiscard]] UiComboScope BeginCombo(std::string_view label, std::string_view preview);
         [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr);
+        [[nodiscard]] UiPopupScope BeginPopup(std::string_view id);
         [[nodiscard]] UiPopupScope BeginItemContextMenu(std::string_view id = {});
-        [[nodiscard]] UiTableScope BeginTable(std::string_view id, std::size_t columns);
+        [[nodiscard]] UiPopupScope BeginWindowContextMenu(std::string_view id = {});
+        [[nodiscard]] UiTableScope BeginTable(std::string_view id, std::size_t columns, UiTableOptions options = {});
         [[nodiscard]] UiDragSourceScope BeginDragSource();
         [[nodiscard]] UiDragTargetScope BeginDragTarget();
         [[nodiscard]] UiPanelScope BeginPanel(UiPanelRegistration& panel, UiWindowOptions options = {});
@@ -319,13 +391,27 @@ namespace Keire
         [[nodiscard]] UiItemState LastItemState() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
         [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
+        [[nodiscard]] bool DragVector3(std::string_view label, Vector3& value, float speed = 0.1F);
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);
         [[nodiscard]] bool SliderInt(std::string_view label, int& value, int minimum, int maximum);
         [[nodiscard]] bool InputText(std::string_view label, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);
         [[nodiscard]] bool MenuItem(std::string_view label, bool selected = false, bool enabled = true);
         [[nodiscard]] bool ColorEdit(std::string_view label, UiColor& color);
+        [[nodiscard]] Ref<UiImage> CreateImage(std::uint32_t width, std::uint32_t height,
+                                               std::span<const std::byte> rgbaPixels);
+        void Image(const Ref<UiImage>& image, UiSize size = {});
+        void Image(const Ref<RenderSurface>& surface, UiSize size = {});
+        [[nodiscard]] bool ImageButton(std::string_view id, const Ref<UiImage>& image, UiSize size = {});
+        [[nodiscard]] UiSize ContentAvailable() const;
+        [[nodiscard]] bool WindowFocused() const;
+        [[nodiscard]] UiPointerState PointerState() const;
+        [[nodiscard]] bool KeyDown(UiKey key) const;
+        [[nodiscard]] bool ControlDown() const;
+        [[nodiscard]] bool ShiftDown() const;
+        [[nodiscard]] bool AltDown() const;
         void SetTooltip(std::string_view text);
+        void SetTooltip(std::string_view text, UiTooltipOptions options);
         void SetNextWindowSize(UiSize size, bool firstUseOnly = true);
         void SetNextWindowPosition(UiPosition position, bool firstUseOnly = true);
 

@@ -142,6 +142,7 @@ filter {}
 group "Dependencies"
 include "Scripts/Premake/DearImGui.lua"
 include "Scripts/Premake/Zstd.lua"
+include "Scripts/Premake/HeaderDependencies.lua"
 group ""
 
 include(ProjectConfig.CORE_DIRECTORY .. "/premake5.lua")

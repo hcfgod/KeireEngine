@@ -15,6 +15,7 @@ $assetToolName = "$($Project.PROJECT_NAMESPACE)AssetTool"
 & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI
+& (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $stage = Join-Path $Root "Artifacts\$name"
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
@@ -24,6 +25,8 @@ New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
+Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
+Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"
@@ -37,6 +40,14 @@ Copy-Item "$Root\Vendor\doctest\LICENSE.txt" "$stage\third-party\licenses\doctes
 Copy-Item "$Root\Vendor\json\LICENSE.MIT" "$stage\third-party\licenses\nlohmann-json-LICENSE.MIT.txt"
 Copy-Item "$Root\Vendor\imgui\LICENSE.txt" "$stage\third-party\licenses\dear-imgui-LICENSE.txt"
 Copy-Item "$Root\Vendor\zstd\LICENSE" "$stage\third-party\licenses\zstandard-LICENSE.txt"
+Copy-Item "$Root\Vendor\entt\LICENSE" "$stage\third-party\licenses\entt-LICENSE.txt"
+Copy-Item "$Root\Vendor\glm\copying.txt" "$stage\third-party\licenses\glm-COPYING.txt"
+Copy-Item "$Root\Vendor\SDL_shadercross\LICENSE.txt" "$stage\third-party\licenses\SDL-shadercross-LICENSE.txt"
+Copy-Item "$Root\Vendor\SDL_shadercross\external\DirectXShaderCompiler\LICENSE.TXT" "$stage\third-party\licenses\DirectXShaderCompiler-LICENSE.txt"
+Copy-Item "$Root\Vendor\SDL_shadercross\external\DirectXShaderCompiler\ThirdPartyNotices.txt" "$stage\third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt"
+Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Cross\LICENSE" "$stage\third-party\licenses\SPIRV-Cross-LICENSE.txt"
+Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Headers\LICENSE" "$stage\third-party\licenses\SPIRV-Headers-LICENSE.txt"
+Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Tools\LICENSE" "$stage\third-party\licenses\SPIRV-Tools-LICENSE.txt"
 $sdlInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
 if (-not (Test-Path (Join-Path $sdlInstall "lib\SDL3-static.lib"))) { throw "Packaged SDL Release dependency is missing." }
 Copy-Item "$sdlInstall\*" "$stage\third-party\SDL3\" -Recurse
@@ -55,16 +66,38 @@ elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
 $dirty = if (Test-GitRepository $Root) { [bool]((& git -C $Root status --porcelain --untracked-files=normal) -join "") } else { $false }
 $commit = Get-GitHeadCommit $Root "unknown"
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT }
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
 if ($parsedManifest.imgui -ne $Lock.IMGUI_COMMIT) { throw "Packaged Dear ImGui identity does not match the dependency lock." }
 if ($parsedManifest.zstd -ne $Lock.ZSTD_COMMIT) { throw "Packaged Zstandard identity does not match the dependency lock." }
+if ($parsedManifest.entt -ne $Lock.ENTT_COMMIT) { throw "Packaged EnTT identity does not match the dependency lock." }
+if ($parsedManifest.glm -ne $Lock.GLM_COMMIT) { throw "Packaged GLM identity does not match the dependency lock." }
+if ($parsedManifest.sdlShadercross -ne $Lock.SDL_SHADERCROSS_COMMIT -or
+    $parsedManifest.dxc -ne $Lock.SDL_SHADERCROSS_DXC_COMMIT -or
+    $parsedManifest.spirvCross -ne $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT -or
+    $parsedManifest.spirvHeaders -ne $Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT -or
+    $parsedManifest.spirvTools -ne $Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT) {
+    throw "Packaged shader compiler identities do not match the dependency lock."
+}
+$shaderHelpBase = Join-Path $env:TEMP ("keire-shader-help-" + [guid]::NewGuid().ToString("N"))
+try {
+    $shaderHelpProcess = Start-Process -FilePath (Join-Path $stage "bin\KeireShaderCompiler.exe") -ArgumentList "--help" `
+        -NoNewWindow -Wait -PassThru -RedirectStandardOutput "$shaderHelpBase.out" -RedirectStandardError "$shaderHelpBase.err"
+    $shaderCompilerHelp = ([IO.File]::ReadAllText("$shaderHelpBase.out") + [IO.File]::ReadAllText("$shaderHelpBase.err"))
+    if ($shaderHelpProcess.ExitCode -ne 0 -or -not $shaderCompilerHelp.Contains("shadercross")) {
+        throw "Packaged shader compiler validation failed."
+    }
+}
+finally { Remove-Item "$shaderHelpBase.out", "$shaderHelpBase.err" -Force -ErrorAction SilentlyContinue }
 $assetToolHelp = (& (Join-Path $stage "bin\$assetToolName.exe") --help) -join "`n"
 if ($LASTEXITCODE -ne 0 -or -not $assetToolHelp.Contains("KeireAssetTool cook")) { throw "Packaged asset tool validation failed." }
 $sampleProject = Join-Path $stage "samples\KeireSandbox"
-$assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") import --project $sampleProject) -join "`n"
+$previousShaderCompiler = $env:KEIRE_SHADER_COMPILER
+$env:KEIRE_SHADER_COMPILER = Join-Path $stage "bin\KeireShaderCompiler.exe"
+try { $assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") import --project $sampleProject) -join "`n" }
+finally { $env:KEIRE_SHADER_COMPILER = $previousShaderCompiler }
 if ($LASTEXITCODE -ne 0 -or -not $assetImportOutput.Contains("Imported")) { throw "Packaged sample project asset validation failed." }
 Remove-Item (Join-Path $sampleProject "Library") -Recurse -Force -ErrorAction SilentlyContinue
 $versionOutput = (& (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") --version) -join "`n"

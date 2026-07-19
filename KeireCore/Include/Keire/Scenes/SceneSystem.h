@@ -38,6 +38,7 @@ namespace Keire
     {
         SceneMode Mode = SceneMode::Disabled;
         std::size_t MaximumLoadedScenes = 64;
+        Ref<ComponentRegistry> Components;
     };
 
     struct SceneLoadedEvent
@@ -98,6 +99,7 @@ namespace Keire
         [[nodiscard]] Ref<Scene> Active() const noexcept;
         [[nodiscard]] Ref<Scene> Find(AssetId scene) const noexcept;
         [[nodiscard]] std::vector<Ref<Scene>> LoadedScenes() const;
+        [[nodiscard]] Ref<ComponentRegistry> Components() const noexcept;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;
 

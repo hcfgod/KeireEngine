@@ -42,6 +42,8 @@ for configuration in Debug Release; do
   printf '%s\n' "$key|$configuration" > "$stamp"
 done
 
+bash "$SCRIPT_DIR/shader-compiler.sh" "$platform" "$architecture" "$toolset" "$force"
+
 mkdir -p "$ROOT/Build/Generated"
 debug_install="../Build/Dependencies/$system-$output_arch-$toolset/Debug/install"
 release_install="../Build/Dependencies/$system-$output_arch-$toolset/Release/install"

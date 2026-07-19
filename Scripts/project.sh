@@ -142,7 +142,7 @@ show_menu() {
             7) CONFIGURATION="$(normalize_configuration "$(read_setting 'Package configuration (Release, Dist)' Release)")"; run_command package || printf '\nCommand failed.\n' >&2 ;;
             8) run_command doctor || printf '\nCommand failed.\n' >&2 ;;
             9) CLEAN_SCOPE="$(read_setting 'Clean scope (full, build, generated)' "$CLEAN_SCOPE")"; run_command clean || printf '\nCommand failed.\n' >&2 ;;
-            10) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, SDL, json, imgui)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
+            10) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, SDL, json, imgui, zstd, entt, glm)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
             11) NAME="$(read_setting 'PascalCase identifier' "$NAME")"; DISPLAY_NAME="$(read_setting 'Display name' "$NAME")"; REPOSITORY="$(read_setting 'Repository (owner/name, optional)' "$REPOSITORY")"; run_command rename || printf '\nCommand failed.\n' >&2 ;;
             12) return ;;
             *) printf 'Invalid menu choice.\n' >&2 ;;

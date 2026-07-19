@@ -28,11 +28,68 @@ namespace Keire
             std::filesystem::path Path;
             std::string Error;
         };
+
+        class SaveFileDialogState final : public RefCounted
+        {
+          public:
+            mutable std::mutex Mutex;
+            SaveFileDialogStatus Status = SaveFileDialogStatus::Pending;
+            std::filesystem::path Path;
+            std::string Error;
+        };
     } // namespace Detail
 
     namespace
     {
         std::atomic<bool> HasActiveSystem = false;
+
+        class TrayDispatchState final
+        {
+          public:
+            explicit TrayDispatchState(std::vector<SystemTrayAction> actions)
+            {
+                m_Callbacks.reserve(actions.size());
+                for (auto& action : actions)
+                    m_Callbacks.push_back(std::move(action.Callback));
+            }
+
+            void Queue(const std::size_t index) noexcept
+            {
+                if (m_Active.load(std::memory_order_acquire) && index < m_Callbacks.size())
+                    m_Pending.fetch_or(std::uint64_t{1} << index, std::memory_order_release);
+            }
+
+            void Drain() noexcept
+            {
+                const auto pending = m_Pending.exchange(0, std::memory_order_acq_rel);
+                if (!m_Active.load(std::memory_order_acquire))
+                    return;
+
+                for (std::size_t index = 0; index < m_Callbacks.size(); ++index)
+                {
+                    if ((pending & (std::uint64_t{1} << index)) == 0)
+                        continue;
+                    try
+                    {
+                        m_Callbacks[index]();
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
+
+            void Close() noexcept
+            {
+                m_Active.store(false, std::memory_order_release);
+                m_Pending.store(0, std::memory_order_release);
+            }
+
+          private:
+            std::vector<std::function<void()>> m_Callbacks;
+            std::atomic<std::uint64_t> m_Pending{0};
+            std::atomic<bool> m_Active{true};
+        };
 
         struct NativeWindowDeleter final
         {
@@ -69,6 +126,11 @@ namespace Keire
             WeakRef<Detail::FolderDialogState> State;
         };
 
+        struct SaveFileDialogRequest final
+        {
+            WeakRef<Detail::SaveFileDialogState> State;
+        };
+
         void SDLCALL FolderDialogCompleted(void* userData, const char* const* files, int)
         {
             std::unique_ptr<FolderDialogRequest> request(static_cast<FolderDialogRequest*>(userData));
@@ -87,6 +149,27 @@ namespace Keire
             {
                 state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
                 state->Status = FolderDialogStatus::Selected;
+            }
+        }
+
+        void SDLCALL SaveFileDialogCompleted(void* userData, const char* const* files, int)
+        {
+            std::unique_ptr<SaveFileDialogRequest> request(static_cast<SaveFileDialogRequest*>(userData));
+            const auto state = request->State.Lock();
+            if (!state)
+                return;
+            std::scoped_lock lock(state->Mutex);
+            if (!files)
+            {
+                state->Status = SaveFileDialogStatus::Failed;
+                state->Error = LastSdlError();
+            }
+            else if (!files[0])
+                state->Status = SaveFileDialogStatus::Cancelled;
+            else
+            {
+                state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
+                state->Status = SaveFileDialogStatus::Selected;
             }
         }
 
@@ -134,6 +217,118 @@ namespace Keire
     {
         std::scoped_lock lock(m_State->Mutex);
         return m_State->Error;
+    }
+
+    class SaveFileDialogOperation::Impl final
+    {
+      public:
+        explicit Impl(Ref<Detail::SaveFileDialogState> state) : State(std::move(state)) {}
+        Ref<Detail::SaveFileDialogState> State;
+    };
+
+    SaveFileDialogOperation::SaveFileDialogOperation(std::unique_ptr<Impl> implementation)
+        : m_Impl(std::move(implementation))
+    {
+    }
+
+    SaveFileDialogOperation::~SaveFileDialogOperation() = default;
+
+    SaveFileDialogStatus SaveFileDialogOperation::Status() const noexcept
+    {
+        std::scoped_lock lock(m_Impl->State->Mutex);
+        return m_Impl->State->Status;
+    }
+
+    std::filesystem::path SaveFileDialogOperation::SelectedPath() const
+    {
+        std::scoped_lock lock(m_Impl->State->Mutex);
+        return m_Impl->State->Path;
+    }
+
+    std::string SaveFileDialogOperation::Diagnostic() const
+    {
+        std::scoped_lock lock(m_Impl->State->Mutex);
+        return m_Impl->State->Error;
+    }
+
+    class SystemTray::Impl final
+    {
+      public:
+        struct Action final
+        {
+            TrayDispatchState* Dispatch = nullptr;
+            std::size_t Index = 0;
+        };
+
+        Impl(SystemTraySpecification specification, std::shared_ptr<TrayDispatchState> dispatch)
+            : OwnerThread(std::this_thread::get_id()), Dispatch(std::move(dispatch))
+        {
+            Tray = SDL_CreateTray(nullptr, specification.Tooltip.empty() ? nullptr : specification.Tooltip.c_str());
+            if (!Tray)
+            {
+                Error = LastSdlError();
+                return;
+            }
+            SDL_TrayMenu* menu = SDL_CreateTrayMenu(Tray);
+            if (!menu)
+            {
+                Error = LastSdlError();
+                SDL_DestroyTray(Tray);
+                Tray = nullptr;
+                return;
+            }
+            Actions.reserve(specification.Actions.size());
+            for (std::size_t index = 0; index < specification.Actions.size(); ++index)
+            {
+                Actions.push_back({Dispatch.get(), index});
+                SDL_TrayEntry* entry =
+                    SDL_InsertTrayEntryAt(menu, -1, specification.Actions[index].Label.c_str(), SDL_TRAYENTRY_BUTTON);
+                if (!entry)
+                {
+                    Error = LastSdlError();
+                    SDL_DestroyTray(Tray);
+                    Tray = nullptr;
+                    Actions.clear();
+                    return;
+                }
+                SDL_SetTrayEntryCallback(entry, &InvokeAction, &Actions[index]);
+            }
+        }
+
+        static void SDLCALL InvokeAction(void* context, SDL_TrayEntry*)
+        {
+            auto* action = static_cast<Action*>(context);
+            if (action && action->Dispatch)
+                action->Dispatch->Queue(action->Index);
+        }
+
+        void Close() noexcept
+        {
+            if (!Tray)
+                return;
+            if (std::this_thread::get_id() != OwnerThread)
+                return;
+            SDL_DestroyTray(Tray);
+            Tray = nullptr;
+            Dispatch->Close();
+            Actions.clear();
+        }
+
+        std::thread::id OwnerThread;
+        SDL_Tray* Tray = nullptr;
+        std::shared_ptr<TrayDispatchState> Dispatch;
+        std::vector<Action> Actions;
+        std::string Error;
+    };
+
+    SystemTray::SystemTray(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
+    SystemTray::~SystemTray() { Close(); }
+    bool SystemTray::IsAvailable() const noexcept { return m_Impl && m_Impl->Tray; }
+    std::string SystemTray::Diagnostic() const { return m_Impl ? m_Impl->Error : std::string{}; }
+    void SystemTray::Close() noexcept
+    {
+        if (m_Impl)
+            m_Impl->Close();
     }
 
     class WindowSystem::Impl final : public RefCounted
@@ -214,6 +409,8 @@ namespace Keire
             void Maximize() override { m_Implementation->Maximize(m_Id); }
 
             void Restore() override { m_Implementation->Restore(m_Id); }
+
+            void Raise() override { m_Implementation->Raise(m_Id); }
 
             void SetMode(const WindowMode mode) override { m_Implementation->SetMode(m_Id, mode); }
 
@@ -354,8 +551,13 @@ namespace Keire
             RequireOwner("PollEvent");
             DrainDeferredDestruction();
             SDL_Event event{};
-            while (SDL_PollEvent(&event))
+            while (true)
             {
+                const bool eventAvailable = SDL_PollEvent(&event);
+                DrainTrayActions();
+                if (!eventAvailable)
+                    break;
+
                 for (const auto& sink : m_EventSinks)
                 {
                     if (sink.Callback)
@@ -463,6 +665,12 @@ namespace Keire
                 }
             }
             return std::nullopt;
+        }
+
+        void RegisterTrayDispatch(const std::shared_ptr<TrayDispatchState>& dispatch)
+        {
+            RequireOwner("CreateSystemTray");
+            m_TrayDispatch.push_back(dispatch);
         }
 
         void Shutdown()
@@ -717,6 +925,7 @@ namespace Keire
                 iterator->second.Specification.Maximized = false;
             }
         }
+        void Raise(const WindowId id) { (void)MutateSimple(id, "SDL_RaiseWindow", SDL_RaiseWindow); }
         void SetMode(const WindowId id, const WindowMode mode)
         {
             if (!RequireActiveOwner("SetMode"))
@@ -760,6 +969,25 @@ namespace Keire
             std::scoped_lock lock(m_StateMutex);
             const auto found = m_Windows.find(id.Value());
             return found == m_Windows.end() ? CursorMode::Normal : found->second.Cursor;
+        }
+
+        void SetClipboardText(const std::string_view text)
+        {
+            RequireOwner("SetClipboardText");
+            const std::string value(text);
+            if (!SDL_SetClipboardText(value.c_str()))
+                throw std::runtime_error("SDL_SetClipboardText failed: " + LastSdlError());
+        }
+
+        [[nodiscard]] std::string ClipboardText() const
+        {
+            RequireOwner("ClipboardText");
+            char* value = SDL_GetClipboardText();
+            if (!value)
+                throw std::runtime_error("SDL_GetClipboardText failed: " + LastSdlError());
+            std::string result(value);
+            SDL_free(value);
+            return result;
         }
 
       private:
@@ -858,6 +1086,24 @@ namespace Keire
             for (const auto id : deferred)
                 DestroyWindow(id, true);
         }
+
+        void DrainTrayActions() noexcept
+        {
+            std::vector<std::shared_ptr<TrayDispatchState>> active;
+            active.reserve(m_TrayDispatch.size());
+            std::erase_if(m_TrayDispatch,
+                          [&active](const std::weak_ptr<TrayDispatchState>& weak)
+                          {
+                              if (auto dispatch = weak.lock())
+                              {
+                                  active.push_back(std::move(dispatch));
+                                  return false;
+                              }
+                              return true;
+                          });
+            for (const auto& dispatch : active)
+                dispatch->Drain();
+        }
         static LogicalExtent ToLogicalExtent(const int width, const int height) noexcept
         {
             return {static_cast<std::uint32_t>(width > 0 ? width : 0),
@@ -906,6 +1152,7 @@ namespace Keire
         };
         std::vector<EventSinkRecord> m_EventSinks;
         WindowSystemInternalAccess::EventSinkToken m_NextEventSinkToken = 1;
+        std::vector<std::weak_ptr<TrayDispatchState>> m_TrayDispatch;
     };
 
     WindowSystem::WindowSystem() : m_Impl(CreateRef<Impl>()) {}
@@ -942,6 +1189,48 @@ namespace Keire
         SDL_ShowOpenFolderDialog(FolderDialogCompleted, request.release(), m_Impl->NativeHandle(parent),
                                  location.empty() ? nullptr : location.c_str(), false);
         return operation;
+    }
+
+    Ref<SaveFileDialogOperation> WindowSystem::ShowSaveFileDialog(const WindowId parent,
+                                                                  const SaveFileDialogSpecification& specification)
+    {
+        if (specification.Title.empty() || specification.Title.size() > 256 || specification.DefaultName.size() > 256 ||
+            specification.Extension.size() > 32 || specification.Extension.find('*') != std::string::npos ||
+            specification.Extension.find('.') != std::string::npos)
+            throw std::invalid_argument("Save file dialog specification is invalid.");
+        auto state = CreateRef<Detail::SaveFileDialogState>();
+        auto operation = CreateRef<SaveFileDialogOperation>(std::make_unique<SaveFileDialogOperation::Impl>(state));
+        auto request = std::make_unique<SaveFileDialogRequest>();
+        request->State = state;
+        const auto location =
+            specification.DefaultLocation.empty() ? std::string{} : Utf8PathString(specification.DefaultLocation);
+        const auto defaultPath = specification.DefaultName.empty()
+                                     ? location
+                                     : Utf8PathString(specification.DefaultLocation / specification.DefaultName);
+        SDL_DialogFileFilter filter{specification.FilterName.c_str(), specification.Extension.c_str()};
+        const SDL_DialogFileFilter* filters = specification.Extension.empty() ? nullptr : &filter;
+        const int filterCount = filters ? 1 : 0;
+        SDL_ShowSaveFileDialog(SaveFileDialogCompleted, request.release(), m_Impl->NativeHandle(parent), filters,
+                               filterCount, defaultPath.empty() ? nullptr : defaultPath.c_str());
+        return operation;
+    }
+
+    void WindowSystem::SetClipboardText(const std::string_view text) { m_Impl->SetClipboardText(text); }
+
+    std::string WindowSystem::ClipboardText() const { return m_Impl->ClipboardText(); }
+
+    Ref<SystemTray> WindowSystem::CreateSystemTray(SystemTraySpecification specification)
+    {
+        if (specification.Tooltip.size() > 256 || specification.Actions.empty() || specification.Actions.size() > 32)
+            throw std::invalid_argument("System tray specification is invalid.");
+        for (const auto& action : specification.Actions)
+            if (action.Label.empty() || action.Label.size() > 128 || !action.Callback)
+                throw std::invalid_argument("System tray actions require a label and callback.");
+        auto dispatch = std::make_shared<TrayDispatchState>(specification.Actions);
+        auto tray =
+            CreateRef<SystemTray>(std::make_unique<SystemTray::Impl>(std::move(specification), std::move(dispatch)));
+        m_Impl->RegisterTrayDispatch(tray->m_Impl->Dispatch);
+        return tray;
     }
 
     void WindowSystem::SetCursorMode(const WindowId window, const CursorMode mode)

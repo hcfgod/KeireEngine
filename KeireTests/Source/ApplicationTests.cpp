@@ -217,6 +217,43 @@ namespace
         }
     };
 
+    class UndoLifecycleLayer final : public Keire::Layer
+    {
+      public:
+        UndoLifecycleLayer(Keire::Ref<Keire::UndoContext>& retained, int& value)
+            : Layer("UndoLifecycle"), m_Retained(retained), m_Value(value)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            REQUIRE(Owner().Undo());
+            m_Retained = Owner().Undo()->CreateContext({.Name = "Application Lifecycle"});
+        }
+        void OnUpdate(const Keire::Time&) override
+        {
+            m_Retained->Execute(
+                Keire::CreateUndoCommand("Set Value", [this] { m_Value = 1; }, [this] { m_Value = 0; }));
+            Owner().RequestExit();
+        }
+        void OnDetach() noexcept override { CHECK(m_Retained->IsOpen()); }
+
+      private:
+        Keire::Ref<Keire::UndoContext>& m_Retained;
+        int& m_Value;
+    };
+
+    class UndoLifecycleApplication final : public Keire::Application
+    {
+      public:
+        UndoLifecycleApplication(Keire::Ref<Keire::UndoContext>& retained, int& value)
+            : Application(HiddenApplicationSpecification("undo-lifecycle"))
+        {
+            (void)PushLayer(std::make_unique<UndoLifecycleLayer>(retained, value));
+        }
+    };
+
     class ThreadExitApplication final : public Keire::Application
     {
       public:
@@ -384,6 +421,63 @@ namespace
       protected:
         void OnInitialize() override { RequestExit(); }
     };
+
+    class MinimizeTransitionLayer final : public Keire::Layer
+    {
+      public:
+        explicit MinimizeTransitionLayer(int& fixedUpdates) : Layer("minimize-transition"), m_FixedUpdates(fixedUpdates)
+        {
+        }
+
+      protected:
+        void OnFixedUpdate(const Keire::Time&) override
+        {
+            ++m_FixedUpdates;
+            Owner().RequestExit(6);
+        }
+
+      private:
+        int& m_FixedUpdates;
+    };
+
+    class MinimizeTransitionApplication final : public Keire::Application
+    {
+      public:
+        explicit MinimizeTransitionApplication(int& fixedUpdates) : Application(BuildSpecification())
+        {
+            (void)PushLayer(std::make_unique<MinimizeTransitionLayer>(fixedUpdates));
+        }
+
+      protected:
+        void OnInitialize() override
+        {
+            int count = 0;
+            SDL_Window** windows = SDL_GetWindows(&count);
+            REQUIRE(windows != nullptr);
+            SDL_WindowID primaryId = 0;
+            for (int index = 0; index < count; ++index)
+                if (std::string(SDL_GetWindowTitle(windows[index])) == "minimize-transition")
+                    primaryId = SDL_GetWindowID(windows[index]);
+            SDL_free(windows);
+            REQUIRE(primaryId != 0);
+
+            SDL_Event minimize{};
+            minimize.type = SDL_EVENT_WINDOW_MINIMIZED;
+            minimize.window.windowID = primaryId;
+            REQUIRE(SDL_PushEvent(&minimize));
+        }
+
+      private:
+        static Keire::ApplicationSpecification BuildSpecification()
+        {
+            auto specification = HiddenApplicationSpecification("minimize-transition");
+            specification.SuspendWhenMainWindowMinimized = true;
+            specification.MinimizedPumpRate = 1000;
+            specification.Timing.FixedDeltaTime = Keire::TimeStep::FromSeconds(0.000000001);
+            specification.Timing.MaximumFixedStepsPerFrame = 1;
+            return specification;
+        }
+    };
 } // namespace
 
 TEST_CASE("LayerStack owns deterministic layer lifecycle and traversal order")
@@ -508,4 +602,26 @@ TEST_CASE("Application cleans up services before rethrowing callback failures")
 
     ThreadExitApplication replacement;
     CHECK(replacement.Run() == 4);
+}
+
+TEST_CASE("Application owns undo before layers and closes it after layer teardown")
+{
+    UseApplicationDummyVideoDriver();
+    Keire::Ref<Keire::UndoContext> retained;
+    int value = 0;
+    UndoLifecycleApplication application(retained, value);
+    CHECK(application.Run() == 0);
+    CHECK(value == 1);
+    REQUIRE(retained);
+    CHECK_FALSE(retained->IsOpen());
+    CHECK_FALSE(retained->CanUndo());
+}
+
+TEST_CASE("Minimizing during a frame consumes the fixed work produced at that frame boundary")
+{
+    UseApplicationDummyVideoDriver();
+    int fixedUpdates = 0;
+    MinimizeTransitionApplication application(fixedUpdates);
+    CHECK(application.Run() == 6);
+    CHECK(fixedUpdates == 1);
 }

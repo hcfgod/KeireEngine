@@ -1,5 +1,8 @@
 #include "Keire/Application.h"
 
+#include "Keire/Assets/RenderingAssets.h"
+
+#include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiInternal.h"
 
 #include <algorithm>
@@ -44,6 +47,7 @@ namespace Keire
         State RuntimeState = State::Constructed;
         std::atomic<int> ExitCode{NoExitRequested};
         Ref<EventBus> EventSystem;
+        Ref<UndoService> UndoHistory;
         Ref<Project> ProjectService;
         Ref<AssetSystem> Assets;
         Ref<SceneSystem> SceneService;
@@ -51,6 +55,7 @@ namespace Keire
         std::unique_ptr<Time> Clock;
         Ref<WindowSystem> Windowing;
         Ref<Window> PrimaryWindow;
+        Ref<RenderSystem> Renderer;
         EventSubscription LayerListener;
         std::unique_ptr<LayerStack> LayerSystem;
         std::unique_ptr<UiSystem> UserInterface;
@@ -109,6 +114,7 @@ namespace Keire
             }
 
             m_Impl->EventSystem = CreateRef<EventBus>(m_Impl->Specification.Events);
+            m_Impl->UndoHistory = CreateRef<UndoService>(m_Impl->Specification.Undo);
             if (m_Impl->Specification.Input.Mode == InputMode::Enabled &&
                 m_Impl->Specification.Assets.Mode == AssetMode::Disabled)
             {
@@ -137,6 +143,18 @@ namespace Keire
             }
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
             {
+                const auto addDecoder = [this](AssetDecoderRegistration registration)
+                {
+                    const auto found = std::ranges::find(m_Impl->Specification.Assets.Decoders, registration.Type,
+                                                         &AssetDecoderRegistration::Type);
+                    if (found == m_Impl->Specification.Assets.Decoders.end())
+                        m_Impl->Specification.Assets.Decoders.push_back(std::move(registration));
+                };
+                addDecoder(CreateShaderAssetDecoder());
+                addDecoder(CreateMaterialAssetDecoder());
+            }
+            if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
+            {
                 m_Impl->Assets = CreateRef<AssetSystem>(m_Impl->Specification.Assets, m_Impl->EventSystem);
             }
             if (m_Impl->Specification.Scenes.Mode == SceneMode::Enabled)
@@ -147,6 +165,38 @@ namespace Keire
             m_Impl->Clock = std::make_unique<Time>(m_Impl->Specification.Timing);
             m_Impl->Windowing = CreateRef<WindowSystem>();
             m_Impl->PrimaryWindow = m_Impl->Windowing->CreateWindow(m_Impl->Specification.MainWindow);
+
+            auto renderSpecification = m_Impl->Specification.Render;
+            if (renderSpecification.Mode == RenderMode::Automatic)
+            {
+                if (m_Impl->Specification.Ui.Mode == UiMode::Rendered)
+                    renderSpecification.Mode = RenderMode::Rendered;
+                else if (m_Impl->Specification.Ui.Mode == UiMode::Headless)
+                    renderSpecification.Mode = RenderMode::Headless;
+                else
+                    renderSpecification.Mode = RenderMode::Disabled;
+            }
+            if (m_Impl->Specification.Ui.Mode != UiMode::Disabled && renderSpecification.Mode == RenderMode::Disabled)
+                throw std::invalid_argument("An enabled UI requires an enabled application renderer.");
+            if (m_Impl->Specification.Ui.Mode == UiMode::Rendered && renderSpecification.Mode != RenderMode::Rendered)
+                throw std::invalid_argument("Rendered UI mode requires rendered application renderer mode.");
+            if (m_Impl->Specification.Ui.Mode == UiMode::Headless && renderSpecification.Mode != RenderMode::Headless)
+                throw std::invalid_argument("Headless UI mode requires headless application renderer mode.");
+
+            if (m_Impl->Specification.Ui.Mode == UiMode::Rendered)
+            {
+                renderSpecification.PresentMode = static_cast<RenderPresentMode>(m_Impl->Specification.Ui.PresentMode);
+                renderSpecification.SwapchainClearColor = {
+                    m_Impl->Specification.Ui.ClearColor.Red, m_Impl->Specification.Ui.ClearColor.Green,
+                    m_Impl->Specification.Ui.ClearColor.Blue, m_Impl->Specification.Ui.ClearColor.Alpha};
+                renderSpecification.EnableGpuValidation |= m_Impl->Specification.Ui.EnableGpuValidation;
+            }
+            m_Impl->Specification.Render = renderSpecification;
+            if (renderSpecification.Mode != RenderMode::Disabled)
+            {
+                m_Impl->Renderer =
+                    CreateRef<RenderSystem>(renderSpecification, m_Impl->Windowing, m_Impl->PrimaryWindow);
+            }
             if (m_Impl->Specification.Input.Mode == InputMode::Enabled)
             {
                 m_Impl->InputService = CreateRef<InputSystem>(m_Impl->Specification.Input, m_Impl->Windowing,
@@ -154,8 +204,8 @@ namespace Keire
             }
             if (m_Impl->Specification.Ui.Mode != UiMode::Disabled)
             {
-                m_Impl->UserInterface =
-                    std::make_unique<UiSystem>(m_Impl->Specification.Ui, *m_Impl->Windowing, *m_Impl->PrimaryWindow);
+                m_Impl->UserInterface = std::make_unique<UiSystem>(m_Impl->Specification.Ui, *m_Impl->Windowing,
+                                                                   *m_Impl->PrimaryWindow, *m_Impl->Renderer);
             }
             m_Impl->LayerListener = m_Impl->EventSystem->SubscribeAny([this](const EventView& event)
                                                                       { return m_Impl->LayerSystem->Dispatch(event); },
@@ -206,7 +256,16 @@ namespace Keire
                     m_Impl->InputService->AdvanceFrame(m_Impl->Clock->UnscaledDeltaTime(), UiCapture(), nowSuspended);
                 }
 
-                if (!ExitRequested() && !nowSuspended)
+                bool renderFrame = false;
+                if (!ExitRequested() && !nowSuspended && m_Impl->Renderer)
+                {
+                    RenderSystemInternalAccess::BeginFrame(*m_Impl->Renderer);
+                    renderFrame = true;
+                }
+
+                // Suspension is sampled before advancing Time. A minimize event can arrive later in this frame, but
+                // every fixed step produced by AdvanceFrame must still be consumed before the next frame begins.
+                if (!ExitRequested() && !suspended)
                 {
                     while (m_Impl->Clock->ConsumeFixedStep())
                     {
@@ -220,15 +279,19 @@ namespace Keire
                     {
                         m_Impl->LayerSystem->Update(*m_Impl->Clock);
                     }
-
-                    if (!ExitRequested() && m_Impl->UserInterface)
-                    {
-                        m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
-                                                          m_Impl->PrimaryWindow->LogicalSize());
-                        m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
-                        m_Impl->UserInterface->EndFrame();
-                    }
                 }
+
+                if (!ExitRequested() && !nowSuspended && m_Impl->UserInterface)
+                {
+                    m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
+                                                      m_Impl->PrimaryWindow->LogicalSize());
+                    m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
+                    m_Impl->UserInterface->EndFrame();
+                    renderFrame = false;
+                }
+
+                if (!ExitRequested() && renderFrame)
+                    RenderSystemInternalAccess::EndFrame(*m_Impl->Renderer, nullptr);
 
                 m_Impl->LayerSystem->ApplyPending();
 
@@ -329,6 +392,10 @@ namespace Keire
 
     Ref<Window> Application::MainWindow() const noexcept { return m_Impl->PrimaryWindow; }
 
+    Ref<RenderSystem> Application::Renderer() const noexcept { return m_Impl->Renderer; }
+
+    Ref<UndoService> Application::Undo() const noexcept { return m_Impl->UndoHistory; }
+
     const ApplicationSpecification& Application::Specification() const noexcept { return m_Impl->Specification; }
 
     bool Application::UiEnabled() const noexcept { return m_Impl->UserInterface != nullptr; }
@@ -399,10 +466,22 @@ namespace Keire
 
         m_Impl->LayerListener.Disconnect();
 
+        if (m_Impl->UndoHistory)
+        {
+            m_Impl->UndoHistory->Close();
+            m_Impl->UndoHistory.Reset();
+        }
+
         if (m_Impl->UserInterface)
         {
             m_Impl->UserInterface->Shutdown();
             m_Impl->UserInterface.reset();
+        }
+
+        if (m_Impl->Renderer)
+        {
+            m_Impl->Renderer->Close();
+            m_Impl->Renderer.Reset();
         }
 
         if (m_Impl->InputService)

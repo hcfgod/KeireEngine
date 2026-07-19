@@ -1,0 +1,69 @@
+# ECS And Components
+
+Kéire exposes a Unity-style entity/component model while keeping EnTT and GLM private. Engine and SDK code use stable
+`EntityId` and `ComponentTypeId` values, `Entity` handles, reference-counted `Component` objects, and Kéire math types.
+No registry entity, GLM vector, or dependency header crosses the public boundary.
+
+## Ownership And Registration
+
+Create a `ComponentRegistry` on the application owner thread, register project components, and pass it through
+`SceneSystemSpecification::Components`. `SceneSystem::Components()` returns the exact registry used by loaded scenes.
+The default registry contains `TransformComponent` and `DirectionalLightComponent`.
+
+A `ComponentRegistration` owns the stable type ID, display metadata, schema version, factory, serialization and
+deserialization callbacks, optional migration callback, dependencies, multiplicity, removability, and execution order.
+Registration rejects incomplete records and duplicate type IDs. One instance per entity is the default; a registration
+must deliberately opt into multiple instances.
+
+```cpp
+class HealthComponent final : public Keire::Component
+{
+  public:
+    HealthComponent() : Component(StaticType()) {}
+
+    [[nodiscard]] static constexpr Keire::ComponentTypeId StaticType() noexcept
+    {
+        return Keire::ComponentTypeId(Keire::AssetId(0x4845414c54480001ULL, 0x434f4d504f4e454eULL));
+    }
+
+    float Value = 100.0F;
+};
+```
+
+Component classes derive from `Component` and are created through `CreateRef`. Retained component references become
+inert after removal or scene destruction: `IsAttached()` becomes false and `Owner()` returns an empty entity. Entity
+handles are weak stable-ID views and likewise become false after their entity or scene is destroyed.
+
+## Entities And Queries
+
+Every entity receives one mandatory, non-removable Transform. Use typed `AddComponent`, `GetComponent`,
+`HasComponent`, and `RemoveComponent` helpers for registered C++ component types. `Scene::Query<T>()` returns matching
+entities in deterministic hierarchy order. Structural changes requested from a component lifecycle callback are queued
+until traversal reaches the next safe boundary.
+
+## Lifecycle
+
+Play mode invokes `Awake`, `OnEnable`, `Start`, `FixedUpdate`, `Update`, `OnDisable`, and `OnDestroy` in deterministic
+component execution order. `Awake` and `Start` run once. Entity activation includes every ancestor; disabling a parent
+disables active descendant components. Pausing a runtime session skips normal updates without invoking disable. Step
+runs exactly one fixed update while paused.
+
+Callback exceptions fault and pause the runtime session, preserve the authored scene, and expose a diagnostic naming
+the failed phase. Stop closes the runtime clone, invokes teardown, and discards every play-mode mutation.
+
+## Transform Contract
+
+Transform stores local position, a normalized quaternion rotation, and scale. Euler degrees are an editor convenience
+converted through `Keire::Math`. World matrices are cached and dirtied through descendants when a local or hierarchy
+value changes. Reparenting rejects cycles and preserves the world transform by default; failure restores the original
+hierarchy transactionally.
+
+Directional Light is renderer-neutral data: enabled state, linear color, intensity, optional color temperature, shadow
+mode, strength, and bias are authorable and serializable, but this milestone does not render light.
+
+## Scene Serialization
+
+Schema v2 stores entities with stable IDs and component records containing stable type ID, schema version, enabled
+state, and bounded JSON data. Schema v1 remains readable and its inline transform is migrated automatically. Saves are
+always canonical v2. Unregistered records remain attached as Missing Components and round-trip their type, version,
+enabled state, and complete data; cooking can reject unresolved types without destroying editor content.

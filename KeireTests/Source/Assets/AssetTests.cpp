@@ -2,6 +2,8 @@
 
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/Log.h"
+#include "KeireTests/TestSupport.h"
 
 #include <chrono>
 #include <filesystem>
@@ -117,11 +119,63 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
     CHECK(std::filesystem::exists(trash / "Greeting Renamed.txt.keiremeta"));
     CHECK_FALSE(database->Find(duplicateId));
 
+    const auto trashRecords = database->TrashRecords();
+    REQUIRE(trashRecords.size() == 1);
+    CHECK(trashRecords.front().Assets == std::vector<Keire::AssetId>{duplicateId});
+    database->RestoreTrash(trashRecords.front().Id);
+    REQUIRE(database->Find(duplicateId));
+    CHECK(database->Find(duplicateId)->RelativePath == std::filesystem::path("Greeting Renamed.txt"));
+
+    database->MoveAsset(duplicateId, "Generated/Greeting Moved.txt");
+    REQUIRE(database->Find(duplicateId));
+    CHECK(database->Find(duplicateId)->RelativePath == std::filesystem::path("Generated/Greeting Moved.txt"));
+    database->MoveFolder("Generated", "Organized");
+    CHECK(database->Find(duplicateId)->RelativePath == std::filesystem::path("Organized/Greeting Moved.txt"));
+    const auto copiedAssets = database->DuplicateFolder("Organized", "Organized Copy");
+    REQUIRE(copiedAssets.size() == 1);
+    CHECK(copiedAssets.front() != duplicateId);
+    const auto folderTrash = database->TrashFolder("Organized Copy");
+    CHECK(folderTrash.Folder);
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Organized Copy"));
+    database->RestoreTrash(folderTrash.Id);
+    CHECK(std::filesystem::is_directory(project.Root / "Assets/Organized Copy"));
+    CHECK_THROWS_AS(database->MoveFolder("Organized", "Organized/Nested"), std::invalid_argument);
+    CHECK_THROWS_AS(database->MoveAsset(duplicateId, "Greeting.txt"), std::runtime_error);
+
     auto changeDatabase = Keire::CreateRef<Keire::AssetDatabase>(
         Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .ChangeDebounce = std::chrono::milliseconds(0)});
     project.Write("Greeting.txt", "updated assets");
     const auto changed = changeDatabase->PollChangedAssets();
     CHECK(std::ranges::find(changed, original->Id) != changed.end());
+}
+
+TEST_CASE("Asset database editor imports report failures without discarding the last-good catalog")
+{
+    KeireTests::LogFixture logs("asset-import-diagnostics");
+    Keire::Log::Initialize(logs.Config);
+    TemporaryAssetProject project;
+    project.Write("Broken.bad", "invalid");
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.Failing";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000001");
+    importer.Extensions = {".bad"};
+    importer.Import = [](std::span<const std::byte>) -> std::vector<std::byte>
+    { throw std::runtime_error("intentional import failure"); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {std::move(importer)}});
+    const auto record = database->Records().front();
+
+    const auto bestEffort = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood);
+    REQUIRE(bestEffort.Statuses.size() == 1);
+    CHECK(bestEffort.Statuses.front().State == Keire::AssetImportState::Failed);
+    REQUIRE(bestEffort.Statuses.front().Diagnostics.size() == 1);
+    CHECK(bestEffort.Statuses.front().Diagnostics.front().Message == "intentional import failure");
+    CHECK(database->ImportStatus(record.Id).State == Keire::AssetImportState::Failed);
+    Keire::Log::Flush();
+    const auto logContents = KeireTests::ReadFile(logs.Directory / logs.Config.CoreLogFile);
+    CHECK(logContents.find("Asset import failed for 'Broken.bad'") != std::string::npos);
+    CHECK(logContents.find("intentional import failure") != std::string::npos);
+    CHECK_THROWS_WITH_AS((void)database->ImportAll(), "intentional import failure", std::runtime_error);
 }
 
 TEST_CASE("Asset handles use fallbacks asynchronously and preserve last-good data after reload failure")

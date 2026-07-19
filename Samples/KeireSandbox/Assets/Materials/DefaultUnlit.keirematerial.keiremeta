@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "b1b2c3d4-1000-4000-8000-000000000002",
+  "type": "4b454952-454d-4154-4552-49414c000001",
+  "importer": "Keire.Material",
+  "importerVersion": 1,
+  "dependencies": [
+    "b1b2c3d4-1000-4000-8000-000000000001"
+  ],
+  "subAssets": []
+}

@@ -1,28 +1,154 @@
 {
-  "schemaVersion": 1,
-  "name": "SampleScene",
-  "objects": [
+  "entities": [
     {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              1.0,
+              -10.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "clearColor": [
+              0.10000000149011612,
+              0.11999999731779099,
+              0.1599999964237213,
+              1.0
+            ],
+            "farPlane": 1000.0,
+            "fieldOfView": 60.0,
+            "nearPlane": 0.10000000149011612,
+            "orthographicSize": 10.0,
+            "primary": true,
+            "priority": 0,
+            "projection": 0
+          },
+          "enabled": true,
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1
+        }
+      ],
       "id": "a1b2c3d4-1000-4000-8000-000000000001",
       "name": "Main Camera",
-      "active": true,
-      "transform": {
-        "position": [0.0, 1.0, -10.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
-      },
       "parent": null
     },
     {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.5,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              2.0,
+              2.0,
+              2.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "material": "b1b2c3d4-1000-4000-8000-000000000002",
+            "mesh": "4b454952-4543-5542-454d-455348000001",
+            "tint": [
+              0.0,
+              0.46831148862838745,
+              0.8298755288124084,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 1
+        }
+      ],
+      "id": "a1b2c3d4-1000-4000-8000-000000000003",
+      "name": "Cube",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              3.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "color": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "intensity": 1.0,
+            "shadowBias": 0.004999999888241291,
+            "shadowStrength": 1.0,
+            "shadows": 2,
+            "temperature": 6500.0,
+            "useTemperature": false
+          },
+          "enabled": true,
+          "type": "4b454952-4544-4952-4c49-474854000001",
+          "version": 1
+        }
+      ],
       "id": "a1b2c3d4-1000-4000-8000-000000000002",
       "name": "Directional Light",
-      "active": true,
-      "transform": {
-        "position": [0.0, 3.0, 0.0],
-        "rotation": [0.0, 0.0, 0.0, 1.0],
-        "scale": [1.0, 1.0, 1.0]
-      },
       "parent": null
     }
-  ]
+  ],
+  "name": "SampleScene",
+  "schemaVersion": 2
 }

@@ -12,6 +12,16 @@ the root file defines workspace identity, dependency grouping, and project load 
 
 `Config/Project.conf` defines names and folders. `Config/Dependencies.lock` defines immutable external inputs. Premake and launchers read these files so renaming and dependency verification have one source of truth.
 
+`Application` creates `RenderSystem` after Windowing and before UI. RenderSystem exclusively owns the SDL_GPU device,
+window claim, swapchain, command recording, fences, viewport resources, and deferred retirement. UI records through a
+private renderer bridge rather than owning presentation. Scene/Game panels exchange only Kéire `RenderView` and
+`RenderSurface` handles; backend resources remain private.
+
+`Application` also owns one `UndoService` before layer attachment. Editors create bounded contexts per document rather
+than retaining process-global history. Commands own forward/inverse behavior and availability checks; nested
+transactions preserve all-or-nothing semantics. Contexts close during layer teardown, and the service closes before
+scene and asset services so no history callback can observe a partially destroyed document service.
+
 ## Public Binary Boundary
 
 Public classes and free functions with KeireCore-owned out-of-line symbols use `KEIRE_API`. Exception types that cross the managed-client boundary are annotated as well so their type identity remains consistent in a same-toolchain shared-library build. Header-only value types, templates, IDs, and aggregates do not own exportable symbols and remain unannotated. `GetApplicationCommandLineDescription` and `CreateApplication` are the deliberate reverse boundary: the managed executable defines them for KeireCore, so they must not be marked as library imports. Script regressions keep this policy explicit as the API grows.
@@ -58,6 +68,16 @@ last-good loaded set.
 The editor owns authoring selection, undo/redo, atomic source writes, dirty decisions, and recovery files. Runtime scene
 activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
 
+Scene schema v2 stores stable entities and component records. The public ECS surface owns stable IDs, weak `Entity`
+handles, reference-counted `Component` instances, registration metadata, and Kéire math values. EnTT owns native entity
+storage privately and GLM implements matrix/quaternion operations privately. A component registry is application-owned
+through `SceneSystemSpecification`; duplicate IDs and incomplete registrations are rejected before a scene uses them.
+Schema v1 loads migrate inline transforms, while unknown v2 component records remain round-trippable Missing Components.
+
+`SceneRuntimeSession` clones the in-memory authored scene for Play while retaining entity IDs. Pause suppresses update
+callbacks, Step advances one fixed tick, and Stop destroys the clone. Component callback exceptions fault the session
+and preserve the edit scene. Detailed contracts live in [ECS And Components](ECSAndComponents.md).
+
 ## Reference Ownership
 
 Project-owned shared objects derive from `RefCounted` and are constructed with `CreateRef`. `Ref` and `WeakRef` point at an external atomic control block containing a type-erased deleter. The last strong release destroys the object; the implicit weak owner then releases the control block when no explicit weak references remain. `WeakRef::Lock` uses atomic increment-if-nonzero, so it cannot resurrect an object or race its destruction. Cyclic graphs must contain at least one weak edge.
@@ -98,6 +118,11 @@ After fixed and variable updates, `Application` begins one UI frame, creates the
 Workspace catalogs, layouts, and custom themes use versioned, bounded JSON documents. Unknown or duplicate keys, invalid types, unsafe names, non-finite theme values, and oversized input are rejected before activation. Writes use a temporary file and recoverable backup replacement. Normal storage lives below `SDL_GetPrefPath(ProjectName, ProjectName)/Editor/Workspace`; an explicit directory supports tests and tools, and ephemeral workspaces perform no disk writes. Native file dialogs are asynchronous: callbacks copy results into a synchronized mailbox and the UI owner thread applies them at the next frame boundary. Shutdown makes late callbacks inert.
 
 Themes cross the public boundary only as stable semantic tokens: canvas, panel surfaces, text, accent states, selection, status colors, spacing, borders, and rounding. Private code maps these tokens to backend style slots. Kéire Dark, Kéire Light, and Classic are immutable; custom themes persist as `.keiretheme` documents. Preview applies at a safe frame boundary, while persistence remains explicit. The client editor enforces Save/Discard/Cancel when a dirty theme would be switched or closed.
+
+Opaque `UiImage` values extend that boundary for editor thumbnails. RGBA uploads happen only on the UI owner thread;
+GPU texture identity and release remain private. The client asset browser owns a bounded thumbnail worker and deterministic
+project-local cache, then transfers completed pixels through the façade. See [Asset Browser](AssetBrowser.md) and
+[Editor Panels And Commands](EditorPanels.md).
 
 Configuration examples, application-facing workflows, storage details, and troubleshooting live in the
 [UI Workspace Guide](UiWorkspace.md).
@@ -163,9 +188,19 @@ Pinned Zstandard sources compile in the dedicated warning-isolated `Zstd` projec
 `libKeireZstd.a`. KeireCore privately includes `zstd.h` for pack compression/decompression. Neither its headers nor
 implementation types cross the public API. SDK targets preserve the Core → ImGui → Zstd → SDL static link order.
 
+Pinned EnTT 3.16.0 and GLM 1.0.3 are header-only private dependencies. Their IDE utility projects live in the
+`Dependencies` solution group, generated metadata stays below `Build/Projects`, and only their utility projects disable
+third-party warnings. KeireCore treats their include roots as external. SDKs package their license texts and locked
+commits but not source trees because no supported header exposes either dependency.
+
+Pinned SDL_shadercross and its exact recursive DXC, SPIRV-Cross, SPIRV-Headers, and SPIRV-Tools gitlinks build a
+host-native `KeireShaderCompiler` during bootstrap. The compiler and runtime libraries are SDK asset tools, never Core
+link dependencies. Shader import produces DXIL, SPIR-V, and MSL canonical variants and validates Kéire's fixed resource
+ABI through reflection before publication.
+
 ## Release Shape
 
-Packages include KeireHub, the KeireClient editor, KeireAssetTool, KeireCore plus private KeireImGui/KeireZstd archives,
+Packages include KeireHub, the KeireClient editor, KeireAssetTool, KeireShaderCompiler and its runtime libraries, KeireCore plus private KeireImGui/KeireZstd archives,
 public `Keire/<header>` APIs, required spdlog headers, the SDL static SDK, complete license texts, notices, README, and a
 complete `samples/KeireSandbox` project. The packaged asset tool imports and validates the sample input and scene assets
 before archive publication. Dear ImGui and Zstd headers/sources are not redistributed because Kéire's public facades own

@@ -11,7 +11,10 @@ $Dependencies = @(
     @{ Name = "SDL"; Path = "Vendor/SDL"; Url = $Lock.SDL_URL; Commit = $Lock.SDL_COMMIT },
     @{ Name = "json"; Path = "Vendor/json"; Url = $Lock.JSON_URL; Commit = $Lock.JSON_COMMIT },
     @{ Name = "imgui"; Path = "Vendor/imgui"; Url = $Lock.IMGUI_URL; Commit = $Lock.IMGUI_COMMIT },
-    @{ Name = "zstd"; Path = "Vendor/zstd"; Url = $Lock.ZSTD_URL; Commit = $Lock.ZSTD_COMMIT }
+    @{ Name = "zstd"; Path = "Vendor/zstd"; Url = $Lock.ZSTD_URL; Commit = $Lock.ZSTD_COMMIT },
+    @{ Name = "entt"; Path = "Vendor/entt"; Url = $Lock.ENTT_URL; Commit = $Lock.ENTT_COMMIT },
+    @{ Name = "glm"; Path = "Vendor/glm"; Url = $Lock.GLM_URL; Commit = $Lock.GLM_COMMIT },
+    @{ Name = "SDL_shadercross"; Path = "Vendor/SDL_shadercross"; Url = $Lock.SDL_SHADERCROSS_URL; Commit = $Lock.SDL_SHADERCROSS_COMMIT }
 )
 
 function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments) {
@@ -56,6 +59,8 @@ foreach ($dependency in $Dependencies) {
     Write-Host "==> $($dependency.Name) verified at $actualCommit"
 }
 
+Invoke-Git -C (Join-Path $Root "Vendor\SDL_shadercross") submodule update --init --recursive
+
 $imguiIntegration = Join-Path $Root "Scripts\Premake\DearImGui.lua"
 $imguiFiles = @(
     $imguiIntegration,
@@ -84,6 +89,37 @@ $zstdFiles = @(
 foreach ($file in $zstdFiles) {
     if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
         throw "Zstandard build integration is incomplete: $file"
+    }
+}
+
+$headerDependencyFiles = @(
+    (Join-Path $Root "Scripts\Premake\HeaderDependencies.lua"),
+    (Join-Path $Root "Vendor\entt\src\entt\entt.hpp"),
+    (Join-Path $Root "Vendor\entt\LICENSE"),
+    (Join-Path $Root "Vendor\glm\glm\glm.hpp"),
+    (Join-Path $Root "Vendor\glm\copying.txt")
+)
+foreach ($file in $headerDependencyFiles) {
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+        throw "ECS/math dependency integration is incomplete: $file"
+    }
+}
+
+$shaderCrossGitlinks = @{
+    "external/DirectXShaderCompiler" = $Lock.SDL_SHADERCROSS_DXC_COMMIT
+    "external/SPIRV-Cross" = $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT
+    "external/SPIRV-Headers" = $Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT
+    "external/SPIRV-Tools" = $Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT
+}
+foreach ($entry in $shaderCrossGitlinks.GetEnumerator()) {
+    $actual = (& git -C (Join-Path $Root "Vendor\SDL_shadercross") rev-parse "HEAD:$($entry.Key)").Trim()
+    if ($LASTEXITCODE -ne 0 -or $actual -ne $entry.Value) {
+        throw "SDL_shadercross gitlink $($entry.Key) is $actual; expected $($entry.Value)."
+    }
+}
+foreach ($file in @("CMakeLists.txt", "LICENSE.txt", "src\cli.c", "include\SDL3_shadercross\SDL_shadercross.h")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Root "Vendor\SDL_shadercross\$file") -PathType Leaf)) {
+        throw "SDL_shadercross source integration is incomplete: $file"
     }
 }
 

@@ -65,6 +65,8 @@ foreach ($configuration in @("Debug", "Release")) {
     [IO.File]::WriteAllText($stamp, "$key|$configuration`n", [Text.UTF8Encoding]::new($false))
 }
 
+& (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset -Force:$Force
+
 $generated = Join-Path $Root "Build\Generated"
 New-Item -ItemType Directory -Force -Path $generated | Out-Null
 $debugInstall = "../Build/Dependencies/windows-$OutputArchitecture-$Toolset/Debug/install"

@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -133,6 +134,9 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(created->Descriptor().StartupScene);
     CHECK(std::filesystem::exists(created->Root() / "Assets/Input/DefaultInput.keireinput"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/Scenes/SampleScene.keirescene"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.hlsl"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.keireshader"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Project.keireproject"));
     CHECK(Keire::Project::Inspect(created->Root()) == Keire::ProjectStatus::Ready);
 
@@ -199,12 +203,12 @@ TEST_CASE("Scene assets and mutable scenes preserve validated hierarchy ordering
     REQUIRE(root);
     const auto child = scene->CreateObject("Child", root.Id());
     REQUIRE(child);
-    CHECK(scene->ObjectCount() == 4);
+    CHECK(scene->ObjectCount() == 5);
     CHECK_THROWS_AS((void)scene->ReparentObject(root.Id(), child.Id()), std::invalid_argument);
     CHECK(scene->RenameObject(child.Id(), "Renamed"));
     const auto duplicate = scene->DuplicateObject(root.Id());
     REQUIRE(duplicate);
-    CHECK(scene->ObjectCount() == 6);
+    CHECK(scene->ObjectCount() == 7);
     const auto duplicateChildren =
         std::ranges::count(scene->Objects(), duplicate.Id(), &Keire::SceneObjectDefinition::Parent);
     CHECK(duplicateChildren == 1);
@@ -213,7 +217,7 @@ TEST_CASE("Scene assets and mutable scenes preserve validated hierarchy ordering
     CHECK(child.Snapshot()->Name == "Renamed");
     CHECK(scene->DestroyObject(root.Id()));
     CHECK_FALSE(child);
-    CHECK(scene->ObjectCount() == 2);
+    CHECK(scene->ObjectCount() == 3);
     std::atomic_bool rejectedOffThread = false;
     std::jthread worker(
         [&]
@@ -267,4 +271,42 @@ TEST_CASE("Application scene system activates single and additive scene loads at
     CHECK(probe->ActiveChanged);
     CHECK(probe->FailedLoadPreservedActive);
     CHECK(probe->ActiveChangeEvents == 2);
+}
+
+TEST_CASE("Newer scene importers upgrade older metadata revisions but reject future revisions")
+{
+    TemporaryDirectory directory("SceneImporterUpgradeTests");
+    const auto sourceDirectory = directory.Path / "Assets";
+    std::filesystem::create_directories(sourceDirectory);
+    const auto source = sourceDirectory / "Legacy.keirescene";
+    const auto metadata = sourceDirectory / "Legacy.keirescene.keiremeta";
+    const auto sourceBytes = Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Legacy"));
+    {
+        std::ofstream stream(source, std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(sourceBytes.data()),
+                     static_cast<std::streamsize>(sourceBytes.size()));
+        REQUIRE(stream.good());
+    }
+    const auto writeMetadata = [&](const std::uint32_t importerVersion)
+    {
+        std::ofstream stream(metadata, std::ios::binary | std::ios::trunc);
+        stream << "{\n"
+                  "  \"schemaVersion\": 1,\n"
+                  "  \"id\": \"11111111-1111-4111-8111-111111111111\",\n"
+                  "  \"type\": \"4b454952-4553-4345-4e45-415353455401\",\n"
+                  "  \"importer\": \"Keire.Scene\",\n"
+                  "  \"importerVersion\": "
+               << importerVersion << ",\n  \"dependencies\": [],\n  \"subAssets\": []\n}\n";
+        REQUIRE(stream.good());
+    };
+    writeMetadata(1);
+    Keire::AssetDatabaseSpecification specification{.ProjectRoot = directory.Path};
+    specification.Importers.push_back(Keire::CreateSceneAssetImporter());
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    CHECK_NOTHROW((void)database->ImportAll());
+
+    writeMetadata(3);
+    database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
+    CHECK_THROWS_WITH_AS((void)database->ImportAll(),
+                         "No compatible importer is registered for asset: Legacy.keirescene", std::runtime_error);
 }

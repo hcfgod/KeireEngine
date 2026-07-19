@@ -8,10 +8,12 @@
 
 namespace Keire
 {
+    class RenderSystem;
+
     class UiSystem final
     {
       public:
-        UiSystem(const UiSpecification& specification, WindowSystem& windows, Window& window);
+        UiSystem(const UiSpecification& specification, WindowSystem& windows, Window& window, RenderSystem& renderer);
         ~UiSystem();
 
         UiSystem(const UiSystem&) = delete;

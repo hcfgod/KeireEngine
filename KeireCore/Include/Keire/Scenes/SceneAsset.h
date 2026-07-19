@@ -3,6 +3,8 @@
 #include "Keire/Api.h"
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/ECS/Component.h"
+#include "Keire/Math/Math.h"
 
 #include <compare>
 #include <cstddef>
@@ -14,22 +16,8 @@
 
 namespace Keire
 {
-    struct SceneVector3
-    {
-        float X = 0.0F;
-        float Y = 0.0F;
-        float Z = 0.0F;
-        auto operator<=>(const SceneVector3&) const noexcept = default;
-    };
-
-    struct SceneQuaternion
-    {
-        float X = 0.0F;
-        float Y = 0.0F;
-        float Z = 0.0F;
-        float W = 1.0F;
-        auto operator<=>(const SceneQuaternion&) const noexcept = default;
-    };
+    using SceneVector3 = Vector3;
+    using SceneQuaternion = Quaternion;
 
     struct SceneTransform
     {
@@ -39,6 +27,14 @@ namespace Keire
         auto operator<=>(const SceneTransform&) const noexcept = default;
     };
 
+    struct SceneComponentDefinition
+    {
+        ComponentTypeId Type;
+        std::uint32_t SchemaVersion = 1;
+        bool Enabled = true;
+        std::string Data;
+    };
+
     struct SceneObjectDefinition
     {
         AssetId Id;
@@ -46,11 +42,12 @@ namespace Keire
         std::string Name;
         bool Active = true;
         SceneTransform Transform;
+        std::vector<SceneComponentDefinition> Components;
     };
 
     struct SceneDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         std::string Name;
         std::vector<SceneObjectDefinition> Objects;
     };
@@ -74,6 +71,7 @@ namespace Keire
         [[nodiscard]] static std::vector<std::byte> Encode(const SceneDefinition& definition);
         [[nodiscard]] static SceneDefinition EmptyDefinition(std::string name = "Untitled");
         [[nodiscard]] static SceneDefinition SampleDefinition();
+        [[nodiscard]] static SceneDefinition SampleDefinition(AssetId material);
         static void Validate(const SceneDefinition& definition);
 
       private:

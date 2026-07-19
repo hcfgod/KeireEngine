@@ -1,9 +1,11 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/ECS/Entity.h"
 #include "Keire/Ref.h"
 #include "Keire/Scenes/SceneAsset.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,7 +39,7 @@ namespace Keire
     class KEIRE_API Scene final : public RefCounted
     {
       public:
-        explicit Scene(AssetId asset, SceneDefinition definition);
+        explicit Scene(AssetId asset, SceneDefinition definition, Ref<ComponentRegistry> components = {});
         ~Scene() override;
 
         Scene(const Scene&) = delete;
@@ -61,12 +63,70 @@ namespace Keire
         [[nodiscard]] bool SetObjectActive(AssetId id, bool active);
         [[nodiscard]] bool SetObjectTransform(AssetId id, SceneTransform transform);
         [[nodiscard]] bool ReparentObject(AssetId id, AssetId parent);
+
+        [[nodiscard]] std::vector<Entity> Entities() const;
+        [[nodiscard]] Entity FindEntity(EntityId id) const noexcept;
+        [[nodiscard]] Entity CreateEntity(std::string name = "GameObject", Entity parent = {});
+        [[nodiscard]] Entity DuplicateEntity(EntityId id);
+        [[nodiscard]] bool DestroyEntity(EntityId id);
+        [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
+
+        template <std::derived_from<Component> T> [[nodiscard]] std::vector<Entity> Query() const
+        {
+            return Query(T::StaticType());
+        }
+
+        [[nodiscard]] Ref<ComponentRegistry> Components() const noexcept;
+        void BeginPlay();
+        void FixedUpdate(float deltaSeconds);
+        void Update(float deltaSeconds);
+        void EndPlay() noexcept;
         void Close() noexcept;
 
       private:
         friend class SceneObjectHandle;
         class Impl;
         [[nodiscard]] std::optional<SceneObjectDefinition> SnapshotObject(AssetId id) const;
+        std::unique_ptr<Impl> m_Impl;
+    };
+
+    enum class ScenePlayState : std::uint8_t
+    {
+        Stopped,
+        Playing,
+        Paused,
+        Faulted
+    };
+
+    struct SceneRuntimeDiagnostic
+    {
+        std::string Callback;
+        std::string Message;
+    };
+
+    class KEIRE_API SceneRuntimeSession final : public RefCounted
+    {
+      public:
+        explicit SceneRuntimeSession(Ref<Scene> editScene);
+        ~SceneRuntimeSession() override;
+
+        SceneRuntimeSession(const SceneRuntimeSession&) = delete;
+        SceneRuntimeSession& operator=(const SceneRuntimeSession&) = delete;
+
+        [[nodiscard]] ScenePlayState State() const noexcept;
+        [[nodiscard]] Ref<Scene> EditScene() const noexcept;
+        [[nodiscard]] Ref<Scene> RuntimeScene() const noexcept;
+        [[nodiscard]] SceneRuntimeDiagnostic Diagnostic() const;
+        void Play();
+        void Pause(bool paused = true);
+        void TogglePause();
+        [[nodiscard]] bool Step(float fixedDeltaSeconds);
+        void FixedUpdate(float deltaSeconds);
+        void Update(float deltaSeconds);
+        void Stop() noexcept;
+
+      private:
+        class Impl;
         std::unique_ptr<Impl> m_Impl;
     };
 } // namespace Keire

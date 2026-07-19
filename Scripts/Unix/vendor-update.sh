@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPENDENCY="${1:-}"; TAG="${2:-}"; LOCK="$ROOT/Config/Dependencies.lock"
-case "$DEPENDENCY" in spdlog|doctest|SDL|json|imgui|zstd) ;; *) printf 'Dependency must be spdlog, doctest, SDL, json, imgui, or zstd.\n' >&2; exit 1;; esac
+case "$DEPENDENCY" in spdlog|doctest|SDL|json|imgui|zstd|entt|glm|SDL_shadercross) ;; *) printf 'Dependency must be spdlog, doctest, SDL, json, imgui, zstd, entt, glm, or SDL_shadercross.\n' >&2; exit 1;; esac
 [[ -n "$TAG" ]] || { printf 'A tag is required.\n' >&2; exit 1; }
 DIRECTORY="$ROOT/Vendor/$DEPENDENCY"; [[ -d "$DIRECTORY" ]] || { printf 'Run bootstrap first.\n' >&2; exit 1; }
 git -C "$DIRECTORY" fetch --tags --force

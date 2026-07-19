@@ -1,5 +1,7 @@
 #include "Keire/Assets/AssetPipeline.h"
 
+#include "Keire/Log.h"
+
 #include "KeireInternal/Assets/AssetInternal.h"
 
 #include <nlohmann/json.hpp>
@@ -8,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -76,6 +79,117 @@ namespace Keire
         [[nodiscard]] std::string ImporterName(const AssetTypeId type)
         {
             return type == TextAsset::StaticType() ? "Keire.Text" : "Keire.Binary";
+        }
+
+        void LogImportDiagnostic(const AssetSourceRecord& record, const AssetImportDiagnostic& diagnostic) noexcept
+        {
+            try
+            {
+                const auto source = diagnostic.RelativePath.empty() ? record.RelativePath : diagnostic.RelativePath;
+                auto location = source.generic_string();
+                if (diagnostic.Line != 0)
+                {
+                    location += ':' + std::to_string(diagnostic.Line);
+                    if (diagnostic.Column != 0)
+                        location += ':' + std::to_string(diagnostic.Column);
+                }
+                switch (diagnostic.Severity)
+                {
+                case AssetDiagnosticSeverity::Information:
+                    KEIRE_CORE_INFO("Asset import diagnostic for '{}' (id={}, importer={}) at {}: {}",
+                                    record.RelativePath.generic_string(), record.Id.ToString(), record.Importer,
+                                    location, diagnostic.Message);
+                    break;
+                case AssetDiagnosticSeverity::Warning:
+                    KEIRE_CORE_WARN("Asset import warning for '{}' (id={}, importer={}) at {}: {}",
+                                    record.RelativePath.generic_string(), record.Id.ToString(), record.Importer,
+                                    location, diagnostic.Message);
+                    break;
+                case AssetDiagnosticSeverity::Error:
+                    KEIRE_CORE_ERROR("Asset import failed for '{}' (id={}, importer={}) at {}: {}",
+                                     record.RelativePath.generic_string(), record.Id.ToString(), record.Importer,
+                                     location, diagnostic.Message);
+                    break;
+                }
+            }
+            catch (...)
+            {
+                std::fprintf(stderr, "Asset import diagnostic logging failed for %s: %s\n",
+                             record.RelativePath.generic_string().c_str(), diagnostic.Message.c_str());
+            }
+        }
+
+        [[nodiscard]] bool IsWithin(const std::filesystem::path& parent, const std::filesystem::path& candidate)
+        {
+            const auto relative = candidate.lexically_normal().lexically_relative(parent.lexically_normal());
+            return !relative.empty() && !relative.is_absolute() && !relative.generic_string().starts_with("..");
+        }
+
+        [[nodiscard]] bool IsSameOrWithin(const std::filesystem::path& parent, const std::filesystem::path& candidate)
+        {
+            return parent.lexically_normal() == candidate.lexically_normal() || IsWithin(parent, candidate);
+        }
+
+        struct ParsedTrashRecord final
+        {
+            AssetId Id;
+            std::filesystem::path OriginalPath;
+            std::vector<AssetId> Assets;
+            bool Folder = false;
+        };
+
+        void WriteTrashManifest(const std::filesystem::path& root, const AssetId id,
+                                const std::filesystem::path& originalPath, const std::span<const AssetId> assets,
+                                const bool folder)
+        {
+            Json assetIds = Json::array();
+            for (const auto asset : assets)
+                assetIds.push_back(asset.ToString());
+            const Json manifest{{"schemaVersion", 1},
+                                {"id", id.ToString()},
+                                {"originalPath", originalPath.generic_string()},
+                                {"folder", folder},
+                                {"assets", std::move(assetIds)}};
+            const auto destination = root / "trash.json";
+            const auto temporary = destination.string() + ".tmp";
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            if (!stream)
+                throw std::runtime_error("Could not create asset trash manifest.");
+            stream << manifest.dump(2) << '\n';
+            stream.close();
+            if (!stream)
+                throw std::runtime_error("Could not write asset trash manifest.");
+            Detail::AtomicReplace(temporary, destination);
+        }
+
+        [[nodiscard]] ParsedTrashRecord ReadTrashManifest(const std::filesystem::path& root)
+        {
+            const auto path = root / "trash.json";
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(path, error) ||
+                std::filesystem::file_size(path, error) > 1024U * 1024U)
+                throw std::runtime_error("Asset trash manifest is missing or exceeds the 1 MiB limit.");
+            std::ifstream stream(path, std::ios::binary);
+            Json manifest;
+            stream >> manifest;
+            if (!stream || !manifest.is_object() || manifest.value("schemaVersion", 0) != 1)
+                throw std::runtime_error("Asset trash manifest has an unsupported schema.");
+            ParsedTrashRecord result;
+            result.Id = AssetId::Parse(manifest.at("id").get<std::string>());
+            result.OriginalPath = manifest.at("originalPath").get<std::string>();
+            result.Folder = manifest.at("folder").get<bool>();
+            const auto normalized = result.OriginalPath.lexically_normal();
+            if (!result.Id || result.OriginalPath.empty() || result.OriginalPath.is_absolute() ||
+                normalized.generic_string().starts_with(".."))
+                throw std::runtime_error("Asset trash manifest contains an invalid identity or source path.");
+            for (const auto& asset : manifest.at("assets"))
+            {
+                const auto id = AssetId::Parse(asset.get<std::string>());
+                if (!id)
+                    throw std::runtime_error("Asset trash manifest contains an invalid asset identity.");
+                result.Assets.push_back(id);
+            }
+            return result;
         }
 
         void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
@@ -232,7 +346,7 @@ namespace Keire
             for (auto& importer : Specification.Importers)
             {
                 if (importer.Name.empty() || importer.Version == 0 || !importer.Type || importer.Extensions.empty() ||
-                    !importer.Import)
+                    (!importer.Import && !importer.ContextualImport))
                     throw std::invalid_argument("Asset importer registration is incomplete.");
                 for (auto& extension : importer.Extensions)
                 {
@@ -263,25 +377,93 @@ namespace Keire
             if (found == Importers.end())
                 return nullptr;
             const auto& importer = found->second;
-            return importer.Version == record.ImporterVersion && importer.Type == record.Type ? &importer : nullptr;
+            return importer.Version >= record.ImporterVersion && importer.Type == record.Type ? &importer : nullptr;
         }
 
-        [[nodiscard]] std::vector<std::byte> Import(const AssetSourceRecord& record) const
+        [[nodiscard]] AssetImportContext CreateImportContext(const AssetSourceRecord& record) const
+        {
+            AssetImportContext context;
+            context.ProjectRoot = Specification.ProjectRoot;
+            context.SourceRoot = SourceRoot;
+            context.SourcePath = SourceRoot / record.RelativePath;
+            context.RelativePath = record.RelativePath;
+            context.MaximumDependencyBytes =
+                std::min(Specification.MaximumSourceBytes, std::size_t{64U * 1024U * 1024U});
+            context.ReadProjectFile = [root = Specification.ProjectRoot,
+                                       maximum = context.MaximumDependencyBytes](const std::filesystem::path& relative)
+            {
+                const auto path = ConfinedPath(root, relative);
+                if (std::filesystem::is_symlink(path))
+                    throw std::runtime_error("Asset dependencies may not be symbolic links.");
+                return ReadSource(path, maximum);
+            };
+            return context;
+        }
+
+        [[nodiscard]] AssetImportOutput Import(const AssetSourceRecord& record) const
         {
             const auto source = ReadSource(SourceRoot / record.RelativePath, Specification.MaximumSourceBytes);
+            AssetImportOutput result;
             if (const auto* importer = FindImporter(record))
-                return importer->Import(source);
-            if ((record.Importer == "Keire.Text" && record.Type == TextAsset::StaticType()) ||
-                (record.Importer == "Keire.Binary" && record.Type == BinaryAsset::StaticType()))
-                return source;
-            throw std::runtime_error("No compatible importer is registered for asset: " +
-                                     record.RelativePath.generic_string());
+            {
+                if (importer->ContextualImport)
+                    result = importer->ContextualImport(CreateImportContext(record), source);
+                else
+                    result.Bytes = importer->Import(source);
+            }
+            else if ((record.Importer == "Keire.Text" && record.Type == TextAsset::StaticType()) ||
+                     (record.Importer == "Keire.Binary" && record.Type == BinaryAsset::StaticType()))
+                result.Bytes = source;
+            else
+                throw std::runtime_error("No compatible importer is registered for asset: " +
+                                         record.RelativePath.generic_string());
+
+            if (result.Bytes.size() > Specification.MaximumSourceBytes)
+                throw std::runtime_error("Imported asset exceeds the configured maximum size.");
+            std::unordered_set<std::string> dependencies;
+            for (const auto& dependency : result.SourceDependencies)
+            {
+                const auto normalized = dependency.RelativePath.lexically_normal();
+                const auto comparable = normalized.generic_string();
+                if (dependency.RelativePath.empty() || dependency.RelativePath.is_absolute() ||
+                    comparable.starts_with("..") || dependency.Digest.size() != 64 ||
+                    !dependencies.insert(comparable).second)
+                    throw std::runtime_error("Contextual importer returned an invalid source dependency record.");
+            }
+            if (result.Diagnostics.size() > 4096)
+                throw std::runtime_error("Contextual importer returned too many diagnostics.");
+            for (const auto& diagnostic : result.Diagnostics)
+            {
+                const auto normalized = diagnostic.RelativePath.lexically_normal();
+                if (diagnostic.Message.empty() || diagnostic.Message.size() > 16U * 1024U ||
+                    diagnostic.RelativePath.is_absolute() || normalized.generic_string().starts_with(".."))
+                    throw std::runtime_error("Contextual importer returned an invalid diagnostic.");
+            }
+            return result;
         }
 
-        [[nodiscard]] std::filesystem::path ObjectPath(const AssetSourceRecord& record) const
+        [[nodiscard]] std::string ImportDigest(const AssetSourceRecord& record, const AssetImportOutput& imported) const
         {
+            std::string input = record.SourceDigest;
+            auto dependencies = imported.SourceDependencies;
+            std::ranges::sort(dependencies, {}, &AssetSourceDependency::RelativePath);
+            for (const auto& dependency : dependencies)
+            {
+                input.push_back('\n');
+                input += dependency.RelativePath.generic_string();
+                input.push_back('=');
+                input += dependency.Digest;
+            }
+            return Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(input))));
+        }
+
+        [[nodiscard]] std::filesystem::path ObjectPath(const AssetSourceRecord& record,
+                                                       const std::string_view importDigest) const
+        {
+            const auto* importer = FindImporter(record);
+            const auto effectiveVersion = importer ? importer->Version : record.ImporterVersion;
             return CacheRoot / "Objects" /
-                   (record.SourceDigest + "-" + record.Type.ToString() + "-" + std::to_string(record.ImporterVersion) +
+                   (std::string(importDigest) + "-" + record.Type.ToString() + "-" + std::to_string(effectiveVersion) +
                     ".bin");
         }
 
@@ -337,8 +519,11 @@ namespace Keire
         std::unordered_map<AssetId, std::chrono::steady_clock::time_point> PendingChanges;
         std::unordered_map<std::string, AssetImporterRegistration> Importers;
         std::unordered_map<std::string, std::string> Extensions;
+        std::unordered_map<AssetId, AssetImportStatus> ImportStatuses;
         mutable std::mutex Mutex;
     };
+
+    std::string AssetTrashId::ToString() const { return m_Value.ToString(); }
 
     AssetDatabase::AssetDatabase(AssetDatabaseSpecification specification)
         : m_Impl(std::make_unique<Impl>(std::move(specification)))
@@ -355,6 +540,12 @@ namespace Keire
         m_Impl->Records = std::move(scanned.Records);
         m_Impl->Observed = std::move(scanned.Signatures);
         m_Impl->PendingChanges.clear();
+        std::erase_if(m_Impl->ImportStatuses,
+                      [this](const auto& entry)
+                      {
+                          return std::ranges::find(m_Impl->Records, entry.first, &AssetSourceRecord::Id) ==
+                                 m_Impl->Records.end();
+                      });
         return m_Impl->Records.size();
     }
 
@@ -417,34 +608,90 @@ namespace Keire
         return ready;
     }
 
-    AssetImportResult AssetDatabase::ImportAll()
+    AssetImportResult AssetDatabase::ImportAll() { return ImportAll(AssetImportPolicy::FailFast); }
+
+    AssetImportResult AssetDatabase::ImportAll(const AssetImportPolicy policy)
     {
         (void)Refresh();
         const auto records = Records();
         const auto objectRoot = m_Impl->CacheRoot / "Objects";
         std::filesystem::create_directories(objectRoot);
         AssetImportResult result;
+        bool failed = false;
         for (const auto& record : records)
         {
-            const auto object = m_Impl->ObjectPath(record);
-            if (std::filesystem::exists(object))
+            AssetImportStatus status;
+            status.Id = record.Id;
+            try
             {
-                ++result.CacheHits;
+                const auto imported = m_Impl->Import(record);
+                status.Diagnostics = imported.Diagnostics;
+                for (const auto& diagnostic : status.Diagnostics)
+                    LogImportDiagnostic(record, diagnostic);
+                {
+                    std::scoped_lock lock(m_Impl->Mutex);
+                    const auto stored = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
+                    if (stored != m_Impl->Records.end())
+                        stored->SourceDependencies = imported.SourceDependencies;
+                }
+                const auto object = m_Impl->ObjectPath(record, m_Impl->ImportDigest(record, imported));
+                if (std::filesystem::exists(object))
+                {
+                    ++result.CacheHits;
+                    status.State = AssetImportState::CacheHit;
+                }
+                else
+                {
+                    const auto temporary = object.string() + ".tmp";
+                    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+                    if (!stream ||
+                        (!imported.Bytes.empty() && !stream.write(reinterpret_cast<const char*>(imported.Bytes.data()),
+                                                                  static_cast<std::streamsize>(imported.Bytes.size()))))
+                        throw std::runtime_error("Could not write imported asset cache object.");
+                    stream.close();
+                    Detail::AtomicReplace(temporary, object);
+                    ++result.Imported;
+                    status.State = AssetImportState::Imported;
+                }
+            }
+            catch (const std::exception& error)
+            {
+                failed = true;
+                status.State = AssetImportState::Failed;
+                status.Diagnostics.push_back({AssetDiagnosticSeverity::Error, record.RelativePath, 0, 0, error.what()});
+                LogImportDiagnostic(record, status.Diagnostics.back());
+                {
+                    std::scoped_lock lock(m_Impl->Mutex);
+                    m_Impl->ImportStatuses[record.Id] = status;
+                }
+                result.Statuses.push_back(std::move(status));
+                if (policy == AssetImportPolicy::FailFast)
+                    throw;
                 continue;
             }
-            const auto bytes = m_Impl->Import(record);
-            const auto temporary = object.string() + ".tmp";
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            if (!stream || (!bytes.empty() && !stream.write(reinterpret_cast<const char*>(bytes.data()),
-                                                            static_cast<std::streamsize>(bytes.size()))))
-                throw std::runtime_error("Could not write imported asset cache object.");
-            stream.close();
-            Detail::AtomicReplace(temporary, object);
-            ++result.Imported;
+            {
+                std::scoped_lock lock(m_Impl->Mutex);
+                m_Impl->ImportStatuses[record.Id] = status;
+            }
+            result.Statuses.push_back(std::move(status));
+        }
+        if (failed)
+        {
+            const auto previous = m_Impl->CacheRoot / "Runtime" / "catalog.json";
+            if (std::filesystem::is_regular_file(previous))
+                result.CatalogPath = previous;
+            return result;
         }
         const auto cooked = AssetCooker::Cook(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime");
         result.CatalogPath = cooked.CatalogPath;
         return result;
+    }
+
+    AssetImportStatus AssetDatabase::ImportStatus(const AssetId id) const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->ImportStatuses.find(id);
+        return found == m_Impl->ImportStatuses.end() ? AssetImportStatus{.Id = id} : found->second;
     }
 
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)
@@ -471,7 +718,12 @@ namespace Keire
             throw std::invalid_argument("Asset creation path does not use an importer-supported extension.");
         if (sourceBytes.size() > m_Impl->Specification.MaximumSourceBytes)
             throw std::invalid_argument("Asset creation source exceeds the configured maximum size.");
-        (void)registered->second.Import(sourceBytes);
+        AssetSourceRecord validationRecord;
+        validationRecord.RelativePath = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
+        if (registered->second.ContextualImport)
+            (void)registered->second.ContextualImport(m_Impl->CreateImportContext(validationRecord), sourceBytes);
+        else
+            (void)registered->second.Import(sourceBytes);
         std::filesystem::create_directories(destination.parent_path());
         const auto temporary = destination.string() + ".tmp";
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
@@ -505,12 +757,23 @@ namespace Keire
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot rename an unknown asset ID.");
+        MoveAsset(id, record->RelativePath.parent_path() / newName);
+    }
+
+    void AssetDatabase::MoveAsset(const AssetId id, const std::filesystem::path& relativeDestination)
+    {
+        const auto record = Find(id);
+        if (!record)
+            throw std::invalid_argument("Cannot move an unknown asset ID.");
         const auto source = m_Impl->SourceRoot / record->RelativePath;
-        const auto destination = source.parent_path() / newName;
+        const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
+        if (source == destination)
+            return;
         const auto sourceMetadata = record->MetadataPath;
         const auto destinationMetadata = std::filesystem::path(destination.string() + ".keiremeta");
         if (std::filesystem::exists(destination) || std::filesystem::exists(destinationMetadata))
-            throw std::runtime_error("Asset rename destination already exists.");
+            throw std::runtime_error("Asset move destination already exists.");
+        std::filesystem::create_directories(destination.parent_path());
         std::filesystem::rename(source, destination);
         try
         {
@@ -522,7 +785,17 @@ namespace Keire
             std::filesystem::rename(destination, source, ignored);
             throw;
         }
-        (void)Refresh();
+        try
+        {
+            (void)Refresh();
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            std::filesystem::rename(destinationMetadata, sourceMetadata, ignored);
+            std::filesystem::rename(destination, source, ignored);
+            throw;
+        }
     }
 
     AssetId AssetDatabase::Duplicate(const AssetId id, const std::filesystem::path& destination)
@@ -551,20 +824,24 @@ namespace Keire
         return newId;
     }
 
-    std::filesystem::path AssetDatabase::MoveToTrash(const AssetId id)
+    void AssetDatabase::MoveFolder(const std::filesystem::path& relativeSource,
+                                   const std::filesystem::path& relativeDestination)
     {
-        const auto record = Find(id);
-        if (!record)
-            throw std::invalid_argument("Cannot trash an unknown asset ID.");
-        const auto trash = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / id.ToString();
-        std::filesystem::create_directories(trash);
-        const auto source = m_Impl->SourceRoot / record->RelativePath;
-        const auto destination = trash / source.filename();
-        const auto destinationMetadata = trash / record->MetadataPath.filename();
+        const auto source = ConfinedPath(m_Impl->SourceRoot, relativeSource);
+        const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
+        if (source == destination)
+            return;
+        if (!std::filesystem::is_directory(source) || std::filesystem::is_symlink(source))
+            throw std::invalid_argument("Asset folder move requires a regular source directory.");
+        if (IsSameOrWithin(source, destination))
+            throw std::invalid_argument("An asset folder cannot be moved into itself.");
+        if (std::filesystem::exists(destination))
+            throw std::runtime_error("Asset folder move destination already exists.");
+        std::filesystem::create_directories(destination.parent_path());
         std::filesystem::rename(source, destination);
         try
         {
-            std::filesystem::rename(record->MetadataPath, destinationMetadata);
+            (void)Refresh();
         }
         catch (...)
         {
@@ -572,9 +849,197 @@ namespace Keire
             std::filesystem::rename(destination, source, ignored);
             throw;
         }
-        (void)Refresh();
-        return trash;
     }
+
+    std::vector<AssetId> AssetDatabase::DuplicateFolder(const std::filesystem::path& relativeSource,
+                                                        const std::filesystem::path& relativeDestination)
+    {
+        const auto source = ConfinedPath(m_Impl->SourceRoot, relativeSource);
+        const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
+        if (!std::filesystem::is_directory(source) || std::filesystem::is_symlink(source))
+            throw std::invalid_argument("Asset folder duplication requires a regular source directory.");
+        if (IsSameOrWithin(source, destination))
+            throw std::invalid_argument("An asset folder cannot be duplicated into itself.");
+        if (std::filesystem::exists(destination))
+            throw std::runtime_error("Asset folder duplicate destination already exists.");
+        try
+        {
+            std::filesystem::create_directories(destination.parent_path());
+            std::filesystem::copy(source, destination, std::filesystem::copy_options::recursive);
+            std::error_code error;
+            for (std::filesystem::recursive_directory_iterator iterator(destination, error), end;
+                 !error && iterator != end; iterator.increment(error))
+            {
+                if (iterator->is_symlink())
+                    throw std::runtime_error("Asset folders containing symbolic links cannot be duplicated.");
+                if (iterator->is_regular_file() && iterator->path().extension() == ".keiremeta")
+                    std::filesystem::remove(iterator->path());
+            }
+            if (error)
+                throw std::runtime_error("Could not enumerate the duplicated asset folder.");
+            (void)Refresh();
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(destination, ignored);
+            throw;
+        }
+        std::vector<AssetId> result;
+        const auto destinationRelative = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
+        for (const auto& record : Records())
+            if (IsSameOrWithin(destinationRelative, record.RelativePath))
+                result.push_back(record.Id);
+        return result;
+    }
+
+    AssetTrashRecord AssetDatabase::TrashAsset(const AssetId id)
+    {
+        const auto record = Find(id);
+        if (!record)
+            throw std::invalid_argument("Cannot trash an unknown asset ID.");
+        const auto transaction = AssetId::Generate();
+        const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / transaction.ToString();
+        std::filesystem::create_directories(root);
+        const auto source = m_Impl->SourceRoot / record->RelativePath;
+        const auto destination = root / source.filename();
+        const auto destinationMetadata = root / record->MetadataPath.filename();
+        std::filesystem::rename(source, destination);
+        try
+        {
+            std::filesystem::rename(record->MetadataPath, destinationMetadata);
+            const std::array assets{id};
+            WriteTrashManifest(root, transaction, record->RelativePath, assets, false);
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            std::filesystem::rename(destinationMetadata, record->MetadataPath, ignored);
+            std::filesystem::rename(destination, source, ignored);
+            std::filesystem::remove_all(root, ignored);
+            throw;
+        }
+        (void)Refresh();
+        return {AssetTrashId(transaction), record->RelativePath, root, {id}, false};
+    }
+
+    AssetTrashRecord AssetDatabase::TrashFolder(const std::filesystem::path& relativePath)
+    {
+        const auto source = ConfinedPath(m_Impl->SourceRoot, relativePath);
+        if (!std::filesystem::is_directory(source) || std::filesystem::is_symlink(source))
+            throw std::invalid_argument("Asset folder trash requires a regular source directory.");
+        const auto normalized = std::filesystem::relative(source, m_Impl->SourceRoot).lexically_normal();
+        std::vector<AssetId> assets;
+        for (const auto& record : Records())
+            if (IsSameOrWithin(normalized, record.RelativePath))
+                assets.push_back(record.Id);
+        const auto transaction = AssetId::Generate();
+        const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / transaction.ToString();
+        std::filesystem::create_directories(root);
+        const auto destination = root / source.filename();
+        std::filesystem::rename(source, destination);
+        try
+        {
+            WriteTrashManifest(root, transaction, normalized, assets, true);
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            std::filesystem::rename(destination, source, ignored);
+            std::filesystem::remove_all(root, ignored);
+            throw;
+        }
+        (void)Refresh();
+        return {AssetTrashId(transaction), normalized, root, std::move(assets), true};
+    }
+
+    std::vector<AssetTrashRecord> AssetDatabase::TrashRecords() const
+    {
+        const auto trashRoot = m_Impl->Specification.ProjectRoot / "Library" / "Trash";
+        std::vector<AssetTrashRecord> result;
+        std::error_code error;
+        for (std::filesystem::directory_iterator iterator(trashRoot, error), end; !error && iterator != end;
+             iterator.increment(error))
+        {
+            if (!iterator->is_directory())
+                continue;
+            const auto parsed = ReadTrashManifest(iterator->path());
+            result.push_back(
+                {AssetTrashId(parsed.Id), parsed.OriginalPath, iterator->path(), parsed.Assets, parsed.Folder});
+        }
+        if (error && error != std::errc::no_such_file_or_directory)
+            throw std::runtime_error("Could not enumerate recoverable asset trash.");
+        std::ranges::sort(result, {}, &AssetTrashRecord::OriginalPath);
+        return result;
+    }
+
+    void AssetDatabase::RestoreTrash(const AssetTrashId id)
+    {
+        if (!id)
+            throw std::invalid_argument("Cannot restore an empty asset trash identity.");
+        const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / id.ToString();
+        const auto record = ReadTrashManifest(root);
+        if (record.Id.ToString() != id.ToString())
+            throw std::runtime_error("Asset trash identity does not match its manifest.");
+        const auto destination = ConfinedPath(m_Impl->SourceRoot, record.OriginalPath);
+        const auto source = root / record.OriginalPath.filename();
+        if (std::filesystem::exists(destination))
+            throw std::runtime_error("Asset trash restore destination already exists.");
+        std::filesystem::create_directories(destination.parent_path());
+        std::filesystem::path sourceMetadata;
+        std::filesystem::path destinationMetadata;
+        if (record.Folder)
+            std::filesystem::rename(source, destination);
+        else
+        {
+            sourceMetadata = root / (record.OriginalPath.filename().string() + ".keiremeta");
+            destinationMetadata = std::filesystem::path(destination.string() + ".keiremeta");
+            if (std::filesystem::exists(destinationMetadata))
+                throw std::runtime_error("Asset trash restore metadata destination already exists.");
+            std::filesystem::rename(source, destination);
+            try
+            {
+                std::filesystem::rename(sourceMetadata, destinationMetadata);
+            }
+            catch (...)
+            {
+                std::error_code ignored;
+                std::filesystem::rename(destination, source, ignored);
+                throw;
+            }
+        }
+        try
+        {
+            (void)Refresh();
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            if (!record.Folder)
+                std::filesystem::rename(destinationMetadata, sourceMetadata, ignored);
+            std::filesystem::rename(destination, source, ignored);
+            throw;
+        }
+        std::error_code ignored;
+        std::filesystem::remove_all(root, ignored);
+    }
+
+    void AssetDatabase::PermanentlyDeleteTrash(const AssetTrashId id)
+    {
+        if (!id)
+            throw std::invalid_argument("Cannot delete an empty asset trash identity.");
+        const auto trashRoot = (m_Impl->Specification.ProjectRoot / "Library" / "Trash").lexically_normal();
+        const auto root = (trashRoot / id.ToString()).lexically_normal();
+        if (root.parent_path() != trashRoot)
+            throw std::logic_error("Asset trash deletion escaped the configured trash directory.");
+        (void)ReadTrashManifest(root);
+        std::error_code error;
+        std::filesystem::remove_all(root, error);
+        if (error)
+            throw std::runtime_error("Could not permanently remove the asset trash entry: " + error.message());
+    }
+
+    std::filesystem::path AssetDatabase::MoveToTrash(const AssetId id) { return TrashAsset(id).TrashPath; }
 
     const AssetDatabaseSpecification& AssetDatabase::Specification() const noexcept { return m_Impl->Specification; }
 
@@ -618,7 +1083,10 @@ namespace Keire
                 if (profile.Strict && record.Importer != ImporterName(record.Type) &&
                     !database.m_Impl->FindImporter(record))
                     throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
-                const auto bytes = database.m_Impl->Import(record);
+                auto imported = database.m_Impl->Import(record);
+                auto bytes = std::move(imported.Bytes);
+                if (const auto* importer = database.m_Impl->FindImporter(record); importer && importer->Cook)
+                    bytes = importer->Cook(bytes, profile.Target);
                 const auto compressed = Compress(bytes, profile.CompressionLevel);
                 if (compressed.size() > profile.MaximumPackBytes - Detail::PackHeaderBytes)
                     throw std::runtime_error("Compressed asset exceeds the build profile's maximum pack size.");
@@ -650,6 +1118,7 @@ namespace Keire
             Detail::WriteCatalog(temporary / "catalog.json", entries);
             const Json buildProfile{{"schemaVersion", 1},
                                     {"name", profile.Name},
+                                    {"target", static_cast<std::uint8_t>(profile.Target)},
                                     {"compression", "zstd"},
                                     {"compressionLevel", profile.CompressionLevel},
                                     {"maximumPackBytes", profile.MaximumPackBytes},

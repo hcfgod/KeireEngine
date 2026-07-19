@@ -1,6 +1,7 @@
 #include "Keire/EntryPoint.h"
 
 #include "Keire/BuildInfo.h"
+#include "Keire/Log.h"
 
 #include <cstdio>
 #include <exception>
@@ -22,6 +23,19 @@ namespace
         SetConsoleOutputCP(CP_UTF8);
         SetConsoleCP(CP_UTF8);
 #endif
+    }
+
+    void ReportClientFailure(const std::string_view message) noexcept
+    {
+        std::fprintf(stderr, "Client failed: %.*s\n", static_cast<int>(message.size()), message.data());
+        try
+        {
+            KEIRE_CLIENT_CRITICAL("Client failed: {}", message);
+            Keire::Log::Flush();
+        }
+        catch (...)
+        {
+        }
     }
 
     bool IsHelpArgument(const std::string_view argument) noexcept { return argument == "--help" || argument == "-h"; }
@@ -134,11 +148,11 @@ int main(const int argc, char* argv[])
     }
     catch (const std::exception& exception)
     {
-        std::fprintf(stderr, "Client failed: %s\n", exception.what());
+        ReportClientFailure(exception.what());
     }
     catch (...)
     {
-        std::fputs("Client failed with an unknown exception.\n", stderr);
+        ReportClientFailure("unknown exception");
     }
     return 1;
 }

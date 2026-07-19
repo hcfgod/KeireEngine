@@ -6,9 +6,16 @@
 
 A reproducible C++20 foundation with a static KeireCore library, a project-first editor Hub, typed scene and input assets,
 asynchronous reference-counted loading, deterministic cooked packs, a production application/layer runtime, typed events,
-Unity-style frame timing, an SDL3 multi-window and SDL_GPU platform layer, private Dear ImGui UI, reusable strong/weak
+Unity-style frame timing, application-owned transactional undo/redo, an SDL3 multi-window and SDL_GPU platform layer,
+private Dear ImGui UI, reusable strong/weak
 references, private asynchronous logging, Premake generation, sanitizers, SDK packaging, and Windows/Linux/macOS
 automation.
+
+The editor now renders resizable Scene and Game views through an application-owned SDL_GPU pipeline. The starter scene
+contains a primary Camera and tintable unlit cube; Scene view adds a depth-tested grid plus Unity-style framing, locking,
+orbit, camera-local pan, dolly, fly, orthographic, and axis-snap navigation. The Project panel provides extension-free
+List/Grid views, contextual creation, multi-item file operations, delayed metadata cards, and persistent recoverable trash.
+Pinned host-side shader tooling imports HLSL into DXIL, SPIR-V, and MSL while runtime/public APIs remain backend-free.
 
 KeireCore is static by default. Its export annotations prepare for a possible same-toolchain C++ shared-library build; they are not a stable cross-compiler ABI. Generated build identity, development assertions, and a core-owned entrypoint keep startup policy consistent while the client supplies only its application factory.
 
@@ -102,7 +109,7 @@ KeireHub/               Project discovery, creation, and editor launcher
 AssetTool/              Source scan, import, cook, and package validation CLI
 KeireTests/             Independent doctest cases
 Samples/KeireSandbox/   Validated starter project packaged with the SDK
-Vendor/                 Pinned spdlog, doctest, SDL3, JSON, Dear ImGui, and Zstandard submodules
+Vendor/                 Pinned runtime, test, UI, compression, ECS, and math submodules
 Scripts/Premake/        Shared policy and tracked private dependency project definitions
 Scripts/Unix/           Shared macOS/Linux implementation
 Scripts/<platform>/     Platform bootstrap and wrappers
@@ -111,16 +118,17 @@ docs/                   Architecture and focused subsystem guides
 .github/workflows/      CI, compatibility, security, and packaging
 ```
 
-The root Premake file owns a seven-project workspace. `KeireCore`, `KeireClient`, `KeireHub`, `KeireAssetTool`, and
-`KeireTests` own first-party definitions; private `DearImGui` and `Zstd` static-library projects are grouped under
-`Dependencies`.
+The root Premake file owns first-party targets plus dependency projects. `KeireCore`, `KeireClient`, `KeireHub`,
+`KeireAssetTool`, and `KeireTests` own first-party definitions; private `DearImGui` and `Zstd` static libraries plus
+header-only EnTT and GLM utility projects are grouped under `Dependencies`.
 Generated dependency metadata remains below ignored `Build/Projects`. Public consumers include `Keire/Core.h` and link
 only the supported `Keire::Core` package target.
 
 ## Documentation
 
-The [documentation index](docs/README.md) links focused guides for projects, the Hub, scene runtime/authoring, input
-debugging, architecture, runtime lifecycle, the UI workspace, and testing/release workflows.
+The [documentation index](docs/README.md) links focused guides for projects, the Hub, scene runtime/authoring, rendering,
+shaders/materials, undo/redo, input debugging, architecture, runtime lifecycle, the UI workspace, and testing/release
+workflows.
 
 ## Windowing And Configuration
 
@@ -140,7 +148,7 @@ clean shutdown.
 
 `Keire::Application` owns logging, a standalone `EventBus`, `Time`, `WindowSystem`, the primary window, and a dedicated `LayerStack`. KeireCore supplies `main`, handles dependency-free help/version commands, owns the top-level exception boundary and application lifetime, and calls `Run()`. A managed client supplies a static command-line description plus `CreateApplication(const ApplicationCommandLineArguments&)`; custom help remains client-owned without initializing engine services. The stack owns layer lifetimes, overlay partitioning, attachment, detachment, deferred structural changes, and traversal. Access it through `Application::Layers()`; the `PushLayer`, `PushOverlay`, and `RemoveLayer` application helpers remain as convenient delegates. The application construction thread owns `Run` and all layer mutations, while `RequestExit` remains safe from workers. Layers update bottom-to-top, receive events top-to-bottom, and may safely request structural changes during nested callbacks; those changes apply at the next frame boundary. Automatic layer subscriptions cannot be created during `OnDetach` and never survive detachment.
 
-`Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to `UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi` runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, and ID scopes are move-only RAII values, so callback exceptions cannot leave the backend stack unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; detachable native viewports, images, renderer handles, and custom draw lists are intentionally unavailable.
+`Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to `UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi` runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, and ID scopes are move-only RAII values, so callback exceptions cannot leave the backend stack unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; opaque ref-counted RGBA images are supported, while detachable native viewports, renderer handles, raw textures, and custom draw lists remain intentionally unavailable.
 
 Enable `ApplicationSpecification::Ui.Workspace` for the editor-grade layout system. `Application::GetUiWorkspace()` provides named layouts, immutable Default reset, registered panels, Kéire Dark/Light/Classic themes, editable semantic theme tokens, and portable `.keirelayout`/`.keiretheme` import and export. Live layout changes autosave atomically to SDL's per-user preference directory; `DirectoryOverride` supports deterministic tools and tests, while `Ephemeral` keeps smoke runs off disk. A backend-independent `BuildFactoryLayout` callback declares the default dock recipe using stable panel IDs. The legacy single-file `LayoutPath` remains available for simple clients, but it is mutually exclusive with the workspace.
 
@@ -198,6 +206,11 @@ events->TryEnqueue(AssetReady{43}); // any thread
 
 Logs default to `Logs` relative to the process working directory. IDE debug directories and scripts use the repository root. Initialization is idempotent only for identical configuration; conflicting configuration throws. `LoggerHandle` is a copyable value backed by `Ref`; each call takes a short operation lock. Shutdown may wait for an active write, but never for a handle's lifetime, and old handles safely become inert. Disabled macro levels evaluate neither logger acquisition nor message arguments.
 
+Editor Console entries are mirrored to the Client terminal/file sinks. Asset import and runtime-load failures are also
+written to the Core terminal/file sinks with stable asset ID, importer/type, source path, line/column when available,
+and the original diagnostic. Selecting a failed shader shows the same compiler diagnostics in Inspector; successful
+hot-reload data remains active until a corrected import completes.
+
 ## References
 
 `Keire/Ref.h` provides thread-safe `Ref<T>` strong ownership, `WeakRef<T>` observation, and the factory-only `CreateRef<T>(...)` API for types derived from `RefCounted`. The external control block keeps weak locking safe while the last strong owner is released, supports polymorphic and incomplete object types, and exposes `UseCount()` for inspection. Reference-counted graphs must use at least one `WeakRef` in every cycle.
@@ -246,8 +259,13 @@ at application frame boundaries; failures preserve the last-good scene set. Muta
 weak object handles, hierarchy edits, transforms, subtree duplication/deletion, cycle-safe reparenting, and dirty state.
 The editor adds atomic Save, bounded undo/redo, Save/Discard/Cancel transitions, and project-local crash recovery.
 
+Schema v2 scenes use stable `Entity` handles and application-registered, reference-counted Components. Transform is
+mandatory; Directional Light is authorable renderer-neutral data. Play clones authored state, Pause freezes component
+updates, Step advances one fixed tick, and Stop discards runtime changes. EnTT and GLM implement ECS/math privately;
+SDK code sees only Kéire IDs, components, queries, vectors, quaternions, matrices, and colors.
+
 See [Project System](docs/ProjectSystem.md), [Project Hub](docs/ProjectHub.md), [Scene System](docs/SceneSystem.md), and
-[Scene Authoring](docs/SceneAuthoring.md).
+[Scene Authoring](docs/SceneAuthoring.md), plus [ECS And Components](docs/ECSAndComponents.md).
 
 ## Input Actions
 
@@ -264,8 +282,9 @@ for keyboard/mouse and gamepad. KeireClient enables Development Assets and Input
 Window. The editor provides four templates, searchable master-detail authoring, bounded undo/redo, Save/Revert,
 validation, conflict-aware Listen rebinding, and a live monitor entirely through `Keire::UiFrame`.
 
-The Input Debugger can enable the project maps with a scoped UI-capture override and records processed phase/value,
-user/device, scheme, duration, and timestamp data in the bounded Console. See [Input System](docs/InputSystem.md),
+The Input Debugger can enable the project maps with a scoped UI-capture override and records filtered phase/value,
+user/device, scheme, duration, and timestamp data in its bounded local history. Idle values and synthetic resets are
+discarded; optional Console forwarding is off by default. See [Input System](docs/InputSystem.md),
 [Input Actions Editor](docs/InputActionsEditor.md), and [Input Debugger](docs/InputDebugger.md).
 
 ## Dependencies
@@ -282,6 +301,10 @@ disabled until Kéire has explicit multi-window renderer ownership.
 Zstandard 1.5.7 is pinned and compiled as the private `KeireZstd` archive. Asset packs use it with deterministic build
 profiles and SHA-256 payload verification. Zstandard headers never cross the public API and are not redistributed.
 
+EnTT 3.16.0 and GLM 1.0.3 are pinned header-only implementation dependencies for entities/components and math. Their
+headers never cross Kéire's API, third-party warnings are isolated, SDKs contain their attribution and manifest commits,
+and their source trees are not redistributed.
+
 KeireClient demonstrates the workspace as a Unity-style project editor. Project and Inspector are backed by the asset
 database; Scene and Hierarchy author typed scene assets, Console captures editor/input diagnostics, and Game remains a
 deliberate renderer-owned preview boundary.
@@ -292,11 +315,15 @@ Intentional updates are explicit:
 ./Scripts/project.ps1 vendor-update -Dependency spdlog -Tag v1.18.0
 ./Scripts/project.ps1 vendor-update -Dependency imgui -Tag v1.92.8-docking
 ./Scripts/project.ps1 vendor-update -Dependency zstd -Tag v1.5.7
+./Scripts/project.ps1 vendor-update -Dependency entt -Tag v3.16.0
+./Scripts/project.ps1 vendor-update -Dependency glm -Tag 1.0.3
 ```
 
 ```sh
 bash Scripts/project.sh vendor-update --dependency spdlog --tag v1.18.0
 bash Scripts/project.sh vendor-update --dependency imgui --tag v1.92.8-docking
+bash Scripts/project.sh vendor-update --dependency entt --tag v3.16.0
+bash Scripts/project.sh vendor-update --dependency glm --tag 1.0.3
 ```
 
 Review the diff and upstream changes before running the Git commands printed by the updater.

@@ -6,6 +6,30 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- An application-owned bounded undo/redo service with isolated document contexts, owner-thread enforcement, mergeable
+  commands, nested rollback-safe transactions, contextual Edit-menu shortcuts, and scene/input/theme/asset integration.
+- Unity-style Project asset creation and management with current-folder templates, immediate browser synchronization,
+  per-asset best-effort import diagnostics, multi-selection file commands, extension-free labels, metadata hover cards,
+  drag/drop moves, and persistent recoverable trash.
+- A first-party generated unlit shader path that applies each Mesh Renderer linear tint in Scene and Game views, plus a
+  testable editor camera controller with framing, view locking, orthographic navigation, fly-speed control, and axis snaps.
+
+- An application-owned SDL_GPU rendering system with coordinated Scene/Game/UI presentation, resizable sRGB/depth/MSAA
+  targets, fence-based retirement, editor grid/cube rendering, Camera and Mesh Renderer components, and persistent
+  Unity-style Scene camera navigation.
+- A contextual shader import pipeline with pinned SDL_shadercross and recursive compiler dependencies, reproducible
+  DXIL/SPIR-V/MSL compilation and reflection, immutable shader/material/mesh assets, target-platform cooking, editor
+  creation commands, and packaged host compiler tooling.
+
+- A Kéire-owned Unity-style ECS surface with stable weak entities, reference-counted components, application-owned
+  registration, typed queries, deterministic lifecycle callbacks, private EnTT storage, and private GLM-backed math.
+- Mandatory hierarchical Transform and authorable Directional Light components, canonical scene schema v2, schema v1
+  migration, Missing Component preservation, and isolated Play/Pause/Step/Stop runtime cloning.
+- A dedicated Asset Browser with folder navigation, persistent List/Grid modes, multi-selection, transactional rename,
+  duplicate/trash operations, opaque UI images, and bounded asynchronous digest/version-cached thumbnails.
+- Asynchronous Save As, global scene shortcuts, hierarchy context commands, component inspectors, scene play controls,
+  and system-tray Hub backgrounding with a recoverable no-tray fallback.
+
 - A project-first editor workflow with transactional Empty/Starter creation, versioned descriptors, canonical roots,
   OS-exclusive editor locks, project-local service paths, a recoverable recent-project registry, and packaged Sandbox.
 - A dedicated KeireHub with searchable/pinnable recent projects, async native folder browsing, reveal/open actions,
@@ -43,6 +67,11 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Changed
 
+- Input Debugger action events now stay in a bounded local history, suppress idle/reset noise, coalesce meaningful
+  analog changes, and forward to Console only through an explicit opt-in.
+- EnTT 3.16.0 and GLM 1.0.3 are pinned private dependencies with IDE utility projects, external warning isolation,
+  package attribution, and build-manifest identities without public header or source redistribution.
+
 - Normal repository `run` launches KeireHub; direct editor launches require an explicit project. SDKs now carry the Hub,
   project/scene headers, and a complete validated sample project instead of a root-level standalone input asset.
 - Generation stamps include Premake/config content and the first-party source inventory, automatically regenerating when
@@ -74,6 +103,23 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Hub-launched editors now resolve the pinned shader compiler independently of the project working directory; failed
+  imports show full Inspector diagnostics, mirror errors to the editor Console and rotating logs, and no longer trigger
+  Dear ImGui's null-ID drag-source assertion when the Project panel displays an error badge.
+- Asset creation now remains visible when a later best-effort import fails, blank-space Project context creation works,
+  and Mesh Renderer tint changes reach GPU draw constants instead of leaving the cube at its test-shader color.
+
+- Project Hub tray callbacks now defer native window mutations until polling completes; one Show action restores,
+  raises, and focuses the Hub, minimizing hides it, and closing or choosing tray Quit performs a full process shutdown.
+
+- Minimizing the editor during event polling no longer abandons pending fixed ticks and terminates the process on the
+  following frame.
+- Minimizing a restored Project Hub now hides it back to the system tray, and Show Hub reliably makes it visible,
+  restores it, and raises it again.
+- Asset Browser grids no longer restore invalid Dear ImGui stretch weights when their responsive column count changes,
+  and narrow panels collapse the folder tree instead of crushing both browser panes together.
+- Transform inspectors now use compact responsive X/Y/Z drag fields with direct numeric entry instead of nine
+  full-width sliders.
 - Project Hub recent-project persistence now encodes filesystem paths as UTF-8, allowing projects beneath Unicode
   directories such as `KéireEngine` to open on Windows.
 - Project generation can no longer silently omit a newly added implementation file and surface as unresolved editor

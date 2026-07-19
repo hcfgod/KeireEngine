@@ -59,6 +59,13 @@ Assert-Equal $lock.SDL_COMMIT "8e37db5e797b6167f3a00d697d816a684bd259c7" "SDL lo
 Assert-Equal $lock.JSON_COMMIT "55f93686c01528224f448c19128836e7df245f72" "JSON lock"
 Assert-Equal $lock.IMGUI_COMMIT "b61e56346a92cfcaf1f43a545ca37b0b32239654" "Dear ImGui lock"
 Assert-Equal $lock.ZSTD_COMMIT "f8745da6ff1ad1e7bab384bd1f9d742439278e99" "Zstandard lock"
+Assert-Equal $lock.ENTT_COMMIT "b4e58bdd364ad72246c123a0c28538eab3252672" "EnTT lock"
+Assert-Equal $lock.GLM_COMMIT "8d1fd52e5ab5590e2c81768ace50c72bae28f2ed" "GLM lock"
+Assert-Equal $lock.SDL_SHADERCROSS_COMMIT "e55cf5e31ced6f3d1be5cc6d0c50e99384f9f4ba" "SDL_shadercross lock"
+Assert-Equal $lock.SDL_SHADERCROSS_DXC_COMMIT "2c84a1c5ab7091608c97df6ba5ccf46e71c322eb" "DXC recursive lock"
+Assert-Equal $lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT "1a6169566c73d3da552748fc372fe2bbb856e46e" "SPIRV-Cross recursive lock"
+Assert-Equal $lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT "ad9184e76a66b1001c29db9b0a3e87f646c64de0" "SPIRV-Headers recursive lock"
+Assert-Equal $lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT "0539c81f69a3daeb706fd3477dca61435b475156" "SPIRV-Tools recursive lock"
 $vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
 $vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
 Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
@@ -66,10 +73,15 @@ Assert-True ($vendorScript.Contains('Scripts\Premake\DearImGui.lua') -and $vendo
 Assert-True ($vendorUpdateScript.Contains('"imgui"')) "Dear ImGui vendor update support"
 Assert-True ($vendorScript.Contains('Vendor/zstd') -and $vendorScript.Contains('$Lock.ZSTD_COMMIT') -and $vendorScript.Contains('Scripts\Premake\Zstd.lua')) "Zstandard vendor mapping"
 Assert-True ($vendorUpdateScript.Contains('"zstd"')) "Zstandard vendor update support"
+Assert-True ($vendorScript.Contains('Vendor/entt') -and $vendorScript.Contains('$Lock.ENTT_COMMIT') -and $vendorScript.Contains('Vendor/glm') -and $vendorScript.Contains('$Lock.GLM_COMMIT')) "ECS and math vendor mappings"
+Assert-True ($vendorUpdateScript.Contains('"entt"') -and $vendorUpdateScript.Contains('"glm"')) "ECS and math vendor update support"
+Assert-True ($vendorScript.Contains('Vendor/SDL_shadercross') -and $vendorScript.Contains('SDL_SHADERCROSS_DXC_COMMIT') -and $vendorScript.Contains('SPIRV-Tools')) "Recursive shader compiler vendor mapping"
+Assert-True ($vendorUpdateScript.Contains('"SDL_shadercross"')) "Shader compiler vendor update support"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
+Assert-True ($dependencyScript.Contains('shader-compiler.ps1')) "Host shader compiler bootstrap"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
@@ -80,10 +92,25 @@ Assert-True ($imguiPremake.Contains('imgui_impl_sdl3.cpp') -and $imguiPremake.Co
 Assert-True ($imguiPremake.Contains('../../Build/Projects/DearImGui') -and $imguiPremake.Contains('DependencyManifest.SDL3Include')) "Dear ImGui generated project and SDL wiring"
 $rootPremake = Get-Content (Join-Path (Get-RepositoryRoot) "premake5.lua") -Raw
 Assert-True ($rootPremake.Contains('group "Dependencies"') -and $rootPremake.Contains('Scripts/Premake/DearImGui.lua')) "Dear ImGui solution grouping"
+$headerDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\HeaderDependencies.lua") -Raw
+Assert-True ($rootPremake.Contains('Scripts/Premake/HeaderDependencies.lua') -and $headerDependencies.Contains('project(EnTTProject)') -and $headerDependencies.Contains('project(GLMProject)')) "Header-only dependency solution projects"
+Assert-True ($headerDependencies.Contains('../../Build/Projects/EnTT') -and $headerDependencies.Contains('../../Build/Projects/GLM') -and $headerDependencies.Contains('warnings "Off"')) "Header-only dependency IDE and warning policy"
 $corePremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\premake5.lua") -Raw
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
 $testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5.lua") -Raw
 Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
+Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
+Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') -and $corePremake.Contains('Source/ECS/Components/MeshRendererComponent.cpp')) "Explicit built-in component translation units"
+Assert-True ($corePremake.Contains('builtin-shaders.ps1') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) "First-party built-in shader generation"
+$renderSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSystem.cpp') -Raw
+Assert-True ($renderSource.Contains('BuiltinUnlitShaders.h') -and $renderSource.Contains('renderer->Tint()') -and -not $renderSource.Contains('Vendor/SDL/test')) "Mesh tint shader ownership and draw wiring"
+$renderingAssetsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\RenderingAssets.cpp') -Raw
+$assetPipelineSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp') -Raw
+$uiSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Ui.cpp') -Raw
+$editorDiagnosticsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireClient\Source\EditorWorkspaceLayer.cpp') -Raw
+Assert-True ($renderingAssetsSource.Contains('SDL_GetBasePath()') -and $renderingAssetsSource.Contains('maximumAncestorDepth')) "Executable-relative shader compiler discovery"
+Assert-True ($assetPipelineSource.Contains('LogImportDiagnostic') -and $editorDiagnosticsSource.Contains('ReportError("Asset Import"')) "Asset import diagnostics reach persistent and editor logs"
+Assert-True ($uiSource.Contains('ImGuiDragDropFlags_SourceAllowNullID')) "Display-item drag sources remain assertion-safe"
 Assert-True ($clientPremake.Contains('LinkKeireCore()') -and $testsPremake.Contains('LinkKeireCore()') -and $premakePolicy.Contains('ProjectConfig.CORE_TARGET') -and $premakePolicy.Contains('DearImGuiProject')) "Static dependency link closure"
 $clientSources = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireClient") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True (-not ($clientSources -match '#include\s*[<\"]imgui|ImGui::|ImGui[A-Z]')) "KeireClient Dear ImGui isolation"
@@ -92,8 +119,17 @@ Assert-True (-not $sourceHeaders) "First-party headers live under Include, never
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Assets\Asset.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Assets\AssetSystem.cpp"))) "Asset subsystem directory organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Input\Input.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Input\InputSystem.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Input\DefaultInput.keireinput"))) "Input subsystem and sample project organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Project\Project.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Scenes\SceneSystem.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp"))) "Project, scene, and hub organization"
+$editorWorkspace = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\Source\EditorWorkspaceLayer.cpp") -Raw
+Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\AssetBrowserPanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\ConsolePanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\DiagnosticsPanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\ThumbnailService.cpp"))) "Focused editor panel and thumbnail classes"
+Assert-True ($clientSources.Contains('DisplayName(record.RelativePath)') -and $clientSources.Contains('TrashRecords()') -and $clientSources.Contains('AssetImportPolicy::KeepLastGood')) "Unity-style asset browser labels, trash, and best-effort import"
+Assert-True ($editorWorkspace.Contains('m_InputForwardToConsole') -and $editorWorkspace.Contains('inputEpsilon') -and $editorWorkspace.Contains('coalescingWindowNanoseconds')) "Input Debugger noise filtering"
+$hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp") -Raw
+Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('Show Hub') -and $hubSource.Contains('m_Tray->IsAvailable()')) "Project Hub tray backgrounding"
+$sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
+Assert-True ($sampleScene.Contains('"schemaVersion": 2') -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Schema-v2 component sample scene"
 $publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire") -File -Recurse | Get-Content -Raw) -join "`n"
-Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui')) "Public dependency isolation"
+Assert-True ($publicHeaders.Contains('class KEIRE_API UndoService') -and $editorWorkspace.Contains('m_ActiveUndoContext')) "Shared undo service and editor routing"
+Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui|entt/|glm/')) "Public dependency isolation"
 Assert-True ($publicHeaders.Contains('class KEIRE_API UiWorkspace') -and $clientSources.Contains('BuildFactoryLayout')) "Kéire workspace facade and factory layout wiring"
 $exportedTypes = @(
     "Application", "ApplicationCommandLineArguments", "CommandLineError", "EventView", "EventSubscription",
@@ -102,7 +138,7 @@ $exportedTypes = @(
     "UiDisabledScope", "UiIdScope", "UiMainMenuBarScope", "UiComboScope", "UiPopupScope", "UiTableScope", "UiDragSourceScope", "UiDragTargetScope", "UiPanelScope", "UiFrame",
     "UiLayoutBuilder", "UiPanelRegistration", "UiWorkspace", "WindowError", "Window", "FolderDialogOperation", "WindowSystem", "ConfigurationError",
     "Asset", "BinaryAsset", "TextAsset", "AssetLoadError", "AssetSystem", "AssetDatabase", "AssetCooker", "InputActionAsset", "InputActionSubscription", "InputActionHandle", "InputActionContext", "InteractiveRebindOperation", "InputSystem", "InputCaptureOverride",
-    "Project", "ProjectRegistry", "SceneAsset", "Scene", "SceneObjectHandle", "SceneLoadOperation", "SceneSystem"
+    "Project", "ProjectRegistry", "UndoCommand", "UndoTransaction", "UndoContext", "UndoService", "EntityId", "ComponentTypeId", "Component", "ComponentRegistry", "Entity", "TransformComponent", "DirectionalLightComponent", "CameraComponent", "MeshRendererComponent", "SceneAsset", "Scene", "SceneObjectHandle", "SceneRuntimeSession", "SceneLoadOperation", "SceneSystem", "UiImage", "SaveFileDialogOperation", "SystemTray", "RenderSurface", "RenderView", "RenderSystem", "ShaderAsset", "MaterialAsset", "MeshAsset"
 )
 foreach ($exportedType in $exportedTypes) {
     Assert-True ($publicHeaders -match "class\s+KEIRE_API\s+$exportedType\b") "KEIRE_API annotation for $exportedType"
@@ -114,6 +150,8 @@ Assert-True (-not ($publicHeaders -match 'KEIRE_API[^;{}]*\b(?:GetApplicationCom
 $packageScript = Get-Content (Join-Path $Windows "package.ps1") -Raw
 Assert-True ($packageScript.Contains('dear-imgui-LICENSE.txt') -and $packageScript.Contains('$Lock.IMGUI_COMMIT') -and $packageScript.Contains('$imguiLibraryName.lib')) "Dear ImGui package metadata and archive"
 Assert-True ($packageScript.Contains('zstandard-LICENSE.txt') -and $packageScript.Contains('$Lock.ZSTD_COMMIT') -and $packageScript.Contains('$zstdLibraryName.lib')) "Zstandard package metadata and archive"
+Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Contains('$Lock.ENTT_COMMIT') -and $packageScript.Contains('glm-COPYING.txt') -and $packageScript.Contains('$Lock.GLM_COMMIT')) "ECS and math package metadata and attribution"
+Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and $packageConfig.Contains('"${_imgui_sdk_library}" "${_zstd_sdk_library}" SDL3::SDL3-static')) "Private archive CMake transitive link"
 
@@ -124,7 +162,12 @@ try {
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
-    foreach ($path in @("bin\CoreAssetTool.exe", "lib\CoreZstd.lib", "include\Core\Assets\Asset.h", "include\Core\Assets\AssetSystem.h", "include\Core\Assets\AssetPipeline.h", "include\Core\Assets\InputActionAsset.h", "include\Core\Input\Input.h", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput.keiremeta", "third-party\licenses\zstandard-LICENSE.txt")) {
+    foreach ($path in @("bin\CoreAssetTool.exe", "lib\CoreZstd.lib", "include\Core\Math\Math.h", "include\Core\ECS\Component.h", "include\Core\ECS\Entity.h", "include\Core\ECS\Components\TransformComponent.h", "include\Core\ECS\Components\DirectionalLightComponent.h", "include\Core\Assets\Asset.h", "include\Core\Assets\AssetSystem.h", "include\Core\Assets\AssetPipeline.h", "include\Core\Assets\InputActionAsset.h", "include\Core\Input\Input.h", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput.keiremeta", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt")) {
+        $file = Join-Path $packageStage $path
+        New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
+        New-Item -ItemType File -Force $file | Out-Null
+    }
+    foreach ($path in @("bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "include\Core\Undo.h", "include\Core\ECS\Components\CameraComponent.h", "include\Core\ECS\Components\MeshRendererComponent.h", "include\Core\Rendering\RenderSystem.h", "include\Core\Assets\RenderingAssets.h", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null

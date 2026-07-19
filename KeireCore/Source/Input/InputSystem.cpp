@@ -1171,10 +1171,12 @@ namespace Keire
         : m_State(std::move(state)), m_Id(id)
     {
     }
+
     InputActionSubscription::InputActionSubscription(InputActionSubscription&& other) noexcept
         : m_State(std::move(other.m_State)), m_Id(std::exchange(other.m_Id, 0))
     {
     }
+
     InputActionSubscription& InputActionSubscription::operator=(InputActionSubscription&& other) noexcept
     {
         if (this != &other)
@@ -1185,6 +1187,7 @@ namespace Keire
         }
         return *this;
     }
+
     InputActionSubscription::~InputActionSubscription() { Disconnect(); }
     void InputActionSubscription::Disconnect() noexcept
     {
@@ -1196,6 +1199,7 @@ namespace Keire
             m_State.Reset();
         }
     }
+
     bool InputActionSubscription::Connected() const noexcept
     {
         if (const auto state = m_State.Lock())
