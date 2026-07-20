@@ -152,6 +152,8 @@ namespace Keire
                 };
                 addDecoder(CreateShaderAssetDecoder());
                 addDecoder(CreateMaterialAssetDecoder());
+                addDecoder(CreateMeshAssetDecoder());
+                addDecoder(CreateTexture2DAssetDecoder());
             }
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
             {

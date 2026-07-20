@@ -35,6 +35,8 @@ install_dependency zstd Vendor/zstd "$(config_value "$LOCK" ZSTD_URL)" "$(config
 install_dependency entt Vendor/entt "$(config_value "$LOCK" ENTT_URL)" "$(config_value "$LOCK" ENTT_COMMIT)"
 install_dependency glm Vendor/glm "$(config_value "$LOCK" GLM_URL)" "$(config_value "$LOCK" GLM_COMMIT)"
 install_dependency SDL_shadercross Vendor/SDL_shadercross "$(config_value "$LOCK" SDL_SHADERCROSS_URL)" "$(config_value "$LOCK" SDL_SHADERCROSS_COMMIT)"
+install_dependency assimp Vendor/assimp "$(config_value "$LOCK" ASSIMP_URL)" "$(config_value "$LOCK" ASSIMP_COMMIT)"
+install_dependency stb Vendor/stb "$(config_value "$LOCK" STB_URL)" "$(config_value "$LOCK" STB_COMMIT)"
 git -C "$ROOT/Vendor/SDL_shadercross" submodule update --init --recursive
 imgui_files=(
     Scripts/Premake/DearImGui.lua
@@ -71,5 +73,9 @@ done
 shadercross_files=(CMakeLists.txt LICENSE.txt src/cli.c include/SDL3_shadercross/SDL_shadercross.h)
 for file in "${shadercross_files[@]}"; do
   [[ -f "$ROOT/Vendor/SDL_shadercross/$file" ]] || { printf 'SDL_shadercross source integration is incomplete: %s\n' "$file" >&2; exit 1; }
+done
+asset_dependency_files=(Vendor/assimp/CMakeLists.txt Vendor/assimp/LICENSE Vendor/assimp/include/assimp/Importer.hpp Vendor/stb/stb_image.h)
+for file in "${asset_dependency_files[@]}"; do
+  [[ -f "$ROOT/$file" ]] || { printf 'Renderable asset dependency integration is incomplete: %s\n' "$file" >&2; exit 1; }
 done
 printf '==> Vendor libraries are ready; Git staging was not modified\n'

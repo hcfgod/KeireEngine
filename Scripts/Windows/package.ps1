@@ -30,6 +30,8 @@ Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"
+$dependencyInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
+Copy-Item (Join-Path $dependencyInstall "lib\assimp.lib"), (Join-Path $dependencyInstall "lib\zlibstatic.lib") "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox"
 Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)" "$stage\include\" -Recurse
@@ -47,6 +49,9 @@ Copy-Item "$Root\Vendor\SDL_shadercross\external\DirectXShaderCompiler\ThirdPart
 Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Cross\LICENSE" "$stage\third-party\licenses\SPIRV-Cross-LICENSE.txt"
 Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Headers\LICENSE" "$stage\third-party\licenses\SPIRV-Headers-LICENSE.txt"
 Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Tools\LICENSE" "$stage\third-party\licenses\SPIRV-Tools-LICENSE.txt"
+Copy-Item "$Root\Vendor\assimp\LICENSE" "$stage\third-party\licenses\assimp-LICENSE.txt"
+Copy-Item "$Root\Vendor\assimp\contrib\zlib\LICENSE" "$stage\third-party\licenses\assimp-zlib-LICENSE.txt"
+Copy-Item "$Root\Vendor\stb\LICENSE" "$stage\third-party\licenses\stb-LICENSE.txt"
 $sdlInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
 if (-not (Test-Path (Join-Path $sdlInstall "lib\SDL3-static.lib"))) { throw "Packaged SDL Release dependency is missing." }
 Copy-Item "$sdlInstall\*" "$stage\third-party\SDL3\" -Recurse
@@ -65,7 +70,7 @@ elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
 $dirty = if (Test-GitRepository $Root) { [bool]((& git -C $Root status --porcelain --untracked-files=normal) -join "") } else { $false }
 $commit = Get-GitHeadCommit $Root "unknown"
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT }
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
@@ -73,6 +78,9 @@ if ($parsedManifest.imgui -ne $Lock.IMGUI_COMMIT) { throw "Packaged Dear ImGui i
 if ($parsedManifest.zstd -ne $Lock.ZSTD_COMMIT) { throw "Packaged Zstandard identity does not match the dependency lock." }
 if ($parsedManifest.entt -ne $Lock.ENTT_COMMIT) { throw "Packaged EnTT identity does not match the dependency lock." }
 if ($parsedManifest.glm -ne $Lock.GLM_COMMIT) { throw "Packaged GLM identity does not match the dependency lock." }
+if ($parsedManifest.assimp -ne $Lock.ASSIMP_COMMIT -or $parsedManifest.stb -ne $Lock.STB_COMMIT) {
+    throw "Packaged asset importer identities do not match the dependency lock."
+}
 if ($parsedManifest.sdlShadercross -ne $Lock.SDL_SHADERCROSS_COMMIT -or
     $parsedManifest.dxc -ne $Lock.SDL_SHADERCROSS_DXC_COMMIT -or
     $parsedManifest.spirvCross -ne $Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT -or
@@ -142,18 +150,16 @@ try {
     $consumerObject = Join-Path $validationRoot "consumer.obj"
     if ($Toolset -eq "msc") {
         $consumerLinkOptions = if ($Configuration -eq "Dist") { @("/link", "/LTCG") } else { @() }
-        & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
-            "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $consumerSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
+        & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" $consumerSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
     }
     else {
         $compilerCommand = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
-        & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
-            "-I$(Join-Path $sdkRoot 'third-party')" $consumerSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
+        & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" $consumerSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $consumerExe
     }
@@ -166,17 +172,15 @@ try {
     $managedExe = Join-Path $validationRoot "managed-consumer.exe"
     $managedObject = Join-Path $validationRoot "managed-consumer.obj"
     if ($Toolset -eq "msc") {
-        & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" `
-            "/external:I$(Join-Path $sdkRoot 'third-party')" /external:W0 $managedSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
+        & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" $managedSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
     }
     else {
-        & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" `
-            "-I$(Join-Path $sdkRoot 'third-party')" $managedSource `
-            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") `
+        & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" $managedSource `
+            (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $managedExe
     }

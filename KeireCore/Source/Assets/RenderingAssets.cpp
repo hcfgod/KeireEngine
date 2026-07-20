@@ -610,10 +610,6 @@ namespace Keire
         return CreateRef<MaterialAsset>(std::move(definition));
     }
 
-    MeshAsset::MeshAsset(const BuiltinMesh mesh) noexcept : m_Mesh(mesh) {}
-    Ref<MeshAsset> MeshAsset::Cube() { return CreateRef<MeshAsset>(BuiltinMesh::Cube); }
-    Ref<MeshAsset> MeshAsset::Error() { return CreateRef<MeshAsset>(BuiltinMesh::Error); }
-
     AssetImporterRegistration CreateShaderAssetImporter(ShaderImporterSpecification specification)
     {
         if (specification.Timeout.count() <= 0 || specification.MaximumOutputBytes == 0 ||

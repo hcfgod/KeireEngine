@@ -663,9 +663,10 @@ void EditorWorkspaceLayer::OnAttach()
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
             LoadSceneCamera();
-            databaseSpecification.Importers = {Keire::CreateInputActionAssetImporter(),
-                                               Keire::CreateSceneAssetImporter(), Keire::CreateShaderAssetImporter(),
-                                               Keire::CreateMaterialAssetImporter()};
+            databaseSpecification.Importers = {
+                Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
+                Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
+                Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             ImportAssets();
             if (const auto input = Owner().Input())

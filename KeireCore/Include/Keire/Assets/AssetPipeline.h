@@ -52,6 +52,7 @@ namespace Keire
         std::filesystem::path ProjectRoot;
         std::filesystem::path SourceRoot;
         std::filesystem::path SourcePath;
+        std::filesystem::path MetadataPath;
         std::filesystem::path RelativePath;
         std::size_t MaximumDependencyBytes = 64U * 1024U * 1024U;
         std::function<std::vector<std::byte>(const std::filesystem::path&)> ReadProjectFile;
@@ -84,6 +85,7 @@ namespace Keire
         std::string Importer;
         std::uint32_t ImporterVersion = 1;
         std::string SourceDigest;
+        std::string MetadataDigest;
         std::vector<AssetId> Dependencies;
         std::vector<AssetId> SubAssets;
         std::vector<AssetSourceDependency> SourceDependencies;

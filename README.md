@@ -255,6 +255,11 @@ integrity, file-operation, cook, and packaging contracts.
 Asset APIs are organized beneath `Keire/Assets` (for example, `#include "Keire/Assets/AssetSystem.h"`). The umbrella
 `Keire/Core.h` continues to include the supported asset surface for consumers that prefer the aggregate header.
 
+Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicitly with `KeireAssetTool convert-mesh
+--input <model>`. PNG, JPEG, TGA, and BMP textures import as validated RGBA8 assets with deterministic mip generation
+and sampler settings stored in source metadata. Assimp and stb remain private implementation dependencies; their
+headers are not required by engine or SDK consumers.
+
 ## Projects And Scenes
 
 `ProjectSettings/Project.keireproject` is the fixed marker for an isolated Kéire project. `Project::Create` produces

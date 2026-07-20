@@ -264,7 +264,8 @@ namespace Keire
             {
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
                 databaseSpecification.Importers = {CreateInputActionAssetImporter(), CreateSceneAssetImporter(),
-                                                   CreateShaderAssetImporter(), CreateMaterialAssetImporter()};
+                                                   CreateShaderAssetImporter(),      CreateMaterialAssetImporter(),
+                                                   CreateMeshAssetImporter(),        CreateTexture2DAssetImporter()};
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
                 const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",

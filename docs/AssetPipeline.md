@@ -69,3 +69,16 @@ Target values are `host`, `windows`, `linux`, and `macos`; contextual cook trans
 variants. Optional cook controls are `--compression-level` and `--pack-mib`. SDK archives include this tool and the asset public
 headers; they carry the private `KeireZstd` archive transitively through `Keire::Core` but do not redistribute Zstandard
 headers.
+
+## Mesh and texture sources
+
+OBJ, FBX, glTF, and GLB static meshes import through the pinned private Assimp build. Import applies source node
+transforms, triangulates and deterministically merges meshes, rejects animation and skinning, and intentionally ignores
+source material assignment. The resulting `.keiremesh` payload is a versioned Kéire binary containing finite
+position/normal/UV/color vertices, unsigned 32-bit triangle indices, and verified bounds. `KeireAssetTool convert-mesh
+--input <model> [--output <asset.keiremesh>]` emits the same format for inspection or source-control workflows.
+
+PNG, JPEG, TGA, and BMP sources decode privately through stb_image into RGBA8 `Texture2DAsset` data. Normalized import
+settings select color/data/normal semantics, linear or sRGB interpretation, maximum dimensions, mip policy, filtering,
+addressing, and anisotropy. Generated mips use a deterministic box filter. Neither Assimp nor stb headers are part of
+the supported SDK boundary.

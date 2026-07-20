@@ -6,6 +6,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- Pinned private Assimp and stb dependencies, a strict versioned `.keiremesh` format, deterministic OBJ/FBX/glTF/GLB
+  static-mesh import, RGBA8 texture import with normalized sampler settings and deterministic mip generation, and an
+  `AssetTool convert-mesh` command.
 - Headless editor document and command-router tests, with scene and Input Actions state moved behind dedicated document
   owners and workspace panels composed through narrow controller interfaces.
 - A component-driven Inspector fallback with transactional property edits, generic drawers for every registered property

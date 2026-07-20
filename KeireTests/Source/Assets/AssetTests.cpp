@@ -147,6 +147,15 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
     project.Write("Greeting.txt", "updated assets");
     const auto changed = changeDatabase->PollChangedAssets();
     CHECK(std::ranges::find(changed, original->Id) != changed.end());
+    CHECK(changeDatabase->ImportAll().Imported > 0);
+    {
+        std::ofstream metadata(project.Root / "Assets/Greeting.txt.keiremeta", std::ios::app);
+        metadata << ' ';
+    }
+    const auto metadataChanged = changeDatabase->PollChangedAssets();
+    CHECK(std::ranges::find(metadataChanged, original->Id) != metadataChanged.end());
+    const auto metadataImport = changeDatabase->ImportAll();
+    CHECK(metadataImport.Imported == 1);
 }
 
 TEST_CASE("Asset database editor imports report failures without discarding the last-good catalog")

@@ -25,3 +25,9 @@
 [submodule "Vendor/SDL_shadercross"]
 	path = Vendor/SDL_shadercross
 	url = https://github.com/libsdl-org/SDL_shadercross.git
+[submodule "Vendor/assimp"]
+	path = Vendor/assimp
+	url = https://github.com/assimp/assimp.git
+[submodule "Vendor/stb"]
+	path = Vendor/stb
+	url = https://github.com/nothings/stb.git

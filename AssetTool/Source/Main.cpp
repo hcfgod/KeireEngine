@@ -4,13 +4,17 @@
 #include "Keire/Project/Project.h"
 #include "Keire/Scenes/SceneAsset.h"
 
+#include <algorithm>
 #include <charconv>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -20,6 +24,7 @@ namespace
         std::filesystem::path Project = ".";
         std::filesystem::path Output = "Build/Assets";
         std::filesystem::path Catalog;
+        std::filesystem::path Input;
         Keire::AssetBuildProfile Profile;
     };
 
@@ -68,6 +73,8 @@ namespace
                 result.Output = requireValue();
             else if (option == "--catalog")
                 result.Catalog = requireValue();
+            else if (option == "--input")
+                result.Input = requireValue();
             else if (option == "--profile")
             {
                 result.Profile.Name = requireValue();
@@ -96,6 +103,7 @@ namespace
                      "                      [--compression-level <level>] [--pack-mib <size>]\n"
                      "                      [--target <host|windows|linux|macos>]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
+        std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
     }
 } // namespace
 
@@ -117,11 +125,48 @@ int main(const int argc, char** argv)
             std::cout << "Validated " << commandLine.Catalog.string() << '\n';
             return 0;
         }
+        if (commandLine.Command == "convert-mesh")
+        {
+            if (commandLine.Input.empty())
+                throw std::invalid_argument("convert-mesh requires --input <model>.");
+            const auto input = std::filesystem::absolute(commandLine.Input);
+            std::ifstream source(input, std::ios::binary);
+            if (!source)
+                throw std::runtime_error("Cannot open mesh source: " + input.string());
+            const std::vector<char> characters{std::istreambuf_iterator<char>(source),
+                                               std::istreambuf_iterator<char>()};
+            std::vector<std::byte> bytes(characters.size());
+            std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
+            const auto importer = Keire::CreateMeshAssetImporter();
+            Keire::AssetImportContext context;
+            context.ProjectRoot = input.parent_path();
+            context.SourceRoot = input.parent_path();
+            context.SourcePath = input;
+            context.RelativePath = input.filename();
+            const auto imported = importer.ContextualImport(context, bytes);
+            auto output = commandLine.Output;
+            if (output == std::filesystem::path("Build/Assets"))
+            {
+                output = input;
+                output.replace_extension(".keiremesh");
+            }
+            if (output.has_parent_path())
+                std::filesystem::create_directories(output.parent_path());
+            std::ofstream destination(output, std::ios::binary | std::ios::trunc);
+            if (!destination ||
+                (!imported.Bytes.empty() && !destination.write(reinterpret_cast<const char*>(imported.Bytes.data()),
+                                                               static_cast<std::streamsize>(imported.Bytes.size()))))
+                throw std::runtime_error("Cannot write converted mesh: " + output.string());
+            std::cout << "Converted " << input.string() << " to " << output.string() << '\n';
+            return 0;
+        }
 
         const auto project = Keire::Project::Open(commandLine.Project);
         Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
-        databaseSpecification.Importers = {Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
-                                           Keire::CreateShaderAssetImporter(), Keire::CreateMaterialAssetImporter()};
+        databaseSpecification.Importers = {
+            Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
+            Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
+            Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
         auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
         if (commandLine.Command == "scan")
         {

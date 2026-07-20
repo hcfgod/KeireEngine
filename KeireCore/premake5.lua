@@ -50,6 +50,8 @@ project(ProjectConfig.CORE_TARGET)
         VendorIncludeDirs.zstd,
         VendorIncludeDirs.entt,
         VendorIncludeDirs.glm,
+        VendorIncludeDirs.stb,
+        DependencyManifest.AssimpInclude,
         DependencyManifest.SDL3Include
     }
 

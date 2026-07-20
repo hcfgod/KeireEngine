@@ -194,6 +194,11 @@ documents and uses the public Kéire UI facade. Details live in [Input Actions E
 
 ## Dependency Build Boundary
 
+Assimp and stb are immutable private asset-import dependencies. The dependency bridge builds Assimp statically with
+only OBJ, FBX, glTF, and GLB importers and no tools, tests, samples, or exporters; stb_image has exactly one private
+implementation translation unit. SDKs retain the Assimp/stb license notices and the static Assimp link closure, but do
+not redistribute either dependency's headers or add a general third-party include directory for consumers.
+
 Premake remains the Kéire build authority. A dependency-only CMake invocation builds and installs pinned SDL3 Debug
 and Release variants into ignored, compiler-keyed caches. A generated Lua manifest supplies Premake with the selected
 include/archive paths and platform requirements. SDK packages preserve SDL's official CMake target and make

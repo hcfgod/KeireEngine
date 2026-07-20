@@ -15,7 +15,8 @@ VendorIncludeDirs = {
     imguiMisc = "../Vendor/imgui/misc/cpp",
     zstd = "../Vendor/zstd/lib",
     entt = "../Vendor/entt/src",
-    glm = "../Vendor/glm"
+    glm = "../Vendor/glm",
+    stb = "../Vendor/stb"
 }
 
 function LinkKeireCore()
@@ -25,6 +26,14 @@ function LinkKeireCore()
         DearImGuiProject,
         ZstdProject
     }
+
+    filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+        links { DependencyManifest.AssimpDebugLibrary, DependencyManifest.AssimpZlibDebugLibrary }
+
+    filter { "configurations:Release or Dist" }
+        links { DependencyManifest.AssimpReleaseLibrary, DependencyManifest.AssimpZlibReleaseLibrary }
+
+    filter {}
 end
 
 function LinkSDL3()

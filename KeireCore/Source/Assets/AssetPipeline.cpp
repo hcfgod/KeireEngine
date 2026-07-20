@@ -30,6 +30,8 @@ namespace Keire
         {
             std::filesystem::file_time_type Modified{};
             std::uintmax_t Size = 0;
+            std::filesystem::file_time_type MetadataModified{};
+            std::uintmax_t MetadataSize = 0;
 
             [[nodiscard]] bool operator==(const FileSignature&) const noexcept = default;
         };
@@ -261,6 +263,8 @@ namespace Keire
             {
                 const auto bytes = ReadSource(source, maximumSourceBytes);
                 record.SourceDigest = Detail::DigestToString(Detail::Sha256(bytes));
+                const auto metadataBytes = ReadSource(record.MetadataPath, 1024U * 1024U);
+                record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
             }
             return record;
         }
@@ -386,6 +390,7 @@ namespace Keire
             context.ProjectRoot = Specification.ProjectRoot;
             context.SourceRoot = SourceRoot;
             context.SourcePath = SourceRoot / record.RelativePath;
+            context.MetadataPath = record.MetadataPath;
             context.RelativePath = record.RelativePath;
             context.MaximumDependencyBytes =
                 std::min(Specification.MaximumSourceBytes, std::size_t{64U * 1024U * 1024U});
@@ -444,7 +449,7 @@ namespace Keire
 
         [[nodiscard]] std::string ImportDigest(const AssetSourceRecord& record, const AssetImportOutput& imported) const
         {
-            std::string input = record.SourceDigest;
+            std::string input = record.SourceDigest + "\nmetadata=" + record.MetadataDigest;
             auto dependencies = imported.SourceDependencies;
             std::ranges::sort(dependencies, {}, &AssetSourceDependency::RelativePath);
             for (const auto& dependency : dependencies)
@@ -504,7 +509,10 @@ namespace Keire
 #endif
                 if (!paths.insert(comparable).second)
                     throw std::runtime_error("Case-colliding asset paths are not portable: " + comparable);
-                result.Signatures.emplace(record.Id, FileSignature{iterator->last_write_time(), iterator->file_size()});
+                result.Signatures.emplace(record.Id,
+                                          FileSignature{iterator->last_write_time(), iterator->file_size(),
+                                                        std::filesystem::last_write_time(record.MetadataPath),
+                                                        std::filesystem::file_size(record.MetadataPath)});
                 result.Records.push_back(std::move(record));
             }
             std::ranges::sort(result.Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
@@ -590,7 +598,10 @@ namespace Keire
         {
             const auto previous = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
             if (previous != m_Impl->Records.end())
+            {
                 record.SourceDigest = previous->SourceDigest;
+                record.MetadataDigest = previous->MetadataDigest;
+            }
         }
         m_Impl->Observed = std::move(scanned.Signatures);
         m_Impl->Records = std::move(scanned.Records);
@@ -720,6 +731,7 @@ namespace Keire
             throw std::invalid_argument("Asset creation source exceeds the configured maximum size.");
         AssetSourceRecord validationRecord;
         validationRecord.RelativePath = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
+        validationRecord.MetadataPath = metadata;
         if (registered->second.ContextualImport)
             (void)registered->second.ContextualImport(m_Impl->CreateImportContext(validationRecord), sourceBytes);
         else

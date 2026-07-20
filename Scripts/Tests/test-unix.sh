@@ -53,16 +53,20 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_DX
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)" 1a6169566c73d3da552748fc372fe2bbb856e46e 'SPIRV-Cross recursive lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)" ad9184e76a66b1001c29db9b0a3e87f646c64de0 'SPIRV-Headers recursive lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)" 0539c81f69a3daeb706fd3477dca61435b475156 'SPIRV-Tools recursive lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" ASSIMP_COMMIT)" 392a658f9c271be965271f45e7521a1b80ea4392 'Assimp lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)" 31c1ad37456438565541f4919958214b6e762fb4 'stb lock'
 assert_true grep -q 'Vendor/imgui' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Scripts/Premake/DearImGui.lua' "$ROOT/Scripts/Unix/vendor.sh"
-assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross)' "$ROOT/Scripts/Unix/vendor-update.sh"
+assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross|assimp|stb)' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'Vendor/entt' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Vendor/glm' "$ROOT/Scripts/Unix/vendor.sh"
-assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross)' "$ROOT/Scripts/Unix/vendor-update.sh"
+assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross|assimp|stb)' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'Vendor/zstd' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Scripts/Premake/Zstd.lua' "$ROOT/Scripts/Unix/vendor.sh"
-assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross)' "$ROOT/Scripts/Unix/vendor-update.sh"
+assert_true grep -q 'imgui|zstd|entt|glm|SDL_shadercross|assimp|stb)' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'Vendor/SDL_shadercross' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -q 'Vendor/assimp' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -q 'Vendor/stb' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'SDL_SHADERCROSS_DXC_COMMIT' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
@@ -155,7 +159,7 @@ assert_true grep -q 'Show Hub' "$ROOT/KeireHub/Source/HubApplication.cpp"
 assert_true grep -q '"schemaVersion": 2' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true grep -q '"components"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
-assert_false grep -R -E 'SDL3/|nlohmann/json|imgui|entt/|glm/' "$ROOT/KeireCore/Include/Keire"
+assert_false grep -R -E 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'class KEIRE_API UiWorkspace' "$ROOT/KeireCore/Include/Keire/UiWorkspace.h"
 assert_true grep -q 'BuildFactoryLayout' "$ROOT/KeireClient/Source/ClientApplication.cpp"
 for exported_type in \
@@ -168,7 +172,7 @@ for exported_type in \
   InputActionSubscription InputActionHandle InputActionContext InteractiveRebindOperation InputSystem InputCaptureOverride \
   Project ProjectRegistry EntityId ComponentTypeId Component ComponentRegistry Entity TransformComponent DirectionalLightComponent \
   UndoCommand UndoTransaction UndoContext UndoService CameraComponent MeshRendererComponent SceneAsset Scene SceneObjectHandle SceneRuntimeSession SceneLoadOperation SceneSystem \
-  UiImage SaveFileDialogOperation SystemTray RenderSurface RenderView RenderSystem ShaderAsset MaterialAsset MeshAsset; do
+  UiImage SaveFileDialogOperation SystemTray RenderSurface RenderView RenderSystem ShaderAsset MaterialAsset MeshAsset Texture2DAsset; do
   assert_true grep -R -E -q "class[[:space:]]+KEIRE_API[[:space:]]+$exported_type([^[:alnum:]_]|$)" "$ROOT/KeireCore/Include/Keire"
 done
 for exported_function in AssertionFailure GetName GetBuildInfo GetVersionString LoadWindowSpecification; do
@@ -189,7 +193,7 @@ assert_true grep -q 'KeireShaderCompiler' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'SDL-shadercross-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'SDL_SHADERCROSS_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"
-assert_true grep -q '"${_imgui_sdk_library}" "${_zstd_sdk_library}" SDL3::SDL3-static' "$ROOT/Config/PackageConfig.cmake.in"
+assert_true grep -q '"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}" SDL3::SDL3-static' "$ROOT/Config/PackageConfig.cmake.in"
 security_workflow="$ROOT/.github/workflows/security.yml"
 grep -q '^  security-status:$' "$security_workflow" || fail 'Security activation sentinel is missing'
 grep -q '^    if: always()$' "$security_workflow" || fail 'Security activation sentinel is not unconditional'
@@ -217,7 +221,7 @@ for path in bin/CoreAssetTool lib/libCoreZstd.a include/Core/Math/Math.h include
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 rm -rf "$package_stage/third-party/spdlog"
-for path in bin/KeireShaderCompiler include/Core/Undo.h include/Core/ECS/Components/CameraComponent.h include/Core/ECS/Components/MeshRendererComponent.h include/Core/Rendering/RenderSystem.h include/Core/Assets/RenderingAssets.h samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl samples/KeireSandbox/Assets/Materials/DefaultUnlit.keirematerial third-party/licenses/SDL-shadercross-LICENSE.txt third-party/licenses/DirectXShaderCompiler-LICENSE.txt third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt third-party/licenses/SPIRV-Cross-LICENSE.txt third-party/licenses/SPIRV-Headers-LICENSE.txt third-party/licenses/SPIRV-Tools-LICENSE.txt; do
+for path in bin/KeireShaderCompiler lib/libassimp.a lib/libzlibstatic.a include/Core/Undo.h include/Core/ECS/Components/CameraComponent.h include/Core/ECS/Components/MeshRendererComponent.h include/Core/Rendering/RenderSystem.h include/Core/Assets/RenderingAssets.h samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl samples/KeireSandbox/Assets/Materials/DefaultUnlit.keirematerial third-party/licenses/SDL-shadercross-LICENSE.txt third-party/licenses/DirectXShaderCompiler-LICENSE.txt third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt third-party/licenses/SPIRV-Cross-LICENSE.txt third-party/licenses/SPIRV-Headers-LICENSE.txt third-party/licenses/SPIRV-Tools-LICENSE.txt third-party/licenses/assimp-LICENSE.txt third-party/licenses/assimp-zlib-LICENSE.txt third-party/licenses/stb-LICENSE.txt; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 : > "$package_stage/include/Core/Ui.h"

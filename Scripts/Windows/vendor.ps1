@@ -14,7 +14,9 @@ $Dependencies = @(
     @{ Name = "zstd"; Path = "Vendor/zstd"; Url = $Lock.ZSTD_URL; Commit = $Lock.ZSTD_COMMIT },
     @{ Name = "entt"; Path = "Vendor/entt"; Url = $Lock.ENTT_URL; Commit = $Lock.ENTT_COMMIT },
     @{ Name = "glm"; Path = "Vendor/glm"; Url = $Lock.GLM_URL; Commit = $Lock.GLM_COMMIT },
-    @{ Name = "SDL_shadercross"; Path = "Vendor/SDL_shadercross"; Url = $Lock.SDL_SHADERCROSS_URL; Commit = $Lock.SDL_SHADERCROSS_COMMIT }
+    @{ Name = "SDL_shadercross"; Path = "Vendor/SDL_shadercross"; Url = $Lock.SDL_SHADERCROSS_URL; Commit = $Lock.SDL_SHADERCROSS_COMMIT },
+    @{ Name = "assimp"; Path = "Vendor/assimp"; Url = $Lock.ASSIMP_URL; Commit = $Lock.ASSIMP_COMMIT },
+    @{ Name = "stb"; Path = "Vendor/stb"; Url = $Lock.STB_URL; Commit = $Lock.STB_COMMIT }
 )
 
 function Invoke-Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Arguments) {
@@ -120,6 +122,13 @@ foreach ($entry in $shaderCrossGitlinks.GetEnumerator()) {
 foreach ($file in @("CMakeLists.txt", "LICENSE.txt", "src\cli.c", "include\SDL3_shadercross\SDL_shadercross.h")) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root "Vendor\SDL_shadercross\$file") -PathType Leaf)) {
         throw "SDL_shadercross source integration is incomplete: $file"
+    }
+}
+
+foreach ($file in @("Vendor\assimp\CMakeLists.txt", "Vendor\assimp\LICENSE", "Vendor\assimp\include\assimp\Importer.hpp",
+                    "Vendor\stb\stb_image.h")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Root $file) -PathType Leaf)) {
+        throw "Renderable asset dependency integration is incomplete: $file"
     }
 }
 

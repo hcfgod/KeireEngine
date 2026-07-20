@@ -10,11 +10,30 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 namespace
 {
+    struct TemporaryDirectory final
+    {
+        explicit TemporaryDirectory(const std::string& name) : Path(KeireTests::MakeTestDirectory(name))
+        {
+            std::filesystem::create_directories(Path);
+        }
+
+        ~TemporaryDirectory()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(Path, error);
+        }
+
+        std::filesystem::path Path;
+    };
+
     [[nodiscard]] std::vector<std::byte> ReadTestBytes(const std::filesystem::path& path)
     {
         std::ifstream input(path, std::ios::binary);
@@ -139,6 +158,111 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     CHECK(Keire::MeshAsset::Cube()->Mesh() == Keire::BuiltinMesh::Cube);
     CHECK(Keire::MeshAsset::CubeId() != Keire::MeshAsset::ErrorId());
     CHECK(Keire::MaterialAsset::Error()->Definition().Properties.contains("ErrorColor"));
+}
+
+TEST_CASE("mesh assets validate and preserve production vertex data")
+{
+    const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 0.0F}, {}},
+                              Keire::MeshVertex{{1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F}, {}},
+                              Keire::MeshVertex{{0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}, {}}};
+    const std::array<std::uint32_t, 3> indices{0, 1, 2};
+    const auto encoded = Keire::MeshAsset::Encode(vertices, indices);
+    const auto decoded = Keire::MeshAsset::Decode(encoded);
+    REQUIRE(decoded->Vertices().size() == 3);
+    REQUIRE(decoded->Indices().size() == 3);
+    CHECK(decoded->Vertices()[1].UV0 == (Keire::Vector2{1.0F, 0.0F}));
+    CHECK(decoded->Bounds().Minimum == (Keire::Vector3{0.0F, 0.0F, 0.0F}));
+    CHECK(decoded->Bounds().Maximum == (Keire::Vector3{1.0F, 1.0F, 0.0F}));
+
+    auto truncated = encoded;
+    truncated.pop_back();
+    CHECK_THROWS_AS((void)Keire::MeshAsset::Decode(truncated), std::invalid_argument);
+    auto outOfRange = indices;
+    outOfRange[2] = 3;
+    CHECK_THROWS_AS((void)Keire::MeshAsset::Encode(vertices, outOfRange), std::invalid_argument);
+    auto nonFinite = vertices;
+    nonFinite[0].Position.X = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_AS((void)Keire::MeshAsset::Encode(nonFinite, indices), std::invalid_argument);
+
+    const auto cube = Keire::MeshAsset::Cube();
+    const auto error = Keire::MeshAsset::Error();
+    CHECK(cube->Vertices().size() == 8);
+    CHECK(cube->Indices().size() == 36);
+    CHECK(error->Vertices().front().VertexColor == (Keire::Color{1.0F, 0.0F, 1.0F, 1.0F}));
+}
+
+TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format")
+{
+    TemporaryDirectory directory("MeshImportTests");
+    const auto sourcePath = directory.Path / "triangle.obj";
+    {
+        std::ofstream source(sourcePath);
+        source << "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+                  "vt 0 0\nvt 1 0\nvt 0 1\n"
+                  "f 1/1 2/2 3/3\n";
+    }
+    const auto importer = Keire::CreateMeshAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    const auto output = importer.ContextualImport(context, ReadTestBytes(sourcePath));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    CHECK(mesh->Vertices().size() == 3);
+    CHECK(mesh->Indices().size() == 3);
+    CHECK(mesh->Bounds().Maximum == (Keire::Vector3{1.0F, 1.0F, 0.0F}));
+}
+
+TEST_CASE("texture importer emits validated RGBA8 mip chains")
+{
+    constexpr std::array<unsigned char, 70> bitmap{
+        0x42, 0x4d, 70, 0, 0, 0,  0, 0, 0,   0, 54,  0,  0, 0, 40,  0,    0,    0,   2,   0,    0,    0, 2,
+        0,    0,    0,  1, 0, 24, 0, 0, 0,   0, 0,   16, 0, 0, 0,   0x13, 0x0b, 0,   0,   0x13, 0x0b, 0, 0,
+        0,    0,    0,  0, 0, 0,  0, 0, 255, 0, 255, 0,  0, 0, 255, 0,    0,    255, 255, 255,  0,    0};
+    std::vector<std::byte> source(bitmap.size());
+    std::ranges::transform(bitmap, source.begin(), [](const unsigned char value) { return std::byte(value); });
+    const auto importer = Keire::CreateTexture2DAssetImporter();
+    REQUIRE(importer.Import);
+    const auto texture = Keire::Texture2DAsset::Decode(importer.Import(source));
+    CHECK(texture->Width() == 2);
+    CHECK(texture->Height() == 2);
+    REQUIRE(texture->Mips().size() == 2);
+    CHECK(texture->Mips().back().Width == 1);
+    CHECK(texture->Mips().back().Height == 1);
+    CHECK(Keire::Texture2DAsset::Encode(texture->Settings(), texture->Mips()) == importer.Import(source));
+
+    auto malformed = Keire::Texture2DAsset::Encode(texture->Settings(), texture->Mips());
+    malformed.push_back(std::byte{0});
+    CHECK_THROWS_AS((void)Keire::Texture2DAsset::Decode(malformed), std::invalid_argument);
+    auto invalidSettings = texture->Settings();
+    invalidSettings.Sampler.Anisotropy = 0;
+    CHECK_THROWS_AS((void)Keire::Texture2DAsset::Encode(invalidSettings, texture->Mips()), std::invalid_argument);
+
+    const auto checkerboard = Keire::Texture2DAsset::Checkerboard();
+    CHECK(checkerboard->Width() == 2);
+    CHECK(checkerboard->Height() == 2);
+    CHECK(checkerboard->Mips().size() == 1);
+
+    TemporaryDirectory directory("TextureMetadataTests");
+    const auto metadata = directory.Path / "texture.bmp.keiremeta";
+    {
+        std::ofstream output(metadata);
+        output
+            << R"({"textureImportSettings":{"semantic":"data","colorSpace":"srgb","mips":"none","maximumSize":1,"sampler":{"min":"nearest","addressU":"clamp","anisotropy":4}}})";
+    }
+    Keire::AssetImportContext context;
+    context.MetadataPath = metadata;
+    REQUIRE(importer.ContextualImport);
+    const auto configured = Keire::Texture2DAsset::Decode(importer.ContextualImport(context, source).Bytes);
+    CHECK(configured->Width() == 1);
+    CHECK(configured->Mips().size() == 1);
+    CHECK(configured->Settings().Semantic == Keire::TextureSemantic::Data);
+    CHECK(configured->Settings().ColorSpace == Keire::TextureColorSpace::Linear);
+    CHECK(configured->Settings().Sampler.Minimum == Keire::TextureFilter::Nearest);
+    CHECK(configured->Settings().Sampler.AddressU == Keire::TextureAddressMode::Clamp);
+    CHECK(configured->Settings().Sampler.Anisotropy == 4);
 }
 
 TEST_CASE("pinned shader compiler resolves from the executable while the project is the working directory")
