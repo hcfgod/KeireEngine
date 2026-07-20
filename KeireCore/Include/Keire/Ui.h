@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -406,7 +407,15 @@ namespace Keire
         [[nodiscard]] UiItemRect LastItemRect() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
         [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
+        [[nodiscard]] bool DragInteger(std::string_view label, std::int64_t& value, double speed = 1.0,
+                                       std::optional<std::int64_t> minimum = {},
+                                       std::optional<std::int64_t> maximum = {});
+        [[nodiscard]] bool DragScalar(std::string_view label, double& value, double speed = 0.1,
+                                      std::optional<double> minimum = {}, std::optional<double> maximum = {});
+        [[nodiscard]] bool DragVector2(std::string_view label, Vector2& value, float speed = 0.1F);
         [[nodiscard]] bool DragVector3(std::string_view label, Vector3& value, float speed = 0.1F);
+        [[nodiscard]] bool DragVector4(std::string_view label, Vector4& value, float speed = 0.1F);
+        [[nodiscard]] bool DragQuaternion(std::string_view label, Quaternion& value, float speed = 0.01F);
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);
         [[nodiscard]] bool SliderInt(std::string_view label, int& value, int minimum, int maximum);
         [[nodiscard]] bool InputText(std::string_view label, std::string& value);

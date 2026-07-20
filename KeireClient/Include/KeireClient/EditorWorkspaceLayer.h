@@ -23,6 +23,7 @@ namespace KeireEditor
     class InspectorPanel;
     class HierarchyPanel;
     class ProjectSettingsPanel;
+    class PropertyDrawerRegistry;
     class SceneDocument;
     class SceneViewportPanel;
     class SceneGizmoController;
@@ -163,6 +164,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::InspectorPanel> m_InspectorPanel;
     std::unique_ptr<KeireEditor::InputActionsPanel> m_InputActionsPanel;
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
+    std::unique_ptr<KeireEditor::PropertyDrawerRegistry> m_PropertyDrawers;
     Keire::UiThemeDefinition m_Theme;
     Keire::RenderEnvironmentSettings m_RenderEnvironment;
     bool m_RenderEnvironmentDirty = false;

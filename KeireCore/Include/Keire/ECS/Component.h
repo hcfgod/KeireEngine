@@ -91,6 +91,7 @@ namespace Keire
         std::optional<double> Minimum;
         std::optional<double> Maximum;
         double Step = 0.1;
+        std::optional<AssetTypeId> ExpectedAssetType;
     };
 
     class KEIRE_API Component : public RefCounted

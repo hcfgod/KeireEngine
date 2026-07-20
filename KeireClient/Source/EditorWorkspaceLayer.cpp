@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SceneGizmoController.h"
 
@@ -12,6 +13,7 @@
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -317,6 +319,142 @@ namespace
         std::size_t m_EstimatedBytes = 1;
         Keire::UndoAvailability m_Available;
     };
+
+    class InspectorPropertyEditor final : public KeireEditor::IPropertyEditor
+    {
+      public:
+        InspectorPropertyEditor(Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> assets,
+                                const Keire::Ref<Keire::Scene>& scene)
+            : m_Ui(ui), m_Assets(assets), m_Scene(scene)
+        {
+        }
+
+        bool EditBoolean(const std::string_view label, bool& value) override { return m_Ui.Checkbox(label, value); }
+
+        bool EditInteger(const std::string_view label, std::int64_t& value, const double step,
+                         const std::optional<double> minimum, const std::optional<double> maximum) override
+        {
+            const auto lower =
+                minimum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*minimum)) : std::nullopt;
+            const auto upper =
+                maximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*maximum)) : std::nullopt;
+            return m_Ui.DragInteger(label, value, step, lower, upper);
+        }
+
+        bool EditChoice(const std::string_view label, std::int64_t& value,
+                        const std::span<const std::string_view> choices) override
+        {
+            const auto preview = value >= 0 && static_cast<std::size_t>(value) < choices.size()
+                                     ? choices[static_cast<std::size_t>(value)]
+                                     : std::string_view("Invalid");
+            bool changed = false;
+            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+            {
+                for (std::size_t index = 0; index < choices.size(); ++index)
+                {
+                    if (m_Ui.Selectable(choices[index], value == static_cast<std::int64_t>(index)))
+                    {
+                        value = static_cast<std::int64_t>(index);
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
+        bool EditScalar(const std::string_view label, double& value, const double step,
+                        const std::optional<double> minimum, const std::optional<double> maximum) override
+        {
+            return m_Ui.DragScalar(label, value, step, minimum, maximum);
+        }
+
+        bool EditText(const std::string_view label, std::string& value) override
+        {
+            return m_Ui.InputText(label, value);
+        }
+        bool EditVector2(const std::string_view label, Keire::Vector2& value, const double step) override
+        {
+            return m_Ui.DragVector2(label, value, static_cast<float>(step));
+        }
+        bool EditVector3(const std::string_view label, Keire::Vector3& value, const double step) override
+        {
+            return m_Ui.DragVector3(label, value, static_cast<float>(step));
+        }
+        bool EditVector4(const std::string_view label, Keire::Vector4& value, const double step) override
+        {
+            return m_Ui.DragVector4(label, value, static_cast<float>(step));
+        }
+        bool EditQuaternion(const std::string_view label, Keire::Quaternion& value, const double step) override
+        {
+            return m_Ui.DragQuaternion(label, value, static_cast<float>(step));
+        }
+        bool EditColor(const std::string_view label, Keire::Color& value) override
+        {
+            Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
+            if (!m_Ui.ColorEdit(label, color))
+                return false;
+            value = {color.Red, color.Green, color.Blue, color.Alpha};
+            return true;
+        }
+        bool EditAsset(const std::string_view label, Keire::AssetId& value,
+                       const std::optional<Keire::AssetTypeId> expectedType) override
+        {
+            const auto selected = std::ranges::find(m_Assets, value, &Keire::AssetSourceRecord::Id);
+            const auto preview = selected == m_Assets.end() ? (value ? "Missing asset" : "None")
+                                                            : selected->RelativePath.filename().string();
+            bool changed = false;
+            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+            {
+                if (m_Ui.Selectable("None", !value))
+                {
+                    value = {};
+                    changed = true;
+                }
+                for (const auto& asset : m_Assets)
+                {
+                    if (expectedType && asset.Type != *expectedType)
+                        continue;
+                    if (m_Ui.Selectable(asset.RelativePath.generic_string(), asset.Id == value))
+                    {
+                        value = asset.Id;
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+        bool EditEntity(const std::string_view label, Keire::EntityId& value) override
+        {
+            const auto selected = m_Scene ? m_Scene->FindEntity(value) : Keire::Entity{};
+            const auto preview = selected ? selected.Name() : (value ? "Missing entity" : "None");
+            bool changed = false;
+            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+            {
+                if (m_Ui.Selectable("None", !value))
+                {
+                    value = {};
+                    changed = true;
+                }
+                if (m_Scene)
+                {
+                    for (const auto& entity : m_Scene->Entities())
+                    {
+                        if (m_Ui.Selectable(entity.Name(), entity.Id() == value))
+                        {
+                            value = entity.Id();
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            return changed;
+        }
+
+      private:
+        Keire::UiFrame& m_Ui;
+        std::span<const Keire::AssetSourceRecord> m_Assets;
+        Keire::Ref<Keire::Scene> m_Scene;
+    };
 } // namespace
 
 EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initializeProject)
@@ -337,6 +475,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           std::make_unique<KeireEditor::InputActionsPanel>(static_cast<KeireEditor::IInputActionsController&>(*this))),
       m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
           static_cast<KeireEditor::IProjectSettingsController&>(*this))),
+      m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
       m_InputAsset(m_InputActionsDocument->AssetStorage()), m_SelectedInputMap(m_InputActionsDocument->MapStorage()),
       m_SelectedInputScheme(m_InputActionsDocument->SchemeStorage()),
       m_SelectedInputAction(m_InputActionsDocument->ActionStorage()),
@@ -354,6 +493,90 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_SceneRecoveryAvailable(m_SceneDocument->RecoveryAvailableStorage()), m_Smoke(smoke),
       m_InitializeProject(initializeProject)
 {
+    m_PropertyDrawers->RegisterOverride(
+        Keire::TransformComponent::StaticType(), "rotation",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* rotation = std::get_if<Keire::Quaternion>(&value);
+            if (!rotation)
+                throw std::invalid_argument("Transform rotation metadata must serialize a Quaternion.");
+            auto euler = Keire::Math::QuaternionToEulerDegrees(*rotation);
+            if (!editor.EditVector3(property.DisplayName, euler, std::max(property.Step, 0.25)))
+                return false;
+            *rotation = Keire::Math::EulerDegreesToQuaternion(euler);
+            return true;
+        });
+    m_PropertyDrawers->RegisterOverride(
+        Keire::TransformComponent::StaticType(), "scale",
+        [this](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+               Keire::ComponentPropertyValue& value)
+        {
+            auto* scale = std::get_if<Keire::Vector3>(&value);
+            if (!scale)
+                throw std::invalid_argument("Transform scale metadata must serialize a Vector3.");
+            const auto previous = *scale;
+            if (!editor.EditVector3(property.DisplayName, *scale, std::max(property.Step, 0.01)))
+                return false;
+            if (!m_UniformScale)
+                return true;
+            const auto propagate = [](const float oldValue, const float newValue, const float other)
+            { return std::abs(oldValue) > 0.0001F ? other * (newValue / oldValue) : other + newValue - oldValue; };
+            if (scale->X != previous.X)
+            {
+                scale->Y = propagate(previous.X, scale->X, previous.Y);
+                scale->Z = propagate(previous.X, scale->X, previous.Z);
+            }
+            else if (scale->Y != previous.Y)
+            {
+                scale->X = propagate(previous.Y, scale->Y, previous.X);
+                scale->Z = propagate(previous.Y, scale->Y, previous.Z);
+            }
+            else if (scale->Z != previous.Z)
+            {
+                scale->X = propagate(previous.Z, scale->Z, previous.X);
+                scale->Y = propagate(previous.Z, scale->Z, previous.Y);
+            }
+            return true;
+        });
+    m_PropertyDrawers->RegisterOverride(
+        Keire::CameraComponent::StaticType(), "projection",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* projection = std::get_if<std::int64_t>(&value);
+            if (!projection)
+                throw std::invalid_argument("Camera projection metadata must serialize an Integer.");
+            constexpr std::array choices{std::string_view("Perspective"), std::string_view("Orthographic")};
+            return editor.EditChoice(property.DisplayName, *projection, choices);
+        });
+    m_PropertyDrawers->RegisterOverride(
+        Keire::DirectionalLightComponent::StaticType(), "shadows",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* shadows = std::get_if<std::int64_t>(&value);
+            if (!shadows)
+                throw std::invalid_argument("Directional Light shadow metadata must serialize an Integer.");
+            constexpr std::array choices{std::string_view("None"), std::string_view("Hard"), std::string_view("Soft")};
+            return editor.EditChoice(property.DisplayName, *shadows, choices);
+        });
+    const auto registerAssetPicker = [this](const std::string_view key, const Keire::AssetTypeId type)
+    {
+        m_PropertyDrawers->RegisterOverride(
+            Keire::MeshRendererComponent::StaticType(), std::string(key),
+            [type](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+                   Keire::ComponentPropertyValue& value)
+            {
+                auto* asset = std::get_if<Keire::AssetId>(&value);
+                if (!asset)
+                    throw std::invalid_argument("Mesh Renderer asset metadata must serialize an AssetId.");
+                return editor.EditAsset(property.DisplayName, *asset, type);
+            });
+    };
+    registerAssetPicker("mesh", Keire::MeshAsset::StaticType());
+    registerAssetPicker("material", Keire::MaterialAsset::StaticType());
+
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::NewScene, [this] { RequestCreateScene(); },
         [this] { return static_cast<bool>(m_AssetDatabase); });
@@ -3774,11 +3997,31 @@ void EditorWorkspaceLayer::DrawInspector(Keire::UiFrame& ui)
                             }
                             if (ui.LastItemState().DeactivatedAfterEdit)
                                 ++m_ContinuousEditSerial;
-                            ui.TextColored(m_Theme.MutedText, "Mesh");
-                            ui.Text(renderer->Mesh() ? renderer->Mesh().ToString() : "Missing (error mesh fallback)");
-                            ui.TextColored(m_Theme.MutedText, "Material");
-                            ui.Text(renderer->Material() ? renderer->Material().ToString()
-                                                         : "Missing (error material fallback)");
+                            if (const auto registration = m_EditingScene->Components()->Find(renderer->Type()))
+                            {
+                                InspectorPropertyEditor propertyEditor(ui, m_AssetRecords, m_EditingScene);
+                                for (const auto& property : registration->Properties)
+                                {
+                                    if (property.Key != "mesh" && property.Key != "material")
+                                        continue;
+                                    try
+                                    {
+                                        if (m_PropertyDrawers->EditComponent(
+                                                propertyEditor, *registration, *renderer, property,
+                                                [this, &entity, &property]
+                                                {
+                                                    RecordSceneUndo("Change " + property.DisplayName,
+                                                                    "mesh-renderer." + property.Key + "." +
+                                                                        entity.Id().ToString());
+                                                }))
+                                            m_EditingScene->MarkDirty();
+                                    }
+                                    catch (const std::exception& error)
+                                    {
+                                        ui.TextColored(m_Theme.Error, error.what());
+                                    }
+                                }
+                            }
                             if (ui.Button("Reset Renderer"))
                             {
                                 RecordSceneUndo();
@@ -3790,6 +4033,71 @@ void EditorWorkspaceLayer::DrawInspector(Keire::UiFrame& ui)
                                 RecordSceneUndo();
                                 (void)entity.RemoveComponent<Keire::MeshRendererComponent>();
                             }
+                        }
+                    }
+                }
+                InspectorPropertyEditor propertyEditor(ui, m_AssetRecords, m_EditingScene);
+                for (const auto& component : entity.GetComponents())
+                {
+                    if (!component || component->Type() == Keire::TransformComponent::StaticType() ||
+                        component->Type() == Keire::CameraComponent::StaticType() ||
+                        component->Type() == Keire::DirectionalLightComponent::StaticType() ||
+                        component->Type() == Keire::MeshRendererComponent::StaticType())
+                        continue;
+                    const auto registration = m_EditingScene->Components()->Find(component->Type());
+                    if (!registration)
+                        continue;
+                    ui.Spacing();
+                    auto& expanded = expansion(registration->Type.ToString());
+                    const auto cardId = "ComponentCard##" + registration->Type.ToString();
+                    const float cardHeight =
+                        expanded ? std::max(115.0F, 80.0F + registration->Properties.size() * 34.0F) : 38.0F;
+                    if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
+                    {
+                        const auto heading = (expanded ? "v  " : ">  ") + registration->Name;
+                        if (ui.Selectable(heading))
+                            expanded = !expanded;
+                        if (!expanded)
+                            continue;
+                        auto enabled = component->Enabled();
+                        if (ui.Checkbox("Enabled##" + registration->Type.ToString(), enabled))
+                        {
+                            RecordSceneUndo("Change " + registration->Name);
+                            component->SetEnabled(enabled);
+                        }
+                        std::string activeGroup;
+                        for (const auto& property : registration->Properties)
+                        {
+                            if (!property.Group.empty() && property.Group != activeGroup)
+                            {
+                                activeGroup = property.Group;
+                                ui.TextColored(m_Theme.MutedText, activeGroup);
+                            }
+                            try
+                            {
+                                const bool changed = m_PropertyDrawers->EditComponent(
+                                    propertyEditor, *registration, *component, property,
+                                    [this, &entity, &registration, &property]
+                                    {
+                                        RecordSceneUndo("Change " + property.DisplayName,
+                                                        registration->Type.ToString() + "." + property.Key + "." +
+                                                            entity.Id().ToString() + "." +
+                                                            std::to_string(m_ContinuousEditSerial));
+                                    });
+                                if (changed)
+                                    m_EditingScene->MarkDirty();
+                                if (changed && ui.LastItemState().DeactivatedAfterEdit)
+                                    ++m_ContinuousEditSerial;
+                            }
+                            catch (const std::exception& error)
+                            {
+                                ui.TextColored(m_Theme.Error, error.what());
+                            }
+                        }
+                        if (registration->Removable && ui.Button("Remove " + registration->Name))
+                        {
+                            RecordSceneUndo("Remove " + registration->Name);
+                            (void)entity.RemoveComponent(registration->Type);
                         }
                     }
                 }

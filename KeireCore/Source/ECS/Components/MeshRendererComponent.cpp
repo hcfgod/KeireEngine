@@ -1,5 +1,6 @@
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 
 #include <stdexcept>
@@ -72,10 +73,19 @@ namespace Keire
         result.Name = "Mesh Renderer";
         result.Category = "Rendering";
         result.RequiredComponents = {TransformComponent::StaticType()};
-        result.Properties = {{"mesh", "Mesh", "Rendering", ComponentPropertyKind::Asset},
-                             {"material", "Material", "Rendering", ComponentPropertyKind::Asset},
-                             {"tint", "Tint", "Rendering", ComponentPropertyKind::Color},
-                             {"visible", "Visible", "Rendering", ComponentPropertyKind::Boolean}};
+        result.Properties = {
+            {"mesh", "Mesh", "Rendering", ComponentPropertyKind::Asset, false, {}, {}, 0.1, MeshAsset::StaticType()},
+            {"material",
+             "Material",
+             "Rendering",
+             ComponentPropertyKind::Asset,
+             false,
+             {},
+             {},
+             0.1,
+             MaterialAsset::StaticType()},
+            {"tint", "Tint", "Rendering", ComponentPropertyKind::Color},
+            {"visible", "Visible", "Rendering", ComponentPropertyKind::Boolean}};
         result.Factory = [] { return Ref<Component>(CreateRef<MeshRendererComponent>()); };
         result.Serialize = [](const Component& component)
         {

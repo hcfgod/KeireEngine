@@ -875,6 +875,41 @@ namespace Keire
         return ImGui::Checkbox(safeLabel.c_str(), &value);
     }
 
+    bool UiFrame::DragInteger(const std::string_view label, std::int64_t& value, const double speed,
+                              const std::optional<std::int64_t> minimum, const std::optional<std::int64_t> maximum)
+    {
+        m_Impl->RequireActive("DragInteger");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0 || (minimum && maximum && *minimum > *maximum))
+            throw std::invalid_argument("DragInteger requires a label, positive speed, and ordered bounds.");
+        const std::string safeLabel(label);
+        const auto* minimumValue = minimum ? &*minimum : nullptr;
+        const auto* maximumValue = maximum ? &*maximum : nullptr;
+        return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_S64, &value, static_cast<float>(speed), minimumValue,
+                                 maximumValue, "%lld");
+    }
+
+    bool UiFrame::DragScalar(const std::string_view label, double& value, const double speed,
+                             const std::optional<double> minimum, const std::optional<double> maximum)
+    {
+        m_Impl->RequireActive("DragScalar");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0 || (minimum && maximum && *minimum > *maximum))
+            throw std::invalid_argument("DragScalar requires a label, positive speed, and ordered bounds.");
+        const std::string safeLabel(label);
+        const auto* minimumValue = minimum ? &*minimum : nullptr;
+        const auto* maximumValue = maximum ? &*maximum : nullptr;
+        return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_Double, &value, static_cast<float>(speed),
+                                 minimumValue, maximumValue, "%.6g");
+    }
+
+    bool UiFrame::DragVector2(const std::string_view label, Vector2& value, const float speed)
+    {
+        m_Impl->RequireActive("DragVector2");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
+            throw std::invalid_argument("DragVector2 requires a label and a finite positive speed.");
+        const std::string safeLabel(label);
+        return ImGui::DragFloat2(safeLabel.c_str(), &value.X, speed, 0.0F, 0.0F, "%.3f");
+    }
+
     bool UiFrame::DragVector3(const std::string_view label, Vector3& value, const float speed)
     {
         m_Impl->RequireActive("DragVector3");
@@ -918,6 +953,24 @@ namespace Keire
         ImGui::EndGroup();
         ImGui::PopID();
         return changed;
+    }
+
+    bool UiFrame::DragVector4(const std::string_view label, Vector4& value, const float speed)
+    {
+        m_Impl->RequireActive("DragVector4");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
+            throw std::invalid_argument("DragVector4 requires a label and a finite positive speed.");
+        const std::string safeLabel(label);
+        return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, 0.0F, 0.0F, "%.3f");
+    }
+
+    bool UiFrame::DragQuaternion(const std::string_view label, Quaternion& value, const float speed)
+    {
+        m_Impl->RequireActive("DragQuaternion");
+        if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
+            throw std::invalid_argument("DragQuaternion requires a label and a finite positive speed.");
+        const std::string safeLabel(label);
+        return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, -1.0F, 1.0F, "%.4f");
     }
 
     bool UiFrame::SliderFloat(std::string_view label, float& value, const float minimum, const float maximum)

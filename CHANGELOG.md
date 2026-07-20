@@ -8,6 +8,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 - Headless editor document and command-router tests, with scene and Input Actions state moved behind dedicated document
   owners and workspace panels composed through narrow controller interfaces.
+- A component-driven Inspector fallback with transactional property edits, generic drawers for every registered property
+  kind, component/property overrides, filtered asset and entity pickers, and engine-owned scalar/vector UI controls.
 - Backend-conditional D3D12, Vulkan, and Metal rendered-output tests with synchronized offscreen RGBA8 readback and
   tolerant pixel assertions for ambient, directional, tint, exposure, and transformed-normal behavior.
 

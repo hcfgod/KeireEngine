@@ -50,6 +50,13 @@ their labels in narrow inspectors, and retain uniform-scale locking. Directional
 temperature, shadow mode, strength, and bias. Add Component searches the application-owned component registry. Missing
 Components remain visible through their preserved serialized records rather than being deleted silently.
 
+Components outside the built-in ergonomic cards are rendered from `ComponentRegistration::Properties`; no
+Inspector-specific code is required. `PropertyDrawerRegistry` supplies Boolean, Integer, Scalar, Text, Vector2,
+Vector3, Vector4, Quaternion, Color, Asset, and Entity drawers. A component type plus property key may override a generic
+drawer. Mesh and Material metadata carries its expected asset type so those fields show filtered pickers, while Entity
+fields select from the open scene. An edit is validated against a fresh component first, records undo only after that
+validation succeeds, and restores the original property bag if applying the validated change unexpectedly fails.
+
 ## UI Resource Boundary
 
 `UiImage` is an opaque reference-counted image owned by the UI service. Call `UiFrame::CreateImage` on the UI owner
