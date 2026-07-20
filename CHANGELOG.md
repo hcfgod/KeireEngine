@@ -23,7 +23,7 @@ All notable template changes are documented here. The format follows Keep a Chan
 - Kéire-owned logging levels and formatting for placeholders, integer hex/width, and floating precision; public headers
   and SDK include paths no longer expose spdlog or fmt.
 - Backend-conditional D3D12, Vulkan, and Metal rendered-output tests with synchronized offscreen RGBA8 readback and
-  tolerant pixel assertions for ambient, directional, tint, exposure, and transformed-normal behavior.
+  tolerant pixel assertions for lighting, transforms, material/shader/texture revision swaps, and last-good output.
 
 - Project-owned ambient color, intensity, and exposure settings with atomic persistence, a dockable Project Settings
   editor, and matching Scene/Game lighting submissions.

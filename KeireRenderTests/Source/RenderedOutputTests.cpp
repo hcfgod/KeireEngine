@@ -145,8 +145,8 @@ namespace
 
             const auto shaderDirectory = Root / "Assets/Shaders";
             std::filesystem::create_directories(shaderDirectory);
-            std::filesystem::copy_file("Samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl",
-                                       shaderDirectory / "DefaultUnlit.hlsl");
+            ShaderSourcePath = shaderDirectory / "DefaultUnlit.hlsl";
+            std::filesystem::copy_file("Samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl", ShaderSourcePath);
             const std::string shaderManifest = R"({
   "schemaVersion": 1,
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
@@ -163,6 +163,7 @@ namespace
             const std::string materialManifest = "{\"schemaVersion\":1,\"shader\":\"" + Shader.ToString() +
                                                  "\",\"properties\":{\"Tint\":[1,1,1,1],\"MainTexture\":\"" +
                                                  Texture.ToString() + "\"}}";
+            MaterialPath = Root / "Assets/Material.keirematerial";
             Material =
                 Database->CreateAsset("Material.keirematerial", materialImporter,
                                       std::as_bytes(std::span(materialManifest.data(), materialManifest.size())));
@@ -183,17 +184,54 @@ namespace
             if (!stream)
                 return false;
 
+            return ReloadAsset(application, Texture);
+        }
+
+        [[nodiscard]] bool ReplaceMaterialTint(Keire::Application& application, const Keire::Color tint)
+        {
+            const std::string manifest =
+                "{\"schemaVersion\":1,\"shader\":\"" + Shader.ToString() + "\",\"properties\":{\"Tint\":[" +
+                std::to_string(tint.Red) + "," + std::to_string(tint.Green) + "," + std::to_string(tint.Blue) + "," +
+                std::to_string(tint.Alpha) + "],\"MainTexture\":\"" + Texture.ToString() + "\"}}";
+            std::ofstream stream(MaterialPath, std::ios::binary | std::ios::trunc);
+            stream << manifest;
+            stream.close();
+            return stream && ReloadAsset(application, Material);
+        }
+
+        [[nodiscard]] bool ReplaceShaderOutputSwizzle(Keire::Application& application)
+        {
+            std::ifstream input(ShaderSourcePath, std::ios::binary);
+            std::string source(std::istreambuf_iterator<char>(input), {});
+            constexpr std::string_view original = "surface.rgb * lighting";
+            const auto position = source.find(original);
+            if (!input || position == std::string::npos)
+                return false;
+            source.replace(position, original.size(), "surface.brg * lighting");
+            std::ofstream output(ShaderSourcePath, std::ios::binary | std::ios::trunc);
+            output << source;
+            output.close();
+            return output && ReloadAsset(application, Shader);
+        }
+
+      private:
+        [[nodiscard]] bool ReloadAsset(Keire::Application& application, const Keire::AssetId id)
+        {
+
             Catalog = Database->ImportAll().CatalogPath;
             auto assets = application.Assets();
             if (!assets || !assets->Unmount(Catalog))
                 return false;
             assets->Mount({Catalog, 0, true});
-            return assets->Reload(Texture);
+            return assets->Reload(id);
         }
 
+      public:
         std::filesystem::path Root;
         std::filesystem::path Catalog;
         std::filesystem::path TexturePath;
+        std::filesystem::path MaterialPath;
+        std::filesystem::path ShaderSourcePath;
         Keire::Ref<Keire::AssetDatabase> Database;
         Keire::AssetId Mesh;
         Keire::AssetId Material;
@@ -402,16 +440,20 @@ namespace
     {
         std::vector<std::uint8_t> Green;
         std::vector<std::uint8_t> Red;
+        std::vector<std::uint8_t> DimRed;
+        std::vector<std::uint8_t> ShaderGreen;
         std::vector<std::uint8_t> AfterFailure;
-        bool ValidReloadQueued = false;
+        bool TextureReloadQueued = false;
+        bool MaterialReloadQueued = false;
+        bool ShaderReloadQueued = false;
         bool InvalidReloadQueued = false;
     };
 
-    class TextureReloadCaptureLayer final : public Keire::Layer
+    class AssetRevisionCaptureLayer final : public Keire::Layer
     {
       public:
-        TextureReloadCaptureLayer(RenderAssetFixture& fixture, std::shared_ptr<ReloadCaptureResults> results)
-            : Layer("Texture reload capture"), m_Fixture(fixture), m_Results(std::move(results))
+        AssetRevisionCaptureLayer(RenderAssetFixture& fixture, std::shared_ptr<ReloadCaptureResults> results)
+            : Layer("Asset revision capture"), m_Fixture(fixture), m_Results(std::move(results))
         {
         }
 
@@ -456,17 +498,30 @@ namespace
                 {
                     m_Results->Green = pixels;
                     const auto red = RenderAssetFixture::SolidTexture(255, 0, 0);
-                    m_Results->ValidReloadQueued = m_Fixture.ReplaceTexture(Owner(), red);
+                    m_Results->TextureReloadQueued = m_Fixture.ReplaceTexture(Owner(), red);
                     m_Stage = 1;
                 }
                 else if (m_Stage == 1 && statistics.Red > statistics.Green + MinimumBehaviorDelta)
                 {
                     m_Results->Red = pixels;
-                    constexpr std::array invalid{std::byte{0x4b}, std::byte{0x45}, std::byte{0x49}};
-                    m_Results->InvalidReloadQueued = m_Fixture.ReplaceTexture(Owner(), invalid);
+                    m_Results->MaterialReloadQueued = m_Fixture.ReplaceMaterialTint(Owner(), {0.25F, 1.0F, 1.0F, 1.0F});
                     m_Stage = 2;
                 }
-                else if (m_Stage == 2 && ++m_FramesAfterFailure == 8)
+                else if (m_Stage == 2 && statistics.Red > statistics.Green + MinimumBehaviorDelta &&
+                         statistics.Red < MeasureCenter(m_Results->Red).Red - MinimumBehaviorDelta)
+                {
+                    m_Results->DimRed = pixels;
+                    m_Results->ShaderReloadQueued = m_Fixture.ReplaceShaderOutputSwizzle(Owner());
+                    m_Stage = 3;
+                }
+                else if (m_Stage == 3 && statistics.Green > statistics.Red + MinimumBehaviorDelta)
+                {
+                    m_Results->ShaderGreen = pixels;
+                    constexpr std::array invalid{std::byte{0x4b}, std::byte{0x45}, std::byte{0x49}};
+                    m_Results->InvalidReloadQueued = m_Fixture.ReplaceTexture(Owner(), invalid);
+                    m_Stage = 4;
+                }
+                else if (m_Stage == 4 && ++m_FramesAfterFailure == 8)
                 {
                     m_Results->AfterFailure = std::move(pixels);
                     Owner().RequestExit();
@@ -474,7 +529,7 @@ namespace
                 }
             }
 
-            if (++m_FrameCount > 60)
+            if (++m_FrameCount > 120)
             {
                 Owner().RequestExit();
                 return;
@@ -609,7 +664,7 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(last.Green > last.Blue + MinimumBehaviorDelta);
 }
 
-TEST_CASE("texture revisions swap atomically and failed reloads preserve last-good output")
+TEST_CASE("render asset revisions swap atomically and failed reloads preserve last-good output")
 {
     RenderAssetFixture assets;
     const auto results = std::make_shared<ReloadCaptureResults>();
@@ -618,21 +673,29 @@ TEST_CASE("texture revisions swap atomically and failed reloads preserve last-go
     specification.Assets.DevelopmentCatalog = assets.Catalog;
     {
         Keire::Application application(std::move(specification));
-        (void)application.PushLayer(std::make_unique<TextureReloadCaptureLayer>(assets, results));
+        (void)application.PushLayer(std::make_unique<AssetRevisionCaptureLayer>(assets, results));
         REQUIRE(application.Run() == 0);
     }
 
-    REQUIRE(results->ValidReloadQueued);
+    REQUIRE(results->TextureReloadQueued);
+    REQUIRE(results->MaterialReloadQueued);
+    REQUIRE(results->ShaderReloadQueued);
     REQUIRE(results->InvalidReloadQueued);
     REQUIRE_FALSE(results->Green.empty());
     REQUIRE_FALSE(results->Red.empty());
+    REQUIRE_FALSE(results->DimRed.empty());
+    REQUIRE_FALSE(results->ShaderGreen.empty());
     REQUIRE_FALSE(results->AfterFailure.empty());
     const auto green = MeasureCenter(results->Green);
     const auto red = MeasureCenter(results->Red);
+    const auto dimRed = MeasureCenter(results->DimRed);
+    const auto shaderGreen = MeasureCenter(results->ShaderGreen);
     const auto afterFailure = MeasureCenter(results->AfterFailure);
     CHECK(green.Green > green.Red + MinimumBehaviorDelta);
     CHECK(red.Red > red.Green + MinimumBehaviorDelta);
-    CHECK(std::abs(afterFailure.Red - red.Red) <= ColorTolerance);
-    CHECK(std::abs(afterFailure.Green - red.Green) <= ColorTolerance);
-    CHECK(std::abs(afterFailure.Blue - red.Blue) <= ColorTolerance);
+    CHECK(dimRed.Red < red.Red - MinimumBehaviorDelta);
+    CHECK(shaderGreen.Green > shaderGreen.Red + MinimumBehaviorDelta);
+    CHECK(std::abs(afterFailure.Red - shaderGreen.Red) <= ColorTolerance);
+    CHECK(std::abs(afterFailure.Green - shaderGreen.Green) <= ColorTolerance);
+    CHECK(std::abs(afterFailure.Blue - shaderGreen.Blue) <= ColorTolerance);
 }
