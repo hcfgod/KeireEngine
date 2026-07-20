@@ -3,6 +3,9 @@
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
+#include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SceneGizmoController.h"
 
 #include "KeireInternal/EditorCameraController.h"
@@ -321,9 +324,65 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>()),
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
       m_SceneGizmos(std::make_unique<KeireEditor::SceneGizmoController>()),
-      m_EditorCamera(std::make_unique<Keire::Detail::EditorCameraController>()), m_Smoke(smoke),
+      m_SceneDocument(std::make_unique<KeireEditor::SceneDocument>()),
+      m_InputActionsDocument(std::make_unique<KeireEditor::InputActionsDocument>()),
+      m_CommandRouter(std::make_unique<KeireEditor::EditorCommandRouter>()),
+      m_SceneViewportPanel(std::make_unique<KeireEditor::SceneViewportPanel>(
+          static_cast<KeireEditor::ISceneViewportController&>(*this))),
+      m_HierarchyPanel(
+          std::make_unique<KeireEditor::HierarchyPanel>(static_cast<KeireEditor::IHierarchyController&>(*this))),
+      m_InspectorPanel(
+          std::make_unique<KeireEditor::InspectorPanel>(static_cast<KeireEditor::IInspectorController&>(*this))),
+      m_InputActionsPanel(
+          std::make_unique<KeireEditor::InputActionsPanel>(static_cast<KeireEditor::IInputActionsController&>(*this))),
+      m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
+          static_cast<KeireEditor::IProjectSettingsController&>(*this))),
+      m_InputAsset(m_InputActionsDocument->AssetStorage()), m_SelectedInputMap(m_InputActionsDocument->MapStorage()),
+      m_SelectedInputScheme(m_InputActionsDocument->SchemeStorage()),
+      m_SelectedInputAction(m_InputActionsDocument->ActionStorage()),
+      m_SelectedInputBinding(m_InputActionsDocument->BindingStorage()),
+      m_InputDocument(m_InputActionsDocument->DefinitionStorage()),
+      m_InputUndoContext(m_InputActionsDocument->UndoStorage()), m_EditingScene(m_SceneDocument->SceneStorage()),
+      m_PlaySession(m_SceneDocument->PlaySessionStorage()), m_SceneLoad(m_SceneDocument->LoadOperationStorage()),
+      m_SaveSceneDialog(m_SceneDocument->SaveDialogStorage()), m_SceneAsset(m_SceneDocument->AssetStorage()),
+      m_SelectedSceneObject(m_SceneDocument->SelectionStorage()), m_SceneUndoContext(m_SceneDocument->UndoStorage()),
+      m_SceneSource(m_SceneDocument->SourceStorage()), m_SceneRecovery(m_SceneDocument->RecoveryPathStorage()),
+      m_SceneStatus(m_SceneDocument->StatusStorage()),
+      m_EditorCamera(std::make_unique<Keire::Detail::EditorCameraController>()),
+      m_SceneRecoverySeconds(m_SceneDocument->RecoverySecondsStorage()),
+      m_InputDirty(m_InputActionsDocument->DirtyStorage()),
+      m_SceneRecoveryAvailable(m_SceneDocument->RecoveryAvailableStorage()), m_Smoke(smoke),
       m_InitializeProject(initializeProject)
 {
+    m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::NewScene, [this] { RequestCreateScene(); },
+        [this] { return static_cast<bool>(m_AssetDatabase); });
+    m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::SaveScene, [this] { SaveScene(); },
+        [this] { return m_EditingScene && m_EditingScene->Dirty(); });
+    m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::SaveSceneAs, [this] { SaveSceneAs(); },
+        [this] { return m_EditingScene && !m_SaveSceneDialog; });
+    m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::CloseScene, [this] { RequestCloseScene(); },
+        [this] { return static_cast<bool>(m_EditingScene); });
+    m_CommandRouter->Bind(KeireEditor::EditorCommand::Exit,
+                          [this]
+                          {
+                              if (m_EditingScene && m_EditingScene->Dirty())
+                              {
+                                  m_PendingSceneAction = PendingSceneAction::Exit;
+                                  OpenDialog(Dialog::DirtyScene);
+                              }
+                              else
+                                  Owner().RequestExit();
+                          });
+    m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::Undo, [this] { ApplyActiveUndo(false); },
+        [this] { return m_ActiveUndoContext && m_ActiveUndoContext->CanUndo(); });
+    m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::Redo, [this] { ApplyActiveUndo(true); },
+        [this] { return m_ActiveUndoContext && m_ActiveUndoContext->CanRedo(); });
 }
 
 EditorWorkspaceLayer::~EditorWorkspaceLayer() = default;
@@ -583,13 +642,13 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     }
     if (ui.Shortcut({.Key = Keire::UiKey::Z, .Shift = true, .Primary = true}))
-        ApplyActiveUndo(true);
+        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
     else if (ui.Shortcut({.Key = Keire::UiKey::Z, .Primary = true}))
-        ApplyActiveUndo(false);
+        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Undo);
     else if (ui.Shortcut({.Key = Keire::UiKey::Y, .Primary = true}))
-        ApplyActiveUndo(true);
+        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
     else if (ui.Shortcut({.Key = Keire::UiKey::R, .Primary = true}))
-        ApplyActiveUndo(true);
+        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
     if (ui.Shortcut({Keire::UiKey::S, true, true}) && m_EditingScene && !m_SaveSceneDialog)
         SaveSceneAs();
     else if (ui.Shortcut({Keire::UiKey::S, true}))
@@ -615,19 +674,19 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     DrawNotices(ui, workspace);
     DrawDialogs(ui, workspace);
 
-    DrawScene(ui);
+    m_SceneViewportPanel->Draw(ui);
     DrawGame(ui);
-    DrawHierarchy(ui);
-    DrawInspector(ui);
+    m_HierarchyPanel->Draw(ui);
+    m_InspectorPanel->Draw(ui);
     DrawProject(ui);
     if (m_AssetBrowserPanel && m_AssetBrowserPanel->Focused())
         m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     DrawConsole(ui);
     DrawDiagnostics(ui);
     DrawThemeEditor(ui, workspace);
-    DrawInputActionsEditor(ui);
+    m_InputActionsPanel->Draw(ui);
     DrawInputDebugger(ui);
-    DrawProjectSettings(ui);
+    m_ProjectSettingsPanel->Draw(ui);
 }
 
 void EditorWorkspaceLayer::DrawEmptyState(Keire::UiFrame& ui, const std::string_view heading,
@@ -653,24 +712,19 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
     {
         if (auto file = ui.BeginMenu("File"); file)
         {
-            if (ui.MenuItem("New Scene", false, static_cast<bool>(m_AssetDatabase)))
-                RequestCreateScene();
-            if (ui.MenuItem("Save Scene", false, m_EditingScene && m_EditingScene->Dirty()))
-                SaveScene();
-            if (ui.MenuItem("Save Scene As...", false, static_cast<bool>(m_EditingScene) && !m_SaveSceneDialog))
-                SaveSceneAs();
-            if (ui.MenuItem("Close Scene", false, static_cast<bool>(m_EditingScene)))
-                RequestCloseScene();
+            if (ui.MenuItem("New Scene", false, m_CommandRouter->Available(KeireEditor::EditorCommand::NewScene)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::NewScene);
+            if (ui.MenuItem("Save Scene", false, m_CommandRouter->Available(KeireEditor::EditorCommand::SaveScene)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveScene);
+            if (ui.MenuItem("Save Scene As...", false,
+                            m_CommandRouter->Available(KeireEditor::EditorCommand::SaveSceneAs)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveSceneAs);
+            if (ui.MenuItem("Close Scene", false, m_CommandRouter->Available(KeireEditor::EditorCommand::CloseScene)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::CloseScene);
             ui.Separator();
             if (ui.MenuItem("Exit"))
             {
-                if (m_EditingScene && m_EditingScene->Dirty())
-                {
-                    m_PendingSceneAction = PendingSceneAction::Exit;
-                    OpenDialog(Dialog::DirtyScene);
-                }
-                else
-                    Owner().RequestExit();
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Exit);
             }
         }
         if (auto edit = ui.BeginMenu("Edit"); edit)
@@ -680,9 +734,9 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             const auto undoLabel = canUndo ? "Undo " + m_ActiveUndoContext->UndoName() : "Undo";
             const auto redoLabel = canRedo ? "Redo " + m_ActiveUndoContext->RedoName() : "Redo";
             if (ui.MenuItem(undoLabel, false, canUndo))
-                ApplyActiveUndo(false);
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Undo);
             if (ui.MenuItem(redoLabel, false, canRedo))
-                ApplyActiveUndo(true);
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
             ui.Separator();
             ui.TextColored(m_Theme.MutedText,
                            m_ActiveUndoContext ? std::string(m_ActiveUndoContext->Name()) : "No active history");

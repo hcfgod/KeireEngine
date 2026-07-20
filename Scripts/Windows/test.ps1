@@ -59,6 +59,17 @@ finally {
     Pop-Location
 }
 
+if ($exitCode -eq 0) {
+    $editorTestsTarget = "$($Project.PROJECT_NAMESPACE)EditorTests"
+    $editorTestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$editorTestsTarget\$editorTestsTarget.exe"
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -Target $editorTestsTarget -CI:$CI -Update:$Update -Generate:$Generate
+    if (-not (Test-Path $editorTestsExe)) { throw "Editor tests executable was not found: $editorTestsExe" }
+    Write-Host "==> Running editor document and controller tests"
+    & $editorTestsExe
+    if ($LASTEXITCODE -ne 0) { throw "Editor tests failed with exit code $LASTEXITCODE." }
+}
+
 if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
     $renderTestsTarget = "$($Project.PROJECT_NAMESPACE)RenderTests"
     $renderTestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$renderTestsTarget\$renderTestsTarget.exe"

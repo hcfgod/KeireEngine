@@ -1,9 +1,16 @@
 # Editor Panels And Commands
 
 KeireClient is a composition of dockable tools built exclusively on Kéire's public UI façade. Dear ImGui and SDL remain
-inside KeireCore. Asset Browser, Console, and Diagnostics are independent panel classes, and thumbnail generation is a
-separate bounded service. The workspace layer coordinates project services, shared selection/undo/console state, scene
-runtime, and panel registration rather than reimplementing those panel views.
+inside KeireCore. `SceneDocument` and `InputActionsDocument` own their respective authoring state and undo contexts;
+closing a document deterministically clears its selections, operations, and dirty/recovery state. Scene View,
+Hierarchy, Inspector, Input Actions, and Project Settings are panel objects that depend on narrow controller
+interfaces. Asset Browser, Console, and Diagnostics remain independent panels, and thumbnail generation is a separate
+bounded service. The workspace layer owns services, composes those panels, coordinates modal transitions, and
+orchestrates each frame.
+
+`EditorCommandRouter` is the single dispatch point shared by menu items and shortcuts. A command supplies its action
+and an availability predicate, so disabled UI and keyboard behavior cannot diverge. The headless `KeireEditorTests`
+target exercises document lifecycle and command dispatch without creating the complete editor application.
 
 ## Global Commands
 

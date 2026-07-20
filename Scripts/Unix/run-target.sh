@@ -44,6 +44,17 @@ if [[ "$MODE" == test && "$CONFIGURATION" =~ ^Debug ]]; then
     grep -q 'assertion probe' "$probe_output"
     rm -f "$probe_output"
 fi
+if [[ "$MODE" == test ]]; then
+    editor_tests_target="${PROJECT_NAMESPACE}EditorTests"
+    editor_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$editor_tests_target")
+    [[ $CI -eq 1 ]] && editor_args+=(--ci)
+    [[ $UPDATE -eq 1 ]] && editor_args+=(--update)
+    [[ $FORCE -eq 1 ]] && editor_args+=(--force)
+    bash "$ROOT/Scripts/$PLATFORM/build.sh" "${editor_args[@]}"
+    editor_tests="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$editor_tests_target/$editor_tests_target"
+    [[ -x "$editor_tests" ]] || { printf 'Editor tests executable not found: %s\n' "$editor_tests" >&2; exit 1; }
+    (cd "$ROOT" && "$editor_tests")
+fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
     render_tests_target="${PROJECT_NAMESPACE}RenderTests"
     render_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$render_tests_target")
