@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireClient/Editor/ScenePicker.h"
+
 #include "Keire/Core.h"
 
 #include <cstdint>
@@ -48,7 +50,7 @@ namespace KeireEditor
         [[nodiscard]] Keire::EntityId UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
                                                     Keire::EntityId selected, const Keire::RenderCamera& camera,
                                                     Keire::UiItemRect viewport, bool allowManipulation,
-                                                    BeginUndo beginUndo);
+                                                    BeginUndo beginUndo, MeshBoundsResolver resolveMeshBounds = {});
 
         void Load(const std::filesystem::path& projectRoot);
         void Save(const std::filesystem::path& projectRoot) const noexcept;

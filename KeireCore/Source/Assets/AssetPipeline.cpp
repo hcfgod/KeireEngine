@@ -1,4 +1,5 @@
 #include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/RenderingAssets.h"
 
 #include "Keire/Log.h"
 
@@ -651,6 +652,7 @@ namespace Keire
                     if (stored != m_Impl->Records.end())
                     {
                         stored->SourceDependencies = imported.SourceDependencies;
+                        stored->Metadata = imported.Metadata;
                         for (const auto dependency : imported.AssetDependencies)
                         {
                             if (std::ranges::find(stored->Dependencies, dependency) == stored->Dependencies.end())
@@ -707,8 +709,20 @@ namespace Keire
                 result.CatalogPath = previous;
             return result;
         }
-        const auto cooked = AssetCooker::Cook(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime");
-        result.CatalogPath = cooked.CatalogPath;
+        try
+        {
+            const auto cooked = AssetCooker::Cook(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime");
+            result.CatalogPath = cooked.CatalogPath;
+        }
+        catch (const std::exception& error)
+        {
+            if (policy == AssetImportPolicy::FailFast)
+                throw;
+            KEIRE_CORE_ERROR("Asset catalog validation failed; retaining the last-good catalog: {}", error.what());
+            const auto previous = m_Impl->CacheRoot / "Runtime" / "catalog.json";
+            if (std::filesystem::is_regular_file(previous))
+                result.CatalogPath = previous;
+        }
         return result;
     }
 
@@ -1101,6 +1115,57 @@ namespace Keire
             indices.emplace(record.Id, prepared.size());
             prepared.push_back({&record, std::move(imported), std::move(dependencies)});
         }
+        for (const auto& asset : prepared)
+        {
+            if (asset.Record->Type != MaterialAsset::StaticType())
+                continue;
+            const auto material = MaterialAsset::Decode(asset.Imported.Bytes);
+            if (!material->Definition().Shader)
+                throw std::runtime_error("Material asset must reference a shader: " + asset.Record->Id.ToString());
+            const auto shaderIndex = indices.find(material->Definition().Shader);
+            if (shaderIndex == indices.end() || prepared[shaderIndex->second].Record->Type != ShaderAsset::StaticType())
+                throw std::runtime_error("Material shader dependency is missing or has the wrong type: " +
+                                         material->Definition().Shader.ToString());
+            const auto shader = ShaderAsset::Decode(prepared[shaderIndex->second].Imported.Bytes);
+            ValidateMaterialAgainstShader(material->Definition(), shader->Definition());
+            for (const auto& property : shader->Definition().Properties)
+            {
+                if (property.Type != ShaderPropertyType::Texture2D)
+                    continue;
+                auto texture = property.DefaultTexture;
+                if (const auto selected = material->Definition().Properties.find(property.Name);
+                    selected != material->Definition().Properties.end())
+                {
+                    const auto* selectedTexture = std::get_if<AssetId>(&selected->second);
+                    if (!selectedTexture)
+                        throw std::runtime_error("Material texture property has a non-texture value: " + property.Name);
+                    texture = *selectedTexture;
+                }
+                if (!texture)
+                    continue;
+                const auto textureIndex = indices.find(texture);
+                if (textureIndex == indices.end() ||
+                    prepared[textureIndex->second].Record->Type != Texture2DAsset::StaticType())
+                    throw std::runtime_error("Material texture property '" + property.Name +
+                                             "' is missing or has the wrong asset type.");
+                const auto textureAsset = Texture2DAsset::Decode(prepared[textureIndex->second].Imported.Bytes);
+                const auto& settings = textureAsset->Settings();
+                const bool compatible =
+                    property.TextureSemantic == ShaderTextureSemantic::Generic ||
+                    ((property.TextureSemantic == ShaderTextureSemantic::BaseColor ||
+                      property.TextureSemantic == ShaderTextureSemantic::Emissive) &&
+                     settings.Semantic == TextureSemantic::Color && settings.ColorSpace == TextureColorSpace::Srgb) ||
+                    (property.TextureSemantic == ShaderTextureSemantic::Normal &&
+                     settings.Semantic == TextureSemantic::Normal &&
+                     settings.ColorSpace == TextureColorSpace::Linear) ||
+                    ((property.TextureSemantic == ShaderTextureSemantic::MetallicRoughness ||
+                      property.TextureSemantic == ShaderTextureSemantic::Occlusion) &&
+                     settings.Semantic == TextureSemantic::Data && settings.ColorSpace == TextureColorSpace::Linear);
+                if (!compatible)
+                    throw std::runtime_error("Material texture property '" + property.Name +
+                                             "' has incompatible semantic or color-space import settings.");
+            }
+        }
         std::unordered_set<AssetId> included;
         if (profile.Roots.empty())
         {
@@ -1175,6 +1240,7 @@ namespace Keire
                 entry.UncompressedBytes = bytes.size();
                 entry.Digest = Detail::Sha256(bytes);
                 entry.Dependencies = std::move(asset.Dependencies);
+                entry.Metadata = asset.Imported.Metadata;
                 if (!compressed.empty())
                     pack.write(reinterpret_cast<const char*>(compressed.data()),
                                static_cast<std::streamsize>(compressed.size()));

@@ -44,6 +44,22 @@ The Scene toolbar exposes Global/Local space, snapping, position/rotation/scale 
 Move, Rotate, and Scale handles operate directly on the selected Transform and record one scene undo step per drag.
 Camera and Directional Light icons remain visible independently of geometry; camera frustums and light directions can
 be toggled in the same settings popup. Scene-tool preferences live under `Library/Editor` and never dirty assets.
+Viewport clicks ray-test every active entity Transform. Rendered entities use cataloged imported mesh bounds and
+transform-only entities use a smaller origin proxy; the nearest hit wins, with rendered geometry winning exact ties.
+Camera and Directional Light overlays retain their larger icon hit regions. The picker is engine-handle-only and does
+not expose SDL or GPU resources, perform source I/O, or invoke Assimp on click.
+
+Shader ABI v2 appends tangent and handedness at vertex location 4 while ABI v1 remains supported. The sandbox surface
+uses Cook-Torrance GGX directional lighting with base color, normal, metallic-roughness (G/B), occlusion (R), emissive,
+ambient, and exposure inputs. Null semantic slots bind renderer-owned white, flat-normal, neutral-ORM, or black
+textures; missing non-null textures retain the checkerboard diagnostic.
+
+Every begun render frame is completed when exit is requested and cancelled without throwing during exceptional
+unwinding. Render tests release scene/view references before GPU shutdown and can be repeated in isolated processes
+with Scripts/Tests/repeat-render-tests.ps1 or repeat-render-tests.sh.
+The PBR suite measures neutral fallbacks, normal perturbation, metallic/roughness response, ambient occlusion, and
+emissive output with tolerant regions. Windows shader catalogs retain DXIL and SPIR-V, and Vulkan pipelines bind the
+shader manifest's declared SPIR-V entrypoint instead of assuming `main`.
 
 Relative cursor capture exists only during fly navigation and is released on focus loss. Camera state is stored below
 the project's `Library/Editor` directory, so navigation never dirties a scene or enters source control.
@@ -68,6 +84,6 @@ Settings...** to edit them live. Values update rendering immediately and persist
 are schema-validated, atomic, and resilient to transient Windows file sharing. A missing file receives conservative
 defaults, while a malformed file is reported and isolated without preventing the project's asset database from opening.
 
-This foundation renders a lit, depth-tested cube and editor grid. Textures, transparency sorting, shadows, PBR,
-post-processing, multiple-light accumulation, compute, custom raw GPU passes, and a
-dedicated render thread remain later milestones.
+This foundation renders asset-backed textured PBR meshes plus the editor grid. Transparency sorting, shadows, IBL,
+post-processing, multiple-light accumulation, compute, custom raw GPU passes, and a dedicated render thread remain
+later milestones.

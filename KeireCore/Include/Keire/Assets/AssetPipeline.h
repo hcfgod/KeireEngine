@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/AssetMetadata.h"
 
 #include <chrono>
 #include <compare>
@@ -64,6 +65,7 @@ namespace Keire
         std::vector<AssetSourceDependency> SourceDependencies;
         std::vector<AssetImportDiagnostic> Diagnostics;
         std::vector<AssetId> AssetDependencies;
+        AssetDerivedMetadata Metadata;
     };
 
     struct AssetImporterRegistration
@@ -90,6 +92,7 @@ namespace Keire
         std::vector<AssetId> Dependencies;
         std::vector<AssetId> SubAssets;
         std::vector<AssetSourceDependency> SourceDependencies;
+        AssetDerivedMetadata Metadata;
     };
 
     struct AssetDatabaseSpecification

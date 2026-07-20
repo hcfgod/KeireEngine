@@ -26,8 +26,8 @@ namespace Keire
         using Json = nlohmann::json;
         constexpr std::array<char, 8> MeshMagic{'K', 'E', 'I', 'R', 'E', 'M', 'S', 'H'};
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
-        constexpr std::uint32_t MeshVersion = 1;
-        constexpr std::uint32_t TextureVersion = 1;
+        constexpr std::uint32_t MeshVersion = 2;
+        constexpr std::uint32_t TextureVersion = 2;
         constexpr std::size_t MaximumMeshVertices = 16U * 1024U * 1024U;
         constexpr std::size_t MaximumMeshIndices = 48U * 1024U * 1024U;
         constexpr std::size_t MaximumTextureDimension = 16U * 1024U;
@@ -101,7 +101,8 @@ namespace Keire
                 if (!Math::IsFinite(vertex.Position) || !Math::IsFinite(vertex.Normal) ||
                     !std::isfinite(vertex.UV0.X) || !std::isfinite(vertex.UV0.Y) ||
                     !Math::IsFinite(Vector4{vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue,
-                                            vertex.VertexColor.Alpha}))
+                                            vertex.VertexColor.Alpha}) ||
+                    !Math::IsFinite(vertex.Tangent))
                     throw std::invalid_argument("Mesh vertices must contain only finite values.");
                 result.Minimum.X = std::min(result.Minimum.X, vertex.Position.X);
                 result.Minimum.Y = std::min(result.Minimum.Y, vertex.Position.Y);
@@ -126,25 +127,117 @@ namespace Keire
 
         [[nodiscard]] std::pair<std::vector<MeshVertex>, std::vector<std::uint32_t>> CubeGeometry(const Color color)
         {
-            constexpr std::array positions = {Vector3{-0.5F, -0.5F, -0.5F}, Vector3{0.5F, -0.5F, -0.5F},
-                                              Vector3{0.5F, 0.5F, -0.5F},   Vector3{-0.5F, 0.5F, -0.5F},
-                                              Vector3{-0.5F, -0.5F, 0.5F},  Vector3{0.5F, -0.5F, 0.5F},
-                                              Vector3{0.5F, 0.5F, 0.5F},    Vector3{-0.5F, 0.5F, 0.5F}};
-            constexpr std::array<std::uint32_t, 36> indices = {0, 2, 1, 0, 3, 2, 1, 2, 6, 1, 6, 5, 5, 6, 7, 5, 7, 4,
-                                                               4, 7, 3, 4, 3, 0, 3, 7, 6, 3, 6, 2, 4, 0, 1, 4, 1, 5};
-            std::vector<MeshVertex> vertices;
-            vertices.reserve(positions.size());
-            for (const auto position : positions)
+            struct Face final
             {
-                const auto inverseLength =
-                    1.0F / std::sqrt(position.X * position.X + position.Y * position.Y + position.Z * position.Z);
-                vertices.push_back(
-                    {position,
-                     {position.X * inverseLength, position.Y * inverseLength, position.Z * inverseLength},
-                     {},
-                     color});
+                Vector3 Normal;
+                Vector4 Tangent;
+                std::array<Vector3, 4> Positions;
+            };
+            constexpr std::array faces{
+                Face{{0.0F, 0.0F, 1.0F},
+                     {1.0F, 0.0F, 0.0F, 1.0F},
+                     {{{-0.5F, -0.5F, 0.5F}, {0.5F, -0.5F, 0.5F}, {0.5F, 0.5F, 0.5F}, {-0.5F, 0.5F, 0.5F}}}},
+                Face{{0.0F, 0.0F, -1.0F},
+                     {-1.0F, 0.0F, 0.0F, 1.0F},
+                     {{{0.5F, -0.5F, -0.5F}, {-0.5F, -0.5F, -0.5F}, {-0.5F, 0.5F, -0.5F}, {0.5F, 0.5F, -0.5F}}}},
+                Face{{1.0F, 0.0F, 0.0F},
+                     {0.0F, 0.0F, -1.0F, 1.0F},
+                     {{{0.5F, -0.5F, 0.5F}, {0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, -0.5F}, {0.5F, 0.5F, 0.5F}}}},
+                Face{{-1.0F, 0.0F, 0.0F},
+                     {0.0F, 0.0F, 1.0F, 1.0F},
+                     {{{-0.5F, -0.5F, -0.5F}, {-0.5F, -0.5F, 0.5F}, {-0.5F, 0.5F, 0.5F}, {-0.5F, 0.5F, -0.5F}}}},
+                Face{{0.0F, 1.0F, 0.0F},
+                     {1.0F, 0.0F, 0.0F, 1.0F},
+                     {{{-0.5F, 0.5F, 0.5F}, {0.5F, 0.5F, 0.5F}, {0.5F, 0.5F, -0.5F}, {-0.5F, 0.5F, -0.5F}}}},
+                Face{{0.0F, -1.0F, 0.0F},
+                     {1.0F, 0.0F, 0.0F, -1.0F},
+                     {{{-0.5F, -0.5F, -0.5F}, {0.5F, -0.5F, -0.5F}, {0.5F, -0.5F, 0.5F}, {-0.5F, -0.5F, 0.5F}}}}};
+            constexpr std::array uvs{Vector2{0.0F, 1.0F}, Vector2{1.0F, 1.0F}, Vector2{1.0F, 0.0F},
+                                     Vector2{0.0F, 0.0F}};
+            std::vector<MeshVertex> vertices;
+            std::vector<std::uint32_t> indices;
+            vertices.reserve(24);
+            indices.reserve(36);
+            for (const auto& face : faces)
+            {
+                const auto base = static_cast<std::uint32_t>(vertices.size());
+                for (std::size_t corner = 0; corner < face.Positions.size(); ++corner)
+                    vertices.push_back({face.Positions[corner], face.Normal, uvs[corner], color, face.Tangent});
+                indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
             }
-            return {std::move(vertices), {indices.begin(), indices.end()}};
+            return {std::move(vertices), std::move(indices)};
+        }
+
+        [[nodiscard]] Vector3 Cross(const Vector3 left, const Vector3 right) noexcept
+        {
+            return {left.Y * right.Z - left.Z * right.Y, left.Z * right.X - left.X * right.Z,
+                    left.X * right.Y - left.Y * right.X};
+        }
+
+        [[nodiscard]] float Dot(const Vector3 left, const Vector3 right) noexcept
+        {
+            return left.X * right.X + left.Y * right.Y + left.Z * right.Z;
+        }
+
+        [[nodiscard]] Vector3 Normalize(const Vector3 value, const Vector3 fallback) noexcept
+        {
+            const auto lengthSquared = Dot(value, value);
+            if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-12F)
+                return fallback;
+            const auto inverseLength = 1.0F / std::sqrt(lengthSquared);
+            return {value.X * inverseLength, value.Y * inverseLength, value.Z * inverseLength};
+        }
+
+        void GenerateTangents(std::vector<MeshVertex>& vertices, const std::span<const std::uint32_t> indices)
+        {
+            std::vector<Vector3> tangents(vertices.size());
+            std::vector<Vector3> bitangents(vertices.size());
+            for (std::size_t triangle = 0; triangle < indices.size(); triangle += 3)
+            {
+                const auto first = indices[triangle];
+                const auto second = indices[triangle + 1];
+                const auto third = indices[triangle + 2];
+                const auto& a = vertices[first];
+                const auto& b = vertices[second];
+                const auto& c = vertices[third];
+                const Vector3 edgeOne{b.Position.X - a.Position.X, b.Position.Y - a.Position.Y,
+                                      b.Position.Z - a.Position.Z};
+                const Vector3 edgeTwo{c.Position.X - a.Position.X, c.Position.Y - a.Position.Y,
+                                      c.Position.Z - a.Position.Z};
+                const Vector2 uvOne{b.UV0.X - a.UV0.X, b.UV0.Y - a.UV0.Y};
+                const Vector2 uvTwo{c.UV0.X - a.UV0.X, c.UV0.Y - a.UV0.Y};
+                const auto determinant = uvOne.X * uvTwo.Y - uvOne.Y * uvTwo.X;
+                if (std::abs(determinant) <= 1.0e-12F)
+                    continue;
+                const auto inverse = 1.0F / determinant;
+                const Vector3 tangent{(edgeOne.X * uvTwo.Y - edgeTwo.X * uvOne.Y) * inverse,
+                                      (edgeOne.Y * uvTwo.Y - edgeTwo.Y * uvOne.Y) * inverse,
+                                      (edgeOne.Z * uvTwo.Y - edgeTwo.Z * uvOne.Y) * inverse};
+                const Vector3 bitangent{(edgeTwo.X * uvOne.X - edgeOne.X * uvTwo.X) * inverse,
+                                        (edgeTwo.Y * uvOne.X - edgeOne.Y * uvTwo.X) * inverse,
+                                        (edgeTwo.Z * uvOne.X - edgeOne.Z * uvTwo.X) * inverse};
+                for (const auto index : {first, second, third})
+                {
+                    tangents[index] = {tangents[index].X + tangent.X, tangents[index].Y + tangent.Y,
+                                       tangents[index].Z + tangent.Z};
+                    bitangents[index] = {bitangents[index].X + bitangent.X, bitangents[index].Y + bitangent.Y,
+                                         bitangents[index].Z + bitangent.Z};
+                }
+            }
+            for (std::size_t index = 0; index < vertices.size(); ++index)
+            {
+                const auto normal = Normalize(vertices[index].Normal, {0.0F, 1.0F, 0.0F});
+                auto tangent = tangents[index];
+                const auto projection = Dot(normal, tangent);
+                tangent = Normalize(
+                    {tangent.X - normal.X * projection, tangent.Y - normal.Y * projection,
+                     tangent.Z - normal.Z * projection},
+                    Normalize(Cross(std::abs(normal.Y) < 0.999F ? Vector3{0.0F, 1.0F, 0.0F} : Vector3{1.0F, 0.0F, 0.0F},
+                                    normal),
+                              {1.0F, 0.0F, 0.0F}));
+                const auto handedness = Dot(Cross(normal, tangent), bitangents[index]) < 0.0F ? -1.0F : 1.0F;
+                vertices[index].Tangent = {tangent.X, tangent.Y, tangent.Z, handedness};
+            }
         }
 
         [[nodiscard]] TextureImportSettings NormalizeTextureSettings(TextureImportSettings settings)
@@ -225,6 +318,7 @@ namespace Keire
                     throw std::invalid_argument("Texture mips must be none or generate.");
             }
             settings.MaximumSize = values.value("maximumSize", settings.MaximumSize);
+            settings.FlipGreen = values.value("flipGreen", settings.FlipGreen);
             if (const auto sampler = values.find("sampler"); sampler != values.end())
             {
                 if (!sampler->is_object())
@@ -278,7 +372,7 @@ namespace Keire
                 throw std::invalid_argument("Texture mip dimensions do not match its RGBA8 payload.");
         }
 
-        [[nodiscard]] TextureMipLevel Downsample(const TextureMipLevel& source)
+        [[nodiscard]] TextureMipLevel Downsample(const TextureMipLevel& source, const bool normalMap)
         {
             TextureMipLevel result;
             result.Width = std::max(source.Width / 2U, 1U);
@@ -288,9 +382,9 @@ namespace Keire
             {
                 for (std::uint32_t x = 0; x < result.Width; ++x)
                 {
-                    for (std::uint32_t channel = 0; channel < 4; ++channel)
+                    if (normalMap)
                     {
-                        std::uint32_t total = 0;
+                        Vector3 normal;
                         std::uint32_t samples = 0;
                         for (std::uint32_t oy = 0; oy < 2; ++oy)
                         {
@@ -299,13 +393,45 @@ namespace Keire
                             {
                                 const auto sourceX = std::min(x * 2U + ox, source.Width - 1U);
                                 const auto sourceIndex =
-                                    (static_cast<std::size_t>(sourceY) * source.Width + sourceX) * 4U + channel;
-                                total += std::to_integer<std::uint8_t>(source.Pixels[sourceIndex]);
+                                    (static_cast<std::size_t>(sourceY) * source.Width + sourceX) * 4U;
+                                normal.X += std::to_integer<std::uint8_t>(source.Pixels[sourceIndex]) / 127.5F - 1.0F;
+                                normal.Y +=
+                                    std::to_integer<std::uint8_t>(source.Pixels[sourceIndex + 1]) / 127.5F - 1.0F;
+                                normal.Z +=
+                                    std::to_integer<std::uint8_t>(source.Pixels[sourceIndex + 2]) / 127.5F - 1.0F;
                                 ++samples;
                             }
                         }
-                        const auto targetIndex = (static_cast<std::size_t>(y) * result.Width + x) * 4U + channel;
-                        result.Pixels[targetIndex] = std::byte((total + samples / 2U) / samples);
+                        normal = Normalize(normal, {0.0F, 0.0F, 1.0F});
+                        const auto targetIndex = (static_cast<std::size_t>(y) * result.Width + x) * 4U;
+                        result.Pixels[targetIndex] = std::byte(static_cast<std::uint8_t>((normal.X + 1.0F) * 127.5F));
+                        result.Pixels[targetIndex + 1] =
+                            std::byte(static_cast<std::uint8_t>((normal.Y + 1.0F) * 127.5F));
+                        result.Pixels[targetIndex + 2] =
+                            std::byte(static_cast<std::uint8_t>((normal.Z + 1.0F) * 127.5F));
+                        result.Pixels[targetIndex + 3] = std::byte{255};
+                    }
+                    else
+                    {
+                        for (std::uint32_t channel = 0; channel < 4; ++channel)
+                        {
+                            std::uint32_t total = 0;
+                            std::uint32_t samples = 0;
+                            for (std::uint32_t oy = 0; oy < 2; ++oy)
+                            {
+                                const auto sourceY = std::min(y * 2U + oy, source.Height - 1U);
+                                for (std::uint32_t ox = 0; ox < 2; ++ox)
+                                {
+                                    const auto sourceX = std::min(x * 2U + ox, source.Width - 1U);
+                                    const auto sourceIndex =
+                                        (static_cast<std::size_t>(sourceY) * source.Width + sourceX) * 4U + channel;
+                                    total += std::to_integer<std::uint8_t>(source.Pixels[sourceIndex]);
+                                    ++samples;
+                                }
+                            }
+                            const auto targetIndex = (static_cast<std::size_t>(y) * result.Width + x) * 4U + channel;
+                            result.Pixels[targetIndex] = std::byte((total + samples / 2U) / samples);
+                        }
                     }
                 }
             }
@@ -332,13 +458,18 @@ namespace Keire
             base.Height = static_cast<std::uint32_t>(height);
             base.Pixels.resize(static_cast<std::size_t>(base.Width) * base.Height * 4U);
             std::memcpy(base.Pixels.data(), pixels.get(), base.Pixels.size());
+            if (settings.Semantic == TextureSemantic::Normal && settings.FlipGreen)
+            {
+                for (std::size_t index = 1; index < base.Pixels.size(); index += 4)
+                    base.Pixels[index] = std::byte(255U - std::to_integer<std::uint8_t>(base.Pixels[index]));
+            }
             while (base.Width > settings.MaximumSize || base.Height > settings.MaximumSize)
-                base = Downsample(base);
+                base = Downsample(base, settings.Semantic == TextureSemantic::Normal);
             std::vector<TextureMipLevel> result{std::move(base)};
             if (settings.Mips == TextureMipPolicy::Generate)
             {
                 while (result.back().Width > 1 || result.back().Height > 1)
-                    result.push_back(Downsample(result.back()));
+                    result.push_back(Downsample(result.back(), settings.Semantic == TextureSemantic::Normal));
             }
             return result;
         }
@@ -375,7 +506,7 @@ namespace Keire
         ValidateMesh(vertices, indices);
         const auto bounds = CalculateBounds(vertices);
         std::vector<std::byte> result;
-        result.reserve(48U + vertices.size() * 48U + indices.size() * sizeof(std::uint32_t));
+        result.reserve(48U + vertices.size() * 64U + indices.size() * sizeof(std::uint32_t));
         for (const char value : MeshMagic)
             result.push_back(std::byte(value));
         AppendUnsigned(result, MeshVersion);
@@ -389,7 +520,8 @@ namespace Keire
             for (const float value :
                  {vertex.Position.X, vertex.Position.Y, vertex.Position.Z, vertex.Normal.X, vertex.Normal.Y,
                   vertex.Normal.Z, vertex.UV0.X, vertex.UV0.Y, vertex.VertexColor.Red, vertex.VertexColor.Green,
-                  vertex.VertexColor.Blue, vertex.VertexColor.Alpha})
+                  vertex.VertexColor.Blue, vertex.VertexColor.Alpha, vertex.Tangent.X, vertex.Tangent.Y,
+                  vertex.Tangent.Z, vertex.Tangent.W})
                 AppendFloat(result, value);
         }
         for (const auto index : indices)
@@ -401,7 +533,8 @@ namespace Keire
     {
         BinaryReader reader(bytes);
         reader.Expect(MeshMagic);
-        if (reader.UnsignedValue<std::uint32_t>() != MeshVersion)
+        const auto version = reader.UnsignedValue<std::uint32_t>();
+        if (version != 1 && version != MeshVersion)
             throw std::invalid_argument("Mesh asset has an unsupported version.");
         const auto vertexCount = reader.UnsignedValue<std::uint64_t>();
         const auto indexCount = reader.UnsignedValue<std::uint64_t>();
@@ -410,7 +543,8 @@ namespace Keire
             throw std::invalid_argument("Mesh asset counts are invalid.");
         MeshBounds bounds{{reader.Float(), reader.Float(), reader.Float()},
                           {reader.Float(), reader.Float(), reader.Float()}};
-        const auto expected = vertexCount * 48U + indexCount * sizeof(std::uint32_t);
+        const auto vertexSize = version == 1 ? 48U : 64U;
+        const auto expected = vertexCount * vertexSize + indexCount * sizeof(std::uint32_t);
         if (expected > reader.Remaining() || expected != reader.Remaining())
             throw std::invalid_argument("Mesh asset payload size is invalid.");
         std::vector<MeshVertex> vertices(static_cast<std::size_t>(vertexCount));
@@ -420,10 +554,14 @@ namespace Keire
             vertex.Normal = {reader.Float(), reader.Float(), reader.Float()};
             vertex.UV0 = {reader.Float(), reader.Float()};
             vertex.VertexColor = {reader.Float(), reader.Float(), reader.Float(), reader.Float()};
+            if (version >= 2)
+                vertex.Tangent = {reader.Float(), reader.Float(), reader.Float(), reader.Float()};
         }
         std::vector<std::uint32_t> indices(static_cast<std::size_t>(indexCount));
         for (auto& index : indices)
             index = reader.UnsignedValue<std::uint32_t>();
+        if (version == 1)
+            GenerateTangents(vertices, indices);
         return CreateRef<MeshAsset>(std::move(vertices), std::move(indices), bounds);
     }
 
@@ -471,7 +609,8 @@ namespace Keire
               static_cast<std::uint8_t>(settings.Sampler.Magnification),
               static_cast<std::uint8_t>(settings.Sampler.Mip), static_cast<std::uint8_t>(settings.Sampler.AddressU),
               static_cast<std::uint8_t>(settings.Sampler.AddressV),
-              static_cast<std::uint8_t>(settings.Sampler.AddressW), settings.Sampler.Anisotropy})
+              static_cast<std::uint8_t>(settings.Sampler.AddressW), settings.Sampler.Anisotropy,
+              static_cast<std::uint8_t>(settings.FlipGreen)})
             result.push_back(std::byte(value));
         AppendUnsigned(result, settings.MaximumSize);
         AppendUnsigned(result, static_cast<std::uint32_t>(mips.size()));
@@ -489,7 +628,8 @@ namespace Keire
     {
         BinaryReader reader(bytes);
         reader.Expect(TextureMagic);
-        if (reader.UnsignedValue<std::uint32_t>() != TextureVersion)
+        const auto version = reader.UnsignedValue<std::uint32_t>();
+        if (version != 1 && version != TextureVersion)
             throw std::invalid_argument("Texture asset has an unsupported version.");
         TextureImportSettings settings;
         settings.Semantic = static_cast<TextureSemantic>(reader.UnsignedValue<std::uint8_t>());
@@ -502,6 +642,8 @@ namespace Keire
         settings.Sampler.AddressV = static_cast<TextureAddressMode>(reader.UnsignedValue<std::uint8_t>());
         settings.Sampler.AddressW = static_cast<TextureAddressMode>(reader.UnsignedValue<std::uint8_t>());
         settings.Sampler.Anisotropy = reader.UnsignedValue<std::uint8_t>();
+        if (version >= 2)
+            settings.FlipGreen = reader.UnsignedValue<std::uint8_t>() != 0;
         settings.MaximumSize = reader.UnsignedValue<std::uint32_t>();
         const auto mipCount = reader.UnsignedValue<std::uint32_t>();
         if (mipCount == 0 || mipCount > 15)
@@ -542,7 +684,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 1;
+        result.Version = 2;
         result.Type = MeshAsset::StaticType();
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
         result.ContextualImport = [](const AssetImportContext& context,
@@ -550,14 +692,19 @@ namespace Keire
         {
             if (context.SourcePath.extension() == ".keiremesh")
             {
-                (void)MeshAsset::Decode(bytes);
-                return {{bytes.begin(), bytes.end()}};
+                const auto mesh = MeshAsset::Decode(bytes);
+                AssetImportOutput output;
+                output.Bytes.assign(bytes.begin(), bytes.end());
+                const auto& bounds = mesh->Bounds();
+                output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
+                                                          {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
+                return output;
             }
             Assimp::Importer importer;
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
                                            aiProcess_GenSmoothNormals | aiProcess_PreTransformVertices |
-                                           aiProcess_ImproveCacheLocality | aiProcess_SortByPType |
-                                           aiProcess_ValidateDataStructure;
+                                           aiProcess_CalcTangentSpace | aiProcess_ImproveCacheLocality |
+                                           aiProcess_SortByPType | aiProcess_ValidateDataStructure;
             auto extension = context.SourcePath.extension().string();
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
@@ -596,7 +743,13 @@ namespace Keire
                         indices.push_back(base + face.mIndices[corner]);
                 }
             }
-            return {MeshAsset::Encode(vertices, indices)};
+            GenerateTangents(vertices, indices);
+            const auto bounds = CalculateBounds(vertices);
+            AssetImportOutput output;
+            output.Bytes = MeshAsset::Encode(vertices, indices);
+            output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
+                                                      {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
+            return output;
         };
         return result;
     }

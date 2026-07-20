@@ -117,6 +117,9 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     definition.Properties.push_back({"Tint", Keire::ShaderPropertyType::Color, {1.0F, 0.5F, 0.25F, 1.0F}});
     const auto defaultTexture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
     definition.Properties.push_back({"MainTexture", Keire::ShaderPropertyType::Texture2D, {}, defaultTexture});
+    definition.Properties.back().DisplayName = "Base Color Texture";
+    definition.Properties.back().Category = "Surface";
+    definition.Properties.back().TextureSemantic = Keire::ShaderTextureSemantic::BaseColor;
     const std::array formats{Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV,
                              Keire::ShaderBinaryFormat::Msl};
     for (std::size_t index = 0; index < formats.size(); ++index)
@@ -133,13 +136,16 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
     CHECK(decoded->Definition().Properties.back().DefaultTexture == defaultTexture);
+    CHECK(decoded->Definition().Properties.back().DisplayName == "Base Color Texture");
+    CHECK(decoded->Definition().Properties.back().TextureSemantic == Keire::ShaderTextureSemantic::BaseColor);
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
 
     const auto importer = Keire::CreateShaderAssetImporter();
     REQUIRE(importer.Cook);
     const auto windows = Keire::ShaderAsset::Decode(importer.Cook(encoded, Keire::AssetTargetPlatform::Windows));
-    REQUIRE(windows->Definition().Variants.size() == 1);
-    CHECK(windows->Definition().Variants.front().Format == Keire::ShaderBinaryFormat::Dxil);
+    REQUIRE(windows->Definition().Variants.size() == 2);
+    CHECK(windows->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
+    CHECK(windows->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     const auto linux = Keire::ShaderAsset::Decode(importer.Cook(encoded, Keire::AssetTargetPlatform::Linux));
     REQUIRE(linux->Definition().Variants.size() == 1);
     CHECK(linux->Definition().Variants.front().Format == Keire::ShaderBinaryFormat::SpirV);
@@ -161,15 +167,48 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     definition.Properties.emplace("Roughness", 0.5F);
     definition.Properties.emplace("Tint", Keire::Color{0.25F, 0.5F, 1.0F, 1.0F});
     const auto texture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
-    definition.Properties.emplace("MainTexture", texture);
+    definition.SetTexture("MainTexture", texture);
+    CHECK(definition.Texture("MainTexture") == texture);
+    CHECK_FALSE(definition.Texture("Missing"));
 
     const auto decoded = Keire::MaterialAsset::Decode(Keire::MaterialAsset::Encode(definition));
     CHECK(decoded->Definition().Shader == definition.Shader);
     CHECK(decoded->Definition().Properties.size() == 3);
     CHECK(std::get<Keire::AssetId>(decoded->Definition().Properties.at("MainTexture")) == texture);
+    const auto sourceDecoded = Keire::MaterialAsset::DecodeSource(Keire::MaterialAsset::EncodeSource(definition));
+    CHECK(sourceDecoded.Shader == definition.Shader);
+    CHECK(sourceDecoded.Texture("MainTexture") == texture);
+    auto mutableDefinition = sourceDecoded;
+    CHECK(mutableDefinition.RemoveTexture("MainTexture"));
+    CHECK_FALSE(mutableDefinition.RemoveTexture("MainTexture"));
     CHECK(Keire::MeshAsset::Cube()->Mesh() == Keire::BuiltinMesh::Cube);
     CHECK(Keire::MeshAsset::CubeId() != Keire::MeshAsset::ErrorId());
     CHECK(Keire::MaterialAsset::Error()->Definition().Properties.contains("ErrorColor"));
+}
+
+TEST_CASE("material overrides are validated against shader declarations")
+{
+    Keire::ShaderAssetDefinition shader;
+    shader.Source = "Assets/Shaders/Surface.hlsl";
+    Keire::ShaderPropertyDefinition roughness{"Roughness", Keire::ShaderPropertyType::Scalar, {1.0F, 0.0F, 0.0F, 0.0F}};
+    roughness.Minimum = 0.0F;
+    roughness.Maximum = 1.0F;
+    shader.Properties.push_back(roughness);
+    Keire::ShaderPropertyDefinition normal{"NormalTexture", Keire::ShaderPropertyType::Texture2D};
+    normal.TextureSemantic = Keire::ShaderTextureSemantic::Normal;
+    shader.Properties.push_back(normal);
+
+    Keire::MaterialAssetDefinition material;
+    material.Properties.emplace("Roughness", 0.5F);
+    material.SetTexture("NormalTexture", {});
+    CHECK_NOTHROW(Keire::ValidateMaterialAgainstShader(material, shader));
+    material.Properties["Roughness"] = 1.5F;
+    CHECK_THROWS_AS(Keire::ValidateMaterialAgainstShader(material, shader), std::invalid_argument);
+    material.Properties["Roughness"] = Keire::Color{};
+    CHECK_THROWS_AS(Keire::ValidateMaterialAgainstShader(material, shader), std::invalid_argument);
+    material.Properties.erase("Roughness");
+    material.Properties.emplace("Unknown", 1.0F);
+    CHECK_THROWS_AS(Keire::ValidateMaterialAgainstShader(material, shader), std::invalid_argument);
 }
 
 TEST_CASE("scene and material importers extract transitive render dependencies")
@@ -218,9 +257,42 @@ TEST_CASE("mesh assets validate and preserve production vertex data")
 
     const auto cube = Keire::MeshAsset::Cube();
     const auto error = Keire::MeshAsset::Error();
-    CHECK(cube->Vertices().size() == 8);
+    CHECK(cube->Vertices().size() == 24);
     CHECK(cube->Indices().size() == 36);
+    CHECK(cube->Vertices().front().Tangent == (Keire::Vector4{1.0F, 0.0F, 0.0F, 1.0F}));
     CHECK(error->Vertices().front().VertexColor == (Keire::Color{1.0F, 0.0F, 1.0F, 1.0F}));
+}
+
+TEST_CASE("mesh version one payloads generate the same deterministic tangent frame as version two")
+{
+    const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 0.0F}, {}},
+                              Keire::MeshVertex{{1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F}, {}},
+                              Keire::MeshVertex{{0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}, {}}};
+    constexpr std::array<std::uint32_t, 3> indices{0, 1, 2};
+    const auto versionTwo = Keire::MeshAsset::Encode(vertices, indices);
+    constexpr std::size_t headerSize = 8U + 4U + 8U + 8U + 6U * sizeof(float);
+    constexpr std::size_t versionTwoVertexSize = 16U * sizeof(float);
+    constexpr std::size_t versionOneVertexSize = 12U * sizeof(float);
+    std::vector<std::byte> versionOne(versionTwo.begin(), versionTwo.begin() + headerSize);
+    versionOne[8] = std::byte{1};
+    versionOne[9] = std::byte{0};
+    versionOne[10] = std::byte{0};
+    versionOne[11] = std::byte{0};
+    for (std::size_t index = 0; index < vertices.size(); ++index)
+    {
+        const auto begin = versionTwo.begin() + static_cast<std::ptrdiff_t>(headerSize + index * versionTwoVertexSize);
+        versionOne.insert(versionOne.end(), begin, begin + versionOneVertexSize);
+    }
+    versionOne.insert(versionOne.end(),
+                      versionTwo.begin() +
+                          static_cast<std::ptrdiff_t>(headerSize + vertices.size() * versionTwoVertexSize),
+                      versionTwo.end());
+
+    const auto decodedOne = Keire::MeshAsset::Decode(versionOne);
+    const auto decodedTwo = Keire::MeshAsset::Decode(versionTwo);
+    REQUIRE(decodedOne->Vertices().size() == decodedTwo->Vertices().size());
+    for (std::size_t index = 0; index < decodedOne->Vertices().size(); ++index)
+        CHECK(decodedOne->Vertices()[index].Tangent == decodedTwo->Vertices()[index].Tangent);
 }
 
 TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format")
@@ -245,6 +317,9 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Vertices().size() == 3);
     CHECK(mesh->Indices().size() == 3);
     CHECK(mesh->Bounds().Maximum == (Keire::Vector3{1.0F, 1.0F, 0.0F}));
+    REQUIRE(output.Metadata.LocalBounds);
+    CHECK(output.Metadata.LocalBounds->Maximum == std::array{1.0F, 1.0F, 0.0F});
+    CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
 }
 
 TEST_CASE("texture importer emits validated RGBA8 mip chains")
@@ -282,7 +357,7 @@ TEST_CASE("texture importer emits validated RGBA8 mip chains")
     {
         std::ofstream output(metadata);
         output
-            << R"({"textureImportSettings":{"semantic":"data","colorSpace":"srgb","mips":"none","maximumSize":1,"sampler":{"min":"nearest","addressU":"clamp","anisotropy":4}}})";
+            << R"({"textureImportSettings":{"semantic":"data","colorSpace":"srgb","mips":"none","maximumSize":1,"flipGreen":true,"sampler":{"min":"nearest","addressU":"clamp","anisotropy":4}}})";
     }
     Keire::AssetImportContext context;
     context.MetadataPath = metadata;
@@ -295,6 +370,7 @@ TEST_CASE("texture importer emits validated RGBA8 mip chains")
     CHECK(configured->Settings().Sampler.Minimum == Keire::TextureFilter::Nearest);
     CHECK(configured->Settings().Sampler.AddressU == Keire::TextureAddressMode::Clamp);
     CHECK(configured->Settings().Sampler.Anisotropy == 4);
+    CHECK(configured->Settings().FlipGreen);
 }
 
 TEST_CASE("pinned shader compiler resolves from the executable while the project is the working directory")

@@ -9,7 +9,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -45,12 +48,28 @@ namespace Keire
         Texture2D
     };
 
+    enum class ShaderTextureSemantic : std::uint8_t
+    {
+        Generic,
+        BaseColor,
+        Normal,
+        MetallicRoughness,
+        Occlusion,
+        Emissive
+    };
+
     struct ShaderPropertyDefinition
     {
         std::string Name;
         ShaderPropertyType Type = ShaderPropertyType::Scalar;
         Vector4 DefaultValue;
         AssetId DefaultTexture;
+        std::string DisplayName;
+        std::string Category;
+        std::optional<float> Minimum;
+        std::optional<float> Maximum;
+        std::optional<float> Step;
+        ShaderTextureSemantic TextureSemantic = ShaderTextureSemantic::Generic;
     };
 
     struct ShaderVariant
@@ -66,6 +85,7 @@ namespace Keire
         std::filesystem::path Source;
         std::string VertexEntry = "VSMain";
         std::string FragmentEntry = "PSMain";
+        std::uint8_t VertexLayoutVersion = 1;
         ShaderPrimitiveTopology Topology = ShaderPrimitiveTopology::TriangleList;
         ShaderCullMode Culling = ShaderCullMode::Back;
         bool DepthTest = true;
@@ -92,6 +112,7 @@ namespace Keire
 
         [[nodiscard]] static Ref<ShaderAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(const ShaderAssetDefinition& definition);
+        [[nodiscard]] static ShaderAssetDefinition DecodeManifest(std::span<const std::byte> bytes);
         [[nodiscard]] static Ref<ShaderAsset> Error();
 
       private:
@@ -105,6 +126,10 @@ namespace Keire
         std::uint32_t SchemaVersion = 1;
         AssetId Shader;
         std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
+
+        void SetTexture(std::string name, AssetId texture);
+        [[nodiscard]] bool RemoveTexture(std::string_view name);
+        [[nodiscard]] std::optional<AssetId> Texture(std::string_view name) const;
     };
 
     class KEIRE_API MaterialAsset final : public Asset
@@ -122,6 +147,8 @@ namespace Keire
 
         [[nodiscard]] static Ref<MaterialAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(const MaterialAssetDefinition& definition);
+        [[nodiscard]] static MaterialAssetDefinition DecodeSource(std::span<const std::byte> bytes);
+        [[nodiscard]] static std::vector<std::byte> EncodeSource(const MaterialAssetDefinition& definition);
         [[nodiscard]] static Ref<MaterialAsset> Error();
 
       private:
@@ -140,6 +167,7 @@ namespace Keire
         Vector3 Normal{0.0F, 1.0F, 0.0F};
         Vector2 UV0;
         Color VertexColor;
+        Vector4 Tangent{1.0F, 0.0F, 0.0F, 1.0F};
     };
 
     struct MeshBounds
@@ -236,6 +264,7 @@ namespace Keire
         TextureColorSpace ColorSpace = TextureColorSpace::Srgb;
         TextureMipPolicy Mips = TextureMipPolicy::Generate;
         std::uint32_t MaximumSize = 4096;
+        bool FlipGreen = false;
         SamplerDescription Sampler;
 
         auto operator<=>(const TextureImportSettings&) const = default;
@@ -283,6 +312,8 @@ namespace Keire
 
     [[nodiscard]] KEIRE_API AssetImporterRegistration
     CreateShaderAssetImporter(ShaderImporterSpecification specification = {});
+    KEIRE_API void ValidateMaterialAgainstShader(const MaterialAssetDefinition& material,
+                                                 const ShaderAssetDefinition& shader);
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateMaterialAssetImporter();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateMeshAssetImporter();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateTexture2DAssetImporter(TextureImportSettings settings = {});

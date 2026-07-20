@@ -170,6 +170,32 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
     CHECK(metadataImport.Imported == 1);
 }
 
+TEST_CASE("Mesh bounds are persisted in catalog metadata and queried without loading the asset")
+{
+    TemporaryAssetProject project;
+    project.Write("Triangle.obj", "v 0 0 0\nv 2 0 0\nv 0 3 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n");
+    Keire::AssetDatabaseSpecification databaseSpecification;
+    databaseSpecification.ProjectRoot = project.Root;
+    databaseSpecification.Importers.push_back(Keire::CreateMeshAssetImporter());
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+    const auto record = database->Find("Triangle.obj");
+    REQUIRE(record);
+    const auto imported = database->ImportAll();
+
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.DevelopmentCatalog = imported.CatalogPath;
+    assetSpecification.Decoders.push_back(Keire::CreateMeshAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const auto metadata = assets->TryGetMetadata(record->Id);
+    REQUIRE(metadata);
+    REQUIRE(metadata->LocalBounds);
+    CHECK(metadata->LocalBounds->Minimum == std::array{0.0F, 0.0F, 0.0F});
+    CHECK(metadata->LocalBounds->Maximum == std::array{2.0F, 3.0F, 0.0F});
+    CHECK(assets->Statistics().KnownAssets == 0);
+    assets->Close();
+}
+
 TEST_CASE("Asset database editor imports report failures without discarding the last-good catalog")
 {
     KeireTests::LogFixture logs("asset-import-diagnostics");

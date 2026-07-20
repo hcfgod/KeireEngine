@@ -1,0 +1,86 @@
+name: Required GPU validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-gpu:
+    name: Windows ${{ matrix.configuration }} D3D12 and Vulkan
+    runs-on: [self-hosted, keire-gpu, windows, x64]
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - shell: pwsh
+        run: ./Scripts/project.ps1 bootstrap -Generator ninja -Architecture x86_64 -Toolset msc
+      - shell: pwsh
+        run: ./Scripts/project.ps1 build -Target KeireRenderTests -Generator ninja -Configuration ${{ matrix.configuration }} -Architecture x86_64 -Toolset msc -CI
+      - name: Require D3D12
+        shell: pwsh
+        run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration ${{ matrix.configuration }} -Backend direct3d12 -Count ${{ matrix.configuration == 'Release' && 25 || 1 }}
+      - name: Require Vulkan
+        shell: pwsh
+        run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration ${{ matrix.configuration }} -Backend vulkan -Count 1
+      - name: D3D12 validation-layer repeats
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration Release -Backend direct3d12 -Count 5 -GpuValidation
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-gpu-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/TestLogs/
+          if-no-files-found: ignore
+
+  unix-gpu:
+    name: ${{ matrix.name }} ${{ matrix.configuration }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux Vulkan
+            runner: [self-hosted, keire-gpu, linux, x64]
+            platform: linux
+            backend: vulkan
+            configuration: Debug
+          - name: Linux Vulkan
+            runner: [self-hosted, keire-gpu, linux, x64]
+            platform: linux
+            backend: vulkan
+            configuration: Release
+          - name: macOS Metal
+            runner: [self-hosted, keire-gpu, macos, x64]
+            platform: macos
+            backend: metal
+            configuration: Debug
+          - name: macOS Metal
+            runner: [self-hosted, keire-gpu, macos, x64]
+            platform: macos
+            backend: metal
+            configuration: Release
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          submodules: recursive
+      - run: bash Scripts/project.sh bootstrap --generator ninja --architecture x86_64 --toolset clang
+      - run: bash Scripts/project.sh build --target KeireRenderTests --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset clang --ci
+      - name: Require backend
+        run: bash Scripts/Tests/repeat-render-tests.sh ${{ matrix.configuration }} ${{ matrix.backend }} 1
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.platform }}-gpu-${{ matrix.configuration }}-failure
+          path: |
+            Logs/
+            Build/TestLogs/
+          if-no-files-found: ignore

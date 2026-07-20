@@ -1,10 +1,16 @@
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/MaterialDocument.h"
+#include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
+#include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/ScenePicker.h"
+#include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include <doctest/doctest.h>
 
+#include <filesystem>
 #include <stdexcept>
 #include <vector>
 
@@ -240,4 +246,138 @@ TEST_CASE("generic property drawers cover every component property kind")
     for (auto [property, value] : properties)
         CHECK(drawers.Draw(editor, CustomComponent::StaticType(), property, value));
     CHECK(editor.ExpectedAssetType == assetType);
+}
+
+TEST_CASE("material documents expose every shader texture property without hardcoded slots")
+{
+    const auto shader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000020");
+    const auto baseColor = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000021");
+    const auto normal = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000022");
+    Keire::ShaderAssetDefinition shaderDefinition;
+    shaderDefinition.Source = "Assets/Shaders/Material.hlsl";
+    shaderDefinition.Properties = {{"Tint", Keire::ShaderPropertyType::Color, {1.0F, 1.0F, 1.0F, 1.0F}},
+                                   {"Roughness", Keire::ShaderPropertyType::Scalar, {1.0F, 0.0F, 0.0F, 0.0F}},
+                                   {"BaseColorTexture", Keire::ShaderPropertyType::Texture2D, {}, baseColor},
+                                   {"NormalTexture", Keire::ShaderPropertyType::Texture2D},
+                                   {"EmissiveTexture", Keire::ShaderPropertyType::Texture2D},
+                                   {"MaskTexture", Keire::ShaderPropertyType::Texture2D}};
+    const auto resolveShader = [&](const Keire::AssetId id) -> std::optional<Keire::ShaderAssetDefinition>
+    { return id == shader ? std::optional(shaderDefinition) : std::nullopt; };
+
+    Keire::MaterialAssetDefinition sourceDefinition;
+    sourceDefinition.Shader = shader;
+    const auto source = Keire::MaterialAsset::EncodeSource(sourceDefinition);
+    KeireEditor::MaterialDocument document;
+    document.Open(source, resolveShader);
+    REQUIRE(document.TextureProperties().size() == 4);
+    CHECK(document.Texture("BaseColorTexture") == baseColor);
+    CHECK(document.SetTexture("NormalTexture", normal));
+    CHECK(document.LastChangedProperty() == "NormalTexture");
+    CHECK_FALSE(document.SetTexture("NormalTexture", normal));
+    CHECK_THROWS_AS((void)document.SetTexture("NotDeclared", normal), std::invalid_argument);
+    CHECK(std::get<float>(document.Property("Roughness")) == doctest::Approx(1.0F));
+    CHECK(document.SetProperty("Roughness", 0.35F));
+    CHECK(document.LastChangedProperty() == "Roughness");
+    CHECK_FALSE(document.SetProperty("Roughness", 0.35F));
+    CHECK_THROWS_AS((void)document.SetProperty("Roughness", Keire::Color{}), std::invalid_argument);
+
+    KeireEditor::MaterialDocument restored;
+    restored.Open(document.SaveSource(), resolveShader);
+    CHECK(restored.Texture("NormalTexture") == normal);
+    CHECK(restored.Definition().Texture("NormalTexture") == normal);
+    CHECK(std::get<float>(restored.Property("Roughness")) == doctest::Approx(0.35F));
+    TestPropertyEditor editor;
+    editor.Scalar = 0.6;
+    CHECK(KeireEditor::MaterialInspectorPanel{}.Draw(editor, restored));
+    CHECK(std::get<float>(restored.Property("Roughness")) == doctest::Approx(0.6F));
+    CHECK(editor.ExpectedAssetType == Keire::Texture2DAsset::StaticType());
+}
+
+TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000030"),
+                                                Keire::SceneAsset::EmptyDefinition("Picking"));
+    auto transformOnly = scene->CreateEntity("Transform only");
+    Keire::RenderCamera camera;
+    camera.View = Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {}, {0.0F, 1.0F, 0.0F});
+    camera.Projection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 100.0F);
+    const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+
+    CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == transformOnly.Id());
+    CHECK_FALSE(KeireEditor::PickSceneEntity(scene, viewport, {250.0F, 100.0F}, camera));
+
+    auto rendered = scene->CreateEntity("Rendered");
+    REQUIRE(rendered.AddComponent<Keire::MeshRendererComponent>());
+    rendered.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.0F, 2.0F});
+    CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == rendered.Id());
+    rendered.SetActive(false);
+    CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == transformOnly.Id());
+}
+
+TEST_CASE("viewport asset drops dispatch through narrow typed commands")
+{
+    class Commands final : public KeireEditor::IViewportAssetDropCommands
+    {
+      public:
+        void OpenDroppedScene(const Keire::AssetId asset) override { Scene = asset; }
+        void OpenDroppedInputActions(const Keire::AssetId asset) override { Input = asset; }
+        void CreateDroppedMeshEntity(const Keire::AssetId asset) override { Mesh = asset; }
+        void AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset) override
+        {
+            Target = entity;
+            Material = asset;
+        }
+
+        Keire::AssetId Scene;
+        Keire::AssetId Input;
+        Keire::AssetId Mesh;
+        Keire::AssetId Material;
+        Keire::EntityId Target;
+    } commands;
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000040");
+    const auto target = Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000041");
+    KeireEditor::ViewportAssetDropRouter router;
+    router.Route(Keire::SceneAsset::StaticType(), asset, {}, commands);
+    CHECK(commands.Scene == asset);
+    router.Route(Keire::InputActionAsset::StaticType(), asset, {}, commands);
+    CHECK(commands.Input == asset);
+    router.Route(Keire::MeshAsset::StaticType(), asset, {}, commands);
+    CHECK(commands.Mesh == asset);
+    router.Route(Keire::MaterialAsset::StaticType(), asset, target, commands);
+    CHECK(commands.Material == asset);
+    CHECK(commands.Target == target);
+    CHECK_THROWS_AS(router.Route(Keire::MaterialAsset::StaticType(), asset, {}, commands), std::invalid_argument);
+    CHECK_THROWS_AS(
+        router.Route(Keire::AssetTypeId::Parse("ed170000-0000-4000-8000-000000000042"), asset, {}, commands),
+        std::invalid_argument);
+}
+
+TEST_CASE("scene camera state and entity locking persist without a workspace layer")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-SceneCameraController-Test";
+    const auto path = root / "SceneCamera.state";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+
+    KeireEditor::SceneCameraController camera;
+    auto state = camera.State();
+    state.Focus = {4.0F, 5.0F, 6.0F};
+    state.YawDegrees = 35.0F;
+    state.PitchDegrees = -15.0F;
+    state.Distance = 12.0F;
+    state.OrthographicSize = 7.0F;
+    state.MoveSpeed = 3.0F;
+    state.Projection = Keire::Detail::EditorCameraProjection::Orthographic;
+    camera.SetState(state);
+    camera.SetLockedEntity(Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000050"));
+    camera.MarkDirty();
+    REQUIRE(camera.Save(path));
+
+    KeireEditor::SceneCameraController restored;
+    REQUIRE(restored.Load(path));
+    CHECK(restored.State().Focus == state.Focus);
+    CHECK(restored.State().YawDegrees == doctest::Approx(state.YawDegrees));
+    CHECK(restored.State().Projection == Keire::Detail::EditorCameraProjection::Orthographic);
+    CHECK(restored.LockedEntity() == camera.LockedEntity());
+    std::filesystem::remove_all(root, error);
 }

@@ -411,6 +411,8 @@ namespace Keire
                             break;
                         }
                     }
+                    KEIRE_CORE_INFO("Selected GPU attachment formats (color={}, depth={}).",
+                                    static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(DepthFormat));
 
                     CreateGeometryResources();
                 }
@@ -490,7 +492,7 @@ namespace Keire
                 else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
                 {
                     information.format = SDL_GPU_SHADERFORMAT_SPIRV;
-                    information.entrypoint = "main";
+                    information.entrypoint = vertex ? "VSMain" : "PSMain";
                     information.code = vertex ? Detail::BuiltinUnlitVertexSpirV : Detail::BuiltinUnlitFragmentSpirV;
                     information.code_size =
                         vertex ? Detail::BuiltinUnlitVertexSpirVSize : Detail::BuiltinUnlitFragmentSpirVSize;
@@ -727,6 +729,28 @@ namespace Keire
                 DefaultMesh = CreateMeshResources(*MeshAsset::Cube());
                 ErrorMesh = CreateMeshResources(*MeshAsset::Error());
                 CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
+                const auto solidTexture = [](const std::array<std::byte, 4> pixel, const TextureSemantic semantic,
+                                             const TextureColorSpace colorSpace)
+                {
+                    TextureImportSettings settings;
+                    settings.Semantic = semantic;
+                    settings.ColorSpace = colorSpace;
+                    settings.Mips = TextureMipPolicy::None;
+                    std::vector<std::byte> pixels(pixel.begin(), pixel.end());
+                    return CreateRef<Texture2DAsset>(settings, std::vector<TextureMipLevel>{{1, 1, std::move(pixels)}});
+                };
+                WhiteTexture = CreateTextureResources(
+                    *solidTexture({std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}},
+                                  TextureSemantic::Color, TextureColorSpace::Srgb));
+                FlatNormalTexture = CreateTextureResources(
+                    *solidTexture({std::byte{128}, std::byte{128}, std::byte{255}, std::byte{255}},
+                                  TextureSemantic::Normal, TextureColorSpace::Linear));
+                NeutralOrmTexture =
+                    CreateTextureResources(*solidTexture({std::byte{255}, std::byte{255}, std::byte{0}, std::byte{255}},
+                                                         TextureSemantic::Data, TextureColorSpace::Linear));
+                BlackTexture =
+                    CreateTextureResources(*solidTexture({std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255}},
+                                                         TextureSemantic::Color, TextureColorSpace::Srgb));
                 const auto grid = CreateGridVertices();
                 GridVertexCount = static_cast<std::uint32_t>(grid.size());
                 GridBuffer = UploadVertexBuffer(grid);
@@ -985,6 +1009,10 @@ namespace Keire
                     information.target_info.depth_stencil_format = DepthFormat;
                     information.target_info.has_depth_stencil_target = true;
 
+                    KEIRE_CORE_INFO(
+                        "Creating built-in pipeline (primitive={}, samples={}, color={}, depth={}, attributes=3).",
+                        static_cast<std::uint32_t>(primitive), static_cast<std::uint32_t>(samples),
+                        static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(DepthFormat));
                     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);
                     if (!pipeline)
                         throw std::runtime_error("SDL_CreateGPUGraphicsPipeline failed for " +
@@ -1055,7 +1083,10 @@ namespace Keire
                 SDL_GPUShaderCreateInfo information{};
                 information.code_size = code.size();
                 information.code = reinterpret_cast<const std::uint8_t*>(code.data());
-                information.entrypoint = format == SDL_GPU_SHADERFORMAT_SPIRV ? "main" : nullptr;
+                information.entrypoint =
+                    format == SDL_GPU_SHADERFORMAT_SPIRV
+                        ? (vertex ? definition.VertexEntry.c_str() : definition.FragmentEntry.c_str())
+                        : nullptr;
                 information.format = format;
                 information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
                 information.num_samplers = vertex ? 0 : textureCount;
@@ -1094,7 +1125,9 @@ namespace Keire
                         SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(MeshVertex, Normal)},
                         SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(MeshVertex, UV0)},
                         SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
-                                               offsetof(MeshVertex, VertexColor)}};
+                                               offsetof(MeshVertex, VertexColor)},
+                        SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
+                                               offsetof(MeshVertex, Tangent)}};
                     SDL_GPUGraphicsPipelineCreateInfo information{};
                     information.vertex_shader = vertex;
                     information.fragment_shader = fragment;
@@ -1102,7 +1135,7 @@ namespace Keire
                     information.vertex_input_state.num_vertex_buffers = 1;
                     information.vertex_input_state.vertex_attributes = attributes.data();
                     information.vertex_input_state.num_vertex_attributes =
-                        static_cast<std::uint32_t>(attributes.size());
+                        definition.VertexLayoutVersion == 2 ? static_cast<std::uint32_t>(attributes.size()) : 4U;
                     information.primitive_type = definition.Topology == ShaderPrimitiveTopology::LineList
                                                      ? SDL_GPU_PRIMITIVETYPE_LINELIST
                                                      : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
@@ -1121,6 +1154,12 @@ namespace Keire
                     information.target_info.num_color_targets = 1;
                     information.target_info.depth_stencil_format = DepthFormat;
                     information.target_info.has_depth_stencil_target = true;
+                    KEIRE_CORE_INFO("Creating asset pipeline (layout={}, topology={}, samples={}, color={}, depth={}, "
+                                    "attributes={}).",
+                                    definition.VertexLayoutVersion, static_cast<std::uint32_t>(definition.Topology),
+                                    static_cast<std::uint32_t>(samples), static_cast<std::uint32_t>(ColorFormat),
+                                    static_cast<std::uint32_t>(DepthFormat),
+                                    information.vertex_input_state.num_vertex_attributes);
                     SDL_GPUGraphicsPipeline* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
                     if (!result)
                         throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(asset) failed: " + LastSdlError());
@@ -1183,6 +1222,12 @@ namespace Keire
                     surface->FrameClearColor = surface->Specification.ClearColor;
                     EnsureSurface(*surface);
                 }
+            }
+
+            void CancelFrame() noexcept
+            {
+                FrameActive = false;
+                Requests.clear();
             }
 
             void Submit(SceneRenderRequest request)
@@ -1281,6 +1326,25 @@ namespace Keire
                     }
                 }
                 return entry.Resources.Empty() ? CheckerboardTexture : entry.Resources;
+            }
+
+            [[nodiscard]] const GpuTextureResources& DefaultTexture(const ShaderTextureSemantic semantic) const noexcept
+            {
+                switch (semantic)
+                {
+                case ShaderTextureSemantic::BaseColor:
+                    return WhiteTexture;
+                case ShaderTextureSemantic::Normal:
+                    return FlatNormalTexture;
+                case ShaderTextureSemantic::MetallicRoughness:
+                case ShaderTextureSemantic::Occlusion:
+                    return NeutralOrmTexture;
+                case ShaderTextureSemantic::Emissive:
+                    return BlackTexture;
+                case ShaderTextureSemantic::Generic:
+                default:
+                    return CheckerboardTexture;
+                }
             }
 
             [[nodiscard]] Ref<const MaterialAsset> ResolveMaterial(const AssetId id)
@@ -1396,7 +1460,8 @@ namespace Keire
                                 return std::nullopt;
                             texture = *selected;
                         }
-                        const auto& resolved = ResolveTexture(texture);
+                        const auto& resolved =
+                            texture ? ResolveTexture(texture) : DefaultTexture(property.TextureSemantic);
                         result.Textures.push_back({resolved.Texture, resolved.Sampler});
                         continue;
                     }
@@ -1695,6 +1760,10 @@ namespace Keire
                 }
                 ShaderCache.clear();
                 ReleaseTextureResources(CheckerboardTexture);
+                ReleaseTextureResources(WhiteTexture);
+                ReleaseTextureResources(FlatNormalTexture);
+                ReleaseTextureResources(NeutralOrmTexture);
+                ReleaseTextureResources(BlackTexture);
                 for (const auto& [description, sampler] : SamplerCache)
                 {
                     (void)description;
@@ -1735,6 +1804,10 @@ namespace Keire
             GpuMeshResources DefaultMesh;
             GpuMeshResources ErrorMesh;
             GpuTextureResources CheckerboardTexture;
+            GpuTextureResources WhiteTexture;
+            GpuTextureResources FlatNormalTexture;
+            GpuTextureResources NeutralOrmTexture;
+            GpuTextureResources BlackTexture;
             std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
             std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
             std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
@@ -1983,6 +2056,10 @@ namespace Keire
     }
 
     void RenderSystemInternalAccess::BeginFrame(RenderSystem& renderer) { renderer.m_Impl->State->BeginFrame(); }
+    void RenderSystemInternalAccess::CancelFrame(RenderSystem& renderer) noexcept
+    {
+        renderer.m_Impl->State->CancelFrame();
+    }
     void RenderSystemInternalAccess::EndFrame(RenderSystem& renderer, ImDrawData* drawData)
     {
         renderer.m_Impl->State->EndFrame(drawData);

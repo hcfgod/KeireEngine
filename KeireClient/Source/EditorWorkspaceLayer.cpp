@@ -5,9 +5,14 @@
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/MaterialDocument.h"
+#include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
+#include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SceneGizmoController.h"
+#include "KeireClient/Editor/ScenePicker.h"
+#include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
@@ -198,86 +203,6 @@ namespace
             IncludeEntityBounds(child, bounds);
     }
 
-    [[nodiscard]] Keire::Vector3 Unproject(const Keire::Matrix4& inverseViewProjection, const float x, const float y,
-                                           const float z)
-    {
-        const auto& value = inverseViewProjection.Elements;
-        const float resultX = value[0] * x + value[4] * y + value[8] * z + value[12];
-        const float resultY = value[1] * x + value[5] * y + value[9] * z + value[13];
-        const float resultZ = value[2] * x + value[6] * y + value[10] * z + value[14];
-        const float resultW = value[3] * x + value[7] * y + value[11] * z + value[15];
-        if (std::abs(resultW) <= 0.000001F)
-            throw std::runtime_error("Scene picking produced an invalid homogeneous position.");
-        return {resultX / resultW, resultY / resultW, resultZ / resultW};
-    }
-
-    [[nodiscard]] Keire::Vector3 NormalizedDirection(const Keire::Vector3 from, const Keire::Vector3 to)
-    {
-        const Keire::Vector3 difference{to.X - from.X, to.Y - from.Y, to.Z - from.Z};
-        const float length =
-            std::sqrt(difference.X * difference.X + difference.Y * difference.Y + difference.Z * difference.Z);
-        if (length <= 0.000001F)
-            throw std::runtime_error("Scene picking produced a zero-length ray.");
-        return {difference.X / length, difference.Y / length, difference.Z / length};
-    }
-
-    [[nodiscard]] std::optional<float> IntersectUnitCube(const Keire::Matrix4& world, const Keire::Vector3 rayOrigin,
-                                                         const Keire::Vector3 rayDirection)
-    {
-        const auto inverse = Keire::Math::Inverse(world);
-        const auto origin = Keire::Math::TransformPoint(inverse, rayOrigin);
-        const auto direction = Keire::Math::TransformDirection(inverse, rayDirection);
-        float minimum = 0.0F;
-        float maximum = std::numeric_limits<float>::max();
-        const auto testAxis = [&](const float position, const float axisDirection)
-        {
-            if (std::abs(axisDirection) <= 0.000001F)
-                return position >= -0.5F && position <= 0.5F;
-            float first = (-0.5F - position) / axisDirection;
-            float second = (0.5F - position) / axisDirection;
-            if (first > second)
-                std::swap(first, second);
-            minimum = std::max(minimum, first);
-            maximum = std::min(maximum, second);
-            return maximum >= minimum;
-        };
-        if (!testAxis(origin.X, direction.X) || !testAxis(origin.Y, direction.Y) || !testAxis(origin.Z, direction.Z))
-            return std::nullopt;
-        return minimum;
-    }
-
-    [[nodiscard]] Keire::Entity PickSceneEntity(const Keire::Ref<Keire::Scene>& scene, const Keire::UiItemRect rect,
-                                                const Keire::UiPosition pointer, const Keire::RenderCamera& camera)
-    {
-        if (!scene || !rect.Contains(pointer))
-            return {};
-        const auto size = rect.Size();
-        if (size.Width <= 1.0F || size.Height <= 1.0F)
-            return {};
-        const float x = ((pointer.X - rect.Minimum.X) / size.Width) * 2.0F - 1.0F;
-        const float y = 1.0F - ((pointer.Y - rect.Minimum.Y) / size.Height) * 2.0F;
-        const auto inverse = Keire::Math::Inverse(Keire::Math::Multiply(camera.Projection, camera.View));
-        const auto nearPoint = Unproject(inverse, x, y, 0.0F);
-        const auto farPoint = Unproject(inverse, x, y, 1.0F);
-        const auto direction = NormalizedDirection(nearPoint, farPoint);
-        float closest = std::numeric_limits<float>::max();
-        Keire::Entity selected;
-        for (const auto& entity : scene->Query<Keire::MeshRendererComponent>())
-        {
-            const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
-            const auto transform = entity.GetComponent<Keire::TransformComponent>();
-            if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform || !entity.ActiveInHierarchy())
-                continue;
-            const auto distance = IntersectUnitCube(transform->WorldMatrix(), nearPoint, direction);
-            if (distance && *distance < closest)
-            {
-                closest = *distance;
-                selected = entity;
-            }
-        }
-        return selected;
-    }
-
     class ContinuousUndoCommand final : public Keire::UndoCommand
     {
       public:
@@ -329,6 +254,8 @@ namespace
         {
         }
 
+        [[nodiscard]] bool EditBoundary() const noexcept { return m_EditBoundary; }
+
         bool EditBoolean(const std::string_view label, bool& value) override { return m_Ui.Checkbox(label, value); }
 
         bool EditInteger(const std::string_view label, std::int64_t& value, const double step,
@@ -365,7 +292,7 @@ namespace
         bool EditScalar(const std::string_view label, double& value, const double step,
                         const std::optional<double> minimum, const std::optional<double> maximum) override
         {
-            return m_Ui.DragScalar(label, value, step, minimum, maximum);
+            return Track(m_Ui.DragScalar(label, value, step, minimum, maximum));
         }
 
         bool EditText(const std::string_view label, std::string& value) override
@@ -374,15 +301,15 @@ namespace
         }
         bool EditVector2(const std::string_view label, Keire::Vector2& value, const double step) override
         {
-            return m_Ui.DragVector2(label, value, static_cast<float>(step));
+            return Track(m_Ui.DragVector2(label, value, static_cast<float>(step)));
         }
         bool EditVector3(const std::string_view label, Keire::Vector3& value, const double step) override
         {
-            return m_Ui.DragVector3(label, value, static_cast<float>(step));
+            return Track(m_Ui.DragVector3(label, value, static_cast<float>(step)));
         }
         bool EditVector4(const std::string_view label, Keire::Vector4& value, const double step) override
         {
-            return m_Ui.DragVector4(label, value, static_cast<float>(step));
+            return Track(m_Ui.DragVector4(label, value, static_cast<float>(step)));
         }
         bool EditQuaternion(const std::string_view label, Keire::Quaternion& value, const double step) override
         {
@@ -391,7 +318,9 @@ namespace
         bool EditColor(const std::string_view label, Keire::Color& value) override
         {
             Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
-            if (!m_Ui.ColorEdit(label, color))
+            const bool changed = m_Ui.ColorEdit(label, color);
+            (void)Track(changed);
+            if (!changed)
                 return false;
             value = {color.Red, color.Green, color.Blue, color.Alpha};
             return true;
@@ -421,6 +350,8 @@ namespace
                     }
                 }
             }
+            if (changed)
+                m_EditBoundary = true;
             return changed;
         }
         bool EditEntity(const std::string_view label, Keire::EntityId& value) override
@@ -451,9 +382,17 @@ namespace
         }
 
       private:
+        bool Track(const bool changed)
+        {
+            const auto state = m_Ui.LastItemState();
+            m_EditBoundary = m_EditBoundary || state.DeactivatedAfterEdit || (changed && !state.Active);
+            return changed;
+        }
+
         Keire::UiFrame& m_Ui;
         std::span<const Keire::AssetSourceRecord> m_Assets;
         Keire::Ref<Keire::Scene> m_Scene;
+        bool m_EditBoundary = false;
     };
 } // namespace
 
@@ -476,6 +415,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
           static_cast<KeireEditor::IProjectSettingsController&>(*this))),
       m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
+      m_ViewportAssetDropRouter(std::make_unique<KeireEditor::ViewportAssetDropRouter>()),
       m_InputAsset(m_InputActionsDocument->AssetStorage()), m_SelectedInputMap(m_InputActionsDocument->MapStorage()),
       m_SelectedInputScheme(m_InputActionsDocument->SchemeStorage()),
       m_SelectedInputAction(m_InputActionsDocument->ActionStorage()),
@@ -487,7 +427,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_SelectedSceneObject(m_SceneDocument->SelectionStorage()), m_SceneUndoContext(m_SceneDocument->UndoStorage()),
       m_SceneSource(m_SceneDocument->SourceStorage()), m_SceneRecovery(m_SceneDocument->RecoveryPathStorage()),
       m_SceneStatus(m_SceneDocument->StatusStorage()),
-      m_EditorCamera(std::make_unique<Keire::Detail::EditorCameraController>()),
+      m_EditorCamera(std::make_unique<KeireEditor::SceneCameraController>()),
       m_SceneRecoverySeconds(m_SceneDocument->RecoverySecondsStorage()),
       m_InputDirty(m_InputActionsDocument->DirtyStorage()),
       m_SceneRecoveryAvailable(m_SceneDocument->RecoveryAvailableStorage()), m_Smoke(smoke),
@@ -732,7 +672,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     }
     if (const auto project = Owner().GetProject(); project && m_SceneGizmos)
         m_SceneGizmos->Save(project->Root());
-    if (m_SceneCameraCapturing)
+    if (m_EditorCamera->Capturing())
     {
         try
         {
@@ -741,7 +681,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         catch (...)
         {
         }
-        m_SceneCameraCapturing = false;
+        m_EditorCamera->SetCapturing(false);
     }
     EndInputTest();
     if (m_PlaySession)
@@ -2158,25 +2098,25 @@ void EditorWorkspaceLayer::DrawScene(Keire::UiFrame& ui)
                           : "Ortho"))
         {
             m_EditorCamera->ToggleProjection();
-            m_SceneCameraDirty = true;
+            m_EditorCamera->MarkDirty();
         }
         ui.SameLine();
         if (ui.Button("X"))
         {
             m_EditorCamera->Snap(Keire::Detail::EditorCameraAxis::PositiveX);
-            m_SceneCameraDirty = true;
+            m_EditorCamera->MarkDirty();
         }
         ui.SameLine();
         if (ui.Button("Y"))
         {
             m_EditorCamera->Snap(Keire::Detail::EditorCameraAxis::PositiveY);
-            m_SceneCameraDirty = true;
+            m_EditorCamera->MarkDirty();
         }
         ui.SameLine();
         if (ui.Button("Z"))
         {
             m_EditorCamera->Snap(Keire::Detail::EditorCameraAxis::PositiveZ);
-            m_SceneCameraDirty = true;
+            m_EditorCamera->MarkDirty();
         }
         ui.TextColored(m_Theme.MutedText, std::to_string(m_EditingScene->ObjectCount()) + " object(s)");
         if (m_SceneRecoveryAvailable)
@@ -2239,51 +2179,9 @@ void EditorWorkspaceLayer::DrawScene(Keire::UiFrame& ui)
                         const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
                         if (!record)
                             throw std::runtime_error("A dropped asset no longer exists in the project database.");
-                        const auto extension = record->RelativePath.extension();
-                        if (extension == ".keirescene")
-                        {
-                            RequestOpenScene(asset);
-                            m_SceneStatus = "Opening " + record->RelativePath.generic_string() + ".";
-                            continue;
-                        }
-                        if (extension == ".keireinput")
-                        {
-                            OpenInputActions(asset);
-                            m_InputActionsEditor.SetVisible(true);
-                            continue;
-                        }
-                        if (extension != ".keirematerial")
-                        {
-                            m_SceneStatus = "No Scene view drop action is registered for " +
-                                            record->RelativePath.filename().string() + ".";
-                            continue;
-                        }
-                        if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
-                            throw std::runtime_error("Stop Play mode before assigning authored scene materials.");
-                        const auto hit = PickSceneEntity(m_EditingScene, imageRect, ui.PointerState().Position, camera);
-                        const auto destination = hit ? m_EditingScene->FindEntity(hit.Id()) : Keire::Entity{};
-                        const auto renderer = destination.GetComponent<Keire::MeshRendererComponent>();
-                        if (!renderer)
-                            throw std::runtime_error("Drop a material directly over an entity with a Mesh Renderer.");
-                        const auto source = m_AssetDatabase->Specification().ProjectRoot /
-                                            m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-                        const auto importer = Keire::CreateMaterialAssetImporter();
-                        const auto material = Keire::MaterialAsset::Decode(importer.Import(ReadBytes(source)));
-                        std::optional<Keire::Color> materialTint;
-                        if (const auto tint = material->Definition().Properties.find("Tint");
-                            tint != material->Definition().Properties.end())
-                        {
-                            if (const auto* color = std::get_if<Keire::Color>(&tint->second))
-                                materialTint = *color;
-                        }
-                        RecordSceneUndo("Assign Material");
-                        renderer->SetMaterial(asset);
-                        if (materialTint)
-                            renderer->SetTint(*materialTint);
-                        m_SelectedSceneObject = destination.Id().Value();
-                        m_SelectedAsset = {};
-                        m_SceneStatus =
-                            "Assigned " + record->RelativePath.stem().string() + " to " + destination.Name() + ".";
+                        const auto hit =
+                            KeireEditor::PickSceneEntity(m_EditingScene, imageRect, ui.PointerState().Position, camera);
+                        m_ViewportAssetDropRouter->Route(record->Type, asset, hit, *this);
                     }
                 }
                 catch (const std::exception& error)
@@ -2296,25 +2194,104 @@ void EditorWorkspaceLayer::DrawScene(Keire::UiFrame& ui)
         if (renderScene)
         {
             const bool allowManipulation = !m_PlaySession || m_PlaySession->State() == Keire::ScenePlayState::Stopped;
+            const auto resolveMeshBounds = [this](const Keire::AssetId mesh) -> std::optional<Keire::MeshBounds>
+            {
+                const auto assets = Owner().Assets();
+                if (!assets)
+                    return std::nullopt;
+                const auto metadata = assets->TryGetMetadata(mesh);
+                if (!metadata || !metadata->LocalBounds)
+                    return std::nullopt;
+                const auto& bounds = *metadata->LocalBounds;
+                return Keire::MeshBounds{{bounds.Minimum[0], bounds.Minimum[1], bounds.Minimum[2]},
+                                         {bounds.Maximum[0], bounds.Maximum[1], bounds.Maximum[2]}};
+            };
             m_SelectedSceneObject =
                 m_SceneGizmos
-                    ->UpdateAndDraw(ui, renderScene, Keire::EntityId(m_SelectedSceneObject), camera, imageRect,
-                                    allowManipulation, [this](const std::string_view name) { RecordSceneUndo(name); })
+                    ->UpdateAndDraw(
+                        ui, renderScene, Keire::EntityId(m_SelectedSceneObject), camera, imageRect, allowManipulation,
+                        [this](const std::string_view name) { RecordSceneUndo(name); }, resolveMeshBounds)
                     .Value();
         }
         UpdateSceneCamera(ui, imageState);
     }
 }
 
+void EditorWorkspaceLayer::OpenDroppedScene(const Keire::AssetId asset)
+{
+    RequestOpenScene(asset);
+    const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+    m_SceneStatus = record ? "Opening " + record->RelativePath.generic_string() + "." : "Opening dropped scene.";
+}
+
+void EditorWorkspaceLayer::OpenDroppedInputActions(const Keire::AssetId asset)
+{
+    OpenInputActions(asset);
+    m_InputActionsEditor.SetVisible(true);
+}
+
+void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset)
+{
+    if (!m_EditingScene)
+        throw std::runtime_error("Open a scene before dropping a mesh.");
+    if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
+        throw std::runtime_error("Stop Play mode before creating authored scene objects.");
+    const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+    if (!record)
+        throw std::runtime_error("The dropped mesh no longer exists in the project database.");
+
+    RecordSceneUndo("Create Mesh Entity");
+    auto entity = m_EditingScene->CreateEntity(record->RelativePath.stem().string());
+    const auto renderer = entity.AddComponent<Keire::MeshRendererComponent>();
+    renderer->SetMesh(asset);
+    m_SelectedSceneObject = entity.Id().Value();
+    m_SelectedAsset = {};
+    m_SceneStatus = "Created " + entity.Name() + " from " + record->RelativePath.filename().string() + ".";
+}
+
+void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset)
+{
+    if (!m_EditingScene)
+        throw std::runtime_error("Open a scene before dropping a material.");
+    if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
+        throw std::runtime_error("Stop Play mode before assigning authored scene materials.");
+    const auto destination = m_EditingScene->FindEntity(entity);
+    const auto renderer = destination.GetComponent<Keire::MeshRendererComponent>();
+    if (!renderer)
+        throw std::runtime_error("Drop a material directly over an entity with a Mesh Renderer.");
+    const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+    if (!record)
+        throw std::runtime_error("The dropped material no longer exists in the project database.");
+
+    const auto source = m_AssetDatabase->Specification().ProjectRoot /
+                        m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
+    const auto importer = Keire::CreateMaterialAssetImporter();
+    const auto material = Keire::MaterialAsset::Decode(importer.Import(ReadBytes(source)));
+    std::optional<Keire::Color> materialTint;
+    if (const auto tint = material->Definition().Properties.find("Tint");
+        tint != material->Definition().Properties.end())
+    {
+        if (const auto* color = std::get_if<Keire::Color>(&tint->second))
+            materialTint = *color;
+    }
+    RecordSceneUndo("Assign Material");
+    renderer->SetMaterial(asset);
+    if (materialTint)
+        renderer->SetTint(*materialTint);
+    m_SelectedSceneObject = destination.Id().Value();
+    m_SelectedAsset = {};
+    m_SceneStatus = "Assigned " + record->RelativePath.stem().string() + " to " + destination.Name() + ".";
+}
+
 void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState)
 {
     const auto pointer = ui.PointerState();
-    const bool navigationRegion = imageState.Hovered || m_SceneCameraCapturing;
+    const bool navigationRegion = imageState.Hovered || m_EditorCamera->Capturing();
     bool changed = false;
 
-    if (m_EditorCameraLockedEntity && m_EditingScene)
+    if (m_EditorCamera->LockedEntity() && m_EditingScene)
     {
-        const auto locked = m_EditingScene->FindEntity(m_EditorCameraLockedEntity);
+        const auto locked = m_EditingScene->FindEntity(m_EditorCamera->LockedEntity());
         if (locked)
         {
             SceneBounds bounds;
@@ -2323,7 +2300,7 @@ void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::Ui
                 m_EditorCamera->SetFocus(bounds.Center());
         }
         else
-            m_EditorCameraLockedEntity = {};
+            m_EditorCamera->SetLockedEntity({});
     }
 
     if (imageState.Hovered && m_EditingScene && m_SelectedSceneObject)
@@ -2331,8 +2308,8 @@ void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::Ui
         const auto selected = m_EditingScene->FindEntity(Keire::EntityId(m_SelectedSceneObject));
         if (ui.Shortcut({.Key = Keire::UiKey::F, .Shift = true}))
         {
-            m_EditorCameraLockedEntity =
-                m_EditorCameraLockedEntity == selected.Id() ? Keire::EntityId{} : selected.Id();
+            m_EditorCamera->SetLockedEntity(m_EditorCamera->LockedEntity() == selected.Id() ? Keire::EntityId{}
+                                                                                            : selected.Id());
             changed = true;
         }
         else if (ui.Shortcut({Keire::UiKey::F}))
@@ -2347,15 +2324,15 @@ void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::Ui
         }
     }
 
-    if (imageState.Hovered && pointer.RightPressed && !ui.AltDown() && !m_SceneCameraCapturing)
+    if (imageState.Hovered && pointer.RightPressed && !ui.AltDown() && !m_EditorCamera->Capturing())
     {
         Owner().Windows()->SetCursorMode(Owner().MainWindow()->Id(), Keire::CursorMode::RelativeLocked);
-        m_SceneCameraCapturing = true;
+        m_EditorCamera->SetCapturing(true);
     }
-    else if (m_SceneCameraCapturing && (!pointer.RightDown || !ui.WindowFocused()))
+    else if (m_EditorCamera->Capturing() && (!pointer.RightDown || !ui.WindowFocused()))
     {
         Owner().Windows()->SetCursorMode(Owner().MainWindow()->Id(), Keire::CursorMode::Normal);
-        m_SceneCameraCapturing = false;
+        m_EditorCamera->SetCapturing(false);
         SaveSceneCamera();
     }
 
@@ -2366,15 +2343,15 @@ void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::Ui
     input.Orbit = navigationRegion && ui.AltDown() && pointer.LeftDown;
     input.Pan = navigationRegion && pointer.MiddleDown;
     input.Zoom = navigationRegion && ui.AltDown() && pointer.RightDown;
-    input.Fly = m_SceneCameraCapturing;
+    input.Fly = m_EditorCamera->Capturing();
     input.Fast = ui.ShiftDown();
-    if (m_SceneCameraCapturing || imageState.Hovered)
+    if (m_EditorCamera->Capturing() || imageState.Hovered)
     {
         input.MoveForward = (ui.KeyDown(Keire::UiKey::W) || ui.KeyDown(Keire::UiKey::Up) ? 1.0F : 0.0F) -
                             (ui.KeyDown(Keire::UiKey::S) || ui.KeyDown(Keire::UiKey::Down) ? 1.0F : 0.0F);
         input.MoveRight = (ui.KeyDown(Keire::UiKey::D) || ui.KeyDown(Keire::UiKey::Right) ? 1.0F : 0.0F) -
                           (ui.KeyDown(Keire::UiKey::A) || ui.KeyDown(Keire::UiKey::Left) ? 1.0F : 0.0F);
-        if (m_SceneCameraCapturing)
+        if (m_EditorCamera->Capturing())
             input.MoveUp = (ui.KeyDown(Keire::UiKey::E) ? 1.0F : 0.0F) - (ui.KeyDown(Keire::UiKey::Q) ? 1.0F : 0.0F);
     }
     changed = m_EditorCamera->Update(input) || changed;
@@ -2382,8 +2359,8 @@ void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::Ui
     if (changed)
     {
         if (input.Orbit || input.Pan || input.Zoom || input.Fly)
-            m_EditorCameraLockedEntity = {};
-        m_SceneCameraDirty = true;
+            m_EditorCamera->SetLockedEntity({});
+        m_EditorCamera->MarkDirty();
     }
 }
 
@@ -2392,61 +2369,14 @@ void EditorWorkspaceLayer::LoadSceneCamera()
     const auto project = Owner().GetProject();
     if (!project)
         return;
-    std::ifstream input(project->Root() / "Library/Editor/SceneCamera.state");
-    std::uint32_t version = 0;
-    Keire::Detail::EditorCameraState state;
-    if (!(input >> version >> state.Focus.X >> state.Focus.Y >> state.Focus.Z >> state.YawDegrees >>
-          state.PitchDegrees >> state.Distance) ||
-        (version != 1 && version != 2))
-        return;
-    if (version == 2)
-    {
-        std::uint32_t projection = 0;
-        std::string locked;
-        if (!(input >> state.OrthographicSize >> state.MoveSpeed >> projection >> locked) || projection > 1)
-            return;
-        state.Projection = static_cast<Keire::Detail::EditorCameraProjection>(projection);
-        if (locked != "-")
-            m_EditorCameraLockedEntity = Keire::EntityId::Parse(locked);
-    }
-    try
-    {
-        m_EditorCamera->SetState(state);
-    }
-    catch (...)
-    {
-        m_EditorCameraLockedEntity = {};
-        return;
-    }
-    m_SceneCameraDirty = false;
+    (void)m_EditorCamera->Load(project->Root() / "Library/Editor/SceneCamera.state");
 }
 
 void EditorWorkspaceLayer::SaveSceneCamera() noexcept
 {
-    if (!m_SceneCameraDirty)
-        return;
-    try
-    {
-        const auto project = Owner().GetProject();
-        if (!project)
-            return;
-        std::ostringstream output;
-        output.precision(9);
-        const auto& state = m_EditorCamera->State();
-        output << "2\n"
-               << state.Focus.X << ' ' << state.Focus.Y << ' ' << state.Focus.Z << '\n'
-               << state.YawDegrees << ' ' << state.PitchDegrees << ' ' << state.Distance << '\n'
-               << state.OrthographicSize << ' ' << state.MoveSpeed << ' '
-               << static_cast<std::uint32_t>(state.Projection) << ' '
-               << (m_EditorCameraLockedEntity ? m_EditorCameraLockedEntity.ToString() : "-") << '\n';
-        const auto path = project->Root() / "Library/Editor/SceneCamera.state";
-        std::filesystem::create_directories(path.parent_path());
-        Keire::Detail::WriteTextFileAtomically(path, output.str());
-        m_SceneCameraDirty = false;
-    }
-    catch (...)
-    {
-    }
+    const auto project = Owner().GetProject();
+    if (project)
+        (void)m_EditorCamera->Save(project->Root() / "Library/Editor/SceneCamera.state");
 }
 
 void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
@@ -4222,10 +4152,94 @@ void EditorWorkspaceLayer::DrawInspector(Keire::UiFrame& ui)
         {
             ui.Separator();
             ui.TextColored(m_Theme.Accent, "MATERIAL");
-            ui.Text("Unlit material with validated shader property overrides.");
+            ui.Text("Shader-driven texture assignments");
+            try
+            {
+                const auto sourceRoot =
+                    m_AssetDatabase->Specification().ProjectRoot / m_AssetDatabase->Specification().SourceDirectory;
+                const auto resolveShader =
+                    [&](const Keire::AssetId shader) -> std::optional<Keire::ShaderAssetDefinition>
+                {
+                    const auto shaderRecord = m_AssetDatabase->Find(shader);
+                    if (!shaderRecord || shaderRecord->Type != Keire::ShaderAsset::StaticType())
+                        return std::nullopt;
+                    try
+                    {
+                        return Keire::ShaderAsset::DecodeManifest(ReadBytes(sourceRoot / shaderRecord->RelativePath));
+                    }
+                    catch (...)
+                    {
+                        return std::nullopt;
+                    }
+                };
+
+                const auto sourcePath = sourceRoot / record->RelativePath;
+                const auto originalSource = ReadBytes(sourcePath);
+                KeireEditor::MaterialDocument document;
+                document.Open(originalSource, resolveShader);
+                InspectorPropertyEditor editor(ui, m_AssetRecords, m_EditingScene);
+                bool changed = false;
+                auto shader = document.Shader();
+                if (editor.EditAsset("Shader", shader, Keire::ShaderAsset::StaticType()))
+                    changed = document.SetShader(shader, resolveShader) || changed;
+
+                if (document.Properties().empty())
+                    ui.TextColored(m_Theme.MutedText, "The selected shader declares no material properties.");
+                else
+                {
+                    ui.Separator();
+                    ui.TextColored(m_Theme.MutedText, "SHADER PROPERTIES");
+                    changed = KeireEditor::MaterialInspectorPanel{}.Draw(editor, document) || changed;
+                }
+                if (changed)
+                {
+                    const auto updatedSource = document.SaveSource();
+                    WriteBytesAtomically(sourcePath, updatedSource);
+                    ImportAssets();
+                    if (const auto undo = m_AssetBrowserPanel->UndoContext(); undo && undo->IsOpen())
+                    {
+                        auto apply = [this, sourcePath](const std::vector<std::byte>& bytes)
+                        {
+                            WriteBytesAtomically(sourcePath, bytes);
+                            ImportAssets();
+                        };
+                        auto after = std::make_shared<std::optional<std::vector<std::byte>>>();
+                        Keire::UndoOperation redo = [apply, after]
+                        {
+                            if (after->has_value())
+                                apply(**after);
+                        };
+                        Keire::UndoOperation undoOperation = [apply, after, originalSource, sourcePath]
+                        {
+                            if (!after->has_value())
+                                *after = ReadBytes(sourcePath);
+                            apply(originalSource);
+                        };
+                        const auto mergeKey = "material:" + record->Id.ToString() + ":" +
+                                              std::string(document.LastChangedProperty()) + ":" +
+                                              std::to_string(m_ContinuousEditSerial);
+                        undo->RecordApplied(std::make_unique<ContinuousUndoCommand>(
+                            "Edit Material", mergeKey, std::move(redo), std::move(undoOperation),
+                            originalSource.size() + updatedSource.size(),
+                            [sourcePath] { return std::filesystem::is_regular_file(sourcePath); }));
+                        m_ActiveUndoContext = undo;
+                    }
+                    m_AssetStatus = "Saved shader-driven material properties and refreshed the runtime catalog.";
+                }
+                if (editor.EditBoundary())
+                    ++m_ContinuousEditSerial;
+                ui.TextColored(m_Theme.MutedText,
+                               "Names, ranges, categories, texture semantics, and defaults come from the shader.");
+            }
+            catch (const std::exception& error)
+            {
+                ui.TextColored(m_Theme.Error, std::string("Material editor unavailable: ") + error.what());
+            }
             ui.TextColored(m_Theme.MutedText, "Invalid shaders resolve to the error material at runtime.");
             if (ui.Button("Reimport Material"))
                 ImportAssets();
+            if (!m_AssetStatus.empty())
+                ui.TextColored(m_Theme.MutedText, m_AssetStatus);
         }
         ui.Separator();
         (void)ui.InputText("Name", m_AssetName);

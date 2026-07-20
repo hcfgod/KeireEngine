@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/AssetMetadata.h"
 
 #include <array>
 #include <cstddef>
@@ -26,6 +27,7 @@ namespace Keire::Detail
         std::uint64_t UncompressedBytes = 0;
         Sha256Digest Digest{};
         std::vector<AssetId> Dependencies;
+        AssetDerivedMetadata Metadata;
     };
 
     struct CatalogData

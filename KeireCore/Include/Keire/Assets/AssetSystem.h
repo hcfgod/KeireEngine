@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/AssetMetadata.h"
 #include "Keire/Event.h"
 
 #include <chrono>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -100,6 +102,7 @@ namespace Keire
         [[nodiscard]] std::size_t PumpCompletions();
         [[nodiscard]] std::size_t EvictUnused();
         [[nodiscard]] AssetSystemStatistics Statistics() const;
+        [[nodiscard]] std::optional<AssetDerivedMetadata> TryGetMetadata(AssetId id) const;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;
 

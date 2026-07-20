@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/SceneGizmoController.h"
 
+#include "KeireClient/Editor/ScenePicker.h"
+
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
@@ -220,7 +222,7 @@ namespace KeireEditor
     Keire::EntityId SceneGizmoController::UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
                                                         Keire::EntityId selected, const Keire::RenderCamera& camera,
                                                         const Keire::UiItemRect viewport, const bool allowManipulation,
-                                                        BeginUndo beginUndo)
+                                                        BeginUndo beginUndo, MeshBoundsResolver resolveMeshBounds)
     {
         if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
             return selected;
@@ -240,6 +242,11 @@ namespace KeireEditor
         }
 
         const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);
+        if (hovered && pointer.LeftPressed && m_Drag.ActiveAxis == Axis::None)
+        {
+            if (const auto picked = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds))
+                selected = picked;
+        }
         if (m_Settings.ShowIcons)
         {
             const auto drawIcons = [&](const auto& entities, const bool cameraIcons)

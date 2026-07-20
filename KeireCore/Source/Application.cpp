@@ -265,35 +265,49 @@ namespace Keire
                     renderFrame = true;
                 }
 
-                // Suspension is sampled before advancing Time. A minimize event can arrive later in this frame, but
-                // every fixed step produced by AdvanceFrame must still be consumed before the next frame begins.
-                if (!ExitRequested() && !suspended)
+                try
                 {
-                    while (m_Impl->Clock->ConsumeFixedStep())
+                    // Suspension is sampled before advancing Time. A minimize event can arrive later in this frame,
+                    // but every fixed step produced by AdvanceFrame must still be consumed before the next frame.
+                    if (!ExitRequested() && !suspended)
                     {
-                        m_Impl->LayerSystem->FixedUpdate(*m_Impl->Clock);
-                        if (ExitRequested())
+                        while (m_Impl->Clock->ConsumeFixedStep())
                         {
-                            break;
+                            m_Impl->LayerSystem->FixedUpdate(*m_Impl->Clock);
+                            if (ExitRequested())
+                            {
+                                break;
+                            }
+                        }
+                        if (!ExitRequested())
+                        {
+                            m_Impl->LayerSystem->Update(*m_Impl->Clock);
                         }
                     }
-                    if (!ExitRequested())
+
+                    if (!ExitRequested() && !nowSuspended && m_Impl->UserInterface)
                     {
-                        m_Impl->LayerSystem->Update(*m_Impl->Clock);
+                        m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
+                                                          m_Impl->PrimaryWindow->LogicalSize());
+                        m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
+                        m_Impl->UserInterface->EndFrame();
+                        renderFrame = false;
+                    }
+
+                    // A frame begun before a layer requests exit must still be completed. Leaving the renderer in an
+                    // active-frame state makes shutdown race GPU work in optimized builds.
+                    if (renderFrame)
+                    {
+                        RenderSystemInternalAccess::EndFrame(*m_Impl->Renderer, nullptr);
+                        renderFrame = false;
                     }
                 }
-
-                if (!ExitRequested() && !nowSuspended && m_Impl->UserInterface)
+                catch (...)
                 {
-                    m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
-                                                      m_Impl->PrimaryWindow->LogicalSize());
-                    m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
-                    m_Impl->UserInterface->EndFrame();
-                    renderFrame = false;
+                    if (renderFrame)
+                        RenderSystemInternalAccess::CancelFrame(*m_Impl->Renderer);
+                    throw;
                 }
-
-                if (!ExitRequested() && renderFrame)
-                    RenderSystemInternalAccess::EndFrame(*m_Impl->Renderer, nullptr);
 
                 m_Impl->LayerSystem->ApplyPending();
 

@@ -261,6 +261,10 @@ Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicit
 and sampler settings stored in source metadata. Assimp and stb remain private implementation dependencies; their
 headers are not required by engine or SDK consumers.
 
+Selecting a `.keirematerial` in Inspector exposes every shader-declared numeric, color, and texture property. The
+production surface uses base-color, +Y normal, metallic-roughness, occlusion, and emissive semantics with neutral
+fallbacks. Edits are range-checked, saved atomically, reimported immediately, and recorded in project-asset undo.
+
 The Sandbox startup scene uses an imported UV-mapped pyramid and Texture2D material through the same renderer-owned
 resource caches used by the editor. Dist cooking follows scene-to-material-to-shader/texture dependencies and emits a
 runtime manifest; omit `--frames` to run the cooked scene as the normal standalone player.

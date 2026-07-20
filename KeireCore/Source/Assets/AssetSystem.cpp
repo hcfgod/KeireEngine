@@ -633,6 +633,15 @@ namespace Keire
         return result;
     }
 
+    std::optional<AssetDerivedMetadata> AssetSystem::TryGetMetadata(const AssetId id) const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->Resolved.find(id);
+        if (found == m_Impl->Resolved.end())
+            return std::nullopt;
+        return found->second.Entry.Metadata;
+    }
+
     bool AssetSystem::IsOpen() const noexcept
     {
         std::scoped_lock lock(m_Impl->Mutex);

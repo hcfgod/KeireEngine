@@ -151,6 +151,16 @@ Configuration examples, application-facing workflows, storage details, and troub
 
 ## Asset Runtime And Pipeline
 
+Editor material authoring is split between `MaterialDocument`, which owns shader-driven source state and validation,
+and `MaterialInspectorPanel`, which maps that state onto the engine-owned property editor interface. Material file
+snapshots enter the project-assets undo context; the workspace layer composes the panel and coordinates reimport.
+Continuous numeric/color edits share a property-scoped undo command until the UI edit boundary; undo captures the
+final serialized source lazily and performs one catalog refresh.
+Scene picking consumes catalog metadata through `AssetSystem` and does not own an importer or source-model cache.
+`SceneCameraController` owns navigation persistence and entity locking. `ViewportAssetDropRouter` dispatches scene,
+input, mesh, and material drops through narrow commands, leaving the workspace responsible for composition and modal
+coordination.
+
 `AssetSystem` is optionally created after `EventBus` and closed before it. Its bounded priority scheduler owns worker
 threads, while handles own reference-counted shared state and immutable payload revisions. Workers perform I/O,
 decompression, integrity verification, and decode; `Application` commits completions and dispatches typed events at a

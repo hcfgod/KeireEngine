@@ -6,6 +6,18 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- A metallic-roughness material surface with shader-declared semantic slots, neutral base/normal/ORM/emissive
+  fallbacks, ranged numeric/color authoring, strict cook validation, and glTF +Y normal-map handling.
+- Version-two mesh vertices with stored tangent handedness, deterministic v1 tangent reconstruction, and cataloged
+  local bounds used by hitch-free scene picking.
+- Cold-process rendered-output repeat harnesses and balanced render-frame cancellation/completion during shutdown.
+- Correct SPIR-V entrypoint binding for Vulkan, Windows catalogs containing both DXIL and SPIR-V, and required
+  GPU-runner diagnostics for D3D12, Vulkan, and Metal.
+- Persisted Scene-camera ownership and typed viewport asset-drop routing, including direct mesh-to-entity creation.
+- Shader-driven material texture authoring in code and Inspector, with filtered Texture2D pickers for every declared
+  base-color, normal, emissive, mask, or custom texture slot and source-safe material serialization.
+- Scene-view ray picking for active transform-only and rendered entities, while retaining Camera and Directional Light
+  overlay selection and nearest-hit behavior.
 - A renderer-owned asset resource layer for revisioned mesh, material, shader, texture, sampler, and pipeline GPU
   resources, with indexed asset geometry, fixed shader bindings, transactional fence retirement, checker/error
   fallbacks, and last-good hot reload behavior.

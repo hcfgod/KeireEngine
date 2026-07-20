@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -171,7 +172,8 @@ namespace Keire::Detail
         const auto bytes = ReadBounded(path, 64U * 1024U * 1024U);
         const Json document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                           reinterpret_cast<const char*>(bytes.data() + bytes.size()));
-        if (!document.is_object() || document.value("schemaVersion", 0) != 1 || !document.contains("assets") ||
+        const auto schemaVersion = document.value("schemaVersion", 0);
+        if (!document.is_object() || (schemaVersion != 1 && schemaVersion != 2) || !document.contains("assets") ||
             !document["assets"].is_array())
             throw std::runtime_error("Asset catalog has an unsupported or malformed schema: " + path.string());
 
@@ -195,6 +197,27 @@ namespace Keire::Detail
                 for (const auto& dependency : item["dependencies"])
                     entry.Dependencies.push_back(AssetId::Parse(dependency.get<std::string>()));
             }
+            if (item.contains("metadata"))
+            {
+                const auto& metadata = item.at("metadata");
+                if (metadata.contains("localBounds"))
+                {
+                    const auto& bounds = metadata.at("localBounds");
+                    if (!bounds.is_object() || !bounds.at("minimum").is_array() || bounds.at("minimum").size() != 3 ||
+                        !bounds.at("maximum").is_array() || bounds.at("maximum").size() != 3)
+                        throw std::runtime_error("Asset catalog contains malformed local bounds.");
+                    AssetBounds decoded;
+                    for (std::size_t axis = 0; axis < 3; ++axis)
+                    {
+                        decoded.Minimum[axis] = bounds.at("minimum")[axis].get<float>();
+                        decoded.Maximum[axis] = bounds.at("maximum")[axis].get<float>();
+                        if (!std::isfinite(decoded.Minimum[axis]) || !std::isfinite(decoded.Maximum[axis]) ||
+                            decoded.Minimum[axis] > decoded.Maximum[axis])
+                            throw std::runtime_error("Asset catalog contains invalid local bounds.");
+                    }
+                    entry.Metadata.LocalBounds = decoded;
+                }
+            }
             catalog.Entries.push_back(std::move(entry));
         }
         return catalog;
@@ -208,6 +231,12 @@ namespace Keire::Detail
             Json dependencies = Json::array();
             for (const auto dependency : entry.Dependencies)
                 dependencies.push_back(dependency.ToString());
+            Json metadata = Json::object();
+            if (entry.Metadata.LocalBounds)
+            {
+                const auto& bounds = *entry.Metadata.LocalBounds;
+                metadata["localBounds"] = {{"minimum", bounds.Minimum}, {"maximum", bounds.Maximum}};
+            }
             assets.push_back({{"id", entry.Id.ToString()},
                               {"type", entry.Type.ToString()},
                               {"pack", entry.PackPath.generic_string()},
@@ -215,9 +244,10 @@ namespace Keire::Detail
                               {"compressedBytes", entry.CompressedBytes},
                               {"uncompressedBytes", entry.UncompressedBytes},
                               {"sha256", DigestToString(entry.Digest)},
-                              {"dependencies", std::move(dependencies)}});
+                              {"dependencies", std::move(dependencies)},
+                              {"metadata", std::move(metadata)}});
         }
-        const Json document{{"schemaVersion", 1}, {"assets", std::move(assets)}};
+        const Json document{{"schemaVersion", 2}, {"assets", std::move(assets)}};
         std::filesystem::create_directories(path.parent_path());
         const auto temporary = path.string() + ".tmp";
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);

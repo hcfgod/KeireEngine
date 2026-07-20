@@ -2,6 +2,7 @@
 
 #include "Keire/Core.h"
 #include "KeireClient/Editor/EditorPanels.h"
+#include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include <cstdint>
 #include <deque>
@@ -27,19 +28,17 @@ namespace KeireEditor
     class SceneDocument;
     class SceneViewportPanel;
     class SceneGizmoController;
+    class SceneCameraController;
+    class ViewportAssetDropRouter;
 } // namespace KeireEditor
-
-namespace Keire::Detail
-{
-    class EditorCameraController;
-} // namespace Keire::Detail
 
 class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::ISceneViewportController,
                                    private KeireEditor::IHierarchyController,
                                    private KeireEditor::IInspectorController,
                                    private KeireEditor::IInputActionsController,
-                                   private KeireEditor::IProjectSettingsController
+                                   private KeireEditor::IProjectSettingsController,
+                                   private KeireEditor::IViewportAssetDropCommands
 {
   public:
     explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false);
@@ -100,6 +99,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawDiagnostics(Keire::UiFrame& ui);
     void DrawProject(Keire::UiFrame& ui);
     void DrawInspector(Keire::UiFrame& ui) override;
+    void OpenDroppedScene(Keire::AssetId asset) override;
+    void OpenDroppedInputActions(Keire::AssetId asset) override;
+    void CreateDroppedMeshEntity(Keire::AssetId asset) override;
+    void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
     void UpdateSceneCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState);
     void LoadSceneCamera();
     void SaveSceneCamera() noexcept;
@@ -165,6 +168,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::InputActionsPanel> m_InputActionsPanel;
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
     std::unique_ptr<KeireEditor::PropertyDrawerRegistry> m_PropertyDrawers;
+    std::unique_ptr<KeireEditor::ViewportAssetDropRouter> m_ViewportAssetDropRouter;
     Keire::UiThemeDefinition m_Theme;
     Keire::RenderEnvironmentSettings m_RenderEnvironment;
     bool m_RenderEnvironmentDirty = false;
@@ -230,8 +234,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::filesystem::path& m_SceneSource;
     std::filesystem::path& m_SceneRecovery;
     std::string& m_SceneStatus;
-    std::unique_ptr<Keire::Detail::EditorCameraController> m_EditorCamera;
-    Keire::EntityId m_EditorCameraLockedEntity;
+    std::unique_ptr<KeireEditor::SceneCameraController> m_EditorCamera;
     PendingSceneAction m_PendingSceneAction = PendingSceneAction::None;
     Keire::AssetId m_PendingSceneAsset;
     Keire::UiColor m_NoticeColor;
@@ -250,8 +253,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool& m_SceneRecoveryAvailable;
     bool m_UniformScale = false;
     bool m_PlayFaultReported = false;
-    bool m_SceneCameraCapturing = false;
-    bool m_SceneCameraDirty = false;
     bool m_CloseThemeAfterDecision = false;
     bool m_OpenDialog = false;
     bool m_Smoke = false;
