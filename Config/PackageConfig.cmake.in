@@ -21,7 +21,7 @@ if(NOT TARGET @PROJECT_NAMESPACE@::Core)
         IMPORTED_LOCATION "${_core_sdk_library}"
         INTERFACE_COMPILE_DEFINITIONS KEIRE_STATIC
         INTERFACE_COMPILE_FEATURES cxx_std_20
-        INTERFACE_INCLUDE_DIRECTORIES "${_core_sdk_prefix}/include;${_core_sdk_prefix}/third-party"
+        INTERFACE_INCLUDE_DIRECTORIES "${_core_sdk_prefix}/include"
     )
     if(MSVC)
         set_property(TARGET @PROJECT_NAMESPACE@::Core APPEND PROPERTY

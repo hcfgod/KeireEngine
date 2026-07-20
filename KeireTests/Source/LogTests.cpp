@@ -111,7 +111,7 @@ TEST_CASE("Logger handles provide copyable lifecycle-safe operations")
     std::filesystem::remove_all(directory);
 }
 
-#if SPDLOG_ACTIVE_LEVEL > SPDLOG_LEVEL_DEBUG
+#if KEIRE_COMPILED_LOG_LEVEL > KEIRE_LOG_LEVEL_DEBUG
 TEST_CASE("Compiled-out logging macros do not evaluate arguments")
 {
     int evaluations = 0;
@@ -119,6 +119,20 @@ TEST_CASE("Compiled-out logging macros do not evaluate arguments")
     CHECK(evaluations == 0);
 }
 #endif
+
+TEST_CASE("Kéire-owned log formatting supports braces, width, hex, and precision")
+{
+    CHECK(Keire::LogMessage("plain {}", 42) == "plain 42");
+    CHECK(Keire::LogMessage("hex {:08x}", 0x2aU) == "hex 0000002a");
+    CHECK(Keire::LogMessage("upper {:>6X}", 0xbeefU) == "upper   BEEF");
+    CHECK(Keire::LogMessage("scalar {:.2f}", 3.14159) == "scalar 3.14");
+    CHECK(Keire::LogMessage("text {:<6}", "ok") == "text ok    ");
+    CHECK(Keire::LogMessage("character {}", 'K') == "character K");
+    CHECK(Keire::LogMessage("escaped {{}} {}", true) == "escaped {} true");
+    CHECK_THROWS_AS((void)Keire::LogMessage("missing {}"), std::invalid_argument);
+    CHECK_THROWS_AS((void)Keire::LogMessage("extra", 1), std::invalid_argument);
+    CHECK_THROWS_AS((void)Keire::LogMessage("bad {:q}", 1), std::invalid_argument);
+}
 
 TEST_CASE("Logger rejects invalid configurations")
 {

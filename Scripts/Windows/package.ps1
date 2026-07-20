@@ -33,7 +33,6 @@ Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstd
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox"
 Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)" "$stage\include\" -Recurse
-Copy-Item "$Root\Vendor\spdlog\include\spdlog" "$stage\third-party\spdlog\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\LICENSE" "$stage\third-party\licenses\spdlog-LICENSE.txt"
 Copy-Item "$Root\Vendor\spdlog\include\spdlog\fmt\bundled\fmt.license.rst" "$stage\third-party\licenses\fmt-LICENSE.rst"
 Copy-Item "$Root\Vendor\doctest\LICENSE.txt" "$stage\third-party\licenses\doctest-LICENSE.txt"

@@ -16,8 +16,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "RenderTests")
 
     externalincludedirs
     {
-        VendorIncludeDirs.doctest,
-        VendorIncludeDirs.spdlog
+        VendorIncludeDirs.doctest
     }
 
     LinkKeireCore()

@@ -185,7 +185,7 @@ Packaging performs tests and a runtime smoke before staging the SDK. It then val
 
 - KeireClient plus the KeireCore, private KeireImGui/KeireZstd static libraries, and host shader compiler;
 - every supported public `Keire/` header;
-- the required spdlog and SDL static SDK inputs;
+- the required SDL static SDK inputs and private-backend license notices;
 - complete third-party license attribution, including Dear ImGui and shader compiler dependencies;
 - a machine-readable build manifest with locked dependency commits;
 - the low-level consumer with its own `main`;

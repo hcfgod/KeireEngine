@@ -73,7 +73,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         defines
         {
             "KEIRE_LOG_DEFAULT_TRACE",
-            "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
+            "KEIRE_COMPILED_LOG_LEVEL=0"
             , "KEIRE_ASSERTIONS_ENABLED"
         }
 
@@ -84,7 +84,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         defines
         {
             "NDEBUG",
-            "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO"
+            "KEIRE_COMPILED_LOG_LEVEL=2"
         }
 
     filter "configurations:Dist"
@@ -95,7 +95,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         defines
         {
             "NDEBUG",
-            "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO"
+            "KEIRE_COMPILED_LOG_LEVEL=2"
         }
 
     filter "configurations:Coverage"
@@ -103,7 +103,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         symbols "on"
         defines {
             "KEIRE_LOG_DEFAULT_TRACE",
-            "SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE"
+            "KEIRE_COMPILED_LOG_LEVEL=0"
         }
 
     ApplySanitizerSettings()

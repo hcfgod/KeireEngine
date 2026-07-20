@@ -1,8 +1,14 @@
 #include "Keire/Log.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <cctype>
+#include <charconv>
 #include <cstdio>
 #include <filesystem>
+#include <iomanip>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -110,7 +116,202 @@ namespace Keire
             logger->flush_on(spdlog::level::warn);
             return logger;
         }
+
+        struct FormatSpecification final
+        {
+            char Fill = ' ';
+            char Alignment = 0;
+            char Type = 0;
+            std::size_t Width = 0;
+            std::optional<std::size_t> Precision;
+        };
+
+        [[nodiscard]] FormatSpecification ParseFormatSpecification(std::string_view text)
+        {
+            FormatSpecification result;
+            if (text.empty())
+                return result;
+            if (text.front() != ':')
+                throw std::invalid_argument("Kéire log placeholders support only ':' format specifications.");
+            text.remove_prefix(1);
+            if (text.size() >= 2 && (text[1] == '<' || text[1] == '>' || text[1] == '^'))
+            {
+                result.Fill = text[0];
+                result.Alignment = text[1];
+                text.remove_prefix(2);
+            }
+            else if (!text.empty() && (text.front() == '<' || text.front() == '>' || text.front() == '^'))
+            {
+                result.Alignment = text.front();
+                text.remove_prefix(1);
+            }
+            if (!text.empty() && text.front() == '0')
+            {
+                result.Fill = '0';
+                result.Alignment = '>';
+                text.remove_prefix(1);
+            }
+            while (!text.empty() && text.front() >= '0' && text.front() <= '9')
+            {
+                const auto digit = static_cast<std::size_t>(text.front() - '0');
+                if (result.Width > (std::numeric_limits<std::size_t>::max() - digit) / 10)
+                    throw std::invalid_argument("Kéire log format width is too large.");
+                result.Width = result.Width * 10 + digit;
+                text.remove_prefix(1);
+            }
+            if (!text.empty() && text.front() == '.')
+            {
+                text.remove_prefix(1);
+                if (text.empty() || text.front() < '0' || text.front() > '9')
+                    throw std::invalid_argument("Kéire log precision requires digits.");
+                std::size_t precision = 0;
+                while (!text.empty() && text.front() >= '0' && text.front() <= '9')
+                {
+                    precision = precision * 10 + static_cast<std::size_t>(text.front() - '0');
+                    if (precision > 1000)
+                        throw std::invalid_argument("Kéire log precision is too large.");
+                    text.remove_prefix(1);
+                }
+                result.Precision = precision;
+            }
+            if (!text.empty())
+            {
+                result.Type = text.front();
+                text.remove_prefix(1);
+            }
+            if (!text.empty())
+                throw std::invalid_argument("Kéire log format specification contains unsupported characters.");
+            return result;
+        }
+
+        [[nodiscard]] std::string ApplyWidth(std::string value, const FormatSpecification& specification,
+                                             const bool numeric)
+        {
+            if (value.size() >= specification.Width)
+                return value;
+            const auto padding = specification.Width - value.size();
+            const auto alignment = specification.Alignment != 0 ? specification.Alignment : (numeric ? '>' : '<');
+            if (alignment == '<')
+                return value + std::string(padding, specification.Fill);
+            if (alignment == '^')
+            {
+                const auto left = padding / 2;
+                return std::string(left, specification.Fill) + value + std::string(padding - left, specification.Fill);
+            }
+            if (specification.Fill == '0' && !value.empty() && (value.front() == '-' || value.front() == '+'))
+                return value.substr(0, 1) + std::string(padding, '0') + value.substr(1);
+            return std::string(padding, specification.Fill) + value;
+        }
+
+        template <typename Integer>
+        [[nodiscard]] std::string FormatInteger(const Integer value, const FormatSpecification& specification)
+        {
+            const bool hexadecimal = specification.Type == 'x' || specification.Type == 'X';
+            if (specification.Type != 0 && !hexadecimal && specification.Type != 'd')
+                throw std::invalid_argument("This Kéire log format type is not valid for an integer.");
+            std::array<char, 128> buffer{};
+            const auto [end, error] =
+                std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, hexadecimal ? 16 : 10);
+            if (error != std::errc{})
+                throw std::runtime_error("Kéire could not format an integer log argument.");
+            std::string result(buffer.data(), end);
+            if (specification.Type == 'X')
+                std::ranges::transform(
+                    result, result.begin(), [](const char character)
+                    { return static_cast<char>(std::toupper(static_cast<unsigned char>(character))); });
+            return ApplyWidth(std::move(result), specification, true);
+        }
+
+        [[nodiscard]] std::string FormatArgumentValue(const FormatArgument& argument,
+                                                      const FormatSpecification& specification)
+        {
+            return std::visit(
+                [&](const auto& value) -> std::string
+                {
+                    using Value = std::remove_cvref_t<decltype(value)>;
+                    if constexpr (std::same_as<Value, std::int64_t> || std::same_as<Value, std::uint64_t>)
+                        return FormatInteger(value, specification);
+                    else if constexpr (std::same_as<Value, double>)
+                    {
+                        if (specification.Type != 0 && specification.Type != 'f' && specification.Type != 'e' &&
+                            specification.Type != 'E' && specification.Type != 'g' && specification.Type != 'G')
+                            throw std::invalid_argument("This Kéire log format type is not valid for a scalar.");
+                        std::ostringstream stream;
+                        if (specification.Precision)
+                            stream << std::setprecision(static_cast<int>(*specification.Precision));
+                        if (specification.Type == 'f')
+                            stream << std::fixed;
+                        else if (specification.Type == 'e' || specification.Type == 'E')
+                            stream << std::scientific;
+                        stream << value;
+                        auto result = stream.str();
+                        if (specification.Type == 'E' || specification.Type == 'G')
+                            std::ranges::transform(
+                                result, result.begin(), [](const char character)
+                                { return static_cast<char>(std::toupper(static_cast<unsigned char>(character))); });
+                        return ApplyWidth(std::move(result), specification, true);
+                    }
+                    else if constexpr (std::same_as<Value, bool>)
+                    {
+                        if (specification.Type != 0)
+                            throw std::invalid_argument("Kéire Boolean log arguments do not accept a format type.");
+                        return ApplyWidth(value ? "true" : "false", specification, false);
+                    }
+                    else
+                    {
+                        if (specification.Type != 0 && specification.Type != 's')
+                            throw std::invalid_argument("This Kéire log format type is not valid for text.");
+                        auto result = value;
+                        if (specification.Precision && result.size() > *specification.Precision)
+                            result.resize(*specification.Precision);
+                        return ApplyWidth(std::move(result), specification, false);
+                    }
+                },
+                argument.Value);
+        }
     } // namespace
+
+    std::string FormatLogMessage(const std::string_view format, const std::span<const FormatArgument> arguments)
+    {
+        std::string result;
+        result.reserve(format.size() + arguments.size() * 8);
+        std::size_t argumentIndex = 0;
+        for (std::size_t index = 0; index < format.size();)
+        {
+            if (format[index] == '{')
+            {
+                if (index + 1 < format.size() && format[index + 1] == '{')
+                {
+                    result.push_back('{');
+                    index += 2;
+                    continue;
+                }
+                const auto close = format.find('}', index + 1);
+                if (close == std::string_view::npos)
+                    throw std::invalid_argument("Kéire log format contains an unmatched '{'.");
+                if (argumentIndex >= arguments.size())
+                    throw std::invalid_argument("Kéire log format has more placeholders than arguments.");
+                result += FormatArgumentValue(arguments[argumentIndex++],
+                                              ParseFormatSpecification(format.substr(index + 1, close - index - 1)));
+                index = close + 1;
+                continue;
+            }
+            if (format[index] == '}')
+            {
+                if (index + 1 < format.size() && format[index + 1] == '}')
+                {
+                    result.push_back('}');
+                    index += 2;
+                    continue;
+                }
+                throw std::invalid_argument("Kéire log format contains an unmatched '}'.");
+            }
+            result.push_back(format[index++]);
+        }
+        if (argumentIndex != arguments.size())
+            throw std::invalid_argument("Kéire log format has fewer placeholders than arguments.");
+        return result;
+    }
 
     namespace Detail
     {

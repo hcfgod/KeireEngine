@@ -20,11 +20,6 @@ project(ProjectConfig.HUB_TARGET)
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
-    externalincludedirs
-    {
-        VendorIncludeDirs.spdlog
-    }
-
     defines
     {
         "KEIRE_EDITOR_TARGET=\"" .. ProjectConfig.CLIENT_TARGET .. "\""

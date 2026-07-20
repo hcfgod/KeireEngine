@@ -207,7 +207,11 @@ events->TryEnqueue(AssetReady{43}); // any thread
 
 ## Logging
 
-`Keire::Log` owns a private spdlog thread pool and never changes spdlog's global registry or default logger. KeireCore and KeireClient use separate asynchronous rotating-file loggers. `LogConfig::EnableConsole` controls the color console sink and defaults to true. The default files are `Logs/Core.log` and `Logs/Client.log`.
+`Keire::Log` owns a private asynchronous backend and never changes its backend's global registry or default logger.
+KeireCore and KeireClient use separate rotating-file loggers. Public code formats through Kéire-owned `{}` placeholders,
+including integer hex/width and floating precision specifications; spdlog and fmt remain implementation details.
+`LogConfig::EnableConsole` controls the color console sink and defaults to true. The default files are `Logs/Core.log`
+and `Logs/Client.log`.
 
 Logs default to `Logs` relative to the process working directory. IDE debug directories and scripts use the repository root. Initialization is idempotent only for identical configuration; conflicting configuration throws. `LoggerHandle` is a copyable value backed by `Ref`; each call takes a short operation lock. Shutdown may wait for an active write, but never for a handle's lifetime, and old handles safely become inert. Disabled macro levels evaluate neither logger acquisition nor message arguments.
 
@@ -354,7 +358,7 @@ Required CI covers Windows/VS2022, Linux/GCC, macOS/Clang, x64 and ARM64 smoke b
 CodeQL and Dependency Review are an explicit repository opt-in. Enable Dependency Graph and code scanning in GitHub, create the repository variable `ENABLE_ADVANCED_SECURITY=true`, and require `Security activation status` plus the resulting checks in the `master` branch protection rules. Once enabled, the status job fails if any eligible security job is skipped or unsuccessful; CodeQL findings are governed by the repository's code-scanning rules. Privileged CodeQL uploads are skipped for pull requests from forks.
 
 Version tags and manual release workflow runs create SDK archives without publishing a GitHub Release. Archives contain
-KeireClient, KeireCore, the private KeireImGui archive, public headers including `Keire/Ui.h`, spdlog headers, SDL's
+KeireClient, KeireCore, the private KeireImGui archive, public headers including `Keire/Ui.h`, SDL's
 static archive/headers/official CMake configuration, complete licenses, two consumers, and a validated JSON build
 manifest containing SDL, JSON, Dear ImGui, and Zstandard commits. Packages also include the canonical Default Input
 source/metadata pair and validate it with the packaged asset tool. Every package extracts and validates both a low-level consumer

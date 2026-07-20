@@ -14,10 +14,5 @@ project(AssetToolTarget)
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
-    externalincludedirs
-    {
-        VendorIncludeDirs.spdlog
-    }
-
     LinkKeireCore()
     LinkSDL3()

@@ -84,7 +84,13 @@ Project-owned shared objects derive from `RefCounted` and are constructed with `
 
 ## Logging Lifecycle
 
-KeireCore owns a private spdlog thread pool and two asynchronous loggers inside a reference-counted `LogState`. The implementation does not register global names, replace the spdlog default, or shut down unrelated state. Handles keep the state storage valid but take operation locks only while making calls. Shutdown detaches the global state, takes its exclusive operation lock, flushes pending work, and closes it. It may wait for an active call but not for a handle's lifetime; detached handles observe the closed state and become safe no-ops.
+KeireCore owns a private spdlog thread pool and two asynchronous loggers inside a reference-counted `LogState`. Public
+headers expose only `LogLevel`, `FormatArgument`, `LogMessage`, and logger handles. Kéire parses its supported `{}`
+formatting subset before crossing the implementation boundary, so neither spdlog nor fmt types, headers, or compile
+levels are part of the SDK contract. The implementation does not register global names, replace the spdlog default, or
+shut down unrelated state. Handles keep the state storage valid but take operation locks only while making calls.
+Shutdown detaches the global state, takes its exclusive operation lock, flushes pending work, and closes it. It may wait
+for an active call but not for a handle's lifetime; detached handles observe the closed state and become safe no-ops.
 
 File paths are intentionally relative to the process working directory. Scripts and generated IDE targets set that directory to the repository root, producing consistent `Logs/Core.log` and `Logs/Client.log` paths.
 
@@ -218,7 +224,7 @@ ABI through reflection before publication.
 ## Release Shape
 
 Packages include KeireHub, the KeireClient editor, KeireAssetTool, KeireShaderCompiler and its runtime libraries, KeireCore plus private KeireImGui/KeireZstd archives,
-public `Keire/<header>` APIs, required spdlog headers, the SDL static SDK, complete license texts, notices, README, and a
+public `Keire/<header>` APIs, the SDL static SDK, complete dependency license texts, notices, README, and a
 complete `samples/KeireSandbox` project. The packaged asset tool imports and validates the sample input and scene assets
 from a tracked-file allowlist. Generated workspace and recovery data is rejected in the stage, archive, and extracted
 validation copy

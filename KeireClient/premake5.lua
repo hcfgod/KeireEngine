@@ -20,11 +20,6 @@ project(ProjectConfig.CLIENT_TARGET)
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
-    externalincludedirs
-    {
-        VendorIncludeDirs.spdlog
-    }
-
     LinkKeireCore()
 
     LinkSDL3()

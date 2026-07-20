@@ -168,6 +168,9 @@ Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Con
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and $packageConfig.Contains('"${_imgui_sdk_library}" "${_zstd_sdk_library}" SDL3::SDL3-static')) "Private archive CMake transitive link"
+Assert-True (-not $packageConfig.Contains('include;${_core_sdk_prefix}/third-party')) "SDK omits general third-party include path"
+$publicLogHeader = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Log.h") -Raw
+Assert-True (-not $publicLogHeader.Contains("spdlog/") -and -not $publicLogHeader.Contains("fmt::") -and $publicLogHeader.Contains("KEIRE_COMPILED_LOG_LEVEL")) "Public logging boundary is engine-owned"
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {
@@ -181,6 +184,7 @@ try {
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
+    Remove-Item (Join-Path $packageStage "third-party\spdlog") -Recurse -Force
     foreach ($path in @("bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "include\Core\Undo.h", "include\Core\ECS\Components\CameraComponent.h", "include\Core\ECS\Components\MeshRendererComponent.h", "include\Core\Rendering\RenderSystem.h", "include\Core\Assets\RenderingAssets.h", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null

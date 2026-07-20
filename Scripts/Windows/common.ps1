@@ -200,7 +200,7 @@ function Assert-WindowsPackageStage {
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h", "include\$Namespace\Undo.h",
         "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial",
-        "third-party\spdlog\spdlog.h", "third-party\licenses\spdlog-LICENSE.txt",
+        "third-party\licenses\spdlog-LICENSE.txt",
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
         "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt",
         "third-party\SDL3\include\SDL3\SDL.h",
@@ -215,6 +215,9 @@ function Assert-WindowsPackageStage {
     }
     if (Test-Path (Join-Path $Stage "include\KeireInternal")) {
         throw "Package contains private KeireInternal headers."
+    }
+    if (Test-Path (Join-Path $Stage "third-party\spdlog")) {
+        throw "Package contains private spdlog headers."
     }
     if (-not (Get-ChildItem (Join-Path $Stage "lib\cmake") -Filter "*Config.cmake" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw "Package is missing its CMake package configuration."
