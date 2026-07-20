@@ -175,6 +175,8 @@ Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packa
 Assert-True (-not $packageConfig.Contains('include;${_core_sdk_prefix}/third-party')) "SDK omits general third-party include path"
 $publicLogHeader = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Log.h") -Raw
 Assert-True (-not $publicLogHeader.Contains("spdlog/") -and -not $publicLogHeader.Contains("fmt::") -and $publicLogHeader.Contains("KEIRE_COMPILED_LOG_LEVEL")) "Public logging boundary is engine-owned"
+$commonPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
+Assert-True ($commonPremake.Contains('_DISABLE_STRING_ANNOTATION') -and $commonPremake.Contains('_DISABLE_VECTOR_ANNOTATION')) "MSVC sanitizer dependency ABI alignment"
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {

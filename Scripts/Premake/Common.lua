@@ -123,7 +123,9 @@ end
 function ApplySanitizerSettings()
     filter { "configurations:DebugASan", "toolset:msc" }
         editandcontinue "Off"
-        buildoptions { "/fsanitize=address" }
+        -- CMake-built private archives use the standard unannotated MSVC STL ABI. Keep that ABI consistent while
+        -- retaining AddressSanitizer instrumentation for every first-party translation unit.
+        buildoptions { "/D_DISABLE_STRING_ANNOTATION", "/D_DISABLE_VECTOR_ANNOTATION", "/fsanitize=address" }
 
     filter { "configurations:DebugASan", "toolset:msc", "kind:ConsoleApp" }
         linkoptions { "/INCREMENTAL:NO" }
