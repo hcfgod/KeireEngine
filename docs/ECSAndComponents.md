@@ -58,8 +58,9 @@ converted through `Keire::Math`. World matrices are cached and dirtied through d
 value changes. Reparenting rejects cycles and preserves the world transform by default; failure restores the original
 hierarchy transactionally.
 
-Directional Light is renderer-neutral data: enabled state, linear color, intensity, optional color temperature, shadow
-mode, strength, and bias are authorable and serializable, but this milestone does not render light.
+Directional Light enabled state, linear color, intensity, optional color temperature, shadow mode, strength, and bias
+are authorable and serializable. The built-in renderer consumes transform orientation, color, intensity, and temperature
+for one ambient-plus-Lambert light. Shadow mode, strength, and bias remain serialized authoring data until shadow passes land.
 
 ## Scene Serialization
 

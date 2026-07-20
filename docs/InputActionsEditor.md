@@ -7,10 +7,14 @@ menu. KeireClient uses only `UiFrame`; no Dear ImGui include or symbol crosses t
 The panel uses a master-detail workflow:
 
 - The toolbar identifies the source asset and provides Save, Revert, bounded Undo/Redo, Validate, search, and live
-  monitor controls. `Ctrl+S`, `Ctrl+Z`, and `Ctrl+Y` mirror the toolbar.
-- The left pane owns action-map selection and control-scheme visibility.
-- The center pane shows actions with nested binding rows and creates new actions or bindings with stable generated IDs.
-- The right pane edits the selected map, action, or binding, reports validation/runtime status, and exposes Listen.
+  monitor controls. `Ctrl+S`, `Ctrl+Z`, `Ctrl+R`, `Ctrl+Y`, and `Ctrl+Shift+Z` mirror the toolbar.
+- The left pane creates, selects, renames, duplicates, and removes action maps and control schemes. Scheme properties
+  edit unique binding groups plus required or optional Keyboard, Mouse, and Gamepad families.
+- The center pane shows actions with nested binding/composite rows. It creates ordinary bindings, 1D Axis composites,
+  and 2D Vector composites with stable generated IDs, and supports action duplication and deletion.
+- The right pane edits map capture policy; Button, Value, and Pass Through action types; Boolean, 1D Axis, and 2D Vector
+  values; common control paths; scheme membership; and all built-in interactions and processors. Press, Tap, Hold,
+  Multi Tap, Deadzone, Scale, Invert, and Normalize expose their validated parameters directly.
 
 Save canonicalizes and validates the entire document, atomically replaces the `.keireinput` source, imports it through
 the same `AssetDatabase` path as `KeireAssetTool`, and requests runtime hot reload. Revert discards the in-memory command

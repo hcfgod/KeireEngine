@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace KeireEditor
@@ -15,6 +16,7 @@ namespace KeireEditor
     class AssetBrowserPanel;
     class ConsolePanel;
     class DiagnosticsPanel;
+    class SceneGizmoController;
 } // namespace KeireEditor
 
 namespace Keire::Detail
@@ -75,6 +77,7 @@ class EditorWorkspaceLayer final : public Keire::Layer
     void DrawThemeEditor(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawInputActionsEditor(Keire::UiFrame& ui);
     void DrawInputDebugger(Keire::UiFrame& ui);
+    void DrawProjectSettings(Keire::UiFrame& ui);
     void DrawScene(Keire::UiFrame& ui);
     void DrawGame(Keire::UiFrame& ui);
     void DrawHierarchy(Keire::UiFrame& ui);
@@ -133,10 +136,14 @@ class EditorWorkspaceLayer final : public Keire::Layer
     Keire::UiPanelRegistration m_ThemeEditor;
     Keire::UiPanelRegistration m_InputActionsEditor;
     Keire::UiPanelRegistration m_InputDebugger;
+    Keire::UiPanelRegistration m_ProjectSettings;
     std::unique_ptr<KeireEditor::AssetBrowserPanel> m_AssetBrowserPanel;
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
+    std::unique_ptr<KeireEditor::SceneGizmoController> m_SceneGizmos;
     Keire::UiThemeDefinition m_Theme;
+    Keire::RenderEnvironmentSettings m_RenderEnvironment;
+    bool m_RenderEnvironmentDirty = false;
     Keire::UiThemeId m_PendingTheme;
     Dialog m_Dialog = Dialog::None;
     std::string m_ProfileName;
@@ -150,6 +157,7 @@ class EditorWorkspaceLayer final : public Keire::Layer
     Keire::AssetId m_EditingAsset;
     Keire::AssetId m_InputAsset;
     Keire::AssetId m_SelectedInputMap;
+    Keire::AssetId m_SelectedInputScheme;
     Keire::AssetId m_SelectedInputAction;
     Keire::AssetId m_SelectedInputBinding;
     Keire::InputActionAssetDefinition m_InputDocument;
@@ -205,6 +213,7 @@ class EditorWorkspaceLayer final : public Keire::Layer
     Keire::UiColor m_NoticeColor;
     std::uint32_t m_FrameCount = 0;
     std::uint64_t m_ContinuousEditSerial = 0;
+    std::unordered_map<std::string, bool> m_ComponentExpansion;
     double m_AssetPollSeconds = 0.0;
     double m_SceneRecoverySeconds = 0.0;
     bool m_ThemeDirty = false;

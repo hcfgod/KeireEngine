@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 #include "KeireInternal/EditorCameraController.h"
+#include "KeireInternal/RenderInternal.h"
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
@@ -24,6 +25,12 @@ namespace
     }
 } // namespace
 
+TEST_CASE("built-in shader resource counts match each stage")
+{
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 1);
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 0);
+}
+
 TEST_CASE("editor camera navigation matches scene-view gesture semantics")
 {
     Keire::Detail::EditorCameraController camera;
@@ -33,7 +40,7 @@ TEST_CASE("editor camera navigation matches scene-view gesture semantics")
     orbit.Orbit = true;
     orbit.PointerDelta = {20.0F, -10.0F};
     CHECK(camera.Update(orbit));
-    CHECK(camera.State().YawDegrees != doctest::Approx(initial.YawDegrees));
+    CHECK(camera.State().YawDegrees > initial.YawDegrees);
     CHECK(camera.State().PitchDegrees != doctest::Approx(initial.PitchDegrees));
 
     const auto beforePan = camera.State().Focus;
@@ -185,4 +192,14 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     CHECK(renderer->Visible());
     CHECK(renderer->Mesh() == Keire::MeshAsset::CubeId());
     CHECK_THROWS_AS(renderer->SetTint({2.0F, 0.0F, 0.0F, 1.0F}), std::invalid_argument);
+
+    auto light = Keire::CreateRef<Keire::DirectionalLightComponent>();
+    light->SetLightColor({0.8F, 0.7F, 0.6F, 1.0F});
+    light->SetIntensity(2.5F);
+    light->SetUseColorTemperature(true);
+    light->SetColorTemperatureKelvin(4200.0F);
+    CHECK(light->Intensity() == doctest::Approx(2.5F));
+    CHECK(light->UseColorTemperature());
+    CHECK(light->ColorTemperatureKelvin() == doctest::Approx(4200.0F));
+    CHECK_THROWS_AS(light->SetColorTemperatureKelvin(500.0F), std::invalid_argument);
 }

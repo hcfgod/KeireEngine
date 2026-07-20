@@ -74,6 +74,7 @@ namespace Keire
         F,
         Left,
         Q,
+        R,
         Right,
         S,
         Up,
@@ -101,6 +102,19 @@ namespace Keire
         bool Edited = false;
         bool DeactivatedAfterEdit = false;
         bool DoubleClicked = false;
+    };
+
+    struct UiItemRect
+    {
+        UiPosition Minimum;
+        UiPosition Maximum;
+
+        [[nodiscard]] UiSize Size() const noexcept { return {Maximum.X - Minimum.X, Maximum.Y - Minimum.Y}; }
+
+        [[nodiscard]] bool Contains(const UiPosition point) const noexcept
+        {
+            return point.X >= Minimum.X && point.Y >= Minimum.Y && point.X <= Maximum.X && point.Y <= Maximum.Y;
+        }
     };
 
     struct UiPointerState
@@ -389,6 +403,7 @@ namespace Keire
                                     float thickness = 4.0F);
         [[nodiscard]] bool Shortcut(UiShortcut shortcut);
         [[nodiscard]] UiItemState LastItemState() const;
+        [[nodiscard]] UiItemRect LastItemRect() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
         [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
         [[nodiscard]] bool DragVector3(std::string_view label, Vector3& value, float speed = 0.1F);
@@ -403,6 +418,14 @@ namespace Keire
         void Image(const Ref<UiImage>& image, UiSize size = {});
         void Image(const Ref<RenderSurface>& surface, UiSize size = {});
         [[nodiscard]] bool ImageButton(std::string_view id, const Ref<UiImage>& image, UiSize size = {});
+        void DrawLine(UiPosition start, UiPosition end, UiColor color, float thickness = 1.0F);
+        void DrawCircle(UiPosition center, float radius, UiColor color, float thickness = 1.0F);
+        void DrawFilledCircle(UiPosition center, float radius, UiColor color);
+        void DrawRectangle(UiItemRect rectangle, UiColor color, float thickness = 1.0F, float rounding = 0.0F);
+        void DrawFilledRectangle(UiItemRect rectangle, UiColor color, float rounding = 0.0F);
+        void DrawTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color, float thickness = 1.0F);
+        void DrawFilledTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color);
+        void DrawOverlayText(UiPosition position, UiColor color, std::string_view text);
         [[nodiscard]] UiSize ContentAvailable() const;
         [[nodiscard]] bool WindowFocused() const;
         [[nodiscard]] UiPointerState PointerState() const;

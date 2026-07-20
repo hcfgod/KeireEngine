@@ -138,6 +138,22 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.keireshader"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Project.keireproject"));
+    CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Rendering.keiresettings"));
+    auto rendering = Keire::LoadRenderEnvironmentSettings(created->Root());
+    CHECK(rendering.AmbientIntensity == doctest::Approx(0.75F));
+    rendering.AmbientColor = {0.1F, 0.2F, 0.3F, 1.0F};
+    rendering.AmbientIntensity = 1.5F;
+    rendering.Exposure = 1.25F;
+    Keire::SaveRenderEnvironmentSettings(created->Root(), rendering);
+    CHECK(Keire::LoadRenderEnvironmentSettings(created->Root()) == rendering);
+    for (int revision = 1; revision <= 16; ++revision)
+    {
+        rendering.AmbientIntensity = static_cast<float>(revision) * 0.25F;
+        Keire::SaveRenderEnvironmentSettings(created->Root(), rendering);
+        CHECK(Keire::LoadRenderEnvironmentSettings(created->Root()) == rendering);
+    }
+    rendering.Exposure = 0.0F;
+    CHECK_THROWS_AS(Keire::SaveRenderEnvironmentSettings(created->Root(), rendering), std::invalid_argument);
     CHECK(Keire::Project::Inspect(created->Root()) == Keire::ProjectStatus::Ready);
 
     const auto exclusive = Keire::Project::Open(created->Root(), Keire::ProjectOpenMode::Exclusive);

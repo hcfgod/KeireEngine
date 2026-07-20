@@ -12,12 +12,13 @@ Hierarchy supports recursive entities, multi-level selection stability, context-
 duplication/deletion, and drag/drop reparenting. Entity creation is available through the top-level **Entity** menu and
 blank-space or row context menus. `F2`, `Delete`, and `Ctrl+D` route to the same operations.
 
-Inspector edits Unity-style component cards. Transform position, Euler rotation (stored as a normalized quaternion),
+Inspector edits foldable Unity-style component cards that retain their bordered presentation when collapsed. Transform
+position, Euler rotation (stored as a normalized quaternion),
 scale, and parent hierarchy are component data. Camera exposes projection, primary selection, priority, clipping, and
-linear clear color. Mesh Renderer exposes mesh/material IDs, tint, and visibility. Directional Light exposes
-renderer-neutral light and shadow authoring.
+linear clear color. Mesh Renderer exposes mesh/material IDs, tint, and visibility. Directional Light color, intensity,
+temperature, and orientation feed the built-in Lambert pass; shadow settings remain authoring data for a later pass.
 Scene uses its own bounded `UndoContext`, `Ctrl+S`, and explicit atomic Save. The global Edit menu and
-`Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, or `Ctrl+Y` route to the focused document history. Continuous Transform and tint
+`Ctrl/Cmd+Z`, `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, or `Ctrl+Y` route to the focused document history. Continuous Transform and tint
 drags are one undo entry. `Ctrl+Shift+S` uses an asynchronous native dialog,
 requires a new `.keirescene` inside project Assets, assigns a new asset identity, and switches to the copy.
 
@@ -39,7 +40,8 @@ caches, workspace state, and cooked builds are ignored project-local data.
 Scene view renders the edit scene or active runtime clone with a depth-tested grid. `F` frames transformed renderer and
 child bounds, `Shift+F` locks the pivot, Alt+left orbits, middle drag pans in camera space, the wheel/Alt+right zooms,
 and right drag plus `WASDQE` flies. Shift accelerates navigation; the wheel adjusts fly speed; arrow keys walk/strafe;
-the toolbar snaps axes and toggles perspective/orthographic projection. Game view renders the deterministic active
-primary Camera. Scene-camera state stays below `Library/Editor` and never dirties source content. See
+the toolbar snaps axes and toggles perspective/orthographic projection. Horizontal orbit/fly motion follows pointer
+motion while vertical motion retains Unity's pitch convention. Game view renders the deterministic active scene Camera
+from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content. See
 [Rendering](Rendering.md). Gizmos, prefabs, scripting, native module hot reload, and applying Play changes remain later
 subsystem milestones.

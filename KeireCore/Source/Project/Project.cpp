@@ -4,6 +4,7 @@
 #include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/BuildInfo.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -252,6 +253,7 @@ namespace Keire
             std::filesystem::create_directories(root / "ProjectSettings");
             std::filesystem::create_directories(root / "Library");
             Detail::WriteTextFileAtomically(root / ".gitignore", "/Library/\n/Logs/\n/Temp/\n/Build/\n");
+            SaveRenderEnvironmentSettings(root, {});
 
             ProjectDescriptor descriptor;
             descriptor.Id = ProjectId::Generate();

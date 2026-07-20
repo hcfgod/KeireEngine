@@ -45,7 +45,8 @@ on the application construction thread; rejected worker-thread calls leave both 
 
 ## Editor Routing
 
-The editor routes `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` plus the Edit menu to the focused document context.
+The editor routes `Ctrl/Cmd+Z` to Undo and `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` to Redo, alongside the Edit
+menu, in the focused document context.
 Project asset operations, scene edits, Input Actions authoring, and theme previews use this shared service. Continuous
 Transform and Mesh Renderer tint drags merge into one history entry. Docking geometry remains layout state rather than
 document history.

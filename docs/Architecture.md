@@ -107,11 +107,27 @@ Configuration is a separate typed boundary. nlohmann/json parses implementation-
 
 ## UI Runtime
 
-`UiSystem` is an application-owned private implementation. `UiMode::Disabled` preserves the pre-UI runtime, `Headless` creates a deterministic context without platform or graphics state, and `Rendered` transactionally creates an SDL_GPU device, claims the primary native window, configures an SDR swapchain, and initializes the SDL3 and SDL_GPU Dear ImGui backends. Partial initialization unwinds in reverse order. Shutdown removes event forwarding, waits for the GPU, shuts down renderer and platform backends, persists the active layout when configured, destroys the context, releases the window claim, and destroys the device before the window system closes.
+`UiSystem` is an application-owned private implementation. `UiMode::Disabled` preserves the pre-UI runtime, `Headless`
+creates a deterministic context without platform or graphics state, and `Rendered` initializes Dear ImGui's SDL3
+platform backend plus a private bridge into the application-owned `RenderSystem`. RenderSystem owns the SDL_GPU device,
+window claim, swapchain, and presentation lifecycle described above. Partial initialization unwinds in reverse order.
+Shutdown removes event forwarding, persists the active layout when configured, closes the UI renderer/platform bridges,
+and destroys the context before RenderSystem releases GPU and window resources.
+
+Scene submissions carry a Kéire-owned `RenderEnvironmentSettings` value. JSON persistence stays private in
+`ProjectSettings/Rendering.keiresettings`; public headers expose only colors, scalar values, paths, and validation
+functions. Fragment-stage lighting consumes that environment together with the deterministic active Directional Light.
+KeireClient owns the separate Scene gizmo controller and uses only the public UI drawing facade, so neither ImGui draw
+lists nor GPU handles cross into client code.
 
 Raw SDL events are forwarded through an implementation-only sink inside `WindowSystem::PollEvent` before Kéire's existing typed translation. Neither the sink, native window, SDL event, GPU device, nor swapchain appears in a public header. `UiCaptureState` is copied out as Kéire values for future input routing.
 
-After fixed and variable updates, `Application` begins one UI frame, creates the root dockspace, and delegates bottom-to-top UI traversal to `LayerStack`; overlays execute last and structural changes remain deferred. `UiFrame` validates owner thread and active generation. Its RAII scopes balance backend begin/end calls during normal returns and exception unwinding. Rendering performs the mandatory SDL_GPU draw-data preparation, records one render pass, and submits the command buffer. Minimized or unavailable swapchain textures are skipped safely. Docking is active, while multi-viewports are forced off because detached native windows require a separate ownership milestone.
+After fixed and variable updates, `Application` begins one UI frame, creates the root dockspace, and delegates
+bottom-to-top UI traversal to `LayerStack`; overlays execute last and structural changes remain deferred. `UiFrame`
+validates owner thread and active generation. Its RAII scopes balance backend begin/end calls during normal returns and
+exception unwinding. Scene/Game declarations and UI draw data are recorded into one coordinated RenderSystem frame.
+Minimized or unavailable swapchain textures are skipped safely. Docking is active, while multi-viewports are forced off
+because detached native windows require a separate ownership milestone.
 
 `UiWorkspace` is an optional application-owned profile service layered above `UiSystem`. Panels register stable IDs and receive move-only registrations; the workspace owns visibility and submitted backend names without exposing Dear ImGui. The Default layout is an immutable factory recipe expressed through `UiLayoutBuilder`, while named layouts capture docking state plus known and unknown panel visibility. Changes autosave to a current-session document and the active custom profile. Explicit reset reapplies the factory recipe; custom profiles support save-as, rename, delete, and portable import/export.
 
@@ -160,7 +176,8 @@ outside source assets. Stable IDs preserve context state across rename and hot r
 and Assets. Full contracts live in [Input System](InputSystem.md).
 
 `.keireinput` is the first registered typed source importer. It validates bounded versioned JSON and emits deterministic
-canonical bytes into the normal content-addressed cache and cooker. The dockable editor owns only mutable authoring
+canonical bytes into the normal content-addressed cache and cooker. The dockable editor exposes every schema-owned
+action type, value type, control scheme, composite, interaction, and processor while owning only mutable authoring
 documents and uses the public Kéire UI facade. Details live in [Input Actions Editor](InputActionsEditor.md).
 
 ## Event And Time Runtime

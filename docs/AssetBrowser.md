@@ -4,6 +4,11 @@ The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presen
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
 rename, stable-identity duplicate, and recoverable Move to Trash operations.
 
+Both the thumbnail and extension-free label are drag handles. Folder targets retain move semantics; Scene-view targets
+dispatch by asset type. Scenes open through the normal dirty-document guard, Input Actions open in their editor, and a
+Material dropped over a visible Mesh Renderer is assigned to the ray-picked entity as an undoable scene edit.
+The current built-in material path also previews its optional `Tint` property through the Mesh Renderer tint.
+
 The Create toolbar and blank-area context menu share commands for Folder, Scene, Material, Unlit Shader, and Input
 Actions templates. New content is created in the displayed folder, appears immediately after its source/metadata
 transaction commits, is selected, and starts an extension-preserving base-name rename. Import diagnostics are shown per
@@ -17,6 +22,9 @@ Asset and folder context menus support Open, Rename, Duplicate, Delete, Cut, Cop
 Refresh, reveal, relative-path copy, and stable-ID copy. Batch operations preflight confined destinations. Trash entries
 persist beneath `Library/Trash`, retain source/metadata pairs and their original path, and can be restored unless that
 destination has become occupied. Permanent deletion is deliberately separate from normal Delete.
+
+Reveal resolves the project root to an absolute canonical path. Windows selects files with Explorer and opens folders
+directly; macOS uses Finder reveal, and Unix opens the containing directory for files.
 
 List and Grid labels omit source extensions. A delayed hover card supplies the complete filename, extension, type,
 project-relative path, size, stable ID, importer, and latest import result so visually identical stems remain

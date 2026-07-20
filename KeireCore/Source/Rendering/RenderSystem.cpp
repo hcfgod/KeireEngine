@@ -1,5 +1,6 @@
 #include "Keire/Rendering/RenderSystem.h"
 
+#include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Log.h"
@@ -40,6 +41,29 @@ namespace Keire
         {
             const auto valid = [](const float value) { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; };
             return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
+        }
+
+        [[nodiscard]] Vector3 Normalize(const Vector3 value) noexcept
+        {
+            const float length = std::sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
+            return length > 0.000001F ? Vector3{value.X / length, value.Y / length, value.Z / length}
+                                      : Vector3{0.0F, -1.0F, 0.0F};
+        }
+
+        [[nodiscard]] Color TemperatureColor(const float kelvin) noexcept
+        {
+            const float temperature = std::clamp(kelvin, 1000.0F, 20000.0F) / 100.0F;
+            const float red = temperature <= 66.0F
+                                  ? 1.0F
+                                  : std::clamp(1.2929362F * std::pow(temperature - 60.0F, -0.13320476F), 0.0F, 1.0F);
+            const float green = temperature <= 66.0F
+                                    ? std::clamp(0.39008158F * std::log(temperature) - 0.63184144F, 0.0F, 1.0F)
+                                    : std::clamp(1.1298909F * std::pow(temperature - 60.0F, -0.07551485F), 0.0F, 1.0F);
+            const float blue = temperature >= 66.0F ? 1.0F
+                               : temperature <= 19.0F
+                                   ? 0.0F
+                                   : std::clamp(0.5432068F * std::log(temperature - 10.0F) - 1.1962541F, 0.0F, 1.0F);
+            return {red, green, blue, 1.0F};
         }
 
         [[nodiscard]] SDL_GPUPresentMode ToSdlPresentMode(const RenderPresentMode mode) noexcept
@@ -127,53 +151,121 @@ namespace Keire
         {
             Vector3 Position;
             Vector3 Color;
+            Vector3 Normal;
         };
 
         struct ObjectUniforms final
         {
             Matrix4 ModelViewProjection;
+            Matrix4 NormalMatrix;
             Color Tint;
+            Vector4 LightDirection;
+            Color LightColor;
+            Vector4 AmbientAndExposure;
+            Vector4 Parameters;
         };
 
-        static_assert(sizeof(ObjectUniforms) == sizeof(float) * 20);
+        static_assert(sizeof(ObjectUniforms) == sizeof(float) * 52);
+
+        struct SceneLighting final
+        {
+            Vector4 Direction{0.0F, -1.0F, 0.0F, 0.0F};
+            Color ColorAndIntensity{1.0F, 1.0F, 1.0F, 0.0F};
+            bool Enabled = false;
+        };
+
+        [[nodiscard]] SceneLighting ResolveLighting(const Ref<Scene>& scene)
+        {
+            SceneLighting result;
+            Entity selected;
+            for (const auto& entity : scene->Query<DirectionalLightComponent>())
+            {
+                const auto light = entity.GetComponent<DirectionalLightComponent>();
+                const auto transform = entity.GetComponent<TransformComponent>();
+                if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy())
+                    continue;
+                if (selected && selected.Id().Value() < entity.Id().Value())
+                    continue;
+                selected = entity;
+                const auto direction =
+                    Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F}));
+                const auto temperature =
+                    light->UseColorTemperature() ? TemperatureColor(light->ColorTemperatureKelvin()) : Color{};
+                const auto color = light->LightColor();
+                result.Direction = {direction.X, direction.Y, direction.Z, 1.0F};
+                result.ColorAndIntensity = {color.Red * temperature.Red, color.Green * temperature.Green,
+                                            color.Blue * temperature.Blue, light->Intensity()};
+                result.Enabled = true;
+            }
+            return result;
+        }
+
+        [[nodiscard]] Matrix4 Transpose(const Matrix4& value) noexcept
+        {
+            Matrix4 result;
+            for (std::size_t row = 0; row < 4; ++row)
+            {
+                for (std::size_t column = 0; column < 4; ++column)
+                    result.Elements[column * 4 + row] = value.Elements[row * 4 + column];
+            }
+            return result;
+        }
+
+        [[nodiscard]] ObjectUniforms MakeObjectUniforms(const Matrix4& modelViewProjection, const Matrix4& model,
+                                                        const Color tint, const SceneLighting& lighting,
+                                                        const RenderEnvironmentSettings& environment,
+                                                        const bool receiveLighting)
+        {
+            auto direction = lighting.Direction;
+            direction.W = receiveLighting && lighting.Enabled ? 1.0F : 0.0F;
+            return {modelViewProjection,
+                    Transpose(Math::Inverse(model)),
+                    tint,
+                    direction,
+                    lighting.ColorAndIntensity,
+                    {environment.AmbientColor.Red * environment.AmbientIntensity,
+                     environment.AmbientColor.Green * environment.AmbientIntensity,
+                     environment.AmbientColor.Blue * environment.AmbientIntensity, environment.Exposure},
+                    {receiveLighting ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F}};
+        }
 
         constexpr std::array<RenderVertex, 36> CubeVertices = {
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {0.22F, 0.55F, 1.0F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {0.08F, 0.28F, 0.72F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {0.12F, 0.38F, 0.88F}},
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {0.22F, 0.55F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {0.40F, 0.70F, 1.0F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {0.08F, 0.28F, 0.72F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {0.55F, 0.78F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {0.12F, 0.38F, 0.88F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {0.18F, 0.48F, 0.94F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {0.55F, 0.78F, 1.0F}},
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {0.22F, 0.55F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {0.12F, 0.38F, 0.88F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {0.55F, 0.78F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {0.40F, 0.70F, 1.0F}},
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {0.22F, 0.55F, 1.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {0.55F, 0.78F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {0.72F, 0.88F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {0.40F, 0.70F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {0.40F, 0.70F, 1.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {0.14F, 0.42F, 0.90F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {0.08F, 0.28F, 0.72F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {0.40F, 0.70F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {0.72F, 0.88F, 1.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {0.14F, 0.42F, 0.90F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {0.72F, 0.88F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {0.18F, 0.48F, 0.94F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {0.14F, 0.42F, 0.90F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {0.72F, 0.88F, 1.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {0.55F, 0.78F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {0.18F, 0.48F, 0.94F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {0.12F, 0.38F, 0.88F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {0.14F, 0.42F, 0.90F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {0.18F, 0.48F, 0.94F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {0.12F, 0.38F, 0.88F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {0.08F, 0.28F, 0.72F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {0.14F, 0.42F, 0.90F}}};
+            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
+            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
+            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
+            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
+            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
+            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
+            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
+            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
+            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
+            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
+            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
+            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
+            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
+            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
+            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
+            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
+            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
+            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
+            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
+            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
+            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
+            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
+            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
+            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
+            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
+            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
+            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
+            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
+            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
+            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}}};
 
         [[nodiscard]] std::vector<RenderVertex> CreateGridVertices()
         {
@@ -184,10 +276,10 @@ namespace Keire
             {
                 const float value = static_cast<float>(coordinate);
                 const Vector3 color = coordinate == 0 ? Vector3{0.30F, 0.50F, 0.78F} : Vector3{0.24F, 0.27F, 0.32F};
-                vertices.push_back({{-static_cast<float>(extent), 0.0F, value}, color});
-                vertices.push_back({{static_cast<float>(extent), 0.0F, value}, color});
-                vertices.push_back({{value, 0.0F, -static_cast<float>(extent)}, color});
-                vertices.push_back({{value, 0.0F, static_cast<float>(extent)}, color});
+                vertices.push_back({{-static_cast<float>(extent), 0.0F, value}, color, {}});
+                vertices.push_back({{static_cast<float>(extent), 0.0F, value}, color, {}});
+                vertices.push_back({{value, 0.0F, -static_cast<float>(extent)}, color, {}});
+                vertices.push_back({{value, 0.0F, static_cast<float>(extent)}, color, {}});
             }
             return vertices;
         }
@@ -232,6 +324,9 @@ namespace Keire
                 Device = SDL_CreateGPUDevice(formats, Specification.EnableGpuValidation, nullptr);
                 if (!Device)
                     throw std::runtime_error("SDL_CreateGPUDevice failed: " + LastSdlError());
+                KEIRE_CORE_INFO("Created SDL_GPU device (driver={}, shader formats=0x{:x}).",
+                                SDL_GetGPUDeviceDriver(Device),
+                                static_cast<std::uint32_t>(SDL_GetGPUShaderFormats(Device)));
 
                 try
                 {
@@ -328,7 +423,7 @@ namespace Keire
             {
                 SDL_GPUShaderCreateInfo information{};
                 information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-                information.num_uniform_buffers = vertex ? 1U : 0U;
+                information.num_uniform_buffers = Detail::BuiltinShaderUniformBufferCount(vertex);
 
                 const auto formats = SDL_GetGPUShaderFormats(Device);
                 if (formats & SDL_GPU_SHADERFORMAT_DXIL)
@@ -579,7 +674,7 @@ namespace Keire
                     vertexBuffer.pitch = sizeof(RenderVertex);
                     vertexBuffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-                    std::array<SDL_GPUVertexAttribute, 2> attributes{};
+                    std::array<SDL_GPUVertexAttribute, 3> attributes{};
                     attributes[0].location = 0;
                     attributes[0].buffer_slot = 0;
                     attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
@@ -588,6 +683,10 @@ namespace Keire
                     attributes[1].buffer_slot = 0;
                     attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
                     attributes[1].offset = offsetof(RenderVertex, Color);
+                    attributes[2].location = 2;
+                    attributes[2].buffer_slot = 0;
+                    attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+                    attributes[2].offset = offsetof(RenderVertex, Normal);
 
                     SDL_GPUGraphicsPipelineCreateInfo information{};
                     information.vertex_shader = vertex;
@@ -714,6 +813,14 @@ namespace Keire
                 if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) ||
                     !ValidColor(camera.ClearColor))
                     throw std::invalid_argument("SceneRenderRequest camera contains invalid values.");
+                if (!ValidColor(request.Environment.AmbientColor) ||
+                    !std::isfinite(request.Environment.AmbientIntensity) ||
+                    request.Environment.AmbientIntensity < 0.0F || request.Environment.AmbientIntensity > 16.0F ||
+                    !std::isfinite(request.Environment.Exposure) || request.Environment.Exposure < 0.01F ||
+                    request.Environment.Exposure > 16.0F)
+                {
+                    throw std::invalid_argument("SceneRenderRequest environment contains invalid values.");
+                }
 
                 surface.Submitted = true;
                 surface.FrameClearColor = camera.ClearColor;
@@ -726,12 +833,14 @@ namespace Keire
                 const auto samples = ToSdlSampleCount(surface.ActualSamples);
                 auto& pipelines = PipelinesFor(samples);
                 const auto camera = request.View->Camera();
+                const auto lighting = ResolveLighting(request.Scene);
 
                 if (request.DrawGrid && GridBuffer && GridVertexCount > 0)
                 {
-                    const ObjectUniforms uniforms{Math::Multiply(camera.Projection, camera.View),
-                                                  {1.0F, 1.0F, 1.0F, 1.0F}};
-                    SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
+                    const ObjectUniforms object =
+                        MakeObjectUniforms(Math::Multiply(camera.Projection, camera.View), {}, {1.0F, 1.0F, 1.0F, 1.0F},
+                                           lighting, request.Environment, false);
+                    SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                     const SDL_GPUBufferBinding binding{GridBuffer, 0};
                     SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
                     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
@@ -749,8 +858,10 @@ namespace Keire
                         continue;
 
                     const Matrix4 viewModel = Math::Multiply(camera.View, transform->WorldMatrix());
-                    const ObjectUniforms uniforms{Math::Multiply(camera.Projection, viewModel), renderer->Tint()};
-                    SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
+                    const ObjectUniforms object =
+                        MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), transform->WorldMatrix(),
+                                           renderer->Tint(), lighting, request.Environment, true);
+                    SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                     const SDL_GPUBufferBinding binding{CubeBuffer, 0};
                     SDL_BindGPUGraphicsPipeline(pass, pipelines.Cube);
                     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);

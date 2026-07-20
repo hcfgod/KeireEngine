@@ -173,6 +173,19 @@ namespace Keire
             return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
         }
 
+        [[nodiscard]] ImU32 ToImGuiColor(const UiColor color)
+        {
+            if (!ValidColor(color))
+                throw std::invalid_argument("UI drawing colors must contain finite values in 0..1.");
+            return ImGui::ColorConvertFloat4ToU32({color.Red, color.Green, color.Blue, color.Alpha});
+        }
+
+        void ValidateDrawing(const float thickness, const float rounding = 0.0F)
+        {
+            if (!std::isfinite(thickness) || thickness <= 0.0F || !std::isfinite(rounding) || rounding < 0.0F)
+                throw std::invalid_argument("UI drawing dimensions must be finite and positive.");
+        }
+
         [[nodiscard]] ImGuiWindowFlags ToImGuiWindowFlags(const UiWindowOptions options) noexcept
         {
             ImGuiWindowFlags flags = ImGuiWindowFlags_None;
@@ -789,6 +802,9 @@ namespace Keire
         case UiKey::Q:
             chord = ImGuiKey_Q;
             break;
+        case UiKey::R:
+            chord = ImGuiKey_R;
+            break;
         case UiKey::Right:
             chord = ImGuiKey_RightArrow;
             break;
@@ -835,6 +851,14 @@ namespace Keire
                 ImGui::IsItemEdited(),
                 ImGui::IsItemDeactivatedAfterEdit(),
                 hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)};
+    }
+
+    UiItemRect UiFrame::LastItemRect() const
+    {
+        m_Impl->RequireActive("LastItemRect");
+        const auto minimum = ImGui::GetItemRectMin();
+        const auto maximum = ImGui::GetItemRectMax();
+        return {{minimum.x, minimum.y}, {maximum.x, maximum.y}};
     }
 
     bool UiFrame::Button(std::string_view label, const UiSize size)
@@ -1003,6 +1027,73 @@ namespace Keire
         return ImGui::ImageButton(safeId.c_str(), image->m_Impl->Texture->GetTexRef(), {size.Width, size.Height});
     }
 
+    void UiFrame::DrawLine(const UiPosition start, const UiPosition end, const UiColor color, const float thickness)
+    {
+        m_Impl->RequireActive("DrawLine");
+        ValidateDrawing(thickness);
+        ImGui::GetWindowDrawList()->AddLine({start.X, start.Y}, {end.X, end.Y}, ToImGuiColor(color), thickness);
+    }
+
+    void UiFrame::DrawCircle(const UiPosition center, const float radius, const UiColor color, const float thickness)
+    {
+        m_Impl->RequireActive("DrawCircle");
+        ValidateDrawing(thickness);
+        if (!std::isfinite(radius) || radius <= 0.0F)
+            throw std::invalid_argument("UI circle radius must be finite and positive.");
+        ImGui::GetWindowDrawList()->AddCircle({center.X, center.Y}, radius, ToImGuiColor(color), 0, thickness);
+    }
+
+    void UiFrame::DrawFilledCircle(const UiPosition center, const float radius, const UiColor color)
+    {
+        m_Impl->RequireActive("DrawFilledCircle");
+        if (!std::isfinite(radius) || radius <= 0.0F)
+            throw std::invalid_argument("UI circle radius must be finite and positive.");
+        ImGui::GetWindowDrawList()->AddCircleFilled({center.X, center.Y}, radius, ToImGuiColor(color));
+    }
+
+    void UiFrame::DrawRectangle(const UiItemRect rectangle, const UiColor color, const float thickness,
+                                const float rounding)
+    {
+        m_Impl->RequireActive("DrawRectangle");
+        ValidateDrawing(thickness, rounding);
+        ImGui::GetWindowDrawList()->AddRect({rectangle.Minimum.X, rectangle.Minimum.Y},
+                                            {rectangle.Maximum.X, rectangle.Maximum.Y}, ToImGuiColor(color), rounding,
+                                            ImDrawFlags_None, thickness);
+    }
+
+    void UiFrame::DrawFilledRectangle(const UiItemRect rectangle, const UiColor color, const float rounding)
+    {
+        m_Impl->RequireActive("DrawFilledRectangle");
+        ValidateDrawing(1.0F, rounding);
+        ImGui::GetWindowDrawList()->AddRectFilled({rectangle.Minimum.X, rectangle.Minimum.Y},
+                                                  {rectangle.Maximum.X, rectangle.Maximum.Y}, ToImGuiColor(color),
+                                                  rounding);
+    }
+
+    void UiFrame::DrawTriangle(const UiPosition first, const UiPosition second, const UiPosition third,
+                               const UiColor color, const float thickness)
+    {
+        m_Impl->RequireActive("DrawTriangle");
+        ValidateDrawing(thickness);
+        ImGui::GetWindowDrawList()->AddTriangle({first.X, first.Y}, {second.X, second.Y}, {third.X, third.Y},
+                                                ToImGuiColor(color), thickness);
+    }
+
+    void UiFrame::DrawFilledTriangle(const UiPosition first, const UiPosition second, const UiPosition third,
+                                     const UiColor color)
+    {
+        m_Impl->RequireActive("DrawFilledTriangle");
+        ImGui::GetWindowDrawList()->AddTriangleFilled({first.X, first.Y}, {second.X, second.Y}, {third.X, third.Y},
+                                                      ToImGuiColor(color));
+    }
+
+    void UiFrame::DrawOverlayText(const UiPosition position, const UiColor color, const std::string_view text)
+    {
+        m_Impl->RequireActive("DrawOverlayText");
+        ImGui::GetWindowDrawList()->AddText({position.X, position.Y}, ToImGuiColor(color), text.data(),
+                                            text.data() + text.size());
+    }
+
     UiSize UiFrame::ContentAvailable() const
     {
         m_Impl->RequireActive("ContentAvailable");
@@ -1078,6 +1169,9 @@ namespace Keire
             break;
         case UiKey::Q:
             imguiKey = ImGuiKey_Q;
+            break;
+        case UiKey::R:
+            imguiKey = ImGuiKey_R;
             break;
         case UiKey::Right:
             imguiKey = ImGuiKey_RightArrow;

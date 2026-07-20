@@ -12,7 +12,7 @@ references, private asynchronous logging, Premake generation, sanitizers, SDK pa
 automation.
 
 The editor now renders resizable Scene and Game views through an application-owned SDL_GPU pipeline. The starter scene
-contains a primary Camera and tintable unlit cube; Scene view adds a depth-tested grid plus Unity-style framing, locking,
+contains a primary Camera, a tintable cube, and a Directional Light; Scene view adds a depth-tested grid plus Unity-style framing, locking,
 orbit, camera-local pan, dolly, fly, orthographic, and axis-snap navigation. The Project panel provides extension-free
 List/Grid views, contextual creation, multi-item file operations, delayed metadata cards, and persistent recoverable trash.
 Pinned host-side shader tooling imports HLSL into DXIL, SPIR-V, and MSL while runtime/public APIs remain backend-free.
@@ -126,9 +126,14 @@ only the supported `Keire::Core` package target.
 
 ## Documentation
 
-The [documentation index](docs/README.md) links focused guides for projects, the Hub, scene runtime/authoring, rendering,
+The [documentation index](docs/README.md) links focused guides for projects, Project Settings, the Hub, scene runtime/authoring, rendering,
 shaders/materials, undo/redo, input debugging, architecture, runtime lifecycle, the UI workspace, and testing/release
 workflows.
+
+The Scene view uses the selected runtime Camera's clear color while retaining its independent editor viewpoint. Its
+`Q/W/E/R` View/Move/Rotate/Scale tools support Local/Global handles, configurable position/rotation/scale snapping, and
+camera/light gizmos. Project ambient color, intensity, and exposure are edited through **Edit > Project Settings...**
+and light both Scene and Game views together.
 
 ## Windowing And Configuration
 
@@ -260,7 +265,7 @@ weak object handles, hierarchy edits, transforms, subtree duplication/deletion, 
 The editor adds atomic Save, bounded undo/redo, Save/Discard/Cancel transitions, and project-local crash recovery.
 
 Schema v2 scenes use stable `Entity` handles and application-registered, reference-counted Components. Transform is
-mandatory; Directional Light is authorable renderer-neutral data. Play clones authored state, Pause freezes component
+mandatory; Directional Light supplies the built-in Lambert path while its shadow fields remain future-facing. Play clones authored state, Pause freezes component
 updates, Step advances one fixed tick, and Stop discards runtime changes. EnTT and GLM implement ECS/math privately;
 SDK code sees only Kéire IDs, components, queries, vectors, quaternions, matrices, and colors.
 

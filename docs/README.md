@@ -13,6 +13,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Asset Runtime](AssetRuntime.md) | Handles, fallbacks, async loading, mounts, integrity, reloads, and threading | Runtime and subsystem authors |
 | [Asset Pipeline](AssetPipeline.md) | Metadata, import cache, file operations, cooking, validation, and CLI | Editor, content, and release authors |
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, navigation, and current scope | Rendering and editor authors |
+| [Project Settings](ProjectSettings.md) | Tracked rendering environment settings, validation, defaults, and editor workflow | Technical artists and editor authors |
 | [Shaders And Materials](ShadersAndMaterials.md) | Shader manifests, compiler boundary, reflection, materials, and target cooking | Technical artists and rendering authors |
 | [Asset Browser](AssetBrowser.md) | Folder navigation, List/Grid modes, thumbnails, selection, and file operations | Designers and editor authors |
 | [Project System](ProjectSystem.md) | Project identity, directory isolation, locks, templates, and recent registry | Editor and tooling authors |

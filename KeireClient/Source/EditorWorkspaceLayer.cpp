@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
+#include "KeireClient/Editor/SceneGizmoController.h"
 
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
@@ -14,6 +15,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <optional>
@@ -21,6 +23,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -63,6 +66,17 @@ namespace
         return result;
     }
 
+    template <typename Range, typename Projection>
+    [[nodiscard]] std::string UniqueInputName(const Range& values, std::string base, Projection projection)
+    {
+        std::string candidate = base;
+        for (std::size_t copy = 2; std::ranges::any_of(values, [&](const auto& value)
+                                                       { return std::invoke(projection, value) == candidate; });
+             ++copy)
+            candidate = base + " " + std::to_string(copy);
+        return candidate;
+    }
+
     void WriteBytesAtomically(const std::filesystem::path& path, const std::span<const std::byte> bytes)
     {
         const std::string text =
@@ -90,17 +104,20 @@ namespace
         if (!scene)
             return std::nullopt;
         std::optional<SceneCamera> selected;
+        bool selectedPrimary = false;
         for (const auto& entity : scene->Query<Keire::CameraComponent>())
         {
             const auto camera = entity.GetComponent<Keire::CameraComponent>();
             const auto transform = entity.GetComponent<Keire::TransformComponent>();
-            if (!camera || !transform || !camera->Enabled() || !camera->Primary() || !entity.ActiveInHierarchy())
+            if (!camera || !transform || !camera->Enabled() || !entity.ActiveInHierarchy())
                 continue;
-            if (!selected || camera->Priority() > selected->Camera->Priority() ||
-                (camera->Priority() == selected->Camera->Priority() &&
-                 entity.Id().Value() < selected->Entity.Id().Value()))
+            if (!selected || (camera->Primary() && !selectedPrimary) ||
+                (camera->Primary() == selectedPrimary && (camera->Priority() > selected->Camera->Priority() ||
+                                                          (camera->Priority() == selected->Camera->Priority() &&
+                                                           entity.Id().Value() < selected->Entity.Id().Value()))))
             {
                 selected = SceneCamera{entity, camera, transform};
+                selectedPrimary = camera->Primary();
             }
         }
         return selected;
@@ -176,6 +193,86 @@ namespace
             IncludeEntityBounds(child, bounds);
     }
 
+    [[nodiscard]] Keire::Vector3 Unproject(const Keire::Matrix4& inverseViewProjection, const float x, const float y,
+                                           const float z)
+    {
+        const auto& value = inverseViewProjection.Elements;
+        const float resultX = value[0] * x + value[4] * y + value[8] * z + value[12];
+        const float resultY = value[1] * x + value[5] * y + value[9] * z + value[13];
+        const float resultZ = value[2] * x + value[6] * y + value[10] * z + value[14];
+        const float resultW = value[3] * x + value[7] * y + value[11] * z + value[15];
+        if (std::abs(resultW) <= 0.000001F)
+            throw std::runtime_error("Scene picking produced an invalid homogeneous position.");
+        return {resultX / resultW, resultY / resultW, resultZ / resultW};
+    }
+
+    [[nodiscard]] Keire::Vector3 NormalizedDirection(const Keire::Vector3 from, const Keire::Vector3 to)
+    {
+        const Keire::Vector3 difference{to.X - from.X, to.Y - from.Y, to.Z - from.Z};
+        const float length =
+            std::sqrt(difference.X * difference.X + difference.Y * difference.Y + difference.Z * difference.Z);
+        if (length <= 0.000001F)
+            throw std::runtime_error("Scene picking produced a zero-length ray.");
+        return {difference.X / length, difference.Y / length, difference.Z / length};
+    }
+
+    [[nodiscard]] std::optional<float> IntersectUnitCube(const Keire::Matrix4& world, const Keire::Vector3 rayOrigin,
+                                                         const Keire::Vector3 rayDirection)
+    {
+        const auto inverse = Keire::Math::Inverse(world);
+        const auto origin = Keire::Math::TransformPoint(inverse, rayOrigin);
+        const auto direction = Keire::Math::TransformDirection(inverse, rayDirection);
+        float minimum = 0.0F;
+        float maximum = std::numeric_limits<float>::max();
+        const auto testAxis = [&](const float position, const float axisDirection)
+        {
+            if (std::abs(axisDirection) <= 0.000001F)
+                return position >= -0.5F && position <= 0.5F;
+            float first = (-0.5F - position) / axisDirection;
+            float second = (0.5F - position) / axisDirection;
+            if (first > second)
+                std::swap(first, second);
+            minimum = std::max(minimum, first);
+            maximum = std::min(maximum, second);
+            return maximum >= minimum;
+        };
+        if (!testAxis(origin.X, direction.X) || !testAxis(origin.Y, direction.Y) || !testAxis(origin.Z, direction.Z))
+            return std::nullopt;
+        return minimum;
+    }
+
+    [[nodiscard]] Keire::Entity PickSceneEntity(const Keire::Ref<Keire::Scene>& scene, const Keire::UiItemRect rect,
+                                                const Keire::UiPosition pointer, const Keire::RenderCamera& camera)
+    {
+        if (!scene || !rect.Contains(pointer))
+            return {};
+        const auto size = rect.Size();
+        if (size.Width <= 1.0F || size.Height <= 1.0F)
+            return {};
+        const float x = ((pointer.X - rect.Minimum.X) / size.Width) * 2.0F - 1.0F;
+        const float y = 1.0F - ((pointer.Y - rect.Minimum.Y) / size.Height) * 2.0F;
+        const auto inverse = Keire::Math::Inverse(Keire::Math::Multiply(camera.Projection, camera.View));
+        const auto nearPoint = Unproject(inverse, x, y, 0.0F);
+        const auto farPoint = Unproject(inverse, x, y, 1.0F);
+        const auto direction = NormalizedDirection(nearPoint, farPoint);
+        float closest = std::numeric_limits<float>::max();
+        Keire::Entity selected;
+        for (const auto& entity : scene->Query<Keire::MeshRendererComponent>())
+        {
+            const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+            const auto transform = entity.GetComponent<Keire::TransformComponent>();
+            if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform || !entity.ActiveInHierarchy())
+                continue;
+            const auto distance = IntersectUnitCube(transform->WorldMatrix(), nearPoint, direction);
+            if (distance && *distance < closest)
+            {
+                closest = *distance;
+                selected = entity;
+            }
+        }
+        return selected;
+    }
+
     class ContinuousUndoCommand final : public Keire::UndoCommand
     {
       public:
@@ -223,6 +320,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
     : Layer("EditorWorkspaceLayer"), m_AssetBrowserPanel(std::make_unique<KeireEditor::AssetBrowserPanel>()),
       m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>()),
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
+      m_SceneGizmos(std::make_unique<KeireEditor::SceneGizmoController>()),
       m_EditorCamera(std::make_unique<Keire::Detail::EditorCameraController>()), m_Smoke(smoke),
       m_InitializeProject(initializeProject)
 {
@@ -243,6 +341,7 @@ void EditorWorkspaceLayer::OnAttach()
     m_ThemeEditor = workspace.RegisterPanel({"editor.theme", "Theme Editor", false});
     m_InputActionsEditor = workspace.RegisterPanel({"editor.input-actions", "Input Actions", false});
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
+    m_ProjectSettings = workspace.RegisterPanel({"editor.project-settings", "Project Settings", false});
     if (const auto undo = Owner().Undo())
         m_ThemeUndoContext = undo->CreateContext({.Name = "Theme Authoring"});
     if (const auto renderer = Owner().Renderer(); renderer && renderer->Mode() != Keire::RenderMode::Disabled)
@@ -268,6 +367,17 @@ void EditorWorkspaceLayer::OnAttach()
                 throw std::runtime_error("Editor workspace requires an active project.");
             databaseSpecification.ProjectRoot = project->Root();
             m_AssetBrowserPanel->SetProjectRoot(project->Root());
+            try
+            {
+                m_RenderEnvironment = Keire::LoadRenderEnvironmentSettings(project->Root());
+            }
+            catch (const std::exception& error)
+            {
+                m_RenderEnvironment = {};
+                ReportError("Rendering",
+                            std::string("Invalid project rendering settings; using defaults: ") + error.what());
+            }
+            m_SceneGizmos->Load(project->Root());
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
             LoadSceneCamera();
@@ -324,6 +434,21 @@ void EditorWorkspaceLayer::OnAttach()
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
     SaveSceneCamera();
+    if (m_RenderEnvironmentDirty)
+    {
+        try
+        {
+            if (const auto project = Owner().GetProject(); project && project->Writable())
+                Keire::SaveRenderEnvironmentSettings(project->Root(), m_RenderEnvironment);
+        }
+        catch (const std::exception& error)
+        {
+            KEIRE_CLIENT_ERROR("[Rendering] Could not save project settings during shutdown: {}", error.what());
+        }
+        m_RenderEnvironmentDirty = false;
+    }
+    if (const auto project = Owner().GetProject(); project && m_SceneGizmos)
+        m_SceneGizmos->Save(project->Root());
     if (m_SceneCameraCapturing)
     {
         try
@@ -463,6 +588,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         ApplyActiveUndo(false);
     else if (ui.Shortcut({.Key = Keire::UiKey::Y, .Primary = true}))
         ApplyActiveUndo(true);
+    else if (ui.Shortcut({.Key = Keire::UiKey::R, .Primary = true}))
+        ApplyActiveUndo(true);
     if (ui.Shortcut({Keire::UiKey::S, true, true}) && m_EditingScene && !m_SaveSceneDialog)
         SaveSceneAs();
     else if (ui.Shortcut({Keire::UiKey::S, true}))
@@ -500,6 +627,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     DrawThemeEditor(ui, workspace);
     DrawInputActionsEditor(ui);
     DrawInputDebugger(ui);
+    DrawProjectSettings(ui);
 }
 
 void EditorWorkspaceLayer::DrawEmptyState(Keire::UiFrame& ui, const std::string_view heading,
@@ -558,6 +686,9 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             ui.Separator();
             ui.TextColored(m_Theme.MutedText,
                            m_ActiveUndoContext ? std::string(m_ActiveUndoContext->Name()) : "No active history");
+            ui.Separator();
+            if (ui.MenuItem("Project Settings..."))
+                m_ProjectSettings.SetVisible(true);
         }
         if (auto entity = ui.BeginMenu("Entity", static_cast<bool>(m_EditingScene)); entity)
         {
@@ -697,6 +828,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_ThemeEditor);
             DrawPanelMenuItem(ui, m_InputActionsEditor);
             DrawPanelMenuItem(ui, m_InputDebugger);
+            DrawPanelMenuItem(ui, m_ProjectSettings);
         }
     }
 }
@@ -1247,6 +1379,7 @@ void EditorWorkspaceLayer::OpenInputActions(const Keire::AssetId asset)
     m_InputDocument = Keire::InputActionAsset::Decode(ReadBytes(source))->Definition();
     m_InputAsset = asset;
     m_SelectedInputMap = m_InputDocument.ActionMaps.empty() ? Keire::AssetId{} : m_InputDocument.ActionMaps.front().Id;
+    m_SelectedInputScheme = {};
     m_SelectedInputAction = {};
     m_SelectedInputBinding = {};
     if (m_InputUndoContext)
@@ -1526,6 +1659,7 @@ void EditorWorkspaceLayer::CloseScene()
     m_SceneLoad.Reset();
     m_SceneAsset = {};
     m_SelectedSceneObject = {};
+    m_ComponentExpansion.clear();
     m_SceneSource.clear();
     DiscardSceneRecovery();
     m_SceneRecovery.clear();
@@ -1733,6 +1867,8 @@ void EditorWorkspaceLayer::DrawScene(Keire::UiFrame& ui)
                 (void)m_PlaySession->Step(static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds()));
         }
         ui.SameLine();
+        m_SceneGizmos->DrawToolbar(ui);
+        ui.SameLine();
         if (ui.Button(m_EditorCamera->State().Projection == Keire::Detail::EditorCameraProjection::Perspective
                           ? "Persp"
                           : "Ortho"))
@@ -1794,13 +1930,95 @@ void EditorWorkspaceLayer::DrawScene(Keire::UiFrame& ui)
         Keire::RenderCamera camera;
         camera.View = m_EditorCamera->ViewMatrix();
         camera.Projection = m_EditorCamera->ProjectionMatrix(aspect);
-        camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
+        const auto renderScene = RenderedScene(m_EditingScene, m_PlaySession);
+        if (const auto sceneCamera = SelectGameCamera(renderScene))
+            camera.ClearColor = sceneCamera->Camera->ClearColor();
+        else
+            camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_SceneRenderView->SetCamera(camera);
 
-        if (const auto scene = RenderedScene(m_EditingScene, m_PlaySession))
-            Owner().Renderer()->Submit({scene, m_SceneRenderView, true});
+        if (renderScene)
+            Owner().Renderer()->Submit({renderScene, m_SceneRenderView, true, m_RenderEnvironment});
         ui.Image(m_SceneRenderView->Surface(), size);
-        UpdateSceneCamera(ui, ui.LastItemState());
+        const auto imageState = ui.LastItemState();
+        const auto imageRect = ui.LastItemRect();
+        if (auto target = ui.BeginDragTarget(); target)
+        {
+            std::vector<std::byte> payload;
+            if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
+            {
+                try
+                {
+                    const auto assets = KeireEditor::AssetBrowserPanel::DecodeDragPayload(payload);
+                    for (const auto asset : assets)
+                    {
+                        const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+                        if (!record)
+                            throw std::runtime_error("A dropped asset no longer exists in the project database.");
+                        const auto extension = record->RelativePath.extension();
+                        if (extension == ".keirescene")
+                        {
+                            RequestOpenScene(asset);
+                            m_SceneStatus = "Opening " + record->RelativePath.generic_string() + ".";
+                            continue;
+                        }
+                        if (extension == ".keireinput")
+                        {
+                            OpenInputActions(asset);
+                            m_InputActionsEditor.SetVisible(true);
+                            continue;
+                        }
+                        if (extension != ".keirematerial")
+                        {
+                            m_SceneStatus = "No Scene view drop action is registered for " +
+                                            record->RelativePath.filename().string() + ".";
+                            continue;
+                        }
+                        if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
+                            throw std::runtime_error("Stop Play mode before assigning authored scene materials.");
+                        const auto hit = PickSceneEntity(m_EditingScene, imageRect, ui.PointerState().Position, camera);
+                        const auto destination = hit ? m_EditingScene->FindEntity(hit.Id()) : Keire::Entity{};
+                        const auto renderer = destination.GetComponent<Keire::MeshRendererComponent>();
+                        if (!renderer)
+                            throw std::runtime_error("Drop a material directly over an entity with a Mesh Renderer.");
+                        const auto source = m_AssetDatabase->Specification().ProjectRoot /
+                                            m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
+                        const auto importer = Keire::CreateMaterialAssetImporter();
+                        const auto material = Keire::MaterialAsset::Decode(importer.Import(ReadBytes(source)));
+                        std::optional<Keire::Color> materialTint;
+                        if (const auto tint = material->Definition().Properties.find("Tint");
+                            tint != material->Definition().Properties.end())
+                        {
+                            if (const auto* color = std::get_if<Keire::Color>(&tint->second))
+                                materialTint = *color;
+                        }
+                        RecordSceneUndo("Assign Material");
+                        renderer->SetMaterial(asset);
+                        if (materialTint)
+                            renderer->SetTint(*materialTint);
+                        m_SelectedSceneObject = destination.Id().Value();
+                        m_SelectedAsset = {};
+                        m_SceneStatus =
+                            "Assigned " + record->RelativePath.stem().string() + " to " + destination.Name() + ".";
+                    }
+                }
+                catch (const std::exception& error)
+                {
+                    m_SceneStatus = std::string("Scene asset drop failed: ") + error.what();
+                    ReportError("Scene", m_SceneStatus);
+                }
+            }
+        }
+        if (renderScene)
+        {
+            const bool allowManipulation = !m_PlaySession || m_PlaySession->State() == Keire::ScenePlayState::Stopped;
+            m_SelectedSceneObject =
+                m_SceneGizmos
+                    ->UpdateAndDraw(ui, renderScene, Keire::EntityId(m_SelectedSceneObject), camera, imageRect,
+                                    allowManipulation, [this](const std::string_view name) { RecordSceneUndo(name); })
+                    .Value();
+        }
+        UpdateSceneCamera(ui, imageState);
     }
 }
 
@@ -1974,6 +2192,11 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             return;
         }
 
+        ui.TextColored(
+            m_Theme.MutedText,
+            "Camera: " + selected->Entity.Name() +
+                (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped ? " (Play)" : " (Edit)"));
+
         const auto available = ui.ContentAvailable();
         const auto size = PrepareRenderSurface(m_GameRenderView, available, Owner().MainWindow()->DisplayScale());
         const float aspect = size.Width / std::max(size.Height, 1.0F);
@@ -1982,7 +2205,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         camera.Projection = selected->Camera->ProjectionMatrix(aspect);
         camera.ClearColor = selected->Camera->ClearColor();
         m_GameRenderView->SetCamera(camera);
-        Owner().Renderer()->Submit({scene, m_GameRenderView, false});
+        Owner().Renderer()->Submit({scene, m_GameRenderView, false, m_RenderEnvironment});
         ui.Image(m_GameRenderView->Surface(), size);
     }
 }
@@ -1991,6 +2214,8 @@ void EditorWorkspaceLayer::DrawHierarchy(Keire::UiFrame& ui)
 {
     if (auto hierarchy = ui.BeginPanel(m_Hierarchy); hierarchy)
     {
+        if (ui.WindowFocused())
+            m_ActiveUndoContext = m_SceneUndoContext;
         ui.TextColored(m_Theme.Accent, "HIERARCHY");
         ui.Separator();
         if (!m_EditingScene)
@@ -2454,6 +2679,7 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
                 if (ui.Selectable(candidate.Name, candidate.Id == m_SelectedInputMap))
                 {
                     m_SelectedInputMap = candidate.Id;
+                    m_SelectedInputScheme = {};
                     m_SelectedInputAction = {};
                     m_SelectedInputBinding = {};
                 }
@@ -2461,15 +2687,83 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
             ui.Separator();
             ui.TextColored(m_Theme.MutedText, "CONTROL SCHEMES");
             for (const auto& scheme : m_InputDocument.ControlSchemes)
-                ui.Text(scheme.Name + "  [" + scheme.BindingGroup + "]");
+            {
+                if (ui.Selectable(scheme.Name + "  [" + scheme.BindingGroup + "]", scheme.Id == m_SelectedInputScheme))
+                {
+                    m_SelectedInputScheme = scheme.Id;
+                    m_SelectedInputMap = {};
+                    m_SelectedInputAction = {};
+                    m_SelectedInputBinding = {};
+                }
+            }
             if (ui.Button("+ Map"))
             {
                 RecordInputUndo();
                 Keire::InputActionMapDefinition added;
                 added.Id = Keire::AssetId::Generate();
-                added.Name = "New Map";
+                added.Name =
+                    UniqueInputName(m_InputDocument.ActionMaps, "New Map", &Keire::InputActionMapDefinition::Name);
                 m_SelectedInputMap = added.Id;
+                m_SelectedInputScheme = {};
                 m_InputDocument.ActionMaps.push_back(std::move(added));
+            }
+            ui.SameLine();
+            if (ui.Button("+ Scheme"))
+            {
+                RecordInputUndo("Add Control Scheme");
+                Keire::InputControlSchemeDefinition added;
+                added.Id = Keire::AssetId::Generate();
+                added.Name = UniqueInputName(m_InputDocument.ControlSchemes, "New Scheme",
+                                             &Keire::InputControlSchemeDefinition::Name);
+                added.BindingGroup = UniqueInputName(m_InputDocument.ControlSchemes, "NewScheme",
+                                                     &Keire::InputControlSchemeDefinition::BindingGroup);
+                added.Devices.push_back({"Keyboard", false});
+                m_SelectedInputScheme = added.Id;
+                m_SelectedInputMap = {};
+                m_SelectedInputAction = {};
+                m_SelectedInputBinding = {};
+                m_InputDocument.ControlSchemes.push_back(std::move(added));
+            }
+            if (m_SelectedInputMap && ui.Button("Duplicate Map"))
+            {
+                const auto source = std::ranges::find(m_InputDocument.ActionMaps, m_SelectedInputMap,
+                                                      &Keire::InputActionMapDefinition::Id);
+                if (source != m_InputDocument.ActionMaps.end())
+                {
+                    RecordInputUndo("Duplicate Action Map");
+                    auto copy = *source;
+                    copy.Id = Keire::AssetId::Generate();
+                    copy.Name = UniqueInputName(m_InputDocument.ActionMaps, copy.Name + " Copy",
+                                                &Keire::InputActionMapDefinition::Name);
+                    std::vector<std::pair<Keire::AssetId, Keire::AssetId>> actionIds;
+                    for (auto& action : copy.Actions)
+                    {
+                        const auto previous = action.Id;
+                        action.Id = Keire::AssetId::Generate();
+                        actionIds.emplace_back(previous, action.Id);
+                    }
+                    for (auto& binding : copy.Bindings)
+                    {
+                        binding.Id = Keire::AssetId::Generate();
+                        const auto action = std::ranges::find_if(actionIds, [&](const auto& identities)
+                                                                 { return identities.first == binding.Action; });
+                        if (action != actionIds.end())
+                            binding.Action = action->second;
+                    }
+                    m_SelectedInputMap = copy.Id;
+                    m_InputDocument.ActionMaps.push_back(std::move(copy));
+                }
+            }
+            ui.SameLine();
+            if (m_SelectedInputMap && ui.Button("Delete Map"))
+            {
+                RecordInputUndo("Delete Action Map");
+                std::erase_if(m_InputDocument.ActionMaps,
+                              [&](const auto& actionMap) { return actionMap.Id == m_SelectedInputMap; });
+                m_SelectedInputMap =
+                    m_InputDocument.ActionMaps.empty() ? Keire::AssetId{} : m_InputDocument.ActionMaps.front().Id;
+                m_SelectedInputAction = {};
+                m_SelectedInputBinding = {};
             }
         }
         ui.SameLine();
@@ -2496,8 +2790,12 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
                         if (binding.Action != action.Id)
                             continue;
                         auto bindingId = ui.PushId(binding.Id.ToString());
-                        const auto label =
-                            "   " + (binding.Name.empty() ? binding.Path : binding.Name + ": " + binding.Path);
+                        const auto detail = !binding.Composite.empty() ? std::string("[") + binding.Composite + "]"
+                                            : !binding.CompositePart.empty()
+                                                ? binding.CompositePart + ": " + binding.Path
+                                            : binding.Name.empty() ? binding.Path
+                                                                   : binding.Name + ": " + binding.Path;
+                        const auto label = "   " + detail;
                         if (ui.Selectable(label, binding.Id == m_SelectedInputBinding))
                         {
                             m_SelectedInputAction = action.Id;
@@ -2510,7 +2808,7 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
                     RecordInputUndo();
                     Keire::InputActionDefinition action;
                     action.Id = Keire::AssetId::Generate();
-                    action.Name = "New Action";
+                    action.Name = UniqueInputName(map->Actions, "New Action", &Keire::InputActionDefinition::Name);
                     m_SelectedInputAction = action.Id;
                     map->Actions.push_back(std::move(action));
                 }
@@ -2527,6 +2825,124 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
                         m_SelectedInputBinding = binding.Id;
                         map->Bindings.push_back(std::move(binding));
                     }
+                    ui.SameLine();
+                    if (ui.Button("+ 1D Axis"))
+                    {
+                        RecordInputUndo("Add 1D Composite");
+                        if (const auto action = std::ranges::find(map->Actions, m_SelectedInputAction,
+                                                                  &Keire::InputActionDefinition::Id);
+                            action != map->Actions.end())
+                        {
+                            action->Type = Keire::InputActionType::Value;
+                            action->ValueType = Keire::InputValueType::Axis1D;
+                        }
+                        Keire::InputBindingDefinition root;
+                        root.Id = Keire::AssetId::Generate();
+                        root.Action = m_SelectedInputAction;
+                        root.Name = "Axis";
+                        root.Composite = "Axis1D";
+                        map->Bindings.push_back(root);
+                        for (const auto& [part, path] :
+                             {std::pair{"Negative", "<Keyboard>/a"}, std::pair{"Positive", "<Keyboard>/d"}})
+                        {
+                            Keire::InputBindingDefinition child;
+                            child.Id = Keire::AssetId::Generate();
+                            child.Action = m_SelectedInputAction;
+                            child.Name = part;
+                            child.Path = path;
+                            child.CompositePart = part;
+                            map->Bindings.push_back(std::move(child));
+                        }
+                        m_SelectedInputBinding = root.Id;
+                    }
+                    ui.SameLine();
+                    if (ui.Button("+ 2D Vector"))
+                    {
+                        RecordInputUndo("Add 2D Composite");
+                        if (const auto action = std::ranges::find(map->Actions, m_SelectedInputAction,
+                                                                  &Keire::InputActionDefinition::Id);
+                            action != map->Actions.end())
+                        {
+                            action->Type = Keire::InputActionType::Value;
+                            action->ValueType = Keire::InputValueType::Axis2D;
+                        }
+                        Keire::InputBindingDefinition root;
+                        root.Id = Keire::AssetId::Generate();
+                        root.Action = m_SelectedInputAction;
+                        root.Name = "Vector";
+                        root.Composite = "Vector2";
+                        map->Bindings.push_back(root);
+                        for (const auto& [part, path] :
+                             {std::pair{"Up", "<Keyboard>/w"}, std::pair{"Down", "<Keyboard>/s"},
+                              std::pair{"Left", "<Keyboard>/a"}, std::pair{"Right", "<Keyboard>/d"}})
+                        {
+                            Keire::InputBindingDefinition child;
+                            child.Id = Keire::AssetId::Generate();
+                            child.Action = m_SelectedInputAction;
+                            child.Name = part;
+                            child.Path = path;
+                            child.CompositePart = part;
+                            map->Bindings.push_back(std::move(child));
+                        }
+                        m_SelectedInputBinding = root.Id;
+                    }
+                }
+                if (m_SelectedInputBinding && ui.Button("Delete Binding"))
+                {
+                    RecordInputUndo("Delete Binding");
+                    auto binding =
+                        std::ranges::find(map->Bindings, m_SelectedInputBinding, &Keire::InputBindingDefinition::Id);
+                    if (binding != map->Bindings.end())
+                    {
+                        if (!binding->Composite.empty())
+                        {
+                            auto end = std::next(binding);
+                            while (end != map->Bindings.end() && !end->CompositePart.empty())
+                                ++end;
+                            map->Bindings.erase(binding, end);
+                        }
+                        else
+                            map->Bindings.erase(binding);
+                    }
+                    m_SelectedInputBinding = {};
+                }
+                else if (m_SelectedInputAction && ui.Button("Duplicate Action"))
+                {
+                    const auto source =
+                        std::ranges::find(map->Actions, m_SelectedInputAction, &Keire::InputActionDefinition::Id);
+                    if (source != map->Actions.end())
+                    {
+                        RecordInputUndo("Duplicate Action");
+                        auto copy = *source;
+                        const auto sourceId = copy.Id;
+                        copy.Id = Keire::AssetId::Generate();
+                        copy.Name =
+                            UniqueInputName(map->Actions, copy.Name + " Copy", &Keire::InputActionDefinition::Name);
+                        m_SelectedInputAction = copy.Id;
+                        map->Actions.push_back(copy);
+                        for (const auto& binding : std::vector<Keire::InputBindingDefinition>(map->Bindings))
+                        {
+                            if (binding.Action != sourceId)
+                                continue;
+                            auto bindingCopy = binding;
+                            bindingCopy.Id = Keire::AssetId::Generate();
+                            bindingCopy.Action = copy.Id;
+                            if (!bindingCopy.Name.empty())
+                                bindingCopy.Name = UniqueInputName(map->Bindings, bindingCopy.Name + " Copy",
+                                                                   &Keire::InputBindingDefinition::Name);
+                            map->Bindings.push_back(std::move(bindingCopy));
+                        }
+                    }
+                }
+                ui.SameLine();
+                if (m_SelectedInputAction && ui.Button("Delete Action"))
+                {
+                    RecordInputUndo("Delete Action");
+                    std::erase_if(map->Bindings,
+                                  [&](const auto& binding) { return binding.Action == m_SelectedInputAction; });
+                    std::erase_if(map->Actions, [&](const auto& action) { return action.Id == m_SelectedInputAction; });
+                    m_SelectedInputAction = {};
+                    m_SelectedInputBinding = {};
                 }
             }
         }
@@ -2535,8 +2951,174 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
         if (auto properties = ui.BeginChild("InputProperties", {}, true); properties)
         {
             ui.TextColored(m_Theme.Accent, "PROPERTIES");
+            const auto drawBehaviors = [&](const std::string_view heading,
+                                           std::vector<Keire::InputBehaviorDefinition>& behaviors,
+                                           const bool interactions)
+            {
+                ui.Separator();
+                ui.TextColored(m_Theme.Accent, heading);
+                for (std::size_t index = 0; index < behaviors.size(); ++index)
+                {
+                    auto behaviorId = ui.PushId(std::string(heading) + std::to_string(index));
+                    auto& behavior = behaviors[index];
+                    ui.Text(behavior.Name);
+                    ui.SameLine();
+                    if (ui.Button("Remove"))
+                    {
+                        RecordInputUndo("Remove " + behavior.Name);
+                        behaviors.erase(behaviors.begin() + static_cast<std::ptrdiff_t>(index));
+                        --index;
+                        continue;
+                    }
+                    for (auto& parameter : behavior.Parameters)
+                    {
+                        if (behavior.Name == "Invert" && (parameter.Name == "x" || parameter.Name == "y"))
+                        {
+                            bool enabled = parameter.Value != 0.0;
+                            if (ui.Checkbox("Invert " + std::string(parameter.Name), enabled))
+                            {
+                                RecordInputUndo("Change Invert Axis");
+                                parameter.Value = enabled ? 1.0 : 0.0;
+                            }
+                            continue;
+                        }
+                        float minimum = -1000.0F;
+                        float maximum = 1000.0F;
+                        if (parameter.Name == "pressPoint" || parameter.Name == "minimum" ||
+                            parameter.Name == "maximum")
+                        {
+                            minimum = 0.0F;
+                            maximum = 1.0F;
+                        }
+                        else if (parameter.Name == "duration" || parameter.Name == "delay")
+                        {
+                            minimum = 0.01F;
+                            maximum = behavior.Name == "Hold" ? 60.0F : 10.0F;
+                        }
+                        else if (parameter.Name == "count")
+                        {
+                            minimum = 2.0F;
+                            maximum = 16.0F;
+                        }
+                        float value = static_cast<float>(parameter.Value);
+                        if (ui.SliderFloat(parameter.Name, value, minimum, maximum))
+                        {
+                            RecordInputUndo("Change " + behavior.Name + " Parameter");
+                            parameter.Value = parameter.Name == "count" ? std::round(value) : value;
+                        }
+                    }
+                }
+                if (behaviors.size() >= 8)
+                    return;
+                if (auto add = ui.BeginCombo("Add " + std::string(heading), "Choose..."); add)
+                {
+                    const auto addBehavior =
+                        [&](const std::string_view name, std::initializer_list<Keire::InputParameter> parameters)
+                    {
+                        if (std::ranges::find(behaviors, name, &Keire::InputBehaviorDefinition::Name) !=
+                            behaviors.end())
+                            return;
+                        RecordInputUndo("Add " + std::string(name));
+                        behaviors.push_back({std::string(name), parameters});
+                    };
+                    if (interactions)
+                    {
+                        if (ui.MenuItem("Press"))
+                            addBehavior("Press", {{"pressPoint", 0.5}});
+                        if (ui.MenuItem("Tap"))
+                            addBehavior("Tap", {{"duration", 0.2}, {"pressPoint", 0.5}});
+                        if (ui.MenuItem("Hold"))
+                            addBehavior("Hold", {{"duration", 0.4}, {"pressPoint", 0.5}});
+                        if (ui.MenuItem("Multi Tap"))
+                            addBehavior("MultiTap",
+                                        {{"duration", 0.2}, {"delay", 0.75}, {"count", 2.0}, {"pressPoint", 0.5}});
+                    }
+                    else
+                    {
+                        if (ui.MenuItem("Deadzone"))
+                            addBehavior("Deadzone", {{"minimum", 0.125}, {"maximum", 0.925}});
+                        if (ui.MenuItem("Scale"))
+                            addBehavior("Scale", {{"x", 1.0}, {"y", 1.0}});
+                        if (ui.MenuItem("Invert"))
+                            addBehavior("Invert", {{"x", 1.0}, {"y", 1.0}});
+                        if (ui.MenuItem("Normalize"))
+                            addBehavior("Normalize", {});
+                    }
+                }
+            };
             if (!map)
+            {
+                const auto scheme = std::ranges::find(m_InputDocument.ControlSchemes, m_SelectedInputScheme,
+                                                      &Keire::InputControlSchemeDefinition::Id);
+                if (scheme == m_InputDocument.ControlSchemes.end())
+                {
+                    ui.TextColored(m_Theme.MutedText, "Select an action map, action, binding, or control scheme.");
+                    return;
+                }
+                auto name = scheme->Name;
+                if (ui.InputText("Scheme Name", name))
+                {
+                    RecordInputUndo("Rename Control Scheme");
+                    scheme->Name = std::move(name);
+                }
+                auto group = scheme->BindingGroup;
+                if (ui.InputText("Binding Group", group))
+                {
+                    RecordInputUndo("Change Binding Group");
+                    const auto previous = scheme->BindingGroup;
+                    scheme->BindingGroup = std::move(group);
+                    for (auto& actionMap : m_InputDocument.ActionMaps)
+                        for (auto& binding : actionMap.Bindings)
+                            std::ranges::replace(binding.Groups, previous, scheme->BindingGroup);
+                }
+                ui.Separator();
+                ui.TextColored(m_Theme.Accent, "DEVICES");
+                for (const std::string_view family : {"Keyboard", "Mouse", "Gamepad"})
+                {
+                    auto device = std::ranges::find(scheme->Devices, family, &Keire::InputDeviceRequirement::Device);
+                    bool required = device != scheme->Devices.end();
+                    if (ui.Checkbox(std::string(family), required))
+                    {
+                        if (required)
+                        {
+                            RecordInputUndo("Add Scheme Device");
+                            scheme->Devices.push_back({std::string(family), false});
+                        }
+                        else if (scheme->Devices.size() > 1)
+                        {
+                            RecordInputUndo("Remove Scheme Device");
+                            scheme->Devices.erase(device);
+                        }
+                        else
+                            m_InputMessage = "A control scheme requires at least one device family.";
+                    }
+                    device = std::ranges::find(scheme->Devices, family, &Keire::InputDeviceRequirement::Device);
+                    if (device != scheme->Devices.end())
+                    {
+                        ui.SameLine();
+                        bool optional = device->Optional;
+                        if (ui.Checkbox("Optional##" + std::string(family), optional))
+                        {
+                            RecordInputUndo("Change Device Requirement");
+                            device->Optional = optional;
+                        }
+                    }
+                }
+                ui.Separator();
+                if (ui.Button("Delete Control Scheme"))
+                {
+                    RecordInputUndo("Delete Control Scheme");
+                    const auto removedGroup = scheme->BindingGroup;
+                    m_InputDocument.ControlSchemes.erase(scheme);
+                    for (auto& actionMap : m_InputDocument.ActionMaps)
+                        for (auto& binding : actionMap.Bindings)
+                            std::erase(binding.Groups, removedGroup);
+                    m_SelectedInputScheme = {};
+                    if (!m_InputDocument.ActionMaps.empty())
+                        m_SelectedInputMap = m_InputDocument.ActionMaps.front().Id;
+                }
                 return;
+            }
             if (!m_SelectedInputAction)
             {
                 auto name = map->Name;
@@ -2564,8 +3146,89 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
                         RecordInputUndo();
                         action->Name = std::move(name);
                     }
-                    ui.Text("Type: " + std::to_string(static_cast<int>(action->Type)));
-                    ui.Text("Value: " + std::to_string(static_cast<int>(action->ValueType)));
+                    const auto actionTypeName = [](const Keire::InputActionType type)
+                    {
+                        switch (type)
+                        {
+                        case Keire::InputActionType::Button:
+                            return "Button";
+                        case Keire::InputActionType::Value:
+                            return "Value";
+                        case Keire::InputActionType::PassThrough:
+                            return "Pass Through";
+                        }
+                        return "Unknown";
+                    };
+                    if (auto combo = ui.BeginCombo("Action Type", actionTypeName(action->Type)); combo)
+                    {
+                        for (const auto type : {Keire::InputActionType::Button, Keire::InputActionType::Value,
+                                                Keire::InputActionType::PassThrough})
+                        {
+                            if (ui.Selectable(actionTypeName(type), action->Type == type) && action->Type != type)
+                            {
+                                RecordInputUndo("Change Action Type");
+                                action->Type = type;
+                                if (type == Keire::InputActionType::Button)
+                                {
+                                    action->ValueType = Keire::InputValueType::Boolean;
+                                    std::erase_if(map->Bindings,
+                                                  [&](const auto& binding)
+                                                  {
+                                                      return binding.Action == action->Id &&
+                                                             (!binding.Composite.empty() ||
+                                                              !binding.CompositePart.empty());
+                                                  });
+                                }
+                                if (type == Keire::InputActionType::PassThrough)
+                                {
+                                    action->Interactions.clear();
+                                    for (auto& binding : map->Bindings)
+                                        if (binding.Action == action->Id)
+                                            binding.Interactions.clear();
+                                }
+                            }
+                        }
+                    }
+                    const auto valueTypeName = [](const Keire::InputValueType type)
+                    {
+                        switch (type)
+                        {
+                        case Keire::InputValueType::Boolean:
+                            return "Boolean";
+                        case Keire::InputValueType::Axis1D:
+                            return "Axis (1D)";
+                        case Keire::InputValueType::Axis2D:
+                            return "Vector (2D)";
+                        }
+                        return "Unknown";
+                    };
+                    if (auto disabled = ui.BeginDisabled(action->Type == Keire::InputActionType::Button); disabled)
+                    {
+                        if (auto combo = ui.BeginCombo("Value Type", valueTypeName(action->ValueType)); combo)
+                        {
+                            for (const auto type : {Keire::InputValueType::Boolean, Keire::InputValueType::Axis1D,
+                                                    Keire::InputValueType::Axis2D})
+                            {
+                                if (ui.Selectable(valueTypeName(type), action->ValueType == type) &&
+                                    action->ValueType != type)
+                                {
+                                    RecordInputUndo("Change Action Value Type");
+                                    action->ValueType = type;
+                                    std::erase_if(map->Bindings,
+                                                  [&](const auto& binding)
+                                                  {
+                                                      if (binding.Action != action->Id)
+                                                          return false;
+                                                      return !binding.Composite.empty() ||
+                                                             !binding.CompositePart.empty();
+                                                  });
+                                }
+                            }
+                        }
+                    }
+                    if (action->Type != Keire::InputActionType::PassThrough)
+                        drawBehaviors("INTERACTIONS", action->Interactions, true);
+                    drawBehaviors("PROCESSORS", action->Processors, false);
                 }
                 if (m_SelectedInputBinding)
                 {
@@ -2579,13 +3242,62 @@ void EditorWorkspaceLayer::DrawInputActionsEditor(Keire::UiFrame& ui)
                             RecordInputUndo();
                             binding->Name = std::move(name);
                         }
-                        auto path = binding->Path;
-                        if (ui.InputText("Control Path", path))
+                        if (!binding->Composite.empty())
                         {
-                            RecordInputUndo();
-                            binding->Path = std::move(path);
+                            ui.TextColored(m_Theme.MutedText, "Composite");
+                            ui.Text(binding->Composite == "Axis1D" ? "1D Axis" : "2D Vector");
                         }
-                        if (ui.Button("Listen"))
+                        else
+                        {
+                            if (!binding->CompositePart.empty())
+                            {
+                                ui.TextColored(m_Theme.MutedText, "Composite Part");
+                                ui.Text(binding->CompositePart);
+                            }
+                            if (auto controls = ui.BeginCombo(
+                                    "Control Browser", binding->Path.empty() ? "Choose a control..." : binding->Path);
+                                controls)
+                            {
+                                for (const std::string_view path :
+                                     {"<Keyboard>/space", "<Keyboard>/enter", "<Keyboard>/escape", "<Keyboard>/w",
+                                      "<Keyboard>/a", "<Keyboard>/s", "<Keyboard>/d", "<Mouse>/position",
+                                      "<Mouse>/delta", "<Mouse>/leftButton", "<Mouse>/rightButton", "<Mouse>/scroll",
+                                      "<Gamepad>/leftStick", "<Gamepad>/rightStick", "<Gamepad>/buttonSouth",
+                                      "<Gamepad>/buttonEast", "<Gamepad>/leftTrigger", "<Gamepad>/rightTrigger"})
+                                {
+                                    if (ui.Selectable(path, binding->Path == path))
+                                    {
+                                        RecordInputUndo("Choose Control Path");
+                                        binding->Path = path;
+                                    }
+                                }
+                            }
+                            auto path = binding->Path;
+                            if (ui.InputText("Control Path", path))
+                            {
+                                RecordInputUndo("Change Control Path");
+                                binding->Path = std::move(path);
+                            }
+                        }
+                        ui.Separator();
+                        ui.TextColored(m_Theme.Accent, "BINDING GROUPS");
+                        for (const auto& scheme : m_InputDocument.ControlSchemes)
+                        {
+                            bool included =
+                                std::ranges::find(binding->Groups, scheme.BindingGroup) != binding->Groups.end();
+                            if (ui.Checkbox(scheme.Name + "##" + scheme.Id.ToString(), included))
+                            {
+                                RecordInputUndo("Change Binding Group");
+                                if (included)
+                                    binding->Groups.push_back(scheme.BindingGroup);
+                                else
+                                    std::erase(binding->Groups, scheme.BindingGroup);
+                            }
+                        }
+                        if (action != map->Actions.end() && action->Type != Keire::InputActionType::PassThrough)
+                            drawBehaviors("BINDING INTERACTIONS", binding->Interactions, true);
+                        drawBehaviors("BINDING PROCESSORS", binding->Processors, false);
+                        if (binding->Composite.empty() && ui.Button("Listen"))
                         {
                             try
                             {
@@ -2698,6 +3410,8 @@ void EditorWorkspaceLayer::DrawInspector(Keire::UiFrame& ui)
 {
     if (auto inspector = ui.BeginPanel(m_Inspector); inspector)
     {
+        if (ui.WindowFocused() && m_EditingScene && m_SelectedSceneObject)
+            m_ActiveUndoContext = m_SceneUndoContext;
         ui.TextColored(m_Theme.Accent, "INSPECTOR");
         ui.Separator();
         if (m_EditingScene && m_SelectedSceneObject)
@@ -2718,282 +3432,310 @@ void EditorWorkspaceLayer::DrawInspector(Keire::UiFrame& ui)
                     entity.SetActive(active);
                 }
                 ui.Separator();
-                const float transformCardHeight = ui.ContentAvailable().Width < 325.0F ? 245.0F : 190.0F;
+                const auto expansion = [&](const std::string_view type) -> bool&
+                {
+                    const auto key = entity.Id().ToString() + "." + std::string(type);
+                    return m_ComponentExpansion.try_emplace(key, true).first->second;
+                };
+                auto& transformExpanded = expansion("transform");
+                const float transformCardHeight =
+                    transformExpanded ? (ui.ContentAvailable().Width < 325.0F ? 245.0F : 190.0F) : 38.0F;
                 if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true); card)
                 {
-                    ui.TextColored(m_Theme.Accent, "TRANSFORM");
-                    ui.TextColored(m_Theme.MutedText, "Required | Local space");
-                    ui.Separator();
-                    const auto transform = entity.GetComponent<Keire::TransformComponent>();
-                    auto position = transform->LocalPosition();
-                    auto rotation = transform->LocalEulerAngles();
-                    auto scale = transform->LocalScale();
-                    const bool positionChanged = ui.DragVector3("Position", position, 0.05F);
-                    const auto positionState = ui.LastItemState();
-                    const bool rotationChanged = ui.DragVector3("Rotation", rotation, 0.25F);
-                    const auto rotationState = ui.LastItemState();
-                    const auto previousScale = scale;
-                    const bool scaleChanged = ui.DragVector3("Scale", scale, 0.01F);
-                    const auto scaleState = ui.LastItemState();
-                    if (m_UniformScale && scaleChanged)
+                    if (ui.Selectable(transformExpanded ? "v  TRANSFORM" : ">  TRANSFORM"))
+                        transformExpanded = !transformExpanded;
+                    if (transformExpanded)
                     {
-                        const auto propagate = [](const float previous, const float current, const float otherPrevious)
+                        ui.TextColored(m_Theme.MutedText, "Required | Local space");
+                        ui.Separator();
+                        const auto transform = entity.GetComponent<Keire::TransformComponent>();
+                        auto position = transform->LocalPosition();
+                        auto rotation = transform->LocalEulerAngles();
+                        auto scale = transform->LocalScale();
+                        const bool positionChanged = ui.DragVector3("Position", position, 0.05F);
+                        const auto positionState = ui.LastItemState();
+                        const bool rotationChanged = ui.DragVector3("Rotation", rotation, 0.25F);
+                        const auto rotationState = ui.LastItemState();
+                        const auto previousScale = scale;
+                        const bool scaleChanged = ui.DragVector3("Scale", scale, 0.01F);
+                        const auto scaleState = ui.LastItemState();
+                        if (m_UniformScale && scaleChanged)
                         {
-                            if (std::abs(previous) > 0.0001F)
-                                return otherPrevious * (current / previous);
-                            return otherPrevious + (current - previous);
-                        };
-                        if (scale.X != previousScale.X)
-                        {
-                            scale.Y = propagate(previousScale.X, scale.X, previousScale.Y);
-                            scale.Z = propagate(previousScale.X, scale.X, previousScale.Z);
+                            const auto propagate =
+                                [](const float previous, const float current, const float otherPrevious)
+                            {
+                                if (std::abs(previous) > 0.0001F)
+                                    return otherPrevious * (current / previous);
+                                return otherPrevious + (current - previous);
+                            };
+                            if (scale.X != previousScale.X)
+                            {
+                                scale.Y = propagate(previousScale.X, scale.X, previousScale.Y);
+                                scale.Z = propagate(previousScale.X, scale.X, previousScale.Z);
+                            }
+                            else if (scale.Y != previousScale.Y)
+                            {
+                                scale.X = propagate(previousScale.Y, scale.Y, previousScale.X);
+                                scale.Z = propagate(previousScale.Y, scale.Y, previousScale.Z);
+                            }
+                            else if (scale.Z != previousScale.Z)
+                            {
+                                scale.X = propagate(previousScale.Z, scale.Z, previousScale.X);
+                                scale.Y = propagate(previousScale.Z, scale.Z, previousScale.Y);
+                            }
                         }
-                        else if (scale.Y != previousScale.Y)
+                        if (positionChanged)
                         {
-                            scale.X = propagate(previousScale.Y, scale.Y, previousScale.X);
-                            scale.Z = propagate(previousScale.Y, scale.Y, previousScale.Z);
+                            RecordSceneUndo("Change Position", "transform.position." + entity.Id().ToString() + "." +
+                                                                   std::to_string(m_ContinuousEditSerial));
+                            transform->SetLocalPosition(position);
                         }
-                        else if (scale.Z != previousScale.Z)
+                        if (rotationChanged)
                         {
-                            scale.X = propagate(previousScale.Z, scale.Z, previousScale.X);
-                            scale.Y = propagate(previousScale.Z, scale.Z, previousScale.Y);
+                            RecordSceneUndo("Change Rotation", "transform.rotation." + entity.Id().ToString() + "." +
+                                                                   std::to_string(m_ContinuousEditSerial));
+                            transform->SetLocalEulerAngles(rotation);
                         }
+                        if (scaleChanged)
+                        {
+                            RecordSceneUndo("Change Scale", "transform.scale." + entity.Id().ToString() + "." +
+                                                                std::to_string(m_ContinuousEditSerial));
+                            transform->SetLocalScale(scale);
+                        }
+                        if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
+                            scaleState.DeactivatedAfterEdit)
+                            ++m_ContinuousEditSerial;
+                        ui.Spacing();
+                        (void)ui.Checkbox("Uniform scale", m_UniformScale);
+                        ui.SameLine();
+                        if (ui.Button("Reset"))
+                        {
+                            RecordSceneUndo();
+                            transform->Reset();
+                        }
+                        if (ui.LastItemState().Hovered)
+                            ui.SetTooltip("Reset local position, rotation, and scale.");
                     }
-                    if (positionChanged)
-                    {
-                        RecordSceneUndo("Change Position", "transform.position." + entity.Id().ToString() + "." +
-                                                               std::to_string(m_ContinuousEditSerial));
-                        transform->SetLocalPosition(position);
-                    }
-                    if (rotationChanged)
-                    {
-                        RecordSceneUndo("Change Rotation", "transform.rotation." + entity.Id().ToString() + "." +
-                                                               std::to_string(m_ContinuousEditSerial));
-                        transform->SetLocalEulerAngles(rotation);
-                    }
-                    if (scaleChanged)
-                    {
-                        RecordSceneUndo("Change Scale", "transform.scale." + entity.Id().ToString() + "." +
-                                                            std::to_string(m_ContinuousEditSerial));
-                        transform->SetLocalScale(scale);
-                    }
-                    if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
-                        scaleState.DeactivatedAfterEdit)
-                        ++m_ContinuousEditSerial;
-                    ui.Spacing();
-                    (void)ui.Checkbox("Uniform scale", m_UniformScale);
-                    ui.SameLine();
-                    if (ui.Button("Reset"))
-                    {
-                        RecordSceneUndo();
-                        transform->Reset();
-                    }
-                    if (ui.LastItemState().Hovered)
-                        ui.SetTooltip("Reset local position, rotation, and scale.");
                 }
                 if (const auto light = entity.GetComponent<Keire::DirectionalLightComponent>())
                 {
                     ui.Spacing();
-                    if (auto card = ui.BeginChild("DirectionalLightCard", {0.0F, 360.0F}, true); card)
+                    auto& lightExpanded = expansion("directional-light");
+                    if (auto card = ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 360.0F : 38.0F}, true);
+                        card)
                     {
-                        ui.TextColored(m_Theme.Accent, "DIRECTIONAL LIGHT");
-                        auto enabled = light->Enabled();
-                        if (ui.Checkbox("Enabled", enabled))
+                        if (ui.Selectable(lightExpanded ? "v  DIRECTIONAL LIGHT" : ">  DIRECTIONAL LIGHT"))
+                            lightExpanded = !lightExpanded;
+                        if (lightExpanded)
                         {
-                            RecordSceneUndo();
-                            light->SetEnabled(enabled);
+                            auto enabled = light->Enabled();
+                            if (ui.Checkbox("Enabled", enabled))
+                            {
+                                RecordSceneUndo();
+                                light->SetEnabled(enabled);
+                            }
+                            auto color = light->LightColor();
+                            Keire::UiColor editorColor{color.Red, color.Green, color.Blue, color.Alpha};
+                            if (ui.ColorEdit("Color", editorColor))
+                            {
+                                RecordSceneUndo();
+                                light->SetLightColor(
+                                    {editorColor.Red, editorColor.Green, editorColor.Blue, editorColor.Alpha});
+                            }
+                            auto intensity = light->Intensity();
+                            if (ui.SliderFloat("Intensity", intensity, 0.0F, 100.0F))
+                            {
+                                RecordSceneUndo();
+                                light->SetIntensity(intensity);
+                            }
+                            auto temperature = light->UseColorTemperature();
+                            if (ui.Checkbox("Use Color Temperature", temperature))
+                            {
+                                RecordSceneUndo();
+                                light->SetUseColorTemperature(temperature);
+                            }
+                            auto kelvin = light->ColorTemperatureKelvin();
+                            if (ui.SliderFloat("Temperature (K)", kelvin, 1000.0F, 20000.0F))
+                            {
+                                RecordSceneUndo();
+                                light->SetColorTemperatureKelvin(kelvin);
+                            }
+                            auto shadowStrength = light->ShadowStrength();
+                            if (ui.SliderFloat("Shadow Strength", shadowStrength, 0.0F, 1.0F))
+                            {
+                                RecordSceneUndo();
+                                light->SetShadowStrength(shadowStrength);
+                            }
+                            auto bias = light->ShadowBias();
+                            if (ui.SliderFloat("Shadow Bias", bias, 0.0F, 1.0F))
+                            {
+                                RecordSceneUndo();
+                                light->SetShadowBias(bias);
+                            }
+                            if (ui.Button("Reset Light"))
+                            {
+                                RecordSceneUndo();
+                                light->Reset();
+                            }
+                            ui.SameLine();
+                            if (ui.Button("Remove Component"))
+                            {
+                                RecordSceneUndo();
+                                (void)entity.RemoveComponent<Keire::DirectionalLightComponent>();
+                            }
+                            ui.TextColored(m_Theme.MutedText, "Direct Lambert lighting | Shadows deferred");
                         }
-                        auto color = light->LightColor();
-                        Keire::UiColor editorColor{color.Red, color.Green, color.Blue, color.Alpha};
-                        if (ui.ColorEdit("Color", editorColor))
-                        {
-                            RecordSceneUndo();
-                            light->SetLightColor(
-                                {editorColor.Red, editorColor.Green, editorColor.Blue, editorColor.Alpha});
-                        }
-                        auto intensity = light->Intensity();
-                        if (ui.SliderFloat("Intensity", intensity, 0.0F, 100.0F))
-                        {
-                            RecordSceneUndo();
-                            light->SetIntensity(intensity);
-                        }
-                        auto temperature = light->UseColorTemperature();
-                        if (ui.Checkbox("Use Color Temperature", temperature))
-                        {
-                            RecordSceneUndo();
-                            light->SetUseColorTemperature(temperature);
-                        }
-                        auto kelvin = light->ColorTemperatureKelvin();
-                        if (ui.SliderFloat("Temperature (K)", kelvin, 1000.0F, 20000.0F))
-                        {
-                            RecordSceneUndo();
-                            light->SetColorTemperatureKelvin(kelvin);
-                        }
-                        auto shadowStrength = light->ShadowStrength();
-                        if (ui.SliderFloat("Shadow Strength", shadowStrength, 0.0F, 1.0F))
-                        {
-                            RecordSceneUndo();
-                            light->SetShadowStrength(shadowStrength);
-                        }
-                        auto bias = light->ShadowBias();
-                        if (ui.SliderFloat("Shadow Bias", bias, 0.0F, 1.0F))
-                        {
-                            RecordSceneUndo();
-                            light->SetShadowBias(bias);
-                        }
-                        if (ui.Button("Reset Light"))
-                        {
-                            RecordSceneUndo();
-                            light->Reset();
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove Component"))
-                        {
-                            RecordSceneUndo();
-                            (void)entity.RemoveComponent<Keire::DirectionalLightComponent>();
-                        }
-                        ui.TextColored(m_Theme.MutedText,
-                                       "Renderer-neutral authoring data; rendering integration is deferred.");
                     }
                 }
                 if (const auto camera = entity.GetComponent<Keire::CameraComponent>())
                 {
                     ui.Spacing();
-                    if (auto card = ui.BeginChild("CameraCard", {0.0F, 405.0F}, true); card)
+                    auto& cameraExpanded = expansion("camera");
+                    if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 405.0F : 38.0F}, true); card)
                     {
-                        ui.TextColored(m_Theme.Accent, "CAMERA");
-                        ui.TextColored(m_Theme.MutedText, "Game view | Priority-selected");
-                        ui.Separator();
-                        auto enabled = camera->Enabled();
-                        if (ui.Checkbox("Enabled##Camera", enabled))
+                        if (ui.Selectable(cameraExpanded ? "v  CAMERA" : ">  CAMERA"))
+                            cameraExpanded = !cameraExpanded;
+                        if (cameraExpanded)
                         {
-                            RecordSceneUndo();
-                            camera->SetEnabled(enabled);
-                        }
-                        auto primary = camera->Primary();
-                        if (ui.Checkbox("Primary", primary))
-                        {
-                            RecordSceneUndo();
-                            camera->SetPrimary(primary);
-                        }
-                        const auto projection = camera->Projection();
-                        if (auto combo = ui.BeginCombo("Projection", projection == Keire::CameraProjection::Perspective
-                                                                         ? "Perspective"
-                                                                         : "Orthographic");
-                            combo)
-                        {
-                            if (ui.Selectable("Perspective", projection == Keire::CameraProjection::Perspective))
+                            ui.TextColored(m_Theme.MutedText, "Game view | Priority-selected");
+                            ui.Separator();
+                            auto enabled = camera->Enabled();
+                            if (ui.Checkbox("Enabled##Camera", enabled))
                             {
                                 RecordSceneUndo();
-                                camera->SetProjection(Keire::CameraProjection::Perspective);
+                                camera->SetEnabled(enabled);
                             }
-                            if (ui.Selectable("Orthographic", projection == Keire::CameraProjection::Orthographic))
+                            auto primary = camera->Primary();
+                            if (ui.Checkbox("Primary", primary))
                             {
                                 RecordSceneUndo();
-                                camera->SetProjection(Keire::CameraProjection::Orthographic);
+                                camera->SetPrimary(primary);
                             }
-                        }
-                        auto priority = camera->Priority();
-                        if (ui.SliderInt("Priority", priority, -100, 100))
-                        {
-                            RecordSceneUndo();
-                            camera->SetPriority(priority);
-                        }
-                        if (camera->Projection() == Keire::CameraProjection::Perspective)
-                        {
-                            auto fieldOfView = camera->VerticalFieldOfViewDegrees();
-                            if (ui.SliderFloat("Vertical FOV", fieldOfView, 1.0F, 179.0F))
+                            const auto projection = camera->Projection();
+                            if (auto combo = ui.BeginCombo(
+                                    "Projection", projection == Keire::CameraProjection::Perspective ? "Perspective"
+                                                                                                     : "Orthographic");
+                                combo)
+                            {
+                                if (ui.Selectable("Perspective", projection == Keire::CameraProjection::Perspective))
+                                {
+                                    RecordSceneUndo();
+                                    camera->SetProjection(Keire::CameraProjection::Perspective);
+                                }
+                                if (ui.Selectable("Orthographic", projection == Keire::CameraProjection::Orthographic))
+                                {
+                                    RecordSceneUndo();
+                                    camera->SetProjection(Keire::CameraProjection::Orthographic);
+                                }
+                            }
+                            auto priority = camera->Priority();
+                            if (ui.SliderInt("Priority", priority, -100, 100))
                             {
                                 RecordSceneUndo();
-                                camera->SetVerticalFieldOfViewDegrees(fieldOfView);
+                                camera->SetPriority(priority);
                             }
-                        }
-                        else
-                        {
-                            auto size = camera->OrthographicSize();
-                            if (ui.SliderFloat("Orthographic Size", size, 0.01F, 100.0F))
+                            if (camera->Projection() == Keire::CameraProjection::Perspective)
+                            {
+                                auto fieldOfView = camera->VerticalFieldOfViewDegrees();
+                                if (ui.SliderFloat("Vertical FOV", fieldOfView, 1.0F, 179.0F))
+                                {
+                                    RecordSceneUndo();
+                                    camera->SetVerticalFieldOfViewDegrees(fieldOfView);
+                                }
+                            }
+                            else
+                            {
+                                auto size = camera->OrthographicSize();
+                                if (ui.SliderFloat("Orthographic Size", size, 0.01F, 100.0F))
+                                {
+                                    RecordSceneUndo();
+                                    camera->SetOrthographicSize(size);
+                                }
+                            }
+                            auto nearPlane = camera->NearPlane();
+                            auto farPlane = camera->FarPlane();
+                            const bool nearChanged =
+                                ui.SliderFloat("Near Plane", nearPlane, 0.01F, std::min(farPlane - 0.01F, 100.0F));
+                            const bool farChanged =
+                                ui.SliderFloat("Far Plane", farPlane, std::max(nearPlane + 0.01F, 1.0F), 10000.0F);
+                            if (nearChanged || farChanged)
                             {
                                 RecordSceneUndo();
-                                camera->SetOrthographicSize(size);
+                                camera->SetClipPlanes(nearPlane, farPlane);
                             }
-                        }
-                        auto nearPlane = camera->NearPlane();
-                        auto farPlane = camera->FarPlane();
-                        const bool nearChanged =
-                            ui.SliderFloat("Near Plane", nearPlane, 0.01F, std::min(farPlane - 0.01F, 100.0F));
-                        const bool farChanged =
-                            ui.SliderFloat("Far Plane", farPlane, std::max(nearPlane + 0.01F, 1.0F), 10000.0F);
-                        if (nearChanged || farChanged)
-                        {
-                            RecordSceneUndo();
-                            camera->SetClipPlanes(nearPlane, farPlane);
-                        }
-                        auto clear = camera->ClearColor();
-                        Keire::UiColor clearColor{clear.Red, clear.Green, clear.Blue, clear.Alpha};
-                        if (ui.ColorEdit("Clear Color", clearColor))
-                        {
-                            RecordSceneUndo();
-                            camera->SetClearColor(
-                                {clearColor.Red, clearColor.Green, clearColor.Blue, clearColor.Alpha});
-                        }
-                        if (ui.Button("Reset Camera"))
-                        {
-                            RecordSceneUndo();
-                            camera->Reset();
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove Camera"))
-                        {
-                            RecordSceneUndo();
-                            (void)entity.RemoveComponent<Keire::CameraComponent>();
+                            auto clear = camera->ClearColor();
+                            Keire::UiColor clearColor{clear.Red, clear.Green, clear.Blue, clear.Alpha};
+                            if (ui.ColorEdit("Clear Color", clearColor))
+                            {
+                                RecordSceneUndo();
+                                camera->SetClearColor(
+                                    {clearColor.Red, clearColor.Green, clearColor.Blue, clearColor.Alpha});
+                            }
+                            if (ui.Button("Reset Camera"))
+                            {
+                                RecordSceneUndo();
+                                camera->Reset();
+                            }
+                            ui.SameLine();
+                            if (ui.Button("Remove Camera"))
+                            {
+                                RecordSceneUndo();
+                                (void)entity.RemoveComponent<Keire::CameraComponent>();
+                            }
                         }
                     }
                 }
                 if (const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>())
                 {
                     ui.Spacing();
-                    if (auto card = ui.BeginChild("MeshRendererCard", {0.0F, 260.0F}, true); card)
+                    auto& rendererExpanded = expansion("mesh-renderer");
+                    if (auto card = ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 260.0F : 38.0F}, true);
+                        card)
                     {
-                        ui.TextColored(m_Theme.Accent, "MESH RENDERER");
-                        ui.TextColored(m_Theme.MutedText, "Unlit geometry submission");
-                        ui.Separator();
-                        auto enabled = renderer->Enabled();
-                        if (ui.Checkbox("Enabled##MeshRenderer", enabled))
+                        if (ui.Selectable(rendererExpanded ? "v  MESH RENDERER" : ">  MESH RENDERER"))
+                            rendererExpanded = !rendererExpanded;
+                        if (rendererExpanded)
                         {
-                            RecordSceneUndo();
-                            renderer->SetEnabled(enabled);
-                        }
-                        auto visible = renderer->Visible();
-                        if (ui.Checkbox("Visible", visible))
-                        {
-                            RecordSceneUndo();
-                            renderer->SetVisible(visible);
-                        }
-                        auto tint = renderer->Tint();
-                        Keire::UiColor tintColor{tint.Red, tint.Green, tint.Blue, tint.Alpha};
-                        if (ui.ColorEdit("Tint", tintColor))
-                        {
-                            RecordSceneUndo("Change Tint", "mesh.tint." + entity.Id().ToString() + "." +
-                                                               std::to_string(m_ContinuousEditSerial));
-                            renderer->SetTint({tintColor.Red, tintColor.Green, tintColor.Blue, tintColor.Alpha});
-                        }
-                        if (ui.LastItemState().DeactivatedAfterEdit)
-                            ++m_ContinuousEditSerial;
-                        ui.TextColored(m_Theme.MutedText, "Mesh");
-                        ui.Text(renderer->Mesh() ? renderer->Mesh().ToString() : "Missing (error mesh fallback)");
-                        ui.TextColored(m_Theme.MutedText, "Material");
-                        ui.Text(renderer->Material() ? renderer->Material().ToString()
-                                                     : "Missing (error material fallback)");
-                        if (ui.Button("Reset Renderer"))
-                        {
-                            RecordSceneUndo();
-                            renderer->Reset();
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove Renderer"))
-                        {
-                            RecordSceneUndo();
-                            (void)entity.RemoveComponent<Keire::MeshRendererComponent>();
+                            ui.TextColored(m_Theme.MutedText, "Lit geometry submission");
+                            ui.Separator();
+                            auto enabled = renderer->Enabled();
+                            if (ui.Checkbox("Enabled##MeshRenderer", enabled))
+                            {
+                                RecordSceneUndo();
+                                renderer->SetEnabled(enabled);
+                            }
+                            auto visible = renderer->Visible();
+                            if (ui.Checkbox("Visible", visible))
+                            {
+                                RecordSceneUndo();
+                                renderer->SetVisible(visible);
+                            }
+                            auto tint = renderer->Tint();
+                            Keire::UiColor tintColor{tint.Red, tint.Green, tint.Blue, tint.Alpha};
+                            if (ui.ColorEdit("Tint", tintColor))
+                            {
+                                RecordSceneUndo("Change Tint", "mesh.tint." + entity.Id().ToString() + "." +
+                                                                   std::to_string(m_ContinuousEditSerial));
+                                renderer->SetTint({tintColor.Red, tintColor.Green, tintColor.Blue, tintColor.Alpha});
+                            }
+                            if (ui.LastItemState().DeactivatedAfterEdit)
+                                ++m_ContinuousEditSerial;
+                            ui.TextColored(m_Theme.MutedText, "Mesh");
+                            ui.Text(renderer->Mesh() ? renderer->Mesh().ToString() : "Missing (error mesh fallback)");
+                            ui.TextColored(m_Theme.MutedText, "Material");
+                            ui.Text(renderer->Material() ? renderer->Material().ToString()
+                                                         : "Missing (error material fallback)");
+                            if (ui.Button("Reset Renderer"))
+                            {
+                                RecordSceneUndo();
+                                renderer->Reset();
+                            }
+                            ui.SameLine();
+                            if (ui.Button("Remove Renderer"))
+                            {
+                                RecordSceneUndo();
+                                (void)entity.RemoveComponent<Keire::MeshRendererComponent>();
+                            }
                         }
                     }
                 }
@@ -3165,6 +3907,60 @@ void EditorWorkspaceLayer::DrawInspector(Keire::UiFrame& ui)
             catch (const std::exception& error)
             {
                 SetAssetError(std::string("Asset trash operation failed: ") + error.what());
+            }
+        }
+    }
+}
+
+void EditorWorkspaceLayer::DrawProjectSettings(Keire::UiFrame& ui)
+{
+    if (auto panel = ui.BeginPanel(m_ProjectSettings); panel)
+    {
+        ui.TextColored(m_Theme.Accent, "PROJECT SETTINGS");
+        ui.Separator();
+        ui.Text("Rendering / Environment");
+        ui.TextColored(m_Theme.MutedText, "These values are project-owned and light both the Scene and Game views.");
+        ui.Spacing();
+
+        Keire::UiColor ambient{m_RenderEnvironment.AmbientColor.Red, m_RenderEnvironment.AmbientColor.Green,
+                               m_RenderEnvironment.AmbientColor.Blue, m_RenderEnvironment.AmbientColor.Alpha};
+        bool changed = ui.ColorEdit("Ambient Color", ambient);
+        bool save = ui.LastItemState().DeactivatedAfterEdit;
+
+        changed |= ui.SliderFloat("Ambient Intensity", m_RenderEnvironment.AmbientIntensity, 0.0F, 8.0F);
+        save |= ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.SliderFloat("Exposure", m_RenderEnvironment.Exposure, 0.1F, 4.0F);
+        save |= ui.LastItemState().DeactivatedAfterEdit;
+        if (ambient != Keire::UiColor{m_RenderEnvironment.AmbientColor.Red, m_RenderEnvironment.AmbientColor.Green,
+                                      m_RenderEnvironment.AmbientColor.Blue, m_RenderEnvironment.AmbientColor.Alpha})
+        {
+            m_RenderEnvironment.AmbientColor = {ambient.Red, ambient.Green, ambient.Blue, ambient.Alpha};
+            changed = true;
+        }
+        ui.Spacing();
+        if (ui.Button("Reset Environment"))
+        {
+            m_RenderEnvironment = {};
+            changed = true;
+            save = true;
+        }
+
+        if (changed)
+            m_RenderEnvironmentDirty = true;
+
+        if (save && m_RenderEnvironmentDirty)
+        {
+            try
+            {
+                const auto project = Owner().GetProject();
+                if (!project || !project->Writable())
+                    throw std::runtime_error("The active project is not writable.");
+                Keire::SaveRenderEnvironmentSettings(project->Root(), m_RenderEnvironment);
+                m_RenderEnvironmentDirty = false;
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Rendering", std::string("Could not save project settings: ") + error.what());
             }
         }
     }

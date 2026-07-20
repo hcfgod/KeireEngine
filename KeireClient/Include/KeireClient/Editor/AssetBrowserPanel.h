@@ -4,7 +4,9 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
+#include <vector>
 
 class EditorWorkspaceLayer;
 
@@ -24,6 +26,7 @@ namespace KeireEditor
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const;
         [[nodiscard]] bool Focused() const noexcept;
         [[nodiscard]] std::filesystem::path CurrentFolder() const;
+        [[nodiscard]] static std::vector<Keire::AssetId> DecodeDragPayload(std::span<const std::byte> bytes);
         void RevealAsset(Keire::AssetId asset, EditorWorkspaceLayer& editor);
         void RecordCreatedAsset(const Keire::Ref<Keire::AssetDatabase>& database, Keire::AssetId asset,
                                 std::string name);

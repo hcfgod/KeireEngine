@@ -25,8 +25,10 @@ skips presentation safely. Viewport surfaces keep their last valid image through
 
 ## Views And Cameras
 
-Scene view uses a nonserialized editor camera and draws a depth-tested grid plus visible mesh renderers from the edit
-scene, or the runtime clone while playing. Its controls are:
+Scene view uses a nonserialized editor camera for navigation and draws a depth-tested grid plus visible mesh renderers
+from the edit scene, or the runtime clone while playing. The active authored Camera supplies the clear color to both
+Scene and Game, so changing Camera clear color gives an immediate, consistent preview without replacing the Scene
+viewpoint. Its controls are:
 
 - `F`: focus the selected entity.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.
@@ -35,22 +37,37 @@ scene, or the runtime clone while playing. Its controls are:
 - Mouse wheel or Alt+right drag: perspective dolly or orthographic zoom; Shift accelerates it.
 - Right drag and `WASDQE`: fly; Shift accelerates movement and the wheel adjusts fly speed without dollying.
 - Arrow keys: walk and strafe while the Scene view is active.
+- `Q`, `W`, `E`, and `R`: select View, Move, Rotate, and Scale tools while the Scene viewport is active.
 - `X`, `Y`, and `Z`: snap orientation; `Persp/Ortho` toggles projection.
+
+The Scene toolbar exposes Global/Local space, snapping, position/rotation/scale increments, and a Gizmos toggle.
+Move, Rotate, and Scale handles operate directly on the selected Transform and record one scene undo step per drag.
+Camera and Directional Light icons remain visible independently of geometry; camera frustums and light directions can
+be toggled in the same settings popup. Scene-tool preferences live under `Library/Editor` and never dirty assets.
 
 Relative cursor capture exists only during fly navigation and is released on focus loss. Camera state is stored below
 the project's `Library/Editor` directory, so navigation never dirties a scene or enters source control.
 
-Game view selects an enabled, hierarchy-active primary `CameraComponent` by highest priority and then stable entity ID.
-It shows an explicit empty state when no camera qualifies. Perspective and orthographic cameras validate their FOV or
+Game view selects an enabled, hierarchy-active primary `CameraComponent` by highest priority and then stable entity ID,
+falling back to the highest-priority enabled scene Camera when no Camera is marked Primary. During Play it performs this
+selection against the runtime clone, never the nonserialized editor camera. Perspective and orthographic cameras validate their FOV or
 size, clipping planes, and linear clear color. `MeshRendererComponent` references Kéire-owned mesh/material asset IDs;
 the built-in cube is available without exposing a graphics backend.
 
 ## Current Scope
 
-The built-in cube uses a first-party HLSL shader compiled reproducibly to DXIL, SPIR-V, and MSL. Its per-draw constants
-contain model-view-projection plus the Mesh Renderer linear tint, so Inspector tint edits update Scene and Game in the
-same frame. Base vertex colors are white and tint alpha is preserved while the pipeline remains opaque.
+The built-in cube uses a first-party HLSL shader compiled reproducibly to DXIL, SPIR-V, and MSL. One per-draw vertex
+constant block carries model-view-projection, normal transform, Mesh Renderer linear tint, the selected active
+Directional Light, and the project ambient environment. Keeping this foundation path in one uniform block provides
+identical binding behavior across SDL_GPU backends. White base vertices preserve tint accuracy; transformed face normals
+receive ambient plus flat Lambert diffuse lighting, including light color, intensity, and optional color temperature.
+The editor grid explicitly bypasses scene lighting.
 
-This foundation renders an unlit, depth-tested cube and editor grid. Directional lights remain authorable but do not
-affect pixels yet. Textures, transparency sorting, shadows, PBR, post-processing, compute, custom raw GPU passes, and a
+Rendering environment values are stored in `ProjectSettings/Rendering.keiresettings`. Use **Edit > Project
+Settings...** to edit them live. Values update rendering immediately and persist once the active edit finishes; writes
+are schema-validated, atomic, and resilient to transient Windows file sharing. A missing file receives conservative
+defaults, while a malformed file is reported and isolated without preventing the project's asset database from opening.
+
+This foundation renders a lit, depth-tested cube and editor grid. Textures, transparency sorting, shadows, PBR,
+post-processing, multiple-light accumulation, compute, custom raw GPU passes, and a
 dedicated render thread remain later milestones.

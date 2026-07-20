@@ -20,7 +20,21 @@
         },
         {
           "id": "1a7b9aa8-1d99-4ea0-95ec-bce2b1227103",
-          "interactions": [],
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {
+                "pressPoint": 0.5
+              }
+            },
+            {
+              "name": "Hold",
+              "parameters": {
+                "duration": 0.4,
+                "pressPoint": 0.5
+              }
+            }
+          ],
           "name": "Fire",
           "processors": [],
           "type": "Button",

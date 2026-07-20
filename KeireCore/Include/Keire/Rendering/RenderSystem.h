@@ -4,7 +4,9 @@
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 
+#include <compare>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -90,6 +92,21 @@ namespace Keire
         Color ClearColor{0.08F, 0.09F, 0.11F, 1.0F};
     };
 
+    struct RenderEnvironmentSettings
+    {
+        std::uint32_t SchemaVersion = 1;
+        Color AmbientColor{0.20F, 0.22F, 0.26F, 1.0F};
+        float AmbientIntensity = 0.75F;
+        float Exposure = 1.0F;
+
+        auto operator<=>(const RenderEnvironmentSettings&) const noexcept = default;
+    };
+
+    [[nodiscard]] KEIRE_API RenderEnvironmentSettings
+    LoadRenderEnvironmentSettings(const std::filesystem::path& projectRoot);
+    KEIRE_API void SaveRenderEnvironmentSettings(const std::filesystem::path& projectRoot,
+                                                 const RenderEnvironmentSettings& settings);
+
     class KEIRE_API RenderView final : public RefCounted
     {
       public:
@@ -112,6 +129,7 @@ namespace Keire
         Ref<Scene> Scene;
         Ref<RenderView> View;
         bool DrawGrid = false;
+        RenderEnvironmentSettings Environment;
     };
 
     struct RenderStatistics

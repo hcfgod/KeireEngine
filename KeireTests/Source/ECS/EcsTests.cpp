@@ -135,6 +135,30 @@ TEST_CASE("Play mode clones authored state and discards runtime mutations on Sto
     CHECK(edit->ObjectCount() == 1);
 }
 
+TEST_CASE("Play mode retains the authored active camera and its transform")
+{
+    auto edit = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto cameraEntity = edit->CreateEntity("Main Camera");
+    const auto camera = cameraEntity.AddComponent<Keire::CameraComponent>();
+    camera->SetPrimary(true);
+    camera->SetPriority(42);
+    camera->SetClearColor({0.12F, 0.24F, 0.36F, 1.0F});
+    cameraEntity.GetComponent<Keire::TransformComponent>()->SetLocalPosition({3.0F, 4.0F, -8.0F});
+
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(edit);
+    session->Play();
+    const auto runtimeCameraEntity = session->RuntimeScene()->FindEntity(cameraEntity.Id());
+    REQUIRE(runtimeCameraEntity);
+    const auto runtimeCamera = runtimeCameraEntity.GetComponent<Keire::CameraComponent>();
+    const auto runtimeTransform = runtimeCameraEntity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(runtimeCamera);
+    REQUIRE(runtimeTransform);
+    CHECK(runtimeCamera->Primary());
+    CHECK(runtimeCamera->Priority() == 42);
+    CHECK(runtimeCamera->ClearColor() == (Keire::Color{0.12F, 0.24F, 0.36F, 1.0F}));
+    CHECK(runtimeTransform->LocalPosition() == (Keire::Vector3{3.0F, 4.0F, -8.0F}));
+}
+
 TEST_CASE("Scene schema v1 migrates to canonical component schema v2")
 {
     const std::string versionOne = R"({

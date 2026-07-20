@@ -18,7 +18,7 @@ The File menu and keyboard routing share the same scene operations:
 - Save As is constrained to the project's `Assets` directory, requires `.keirescene`, creates a new metadata identity,
   and switches the editor to the new asset.
 - `Ctrl+D`, `F2`, and `Delete` duplicate, rename, and delete the selected entity.
-- `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` undo or redo the active document.
+- `Ctrl/Cmd+Z` undoes; `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` redo the active document.
 
 Hierarchy creation lives in the top-level Entity menu and blank-space or row context menus. Create Empty, Create Child,
 Directional Light, Duplicate, Rename, Delete, and drag/drop reparenting all operate on stable entities. There are no
@@ -26,11 +26,18 @@ permanent create/delete buttons consuming hierarchy space.
 
 ## Scene And Inspector
 
-The Scene toolbar shows the authored scene and dirty state plus centered Play, Pause, Step, and Stop controls. Play
+The Scene toolbar shows the authored scene and dirty state plus centered Play, Pause, Step, and Stop controls. It also
+contains View/Move/Rotate/Scale tools (`Q/W/E/R`), Global/Local orientation, a snapping toggle, independent position,
+rotation, and scale increments, and Gizmos visibility settings. Camera icons/frustums and Directional Light icons/rays
+remain clickable overlays, while transform handle drags participate in scene undo. Play
 clones the current in-memory edit scene with the same entity IDs. Save always targets the authored scene. Runtime
 changes are discarded on Stop.
 
-Inspector uses component cards. Transform presents compact, responsive X/Y/Z drag fields for local position,
+The Project Settings panel is opened from the Edit or Window menu. Its Rendering section owns ambient color, ambient
+intensity, and exposure for both Scene and Game views; settings are saved atomically under the project's tracked
+`ProjectSettings` directory.
+
+Inspector uses bordered, foldable component cards. Transform presents compact, responsive X/Y/Z drag fields for local position,
 Euler-degree rotation backed by a normalized quaternion, and scale. The fields support direct numeric entry, stack
 their labels in narrow inspectors, and retain uniform-scale locking. Directional Light exposes linear color, intensity,
 temperature, shadow mode, strength, and bias. Add Component searches the application-owned component registry. Missing

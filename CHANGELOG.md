@@ -6,6 +6,20 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- Project-owned ambient color, intensity, and exposure settings with atomic persistence, a dockable Project Settings
+  editor, and matching Scene/Game lighting submissions.
+- Unity-style Scene transform gizmos with `Q/W/E/R` tool shortcuts, Local/Global space, independent position/rotation/
+  scale snapping, persistent tool preferences, Camera icons/frustums, and Directional Light icons/rays.
+
+- Advanced Input Actions authoring for action/value types, control schemes and device requirements, composites, binding
+  groups, control browsing, every built-in interaction/processor, and conflict-aware interactive rebinding.
+- Typed Scene-view asset drops: Material assignment uses object picking and shared scene undo, while Scene and Input
+  Actions assets open through their existing guarded workflows.
+- A built-in Directional Light Lambert path with transformed cube normals, linear color/intensity, optional color
+  temperature, and an unlit editor grid.
+- Fixed ambient and Directional Light delivery across SDL_GPU backends by using the proven per-draw vertex uniform
+  block, and stopped Project Settings drags from issuing repeated atomic writes while Windows still retires a file.
+
 - An application-owned bounded undo/redo service with isolated document contexts, owner-thread enforcement, mergeable
   commands, nested rollback-safe transactions, contextual Edit-menu shortcuts, and scene/input/theme/asset integration.
 - Unity-style Project asset creation and management with current-folder templates, immediate browser synchronization,
@@ -67,6 +81,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Changed
 
+- Scene view now previews the active scene Camera's clear color while retaining the nonserialized editor camera, and
+  built-in Directional Light plus ambient illumination is evaluated through validated fragment-stage uniforms.
+
 - Input Debugger action events now stay in a bounded local history, suppress idle/reset noise, coalesce meaningful
   analog changes, and forward to Console only through an explicit opt-in.
 - EnTT 3.16.0 and GLM 1.0.3 are pinned private dependencies with IDE utility projects, external warning isolation,
@@ -103,6 +120,11 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Project thumbnails and labels now initiate the same asset drag, component cards collapse without losing their bordered
+  presentation, horizontal Scene-camera motion follows pointer direction, and file-manager reveal opens the canonical
+  project asset path instead of the process default folder.
+- The Game view resolves Camera components from the active runtime scene rather than editor-camera state, and focused
+  Inspector/Hierarchy edits route Undo/Redo to the scene context.
 - Hub-launched editors now resolve the pinned shader compiler independently of the project working directory; failed
   imports show full Inspector diagnostics, mirror errors to the editor Console and rotating logs, and no longer trigger
   Dear ImGui's null-ID drag-source assertion when the Project panel displays an error badge.

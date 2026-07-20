@@ -117,10 +117,10 @@ namespace KeireEditor
             Close();
             if (root.empty())
                 return;
-            ProjectRoot = root;
-            AssetRoot = root / "Assets";
-            PreferencePath = root / "Library" / "Editor" / "asset-browser.settings";
-            Thumbnails = std::make_unique<ThumbnailService>(root / "Library" / "Thumbnails");
+            ProjectRoot = std::filesystem::absolute(root).lexically_normal();
+            AssetRoot = ProjectRoot / "Assets";
+            PreferencePath = ProjectRoot / "Library" / "Editor" / "asset-browser.settings";
+            Thumbnails = std::make_unique<ThumbnailService>(ProjectRoot / "Library" / "Thumbnails");
             LoadPreferences();
         }
 
@@ -874,6 +874,19 @@ namespace KeireEditor
             ui.SetTooltip(text.str(), {.Delayed = true});
         }
 
+        void DrawAssetDragSource(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record)
+        {
+            if (auto source = ui.BeginDragSource(); source)
+            {
+                const bool selected = std::ranges::find(Selection, record.Id) != Selection.end();
+                const auto payloadAssets = selected ? Selection : std::vector<Keire::AssetId>{record.Id};
+                const auto value = EncodeAssetPayload(payloadAssets);
+                ui.SetDragPayload("KEIRE_ASSETS", std::as_bytes(std::span(value.data(), value.size())));
+                ui.Text(payloadAssets.size() == 1 ? DisplayName(record.RelativePath)
+                                                  : std::to_string(payloadAssets.size()) + " assets");
+            }
+        }
+
         void DrawAsset(Keire::UiFrame& ui, const Keire::AssetSourceRecord& record, EditorWorkspaceLayer& editor,
                        const bool grid)
         {
@@ -886,31 +899,27 @@ namespace KeireEditor
                 if (ui.ImageButton("Thumbnail", image, {ThumbnailSize, ThumbnailSize}))
                     Select(record.Id, ui.ControlDown(), editor);
                 open = ui.LastItemState().DoubleClicked;
+                DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
                 if (ui.Selectable(DisplayName(record.RelativePath), selected))
                     Select(record.Id, ui.ControlDown(), editor);
                 open |= ui.LastItemState().DoubleClicked;
+                DrawAssetDragSource(ui, record);
+                DrawAssetContext(ui, record, editor, "LabelContext");
+                DrawAssetTooltip(ui, record, editor);
             }
             else
             {
-                (void)ui.ImageButton("Thumbnail", image, {32.0F, 32.0F});
+                if (ui.ImageButton("Thumbnail", image, {32.0F, 32.0F}))
+                    Select(record.Id, ui.ControlDown(), editor);
+                open = ui.LastItemState().DoubleClicked;
+                DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
                 ui.SameLine();
                 if (ui.Selectable(DisplayName(record.RelativePath), selected))
                     Select(record.Id, ui.ControlDown(), editor);
-                open = ui.LastItemState().DoubleClicked;
-            }
-            bool dragging = false;
-            if (auto source = ui.BeginDragSource(); source)
-            {
-                dragging = true;
-                const auto payloadAssets = selected ? Selection : std::vector<Keire::AssetId>{record.Id};
-                const auto value = EncodeAssetPayload(payloadAssets);
-                ui.SetDragPayload("KEIRE_ASSETS", std::as_bytes(std::span(value.data(), value.size())));
-                ui.Text(std::to_string(payloadAssets.size()) + " asset(s)");
-            }
-            if (!dragging)
-            {
+                open |= ui.LastItemState().DoubleClicked;
+                DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "LabelContext");
                 DrawAssetTooltip(ui, record, editor);
             }
@@ -962,33 +971,38 @@ namespace KeireEditor
                         const bool grid)
         {
             auto id = ui.PushId(folder.generic_string());
+            const auto drawDragSource = [&]
+            {
+                if (auto source = ui.BeginDragSource(); source)
+                {
+                    const auto value = folder.generic_string();
+                    ui.SetDragPayload("KEIRE_FOLDER", std::as_bytes(std::span(value.data(), value.size())));
+                    ui.Text(folder.filename().string());
+                }
+            };
             if (grid)
             {
                 if (ui.ImageButton("Folder", FolderImage, {ThumbnailSize, ThumbnailSize}))
                     CurrentFolder = folder;
+                drawDragSource();
                 DrawFolderContext(ui, folder, editor, "FolderImageContext");
                 if (ui.Selectable(folder.filename().string()))
                     CurrentFolder = folder;
+                drawDragSource();
+                DrawFolderContext(ui, folder, editor, "FolderLabelContext");
+                AcceptFolderDrop(ui, folder, editor);
+                ui.SetTooltip((std::filesystem::path("Assets") / folder).generic_string(), {.Delayed = true});
             }
             else
             {
                 if (ui.ImageButton("Folder", FolderImage, {32.0F, 32.0F}))
                     CurrentFolder = folder;
+                drawDragSource();
                 DrawFolderContext(ui, folder, editor, "FolderImageContext");
                 ui.SameLine();
                 if (ui.Selectable(folder.filename().string()))
                     CurrentFolder = folder;
-            }
-            bool dragging = false;
-            if (auto source = ui.BeginDragSource(); source)
-            {
-                dragging = true;
-                const auto value = folder.generic_string();
-                ui.SetDragPayload("KEIRE_FOLDER", std::as_bytes(std::span(value.data(), value.size())));
-                ui.Text(folder.filename().string());
-            }
-            if (!dragging)
-            {
+                drawDragSource();
                 DrawFolderContext(ui, folder, editor, "FolderLabelContext");
                 AcceptFolderDrop(ui, folder, editor);
                 ui.SetTooltip((std::filesystem::path("Assets") / folder).generic_string(), {.Delayed = true});
@@ -1279,6 +1293,11 @@ namespace KeireEditor
     Keire::Ref<Keire::UndoContext> AssetBrowserPanel::UndoContext() const { return m_Impl->Undo; }
     bool AssetBrowserPanel::Focused() const noexcept { return m_Impl->Focused; }
     std::filesystem::path AssetBrowserPanel::CurrentFolder() const { return m_Impl->CurrentFolder; }
+
+    std::vector<Keire::AssetId> AssetBrowserPanel::DecodeDragPayload(const std::span<const std::byte> bytes)
+    {
+        return DecodeAssetPayload(bytes);
+    }
     void AssetBrowserPanel::RevealAsset(const Keire::AssetId asset, EditorWorkspaceLayer& editor)
     {
         m_Impl->Reveal(asset, editor);

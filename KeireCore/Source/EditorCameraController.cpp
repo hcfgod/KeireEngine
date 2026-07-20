@@ -67,7 +67,7 @@ namespace Keire::Detail
 
         if (input.Orbit || input.Fly)
         {
-            m_State.YawDegrees -= input.PointerDelta.X * 0.20F * acceleration;
+            m_State.YawDegrees += input.PointerDelta.X * 0.20F * acceleration;
             m_State.PitchDegrees =
                 std::clamp(m_State.PitchDegrees - input.PointerDelta.Y * 0.20F * acceleration, -89.9F, 89.9F);
             changed = changed || input.PointerDelta.X != 0.0F || input.PointerDelta.Y != 0.0F;

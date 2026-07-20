@@ -334,7 +334,8 @@ namespace Keire::Detail
                 diagnostic = "Path does not exist.";
                 return false;
             }
-            const auto workingDirectory = std::filesystem::is_directory(resolved) ? resolved : resolved.parent_path();
+            const bool directory = std::filesystem::is_directory(resolved);
+            const auto workingDirectory = directory ? resolved : resolved.parent_path();
             const auto pathValue = resolved.generic_u8string();
             const std::string utf8Path(reinterpret_cast<const char*>(pathValue.data()), pathValue.size());
 #if defined(_WIN32)
@@ -348,12 +349,16 @@ namespace Keire::Detail
             }
             windowsDirectory.resize(length);
             const auto executable = std::filesystem::path(windowsDirectory) / "explorer.exe";
+            const std::vector<std::string> arguments =
+                directory ? std::vector<std::string>{utf8Path} : std::vector<std::string>{"/select," + utf8Path};
 #elif defined(__APPLE__)
             const std::filesystem::path executable = "/usr/bin/open";
+            const std::vector<std::string> arguments =
+                directory ? std::vector<std::string>{utf8Path} : std::vector<std::string>{"-R", utf8Path};
 #else
             const std::filesystem::path executable = "/usr/bin/xdg-open";
+            const std::vector<std::string> arguments{directory ? utf8Path : workingDirectory.generic_string()};
 #endif
-            const std::array arguments{utf8Path};
             return LaunchDetachedProcess(executable, arguments, workingDirectory, diagnostic);
         }
         catch (const std::exception& error)

@@ -88,6 +88,15 @@ namespace
             if (auto window = ui.BeginWindow("Headless UI"); window)
             {
                 ui.Text("Public Kéire UI facade");
+                ui.DrawLine({10.0F, 10.0F}, {30.0F, 30.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, 2.0F);
+                ui.DrawCircle({40.0F, 40.0F}, 8.0F, {0.0F, 1.0F, 0.0F, 1.0F});
+                ui.DrawFilledCircle({60.0F, 40.0F}, 6.0F, {0.0F, 0.0F, 1.0F, 0.5F});
+                ui.DrawRectangle({{70.0F, 30.0F}, {90.0F, 50.0F}}, {1.0F, 1.0F, 0.0F, 1.0F});
+                ui.DrawFilledRectangle({{95.0F, 30.0F}, {115.0F, 50.0F}}, {1.0F, 0.0F, 1.0F, 0.5F});
+                ui.DrawTriangle({120.0F, 50.0F}, {130.0F, 30.0F}, {140.0F, 50.0F}, {0.0F, 1.0F, 1.0F, 1.0F});
+                ui.DrawFilledTriangle({145.0F, 50.0F}, {155.0F, 30.0F}, {165.0F, 50.0F}, {1.0F, 0.5F, 0.0F, 1.0F});
+                ui.DrawOverlayText({170.0F, 30.0F}, {1.0F, 1.0F, 1.0F, 1.0F}, "overlay");
+                CHECK_THROWS_AS(ui.DrawCircle({0.0F, 0.0F}, -1.0F, {}), std::invalid_argument);
                 bool checked = false;
                 (void)ui.Checkbox("Check", checked);
                 float value = 0.5F;
@@ -601,4 +610,13 @@ TEST_CASE("UI workspace and legacy single-file persistence are mutually exclusiv
     CHECK_THROWS_WITH_AS((void)application.Run(),
                          "UiSpecification::LayoutPath and Workspace cannot be enabled together.",
                          std::invalid_argument);
+}
+TEST_CASE("UI item rectangles report bounded screen-space geometry")
+{
+    const Keire::UiItemRect rect{{10.0F, 20.0F}, {110.0F, 70.0F}};
+    CHECK(rect.Size() == (Keire::UiSize{100.0F, 50.0F}));
+    CHECK(rect.Contains({10.0F, 20.0F}));
+    CHECK(rect.Contains({55.0F, 45.0F}));
+    CHECK_FALSE(rect.Contains({9.0F, 45.0F}));
+    CHECK_FALSE(rect.Contains({55.0F, 71.0F}));
 }

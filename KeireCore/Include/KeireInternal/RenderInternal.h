@@ -4,8 +4,18 @@
 
 #include <SDL3/SDL_gpu.h>
 
+#include <cstdint>
+
 struct ImDrawData;
 struct SDL_Window;
+
+namespace Keire::Detail
+{
+    [[nodiscard]] inline constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool vertex) noexcept
+    {
+        return vertex ? 1U : 0U;
+    }
+} // namespace Keire::Detail
 
 namespace Keire
 {
