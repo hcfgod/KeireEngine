@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "c0ffee00-0000-4000-8000-000000000002",
+  "type": "4b454952-4554-4558-5455-524532440001",
+  "importer": "Keire.Texture2D",
+  "importerVersion": 1,
+  "dependencies": [],
+  "subAssets": [],
+  "textureImportSettings": {
+    "semantic": "color",
+    "colorSpace": "srgb",
+    "mips": "generate",
+    "maximumSize": 1024,
+    "sampler": {
+      "min": "linear",
+      "mag": "linear",
+      "mip": "linear",
+      "addressU": "repeat",
+      "addressV": "repeat",
+      "addressW": "repeat",
+      "anisotropy": 8
+    }
+  }
+}

@@ -274,31 +274,61 @@ namespace Keire
                 constexpr std::string_view hlsl = R"(struct VertexInput
 {
     float3 Position : TEXCOORD0;
-    float3 Color : TEXCOORD1;
+    float3 Normal : TEXCOORD1;
+    float2 UV0 : TEXCOORD2;
+    float4 Color : TEXCOORD3;
 };
 
 struct VertexOutput
 {
-    float4 Color : TEXCOORD0;
+    float3 Normal : TEXCOORD0;
+    float2 UV0 : TEXCOORD1;
+    float4 Color : TEXCOORD2;
     float4 Position : SV_Position;
 };
 
-cbuffer CameraObjectConstants : register(b0, space1)
+cbuffer ObjectData : register(b0, space1)
 {
-    float4x4 ModelViewProjection;
+    float4x4 Model;
+    float4x4 View;
+    float4x4 Projection;
+    float4x4 NormalMatrix;
 };
+
+cbuffer SceneData : register(b0, space3)
+{
+    float4 AmbientColorIntensity;
+    float4 DirectionalColorIntensity;
+    float4 DirectionalDirectionExposure;
+};
+
+cbuffer MaterialData : register(b1, space3)
+{
+    float4 Tint;
+};
+
+Texture2D MainTexture : register(t0, space2);
+SamplerState MainSampler : register(s0, space2);
 
 VertexOutput VSMain(VertexInput input)
 {
     VertexOutput output;
-    output.Color = float4(input.Color, 1.0F);
-    output.Position = mul(ModelViewProjection, float4(input.Position, 1.0F));
+    const float4 worldPosition = mul(Model, float4(input.Position, 1.0F));
+    output.Position = mul(Projection, mul(View, worldPosition));
+    output.Normal = normalize(mul((float3x3)NormalMatrix, input.Normal));
+    output.UV0 = input.UV0;
+    output.Color = input.Color;
     return output;
 }
 
 float4 PSMain(VertexOutput input) : SV_Target0
 {
-    return input.Color;
+    const float3 normal = normalize(input.Normal);
+    const float directional = saturate(dot(normal, -DirectionalDirectionExposure.xyz));
+    const float3 lighting = AmbientColorIntensity.rgb * AmbientColorIntensity.a +
+                            DirectionalColorIntensity.rgb * DirectionalColorIntensity.a * directional;
+    const float4 surface = MainTexture.Sample(MainSampler, input.UV0) * input.Color * Tint;
+    return float4(surface.rgb * lighting * DirectionalDirectionExposure.w, surface.a);
 }
 )";
                 const auto shaderSource = root / "Assets/Shaders/DefaultUnlit.hlsl";
@@ -316,9 +346,11 @@ float4 PSMain(VertexOutput input) : SV_Target0
                            {"depthTest", true},
                            {"depthWrite", true},
                            {"blend", false}}},
-                         {"properties", Json::array({{{"name", "Tint"},
-                                                      {"type", "Color"},
-                                                      {"default", Json::array({0.25F, 0.55F, 1.0F, 1.0F})}}})}}
+                         {"properties",
+                          Json::array({{{"name", "Tint"},
+                                        {"type", "Color"},
+                                        {"default", Json::array({0.25F, 0.55F, 1.0F, 1.0F})}},
+                                       {{"name", "MainTexture"}, {"type", "Texture2D"}, {"default", nullptr}}})}}
                         .dump(2) +
                     '\n';
                 const auto shaderBytes = std::as_bytes(std::span(shaderManifest.data(), shaderManifest.size()));

@@ -2,12 +2,14 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Log.h"
 #include "Keire/Project/Project.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneAsset.h"
 
 #include <algorithm>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
@@ -105,13 +107,34 @@ namespace
                      "  KeireAssetTool validate --catalog <path>\n";
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
     }
+
+    void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output)
+    {
+        const auto& descriptor = project.Descriptor();
+        if (!descriptor.StartupScene)
+            throw std::runtime_error("Runtime cooking requires a configured startup scene.");
+        const auto rendering = Keire::LoadRenderEnvironmentSettings(project.Root());
+        std::ofstream stream(output / "runtime-manifest.json", std::ios::binary | std::ios::trunc);
+        stream << std::setprecision(9) << "{\n  \"schemaVersion\": 1,\n  \"startupScene\": \""
+               << descriptor.StartupScene.ToString() << "\",\n  \"defaultInput\": ";
+        if (descriptor.DefaultInput)
+            stream << '"' << descriptor.DefaultInput.ToString() << '"';
+        else
+            stream << "null";
+        stream << ",\n  \"rendering\": {\n    \"ambientColor\": [" << rendering.AmbientColor.Red << ", "
+               << rendering.AmbientColor.Green << ", " << rendering.AmbientColor.Blue << ", "
+               << rendering.AmbientColor.Alpha << "],\n    \"ambientIntensity\": " << rendering.AmbientIntensity
+               << ",\n    \"exposure\": " << rendering.Exposure << "\n  }\n}\n";
+        if (!stream)
+            throw std::runtime_error("Could not write the cooked runtime manifest.");
+    }
 } // namespace
 
 int main(const int argc, char** argv)
 {
     try
     {
-        const auto commandLine = Parse(argc, argv);
+        auto commandLine = Parse(argc, argv);
         if (commandLine.Command == "--help" || commandLine.Command == "-h")
         {
             PrintHelp();
@@ -181,11 +204,15 @@ int main(const int argc, char** argv)
         else if (commandLine.Command == "cook")
         {
             (void)database->Refresh();
+            commandLine.Profile.Roots = {project->Descriptor().StartupScene};
+            if (project->Descriptor().DefaultInput)
+                commandLine.Profile.Roots.push_back(project->Descriptor().DefaultInput);
             auto output = commandLine.Output;
             if (output.is_relative())
                 output = commandLine.Project / output;
             const auto result = Keire::AssetCooker::Cook(*database, commandLine.Profile, output);
             Keire::AssetCooker::Validate(result.CatalogPath);
+            WriteRuntimeManifest(*project, result.CatalogPath.parent_path());
             std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
                       << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
         }

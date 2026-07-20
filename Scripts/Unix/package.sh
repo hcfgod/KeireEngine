@@ -11,6 +11,7 @@ common=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture
 test_args=("${common[@]}"); [[ $UPDATE -eq 1 ]] && test_args+=(--update); [[ $FORCE -eq 1 ]] && test_args+=(--force)
 bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"; KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
 asset_tool="${PROJECT_NAMESPACE}AssetTool"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_tool"
+runtime="${PROJECT_NAMESPACE}Runtime"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$runtime"
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$HUB_TARGET"
 bash "$ROOT/Scripts/Unix/shader-compiler.sh" "$PLATFORM" "$ARCHITECTURE" "$TOOLSET"
 output_arch="$(architecture_output_name "$ARCHITECTURE")"; name="$ARTIFACT_PREFIX-$os_name-$ARCHITECTURE-$CONFIGURATION"; stage="$ROOT/Artifacts/$name"
@@ -18,13 +19,13 @@ imgui_library="${PROJECT_NAMESPACE}ImGui"
 zstd_library="${PROJECT_NAMESPACE}Zstd"
 archive="$ROOT/Artifacts/$name.tar.gz"; symbols="$ROOT/Artifacts/$name-symbols.tar.gz"; symbol_stage="$ROOT/Artifacts/$name-symbols"
 rm -rf "$stage" "$symbol_stage"; rm -f "$archive" "$archive.sha256" "$symbols" "$symbols.sha256"
-mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
+mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
 client_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"
 hub_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$HUB_TARGET/$HUB_TARGET"
 core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/lib$CORE_TARGET.a"
 imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
 zstd_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/Zstd/lib$zstd_library.a"
-cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
+cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
 cp "$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install/lib/libassimp.a" "$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install/lib/libzlibstatic.a" "$stage/lib/"
 cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
 find "$ROOT/Build/Tools/ShaderCompiler" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$stage/bin/" \;
@@ -70,8 +71,10 @@ grep -Fq "\"stb\": \"$stb\"" "$stage/build-manifest.json" || { printf 'Packaged 
 grep -Fq "\"sdlShadercross\": \"$shadercross\"" "$stage/build-manifest.json" || { printf 'Packaged SDL_shadercross identity does not match the dependency lock.\n' >&2; exit 1; }
 "$stage/bin/KeireShaderCompiler" --help 2>&1 | grep -Fq shadercross || { printf 'Packaged shader compiler validation failed.\n' >&2; exit 1; }
 "$stage/bin/$asset_tool" --help | grep -Fq 'KeireAssetTool cook' || { printf 'Packaged asset tool validation failed.\n' >&2; exit 1; }
-KEIRE_SHADER_COMPILER="$stage/bin/KeireShaderCompiler" "$stage/bin/$asset_tool" import --project "$stage/samples/KeireSandbox" | grep -Fq 'Imported' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
+KEIRE_SHADER_COMPILER="$stage/bin/KeireShaderCompiler" "$stage/bin/$asset_tool" cook --project "$stage/samples/KeireSandbox" --output "$stage/content/KeireSandbox" --profile Dist --target "$os_name" | grep -Fq 'Cooked' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
 rm -rf "$stage/samples/KeireSandbox/Library" "$stage/samples/KeireSandbox/Logs" "$stage/samples/KeireSandbox/Build" "$stage/samples/KeireSandbox/Temp"
+[[ -f "$stage/content/KeireSandbox/catalog.json" && -f "$stage/content/KeireSandbox/runtime-manifest.json" ]] || { printf 'Packaged cooked runtime content is incomplete.\n' >&2; exit 1; }
+"$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 12 || { printf 'Packaged runtime smoke failed.\n' >&2; exit 1; }
 version_output="$("$stage/bin/$CLIENT_TARGET" --version)"
 commit_prefix="${commit:0:12}"
 expected_identity="$commit_prefix"; [[ "$dirty" == true ]] && expected_identity="${commit_prefix}-dirty"

@@ -41,7 +41,8 @@ namespace Keire
         Vector2,
         Vector3,
         Vector4,
-        Color
+        Color,
+        Texture2D
     };
 
     struct ShaderPropertyDefinition
@@ -49,6 +50,7 @@ namespace Keire
         std::string Name;
         ShaderPropertyType Type = ShaderPropertyType::Scalar;
         Vector4 DefaultValue;
+        AssetId DefaultTexture;
     };
 
     struct ShaderVariant
@@ -96,7 +98,7 @@ namespace Keire
         ShaderAssetDefinition m_Definition;
     };
 
-    using MaterialPropertyValue = std::variant<float, Vector2, Vector3, Vector4, Color>;
+    using MaterialPropertyValue = std::variant<float, Vector2, Vector3, Vector4, Color, AssetId>;
 
     struct MaterialAssetDefinition
     {

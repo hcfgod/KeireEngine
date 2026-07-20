@@ -167,6 +167,11 @@ confined rollback-capable file operations. `AssetCooker` sorts stable IDs, write
 versioned build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the
 same public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
 
+`RenderSystem` holds an owned `AssetSystem` reference and resolves renderable IDs only on the render owner thread.
+Revisioned mesh, material, shader, texture, sampler, and attachment-format pipeline caches publish complete GPU
+replacements at frame-safe boundaries. Buffers, textures, and pipelines replaced in flight retire behind the submitted
+frame fence; failed rebuilds leave the prior revision active.
+
 Asset code is grouped by subsystem: supported headers live in `KeireCore/Include/Keire/Assets`, implementation sources
 live in `KeireCore/Source/Assets`, and implementation-only declarations live in
 `KeireCore/Include/KeireInternal/Assets`. SDK packaging copies only the `Keire` public include tree, so internal headers
@@ -228,9 +233,10 @@ ABI through reflection before publication.
 
 ## Release Shape
 
-Packages include KeireHub, the KeireClient editor, KeireAssetTool, KeireShaderCompiler and its runtime libraries, KeireCore plus private KeireImGui/KeireZstd archives,
+Packages include KeireHub, the KeireClient editor, KeireRuntime, KeireAssetTool, KeireShaderCompiler and its runtime libraries, KeireCore plus private KeireImGui/KeireZstd archives,
 public `Keire/<header>` APIs, the SDL static SDK, complete dependency license texts, notices, README, and a
-complete `samples/KeireSandbox` project. The packaged asset tool imports and validates the sample input and scene assets
+complete `samples/KeireSandbox` project plus a separate transitive cooked-content tree. The packaged asset tool cooks
+and validates the sample startup graph, then `KeireRuntime --content <path> --frames 12` renders it as a bounded smoke
 from a tracked-file allowlist. Generated workspace and recovery data is rejected in the stage, archive, and extracted
 validation copy
 before archive publication. Dear ImGui and Zstd headers/sources are not redistributed because Kéire's public facades own

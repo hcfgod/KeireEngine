@@ -16,6 +16,8 @@ serialization, project-aware rendered smoke, and real compilation of the sample 
 Conditional native GPU checks cover D3D12, Vulkan, or Metal where available; deterministic logic remains testable in
 headless mode. Packages require `KeireShaderCompiler`, its runtime libraries, every recursive lock identity, and all
 SDL_shadercross/DXC/SPIR-V license and notice files.
+Asset-backed rendered tests additionally cover custom indexed geometry and a real material/shader/Texture2D pipeline;
+packaging cooks the Sandbox dependency graph and runs `KeireRuntime` against the packaged catalog.
 
 Input changes additionally run canonical schema/import tests, an SDL-dummy outer-frame keyboard action test, cursor
 focus restoration, public dependency isolation/`KEIRE_API` assertions, and headless UI facade tests. Packages must

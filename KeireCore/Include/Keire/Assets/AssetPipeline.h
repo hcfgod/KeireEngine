@@ -63,6 +63,7 @@ namespace Keire
         std::vector<std::byte> Bytes;
         std::vector<AssetSourceDependency> SourceDependencies;
         std::vector<AssetImportDiagnostic> Diagnostics;
+        std::vector<AssetId> AssetDependencies;
     };
 
     struct AssetImporterRegistration
@@ -204,6 +205,7 @@ namespace Keire
         int CompressionLevel = 6;
         std::uint64_t MaximumPackBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
         bool Strict = false;
+        std::vector<AssetId> Roots;
     };
 
     struct AssetCookResult

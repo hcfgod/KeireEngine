@@ -435,6 +435,12 @@ namespace Keire
                     !dependencies.insert(comparable).second)
                     throw std::runtime_error("Contextual importer returned an invalid source dependency record.");
             }
+            std::unordered_set<AssetId> assetDependencies;
+            for (const auto dependency : result.AssetDependencies)
+            {
+                if (!dependency || !assetDependencies.insert(dependency).second)
+                    throw std::runtime_error("Contextual importer returned an invalid asset dependency record.");
+            }
             if (result.Diagnostics.size() > 4096)
                 throw std::runtime_error("Contextual importer returned too many diagnostics.");
             for (const auto& diagnostic : result.Diagnostics)
@@ -643,7 +649,15 @@ namespace Keire
                     std::scoped_lock lock(m_Impl->Mutex);
                     const auto stored = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
                     if (stored != m_Impl->Records.end())
+                    {
                         stored->SourceDependencies = imported.SourceDependencies;
+                        for (const auto dependency : imported.AssetDependencies)
+                        {
+                            if (std::ranges::find(stored->Dependencies, dependency) == stored->Dependencies.end())
+                                stored->Dependencies.push_back(dependency);
+                        }
+                        std::ranges::sort(stored->Dependencies);
+                    }
                 }
                 const auto object = m_Impl->ObjectPath(record, m_Impl->ImportDigest(record, imported));
                 if (std::filesystem::exists(object))
@@ -1062,6 +1076,54 @@ namespace Keire
             profile.CompressionLevel > ZSTD_maxCLevel() || profile.MaximumPackBytes <= Detail::PackHeaderBytes)
             throw std::invalid_argument("Asset build profile contains invalid compression or shard settings.");
         const auto records = database.Records();
+        struct PreparedAsset final
+        {
+            const AssetSourceRecord* Record = nullptr;
+            AssetImportOutput Imported;
+            std::vector<AssetId> Dependencies;
+        };
+        std::vector<PreparedAsset> prepared;
+        prepared.reserve(records.size());
+        std::unordered_map<AssetId, std::size_t> indices;
+        for (const auto& record : records)
+        {
+            if (profile.Strict && record.Importer != ImporterName(record.Type) &&
+                !database.m_Impl->FindImporter(record))
+                throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
+            auto imported = database.m_Impl->Import(record);
+            auto dependencies = record.Dependencies;
+            for (const auto dependency : imported.AssetDependencies)
+            {
+                if (std::ranges::find(dependencies, dependency) == dependencies.end())
+                    dependencies.push_back(dependency);
+            }
+            std::ranges::sort(dependencies);
+            indices.emplace(record.Id, prepared.size());
+            prepared.push_back({&record, std::move(imported), std::move(dependencies)});
+        }
+        std::unordered_set<AssetId> included;
+        if (profile.Roots.empty())
+        {
+            for (const auto& record : records)
+                included.insert(record.Id);
+        }
+        else
+        {
+            std::vector<AssetId> pending = profile.Roots;
+            while (!pending.empty())
+            {
+                const auto id = pending.back();
+                pending.pop_back();
+                if (!id || !included.insert(id).second)
+                    continue;
+                const auto found = indices.find(id);
+                if (found == indices.end())
+                    throw std::runtime_error("Cook root or dependency is missing from the asset database: " +
+                                             id.ToString());
+                const auto& dependencies = prepared[found->second].Dependencies;
+                pending.insert(pending.end(), dependencies.begin(), dependencies.end());
+            }
+        }
         const auto destination = std::filesystem::absolute(outputDirectory).lexically_normal();
         const auto temporary = std::filesystem::path(destination.string() + ".tmp-" + AssetId::Generate().ToString());
         std::filesystem::create_directories(temporary);
@@ -1090,13 +1152,12 @@ namespace Keire
 
         try
         {
-            for (const auto& record : records)
+            for (auto& asset : prepared)
             {
-                if (profile.Strict && record.Importer != ImporterName(record.Type) &&
-                    !database.m_Impl->FindImporter(record))
-                    throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
-                auto imported = database.m_Impl->Import(record);
-                auto bytes = std::move(imported.Bytes);
+                const auto& record = *asset.Record;
+                if (!included.contains(record.Id))
+                    continue;
+                auto bytes = std::move(asset.Imported.Bytes);
                 if (const auto* importer = database.m_Impl->FindImporter(record); importer && importer->Cook)
                     bytes = importer->Cook(bytes, profile.Target);
                 const auto compressed = Compress(bytes, profile.CompressionLevel);
@@ -1113,7 +1174,7 @@ namespace Keire
                 entry.CompressedBytes = compressed.size();
                 entry.UncompressedBytes = bytes.size();
                 entry.Digest = Detail::Sha256(bytes);
-                entry.Dependencies = record.Dependencies;
+                entry.Dependencies = std::move(asset.Dependencies);
                 if (!compressed.empty())
                     pack.write(reinterpret_cast<const char*>(compressed.data()),
                                static_cast<std::streamsize>(compressed.size()));

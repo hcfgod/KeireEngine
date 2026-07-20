@@ -115,6 +115,8 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     Keire::ShaderAssetDefinition definition;
     definition.Source = "Assets/Shaders/Test.hlsl";
     definition.Properties.push_back({"Tint", Keire::ShaderPropertyType::Color, {1.0F, 0.5F, 0.25F, 1.0F}});
+    const auto defaultTexture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
+    definition.Properties.push_back({"MainTexture", Keire::ShaderPropertyType::Texture2D, {}, defaultTexture});
     const std::array formats{Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV,
                              Keire::ShaderBinaryFormat::Msl};
     for (std::size_t index = 0; index < formats.size(); ++index)
@@ -130,6 +132,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+    CHECK(decoded->Definition().Properties.back().DefaultTexture == defaultTexture);
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
 
     const auto importer = Keire::CreateShaderAssetImporter();
@@ -143,6 +146,12 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     const auto macOS = Keire::ShaderAsset::Decode(importer.Cook(encoded, Keire::AssetTargetPlatform::MacOS));
     REQUIRE(macOS->Definition().Variants.size() == 1);
     CHECK(macOS->Definition().Variants.front().Format == Keire::ShaderBinaryFormat::Msl);
+
+    auto excessive = definition;
+    for (std::size_t index = 0; index < 16; ++index)
+        excessive.Properties.push_back(
+            {"Texture" + std::to_string(index), Keire::ShaderPropertyType::Texture2D, {}, {}});
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(excessive), std::invalid_argument);
 }
 
 TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
@@ -151,13 +160,36 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     definition.Shader = Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000001");
     definition.Properties.emplace("Roughness", 0.5F);
     definition.Properties.emplace("Tint", Keire::Color{0.25F, 0.5F, 1.0F, 1.0F});
+    const auto texture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
+    definition.Properties.emplace("MainTexture", texture);
 
     const auto decoded = Keire::MaterialAsset::Decode(Keire::MaterialAsset::Encode(definition));
     CHECK(decoded->Definition().Shader == definition.Shader);
-    CHECK(decoded->Definition().Properties.size() == 2);
+    CHECK(decoded->Definition().Properties.size() == 3);
+    CHECK(std::get<Keire::AssetId>(decoded->Definition().Properties.at("MainTexture")) == texture);
     CHECK(Keire::MeshAsset::Cube()->Mesh() == Keire::BuiltinMesh::Cube);
     CHECK(Keire::MeshAsset::CubeId() != Keire::MeshAsset::ErrorId());
     CHECK(Keire::MaterialAsset::Error()->Definition().Properties.contains("ErrorColor"));
+}
+
+TEST_CASE("scene and material importers extract transitive render dependencies")
+{
+    const auto shader = Keire::AssetId::Parse("11111111-1111-4111-8111-111111111111");
+    const auto material = Keire::AssetId::Parse("22222222-2222-4222-8222-222222222222");
+    const auto texture = Keire::AssetId::Parse("33333333-3333-4333-8333-333333333333");
+    const std::string materialSource = "{\"schemaVersion\":1,\"shader\":\"" + shader.ToString() +
+                                       "\",\"properties\":{\"MainTexture\":\"" + texture.ToString() + "\"}}";
+    const auto materialBytes = std::as_bytes(std::span(materialSource.data(), materialSource.size()));
+    const auto materialImporter = Keire::CreateMaterialAssetImporter();
+    REQUIRE(materialImporter.ContextualImport);
+    const auto materialOutput = materialImporter.ContextualImport({}, materialBytes);
+    CHECK(materialOutput.AssetDependencies == std::vector<Keire::AssetId>{shader, texture});
+
+    const auto sceneBytes = Keire::SceneAsset::Encode(Keire::SceneAsset::SampleDefinition(material));
+    const auto sceneImporter = Keire::CreateSceneAssetImporter();
+    REQUIRE(sceneImporter.ContextualImport);
+    const auto sceneOutput = sceneImporter.ContextualImport({}, sceneBytes);
+    CHECK(sceneOutput.AssetDependencies == std::vector<Keire::AssetId>{material});
 }
 
 TEST_CASE("mesh assets validate and preserve production vertex data")

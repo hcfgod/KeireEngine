@@ -25,7 +25,9 @@ namespace Keire
     {
         using Json = nlohmann::json;
 
-        constexpr std::size_t MaximumShaderProperties = 256;
+        constexpr std::size_t MaximumShaderNumericProperties = 64;
+        constexpr std::size_t MaximumShaderTextureProperties = 16;
+        constexpr std::size_t MaximumShaderProperties = MaximumShaderNumericProperties + MaximumShaderTextureProperties;
         constexpr std::size_t MaximumShaderDependencies = 256;
         constexpr std::size_t MaximumDefines = 128;
         constexpr std::size_t MaximumIncludeRoots = 16;
@@ -106,13 +108,26 @@ namespace Keire
                 throw std::invalid_argument("Shader definition exceeds a bounded collection or lacks variants.");
 
             std::set<std::string, std::less<>> propertyNames;
+            std::size_t numericProperties = 0;
+            std::size_t textureProperties = 0;
             for (const auto& property : definition.Properties)
             {
-                if (!ValidIdentifier(property.Name) || !Math::IsFinite(property.DefaultValue) ||
-                    !propertyNames.insert(property.Name).second)
+                if (!ValidIdentifier(property.Name) || !propertyNames.insert(property.Name).second ||
+                    property.Type > ShaderPropertyType::Texture2D)
                     throw std::invalid_argument(
-                        "Shader property names must be unique identifiers with finite defaults.");
+                        "Shader property names and types must be unique supported identifiers.");
+                if (property.Type == ShaderPropertyType::Texture2D)
+                    ++textureProperties;
+                else
+                {
+                    ++numericProperties;
+                    if (!Math::IsFinite(property.DefaultValue))
+                        throw std::invalid_argument("Shader numeric property defaults must be finite.");
+                }
             }
+            if (numericProperties > MaximumShaderNumericProperties ||
+                textureProperties > MaximumShaderTextureProperties)
+                throw std::invalid_argument("Shader exceeds the 64 numeric slot or 16 texture slot ABI limit.");
             std::set<ShaderBinaryFormat> formats;
             for (const auto& variant : definition.Variants)
             {
@@ -125,9 +140,15 @@ namespace Keire
         {
             Json properties = Json::array();
             for (const auto& property : definition.Properties)
-                properties.push_back({{"name", property.Name},
-                                      {"type", static_cast<std::uint8_t>(property.Type)},
-                                      {"default", Vector(property.DefaultValue)}});
+            {
+                Json encoded{{"name", property.Name}, {"type", static_cast<std::uint8_t>(property.Type)}};
+                if (property.Type == ShaderPropertyType::Texture2D)
+                    encoded["defaultTexture"] =
+                        property.DefaultTexture ? Json(property.DefaultTexture.ToString()) : Json(nullptr);
+                else
+                    encoded["default"] = Vector(property.DefaultValue);
+                properties.push_back(std::move(encoded));
+            }
             Json dependencies = Json::array();
             for (const auto& dependency : definition.Dependencies)
                 dependencies.push_back(
@@ -168,9 +189,18 @@ namespace Keire
             result.DepthWrite = source.at("depthWrite").get<bool>();
             result.Blend = source.at("blend").get<bool>();
             for (const auto& property : source.at("properties"))
-                result.Properties.push_back({property.at("name").get<std::string>(),
-                                             static_cast<ShaderPropertyType>(property.at("type").get<std::uint8_t>()),
-                                             ParseVector(property.at("default"))});
+            {
+                ShaderPropertyDefinition decoded;
+                decoded.Name = property.at("name").get<std::string>();
+                decoded.Type = static_cast<ShaderPropertyType>(property.at("type").get<std::uint8_t>());
+                if (decoded.Type == ShaderPropertyType::Texture2D)
+                    decoded.DefaultTexture = property.at("defaultTexture").is_null()
+                                                 ? AssetId{}
+                                                 : AssetId::Parse(property.at("defaultTexture").get<std::string>());
+                else
+                    decoded.DefaultValue = ParseVector(property.at("default"));
+                result.Properties.push_back(std::move(decoded));
+            }
             for (const auto& dependency : source.at("dependencies"))
                 result.Dependencies.push_back(
                     {dependency.at("path").get<std::string>(), dependency.at("digest").get<std::string>()});
@@ -302,16 +332,26 @@ namespace Keire
             return ReadFile(output, specification.MaximumOutputBytes);
         }
 
-        void ValidateReflection(const Json& vertex, const Json& fragment)
+        void ValidateReflection(const Json& vertex, const Json& fragment, const ShaderAssetDefinition& definition)
         {
             const auto noStorage = [](const Json& value)
-            {
-                return value.value("samplers", 0U) == 0 && value.value("storage_textures", 0U) == 0 &&
-                       value.value("storage_buffers", 0U) == 0;
-            };
-            if (!noStorage(vertex) || !noStorage(fragment) || vertex.value("uniform_buffers", 0U) > 1 ||
-                fragment.value("uniform_buffers", 0U) > 1)
+            { return value.value("storage_textures", 0U) == 0 && value.value("storage_buffers", 0U) == 0; };
+            const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
+                                                         &ShaderPropertyDefinition::Type);
+            if (!noStorage(vertex) || !noStorage(fragment) || vertex.value("samplers", 0U) != 0 ||
+                vertex.value("uniform_buffers", 0U) != 1 || fragment.value("uniform_buffers", 0U) != 2 ||
+                fragment.value("samplers", 0U) != textureCount)
                 throw std::invalid_argument("Shader violates Kéire's fixed graphics resource-binding ABI.");
+
+            constexpr std::array<std::string_view, 4> vertexTypes{"float3", "float3", "float2", "float4"};
+            if (!vertex.at("inputs").is_array() || vertex.at("inputs").size() != vertexTypes.size())
+                throw std::invalid_argument("Shader vertex inputs do not match the fixed mesh ABI.");
+            for (const auto& input : vertex.at("inputs"))
+            {
+                const auto location = input.at("location").get<std::uint32_t>();
+                if (location >= vertexTypes.size() || input.at("type").get<std::string>() != vertexTypes[location])
+                    throw std::invalid_argument("Shader vertex inputs do not match the fixed mesh ABI.");
+            }
 
             std::map<std::uint32_t, std::string> outputs;
             for (const auto& output : vertex.at("outputs"))
@@ -437,19 +477,26 @@ namespace Keire
             const auto& properties = manifest.value("properties", Json::array());
             if (!properties.is_array() || properties.size() > MaximumShaderProperties)
                 throw std::invalid_argument("Shader properties must be a bounded array.");
-            const std::unordered_map<std::string, ShaderPropertyType> types{{"Float", ShaderPropertyType::Scalar},
-                                                                            {"Vector2", ShaderPropertyType::Vector2},
-                                                                            {"Vector3", ShaderPropertyType::Vector3},
-                                                                            {"Vector4", ShaderPropertyType::Vector4},
-                                                                            {"Color", ShaderPropertyType::Color}};
+            const std::unordered_map<std::string, ShaderPropertyType> types{
+                {"Float", ShaderPropertyType::Scalar},    {"Vector2", ShaderPropertyType::Vector2},
+                {"Vector3", ShaderPropertyType::Vector3}, {"Vector4", ShaderPropertyType::Vector4},
+                {"Color", ShaderPropertyType::Color},     {"Texture2D", ShaderPropertyType::Texture2D}};
             for (const auto& property : properties)
             {
                 const auto typeName = property.at("type").get<std::string>();
                 const auto found = types.find(typeName);
                 if (found == types.end())
                     throw std::invalid_argument("Shader property type is invalid: " + typeName);
-                result.Properties.push_back(
-                    {property.at("name").get<std::string>(), found->second, ParseVector(property.at("default"))});
+                ShaderPropertyDefinition definition;
+                definition.Name = property.at("name").get<std::string>();
+                definition.Type = found->second;
+                if (definition.Type == ShaderPropertyType::Texture2D)
+                    definition.DefaultTexture = !property.contains("default") || property.at("default").is_null()
+                                                    ? AssetId{}
+                                                    : AssetId::Parse(property.at("default").get<std::string>());
+                else
+                    definition.DefaultValue = ParseVector(property.at("default"));
+                result.Properties.push_back(std::move(definition));
             }
             ValidateDefinition(result, false, true);
             return result;
@@ -529,6 +576,13 @@ namespace Keire
         for (const auto& [name, property] : source.at("properties").items())
         {
             const auto type = property.at("type").get<std::uint8_t>();
+            if (type == 5)
+            {
+                result.Properties.emplace(name, property.at("value").is_null()
+                                                    ? AssetId{}
+                                                    : AssetId::Parse(property.at("value").get<std::string>()));
+                continue;
+            }
             const auto value = ParseVector(property.at("value"));
             switch (type)
             {
@@ -567,33 +621,38 @@ namespace Keire
                 [&](const auto& typed)
                 {
                     using T = std::decay_t<decltype(typed)>;
-                    Vector4 packed;
-                    std::uint8_t type = 0;
-                    if constexpr (std::same_as<T, float>)
-                        packed.X = typed;
-                    else if constexpr (std::same_as<T, Vector2>)
-                    {
-                        packed = {typed.X, typed.Y, 0.0F, 0.0F};
-                        type = 1;
-                    }
-                    else if constexpr (std::same_as<T, Vector3>)
-                    {
-                        packed = {typed.X, typed.Y, typed.Z, 0.0F};
-                        type = 2;
-                    }
-                    else if constexpr (std::same_as<T, Vector4>)
-                    {
-                        packed = typed;
-                        type = 3;
-                    }
+                    if constexpr (std::same_as<T, AssetId>)
+                        properties[name] = {{"type", 5}, {"value", typed ? Json(typed.ToString()) : Json(nullptr)}};
                     else
                     {
-                        packed = {typed.Red, typed.Green, typed.Blue, typed.Alpha};
-                        type = 4;
+                        Vector4 packed;
+                        std::uint8_t type = 0;
+                        if constexpr (std::same_as<T, float>)
+                            packed.X = typed;
+                        else if constexpr (std::same_as<T, Vector2>)
+                        {
+                            packed = {typed.X, typed.Y, 0.0F, 0.0F};
+                            type = 1;
+                        }
+                        else if constexpr (std::same_as<T, Vector3>)
+                        {
+                            packed = {typed.X, typed.Y, typed.Z, 0.0F};
+                            type = 2;
+                        }
+                        else if constexpr (std::same_as<T, Vector4>)
+                        {
+                            packed = typed;
+                            type = 3;
+                        }
+                        else
+                        {
+                            packed = {typed.Red, typed.Green, typed.Blue, typed.Alpha};
+                            type = 4;
+                        }
+                        if (!Math::IsFinite(packed))
+                            throw std::invalid_argument("Material property value is not finite.");
+                        properties[name] = {{"type", type}, {"value", Vector(packed)}};
                     }
-                    if (!Math::IsFinite(packed))
-                        throw std::invalid_argument("Material property value is not finite.");
-                    properties[name] = {{"type", type}, {"value", Vector(packed)}};
                 },
                 value);
         }
@@ -692,7 +751,8 @@ namespace Keire
                          Utf8Path(fragmentReflection)},
                         temporary.Path(), specification.Timeout);
             ValidateReflection(Json::parse(Text(ReadFile(vertexReflection, specification.MaximumOutputBytes))),
-                               Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))));
+                               Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))),
+                               definition);
             ValidateDefinition(definition, true);
             return {ShaderAsset::Encode(definition), definition.Dependencies};
         };
@@ -714,32 +774,47 @@ namespace Keire
 
     AssetImporterRegistration CreateMaterialAssetImporter()
     {
-        return {"Keire.Material",
-                1,
-                MaterialAsset::StaticType(),
-                {".keirematerial"},
-                [](const std::span<const std::byte> bytes)
-                {
-                    const auto source = Json::parse(Text(bytes));
-                    MaterialAssetDefinition definition;
-                    if (!source.is_object() || source.value("schemaVersion", 0U) != 1)
-                        throw std::invalid_argument("Material manifest has an unsupported schema.");
-                    definition.Shader = source.at("shader").is_null()
-                                            ? AssetId{}
-                                            : AssetId::Parse(source.at("shader").get<std::string>());
-                    const auto properties = source.value("properties", Json::object());
-                    for (const auto& [name, value] : properties.items())
-                    {
-                        if (value.is_number())
-                            definition.Properties.emplace(name, value.get<float>());
-                        else
-                        {
-                            const auto packed = ParseVector(value);
-                            definition.Properties.emplace(name, packed);
-                        }
-                    }
-                    return MaterialAsset::Encode(definition);
-                }};
+        AssetImporterRegistration result;
+        result.Name = "Keire.Material";
+        result.Version = 1;
+        result.Type = MaterialAsset::StaticType();
+        result.Extensions = {".keirematerial"};
+        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        {
+            const auto source = Json::parse(Text(bytes));
+            MaterialAssetDefinition definition;
+            if (!source.is_object() || source.value("schemaVersion", 0U) != 1)
+                throw std::invalid_argument("Material manifest has an unsupported schema.");
+            definition.Shader =
+                source.at("shader").is_null() ? AssetId{} : AssetId::Parse(source.at("shader").get<std::string>());
+            const auto properties = source.value("properties", Json::object());
+            for (const auto& [name, value] : properties.items())
+            {
+                if (value.is_number())
+                    definition.Properties.emplace(name, value.get<float>());
+                else if (value.is_string() || value.is_null())
+                    definition.Properties.emplace(name, value.is_null() ? AssetId{}
+                                                                        : AssetId::Parse(value.get<std::string>()));
+                else
+                    definition.Properties.emplace(name, ParseVector(value));
+            }
+            AssetImportOutput output;
+            output.Bytes = MaterialAsset::Encode(definition);
+            if (definition.Shader)
+                output.AssetDependencies.push_back(definition.Shader);
+            for (const auto& [name, value] : definition.Properties)
+            {
+                (void)name;
+                if (const auto* texture = std::get_if<AssetId>(&value); texture && *texture)
+                    output.AssetDependencies.push_back(*texture);
+            }
+            std::ranges::sort(output.AssetDependencies);
+            output.AssetDependencies.erase(
+                std::unique(output.AssetDependencies.begin(), output.AssetDependencies.end()),
+                output.AssetDependencies.end());
+            return output;
+        };
+        return result;
     }
 
     AssetDecoderRegistration CreateShaderAssetDecoder()

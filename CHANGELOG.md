@@ -6,6 +6,11 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- A renderer-owned asset resource layer for revisioned mesh, material, shader, texture, sampler, and pipeline GPU
+  resources, with indexed asset geometry, fixed shader bindings, transactional fence retirement, checker/error
+  fallbacks, and last-good hot reload behavior.
+- A transitive startup-scene cooker, textured Sandbox pyramid, cooked runtime manifest, and managed `KeireRuntime`
+  player with finite-frame package smoke validation.
 - Pinned private Assimp and stb dependencies, a strict versioned `.keiremesh` format, deterministic OBJ/FBX/glTF/GLB
   static-mesh import, RGBA8 texture import with normalized sampler settings and deterministic mip generation, and an
   `AssetTool convert-mesh` command.

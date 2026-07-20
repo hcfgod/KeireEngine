@@ -71,7 +71,7 @@ if ($All -or $Generated) {
         "*.xcworkspace"
     )
 
-    foreach ($projectDir in @($Project.CORE_DIRECTORY, $Project.CLIENT_DIRECTORY, $Project.HUB_DIRECTORY, $Project.TESTS_DIRECTORY, "AssetTool")) {
+    foreach ($projectDir in @($Project.CORE_DIRECTORY, $Project.CLIENT_DIRECTORY, $Project.HUB_DIRECTORY, $Project.TESTS_DIRECTORY, "AssetTool", "KeireRuntime")) {
         $path = Join-Path $Root $projectDir
         if (-not (Test-Path $path)) {
             continue

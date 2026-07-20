@@ -1460,6 +1460,12 @@ void EditorWorkspaceLayer::CookAssets()
         profile.Name = "Dist";
         profile.Strict = true;
         const auto project = Owner().GetProject();
+        if (project)
+        {
+            profile.Roots.push_back(project->Descriptor().StartupScene);
+            if (project->Descriptor().DefaultInput)
+                profile.Roots.push_back(project->Descriptor().DefaultInput);
+        }
         const auto output =
             project ? project->Root() / "Build/CookedAssets/Dist" : std::filesystem::path("Build/CookedAssets/Dist");
         const auto result = Keire::AssetCooker::Cook(*m_AssetDatabase, profile, output);

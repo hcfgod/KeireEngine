@@ -111,7 +111,7 @@ assert_true test -f "$ROOT/KeireRenderTests/Source/RenderedOutputTests.cpp"
 assert_true grep -q 'backends=(vulkan)' "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -q 'backends=(metal)' "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -q 'BuiltinShaderUniformBufferCount(vertex)' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
-assert_false grep -q 'SDL_PushGPUFragmentUniformData' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
+assert_true grep -q 'SDL_PushGPUFragmentUniformData' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
 assert_true grep -q 'Rendering.keiresettings' "$ROOT/KeireCore/Source/Rendering/RenderSettings.cpp"
 assert_true test -f "$ROOT/Samples/KeireSandbox/ProjectSettings/Rendering.keiresettings"
 assert_false grep -q 'Vendor/SDL/test' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
@@ -135,7 +135,7 @@ assert_false grep -q 'imgui.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_false grep -q 'AddDearImGuiSources' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireClient/premake5.lua"
 assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireTests/premake5.lua"
-assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" -type f -name '*.h' -print -quit)"
+assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Assets/Asset.h"
 assert_true test -f "$ROOT/KeireCore/Source/Assets/AssetSystem.cpp"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Input/Input.h"
@@ -226,6 +226,7 @@ for path in bin/KeireShaderCompiler lib/libassimp.a lib/libzlibstatic.a include/
 done
 : > "$package_stage/include/Core/Ui.h"
 : > "$package_stage/include/Core/UiWorkspace.h"
+: > "$package_stage/bin/CoreRuntime"
 assert_true validate_package_stage "$package_stage" Client Hub Core Core
 for generated_path in \
   samples/KeireSandbox/Build/generated.make \

@@ -10,10 +10,12 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset; $outputArchitecture = Get
 $imguiLibraryName = "$($Project.PROJECT_NAMESPACE)ImGui"
 $zstdLibraryName = "$($Project.PROJECT_NAMESPACE)Zstd"
 $assetToolName = "$($Project.PROJECT_NAMESPACE)AssetTool"
+$runtimeName = "$($Project.PROJECT_NAMESPACE)Runtime"
 & (Join-Path $PSScriptRoot "build-info.ps1")
 & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate
 & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI
+& (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $runtimeName -CI:$CI
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI
 & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
@@ -21,10 +23,11 @@ $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $sta
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
+New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\content", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\$runtimeName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
 Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
@@ -103,11 +106,18 @@ if ($LASTEXITCODE -ne 0 -or -not $assetToolHelp.Contains("KeireAssetTool cook"))
 $sampleProject = Join-Path $stage "samples\KeireSandbox"
 $previousShaderCompiler = $env:KEIRE_SHADER_COMPILER
 $env:KEIRE_SHADER_COMPILER = Join-Path $stage "bin\KeireShaderCompiler.exe"
-try { $assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") import --project $sampleProject) -join "`n" }
+try { $assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") cook --project $sampleProject --output (Join-Path $stage "content\KeireSandbox") --profile Dist --target windows) -join "`n" }
 finally { $env:KEIRE_SHADER_COMPILER = $previousShaderCompiler }
-if ($LASTEXITCODE -ne 0 -or -not $assetImportOutput.Contains("Imported")) { throw "Packaged sample project asset validation failed." }
+if ($LASTEXITCODE -ne 0 -or -not $assetImportOutput.Contains("Cooked")) { throw "Packaged sample project asset validation failed." }
 Remove-Item (Join-Path $sampleProject "Library") -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $sampleProject "Logs"), (Join-Path $sampleProject "Build"), (Join-Path $sampleProject "Temp") -Recurse -Force -ErrorAction SilentlyContinue
+$runtimeContent = Join-Path $stage "content\KeireSandbox"
+if (-not (Test-Path (Join-Path $runtimeContent "catalog.json")) -or
+    -not (Test-Path (Join-Path $runtimeContent "runtime-manifest.json"))) {
+    throw "Packaged cooked runtime content is incomplete."
+}
+& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --frames 12
+if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke failed with exit code $LASTEXITCODE." }
 $versionOutput = (& (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") --version) -join "`n"
 if ($LASTEXITCODE -ne 0) { throw "Packaged client version query failed with exit code $LASTEXITCODE." }
 $commitPrefix = $commit.Substring(0, [Math]::Min(12, $commit.Length))

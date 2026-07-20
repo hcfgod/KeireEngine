@@ -32,7 +32,8 @@ KeireClient and `KeireAssetTool` install it explicitly. `CreateAsset()` validate
 before transactionally publishing the source and metadata identity.
 
 Contextual importers additionally receive the project root, source path, and a bounded project-relative dependency
-reader. They return canonical bytes, structured diagnostics, and dependency path/digest records. This is used by shader
+reader. They return canonical bytes, structured diagnostics, source dependency path/digest records, and referenced
+asset IDs. This is used by shader
 manifests and preserves the byte-only callback for existing importers. Dependency digests participate in the cache key,
 and failed reimports never replace a last-good runtime object.
 
@@ -44,7 +45,8 @@ mandatory for cooking and release packaging.
 
 ## Deterministic Cooking
 
-`AssetCooker::Cook()` sorts entries by stable ID, compresses each payload with pinned Zstandard and the selected
+`AssetCooker::Cook()` walks optional stable-ID roots transitively, sorts the selected entries by stable ID, compresses
+each payload with pinned Zstandard and the selected
 versioned `AssetBuildProfile`, target platform, and shards packs at a 2 GiB default limit. Catalog entries contain relative pack paths,
 bounded offsets/sizes, type, SHA-256, and dependency IDs. Output is assembled in a sibling temporary directory, then
 published with a recoverable directory swap. The accompanying `build-profile.json` records schema, profile name,
@@ -66,7 +68,9 @@ KeireAssetTool validate --catalog <path>
 ```
 
 Target values are `host`, `windows`, `linux`, and `macos`; contextual cook transforms use them to strip unused shader
-variants. Optional cook controls are `--compression-level` and `--pack-mib`. SDK archives include this tool and the asset public
+variants. A project cook roots the graph at its startup scene and default input, and writes `runtime-manifest.json`
+beside the catalog with startup and rendering settings. Optional cook controls are `--compression-level` and
+`--pack-mib`. SDK archives include this tool and the asset public
 headers; they carry the private `KeireZstd` archive transitively through `Keire::Core` but do not redistribute Zstandard
 headers.
 

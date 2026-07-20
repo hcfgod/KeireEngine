@@ -3,13 +3,18 @@
 ## Source Assets
 
 A `.keireshader` manifest names a project-relative HLSL source, vertex and fragment entry points, bounded defines and
-include roots, fixed-function render state, and scalar/vector/color material properties. Paths are relative to the
+include roots, fixed-function render state, and scalar/vector/color/Texture2D material properties. Paths are relative to the
 project `Assets` directory. Absolute paths, traversal, symlinks, include cycles, incompatible stages, duplicate
 properties, and unsupported resource bindings are rejected before publication.
 
 `.keirematerial` assets reference a stable shader asset ID and store validated property overrides. `ShaderAsset`,
 `MaterialAsset`, and the built-in `MeshAsset` are immutable runtime assets with safe fallbacks. Failed shaders and
-materials resolve to a conspicuous error material instead of leaving an invalid GPU pipeline.
+materials resolve to a conspicuous error material instead of leaving an invalid GPU pipeline. Numeric properties are
+limited to 64 `float4` slots and fragment textures to 16 declaration-ordered bindings.
+
+The fixed vertex ABI is position, normal, UV0, and color at locations 0 through 3. Object/view/projection and normal
+data use vertex `b0/space1`; scene lighting/exposure use fragment `b0/space3`; packed numeric material data uses
+fragment `b1/space3`; Texture2D properties use matching `tN/sN/space2` pairs.
 
 The Project menu creates an Unlit Shader transactionally: its manifest, HLSL template, and metadata are either all
 published or all rolled back. It can also create a Material that references the selected shader.
@@ -51,5 +56,6 @@ preserves all variants. The asset tool exposes this explicitly:
 KeireAssetTool cook --project <path> --output <path> --profile Dist --target windows
 ```
 
-Supported target values are `host`, `windows`, `linux`, and `macos`. SDK packages include the compiler, required runtime
+Supported target values are `host`, `windows`, `linux`, and `macos`. Renderer caches track loaded and attempted asset
+revisions, build complete replacements before swapping, and retain last-good GPU resources after failed reloads. SDK packages include the compiler, required runtime
 libraries, licenses/notices, and locked recursive commits so packaged asset workflows remain reproducible.

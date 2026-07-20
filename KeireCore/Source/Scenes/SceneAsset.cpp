@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <unordered_map>
 
@@ -25,6 +26,29 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4U * 1024U * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
+
+        [[nodiscard]] std::vector<AssetId> RenderingDependencies(const SceneDefinition& definition)
+        {
+            std::set<AssetId> unique;
+            for (const auto& object : definition.Objects)
+            {
+                for (const auto& component : object.Components)
+                {
+                    if (component.Type != MeshRendererComponent::StaticType())
+                        continue;
+                    const auto data = Json::parse(component.Data);
+                    for (const auto* key : {"mesh", "material"})
+                    {
+                        if (!data.contains(key) || data.at(key).is_null())
+                            continue;
+                        const auto dependency = AssetId::Parse(data.at(key).get<std::string>());
+                        if (dependency && dependency != MeshAsset::CubeId() && dependency != MeshAsset::ErrorId())
+                            unique.insert(dependency);
+                    }
+                }
+            }
+            return {unique.begin(), unique.end()};
+        }
 
         [[nodiscard]] SceneVector3 ParseVector3(const Json& value)
         {
@@ -352,14 +376,19 @@ namespace Keire
 
     AssetImporterRegistration CreateSceneAssetImporter()
     {
-        return {"Keire.Scene",
-                2,
-                SceneAsset::StaticType(),
-                {".keirescene"},
-                [](const std::span<const std::byte> bytes)
-                {
-                    const auto parsed = SceneAsset::Decode(bytes);
-                    return SceneAsset::Encode(parsed->Definition());
-                }};
+        AssetImporterRegistration result;
+        result.Name = "Keire.Scene";
+        result.Version = 2;
+        result.Type = SceneAsset::StaticType();
+        result.Extensions = {".keirescene"};
+        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        {
+            const auto parsed = SceneAsset::Decode(bytes);
+            AssetImportOutput output;
+            output.Bytes = SceneAsset::Encode(parsed->Definition());
+            output.AssetDependencies = RenderingDependencies(parsed->Definition());
+            return output;
+        };
+        return result;
     }
 } // namespace Keire

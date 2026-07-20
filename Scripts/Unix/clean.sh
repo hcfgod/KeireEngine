@@ -27,6 +27,7 @@ if [[ "$scope" == all || "$scope" == generated ]]; then
     find "$ROOT" -maxdepth 1 \( -name '*.sln' -o -name '*.slnx' -o -name Makefile -o -name build.ninja -o -name compile_commands.json -o -name '*.xcodeproj' -o -name '*.xcworkspace' \) -exec rm -rf {} +
     project_directories=("$ROOT/$CORE_DIRECTORY" "$ROOT/$CLIENT_DIRECTORY" "$ROOT/$HUB_DIRECTORY" "$ROOT/$TESTS_DIRECTORY")
     [[ ! -d "$ROOT/AssetTool" ]] || project_directories+=("$ROOT/AssetTool")
+    [[ ! -d "$ROOT/KeireRuntime" ]] || project_directories+=("$ROOT/KeireRuntime")
     find "${project_directories[@]}" -maxdepth 1 \( -name '*.vcxproj' -o -name '*.vcxproj.filters' -o -name '*.vcxproj.user' -o -name Makefile -o -name '*.make' -o -name '*.ninja' -o -name '*.xcodeproj' -o -name '*.xcworkspace' \) -exec rm -rf {} +
 fi
 printf '==> Clean complete\n'

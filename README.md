@@ -247,6 +247,7 @@ available without the editor:
 ```powershell
 ./Build/Bin/Debug-windows-x86_64/KeireAssetTool/KeireAssetTool.exe import --project Samples/KeireSandbox
 ./Build/Bin/Debug-windows-x86_64/KeireAssetTool/KeireAssetTool.exe cook --project Samples/KeireSandbox --output Build/Assets --profile Dist
+./Build/Bin/Debug-windows-x86_64/KeireRuntime/KeireRuntime.exe --content Samples/KeireSandbox/Build/Assets --frames 12
 ```
 
 See [Asset Runtime](docs/AssetRuntime.md) and [Asset Pipeline](docs/AssetPipeline.md) for threading, mount, metadata,
@@ -259,6 +260,10 @@ Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicit
 --input <model>`. PNG, JPEG, TGA, and BMP textures import as validated RGBA8 assets with deterministic mip generation
 and sampler settings stored in source metadata. Assimp and stb remain private implementation dependencies; their
 headers are not required by engine or SDK consumers.
+
+The Sandbox startup scene uses an imported UV-mapped pyramid and Texture2D material through the same renderer-owned
+resource caches used by the editor. Dist cooking follows scene-to-material-to-shader/texture dependencies and emits a
+runtime manifest; omit `--frames` to run the cooked scene as the normal standalone player.
 
 ## Projects And Scenes
 

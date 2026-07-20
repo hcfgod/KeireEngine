@@ -111,6 +111,7 @@ end
 local selectedArchitecture = os.targetarch() or os.hostarch()
 SelectedToolset = resolveToolset(_OPTIONS["toolset"] or "default")
 AssetToolTarget = ProjectConfig.PROJECT_NAMESPACE .. "AssetTool"
+RuntimeTarget = ProjectConfig.PROJECT_NAMESPACE .. "Runtime"
 
 if _ACTION and _ACTION:match("^vs") and SelectedToolset == "gcc" then
     error("Visual Studio generators do not support the GCC toolset in this template.")
@@ -149,6 +150,7 @@ include(ProjectConfig.CORE_DIRECTORY .. "/premake5.lua")
 include(ProjectConfig.CLIENT_DIRECTORY .. "/premake5.lua")
 include(ProjectConfig.HUB_DIRECTORY .. "/premake5.lua")
 include "AssetTool/premake5.lua"
+include "KeireRuntime/premake5.lua"
 include(ProjectConfig.TESTS_DIRECTORY .. "/premake5.lua")
 include "KeireEditorTests/premake5.lua"
 include "KeireRenderTests/premake5.lua"

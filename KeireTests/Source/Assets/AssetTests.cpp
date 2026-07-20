@@ -100,6 +100,18 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
     CHECK(ReadAll(firstCook.CatalogPath) == ReadAll(secondCook.CatalogPath));
     CHECK(ReadAll(firstCook.CatalogPath.parent_path() / "content-0.keirepak") ==
           ReadAll(secondCook.CatalogPath.parent_path() / "content-0.keirepak"));
+    const auto greeting = database->Find("Greeting.txt");
+    REQUIRE(greeting);
+    Keire::AssetBuildProfile rootedProfile;
+    rootedProfile.Roots = {greeting->Id};
+    const auto rootedCook = Keire::AssetCooker::Cook(*database, rootedProfile, project.Root / "CookRooted");
+    CHECK(rootedCook.AssetCount == 1);
+    const auto rootedCatalogBytes = ReadAll(rootedCook.CatalogPath);
+    const std::string rootedCatalog(rootedCatalogBytes.begin(), rootedCatalogBytes.end());
+    CHECK(rootedCatalog.find(greeting->Id.ToString()) != std::string::npos);
+    rootedProfile.Roots = {Keire::AssetId::Generate()};
+    CHECK_THROWS_AS((void)Keire::AssetCooker::Cook(*database, rootedProfile, project.Root / "CookMissing"),
+                    std::runtime_error);
     const auto cached = database->ImportAll();
     CHECK(cached.Imported == 0);
     CHECK(cached.CacheHits == 2);
@@ -180,7 +192,7 @@ TEST_CASE("Asset database editor imports report failures without discarding the 
     REQUIRE(bestEffort.Statuses.front().Diagnostics.size() == 1);
     CHECK(bestEffort.Statuses.front().Diagnostics.front().Message == "intentional import failure");
     CHECK(database->ImportStatus(record.Id).State == Keire::AssetImportState::Failed);
-    Keire::Log::Flush();
+    Keire::Log::Shutdown();
     const auto logContents = KeireTests::ReadFile(logs.Directory / logs.Config.CoreLogFile);
     CHECK(logContents.find("Asset import failed for 'Broken.bad'") != std::string::npos);
     CHECK(logContents.find("intentional import failure") != std::string::npos);

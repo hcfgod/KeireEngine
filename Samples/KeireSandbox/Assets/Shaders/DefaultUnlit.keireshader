@@ -26,6 +26,11 @@
         1.0,
         1.0
       ]
+    },
+    {
+      "name": "MainTexture",
+      "type": "Texture2D",
+      "default": null
     }
   ]
 }

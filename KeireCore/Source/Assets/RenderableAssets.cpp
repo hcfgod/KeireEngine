@@ -558,7 +558,10 @@ namespace Keire
                                            aiProcess_GenSmoothNormals | aiProcess_PreTransformVertices |
                                            aiProcess_ImproveCacheLocality | aiProcess_SortByPType |
                                            aiProcess_ValidateDataStructure;
-            const auto* scene = importer.ReadFile(context.SourcePath.string(), flags);
+            auto extension = context.SourcePath.extension().string();
+            if (!extension.empty() && extension.front() == '.')
+                extension.erase(extension.begin());
+            const auto* scene = importer.ReadFileFromMemory(bytes.data(), bytes.size(), flags, extension.c_str());
             if (!scene)
                 throw std::invalid_argument(std::string("Mesh import failed: ") + importer.GetErrorString());
             if (scene->mNumAnimations != 0)

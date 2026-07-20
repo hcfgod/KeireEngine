@@ -112,7 +112,7 @@ Assert-True ($renderSource.Contains('ResolveLighting') -and $renderSource.Contai
 Assert-True ($renderSource.Contains('ReadbackRGBA8') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireRenderTests\Source\RenderedOutputTests.cpp'))) "Rendered output readback tests"
 $testRunner = Get-Content (Join-Path $Windows 'test.ps1') -Raw
 Assert-True ($testRunner.Contains('direct3d12') -and $testRunner.Contains('vulkan') -and $testRunner.Contains('KEIRE_REQUIRE_GPU_TESTS')) "Conditional Windows GPU test backends"
-Assert-True ($renderSource.Contains('BuiltinShaderUniformBufferCount(vertex)') -and -not $renderSource.Contains('SDL_PushGPUFragmentUniformData')) "Built-in lighting uses only its reflected vertex uniform block"
+Assert-True ($renderSource.Contains('BuiltinShaderUniformBufferCount(vertex)') -and $renderSource.Contains('SDL_PushGPUFragmentUniformData')) "Built-in and asset-backed shader uniform bindings"
 $renderSettingsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSettings.cpp') -Raw
 Assert-True ($renderSettingsSource.Contains('Rendering.keiresettings') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'Samples\KeireSandbox\ProjectSettings\Rendering.keiresettings'))) "Persistent project rendering settings"
 $renderingAssetsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\RenderingAssets.cpp') -Raw
@@ -125,7 +125,7 @@ Assert-True ($uiSource.Contains('ImGuiDragDropFlags_SourceAllowNullID')) "Displa
 Assert-True ($clientPremake.Contains('LinkKeireCore()') -and $testsPremake.Contains('LinkKeireCore()') -and $premakePolicy.Contains('ProjectConfig.CORE_TARGET') -and $premakePolicy.Contains('DearImGuiProject')) "Static dependency link closure"
 $clientSources = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireClient") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True (-not ($clientSources -match '#include\s*[<\"]imgui|ImGui::|ImGui[A-Z]')) "KeireClient Dear ImGui isolation"
-$sourceHeaders = Get-ChildItem (Get-RepositoryRoot) -Directory | Where-Object { $_.Name -in @("KeireCore", "KeireClient", "KeireHub", "KeireTests", "AssetTool") } | ForEach-Object { Get-ChildItem (Join-Path $_.FullName "Source") -Filter "*.h" -File -Recurse -ErrorAction SilentlyContinue }
+$sourceHeaders = Get-ChildItem (Get-RepositoryRoot) -Directory | Where-Object { $_.Name -in @("KeireCore", "KeireClient", "KeireHub", "KeireTests", "AssetTool", "KeireRuntime") } | ForEach-Object { Get-ChildItem (Join-Path $_.FullName "Source") -Filter "*.h" -File -Recurse -ErrorAction SilentlyContinue }
 Assert-True (-not $sourceHeaders) "First-party headers live under Include, never Source"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Assets\Asset.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Assets\AssetSystem.cpp"))) "Asset subsystem directory organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Input\Input.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Input\InputSystem.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Input\DefaultInput.keireinput"))) "Input subsystem and sample project organization"
@@ -198,6 +198,7 @@ try {
     New-Item -ItemType Directory -Force (Split-Path $uiHeader) | Out-Null
     New-Item -ItemType File -Force $uiHeader | Out-Null
     New-Item -ItemType File -Force (Join-Path $packageStage "include\Core\UiWorkspace.h") | Out-Null
+    New-Item -ItemType File -Force (Join-Path $packageStage "bin\CoreRuntime.exe") | Out-Null
     Assert-WindowsPackageStage $packageStage Client Hub Core Core
     foreach ($generatedPath in @(
         "samples\KeireSandbox\Build\generated.vcxproj",

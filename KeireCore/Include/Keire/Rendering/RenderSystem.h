@@ -12,6 +12,7 @@
 
 namespace Keire
 {
+    class AssetSystem;
     class Scene;
     class Window;
     class WindowSystem;
@@ -162,7 +163,8 @@ namespace Keire
         friend class Application;
         friend class RenderSystemInternalAccess;
         template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
-        RenderSystem(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window);
+        RenderSystem(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
+                     Ref<AssetSystem> assets);
 
         class Impl;
         std::unique_ptr<Impl> m_Impl;

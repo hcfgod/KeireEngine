@@ -1,5 +1,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 
+#include "Keire/Assets/AssetSystem.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
@@ -22,9 +24,11 @@
 #include <cstring>
 #include <deque>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -142,10 +146,71 @@ namespace Keire
             bool Submitted = false;
         };
 
+        struct GpuMeshResources final
+        {
+            SDL_GPUBuffer* Vertices = nullptr;
+            SDL_GPUBuffer* AssetVertices = nullptr;
+            SDL_GPUBuffer* Indices = nullptr;
+            std::uint32_t IndexCount = 0;
+
+            [[nodiscard]] bool Empty() const noexcept { return !Vertices && !AssetVertices && !Indices; }
+        };
+
+        struct GpuTextureResources final
+        {
+            SDL_GPUTexture* Texture = nullptr;
+            SDL_GPUSampler* Sampler = nullptr;
+
+            [[nodiscard]] bool Empty() const noexcept { return !Texture && !Sampler; }
+        };
+
         struct InFlightFrame final
         {
             SDL_GPUFence* Fence = nullptr;
             std::vector<SurfaceResources> Retired;
+            std::vector<GpuMeshResources> RetiredMeshes;
+            std::vector<GpuTextureResources> RetiredTextures;
+            std::vector<SDL_GPUGraphicsPipeline*> RetiredPipelines;
+        };
+
+        struct GpuTextureEntry final
+        {
+            AssetHandle<Texture2DAsset> Handle;
+            GpuTextureResources Resources;
+            std::uint64_t LoadedRevision = 0;
+            std::uint64_t LastAttemptedRevision = 0;
+        };
+
+        struct GpuShaderEntry final
+        {
+            AssetHandle<ShaderAsset> Handle;
+            Ref<const ShaderAsset> LastGood;
+            std::vector<std::pair<SDL_GPUSampleCount, SDL_GPUGraphicsPipeline*>> Pipelines;
+            std::uint64_t LoadedRevision = 0;
+            std::uint64_t LastAttemptedRevision = 0;
+        };
+
+        struct GpuMaterialEntry final
+        {
+            AssetHandle<MaterialAsset> Handle;
+            Ref<const MaterialAsset> LastGood;
+            std::uint64_t LoadedRevision = 0;
+            std::uint64_t LastAttemptedRevision = 0;
+        };
+
+        struct ResolvedAssetMaterial final
+        {
+            SDL_GPUGraphicsPipeline* Pipeline = nullptr;
+            std::vector<Vector4> NumericProperties;
+            std::vector<SDL_GPUTextureSamplerBinding> Textures;
+        };
+
+        struct GpuMeshEntry final
+        {
+            AssetHandle<MeshAsset> Handle;
+            GpuMeshResources Resources;
+            std::uint64_t LoadedRevision = 0;
+            std::uint64_t LastAttemptedRevision = 0;
         };
 
         struct RenderVertex final
@@ -167,6 +232,24 @@ namespace Keire
         };
 
         static_assert(sizeof(ObjectUniforms) == sizeof(float) * 52);
+
+        struct AssetObjectUniforms final
+        {
+            Matrix4 Model;
+            Matrix4 View;
+            Matrix4 Projection;
+            Matrix4 NormalMatrix;
+        };
+
+        struct AssetSceneUniforms final
+        {
+            Vector4 AmbientColorIntensity;
+            Vector4 DirectionalColorIntensity;
+            Vector4 DirectionalDirectionExposure;
+        };
+
+        static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
+        static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * 12);
 
         struct SceneLighting final
         {
@@ -230,44 +313,6 @@ namespace Keire
                     {receiveLighting ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F}};
         }
 
-        constexpr std::array<RenderVertex, 36> CubeVertices = {
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, -1.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {-1.0F, 0.0F, 0.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
-            RenderVertex{{-0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 1.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {1.0F, 0.0F, 0.0F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
-            RenderVertex{{0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
-            RenderVertex{{-0.5F, 0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, 0.0F, 1.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
-            RenderVertex{{-0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
-            RenderVertex{{-0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
-            RenderVertex{{0.5F, -0.5F, -0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}},
-            RenderVertex{{0.5F, -0.5F, 0.5F}, {1.0F, 1.0F, 1.0F}, {0.0F, -1.0F, 0.0F}}};
-
         [[nodiscard]] std::vector<RenderVertex> CreateGridVertices()
         {
             constexpr int extent = 20;
@@ -300,9 +345,10 @@ namespace Keire
 
         struct RenderSharedState final : public std::enable_shared_from_this<RenderSharedState>
         {
-            RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window)
+            RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
+                              Ref<AssetSystem> assets)
                 : Specification(std::move(specification)), Windows(std::move(windows)), Window(std::move(window)),
-                  OwnerThread(std::this_thread::get_id())
+                  Assets(std::move(assets)), OwnerThread(std::this_thread::get_id())
             {
                 if (!ValidColor(Specification.SwapchainClearColor))
                     throw std::invalid_argument("Render swapchain clear color must contain finite values in 0..1.");
@@ -458,11 +504,14 @@ namespace Keire
                 return shader;
             }
 
-            [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(const std::span<const RenderVertex> vertices)
+            [[nodiscard]] SDL_GPUBuffer* UploadBuffer(const std::span<const std::byte> bytes,
+                                                      const SDL_GPUBufferUsageFlags usage)
             {
-                const auto byteSize = static_cast<std::uint32_t>(vertices.size_bytes());
+                if (bytes.empty() || bytes.size() > std::numeric_limits<std::uint32_t>::max())
+                    throw std::invalid_argument("GPU buffer payload is empty or exceeds the 32-bit SDL limit.");
+                const auto byteSize = static_cast<std::uint32_t>(bytes.size());
                 SDL_GPUBufferCreateInfo bufferInformation{};
-                bufferInformation.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+                bufferInformation.usage = usage;
                 bufferInformation.size = byteSize;
                 SDL_GPUBuffer* buffer = SDL_CreateGPUBuffer(Device, &bufferInformation);
                 if (!buffer)
@@ -481,7 +530,7 @@ namespace Keire
                     void* mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
                     if (!mapped)
                         throw std::runtime_error("SDL_MapGPUTransferBuffer failed: " + LastSdlError());
-                    std::memcpy(mapped, vertices.data(), vertices.size_bytes());
+                    std::memcpy(mapped, bytes.data(), bytes.size());
                     SDL_UnmapGPUTransferBuffer(Device, transfer);
 
                     SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
@@ -511,15 +560,239 @@ namespace Keire
                 }
             }
 
+            [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(const std::span<const RenderVertex> vertices)
+            {
+                return UploadBuffer(std::as_bytes(vertices), SDL_GPU_BUFFERUSAGE_VERTEX);
+            }
+
+            [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description)
+            {
+                const auto found =
+                    std::ranges::find(SamplerCache, description, &decltype(SamplerCache)::value_type::first);
+                if (found != SamplerCache.end())
+                    return found->second;
+                const auto filter = [](const TextureFilter value)
+                { return value == TextureFilter::Nearest ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR; };
+                const auto address = [](const TextureAddressMode value)
+                {
+                    switch (value)
+                    {
+                    case TextureAddressMode::Clamp:
+                        return SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+                    case TextureAddressMode::Mirror:
+                        return SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT;
+                    case TextureAddressMode::Repeat:
+                    default:
+                        return SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
+                    }
+                };
+                SDL_GPUSamplerCreateInfo sampler{};
+                sampler.min_filter = filter(description.Minimum);
+                sampler.mag_filter = filter(description.Magnification);
+                sampler.mipmap_mode = description.Mip == TextureFilter::Nearest ? SDL_GPU_SAMPLERMIPMAPMODE_NEAREST
+                                                                                : SDL_GPU_SAMPLERMIPMAPMODE_LINEAR;
+                sampler.address_mode_u = address(description.AddressU);
+                sampler.address_mode_v = address(description.AddressV);
+                sampler.address_mode_w = address(description.AddressW);
+                sampler.max_anisotropy = static_cast<float>(description.Anisotropy);
+                sampler.max_lod = 32.0F;
+                sampler.enable_anisotropy = description.Anisotropy > 1;
+                SDL_GPUSampler* created = SDL_CreateGPUSampler(Device, &sampler);
+                if (!created)
+                    throw std::runtime_error("SDL_CreateGPUSampler failed: " + LastSdlError());
+                SamplerCache.emplace_back(description, created);
+                return created;
+            }
+
+            [[nodiscard]] GpuTextureResources CreateTextureResources(const Texture2DAsset& asset)
+            {
+                const auto mips = asset.Mips();
+                if (mips.empty() || mips.size() > std::numeric_limits<std::uint32_t>::max())
+                    throw std::invalid_argument("Texture GPU upload requires a bounded mip chain.");
+                std::size_t totalBytes = 0;
+                for (const auto& mip : mips)
+                {
+                    if (mip.Pixels.size() > std::numeric_limits<std::uint32_t>::max() - totalBytes)
+                        throw std::invalid_argument("Texture GPU upload exceeds SDL's 32-bit transfer limit.");
+                    totalBytes += mip.Pixels.size();
+                }
+
+                GpuTextureResources result;
+                SDL_GPUTransferBuffer* transfer = nullptr;
+                try
+                {
+                    SDL_GPUTextureCreateInfo texture{};
+                    texture.type = SDL_GPU_TEXTURETYPE_2D;
+                    texture.format = asset.Settings().ColorSpace == TextureColorSpace::Srgb
+                                         ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+                                         : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+                    texture.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+                    texture.width = asset.Width();
+                    texture.height = asset.Height();
+                    texture.layer_count_or_depth = 1;
+                    texture.num_levels = static_cast<std::uint32_t>(mips.size());
+                    texture.sample_count = SDL_GPU_SAMPLECOUNT_1;
+                    result.Texture = SDL_CreateGPUTexture(Device, &texture);
+                    if (!result.Texture)
+                        throw std::runtime_error("SDL_CreateGPUTexture(asset) failed: " + LastSdlError());
+
+                    result.Sampler = ResolveSampler(asset.Settings().Sampler);
+
+                    SDL_GPUTransferBufferCreateInfo transferInformation{};
+                    transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+                    transferInformation.size = static_cast<std::uint32_t>(totalBytes);
+                    transfer = SDL_CreateGPUTransferBuffer(Device, &transferInformation);
+                    if (!transfer)
+                        throw std::runtime_error("SDL_CreateGPUTransferBuffer(texture) failed: " + LastSdlError());
+                    auto* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(Device, transfer, false));
+                    if (!mapped)
+                        throw std::runtime_error("SDL_MapGPUTransferBuffer(texture) failed: " + LastSdlError());
+                    std::size_t offset = 0;
+                    for (const auto& mip : mips)
+                    {
+                        std::memcpy(mapped + offset, mip.Pixels.data(), mip.Pixels.size());
+                        offset += mip.Pixels.size();
+                    }
+                    SDL_UnmapGPUTransferBuffer(Device, transfer);
+
+                    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
+                    if (!commands)
+                        throw std::runtime_error("SDL_AcquireGPUCommandBuffer(texture) failed: " + LastSdlError());
+                    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+                    if (!copy)
+                    {
+                        (void)SDL_CancelGPUCommandBuffer(commands);
+                        throw std::runtime_error("SDL_BeginGPUCopyPass(texture) failed: " + LastSdlError());
+                    }
+                    offset = 0;
+                    for (std::size_t index = 0; index < mips.size(); ++index)
+                    {
+                        const auto& mip = mips[index];
+                        SDL_GPUTextureTransferInfo source{transfer, static_cast<std::uint32_t>(offset), mip.Width,
+                                                          mip.Height};
+                        SDL_GPUTextureRegion destination{
+                            result.Texture, static_cast<std::uint32_t>(index), 0, 0, 0, 0, mip.Width, mip.Height, 1};
+                        SDL_UploadToGPUTexture(copy, &source, &destination, false);
+                        offset += mip.Pixels.size();
+                    }
+                    SDL_EndGPUCopyPass(copy);
+                    if (!SDL_SubmitGPUCommandBuffer(commands))
+                        throw std::runtime_error("SDL_SubmitGPUCommandBuffer(texture) failed: " + LastSdlError());
+                    SDL_ReleaseGPUTransferBuffer(Device, transfer);
+                    return result;
+                }
+                catch (...)
+                {
+                    if (transfer)
+                        SDL_ReleaseGPUTransferBuffer(Device, transfer);
+                    if (result.Texture)
+                        SDL_ReleaseGPUTexture(Device, result.Texture);
+                    throw;
+                }
+            }
+
+            [[nodiscard]] GpuMeshResources CreateMeshResources(const MeshAsset& mesh)
+            {
+                std::vector<RenderVertex> vertices;
+                vertices.reserve(mesh.Vertices().size());
+                for (const auto& vertex : mesh.Vertices())
+                {
+                    vertices.push_back({vertex.Position,
+                                        {vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue},
+                                        vertex.Normal});
+                }
+                GpuMeshResources result;
+                try
+                {
+                    result.Vertices = UploadVertexBuffer(vertices);
+                    result.AssetVertices = UploadBuffer(std::as_bytes(mesh.Vertices()), SDL_GPU_BUFFERUSAGE_VERTEX);
+                    result.Indices = UploadBuffer(std::as_bytes(mesh.Indices()), SDL_GPU_BUFFERUSAGE_INDEX);
+                    result.IndexCount = static_cast<std::uint32_t>(mesh.Indices().size());
+                    return result;
+                }
+                catch (...)
+                {
+                    if (result.Indices)
+                        SDL_ReleaseGPUBuffer(Device, result.Indices);
+                    if (result.Vertices)
+                        SDL_ReleaseGPUBuffer(Device, result.Vertices);
+                    if (result.AssetVertices)
+                        SDL_ReleaseGPUBuffer(Device, result.AssetVertices);
+                    throw;
+                }
+            }
+
             void CreateGeometryResources()
             {
-                auto cube = CubeVertices;
-                for (auto& vertex : cube)
-                    vertex.Color = {1.0F, 1.0F, 1.0F};
-                CubeBuffer = UploadVertexBuffer(cube);
+                DefaultMesh = CreateMeshResources(*MeshAsset::Cube());
+                ErrorMesh = CreateMeshResources(*MeshAsset::Error());
+                CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
                 const auto grid = CreateGridVertices();
                 GridVertexCount = static_cast<std::uint32_t>(grid.size());
                 GridBuffer = UploadVertexBuffer(grid);
+            }
+
+            void ReleaseMeshResources(GpuMeshResources& resources) noexcept
+            {
+                if (Device && resources.Indices)
+                    SDL_ReleaseGPUBuffer(Device, resources.Indices);
+                if (Device && resources.Vertices)
+                    SDL_ReleaseGPUBuffer(Device, resources.Vertices);
+                if (Device && resources.AssetVertices)
+                    SDL_ReleaseGPUBuffer(Device, resources.AssetVertices);
+                resources = {};
+            }
+
+            void ReleaseTextureResources(GpuTextureResources& resources) noexcept
+            {
+                if (Device && resources.Texture)
+                    SDL_ReleaseGPUTexture(Device, resources.Texture);
+                resources = {};
+            }
+
+            void Retire(GpuTextureResources resources) noexcept
+            {
+                if (resources.Empty())
+                    return;
+                if (!Open || !Device)
+                    ReleaseTextureResources(resources);
+                else if (FrameActive)
+                    PendingRetiredTextures.push_back(resources);
+                else if (!InFlight.empty())
+                    InFlight.back().RetiredTextures.push_back(resources);
+                else
+                    ReleaseTextureResources(resources);
+            }
+
+            void Retire(SDL_GPUGraphicsPipeline* pipeline) noexcept
+            {
+                if (!pipeline)
+                    return;
+                if (!Open || !Device)
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+                else if (FrameActive)
+                    PendingRetiredPipelines.push_back(pipeline);
+                else if (!InFlight.empty())
+                    InFlight.back().RetiredPipelines.push_back(pipeline);
+                else
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+            }
+
+            void Retire(GpuMeshResources resources) noexcept
+            {
+                if (resources.Empty())
+                    return;
+                if (!Open || !Device)
+                {
+                    ReleaseMeshResources(resources);
+                    return;
+                }
+                if (FrameActive)
+                    PendingRetiredMeshes.push_back(resources);
+                else if (!InFlight.empty())
+                    InFlight.back().RetiredMeshes.push_back(resources);
+                else
+                    ReleaseMeshResources(resources);
             }
 
             void Retire(SurfaceResources resources) noexcept
@@ -756,6 +1029,114 @@ namespace Keire
                 }
             }
 
+            [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition,
+                                                           const bool vertex) const
+            {
+                const auto supported = SDL_GetGPUShaderFormats(Device);
+                const ShaderVariant* variant = nullptr;
+                SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
+                const auto findVariant = [&definition](const ShaderBinaryFormat requested)
+                {
+                    const auto found = std::ranges::find(definition.Variants, requested, &ShaderVariant::Format);
+                    return found == definition.Variants.end() ? nullptr : &*found;
+                };
+                if ((supported & SDL_GPU_SHADERFORMAT_DXIL) && (variant = findVariant(ShaderBinaryFormat::Dxil)))
+                    format = SDL_GPU_SHADERFORMAT_DXIL;
+                else if ((supported & SDL_GPU_SHADERFORMAT_MSL) && (variant = findVariant(ShaderBinaryFormat::Msl)))
+                    format = SDL_GPU_SHADERFORMAT_MSL;
+                else if ((supported & SDL_GPU_SHADERFORMAT_SPIRV) && (variant = findVariant(ShaderBinaryFormat::SpirV)))
+                    format = SDL_GPU_SHADERFORMAT_SPIRV;
+                if (!variant)
+                    throw std::runtime_error("Shader asset lacks a variant for the active GPU backend.");
+
+                const auto& code = vertex ? variant->Vertex : variant->Fragment;
+                const auto textureCount = static_cast<std::uint32_t>(std::ranges::count(
+                    definition.Properties, ShaderPropertyType::Texture2D, &ShaderPropertyDefinition::Type));
+                SDL_GPUShaderCreateInfo information{};
+                information.code_size = code.size();
+                information.code = reinterpret_cast<const std::uint8_t*>(code.data());
+                information.entrypoint = format == SDL_GPU_SHADERFORMAT_SPIRV ? "main" : nullptr;
+                information.format = format;
+                information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+                information.num_samplers = vertex ? 0 : textureCount;
+                information.num_uniform_buffers = vertex ? 1 : 2;
+                SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+                if (!shader)
+                    throw std::runtime_error("SDL_CreateGPUShader(asset) failed: " + LastSdlError());
+                return shader;
+            }
+
+            [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,
+                                                                       const SDL_GPUSampleCount samples)
+            {
+                SDL_GPUShader* vertex = CreateAssetShader(definition, true);
+                SDL_GPUShader* fragment = nullptr;
+                try
+                {
+                    fragment = CreateAssetShader(definition, false);
+                    SDL_GPUColorTargetDescription color{};
+                    color.format = ColorFormat;
+                    color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+                    color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                    color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+                    color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+                    color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+                    color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+                    color.blend_state.enable_blend = definition.Blend;
+
+                    SDL_GPUVertexBufferDescription buffer{};
+                    buffer.slot = 0;
+                    buffer.pitch = sizeof(MeshVertex);
+                    buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+                    const std::array attributes{
+                        SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+                                               offsetof(MeshVertex, Position)},
+                        SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(MeshVertex, Normal)},
+                        SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(MeshVertex, UV0)},
+                        SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
+                                               offsetof(MeshVertex, VertexColor)}};
+                    SDL_GPUGraphicsPipelineCreateInfo information{};
+                    information.vertex_shader = vertex;
+                    information.fragment_shader = fragment;
+                    information.vertex_input_state.vertex_buffer_descriptions = &buffer;
+                    information.vertex_input_state.num_vertex_buffers = 1;
+                    information.vertex_input_state.vertex_attributes = attributes.data();
+                    information.vertex_input_state.num_vertex_attributes =
+                        static_cast<std::uint32_t>(attributes.size());
+                    information.primitive_type = definition.Topology == ShaderPrimitiveTopology::LineList
+                                                     ? SDL_GPU_PRIMITIVETYPE_LINELIST
+                                                     : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+                    information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+                    information.rasterizer_state.cull_mode =
+                        definition.Culling == ShaderCullMode::Front  ? SDL_GPU_CULLMODE_FRONT
+                        : definition.Culling == ShaderCullMode::Back ? SDL_GPU_CULLMODE_BACK
+                                                                     : SDL_GPU_CULLMODE_NONE;
+                    information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+                    information.rasterizer_state.enable_depth_clip = true;
+                    information.multisample_state.sample_count = samples;
+                    information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+                    information.depth_stencil_state.enable_depth_test = definition.DepthTest;
+                    information.depth_stencil_state.enable_depth_write = definition.DepthWrite;
+                    information.target_info.color_target_descriptions = &color;
+                    information.target_info.num_color_targets = 1;
+                    information.target_info.depth_stencil_format = DepthFormat;
+                    information.target_info.has_depth_stencil_target = true;
+                    SDL_GPUGraphicsPipeline* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
+                    if (!result)
+                        throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(asset) failed: " + LastSdlError());
+                    SDL_ReleaseGPUShader(Device, fragment);
+                    SDL_ReleaseGPUShader(Device, vertex);
+                    return result;
+                }
+                catch (...)
+                {
+                    if (fragment)
+                        SDL_ReleaseGPUShader(Device, fragment);
+                    SDL_ReleaseGPUShader(Device, vertex);
+                    throw;
+                }
+            }
+
             void CollectCompletedFrames()
             {
                 if (!Device)
@@ -766,6 +1147,12 @@ namespace Keire
                     InFlight.pop_front();
                     for (auto& retired : frame.Retired)
                         ReleaseResources(retired);
+                    for (auto& retired : frame.RetiredMeshes)
+                        ReleaseMeshResources(retired);
+                    for (auto& retired : frame.RetiredTextures)
+                        ReleaseTextureResources(retired);
+                    for (auto* retired : frame.RetiredPipelines)
+                        SDL_ReleaseGPUGraphicsPipeline(Device, retired);
                     SDL_ReleaseGPUFence(Device, frame.Fence);
                 }
                 if (InFlight.size() < Specification.MaximumFramesInFlight)
@@ -833,6 +1220,218 @@ namespace Keire
                 Requests.push_back({std::move(request), &surface});
             }
 
+            [[nodiscard]] const GpuMeshResources& ResolveMesh(const AssetId id)
+            {
+                if (!id || id == MeshAsset::CubeId())
+                    return DefaultMesh;
+                if (id == MeshAsset::ErrorId() || !Assets)
+                    return ErrorMesh;
+
+                auto [iterator, inserted] = MeshCache.try_emplace(id);
+                auto& entry = iterator->second;
+                if (inserted)
+                    entry.Handle = Assets->Load<MeshAsset>(id, AssetPriority::High);
+                const auto revision = entry.Handle.Revision();
+                if (revision != 0 && revision > entry.LastAttemptedRevision)
+                {
+                    entry.LastAttemptedRevision = revision;
+                    if (const auto mesh = entry.Handle.TryGetLoaded())
+                    {
+                        try
+                        {
+                            auto replacement = CreateMeshResources(*mesh);
+                            Retire(std::exchange(entry.Resources, replacement));
+                            entry.LoadedRevision = revision;
+                        }
+                        catch (const std::exception& error)
+                        {
+                            KEIRE_CORE_ERROR("Mesh GPU rebuild failed for id={} revision={}: {}", id.ToString(),
+                                             revision, error.what());
+                        }
+                    }
+                }
+                return entry.Resources.Empty() ? ErrorMesh : entry.Resources;
+            }
+
+            [[nodiscard]] const GpuTextureResources& ResolveTexture(const AssetId id)
+            {
+                if (!id || !Assets)
+                    return CheckerboardTexture;
+                auto [iterator, inserted] = TextureCache.try_emplace(id);
+                auto& entry = iterator->second;
+                if (inserted)
+                    entry.Handle = Assets->Load<Texture2DAsset>(id, AssetPriority::High);
+                const auto revision = entry.Handle.Revision();
+                if (revision != 0 && revision > entry.LastAttemptedRevision)
+                {
+                    entry.LastAttemptedRevision = revision;
+                    if (const auto texture = entry.Handle.TryGetLoaded())
+                    {
+                        try
+                        {
+                            auto replacement = CreateTextureResources(*texture);
+                            Retire(std::exchange(entry.Resources, replacement));
+                            entry.LoadedRevision = revision;
+                        }
+                        catch (const std::exception& error)
+                        {
+                            KEIRE_CORE_ERROR("Texture GPU rebuild failed for id={} revision={}: {}", id.ToString(),
+                                             revision, error.what());
+                        }
+                    }
+                }
+                return entry.Resources.Empty() ? CheckerboardTexture : entry.Resources;
+            }
+
+            [[nodiscard]] Ref<const MaterialAsset> ResolveMaterial(const AssetId id)
+            {
+                if (!id || !Assets)
+                    return {};
+                auto [iterator, inserted] = MaterialCache.try_emplace(id);
+                auto& entry = iterator->second;
+                if (inserted)
+                    entry.Handle = Assets->Load<MaterialAsset>(id, AssetPriority::High);
+                const auto revision = entry.Handle.Revision();
+                if (revision != 0 && revision > entry.LastAttemptedRevision)
+                {
+                    entry.LastAttemptedRevision = revision;
+                    if (const auto material = entry.Handle.TryGetLoaded())
+                    {
+                        entry.LastGood = material;
+                        entry.LoadedRevision = revision;
+                    }
+                }
+                return entry.LastGood;
+            }
+
+            [[nodiscard]] GpuShaderEntry* ResolveShader(const AssetId id, const SDL_GPUSampleCount samples)
+            {
+                if (!id || !Assets)
+                    return nullptr;
+                auto [iterator, inserted] = ShaderCache.try_emplace(id);
+                auto& entry = iterator->second;
+                if (inserted)
+                    entry.Handle = Assets->Load<ShaderAsset>(id, AssetPriority::High);
+                const auto revision = entry.Handle.Revision();
+                if (revision != 0 && revision > entry.LastAttemptedRevision)
+                {
+                    entry.LastAttemptedRevision = revision;
+                    if (const auto shader = entry.Handle.TryGetLoaded())
+                    {
+                        try
+                        {
+                            auto replacement = CreateAssetPipeline(shader->Definition(), samples);
+                            for (const auto& [oldSamples, oldPipeline] : entry.Pipelines)
+                            {
+                                (void)oldSamples;
+                                Retire(oldPipeline);
+                            }
+                            entry.Pipelines = {{samples, replacement}};
+                            entry.LastGood = shader;
+                            entry.LoadedRevision = revision;
+                        }
+                        catch (const std::exception& error)
+                        {
+                            KEIRE_CORE_ERROR("Shader GPU rebuild failed for id={} revision={}: {}", id.ToString(),
+                                             revision, error.what());
+                        }
+                    }
+                }
+                if (!entry.LastGood)
+                    return nullptr;
+                auto pipeline =
+                    std::ranges::find(entry.Pipelines, samples, &decltype(entry.Pipelines)::value_type::first);
+                if (pipeline == entry.Pipelines.end())
+                {
+                    try
+                    {
+                        entry.Pipelines.emplace_back(samples,
+                                                     CreateAssetPipeline(entry.LastGood->Definition(), samples));
+                    }
+                    catch (const std::exception& error)
+                    {
+                        KEIRE_CORE_ERROR("Shader pipeline creation failed for id={}: {}", id.ToString(), error.what());
+                        return nullptr;
+                    }
+                }
+                return &entry;
+            }
+
+            [[nodiscard]] std::optional<ResolvedAssetMaterial>
+            ResolveAssetMaterial(const AssetId id, const Color componentTint, const SDL_GPUSampleCount samples)
+            {
+                const auto material = ResolveMaterial(id);
+                if (!material || !material->Definition().Shader)
+                    return std::nullopt;
+                auto* shader = ResolveShader(material->Definition().Shader, samples);
+                if (!shader)
+                    return std::nullopt;
+                const auto pipeline =
+                    std::ranges::find(shader->Pipelines, samples, &decltype(shader->Pipelines)::value_type::first);
+                if (pipeline == shader->Pipelines.end())
+                    return std::nullopt;
+
+                const auto& properties = material->Definition().Properties;
+                for (const auto& [name, value] : properties)
+                {
+                    (void)value;
+                    if (std::ranges::find(shader->LastGood->Definition().Properties, name,
+                                          &ShaderPropertyDefinition::Name) ==
+                        shader->LastGood->Definition().Properties.end())
+                        return std::nullopt;
+                }
+
+                ResolvedAssetMaterial result;
+                result.Pipeline = pipeline->second;
+                for (const auto& property : shader->LastGood->Definition().Properties)
+                {
+                    const auto found = properties.find(property.Name);
+                    if (property.Type == ShaderPropertyType::Texture2D)
+                    {
+                        AssetId texture = property.DefaultTexture;
+                        if (found != properties.end())
+                        {
+                            const auto* selected = std::get_if<AssetId>(&found->second);
+                            if (!selected)
+                                return std::nullopt;
+                            texture = *selected;
+                        }
+                        const auto& resolved = ResolveTexture(texture);
+                        result.Textures.push_back({resolved.Texture, resolved.Sampler});
+                        continue;
+                    }
+
+                    Vector4 packed = property.DefaultValue;
+                    if (found != properties.end())
+                    {
+                        const auto& value = found->second;
+                        if (const auto* scalar = std::get_if<float>(&value))
+                            packed = {*scalar, 0.0F, 0.0F, 0.0F};
+                        else if (const auto* vector2 = std::get_if<Vector2>(&value))
+                            packed = {vector2->X, vector2->Y, 0.0F, 0.0F};
+                        else if (const auto* vector3 = std::get_if<Vector3>(&value))
+                            packed = {vector3->X, vector3->Y, vector3->Z, 0.0F};
+                        else if (const auto* vector4 = std::get_if<Vector4>(&value))
+                            packed = *vector4;
+                        else if (const auto* color = std::get_if<Color>(&value))
+                            packed = {color->Red, color->Green, color->Blue, color->Alpha};
+                        else
+                            return std::nullopt;
+                    }
+                    if (property.Name == "Tint")
+                    {
+                        packed.X *= componentTint.Red;
+                        packed.Y *= componentTint.Green;
+                        packed.Z *= componentTint.Blue;
+                        packed.W *= componentTint.Alpha;
+                    }
+                    result.NumericProperties.push_back(packed);
+                }
+                if (result.NumericProperties.empty())
+                    result.NumericProperties.emplace_back();
+                return result;
+            }
+
             void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                            const SceneRenderRequest& request)
             {
@@ -864,16 +1463,51 @@ namespace Keire
                         continue;
 
                     const Matrix4 viewModel = Math::Multiply(camera.View, transform->WorldMatrix());
-                    const ObjectUniforms object =
-                        MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), transform->WorldMatrix(),
-                                           renderer->Tint(), lighting, request.Environment, true);
-                    SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-                    const SDL_GPUBufferBinding binding{CubeBuffer, 0};
-                    SDL_BindGPUGraphicsPipeline(pass, pipelines.Cube);
-                    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-                    SDL_DrawGPUPrimitives(pass, static_cast<std::uint32_t>(CubeVertices.size()), 1, 0, 0);
+                    const auto& mesh = ResolveMesh(renderer->Mesh());
+                    const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
+                    const auto material = renderer->Material()
+                                              ? ResolveAssetMaterial(renderer->Material(), renderer->Tint(), samples)
+                                              : std::nullopt;
+                    if (material)
+                    {
+                        const AssetObjectUniforms object{transform->WorldMatrix(), camera.View, camera.Projection,
+                                                         Transpose(Math::Inverse(transform->WorldMatrix()))};
+                        const AssetSceneUniforms scene{
+                            {request.Environment.AmbientColor.Red, request.Environment.AmbientColor.Green,
+                             request.Environment.AmbientColor.Blue, request.Environment.AmbientIntensity},
+                            {lighting.ColorAndIntensity.Red, lighting.ColorAndIntensity.Green,
+                             lighting.ColorAndIntensity.Blue, lighting.ColorAndIntensity.Alpha},
+                            {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z,
+                             request.Environment.Exposure}};
+                        SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                        SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
+                        SDL_PushGPUFragmentUniformData(
+                            commands, 1, material->NumericProperties.data(),
+                            static_cast<std::uint32_t>(material->NumericProperties.size() * sizeof(Vector4)));
+                        SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
+                        if (!material->Textures.empty())
+                        {
+                            SDL_BindGPUFragmentSamplers(pass, 0, material->Textures.data(),
+                                                        static_cast<std::uint32_t>(material->Textures.size()));
+                        }
+                        const SDL_GPUBufferBinding vertexBinding{mesh.AssetVertices, 0};
+                        SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                    }
+                    else
+                    {
+                        const Color tint = renderer->Material() ? Color{1.0F, 0.0F, 1.0F, 1.0F} : renderer->Tint();
+                        const ObjectUniforms object =
+                            MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), transform->WorldMatrix(),
+                                               tint, lighting, request.Environment, true);
+                        SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                        SDL_BindGPUGraphicsPipeline(pass, pipelines.Cube);
+                        const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
+                        SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                    }
+                    SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    SDL_DrawGPUIndexedPrimitives(pass, mesh.IndexCount, 1, 0, 0, 0);
                     ++Statistics.DrawCalls;
-                    Statistics.Triangles += static_cast<std::uint32_t>(CubeVertices.size() / 3);
+                    Statistics.Triangles += mesh.IndexCount / 3;
                 }
             }
 
@@ -971,8 +1605,12 @@ namespace Keire
                     SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
                     if (!fence)
                         throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
-                    InFlight.push_back({fence, std::move(PendingRetired)});
+                    InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
+                                        std::move(PendingRetiredTextures), std::move(PendingRetiredPipelines)});
                     PendingRetired.clear();
+                    PendingRetiredMeshes.clear();
+                    PendingRetiredTextures.clear();
+                    PendingRetiredPipelines.clear();
                 }
                 catch (...)
                 {
@@ -1000,10 +1638,25 @@ namespace Keire
                 for (auto& resources : PendingRetired)
                     ReleaseResources(resources);
                 PendingRetired.clear();
+                for (auto& resources : PendingRetiredMeshes)
+                    ReleaseMeshResources(resources);
+                PendingRetiredMeshes.clear();
+                for (auto& resources : PendingRetiredTextures)
+                    ReleaseTextureResources(resources);
+                PendingRetiredTextures.clear();
+                for (auto* pipeline : PendingRetiredPipelines)
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+                PendingRetiredPipelines.clear();
                 for (auto& frame : InFlight)
                 {
                     for (auto& resources : frame.Retired)
                         ReleaseResources(resources);
+                    for (auto& resources : frame.RetiredMeshes)
+                        ReleaseMeshResources(resources);
+                    for (auto& resources : frame.RetiredTextures)
+                        ReleaseTextureResources(resources);
+                    for (auto* pipeline : frame.RetiredPipelines)
+                        SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
                     if (Device && frame.Fence)
                         SDL_ReleaseGPUFence(Device, frame.Fence);
                 }
@@ -1018,12 +1671,41 @@ namespace Keire
                         SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Cube);
                 }
                 Pipelines.clear();
+                for (auto& [id, entry] : MeshCache)
+                {
+                    (void)id;
+                    ReleaseMeshResources(entry.Resources);
+                }
+                MeshCache.clear();
+                for (auto& [id, entry] : TextureCache)
+                {
+                    (void)id;
+                    ReleaseTextureResources(entry.Resources);
+                }
+                TextureCache.clear();
+                MaterialCache.clear();
+                for (auto& [id, entry] : ShaderCache)
+                {
+                    (void)id;
+                    for (const auto& [samples, pipeline] : entry.Pipelines)
+                    {
+                        (void)samples;
+                        SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+                    }
+                }
+                ShaderCache.clear();
+                ReleaseTextureResources(CheckerboardTexture);
+                for (const auto& [description, sampler] : SamplerCache)
+                {
+                    (void)description;
+                    SDL_ReleaseGPUSampler(Device, sampler);
+                }
+                SamplerCache.clear();
+                ReleaseMeshResources(ErrorMesh);
+                ReleaseMeshResources(DefaultMesh);
                 if (GridBuffer)
                     SDL_ReleaseGPUBuffer(Device, GridBuffer);
-                if (CubeBuffer)
-                    SDL_ReleaseGPUBuffer(Device, CubeBuffer);
                 GridBuffer = nullptr;
-                CubeBuffer = nullptr;
                 GridVertexCount = 0;
 
                 if (WindowClaimed && Device && NativeWindow)
@@ -1035,24 +1717,36 @@ namespace Keire
                 NativeWindow = nullptr;
                 Window.Reset();
                 Windows.Reset();
+                Assets.Reset();
             }
 
             RenderSpecification Specification;
             Ref<WindowSystem> Windows;
             Ref<Window> Window;
+            Ref<AssetSystem> Assets;
             std::thread::id OwnerThread;
             SDL_Window* NativeWindow = nullptr;
             SDL_GPUDevice* Device = nullptr;
             SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
             SDL_GPUTextureFormat ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
             SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
-            SDL_GPUBuffer* CubeBuffer = nullptr;
             SDL_GPUBuffer* GridBuffer = nullptr;
             std::uint32_t GridVertexCount = 0;
+            GpuMeshResources DefaultMesh;
+            GpuMeshResources ErrorMesh;
+            GpuTextureResources CheckerboardTexture;
+            std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
+            std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
+            std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
+            std::unordered_map<AssetId, GpuShaderEntry> ShaderCache;
+            std::vector<std::pair<SamplerDescription, SDL_GPUSampler*>> SamplerCache;
             std::vector<RenderPipelineSet> Pipelines;
             std::vector<std::weak_ptr<RenderSurfaceState>> Surfaces;
             std::vector<QueuedSceneRequest> Requests;
             std::vector<SurfaceResources> PendingRetired;
+            std::vector<GpuMeshResources> PendingRetiredMeshes;
+            std::vector<GpuTextureResources> PendingRetiredTextures;
+            std::vector<SDL_GPUGraphicsPipeline*> PendingRetiredPipelines;
             std::deque<InFlightFrame> InFlight;
             RenderStatistics Statistics;
             std::uint64_t NextSurfaceId = 1;
@@ -1138,16 +1832,18 @@ namespace Keire
     class RenderSystem::Impl final
     {
       public:
-        Impl(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window)
-            : State(
-                  std::make_shared<RenderSharedState>(std::move(specification), std::move(windows), std::move(window)))
+        Impl(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window, Ref<AssetSystem> assets)
+            : State(std::make_shared<RenderSharedState>(std::move(specification), std::move(windows), std::move(window),
+                                                        std::move(assets)))
         {
         }
         std::shared_ptr<RenderSharedState> State;
     };
 
-    RenderSystem::RenderSystem(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window)
-        : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(windows), std::move(window)))
+    RenderSystem::RenderSystem(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
+                               Ref<AssetSystem> assets)
+        : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(windows), std::move(window),
+                                        std::move(assets)))
     {
     }
 

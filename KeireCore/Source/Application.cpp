@@ -196,8 +196,8 @@ namespace Keire
             m_Impl->Specification.Render = renderSpecification;
             if (renderSpecification.Mode != RenderMode::Disabled)
             {
-                m_Impl->Renderer =
-                    CreateRef<RenderSystem>(renderSpecification, m_Impl->Windowing, m_Impl->PrimaryWindow);
+                m_Impl->Renderer = CreateRef<RenderSystem>(renderSpecification, m_Impl->Windowing,
+                                                           m_Impl->PrimaryWindow, m_Impl->Assets);
             }
             if (m_Impl->Specification.Input.Mode == InputMode::Enabled)
             {
