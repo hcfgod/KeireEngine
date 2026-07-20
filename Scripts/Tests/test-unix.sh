@@ -215,6 +215,23 @@ done
 : > "$package_stage/include/Core/Ui.h"
 : > "$package_stage/include/Core/UiWorkspace.h"
 assert_true validate_package_stage "$package_stage" Client Hub Core Core
+for generated_path in \
+  samples/KeireSandbox/Build/generated.make \
+  samples/KeireSandbox/Logs/Core.log \
+  samples/KeireSandbox/Library/AssetCatalog.json \
+  samples/KeireSandbox/Temp/editor.tmp \
+  samples/KeireSandbox/Assets/Scenes/SampleScene.recovery.json; do
+  mkdir -p "$package_stage/$(dirname "$generated_path")"
+  : > "$package_stage/$generated_path"
+  assert_false assert_package_generated_data_free "$package_stage"
+  rm "$package_stage/$generated_path"
+done
+mkdir -p "$package_stage/samples/KeireSandbox/Build"
+: > "$package_stage/samples/KeireSandbox/Build/generated.txt"
+package_contamination_archive="$(mktemp).tar.gz"
+tar -C "$package_stage" -czf "$package_contamination_archive" .
+assert_false assert_package_archive_generated_data_free "$package_contamination_archive"
+rm -f "$package_contamination_archive" "$package_stage/samples/KeireSandbox/Build/generated.txt"
 rm "$package_stage/lib/libCoreImGui.a"
 assert_false validate_package_stage "$package_stage" Client Hub Core Core
 : > "$package_stage/lib/libCoreImGui.a"
@@ -224,6 +241,12 @@ assert_false validate_package_stage "$package_stage" Client Hub Core Core
 rm "$package_stage/third-party/licenses/spdlog-LICENSE.txt"
 assert_false validate_package_stage "$package_stage" Client Hub Core Core
 rm -rf "$package_stage"
+
+tracked_sample_stage="$(mktemp -d)"
+copy_tracked_tree "$ROOT" Samples/KeireSandbox "$tracked_sample_stage"
+assert_true test -f "$tracked_sample_stage/ProjectSettings/Project.keireproject"
+assert_true assert_package_generated_data_free "$tracked_sample_stage"
+rm -rf "$tracked_sample_stage"
 
 identity_fixture="$(mktemp -d)"
 mkdir -p "$identity_fixture/Scripts/Unix" "$identity_fixture/Config"

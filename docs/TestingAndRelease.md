@@ -186,6 +186,11 @@ Packaging performs tests and a runtime smoke before staging the SDK. It then val
 - the managed consumer using the KeireCore-owned entrypoint;
 - both consumers through direct compiler commands and the generated CMake package.
 
+The sandbox source is staged from Git's tracked-file list, not by recursively copying the developer workspace. Package
+validation fails before publication, while inspecting the archive, and after extraction if it finds a `Library`, `Logs`,
+`Build`, `Temp`, `SceneRecovery`, or `Recovery` directory, a recovery file, or a `.tmp` file. Package-only asset imports
+may create `Library` transiently, but the directory is removed and the stage is revalidated before compression.
+
 Direct compiler validation links the static archives in `KeireCore`, `KeireImGui`, `KeireZstd`, SDL order. The package CMake target
 encodes that private closure transitively, so supported consumers continue linking only `Keire::Core`. Package validation
 also rejects a missing platform-specific ImGui archive or missing MIT attribution; Dear ImGui headers and sources remain

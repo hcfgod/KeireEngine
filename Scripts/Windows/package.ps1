@@ -31,7 +31,7 @@ Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
-Copy-Item "$Root\Samples\KeireSandbox" "$stage\samples\" -Recurse
+Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox"
 Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)" "$stage\include\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\include\spdlog" "$stage\third-party\spdlog\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\LICENSE" "$stage\third-party\licenses\spdlog-LICENSE.txt"
@@ -100,6 +100,7 @@ try { $assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") import
 finally { $env:KEIRE_SHADER_COMPILER = $previousShaderCompiler }
 if ($LASTEXITCODE -ne 0 -or -not $assetImportOutput.Contains("Imported")) { throw "Packaged sample project asset validation failed." }
 Remove-Item (Join-Path $sampleProject "Library") -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $sampleProject "Logs"), (Join-Path $sampleProject "Build"), (Join-Path $sampleProject "Temp") -Recurse -Force -ErrorAction SilentlyContinue
 $versionOutput = (& (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") --version) -join "`n"
 if ($LASTEXITCODE -ne 0) { throw "Packaged client version query failed with exit code $LASTEXITCODE." }
 $commitPrefix = $commit.Substring(0, [Math]::Min(12, $commit.Length))
@@ -107,7 +108,9 @@ $expectedIdentity = if ($dirty) { "$commitPrefix-dirty" } else { $commitPrefix }
 if (-not $versionOutput.Contains($expectedIdentity) -or (-not $dirty -and $versionOutput.Contains("$commitPrefix-dirty"))) {
     throw "Packaged binary identity does not match build-manifest.json."
 }
+Assert-WindowsPackageGeneratedDataFree $stage
 Compress-Archive "$stage\*" $archive
+Assert-WindowsPackageArchiveGeneratedDataFree $archive
 (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name.zip" | Set-Content "$archive.sha256" -Encoding ASCII
 $symbolStage = Join-Path $Root "Artifacts\$name-symbols"
 Remove-Item $symbolStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -134,6 +137,7 @@ try {
     $sdkRoot = Join-Path $validationRoot "sdk"
     New-Item -ItemType Directory -Force $sdkRoot | Out-Null
     Expand-Archive $archive $sdkRoot -Force
+    Assert-WindowsPackageGeneratedDataFree $sdkRoot
     $consumerSource = Join-Path $sdkRoot "examples\consumer\Main.cpp"
     $consumerExe = Join-Path $validationRoot "consumer.exe"
     $consumerObject = Join-Path $validationRoot "consumer.obj"

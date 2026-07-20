@@ -8,6 +8,7 @@ Build/
 Artifacts/
 Logs/
 Library/
+Temp/
 .ninja_deps
 .ninja_lock
 .ninja_log

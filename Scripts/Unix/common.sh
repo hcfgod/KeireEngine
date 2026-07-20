@@ -71,6 +71,57 @@ identifier_to_macro_prefix() {
     printf '%s' "$1" | sed -E 's/([A-Z]+)([A-Z][a-z])/\1_\2/g; s/([a-z0-9])([A-Z])/\1_\2/g' | tr '[:lower:]' '[:upper:]'
 }
 
+copy_tracked_tree() {
+    local repository_root="$1" relative_source="$2" destination="$3" tracked_file relative_path
+    git -C "$repository_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+        printf 'Tracked package copies require a Git working tree: %s\n' "$repository_root" >&2
+        return 1
+    }
+
+    mkdir -p "$destination"
+    local copied=0
+    while IFS= read -r -d '' tracked_file; do
+        [[ "$tracked_file" == "$relative_source/"* ]] || {
+            printf "Tracked package path escaped '%s': %s\n" "$relative_source" "$tracked_file" >&2
+            return 1
+        }
+        relative_path="${tracked_file#"$relative_source/"}"
+        mkdir -p "$destination/$(dirname "$relative_path")"
+        cp "$repository_root/$tracked_file" "$destination/$relative_path"
+        copied=1
+    done < <(git -c core.quotepath=false -C "$repository_root" ls-files -z -- "$relative_source")
+    [[ "$copied" == 1 ]] || { printf "No tracked files were found for package source '%s'.\n" "$relative_source" >&2; return 1; }
+}
+
+is_generated_package_path() {
+    local path="/${1//\\//}/" name
+    [[ "$path" =~ /(Library|Logs|Build|Temp|SceneRecovery|Recovery)/ ]] && return 0
+    name="${path%/}"; name="${name##*/}"
+    [[ "$name" =~ (^|[._-])[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy]([._-]|$) || "$name" =~ \.[Tt][Mm][Pp]$ ]]
+}
+
+assert_package_generated_data_free() {
+    local stage="$1" entry relative
+    while IFS= read -r -d '' entry; do
+        relative="${entry#"$stage/"}"
+        if is_generated_package_path "$relative"; then
+            printf 'Package contains generated workspace data: %s\n' "$relative" >&2
+            return 1
+        fi
+    done < <(find "$stage" -mindepth 1 -print0)
+}
+
+assert_package_archive_generated_data_free() {
+    local archive="$1" entry
+    while IFS= read -r entry; do
+        entry="${entry#./}"
+        if is_generated_package_path "$entry"; then
+            printf 'Package archive contains generated workspace data: %s\n' "$entry" >&2
+            return 1
+        fi
+    done < <(tar -tzf "$archive")
+}
+
 validate_package_stage() {
     local stage="$1" client="$2" hub="$3" core="$4" namespace="$5" path
     local required=("bin/$client" "bin/$hub" "lib/lib$core.a" "lib/lib${namespace}ImGui.a" "Config/Client.json" "include/$namespace/Core.h" "include/$namespace/Log.h" "include/$namespace/Api.h" "include/$namespace/Application.h" "include/$namespace/Assert.h" "include/$namespace/BuildInfo.h" "include/$namespace/EntryPoint.h" "include/$namespace/Event.h" "include/$namespace/Layer.h" "include/$namespace/Ref.h" "include/$namespace/Time.h" "include/$namespace/Undo.h" "include/$namespace/Project/Project.h" "include/$namespace/Scenes/Scene.h" "include/$namespace/Scenes/SceneAsset.h" "include/$namespace/Scenes/SceneSystem.h" "include/$namespace/Ui.h" "include/$namespace/UiWorkspace.h" "include/$namespace/Window.h" "include/$namespace/WindowConfig.h" "samples/KeireSandbox/ProjectSettings/Project.keireproject" "samples/KeireSandbox/ProjectSettings/Rendering.keiresettings" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput" "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "examples/consumer/Main.cpp" "examples/consumer/Client.json" "examples/consumer/CMakeLists.txt" "examples/consumer/README.md" "examples/managed-consumer/ClientApplication.cpp" "examples/managed-consumer/CMakeLists.txt" "examples/managed-consumer/README.md" "third-party/spdlog/spdlog.h" "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst" "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/SDL3/include/SDL3/SDL.h" "third-party/SDL3/lib/libSDL3.a" "third-party/SDL3/cmake/SDL3Config.cmake" "third-party/SDL3/licenses/SDL3/LICENSE.txt" README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json)
@@ -85,6 +136,7 @@ validate_package_stage() {
     done
     [[ ! -e "$stage/include/KeireInternal" ]] || { printf 'Package contains private KeireInternal headers.\n' >&2; return 1; }
     find "$stage/lib/cmake" -type f -name '*Config.cmake' -print -quit 2>/dev/null | grep -q . || { printf 'Package is missing its CMake package configuration.\n' >&2; return 1; }
+    assert_package_generated_data_free "$stage"
 }
 
 resolve_unix_toolset() {

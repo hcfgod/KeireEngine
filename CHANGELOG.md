@@ -120,6 +120,11 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Restored the declared Zstandard, EnTT, GLM, and SDL_shadercross submodule gitlinks so recursive clones reproduce the
+  locked vendor tree.
+- SDK packaging now stages only tracked sandbox sources and rejects generated `Library`, `Logs`, `Build`, `Temp`, and
+  recovery data in the staging tree, archive, and extracted validation copy.
+
 - Project thumbnails and labels now initiate the same asset drag, component cards collapse without losing their bordered
   presentation, horizontal Scene-camera motion follows pointer direction, and file-manager reveal opens the canonical
   project asset path instead of the process default folder.

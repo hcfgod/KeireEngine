@@ -28,7 +28,7 @@ cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURAT
 cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
 find "$ROOT/Build/Tools/ShaderCompiler" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$stage/bin/" \;
 cp "$ROOT/Config/Client.json" "$stage/Config/Client.json"
-cp -R "$ROOT/Samples/KeireSandbox" "$stage/samples/"
+copy_tracked_tree "$ROOT" "Samples/KeireSandbox" "$stage/samples/KeireSandbox"
 cp -R "$ROOT/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$stage/include/"; cp -R "$ROOT/Vendor/spdlog/include/spdlog/"* "$stage/third-party/spdlog/"
 cp "$ROOT/Vendor/spdlog/LICENSE" "$stage/third-party/licenses/spdlog-LICENSE.txt"
 cp "$ROOT/Vendor/spdlog/include/spdlog/fmt/bundled/fmt.license.rst" "$stage/third-party/licenses/fmt-LICENSE.rst"
@@ -65,12 +65,13 @@ grep -Fq "\"sdlShadercross\": \"$shadercross\"" "$stage/build-manifest.json" || 
 "$stage/bin/KeireShaderCompiler" --help 2>&1 | grep -Fq shadercross || { printf 'Packaged shader compiler validation failed.\n' >&2; exit 1; }
 "$stage/bin/$asset_tool" --help | grep -Fq 'KeireAssetTool cook' || { printf 'Packaged asset tool validation failed.\n' >&2; exit 1; }
 KEIRE_SHADER_COMPILER="$stage/bin/KeireShaderCompiler" "$stage/bin/$asset_tool" import --project "$stage/samples/KeireSandbox" | grep -Fq 'Imported' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
-rm -rf "$stage/samples/KeireSandbox/Library"
+rm -rf "$stage/samples/KeireSandbox/Library" "$stage/samples/KeireSandbox/Logs" "$stage/samples/KeireSandbox/Build" "$stage/samples/KeireSandbox/Temp"
 version_output="$("$stage/bin/$CLIENT_TARGET" --version)"
 commit_prefix="${commit:0:12}"
 expected_identity="$commit_prefix"; [[ "$dirty" == true ]] && expected_identity="${commit_prefix}-dirty"
 [[ "$version_output" == *"$expected_identity"* ]] || { printf 'Packaged binary identity does not match build-manifest.json.\n' >&2; exit 1; }
 [[ "$dirty" == true || "$version_output" != *"${commit_prefix}-dirty"* ]] || { printf 'Packaged binary reports a stale dirty state.\n' >&2; exit 1; }
+assert_package_generated_data_free "$stage"
 
 if [[ "$CONFIGURATION" == Release && "$PLATFORM" == Linux ]]; then
   command -v objcopy >/dev/null 2>&1 || { printf 'objcopy is required to package Linux Release symbols.\n' >&2; exit 1; }
@@ -96,6 +97,7 @@ elif [[ "$CONFIGURATION" == Release && "$PLATFORM" == Mac ]]; then
 fi
 
 tar -C "$stage" -czf "$archive" .
+assert_package_archive_generated_data_free "$archive"
 if command -v sha256sum >/dev/null 2>&1; then
   digest="$(sha256sum "$archive" | awk '{print $1}')"
 else
@@ -109,6 +111,7 @@ if [[ -d "$symbol_stage" ]] && find "$symbol_stage" -type f -print -quit | grep 
 fi
 validation_root="$ROOT/Artifacts/$name-validation"; rm -rf "$validation_root"; mkdir -p "$validation_root/sdk"
 tar -C "$validation_root/sdk" -xzf "$archive"
+assert_package_generated_data_free "$validation_root/sdk"
 cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
 consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "-I$validation_root/sdk/third-party" "$validation_root/sdk/examples/consumer/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
 [[ "$CONFIGURATION" == Dist ]] && consumer_compile+=(-flto)

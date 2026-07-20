@@ -188,6 +188,31 @@ try {
     New-Item -ItemType File -Force $uiHeader | Out-Null
     New-Item -ItemType File -Force (Join-Path $packageStage "include\Core\UiWorkspace.h") | Out-Null
     Assert-WindowsPackageStage $packageStage Client Hub Core Core
+    foreach ($generatedPath in @(
+        "samples\KeireSandbox\Build\generated.vcxproj",
+        "samples\KeireSandbox\Logs\Core.log",
+        "samples\KeireSandbox\Library\AssetCatalog.json",
+        "samples\KeireSandbox\Temp\editor.tmp",
+        "samples\KeireSandbox\Assets\Scenes\SampleScene.recovery.json"
+    )) {
+        $generatedFile = Join-Path $packageStage $generatedPath
+        New-Item -ItemType Directory -Force (Split-Path $generatedFile) | Out-Null
+        New-Item -ItemType File -Force $generatedFile | Out-Null
+        Assert-Throws { Assert-WindowsPackageGeneratedDataFree $packageStage } "Generated package data rejection: $generatedPath"
+        Remove-Item $generatedFile -Force
+    }
+    $archiveContamination = Join-Path ([IO.Path]::GetTempPath()) ("template-package-contamination-" + [guid]::NewGuid().ToString("N") + ".zip")
+    try {
+        $generatedFile = Join-Path $packageStage "samples\KeireSandbox\Build\generated.txt"
+        New-Item -ItemType Directory -Force (Split-Path $generatedFile) | Out-Null
+        New-Item -ItemType File -Force $generatedFile | Out-Null
+        Compress-Archive (Join-Path $packageStage "*") $archiveContamination
+        Assert-Throws { Assert-WindowsPackageArchiveGeneratedDataFree $archiveContamination } "Generated archive data rejection"
+        Remove-Item $generatedFile -Force
+    }
+    finally {
+        Remove-Item $archiveContamination -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item (Join-Path $packageStage "lib\CoreImGui.lib")
     Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } "Missing Dear ImGui package archive validation"
     New-Item -ItemType File (Join-Path $packageStage "lib\CoreImGui.lib") | Out-Null
@@ -199,6 +224,16 @@ try {
 }
 finally {
     Remove-Item $packageStage -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$trackedSampleStage = Join-Path ([IO.Path]::GetTempPath()) ("template-tracked-sample-" + [guid]::NewGuid().ToString("N"))
+try {
+    Copy-WindowsTrackedTree (Get-RepositoryRoot) "Samples/KeireSandbox" $trackedSampleStage
+    Assert-True (Test-Path (Join-Path $trackedSampleStage "ProjectSettings\Project.keireproject")) "Tracked sample copy includes project settings"
+    Assert-WindowsPackageGeneratedDataFree $trackedSampleStage
+}
+finally {
+    Remove-Item $trackedSampleStage -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 $identityFixture = Join-Path ([IO.Path]::GetTempPath()) ("template-identity-test-" + [guid]::NewGuid().ToString("N"))

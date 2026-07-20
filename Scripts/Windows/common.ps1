@@ -122,6 +122,77 @@ function ConvertTo-MacroPrefix {
     return $value.ToUpperInvariant()
 }
 
+function Copy-WindowsTrackedTree {
+    param([string]$RepositoryRoot, [string]$RelativeSource, [string]$Destination)
+
+    if (-not (Test-GitRepository $RepositoryRoot)) {
+        throw "Tracked package copies require a Git working tree: $RepositoryRoot"
+    }
+
+    $trackedFiles = @(& git -c core.quotepath=false -C $RepositoryRoot ls-files -- $RelativeSource)
+    if ($LASTEXITCODE -ne 0 -or $trackedFiles.Count -eq 0) {
+        throw "No tracked files were found for package source '$RelativeSource'."
+    }
+
+    New-Item -ItemType Directory -Force $Destination | Out-Null
+    $prefix = $RelativeSource.TrimEnd('/', '\') + "/"
+    foreach ($trackedFile in $trackedFiles) {
+        if (-not $trackedFile.StartsWith($prefix, [StringComparison]::Ordinal)) {
+            throw "Tracked package path escaped '$RelativeSource': $trackedFile"
+        }
+
+        $relativePath = $trackedFile.Substring($prefix.Length).Replace('/', [IO.Path]::DirectorySeparatorChar)
+        $target = Join-Path $Destination $relativePath
+        New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $RepositoryRoot $trackedFile) -Destination $target
+    }
+}
+
+function Test-WindowsGeneratedPackagePath {
+    param([string]$RelativePath)
+
+    $normalized = $RelativePath.Replace('\', '/')
+    $segments = $normalized.Split('/', [StringSplitOptions]::RemoveEmptyEntries)
+    foreach ($segment in $segments) {
+        if ($segment -in @("Library", "Logs", "Build", "Temp", "SceneRecovery", "Recovery")) { return $true }
+    }
+
+    $name = if ($segments.Count -gt 0) { $segments[-1] } else { "" }
+    return $name -match '(?i)(^|[._-])recovery([._-]|$)' -or $name -match '(?i)\.tmp$'
+}
+
+function Assert-WindowsPackageGeneratedDataFree {
+    param([string]$Stage)
+
+    $stageRoot = (Resolve-Path -LiteralPath $Stage).Path.TrimEnd('\') + '\'
+    foreach ($entry in Get-ChildItem -LiteralPath $Stage -Force -Recurse -ErrorAction SilentlyContinue) {
+        if (-not $entry.FullName.StartsWith($stageRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Package entry escaped its staging root: $($entry.FullName)"
+        }
+        $relativePath = $entry.FullName.Substring($stageRoot.Length)
+        if (Test-WindowsGeneratedPackagePath $relativePath) {
+            throw "Package contains generated workspace data: $relativePath"
+        }
+    }
+}
+
+function Assert-WindowsPackageArchiveGeneratedDataFree {
+    param([string]$Archive)
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($Archive)
+    try {
+        foreach ($entry in $zip.Entries) {
+            if (Test-WindowsGeneratedPackagePath $entry.FullName) {
+                throw "Package archive contains generated workspace data: $($entry.FullName)"
+            }
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
 function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
@@ -148,6 +219,7 @@ function Assert-WindowsPackageStage {
     if (-not (Get-ChildItem (Join-Path $Stage "lib\cmake") -Filter "*Config.cmake" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw "Package is missing its CMake package configuration."
     }
+    Assert-WindowsPackageGeneratedDataFree $Stage
 }
 
 function Resolve-WindowsToolset {

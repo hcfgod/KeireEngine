@@ -220,6 +220,8 @@ ABI through reflection before publication.
 Packages include KeireHub, the KeireClient editor, KeireAssetTool, KeireShaderCompiler and its runtime libraries, KeireCore plus private KeireImGui/KeireZstd archives,
 public `Keire/<header>` APIs, required spdlog headers, the SDL static SDK, complete license texts, notices, README, and a
 complete `samples/KeireSandbox` project. The packaged asset tool imports and validates the sample input and scene assets
+from a tracked-file allowlist. Generated workspace and recovery data is rejected in the stage, archive, and extracted
+validation copy
 before archive publication. Dear ImGui and Zstd headers/sources are not redistributed because Kéire's public facades own
 the supported contracts. Direct validation links Core, ImGui, Zstd, then SDL; the generated CMake package carries those
 private archives through `Keire::Core`, so low-level and managed consumers still name one Kéire target.
