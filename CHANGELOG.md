@@ -6,6 +6,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- Backend-conditional D3D12, Vulkan, and Metal rendered-output tests with synchronized offscreen RGBA8 readback and
+  tolerant pixel assertions for ambient, directional, tint, exposure, and transformed-normal behavior.
+
 - Project-owned ambient color, intensity, and exposure settings with atomic persistence, a dockable Project Settings
   editor, and matching Scene/Game lighting submissions.
 - Unity-style Scene transform gizmos with `Q/W/E/R` tool shortcuts, Local/Global space, independent position/rotation/

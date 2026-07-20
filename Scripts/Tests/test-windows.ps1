@@ -106,6 +106,9 @@ $renderSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Re
 Assert-True ($renderSource.Contains('BuiltinUnlitShaders.h') -and $renderSource.Contains('renderer->Tint()') -and -not $renderSource.Contains('Vendor/SDL/test')) "Mesh tint shader ownership and draw wiring"
 $builtinShader = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl') -Raw
 Assert-True ($renderSource.Contains('ResolveLighting') -and $renderSource.Contains('DirectionalLightComponent') -and $renderSource.Contains('AmbientAndExposure') -and $builtinShader.Contains('LightDirection') -and $builtinShader.Contains('worldNormal')) "Directional and ambient light wiring"
+Assert-True ($renderSource.Contains('ReadbackRGBA8') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireRenderTests\Source\RenderedOutputTests.cpp'))) "Rendered output readback tests"
+$testRunner = Get-Content (Join-Path $Windows 'test.ps1') -Raw
+Assert-True ($testRunner.Contains('direct3d12') -and $testRunner.Contains('vulkan') -and $testRunner.Contains('KEIRE_REQUIRE_GPU_TESTS')) "Conditional Windows GPU test backends"
 Assert-True ($renderSource.Contains('BuiltinShaderUniformBufferCount(vertex)') -and -not $renderSource.Contains('SDL_PushGPUFragmentUniformData')) "Built-in lighting uses only its reflected vertex uniform block"
 $renderSettingsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSettings.cpp') -Raw
 Assert-True ($renderSettingsSource.Contains('Rendering.keiresettings') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'Samples\KeireSandbox\ProjectSettings\Rendering.keiresettings'))) "Persistent project rendering settings"

@@ -150,3 +150,4 @@ include(ProjectConfig.CLIENT_DIRECTORY .. "/premake5.lua")
 include(ProjectConfig.HUB_DIRECTORY .. "/premake5.lua")
 include "AssetTool/premake5.lua"
 include(ProjectConfig.TESTS_DIRECTORY .. "/premake5.lua")
+include "KeireRenderTests/premake5.lua"

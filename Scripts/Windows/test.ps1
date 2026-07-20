@@ -58,4 +58,45 @@ finally {
     $env:PATH = $originalPath
     Pop-Location
 }
+
+if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
+    $renderTestsTarget = "$($Project.PROJECT_NAMESPACE)RenderTests"
+    $renderTestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$renderTestsTarget\$renderTestsTarget.exe"
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -Target $renderTestsTarget -CI:$CI -Update:$Update -Generate:$Generate
+    if (-not (Test-Path $renderTestsExe)) { throw "GPU render tests executable was not found: $renderTestsExe" }
+
+    $previousVideoDriver = $env:SDL_VIDEODRIVER
+    $previousGpuBackend = $env:KEIRE_GPU_TEST_BACKEND
+    try {
+        Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue
+        foreach ($backend in @("direct3d12", "vulkan")) {
+            $env:KEIRE_GPU_TEST_BACKEND = $backend
+            & $renderTestsExe --probe
+            $gpuProbeExitCode = $LASTEXITCODE
+            if ($gpuProbeExitCode -eq 77) {
+                Write-Host "==> GPU render tests skipped: $backend is unavailable"
+                $required = $env:KEIRE_REQUIRE_GPU_TESTS
+                if ($required -and ($required -in @("1", "all") -or $backend -in ($required -split ','))) {
+                    throw "Required GPU test backend is unavailable: $backend"
+                }
+                continue
+            }
+            elseif ($gpuProbeExitCode -ne 0) {
+                throw "GPU render test probe failed for $backend with exit code $gpuProbeExitCode."
+            }
+
+            Write-Host "==> Running GPU render tests with $backend"
+            & $renderTestsExe
+            $gpuExitCode = $LASTEXITCODE
+            if ($gpuExitCode -ne 0) {
+                throw "GPU render tests failed for $backend with exit code $gpuExitCode."
+            }
+        }
+    }
+    finally {
+        $env:SDL_VIDEODRIVER = $previousVideoDriver
+        $env:KEIRE_GPU_TEST_BACKEND = $previousGpuBackend
+    }
+}
 exit $exitCode

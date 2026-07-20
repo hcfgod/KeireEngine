@@ -44,6 +44,45 @@ if [[ "$MODE" == test && "$CONFIGURATION" =~ ^Debug ]]; then
     grep -q 'assertion probe' "$probe_output"
     rm -f "$probe_output"
 fi
+if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
+    render_tests_target="${PROJECT_NAMESPACE}RenderTests"
+    render_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$render_tests_target")
+    [[ $CI -eq 1 ]] && render_args+=(--ci)
+    [[ $UPDATE -eq 1 ]] && render_args+=(--update)
+    [[ $FORCE -eq 1 ]] && render_args+=(--force)
+    bash "$ROOT/Scripts/$PLATFORM/build.sh" "${render_args[@]}"
+    render_tests="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$render_tests_target/$render_tests_target"
+    [[ -x "$render_tests" ]] || { printf 'GPU render tests executable not found: %s\n' "$render_tests" >&2; exit 1; }
+    backends=(vulkan)
+    [[ "$PLATFORM" == Mac ]] && backends=(metal)
+    for backend in "${backends[@]}"; do
+        printf '==> Running GPU render tests with %s\n' "$backend"
+        set +e
+        (cd "$ROOT" && env -u SDL_VIDEODRIVER KEIRE_GPU_TEST_BACKEND="$backend" "$render_tests" --probe)
+        gpu_probe_status=$?
+        set -e
+        if [[ $gpu_probe_status -eq 77 ]]; then
+            printf '==> GPU render tests skipped: %s is unavailable\n' "$backend"
+            required=",${KEIRE_REQUIRE_GPU_TESTS:-},"
+            [[ "$required" != ",1," && "$required" != ",all," && "$required" != *",$backend,"* ]] || {
+                printf 'Required GPU test backend is unavailable: %s\n' "$backend" >&2
+                exit 1
+            }
+            continue
+        elif [[ $gpu_probe_status -ne 0 ]]; then
+            printf 'GPU render test probe failed for %s with exit code %s.\n' "$backend" "$gpu_probe_status" >&2
+            exit "$gpu_probe_status"
+        fi
+        set +e
+        (cd "$ROOT" && env -u SDL_VIDEODRIVER KEIRE_GPU_TEST_BACKEND="$backend" "$render_tests")
+        gpu_status=$?
+        set -e
+        if [[ $gpu_status -ne 0 ]]; then
+            printf 'GPU render tests failed for %s with exit code %s.\n' "$backend" "$gpu_status" >&2
+            exit "$gpu_status"
+        fi
+    done
+fi
 if [[ "$MODE" == run ]]; then
     cli_root="$(mktemp -d)"
     for option in --help -h --version -v; do (cd "$cli_root" && "$executable" "$option" >/dev/null); done

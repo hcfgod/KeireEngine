@@ -72,6 +72,7 @@ Never format or patch vendored code during ordinary engine work.
 | Hub tray behavior | Injected lifecycle tests plus conditional native smoke |
 | Script changes | Matching Windows and Unix regression harnesses |
 | Packaging | Release package with direct and CMake low-level/managed consumers |
+| Rendered pixels | Hidden-window `KeireRenderTests` on D3D12/Vulkan/Metal where supported |
 
 UBSan and TSan should also run when a supported GCC/Clang platform is available and the change affects undefined
 behavior or concurrency. A missing host capability must be reported; it is not equivalent to a passing check.
@@ -146,6 +147,11 @@ bash Scripts/Tests/test-unix.sh
 
 The harnesses exercise argument validation, dependency mappings, generated identity, package-stage requirements,
 public dependency isolation, and safe cleanup behavior without performing a full release build.
+
+Normal Debug and Release test commands also build `KeireRenderTests`. Windows attempts D3D12 and Vulkan, Linux attempts
+Vulkan, and macOS attempts Metal. An unavailable local driver is reported as a skip; set `KEIRE_REQUIRE_GPU_TESTS=all`
+or a comma-separated backend list to turn a missing configured backend into a failure. Pixel tests use central image
+regions and tolerant color/behavior deltas rather than exact screenshots.
 
 ## Coverage
 

@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstring>
 #include <deque>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <thread>
@@ -443,6 +444,7 @@ namespace Keire
                 else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
                 {
                     information.format = SDL_GPU_SHADERFORMAT_SPIRV;
+                    information.entrypoint = "main";
                     information.code = vertex ? Detail::BuiltinUnlitVertexSpirV : Detail::BuiltinUnlitFragmentSpirV;
                     information.code_size =
                         vertex ? Detail::BuiltinUnlitVertexSpirVSize : Detail::BuiltinUnlitFragmentSpirVSize;
@@ -712,7 +714,11 @@ namespace Keire
 
                     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);
                     if (!pipeline)
-                        throw std::runtime_error("SDL_CreateGPUGraphicsPipeline failed: " + LastSdlError());
+                        throw std::runtime_error("SDL_CreateGPUGraphicsPipeline failed for " +
+                                                 std::string(primitive == SDL_GPU_PRIMITIVETYPE_TRIANGLELIST
+                                                                 ? "triangle list"
+                                                                 : "line list") +
+                                                 ": " + LastSdlError());
                     SDL_ReleaseGPUShader(Device, fragment);
                     SDL_ReleaseGPUShader(Device, vertex);
                     return pipeline;
@@ -1198,6 +1204,75 @@ namespace Keire
     SDL_GPUTexture* RenderSystemInternalAccess::Texture(const RenderSurface& surface) noexcept
     {
         return surface.m_Impl->State->Resources.SampledColor;
+    }
+
+    std::vector<std::uint8_t> RenderSystemInternalAccess::ReadbackRGBA8(RenderSystem& renderer,
+                                                                        const RenderSurface& surface)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("ReadbackRGBA8");
+        const auto& surfaceState = *surface.m_Impl->State;
+        const auto owner = surfaceState.Owner.lock();
+        if (owner.get() != &renderState)
+            throw std::invalid_argument("Render surface belongs to another renderer.");
+        if (!surfaceState.Resources.SampledColor || surfaceState.Width == 0 || surfaceState.Height == 0)
+            throw std::logic_error("Render surface is not available for readback.");
+
+        const std::uint64_t byteSize64 =
+            static_cast<std::uint64_t>(surfaceState.Width) * static_cast<std::uint64_t>(surfaceState.Height) * 4ULL;
+        if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("Render surface is too large for an RGBA8 readback.");
+        const auto byteSize = static_cast<std::uint32_t>(byteSize64);
+
+        SDL_GPUTransferBufferCreateInfo transferInformation{};
+        transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+        transferInformation.size = byteSize;
+        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(renderState.Device, &transferInformation);
+        if (!transfer)
+            throw std::runtime_error("SDL_CreateGPUTransferBuffer(readback) failed: " + LastSdlError());
+
+        SDL_GPUFence* fence = nullptr;
+        try
+        {
+            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(renderState.Device);
+            if (!commands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(readback) failed: " + LastSdlError());
+            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+            if (!copy)
+            {
+                (void)SDL_CancelGPUCommandBuffer(commands);
+                throw std::runtime_error("SDL_BeginGPUCopyPass(readback) failed: " + LastSdlError());
+            }
+
+            const SDL_GPUTextureRegion source{
+                surfaceState.Resources.SampledColor, 0, 0, 0, 0, 0, surfaceState.Width, surfaceState.Height, 1};
+            const SDL_GPUTextureTransferInfo destination{transfer, 0, surfaceState.Width, surfaceState.Height};
+            SDL_DownloadFromGPUTexture(copy, &source, &destination);
+            SDL_EndGPUCopyPass(copy);
+            fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+            if (!fence)
+                throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence(readback) failed: " +
+                                         LastSdlError());
+            if (!SDL_WaitForGPUFences(renderState.Device, true, &fence, 1))
+                throw std::runtime_error("SDL_WaitForGPUFences(readback) failed: " + LastSdlError());
+
+            const void* mapped = SDL_MapGPUTransferBuffer(renderState.Device, transfer, false);
+            if (!mapped)
+                throw std::runtime_error("SDL_MapGPUTransferBuffer(readback) failed: " + LastSdlError());
+            std::vector<std::uint8_t> pixels(byteSize);
+            std::memcpy(pixels.data(), mapped, byteSize);
+            SDL_UnmapGPUTransferBuffer(renderState.Device, transfer);
+            SDL_ReleaseGPUFence(renderState.Device, fence);
+            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+            return pixels;
+        }
+        catch (...)
+        {
+            if (fence)
+                SDL_ReleaseGPUFence(renderState.Device, fence);
+            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+            throw;
+        }
     }
 
     void* RenderSystemInternalAccess::SurfaceState(RenderSurface& surface) noexcept
