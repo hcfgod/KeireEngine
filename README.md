@@ -270,8 +270,9 @@ production surface uses base-color, +Y normal, packed metallic-roughness, separa
 emissive semantics with neutral fallbacks. Edits are range-checked, previewed through live immutable revisions, saved
 atomically at the edit boundary, persisted to the catalog in the background, and recorded in project-asset undo.
 
-The Sandbox startup scene uses an imported UV-mapped pyramid and Texture2D material through the same renderer-owned
-resource caches used by the editor. Dist cooking follows scene-to-material-to-shader/texture dependencies and emits a
+The Sandbox startup scene uses an imported textured monster from `Assets/Meshes/Monster/base.fbx` and a UV-mapped
+pyramid through the same renderer-owned resource caches used by the editor. Dist cooking follows
+scene-to-material-to-shader/texture dependencies and emits a
 runtime manifest; omit `--frames` to run the cooked scene as the normal standalone player.
 
 ## Projects And Scenes

@@ -4,8 +4,13 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Fixed clean Windows Ninja builds so generated built-in shader headers are produced before any engine source compiles.
+
 ### Fixed
 
+- Successful imports now atomically advance compatible `.keiremeta` importer versions without rewriting stable IDs,
+  settings, dependencies, or project-owned fields; failed imports leave metadata byte-identical. The Sandbox contains
+  one organized monster FBX at `Assets/Meshes/Monster/base.fbx` with its active scene identity preserved.
 - Asset move, folder, trash/restore, and cooked-publication renames now retry only transient sharing/permission
   failures with bounded backoff and resolved-path diagnostics. Script harnesses rely on compiled editor behavior tests
   instead of stale implementation-text probes while still proving top-level launcher failure propagation.

@@ -161,6 +161,10 @@ assert_true grep -q 'CreateSystemTray' "$ROOT/KeireHub/Source/HubApplication.cpp
 assert_true grep -q 'Show Hub' "$ROOT/KeireHub/Source/HubApplication.cpp"
 assert_true grep -q '"schemaVersion": 2' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true grep -q '"components"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
+assert_equal "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f -name base.fbx | wc -l | tr -d ' ')" 1 'organized monster source count'
+assert_equal "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f -name '*.fbx' -exec sha256sum {} + | awk '{print $1}' | sort | uniq -d | wc -l | tr -d ' ')" 0 'duplicate FBX content'
+assert_true grep -q 'c506e2a8-62f9-44f0-8831-b66755cc9b9b' "$ROOT/Samples/KeireSandbox/Assets/Meshes/Monster/base.fbx.keiremeta"
+assert_false grep -R -q '070fedd0-9e84-435e-83ae-21b4530159f3' "$ROOT/Samples/KeireSandbox/Assets"
 assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
 assert_false grep -R -E 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image' "$ROOT/KeireCore/Include/Keire"
 assert_true grep -q 'class KEIRE_API UiWorkspace' "$ROOT/KeireCore/Include/Keire/UiWorkspace.h"

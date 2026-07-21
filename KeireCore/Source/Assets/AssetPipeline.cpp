@@ -280,6 +280,22 @@ namespace Keire
             Detail::AtomicReplace(temporary, path);
         }
 
+        [[nodiscard]] bool UpgradeMetadataImporterVersion(const std::filesystem::path& path,
+                                                          const std::string_view importer,
+                                                          const std::uint32_t importerVersion)
+        {
+            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            if (!metadata.is_object() || metadata.value("schemaVersion", 0) != 1 ||
+                metadata.value("importer", std::string{}) != importer)
+                throw std::runtime_error("Asset metadata cannot be upgraded by a different importer: " + path.string());
+            const auto currentVersion = metadata.value("importerVersion", 0U);
+            if (currentVersion >= importerVersion)
+                return false;
+            metadata["importerVersion"] = importerVersion;
+            WriteJsonAtomically(path, metadata);
+            return true;
+        }
+
         [[nodiscard]] AssetSourceRecord ReadMetadata(const std::filesystem::path& sourceRoot,
                                                      const std::filesystem::path& source,
                                                      const std::size_t maximumSourceBytes, const bool digestSource,
@@ -941,6 +957,7 @@ namespace Keire
         AssetImportResult result;
         bool failed = false;
         std::size_t completed = 0;
+        std::vector<std::pair<AssetId, std::uint32_t>> metadataUpgrades;
         for (const auto& record : records)
         {
             ThrowIfOperationCancelled(cancellation);
@@ -991,6 +1008,9 @@ namespace Keire
                     status.State = AssetImportState::Imported;
                 }
                 m_Impl->StoreCookInput(record, std::move(imported));
+                if (const auto* importer = m_Impl->FindImporter(record);
+                    importer && importer->Version > record.ImporterVersion)
+                    metadataUpgrades.emplace_back(record.Id, importer->Version);
             }
             catch (const std::exception& error)
             {
@@ -1022,6 +1042,18 @@ namespace Keire
             if (std::filesystem::is_regular_file(previous))
                 result.CatalogPath = previous;
             return result;
+        }
+        for (const auto& [id, version] : metadataUpgrades)
+        {
+            const auto record = Find(id);
+            if (!record || !UpgradeMetadataImporterVersion(record->MetadataPath, record->Importer, version))
+                continue;
+            auto upgraded = *record;
+            upgraded.ImporterVersion = version;
+            const auto metadataBytes = ReadSource(upgraded.MetadataPath, 1024U * 1024U);
+            upgraded.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
+            m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(m_Impl->SourceRoot / record->RelativePath,
+                                                                             record->MetadataPath));
         }
         try
         {

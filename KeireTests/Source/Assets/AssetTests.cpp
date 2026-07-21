@@ -97,6 +97,58 @@ TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
     CHECK_THROWS((void)database->Refresh());
 }
 
+TEST_CASE("Successful compatible imports upgrade metadata without losing project fields")
+{
+    TemporaryAssetProject project;
+    const auto id = Keire::AssetId::Generate();
+    project.Write("Versioned.upgrade", "versioned source");
+    const auto metadata = std::string("{\n") +
+                          "  \"schemaVersion\": 1,\n"
+                          "  \"id\": \"" +
+                          id.ToString() +
+                          "\",\n"
+                          "  \"type\": \"" +
+                          Keire::TextAsset::StaticType().ToString() +
+                          "\",\n"
+                          "  \"importer\": \"Test.MetadataUpgrade\",\n"
+                          "  \"importerVersion\": 1,\n"
+                          "  \"dependencies\": [],\n"
+                          "  \"subAssets\": [],\n"
+                          "  \"importSettings\": {\"quality\": 7},\n"
+                          "  \"projectExtension\": {\"keep\": true}\n"
+                          "}\n";
+    project.Write("Versioned.upgrade.keiremeta", metadata);
+
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.MetadataUpgrade";
+    importer.Version = 2;
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".upgrade"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    (void)database->ImportAll();
+
+    REQUIRE(database->Find(id));
+    CHECK(database->Find(id)->ImporterVersion == 2);
+    const auto upgraded = ReadAll(project.Root / "Assets/Versioned.upgrade.keiremeta");
+    const std::string upgradedText(upgraded.begin(), upgraded.end());
+    CHECK(upgradedText.find("\"importerVersion\": 2") != std::string::npos);
+    CHECK(upgradedText.find(id.ToString()) != std::string::npos);
+    CHECK(upgradedText.find("projectExtension") != std::string::npos);
+    CHECK(upgradedText.find("\"quality\": 7") != std::string::npos);
+
+    auto failingImporter = importer;
+    failingImporter.Version = 3;
+    failingImporter.Import = [](std::span<const std::byte>) -> std::vector<std::byte>
+    { throw std::runtime_error("intentional metadata upgrade import failure"); };
+    auto failingDatabase = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {failingImporter}});
+    (void)failingDatabase->ImportAll(Keire::AssetImportPolicy::KeepLastGood);
+    CHECK(ReadAll(project.Root / "Assets/Versioned.upgrade.keiremeta") == upgraded);
+}
+
 TEST_CASE("External asset imports persist normalized options and preserve identities on replace")
 {
     TemporaryAssetProject project;

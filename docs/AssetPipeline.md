@@ -36,9 +36,17 @@ dependencies, and reserved stable subasset IDs. A missing sidecar is created ato
 instead of regenerated so an identity is never silently lost. Duplicate IDs, subasset collisions, symbolic links,
 case-colliding paths, unsafe relative paths, oversized metadata, and oversized sources are rejected.
 
+When a registered importer is a newer compatible version, a successful import atomically updates only the
+`importerVersion` field in the sidecar. JSON fields unknown to the engine, stable identity, dependencies, subassets,
+and normalized import settings are preserved. Failed imports do not touch metadata. Committed sample metadata is kept
+at current successful versions, so opening or reimporting the Sandbox does not dirty tracked files.
+
 Rename moves source and metadata as one rollback-capable operation. Duplicate copies bytes and creates a new identity.
 Delete is represented by `MoveToTrash()`, which moves both files under `Library/Trash/<asset-id>` for recovery. Public
 operations confine destinations below the configured source root.
+
+The Sandbox keeps its single monster source at `Assets/Meshes/Monster/base.fbx`; its metadata retains AssetId
+`c506e2a8-62f9-44f0-8831-b66755cc9b9b`, which is the identity referenced by the startup scene.
 
 `MoveAsset`, `MoveFolder`, `DuplicateFolder`, `TrashAsset`, `TrashFolder`, `RestoreTrash`, and
 `PermanentlyDeleteTrash` provide the Project panel's transactional file boundary. Folder operations include metadata
