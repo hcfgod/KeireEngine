@@ -6,6 +6,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Scene, Hierarchy, Inspector, Input Actions, and Project Settings panels now own their dock registration and content
+  boundary; material drafts own their source/baseline lifecycle in `MaterialDocument`, document mutation storage is no
+  longer public, and entity, selection, Play, save, and history actions share the command router.
 - GPU material entries now cache complete last-good pipelines, packed numeric slots, texture/sampler bindings, and
   dependency revision stamps. Shared-material draws reuse immutable bindings, component tint remains per draw, and a
   failed dependency rebuild cannot partially replace a working material.

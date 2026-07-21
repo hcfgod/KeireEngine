@@ -165,9 +165,10 @@ Configuration examples, application-facing workflows, storage details, and troub
 
 ## Asset Runtime And Pipeline
 
-Editor material authoring is split between `MaterialDocument`, which owns shader-driven source state and validation,
-and `MaterialInspectorPanel`, which maps that state onto the engine-owned property editor interface. Material file
-snapshots enter the project-assets undo context; the workspace layer composes the panel and coordinates persistence.
+Editor material authoring is split between `MaterialDocument`, which owns the selected asset/path, draft and committed
+source snapshots, shader-driven state, dirty lifecycle, and validation, and `MaterialInspectorPanel`, which maps that
+state onto the engine-owned property editor interface. Material file snapshots enter the project-assets undo context;
+the workspace layer composes the panel and coordinates persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
 refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are

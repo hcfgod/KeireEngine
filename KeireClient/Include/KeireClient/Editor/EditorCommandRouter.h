@@ -12,6 +12,13 @@ namespace KeireEditor
         SaveScene,
         SaveSceneAs,
         CloseScene,
+        CreateEntity,
+        DeleteSelection,
+        SelectAll,
+        ClearSelection,
+        Play,
+        Pause,
+        Stop,
         Exit,
         Undo,
         Redo

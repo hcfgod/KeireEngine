@@ -8,9 +8,18 @@ interfaces. Asset Browser, Console, and Diagnostics remain independent panels, a
 bounded service. The workspace layer owns services, composes those panels, coordinates modal transitions, and
 orchestrates each frame.
 
-`EditorCommandRouter` is the single dispatch point shared by menu items and shortcuts. A command supplies its action
-and an availability predicate, so disabled UI and keyboard behavior cannot diverge. The headless `KeireEditorTests`
-target exercises document lifecycle and command dispatch without creating the complete editor application.
+Each primary panel owns its move-only `UiPanelRegistration` and begins/ends its own docked content boundary. The
+workspace supplies the narrow controller interface but does not decide whether a closed panel executes content.
+`SceneDocument` and `InputActionsDocument` expose lifecycle and selection commands instead of public mutable storage.
+`MaterialDocument` retains the selected asset, source path, draft bytes, committed baseline, shader schema, and dirty
+state, so material undo and persistence no longer depend on parallel workspace fields. `SceneCameraController` owns
+camera state, focus/lock, capture, and atomic persistence independently of the Scene panel.
+
+`EditorCommandRouter` is the single dispatch point shared by menu items, shortcuts, and the Play toolbar. Scene
+creation/save/close, entity create/delete, select all/clear, Play/Pause/Stop, and undo/redo each supply an action and an
+availability predicate, so disabled UI and keyboard behavior cannot diverge. The headless `KeireEditorTests` target
+exercises document lifecycle, material draft ownership, camera persistence, and command dispatch without creating the
+complete editor application.
 
 ## Global Commands
 

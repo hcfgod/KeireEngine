@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+class EditorWorkspaceLayer;
+
 namespace KeireEditor
 {
     class SceneDocument final
@@ -31,8 +33,14 @@ namespace KeireEditor
         void SetSelections(std::span<const Keire::AssetId> selections) noexcept;
         void SynchronizeSelection() noexcept;
         void ClearSelection() noexcept;
+        void Open(Keire::Ref<Keire::Scene> scene, Keire::AssetId asset = {}, std::filesystem::path source = {},
+                  Keire::Ref<Keire::UndoContext> undo = {});
+        void BeginPlay();
+        void SetRecoveryAvailable(bool available) noexcept { m_RecoveryAvailable = available; }
         void Close() noexcept;
 
+      private:
+        friend class ::EditorWorkspaceLayer;
         [[nodiscard]] Keire::Ref<Keire::Scene>& SceneStorage() noexcept { return m_Scene; }
         [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>& PlaySessionStorage() noexcept { return m_PlaySession; }
         [[nodiscard]] Keire::Ref<Keire::SceneLoadOperation>& LoadOperationStorage() noexcept { return m_LoadOperation; }
@@ -46,7 +54,6 @@ namespace KeireEditor
         [[nodiscard]] double& RecoverySecondsStorage() noexcept { return m_RecoverySeconds; }
         [[nodiscard]] bool& RecoveryAvailableStorage() noexcept { return m_RecoveryAvailable; }
 
-      private:
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::SceneRuntimeSession> m_PlaySession;
         Keire::Ref<Keire::SceneLoadOperation> m_LoadOperation;

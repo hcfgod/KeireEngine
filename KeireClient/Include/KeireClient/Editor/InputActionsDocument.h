@@ -2,6 +2,8 @@
 
 #include "Keire/Core.h"
 
+class EditorWorkspaceLayer;
+
 namespace KeireEditor
 {
     class InputActionsDocument final
@@ -12,8 +14,12 @@ namespace KeireEditor
         [[nodiscard]] bool Dirty() const noexcept { return m_Dirty; }
         void MarkDirty() noexcept { m_Dirty = true; }
         void MarkSaved() noexcept { m_Dirty = false; }
+        void Open(Keire::AssetId asset, Keire::InputActionAssetDefinition definition,
+                  Keire::Ref<Keire::UndoContext> undo = {});
         void Close() noexcept;
 
+      private:
+        friend class ::EditorWorkspaceLayer;
         [[nodiscard]] Keire::AssetId& AssetStorage() noexcept { return m_Asset; }
         [[nodiscard]] Keire::AssetId& MapStorage() noexcept { return m_Map; }
         [[nodiscard]] Keire::AssetId& SchemeStorage() noexcept { return m_Scheme; }
@@ -23,7 +29,6 @@ namespace KeireEditor
         [[nodiscard]] Keire::Ref<Keire::UndoContext>& UndoStorage() noexcept { return m_Undo; }
         [[nodiscard]] bool& DirtyStorage() noexcept { return m_Dirty; }
 
-      private:
         Keire::AssetId m_Asset;
         Keire::AssetId m_Map;
         Keire::AssetId m_Scheme;

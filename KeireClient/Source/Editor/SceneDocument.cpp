@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <ranges>
+#include <stdexcept>
+#include <utility>
 
 namespace KeireEditor
 {
@@ -83,6 +85,29 @@ namespace KeireEditor
     {
         m_Selection = {};
         m_Selections.clear();
+    }
+
+    void SceneDocument::Open(Keire::Ref<Keire::Scene> scene, const Keire::AssetId asset, std::filesystem::path source,
+                             Keire::Ref<Keire::UndoContext> undo)
+    {
+        if (!scene)
+            throw std::invalid_argument("SceneDocument::Open requires a scene.");
+        Close();
+        m_Scene = std::move(scene);
+        m_Asset = asset ? asset : m_Scene->Asset();
+        m_Source = std::move(source);
+        m_Undo = std::move(undo);
+    }
+
+    void SceneDocument::BeginPlay()
+    {
+        if (!m_Scene)
+            throw std::logic_error("SceneDocument cannot enter Play without an editing scene.");
+        if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
+            throw std::logic_error("SceneDocument is already in Play.");
+        m_PlaySession = Keire::CreateRef<Keire::SceneRuntimeSession>(m_Scene);
+        m_PlaySession->Play();
+        SynchronizeSelection();
     }
 
     void SceneDocument::Close() noexcept

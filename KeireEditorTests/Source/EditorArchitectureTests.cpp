@@ -152,6 +152,19 @@ TEST_CASE("editor command router centralizes availability and execution")
     CHECK(executions == 1);
     CHECK_FALSE(router.Execute(KeireEditor::EditorCommand::Exit));
     CHECK_THROWS_AS(router.Bind(KeireEditor::EditorCommand::Exit, {}), std::invalid_argument);
+
+    constexpr std::array routedCommands{
+        KeireEditor::EditorCommand::CreateEntity, KeireEditor::EditorCommand::DeleteSelection,
+        KeireEditor::EditorCommand::SelectAll,    KeireEditor::EditorCommand::ClearSelection,
+        KeireEditor::EditorCommand::Play,         KeireEditor::EditorCommand::Pause,
+        KeireEditor::EditorCommand::Stop,         KeireEditor::EditorCommand::Undo,
+        KeireEditor::EditorCommand::Redo,
+    };
+    for (const auto command : routedCommands)
+        router.Bind(command, [&executions] { ++executions; });
+    for (const auto command : routedCommands)
+        CHECK(router.Execute(command));
+    CHECK(executions == 1 + routedCommands.size());
 }
 
 TEST_CASE("scene document owns selection and deterministic close state")
@@ -161,8 +174,7 @@ TEST_CASE("scene document owns selection and deterministic close state")
                                                 Keire::SceneAsset::EmptyDefinition("Document test"));
     auto entity = scene->CreateEntity("Selected");
     auto second = scene->CreateEntity("Also selected");
-    document.SceneStorage() = scene;
-    document.AssetStorage() = scene->Asset();
+    document.Open(scene);
     document.Select(entity.Id().Value());
     CHECK(document.Selection() == entity.Id().Value());
     document.Select(second.Id().Value(), true);
@@ -174,7 +186,7 @@ TEST_CASE("scene document owns selection and deterministic close state")
     CHECK(document.Selection() == second.Id().Value());
     document.Select(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000099"));
     CHECK_FALSE(document.Selection());
-    document.RecoveryAvailableStorage() = true;
+    document.SetRecoveryAvailable(true);
 
     document.Close();
     CHECK_FALSE(document.Scene());
@@ -239,9 +251,8 @@ TEST_CASE("scene document targets the isolated runtime scene while playing")
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000060"),
                                                 Keire::SceneAsset::EmptyDefinition("Play document"));
     auto authored = scene->CreateEntity("Authored");
-    document.SceneStorage() = scene;
-    document.PlaySessionStorage() = Keire::CreateRef<Keire::SceneRuntimeSession>(scene);
-    document.PlaySessionStorage()->Play();
+    document.Open(scene);
+    document.BeginPlay();
     REQUIRE(document.ActiveScene());
     CHECK(document.ActiveScene() != document.EditingScene());
     document.ActiveScene()->FindEntity(authored.Id()).SetName("Runtime");
@@ -393,8 +404,8 @@ TEST_CASE("play changes preserve selected unavailable component replacements")
 TEST_CASE("input actions document owns authoring state and dirty lifecycle")
 {
     KeireEditor::InputActionsDocument document;
-    document.AssetStorage() = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000002");
-    document.DefinitionStorage() = Keire::InputActionAsset::DefaultDefinition();
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000002"),
+                  Keire::InputActionAsset::DefaultDefinition());
     document.MarkDirty();
     CHECK(document.Dirty());
     CHECK(document.Definition().ActionMaps.size() > 0);
@@ -540,6 +551,33 @@ TEST_CASE("material documents expose every shader texture property without hardc
     CHECK(KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::Roughness));
     CHECK_FALSE(
         KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::BaseColor));
+}
+
+TEST_CASE("material document owns draft and committed source state")
+{
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000023");
+    const auto shader = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000024");
+    Keire::ShaderAssetDefinition shaderDefinition;
+    shaderDefinition.Source = "Assets/Shaders/Material.hlsl";
+    shaderDefinition.Properties = {{"Roughness", Keire::ShaderPropertyType::Scalar, {1.0F, 0.0F, 0.0F, 0.0F}}};
+    const auto resolver = [&](const Keire::AssetId id) -> std::optional<Keire::ShaderAssetDefinition>
+    { return id == shader ? std::optional(shaderDefinition) : std::nullopt; };
+    Keire::MaterialAssetDefinition definition;
+    definition.Shader = shader;
+    const auto source = Keire::MaterialAsset::EncodeSource(definition);
+
+    KeireEditor::MaterialDocument document;
+    document.OpenAsset(asset, "Assets/Materials/Test.keirematerial", source, resolver);
+    CHECK(document.IsOpen(asset));
+    CHECK_FALSE(document.Dirty());
+    CHECK(document.SetProperty("Roughness", 0.25F));
+    document.CaptureDraft();
+    CHECK(document.Dirty());
+    CHECK_FALSE(std::ranges::equal(document.DraftSource(), document.BaselineSource()));
+    const std::vector<std::byte> committed(document.DraftSource().begin(), document.DraftSource().end());
+    document.AcceptSavedSource(committed);
+    CHECK_FALSE(document.Dirty());
+    CHECK(std::ranges::equal(document.DraftSource(), document.BaselineSource()));
 }
 
 TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")

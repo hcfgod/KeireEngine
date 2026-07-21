@@ -25,6 +25,17 @@ namespace KeireEditor
         SetResolvedShader(std::move(shader));
     }
 
+    void MaterialDocument::OpenAsset(const Keire::AssetId asset, std::filesystem::path sourcePath,
+                                     const std::span<const std::byte> source, const ShaderResolver& resolveShader)
+    {
+        Open(source, resolveShader);
+        m_Asset = asset;
+        m_SourcePath = std::move(sourcePath);
+        m_DraftSource.assign(source.begin(), source.end());
+        m_BaselineSource = m_DraftSource;
+        m_Dirty = false;
+    }
+
     bool MaterialDocument::SetShader(const Keire::AssetId shader, const ShaderResolver& resolveShader)
     {
         if (m_Definition.Shader == shader)
@@ -128,6 +139,19 @@ namespace KeireEditor
     std::vector<std::byte> MaterialDocument::SaveSource() const
     {
         return Keire::MaterialAsset::EncodeSource(m_Definition);
+    }
+
+    void MaterialDocument::CaptureDraft()
+    {
+        m_DraftSource = SaveSource();
+        m_Dirty = m_DraftSource != m_BaselineSource;
+    }
+
+    void MaterialDocument::AcceptSavedSource(const std::span<const std::byte> source)
+    {
+        m_DraftSource.assign(source.begin(), source.end());
+        m_BaselineSource = m_DraftSource;
+        m_Dirty = false;
     }
 
     void MaterialDocument::SetResolvedShader(std::optional<Keire::ShaderAssetDefinition> definition)
