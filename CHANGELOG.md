@@ -33,6 +33,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- Asset import and cooking now expose engine-owned progress phases, typed cancellation, and stop-token-aware overloads
+  while serializing every source mutation and catalog publication per database.
 - Unity-style persistent Play/Pause/Step controls, nonintrusive Scene-view tool/orientation overlays, automatic
   Game-tab focus on Play and Scene-tab focus after Stop, and content-aware texture, material-sphere, and mesh previews.
 - Scene and Hierarchy multi-selection with Ctrl-toggle, viewport marquee selection, primary-selection Inspector

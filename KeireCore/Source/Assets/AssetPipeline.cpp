@@ -371,6 +371,20 @@ namespace Keire
             for (std::size_t index = 0; index < entries.size(); ++index)
                 visit(index);
         }
+
+        void ThrowIfOperationCancelled(const std::stop_token cancellation)
+        {
+            if (cancellation.stop_requested())
+                throw AssetOperationCancelled();
+        }
+
+        void ReportOperationProgress(const AssetOperationProgressCallback& callback, const AssetOperationPhase phase,
+                                     const std::size_t completed, const std::size_t total,
+                                     std::filesystem::path currentPath = {})
+        {
+            if (callback)
+                callback({phase, completed, total, std::move(currentPath)});
+        }
     } // namespace
 
     class AssetDatabase::Impl final
@@ -724,8 +738,11 @@ namespace Keire
         std::unordered_map<AssetId, AssetImportStatus> ImportStatuses;
         std::unordered_map<AssetId, PreparedImport> ValidatedImports;
         std::unordered_map<AssetId, PreparedImport> CookInputs;
+        mutable std::recursive_mutex OperationMutex;
         mutable std::mutex Mutex;
     };
+
+    AssetOperationCancelled::AssetOperationCancelled() : std::runtime_error("Asset operation was cancelled.") {}
 
     std::string ExternalAssetImportReceiptId::ToString() const { return m_Value.ToString(); }
 
@@ -741,6 +758,7 @@ namespace Keire
 
     std::size_t AssetDatabase::Refresh()
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         auto scanned = m_Impl->Scan();
         std::scoped_lock lock(m_Impl->Mutex);
         m_Impl->Records = std::move(scanned.Records);
@@ -778,6 +796,7 @@ namespace Keire
 
     std::vector<AssetId> AssetDatabase::PollChangedAssets()
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         auto scanned = m_Impl->Scan(false);
         const auto now = std::chrono::steady_clock::now();
         std::vector<AssetId> ready;
@@ -817,19 +836,28 @@ namespace Keire
         return ready;
     }
 
-    AssetImportResult AssetDatabase::ImportAll() { return ImportAll(AssetImportPolicy::FailFast); }
+    AssetImportResult AssetDatabase::ImportAll() { return ImportAll(AssetImportPolicy::FailFast, {}, {}); }
 
-    AssetImportResult AssetDatabase::ImportAll(const AssetImportPolicy policy)
+    AssetImportResult AssetDatabase::ImportAll(const AssetImportPolicy policy) { return ImportAll(policy, {}, {}); }
+
+    AssetImportResult AssetDatabase::ImportAll(const AssetImportPolicy policy, const std::stop_token cancellation,
+                                               AssetOperationProgressCallback progress)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
+        ThrowIfOperationCancelled(cancellation);
+        ReportOperationProgress(progress, AssetOperationPhase::Scanning, 0, 0);
         (void)Refresh();
         const auto records = Records();
+        ReportOperationProgress(progress, AssetOperationPhase::Importing, 0, records.size());
         m_Impl->ResetCookInputs();
         const auto objectRoot = m_Impl->CacheRoot / "Objects";
         std::filesystem::create_directories(objectRoot);
         AssetImportResult result;
         bool failed = false;
+        std::size_t completed = 0;
         for (const auto& record : records)
         {
+            ThrowIfOperationCancelled(cancellation);
             AssetImportStatus status;
             status.Id = record.Id;
             try
@@ -898,6 +926,9 @@ namespace Keire
                 m_Impl->ImportStatuses[record.Id] = status;
             }
             result.Statuses.push_back(std::move(status));
+            ++completed;
+            ReportOperationProgress(progress, AssetOperationPhase::Importing, completed, records.size(),
+                                    record.RelativePath);
         }
         if (failed)
         {
@@ -908,8 +939,14 @@ namespace Keire
         }
         try
         {
-            const auto cooked = AssetCooker::Cook(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime");
+            ThrowIfOperationCancelled(cancellation);
+            const auto cooked =
+                AssetCooker::Cook(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime", cancellation, progress);
             result.CatalogPath = cooked.CatalogPath;
+        }
+        catch (const AssetOperationCancelled&)
+        {
+            throw;
         }
         catch (const std::exception& error)
         {
@@ -920,6 +957,7 @@ namespace Keire
             if (std::filesystem::is_regular_file(previous))
                 result.CatalogPath = previous;
         }
+        ReportOperationProgress(progress, AssetOperationPhase::Completed, records.size(), records.size());
         return result;
     }
 
@@ -937,13 +975,11 @@ namespace Keire
     }
 
     ExternalAssetImportResult AssetDatabase::ImportExternal(const std::span<const ExternalAssetImportItem> items,
-                                                            const std::stop_token cancellation)
+                                                            const std::stop_token cancellation,
+                                                            AssetOperationProgressCallback progress)
     {
-        const auto throwIfCancelled = [&cancellation]
-        {
-            if (cancellation.stop_requested())
-                throw std::runtime_error("External asset import was cancelled.");
-        };
+        std::scoped_lock operation(m_Impl->OperationMutex);
+        const auto throwIfCancelled = [&cancellation] { ThrowIfOperationCancelled(cancellation); };
         struct PlannedItem final
         {
             std::filesystem::path Source;
@@ -952,6 +988,8 @@ namespace Keire
             ExternalAssetConflictPolicy Conflict = ExternalAssetConflictPolicy::UniqueName;
         };
         std::vector<PlannedItem> planned;
+        ReportOperationProgress(progress, AssetOperationPhase::Preflight, 0, items.size());
+        std::size_t preflightCompleted = 0;
         for (const auto& item : items)
         {
             throwIfCancelled();
@@ -989,12 +1027,17 @@ namespace Keire
                 }
                 if (error)
                     throw std::runtime_error("Could not enumerate dropped directory: " + error.message());
+                ++preflightCompleted;
+                ReportOperationProgress(progress, AssetOperationPhase::Preflight, preflightCompleted, items.size(),
+                                        source);
                 continue;
             }
             if (!std::filesystem::is_regular_file(source))
                 throw std::invalid_argument("External import source is not a regular file: " + source.string());
             planned.push_back({source, item.RelativeDestination.empty() ? source.filename() : item.RelativeDestination,
                                item.Settings, item.Conflict});
+            ++preflightCompleted;
+            ReportOperationProgress(progress, AssetOperationPhase::Preflight, preflightCompleted, items.size(), source);
         }
         if (planned.empty())
             throw std::invalid_argument("No supported asset files were found in the external import.");
@@ -1096,7 +1139,7 @@ namespace Keire
                 result.Entries.push_back({existing->Id, item.Source, destination, true});
             }
             throwIfCancelled();
-            result.Import = ImportAll(AssetImportPolicy::FailFast);
+            result.Import = ImportAll(AssetImportPolicy::FailFast, cancellation, progress);
             throwIfCancelled();
             const auto receiptValue = AssetId::Generate();
             receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
@@ -1123,6 +1166,7 @@ namespace Keire
             const auto manifest = receipt.dump(2);
             writeBytes(receiptRoot / "receipt.json", std::as_bytes(std::span(manifest.data(), manifest.size())));
             result.Receipt = ExternalAssetImportReceiptId(receiptValue);
+            ReportOperationProgress(progress, AssetOperationPhase::Completed, planned.size(), planned.size());
             return result;
         }
         catch (...)
@@ -1169,6 +1213,7 @@ namespace Keire
 
     void AssetDatabase::ApplyExternalImportReceipt(const ExternalAssetImportReceiptId receipt, const bool applied)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         if (!receipt)
             throw std::invalid_argument("External import receipt is invalid.");
         const auto receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
@@ -1227,6 +1272,7 @@ namespace Keire
 
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativePath);
         if (!std::filesystem::create_directories(destination) && !std::filesystem::is_directory(destination))
             throw std::runtime_error("Could not create asset folder: " + destination.string());
@@ -1237,6 +1283,7 @@ namespace Keire
                                        const std::span<const std::byte> sourceBytes,
                                        const AssetImportSettings& requestedSettings)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto registered = m_Impl->Importers.find(importer.Name);
         if (registered == m_Impl->Importers.end() || registered->second.Version != importer.Version ||
             registered->second.Type != importer.Type)
@@ -1315,6 +1362,7 @@ namespace Keire
 
     void AssetDatabase::Rename(const AssetId id, std::string newName)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         if (newName.empty() || newName == "." || newName == ".." || newName.find('/') != std::string::npos ||
             newName.find('\\') != std::string::npos)
             throw std::invalid_argument("Asset name must be one non-empty path component.");
@@ -1326,6 +1374,7 @@ namespace Keire
 
     void AssetDatabase::MoveAsset(const AssetId id, const std::filesystem::path& relativeDestination)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot move an unknown asset ID.");
@@ -1367,6 +1416,7 @@ namespace Keire
 
     AssetId AssetDatabase::Duplicate(const AssetId id, const std::filesystem::path& destination)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot duplicate an unknown asset ID.");
@@ -1394,6 +1444,7 @@ namespace Keire
     void AssetDatabase::MoveFolder(const std::filesystem::path& relativeSource,
                                    const std::filesystem::path& relativeDestination)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto source = ConfinedPath(m_Impl->SourceRoot, relativeSource);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
         if (source == destination)
@@ -1421,6 +1472,7 @@ namespace Keire
     std::vector<AssetId> AssetDatabase::DuplicateFolder(const std::filesystem::path& relativeSource,
                                                         const std::filesystem::path& relativeDestination)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto source = ConfinedPath(m_Impl->SourceRoot, relativeSource);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
         if (!std::filesystem::is_directory(source) || std::filesystem::is_symlink(source))
@@ -1462,6 +1514,7 @@ namespace Keire
 
     AssetTrashRecord AssetDatabase::TrashAsset(const AssetId id)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot trash an unknown asset ID.");
@@ -1492,6 +1545,7 @@ namespace Keire
 
     AssetTrashRecord AssetDatabase::TrashFolder(const std::filesystem::path& relativePath)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto source = ConfinedPath(m_Impl->SourceRoot, relativePath);
         if (!std::filesystem::is_directory(source) || std::filesystem::is_symlink(source))
             throw std::invalid_argument("Asset folder trash requires a regular source directory.");
@@ -1522,6 +1576,7 @@ namespace Keire
 
     std::vector<AssetTrashRecord> AssetDatabase::TrashRecords() const
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         const auto trashRoot = m_Impl->Specification.ProjectRoot / "Library" / "Trash";
         std::vector<AssetTrashRecord> result;
         std::error_code error;
@@ -1542,6 +1597,7 @@ namespace Keire
 
     void AssetDatabase::RestoreTrash(const AssetTrashId id)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         if (!id)
             throw std::invalid_argument("Cannot restore an empty asset trash identity.");
         const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / id.ToString();
@@ -1593,6 +1649,7 @@ namespace Keire
 
     void AssetDatabase::PermanentlyDeleteTrash(const AssetTrashId id)
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         if (!id)
             throw std::invalid_argument("Cannot delete an empty asset trash identity.");
         const auto trashRoot = (m_Impl->Specification.ProjectRoot / "Library" / "Trash").lexically_normal();
@@ -1611,8 +1668,11 @@ namespace Keire
     const AssetDatabaseSpecification& AssetDatabase::Specification() const noexcept { return m_Impl->Specification; }
 
     AssetCookResult AssetCooker::Cook(const AssetDatabase& database, const AssetBuildProfile& profile,
-                                      const std::filesystem::path& outputDirectory)
+                                      const std::filesystem::path& outputDirectory, const std::stop_token cancellation,
+                                      AssetOperationProgressCallback progress)
     {
+        std::scoped_lock operation(database.m_Impl->OperationMutex);
+        ThrowIfOperationCancelled(cancellation);
         if (profile.Name.empty() || profile.CompressionLevel < ZSTD_minCLevel() ||
             profile.CompressionLevel > ZSTD_maxCLevel() || profile.MaximumPackBytes <= Detail::PackHeaderBytes)
             throw std::invalid_argument("Asset build profile contains invalid compression or shard settings.");
@@ -1626,8 +1686,11 @@ namespace Keire
         std::vector<PreparedAsset> prepared;
         prepared.reserve(records.size());
         std::unordered_map<AssetId, std::size_t> indices;
+        ReportOperationProgress(progress, AssetOperationPhase::Cooking, 0, records.size());
+        std::size_t preparedCount = 0;
         for (const auto& record : records)
         {
+            ThrowIfOperationCancelled(cancellation);
             if (profile.Strict && record.Importer != ImporterName(record.Type) &&
                 !database.m_Impl->FindImporter(record))
                 throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
@@ -1642,6 +1705,9 @@ namespace Keire
             std::ranges::sort(dependencies);
             indices.emplace(record.Id, prepared.size());
             prepared.push_back({&record, std::move(imported), std::move(dependencies)});
+            ++preparedCount;
+            ReportOperationProgress(progress, AssetOperationPhase::Cooking, preparedCount, records.size(),
+                                    record.RelativePath);
         }
         if (!profile.Strict)
         {
@@ -1762,6 +1828,7 @@ namespace Keire
         {
             for (auto& asset : prepared)
             {
+                ThrowIfOperationCancelled(cancellation);
                 const auto& record = *asset.Record;
                 if (!included.contains(record.Id))
                     continue;
@@ -1811,6 +1878,9 @@ namespace Keire
             if (!profileStream)
                 throw std::runtime_error("Could not write the asset build profile.");
             std::filesystem::create_directories(destination.parent_path());
+            ThrowIfOperationCancelled(cancellation);
+            ReportOperationProgress(progress, AssetOperationPhase::Publishing, entries.size(), entries.size(),
+                                    destination);
             ReplaceDirectory(temporary, destination);
         }
         catch (...)

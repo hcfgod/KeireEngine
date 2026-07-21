@@ -175,8 +175,8 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     item.Conflict = Keire::ExternalAssetConflictPolicy::UniqueName;
     std::stop_source cancellation;
     cancellation.request_stop();
-    CHECK_THROWS_WITH((void)database->ImportExternal(std::span(&item, 1), cancellation.get_token()),
-                      "External asset import was cancelled.");
+    CHECK_THROWS_AS((void)database->ImportExternal(std::span(&item, 1), cancellation.get_token()),
+                    Keire::AssetOperationCancelled);
     CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Cancelled.opt"));
 
     auto validBatchItem = item;
@@ -200,6 +200,66 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     CHECK_THROWS_WITH_AS((void)database->ImportExternal(std::span(&folderItem, 1)),
                          doctest::Contains("No importer supports a dropped directory entry"), std::invalid_argument);
     CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Supported.opt"));
+}
+
+TEST_CASE("Asset database serializes catalog operations and reports cancellable progress")
+{
+    TemporaryAssetProject project;
+    project.Write("Serialized.txt", "serialized operation");
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+
+    std::atomic_int ready = 0;
+    std::atomic_bool start = false;
+    std::atomic_int callbacks = 0;
+    std::atomic_int activeCallbacks = 0;
+    std::atomic_int maximumCallbacks = 0;
+    std::atomic_int failures = 0;
+    const auto run = [&]
+    {
+        ++ready;
+        while (!start.load())
+            std::this_thread::yield();
+        try
+        {
+            (void)database->ImportAll(Keire::AssetImportPolicy::FailFast, {},
+                                      [&](const Keire::AssetOperationProgress& progress)
+                                      {
+                                          ++callbacks;
+                                          if (progress.Phase != Keire::AssetOperationPhase::Scanning)
+                                              return;
+                                          const auto active = ++activeCallbacks;
+                                          auto observed = maximumCallbacks.load();
+                                          while (observed < active &&
+                                                 !maximumCallbacks.compare_exchange_weak(observed, active))
+                                          {
+                                          }
+                                          std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                                          --activeCallbacks;
+                                      });
+        }
+        catch (...)
+        {
+            ++failures;
+        }
+    };
+    std::jthread first(run);
+    std::jthread second(run);
+    while (ready.load() != 2)
+        std::this_thread::yield();
+    start = true;
+    first.join();
+    second.join();
+
+    CHECK(failures.load() == 0);
+    CHECK(callbacks.load() >= 2);
+    CHECK(maximumCallbacks.load() == 1);
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(project.Root / "Library/AssetCache/Runtime/catalog.json"));
+
+    std::stop_source cancellation;
+    cancellation.request_stop();
+    CHECK_THROWS_AS((void)database->ImportAll(Keire::AssetImportPolicy::FailFast, cancellation.get_token()),
+                    Keire::AssetOperationCancelled);
 }
 
 TEST_CASE("Texture importer exposes UI-independent production import options")

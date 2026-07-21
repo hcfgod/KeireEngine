@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <variant>
@@ -168,6 +169,34 @@ namespace Keire
         KeepLastGood
     };
 
+    enum class AssetOperationPhase : std::uint8_t
+    {
+        Scanning,
+        Preflight,
+        Staging,
+        Importing,
+        Cooking,
+        Publishing,
+        RollingBack,
+        Completed
+    };
+
+    struct AssetOperationProgress
+    {
+        AssetOperationPhase Phase = AssetOperationPhase::Scanning;
+        std::size_t Completed = 0;
+        std::size_t Total = 0;
+        std::filesystem::path CurrentPath;
+    };
+
+    using AssetOperationProgressCallback = std::function<void(const AssetOperationProgress&)>;
+
+    class KEIRE_API AssetOperationCancelled final : public std::runtime_error
+    {
+      public:
+        AssetOperationCancelled();
+    };
+
     enum class ExternalAssetConflictPolicy : std::uint8_t
     {
         UniqueName,
@@ -253,11 +282,14 @@ namespace Keire
         [[nodiscard]] std::vector<AssetId> PollChangedAssets();
         [[nodiscard]] AssetImportResult ImportAll();
         [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy);
+        [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy, std::stop_token cancellation,
+                                                  AssetOperationProgressCallback progress = {});
         [[nodiscard]] AssetImportStatus ImportStatus(AssetId id) const;
         [[nodiscard]] std::optional<AssetImporterRegistration>
         FindImporterForPath(const std::filesystem::path& path) const;
         [[nodiscard]] ExternalAssetImportResult ImportExternal(std::span<const ExternalAssetImportItem> items,
-                                                               std::stop_token cancellation = {});
+                                                               std::stop_token cancellation = {},
+                                                               AssetOperationProgressCallback progress = {});
         void UndoExternalImport(ExternalAssetImportReceiptId receipt);
         void RedoExternalImport(ExternalAssetImportReceiptId receipt);
 
@@ -311,7 +343,9 @@ namespace Keire
     {
       public:
         [[nodiscard]] static AssetCookResult Cook(const AssetDatabase& database, const AssetBuildProfile& profile,
-                                                  const std::filesystem::path& outputDirectory);
+                                                  const std::filesystem::path& outputDirectory,
+                                                  std::stop_token cancellation = {},
+                                                  AssetOperationProgressCallback progress = {});
         static void Validate(const std::filesystem::path& catalogPath,
                              std::size_t maximumAssetBytes = 1024U * 1024U * 1024U);
     };

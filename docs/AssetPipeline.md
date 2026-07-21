@@ -43,6 +43,12 @@ Trash manifests persist the original relative location so editor Undo can restor
 
 ## Import And Change Detection
 
+Catalog-producing and source-mutating operations are serialized per `AssetDatabase`. Record queries return immutable
+snapshots, while import, cook, external publication, receipt replay, rename, move, trash, and metadata refresh execute
+under one operation boundary. Nested import-to-cook calls remain safe, and parallel callers cannot reset or combine
+each other's prepared cook inputs. Optional stop tokens and operation progress callbacks allow tools to cancel before
+publication and report scanning, importing, cooking, and publication without exposing editor implementation types.
+
 `ImportAll()` hashes sources with SHA-256 and stores immutable raw objects below `Library/AssetCache/Objects`. Existing
 objects are cache hits. It then publishes the development runtime directory transactionally under
 `Library/AssetCache/Runtime`. `PollChangedAssets()` uses file signatures and a 250 ms default stability window; hashing
