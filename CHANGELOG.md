@@ -22,8 +22,8 @@ All notable template changes are documented here. The format follows Keep a Chan
   reject incompatible semantic/color-space assignments before they can invalidate the development catalog.
 - Material creation now asks for a name before publishing, and single-asset create/rename operations update the live
   source index without synchronously hashing and cooking the entire project.
-- The Sandbox monster now uses its textured material, with separate linear Metallic and Roughness map slots instead
-  of incorrectly treating standalone images as packed glTF ORM data.
+- The Sandbox monster now uses its textured material with dedicated linear Metallic and Roughness slots, leaves packed
+  glTF ORM on its neutral fallback, and ships with a calibrated neutral studio environment and directional light.
 - Project Browser breadcrumbs now defer navigation until path enumeration finishes and use stable scoped IDs, avoiding
   an ImGui empty-ID assertion when navigating from a nested folder to one of its parents.
 - `Ctrl/Cmd+S` now routes globally to Scene save, existing-scene saves defer catalog rebuilding to a background task,

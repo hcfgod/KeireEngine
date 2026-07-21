@@ -66,6 +66,12 @@ emissive output with tolerant regions, including opaque output from a transparen
 catalogs retain DXIL and SPIR-V, and Vulkan pipelines bind the
 shader manifest's declared SPIR-V entrypoint instead of assuming `main`.
 
+The sandbox monster is the cooked production-content calibration sample. It binds diffuse as sRGB Base Color and
+normal, standalone metallic, and standalone roughness as linear semantic data; the packed metallic-roughness slot stays
+on the neutral ORM fallback. Its neutral studio baseline uses ambient `[0.18, 0.20, 0.24]` at intensity/exposure `1.0`
+and a warm-white directional light `[1.0, 0.95, 0.90]` at intensity `2.0`, making skin, leather, and metal response
+visible without saturating the reference regions.
+
 Relative cursor capture exists only during fly navigation and is released on focus loss. Camera state is stored below
 the project's `Library/Editor` directory, so navigation never dirties a scene or enters source control.
 

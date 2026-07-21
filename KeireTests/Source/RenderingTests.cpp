@@ -217,6 +217,32 @@ TEST_CASE("material overrides are validated against shader declarations")
     CHECK_THROWS_AS(Keire::ValidateMaterialAgainstShader(material, shader), std::invalid_argument);
 }
 
+TEST_CASE("sandbox monster material binds dedicated color normal metallic and roughness sources")
+{
+    const auto source = ReadTestBytes("Samples/KeireSandbox/Assets/Monster1.keirematerial");
+    const auto definition = Keire::MaterialAsset::DecodeSource(source);
+    const auto baseColor = Keire::AssetId::Parse("38760a1d-9dfa-4bbc-8ba1-50921ae9d748");
+    const auto normal = Keire::AssetId::Parse("0a8ba309-c28a-4842-8949-09ff8c60a1fa");
+    const auto metallic = Keire::AssetId::Parse("cda3b77a-3982-42ef-8f7c-b6f8730e8eda");
+    const auto roughness = Keire::AssetId::Parse("0b904e85-216d-4c6d-889b-2cee89089b02");
+    CHECK(definition.Texture("MainTexture") == baseColor);
+    CHECK(definition.Texture("NormalTexture") == normal);
+    CHECK(definition.Texture("MetallicTexture") == metallic);
+    CHECK(definition.Texture("RoughnessTexture") == roughness);
+    const auto packed = definition.Texture("MetallicRoughnessTexture");
+    CHECK((!packed || !*packed));
+    const auto shader = Keire::ShaderAsset::DecodeManifest(
+        ReadTestBytes("Samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader"));
+    CHECK_NOTHROW(Keire::ValidateMaterialAgainstShader(definition, shader));
+
+    const auto importer = Keire::CreateMaterialAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    const auto imported = importer.ContextualImport({}, source);
+    CHECK(std::ranges::find(imported.AssetDependencies, definition.Shader) != imported.AssetDependencies.end());
+    for (const auto texture : std::array{baseColor, normal, metallic, roughness})
+        CHECK(std::ranges::find(imported.AssetDependencies, texture) != imported.AssetDependencies.end());
+}
+
 TEST_CASE("scene and material importers extract transitive render dependencies")
 {
     const auto shader = Keire::AssetId::Parse("11111111-1111-4111-8111-111111111111");
