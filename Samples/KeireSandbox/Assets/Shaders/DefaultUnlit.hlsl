@@ -60,15 +60,32 @@ SamplerState MetallicSampler : register(s5, space2);
 Texture2D RoughnessTexture : register(t6, space2);
 SamplerState RoughnessSampler : register(s6, space2);
 
+float3 SafeNormal(const float3 value, const float3 fallback)
+{
+    const float lengthSquared = dot(value, value);
+    return lengthSquared > 1.0e-12F && all(isfinite(value)) ? value * rsqrt(lengthSquared) : fallback;
+}
+
+float3 OrthogonalTangent(const float3 normal)
+{
+    const float3 axis = abs(normal.z) < 0.999F ? float3(0.0F, 0.0F, 1.0F) : float3(0.0F, 1.0F, 0.0F);
+    return SafeNormal(cross(axis, normal), float3(1.0F, 0.0F, 0.0F));
+}
+
 VertexOutput VSMain(VertexInput input)
 {
     VertexOutput output;
     const float4 worldPosition = mul(Model, float4(input.Position, 1.0F));
     const float4 viewPosition = mul(View, worldPosition);
     output.Position = mul(Projection, viewPosition);
-    output.Normal = normalize(mul((float3x3)NormalMatrix, input.Normal));
-    output.Tangent = normalize(mul((float3x3)Model, input.Tangent.xyz));
-    output.Bitangent = normalize(cross(output.Normal, output.Tangent) * input.Tangent.w);
+    output.Normal = SafeNormal(mul((float3x3)NormalMatrix, input.Normal), float3(0.0F, 0.0F, 1.0F));
+    float3 tangent = mul((float3x3)Model, input.Tangent.xyz);
+    tangent -= output.Normal * dot(output.Normal, tangent);
+    output.Tangent = SafeNormal(tangent, OrthogonalTangent(output.Normal));
+    const float modelHandedness = determinant((float3x3)Model) < 0.0F ? -1.0F : 1.0F;
+    const float tangentHandedness = abs(input.Tangent.w) > 0.0001F ? input.Tangent.w : 1.0F;
+    output.Bitangent = SafeNormal(cross(output.Normal, output.Tangent) * tangentHandedness * modelHandedness,
+                                  cross(output.Normal, OrthogonalTangent(output.Normal)));
     output.ViewDirection = normalize(mul(-viewPosition.xyz, (float3x3)View));
     output.UV0 = input.UV0;
     output.Color = input.Color;

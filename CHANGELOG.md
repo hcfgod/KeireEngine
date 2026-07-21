@@ -6,6 +6,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- PBR tangent frames now transform normals and tangents through their correct matrices, Gram–Schmidt orthogonalize the
+  basis, compensate handedness for mirrored instances, and use deterministic finite fallbacks for degenerate tangents.
 - External asset imports now preflight and validate complete batches in private staging, journal publication for crash
   recovery, preserve zero partial record visibility, and replay undo/redo through the same rollback-capable cook path.
 - Editor external-import work now has an explicit cancellable worker lifetime that joins during shutdown instead of

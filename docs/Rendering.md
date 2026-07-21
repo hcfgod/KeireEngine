@@ -55,6 +55,11 @@ ambient, and exposure inputs. Null semantic slots bind renderer-owned white, fla
 textures; missing non-null textures retain the checkerboard diagnostic. Tangent normals, light direction, and view
 direction are evaluated in world space. Opaque pipelines write opaque alpha even when a source base-color image carries
 transparent texels; authored transparency requires a future explicit surface mode instead of accidental compositing.
+The PBR vertex path applies the normal matrix to normals and the model matrix to tangents, orthogonalizes the tangent,
+multiplies stored tangent handedness by the model determinant sign, and reconstructs a normalized bitangent. Degenerate
+or nonfinite inputs use a deterministic axis fallback. D3D12 and Vulkan pixel cases cover +Y normal perturbation under
+identity, nonuniform scale, rotation, and mirrored scale while mesh ABI v1 tangent generation remains compatible with
+stored ABI v2 tangents.
 The left-handed camera/projection path produces clockwise exterior winding in render-target space, which is the shared
 front-face convention used by built-in and asset pipelines when applying front/back culling.
 

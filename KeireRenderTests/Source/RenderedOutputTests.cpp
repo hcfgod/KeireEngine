@@ -159,7 +159,7 @@ namespace
                 SolidTexture(128, 128, 255, Keire::TextureSemantic::Normal, Keire::TextureColorSpace::Linear));
             PerturbedNormal = Database->CreateAsset(
                 "PerturbedNormal.texture", textureImporter,
-                SolidTexture(255, 128, 128, Keire::TextureSemantic::Normal, Keire::TextureColorSpace::Linear));
+                SolidTexture(128, 255, 128, Keire::TextureSemantic::Normal, Keire::TextureColorSpace::Linear));
             NeutralOrm = Database->CreateAsset(
                 "NeutralOrm.texture", textureImporter,
                 SolidTexture(255, 255, 0, Keire::TextureSemantic::Data, Keire::TextureColorSpace::Linear));
@@ -188,7 +188,7 @@ namespace
   "vertexLayoutVersion": 2,
   "stages": {"vertex": "VSMain", "fragment": "PSMain"},
   "includeRoots": ["Assets/Shaders"],
-  "renderState": {"topology": "TriangleList", "culling": "Back", "depthTest": true, "depthWrite": true, "blend": false},
+  "renderState": {"topology": "TriangleList", "culling": "None", "depthTest": true, "depthWrite": true, "blend": false},
   "properties": [
     {"name": "Tint", "type": "Color", "default": [1, 1, 1, 1]},
     {"name": "MainTexture", "type": "Texture2D", "semantic": "BaseColor", "default": null},
@@ -679,7 +679,7 @@ namespace
 
     struct MaterialSemanticResults final
     {
-        std::array<std::vector<std::uint8_t>, 9> Frames;
+        std::array<std::vector<std::uint8_t>, 12> Frames;
         bool ReloadsSucceeded = true;
     };
 
@@ -698,13 +698,14 @@ namespace
                                                      Keire::SceneAsset::EmptyDefinition("Material semantic tests"),
                                                      Keire::ComponentRegistry::CreateDefault());
             auto object = m_Scene->CreateEntity("PBR triangle");
+            m_ObjectTransform = object.GetComponent<Keire::TransformComponent>();
             const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
             renderer->SetMesh(m_Fixture.Mesh);
             renderer->SetMaterial(m_Fixture.Material);
 
             auto lightEntity = m_Scene->CreateEntity("Directional light");
             m_LightTransform = lightEntity.GetComponent<Keire::TransformComponent>();
-            m_LightTransform->SetLocalEulerAngles({0.0F, 180.0F, 0.0F});
+            m_LightTransform->SetLocalEulerAngles({30.0F, 180.0F, 0.0F});
             m_Light = lightEntity.AddComponent<Keire::DirectionalLightComponent>();
             m_Light->SetIntensity(4.0F);
 
@@ -730,6 +731,7 @@ namespace
                 m_Scene->Close();
             m_Light.Reset();
             m_LightTransform.Reset();
+            m_ObjectTransform.Reset();
             m_View.Reset();
             m_Scene.Reset();
         }
@@ -821,6 +823,22 @@ namespace
                 m_Environment.AmbientIntensity = 0.05F;
                 properties = CommonProperties(m_Fixture.TransparentTexture);
             }
+            else if (stage == 9)
+            {
+                properties += ",\"NormalTexture\":\"" + m_Fixture.PerturbedNormal.ToString() + "\"";
+                m_ObjectTransform->SetLocalScale({1.0F, 1.0F, 0.5F});
+            }
+            else if (stage == 10)
+            {
+                properties += ",\"NormalTexture\":\"" + m_Fixture.PerturbedNormal.ToString() + "\"";
+                m_ObjectTransform->SetLocalEulerAngles({70.0F, 0.0F, 0.0F});
+            }
+            else if (stage == 11)
+            {
+                properties += ",\"NormalTexture\":\"" + m_Fixture.PerturbedNormal.ToString() + "\"";
+                m_ObjectTransform->SetLocalEulerAngles({});
+                m_ObjectTransform->SetLocalScale({-1.0F, 1.0F, 1.0F});
+            }
             return m_Fixture.ReplaceMaterialProperties(Owner(), properties);
         }
 
@@ -829,6 +847,7 @@ namespace
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         Keire::Ref<Keire::TransformComponent> m_LightTransform;
+        Keire::Ref<Keire::TransformComponent> m_ObjectTransform;
         Keire::Ref<Keire::DirectionalLightComponent> m_Light;
         Keire::RenderEnvironmentSettings m_Environment;
         std::size_t m_Stage = 0;
@@ -977,7 +996,7 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     }
 
     REQUIRE(results->ReloadsSucceeded);
-    std::array<PixelStatistics, 9> captures;
+    std::array<PixelStatistics, 12> captures;
     for (std::size_t index = 0; index < captures.size(); ++index)
     {
         REQUIRE_FALSE(results->Frames[index].empty());
@@ -995,6 +1014,13 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     CHECK(std::abs(captures[3].Green - captures[7].Green) <= ColorTolerance);
     CHECK(std::abs(captures[3].Blue - captures[7].Blue) <= ColorTolerance);
     CHECK(captures[8].Alpha >= 1.0F - ColorTolerance);
+    CHECK(std::abs(captures[2].Red - captures[9].Red) <= ColorTolerance);
+    CHECK(std::abs(captures[2].Green - captures[9].Green) <= ColorTolerance);
+    CHECK(std::abs(captures[2].Blue - captures[9].Blue) <= ColorTolerance);
+    CHECK(std::abs(captures[9].Luminance() - captures[10].Luminance()) > MinimumBehaviorDelta);
+    CHECK(std::abs(captures[2].Red - captures[11].Red) <= ColorTolerance);
+    CHECK(std::abs(captures[2].Green - captures[11].Green) <= ColorTolerance);
+    CHECK(std::abs(captures[2].Blue - captures[11].Blue) <= ColorTolerance);
 }
 
 TEST_CASE("render asset revisions swap atomically and failed reloads preserve last-good output")
