@@ -6,6 +6,10 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- External asset imports now preflight and validate complete batches in private staging, journal publication for crash
+  recovery, preserve zero partial record visibility, and replay undo/redo through the same rollback-capable cook path.
+- Editor external-import work now has an explicit cancellable worker lifetime that joins during shutdown instead of
+  leaving `std::async` teardown behavior to the standard library implementation.
 - Noninteractive Windows repository launcher commands now preserve child-script failures and their native exit codes,
   preventing failed builds, tests, runs, or packages from being reported as successful automation steps.
 - Asset pipelines now use the clockwise render-target front-face convention required by Kéire's left-handed camera

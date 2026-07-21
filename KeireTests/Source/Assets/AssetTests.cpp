@@ -262,6 +262,72 @@ TEST_CASE("Asset database serializes catalog operations and reports cancellable 
                     Keire::AssetOperationCancelled);
 }
 
+TEST_CASE("External import staging cancels without publication and startup rolls back an interrupted journal")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.Transaction";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000012");
+    importer.Extensions = {".txn"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    const auto first = project.Root / "First.txn";
+    const auto second = project.Root / "Second.txn";
+    {
+        std::ofstream stream(first);
+        stream << "first";
+    }
+    {
+        std::ofstream stream(second);
+        stream << "second";
+    }
+    const std::array items{Keire::ExternalAssetImportItem{first, "Imported/First.txn"},
+                           Keire::ExternalAssetImportItem{second, "Imported/Second.txn"}};
+    std::stop_source cancellation;
+    CHECK_THROWS_AS((void)database->ImportExternal(items, cancellation.get_token(),
+                                                   [&](const Keire::AssetOperationProgress& progress)
+                                                   {
+                                                       if (progress.Phase == Keire::AssetOperationPhase::Staging &&
+                                                           progress.Completed == 1)
+                                                           cancellation.request_stop();
+                                                   }),
+                    Keire::AssetOperationCancelled);
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/First.txn"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Second.txn"));
+
+    const std::string original = "original";
+    const auto id =
+        database->CreateAsset("Recover.txn", importer, std::as_bytes(std::span(original.data(), original.size())));
+    const auto originalMetadata = ReadAll(project.Root / "Assets/Recover.txn.keiremeta");
+    const auto transaction = project.Root / "Library/AssetImport/interrupted";
+    std::filesystem::create_directories(transaction / "before");
+    const auto write = [](const std::filesystem::path& path, const std::span<const char> bytes)
+    {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        REQUIRE(stream.good());
+    };
+    write(transaction / "before/0.source", std::span(original.data(), original.size()));
+    write(transaction / "before/0.metadata", originalMetadata);
+    const std::string damaged = "damaged";
+    write(project.Root / "Assets/Recover.txn", std::span(damaged.data(), damaged.size()));
+    const std::string journal =
+        "{\"schemaVersion\":1,\"state\":\"publishing\",\"entries\":[{\"destination\":\"Recover.txn\","
+        "\"replaced\":true}]}";
+    write(transaction / "journal.json", std::span(journal.data(), journal.size()));
+
+    database.Reset();
+    database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    REQUIRE(database->Find(id));
+    CHECK(ReadAll(project.Root / "Assets/Recover.txn") == std::vector<char>(original.begin(), original.end()));
+    CHECK_FALSE(std::filesystem::exists(transaction));
+}
+
 TEST_CASE("Texture importer exposes UI-independent production import options")
 {
     const auto importer = Keire::CreateTexture2DAssetImporter();

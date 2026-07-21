@@ -64,6 +64,35 @@ namespace Keire
             return bytes;
         }
 
+        void WriteFileAtomically(const std::filesystem::path& path, const std::span<const std::byte> bytes,
+                                 const std::string_view temporarySuffix = ".asset-operation.tmp")
+        {
+            std::filesystem::create_directories(path.parent_path());
+            const auto temporary = path.string() + std::string(temporarySuffix);
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            if (!stream || (!bytes.empty() && !stream.write(reinterpret_cast<const char*>(bytes.data()),
+                                                            static_cast<std::streamsize>(bytes.size()))))
+                throw std::runtime_error("Could not write asset operation data: " + path.string());
+            stream.close();
+            if (!stream)
+                throw std::runtime_error("Could not finish asset operation data: " + path.string());
+            Detail::AtomicReplace(temporary, path);
+        }
+
+        void WriteJsonAtomically(const std::filesystem::path& path, const Json& value)
+        {
+            const auto serialized = value.dump(2) + '\n';
+            WriteFileAtomically(path, std::as_bytes(std::span(serialized.data(), serialized.size())),
+                                ".json-write.tmp");
+        }
+
+        [[nodiscard]] Json ReadJsonFile(const std::filesystem::path& path, const std::size_t maximum)
+        {
+            const auto bytes = ReadSource(path, maximum);
+            return Json::parse(reinterpret_cast<const char*>(bytes.data()),
+                               reinterpret_cast<const char*>(bytes.data() + bytes.size()));
+        }
+
         [[nodiscard]] std::string LowerExtension(const std::filesystem::path& path)
         {
             auto extension = path.extension().string();
@@ -385,6 +414,12 @@ namespace Keire
             if (callback)
                 callback({phase, completed, total, std::move(currentPath)});
         }
+
+        void RemovePathNoThrow(const std::filesystem::path& path) noexcept
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
     } // namespace
 
     class AssetDatabase::Impl final
@@ -415,6 +450,60 @@ namespace Keire
             }
             std::filesystem::create_directories(SourceRoot);
             std::filesystem::create_directories(CacheRoot);
+            RecoverInterruptedExternalImports();
+        }
+
+        void RecoverInterruptedExternalImports()
+        {
+            const auto transactions = Specification.ProjectRoot / "Library/AssetImport";
+            std::error_code error;
+            if (!std::filesystem::is_directory(transactions, error))
+                return;
+            for (std::filesystem::directory_iterator iterator(transactions, error), end; !error && iterator != end;
+                 iterator.increment(error))
+            {
+                if (!iterator->is_directory(error))
+                    continue;
+                const auto journalPath = iterator->path() / "journal.json";
+                if (!std::filesystem::is_regular_file(journalPath, error))
+                    continue;
+                const auto journal = ReadJsonFile(journalPath, 16U * 1024U * 1024U);
+                if (journal.value("schemaVersion", 0) != 1 || !journal.contains("state"))
+                    throw std::runtime_error("External asset import journal is invalid: " + journalPath.string());
+                const auto state = journal.at("state").get<std::string>();
+                if (state == "committed")
+                    continue;
+                if (state == "publishing")
+                {
+                    if (!journal.contains("entries") || !journal["entries"].is_array())
+                        throw std::runtime_error("Publishing asset journal has no recovery entries.");
+                    for (std::size_t index = journal["entries"].size(); index > 0; --index)
+                    {
+                        const auto& entry = journal["entries"][index - 1];
+                        const auto destination =
+                            ConfinedPath(SourceRoot, std::filesystem::path(entry.at("destination").get<std::string>()));
+                        const auto metadata = std::filesystem::path(destination.string() + ".keiremeta");
+                        if (entry.value("replaced", false))
+                        {
+                            const auto prefix = std::to_string(index - 1);
+                            WriteFileAtomically(destination,
+                                                ReadSource(iterator->path() / "before" / (prefix + ".source"),
+                                                           Specification.MaximumSourceBytes));
+                            WriteFileAtomically(
+                                metadata,
+                                ReadSource(iterator->path() / "before" / (prefix + ".metadata"), 16U * 1024U * 1024U));
+                        }
+                        else
+                        {
+                            RemovePathNoThrow(destination);
+                            RemovePathNoThrow(metadata);
+                        }
+                    }
+                }
+                RemovePathNoThrow(iterator->path());
+            }
+            if (error)
+                throw std::runtime_error("Could not recover external asset import transactions: " + error.message());
         }
 
         [[nodiscard]] const AssetImporterRegistration* InferImporter(const std::filesystem::path& path) const
@@ -775,12 +864,14 @@ namespace Keire
 
     std::vector<AssetSourceRecord> AssetDatabase::Records() const
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         return m_Impl->Records;
     }
 
     std::optional<AssetSourceRecord> AssetDatabase::Find(const AssetId id) const
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = std::ranges::find(m_Impl->Records, id, &AssetSourceRecord::Id);
         return found == m_Impl->Records.end() ? std::nullopt : std::optional<AssetSourceRecord>(*found);
@@ -789,6 +880,7 @@ namespace Keire
     std::optional<AssetSourceRecord> AssetDatabase::Find(const std::filesystem::path& relativePath) const
     {
         const auto normalized = relativePath.lexically_normal();
+        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = std::ranges::find(m_Impl->Records, normalized, &AssetSourceRecord::RelativePath);
         return found == m_Impl->Records.end() ? std::nullopt : std::optional<AssetSourceRecord>(*found);
@@ -963,6 +1055,7 @@ namespace Keire
 
     AssetImportStatus AssetDatabase::ImportStatus(const AssetId id) const
     {
+        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = m_Impl->ImportStatuses.find(id);
         return found == m_Impl->ImportStatuses.end() ? AssetImportStatus{.Id = id} : found->second;
@@ -986,6 +1079,13 @@ namespace Keire
             std::filesystem::path Destination;
             AssetImportSettings Settings;
             ExternalAssetConflictPolicy Conflict = ExternalAssetConflictPolicy::UniqueName;
+            const AssetImporterRegistration* Importer = nullptr;
+            AssetId Id;
+            bool Replaced = false;
+            std::vector<std::byte> SourceBytes;
+            std::vector<std::byte> PreviousSource;
+            std::vector<std::byte> PreviousMetadata;
+            AssetImportOutput Validated;
         };
         std::vector<PlannedItem> planned;
         ReportOperationProgress(progress, AssetOperationPhase::Preflight, 0, items.size());
@@ -1014,7 +1114,10 @@ namespace Keire
                         throw std::invalid_argument("External imports do not follow symbolic links: " +
                                                     iterator->path().string());
                     }
-                    if (!iterator->is_regular_file(error) || iterator->path().extension() == ".keiremeta")
+                    if (iterator->path().extension() == ".keiremeta")
+                        throw std::invalid_argument("External imports do not accept asset identity metadata: " +
+                                                    iterator->path().string());
+                    if (!iterator->is_regular_file(error))
                         continue;
                     if (!m_Impl->InferImporter(iterator->path()))
                         throw std::invalid_argument("No importer supports a dropped directory entry: " +
@@ -1042,161 +1145,172 @@ namespace Keire
         if (planned.empty())
             throw std::invalid_argument("No supported asset files were found in the external import.");
 
-        struct Rollback final
-        {
-            std::filesystem::path Source;
-            std::filesystem::path Metadata;
-            std::vector<std::byte> PreviousSource;
-            std::vector<std::byte> PreviousMetadata;
-            bool Replaced = false;
-        };
-        std::vector<Rollback> rollback;
         ExternalAssetImportResult result;
-        std::filesystem::path receiptRoot;
-        const auto writeBytes = [](const std::filesystem::path& path, const std::span<const std::byte> bytes)
-        {
-            std::filesystem::create_directories(path.parent_path());
-            const auto temporary = path.string() + ".external-import.tmp";
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            if (!stream || (!bytes.empty() && !stream.write(reinterpret_cast<const char*>(bytes.data()),
-                                                            static_cast<std::streamsize>(bytes.size()))))
-                throw std::runtime_error("Could not stage external asset data.");
-            stream.close();
-            Detail::AtomicReplace(temporary, path);
-        };
+        const auto receiptValue = AssetId::Generate();
+        const auto transactionRoot = ConfinedPath(
+            m_Impl->Specification.ProjectRoot, std::filesystem::path("Library/AssetImport") / receiptValue.ToString());
+        const auto stagingRoot = transactionRoot / "staging";
+        Json journal{{"schemaVersion", 1}, {"state", "staged"}, {"entries", Json::array()}};
+        bool publicationStarted = false;
         try
         {
+            std::unordered_set<std::string> reservedDestinations;
             for (auto& item : planned)
             {
                 throwIfCancelled();
-                const auto* importer = m_Impl->InferImporter(item.Source);
-                if (!importer)
+                item.Importer = m_Impl->InferImporter(item.Source);
+                if (!item.Importer)
                     throw std::invalid_argument("No importer supports: " + item.Source.string());
-                if (item.Settings.empty() && importer->SuggestImportSettings)
-                    item.Settings = importer->SuggestImportSettings(item.Source, item.Settings);
+                if (item.Settings.empty() && item.Importer->SuggestImportSettings)
+                    item.Settings = item.Importer->SuggestImportSettings(item.Source, item.Settings);
+                item.Settings = m_Impl->NormalizeSettings(*item.Importer, item.Settings);
                 auto destination = item.Destination.lexically_normal();
-                auto absoluteDestination = ConfinedPath(m_Impl->SourceRoot, destination);
                 auto existing = Find(destination);
                 if (existing && item.Conflict == ExternalAssetConflictPolicy::Skip)
                     continue;
-                if (existing && item.Conflict == ExternalAssetConflictPolicy::UniqueName)
+                auto destinationKey = destination.generic_string();
+                if ((existing || reservedDestinations.contains(destinationKey)) &&
+                    item.Conflict == ExternalAssetConflictPolicy::UniqueName)
                 {
                     const auto parent = destination.parent_path();
                     const auto stem = destination.stem().string();
                     const auto extension = destination.extension().string();
-                    for (std::size_t copy = 2; existing; ++copy)
+                    for (std::size_t copy = 2; existing || reservedDestinations.contains(destinationKey); ++copy)
                     {
                         destination = parent / (stem + " " + std::to_string(copy) + extension);
                         existing = Find(destination);
+                        destinationKey = destination.generic_string();
                     }
-                    absoluteDestination = ConfinedPath(m_Impl->SourceRoot, destination);
                 }
-                const auto bytes = ReadSource(item.Source, m_Impl->Specification.MaximumSourceBytes);
-                if (!existing)
-                {
-                    const auto id = CreateAsset(destination, *importer, bytes, item.Settings);
-                    rollback.push_back(
-                        {absoluteDestination, std::filesystem::path(absoluteDestination.string() + ".keiremeta")});
-                    result.Entries.push_back({id, item.Source, destination, false});
-                    continue;
-                }
-                if (existing->Importer != importer->Name || existing->Type != importer->Type)
+                if (reservedDestinations.contains(destinationKey))
+                    throw std::invalid_argument("External import batch contains conflicting destinations: " +
+                                                destinationKey);
+                reservedDestinations.insert(destinationKey);
+                if (existing && (existing->Importer != item.Importer->Name || existing->Type != item.Importer->Type))
                     throw std::invalid_argument("Replace requires a destination with the same importer and type.");
-
-                const auto metadata = std::filesystem::path(absoluteDestination.string() + ".keiremeta");
-                Rollback restore{absoluteDestination, metadata,
-                                 ReadSource(absoluteDestination, m_Impl->Specification.MaximumSourceBytes),
-                                 ReadSource(metadata, 1024U * 1024U), true};
-                const auto settings = m_Impl->NormalizeSettings(*importer, item.Settings);
-                AssetSourceRecord validation = *existing;
-                validation.ImportSettings = settings;
-                validation.Type = importer->Type;
-                validation.Importer = importer->Name;
-                validation.ImporterVersion = importer->Version;
-                const auto validationMetadata = std::filesystem::path(metadata.string() + ".validate.tmp");
-                validation.MetadataPath = validationMetadata;
-                WriteMetadata(validationMetadata, existing->Id, importer->Type, importer->Name, importer->Version,
-                              settings);
-                AssetImportOutput validated;
-                try
+                item.Destination = destination;
+                item.Replaced = static_cast<bool>(existing);
+                item.Id = existing ? existing->Id : AssetId::Generate();
+                item.SourceBytes = ReadSource(item.Source, m_Impl->Specification.MaximumSourceBytes);
+                if (existing)
                 {
-                    validated = m_Impl->ImportSource(validation, bytes);
+                    const auto destinationPath = ConfinedPath(m_Impl->SourceRoot, destination);
+                    item.PreviousSource = ReadSource(destinationPath, m_Impl->Specification.MaximumSourceBytes);
+                    item.PreviousMetadata =
+                        ReadSource(std::filesystem::path(destinationPath.string() + ".keiremeta"), 16U * 1024U * 1024U);
                 }
-                catch (...)
-                {
-                    std::error_code ignored;
-                    std::filesystem::remove(validationMetadata, ignored);
-                    throw;
-                }
-                std::error_code ignored;
-                std::filesystem::remove(validationMetadata, ignored);
-                writeBytes(absoluteDestination, bytes);
-                WriteMetadata(metadata, existing->Id, importer->Type, importer->Name, importer->Version, settings);
-                rollback.push_back(std::move(restore));
-                (void)Refresh();
-                if (const auto refreshed = Find(existing->Id))
-                    m_Impl->StoreValidatedImport(*refreshed, std::move(validated));
-                result.Entries.push_back({existing->Id, item.Source, destination, true});
             }
-            throwIfCancelled();
-            result.Import = ImportAll(AssetImportPolicy::FailFast, cancellation, progress);
-            throwIfCancelled();
-            const auto receiptValue = AssetId::Generate();
-            receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
-                                       std::filesystem::path("Library/AssetImport") / receiptValue.ToString());
-            std::filesystem::create_directories(receiptRoot);
-            Json receipt{{"schemaVersion", 1}, {"entries", Json::array()}};
-            for (std::size_t index = 0; index < rollback.size(); ++index)
+            std::erase_if(planned, [](const PlannedItem& item) { return !item.Id; });
+            if (planned.empty())
+                throw std::invalid_argument("Every external import item was skipped.");
+
+            std::filesystem::create_directories(stagingRoot);
+            ReportOperationProgress(progress, AssetOperationPhase::Staging, 0, planned.size());
+            for (std::size_t index = 0; index < planned.size(); ++index)
             {
-                const auto& state = rollback[index];
-                const auto prefix = std::to_string(index);
-                writeBytes(receiptRoot / (prefix + ".after"),
-                           ReadSource(state.Source, m_Impl->Specification.MaximumSourceBytes));
-                writeBytes(receiptRoot / (prefix + ".after.keiremeta"),
-                           ReadSource(state.Metadata, 16U * 1024U * 1024U));
-                if (state.Replaced)
+                throwIfCancelled();
+                auto& item = planned[index];
+                const auto stagedSource = ConfinedPath(stagingRoot, item.Destination);
+                const auto stagedMetadata = std::filesystem::path(stagedSource.string() + ".keiremeta");
+                WriteFileAtomically(stagedSource, item.SourceBytes);
+                WriteMetadata(stagedMetadata, item.Id, item.Importer->Type, item.Importer->Name, item.Importer->Version,
+                              item.Settings);
+                const auto stagedRecord = ReadMetadata(stagingRoot, stagedSource,
+                                                       m_Impl->Specification.MaximumSourceBytes, true, item.Importer);
+                item.Validated = m_Impl->ImportSource(stagedRecord, item.SourceBytes);
+                if (item.Replaced)
                 {
-                    writeBytes(receiptRoot / (prefix + ".before"), state.PreviousSource);
-                    writeBytes(receiptRoot / (prefix + ".before.keiremeta"), state.PreviousMetadata);
+                    const auto prefix = std::to_string(index);
+                    WriteFileAtomically(transactionRoot / "before" / (prefix + ".source"), item.PreviousSource);
+                    WriteFileAtomically(transactionRoot / "before" / (prefix + ".metadata"), item.PreviousMetadata);
+                }
+                journal["entries"].push_back(
+                    {{"destination", item.Destination.generic_string()}, {"replaced", item.Replaced}});
+                ReportOperationProgress(progress, AssetOperationPhase::Staging, index + 1, planned.size(), item.Source);
+            }
+            WriteJsonAtomically(transactionRoot / "journal.json", journal);
+            throwIfCancelled();
+
+            publicationStarted = true;
+            journal["state"] = "publishing";
+            WriteJsonAtomically(transactionRoot / "journal.json", journal);
+            ReportOperationProgress(progress, AssetOperationPhase::Publishing, 0, planned.size());
+            for (std::size_t index = 0; index < planned.size(); ++index)
+            {
+                const auto& item = planned[index];
+                const auto destination = ConfinedPath(m_Impl->SourceRoot, item.Destination);
+                WriteFileAtomically(destination, item.SourceBytes);
+                WriteFileAtomically(std::filesystem::path(destination.string() + ".keiremeta"),
+                                    ReadSource(std::filesystem::path(
+                                                   ConfinedPath(stagingRoot, item.Destination).string() + ".keiremeta"),
+                                               16U * 1024U * 1024U));
+                ReportOperationProgress(progress, AssetOperationPhase::Publishing, index + 1, planned.size(),
+                                        item.Destination);
+            }
+            (void)Refresh();
+            for (auto& item : planned)
+                if (const auto record = Find(item.Id))
+                    m_Impl->StoreValidatedImport(*record, std::move(item.Validated));
+            result.Import = ImportAll(AssetImportPolicy::FailFast, {}, progress);
+
+            Json receipt{{"schemaVersion", 1}, {"entries", Json::array()}};
+            for (std::size_t index = 0; index < planned.size(); ++index)
+            {
+                const auto& item = planned[index];
+                const auto prefix = std::to_string(index);
+                WriteFileAtomically(transactionRoot / (prefix + ".after"), item.SourceBytes);
+                WriteFileAtomically(transactionRoot / (prefix + ".after.keiremeta"),
+                                    ReadSource(std::filesystem::path(
+                                                   ConfinedPath(stagingRoot, item.Destination).string() + ".keiremeta"),
+                                               16U * 1024U * 1024U));
+                if (item.Replaced)
+                {
+                    WriteFileAtomically(transactionRoot / (prefix + ".before"), item.PreviousSource);
+                    WriteFileAtomically(transactionRoot / (prefix + ".before.keiremeta"), item.PreviousMetadata);
                 }
                 receipt["entries"].push_back(
-                    {{"destination", result.Entries[index].RelativeDestination.generic_string()},
-                     {"replaced", state.Replaced}});
+                    {{"destination", item.Destination.generic_string()}, {"replaced", item.Replaced}});
+                result.Entries.push_back({item.Id, item.Source, item.Destination, item.Replaced});
             }
-            const auto manifest = receipt.dump(2);
-            writeBytes(receiptRoot / "receipt.json", std::as_bytes(std::span(manifest.data(), manifest.size())));
+            WriteJsonAtomically(transactionRoot / "receipt.json", receipt);
+            journal["state"] = "committed";
+            WriteJsonAtomically(transactionRoot / "journal.json", journal);
+            RemovePathNoThrow(stagingRoot);
+            RemovePathNoThrow(transactionRoot / "before");
             result.Receipt = ExternalAssetImportReceiptId(receiptValue);
             ReportOperationProgress(progress, AssetOperationPhase::Completed, planned.size(), planned.size());
             return result;
         }
         catch (...)
         {
-            for (auto iterator = rollback.rbegin(); iterator != rollback.rend(); ++iterator)
+            if (publicationStarted)
             {
-                std::error_code ignored;
-                if (iterator->Replaced)
+                try
                 {
-                    try
+                    ReportOperationProgress(progress, AssetOperationPhase::RollingBack, 0, planned.size());
+                    for (std::size_t index = planned.size(); index > 0; --index)
                     {
-                        writeBytes(iterator->Source, iterator->PreviousSource);
-                        writeBytes(iterator->Metadata, iterator->PreviousMetadata);
+                        const auto& item = planned[index - 1];
+                        const auto destination = ConfinedPath(m_Impl->SourceRoot, item.Destination);
+                        const auto metadata = std::filesystem::path(destination.string() + ".keiremeta");
+                        if (item.Replaced)
+                        {
+                            WriteFileAtomically(destination, item.PreviousSource);
+                            WriteFileAtomically(metadata, item.PreviousMetadata);
+                        }
+                        else
+                        {
+                            RemovePathNoThrow(destination);
+                            RemovePathNoThrow(metadata);
+                        }
                     }
-                    catch (...)
-                    {
-                    }
+                    (void)Refresh();
                 }
-                else
+                catch (...)
                 {
-                    std::filesystem::remove(iterator->Source, ignored);
-                    std::filesystem::remove(iterator->Metadata, ignored);
                 }
             }
-            (void)Refresh();
-            if (!receiptRoot.empty())
-            {
-                std::error_code ignored;
-                std::filesystem::remove_all(receiptRoot, ignored);
-            }
+            RemovePathNoThrow(transactionRoot);
             throw;
         }
     }
@@ -1218,56 +1332,114 @@ namespace Keire
             throw std::invalid_argument("External import receipt is invalid.");
         const auto receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
                                               std::filesystem::path("Library/AssetImport") / receipt.ToString());
-        const auto manifestBytes = ReadSource(receiptRoot / "receipt.json", 16U * 1024U * 1024U);
-        const auto manifest = Json::parse(reinterpret_cast<const char*>(manifestBytes.data()),
-                                          reinterpret_cast<const char*>(manifestBytes.data() + manifestBytes.size()));
+        const auto manifest = ReadJsonFile(receiptRoot / "receipt.json", 16U * 1024U * 1024U);
         if (manifest.value("schemaVersion", 0) != 1 || !manifest.contains("entries") || !manifest["entries"].is_array())
             throw std::runtime_error("External import receipt is invalid.");
-        const auto writeBytes = [](const std::filesystem::path& path, const std::span<const std::byte> bytes)
+
+        struct ReplayEntry final
         {
-            std::filesystem::create_directories(path.parent_path());
-            const auto temporary = path.string() + ".external-import-replay.tmp";
-            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-            if (!stream || (!bytes.empty() && !stream.write(reinterpret_cast<const char*>(bytes.data()),
-                                                            static_cast<std::streamsize>(bytes.size()))))
-                throw std::runtime_error("Could not replay external asset import receipt.");
-            stream.close();
-            Detail::AtomicReplace(temporary, path);
+            std::filesystem::path Destination;
+            std::filesystem::path Metadata;
+            std::vector<std::byte> DesiredSource;
+            std::vector<std::byte> DesiredMetadata;
+            std::vector<std::byte> PreviousSource;
+            std::vector<std::byte> PreviousMetadata;
+            bool Desired = false;
+            bool Previous = false;
         };
-        const auto applyEntry = [&](const std::size_t index, const Json& entry)
+        std::vector<ReplayEntry> replay;
+        replay.reserve(manifest["entries"].size());
+        std::size_t index = 0;
+        for (const auto& entry : manifest["entries"])
         {
             const auto destination =
                 ConfinedPath(m_Impl->SourceRoot, std::filesystem::path(entry.at("destination").get<std::string>()));
             const auto metadata = std::filesystem::path(destination.string() + ".keiremeta");
-            const bool replaced = entry.value("replaced", false);
-            if (!applied && !replaced)
+            const bool desired = applied || entry.value("replaced", false);
+            ReplayEntry state{.Destination = destination,
+                              .Metadata = metadata,
+                              .Desired = desired,
+                              .Previous = std::filesystem::is_regular_file(destination) &&
+                                          std::filesystem::is_regular_file(metadata)};
+            if (desired)
             {
-                std::error_code error;
-                std::filesystem::remove(destination, error);
-                if (error)
-                    throw std::runtime_error("Could not undo imported asset: " + error.message());
-                std::filesystem::remove(metadata, error);
-                if (error)
-                    throw std::runtime_error("Could not undo imported asset metadata: " + error.message());
-                return;
+                const auto prefix = std::to_string(index) + (applied ? ".after" : ".before");
+                state.DesiredSource = ReadSource(receiptRoot / prefix, m_Impl->Specification.MaximumSourceBytes);
+                state.DesiredMetadata = ReadSource(receiptRoot / (prefix + ".keiremeta"), 16U * 1024U * 1024U);
             }
-            const auto prefix = std::to_string(index) + (applied ? ".after" : ".before");
-            writeBytes(destination, ReadSource(receiptRoot / prefix, m_Impl->Specification.MaximumSourceBytes));
-            writeBytes(metadata, ReadSource(receiptRoot / (prefix + ".keiremeta"), 16U * 1024U * 1024U));
-        };
-        if (applied)
-        {
-            std::size_t index = 0;
-            for (const auto& entry : manifest["entries"])
-                applyEntry(index++, entry);
+            if (state.Previous)
+            {
+                state.PreviousSource = ReadSource(destination, m_Impl->Specification.MaximumSourceBytes);
+                state.PreviousMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+            }
+            replay.push_back(std::move(state));
+            ++index;
         }
-        else
+
+        const auto transactionRoot =
+            ConfinedPath(m_Impl->Specification.ProjectRoot,
+                         std::filesystem::path("Library/AssetImport") / AssetId::Generate().ToString());
+        Json journal{{"schemaVersion", 1}, {"state", "staged"}, {"entries", Json::array()}};
+        bool publicationStarted = false;
+        try
         {
-            for (std::size_t index = manifest["entries"].size(); index > 0; --index)
-                applyEntry(index - 1, manifest["entries"][index - 1]);
+            for (index = 0; index < replay.size(); ++index)
+            {
+                const auto& state = replay[index];
+                if (state.Previous)
+                {
+                    const auto prefix = std::to_string(index);
+                    WriteFileAtomically(transactionRoot / "before" / (prefix + ".source"), state.PreviousSource);
+                    WriteFileAtomically(transactionRoot / "before" / (prefix + ".metadata"), state.PreviousMetadata);
+                }
+                journal["entries"].push_back(
+                    {{"destination", std::filesystem::relative(state.Destination, m_Impl->SourceRoot).generic_string()},
+                     {"replaced", state.Previous}});
+            }
+            WriteJsonAtomically(transactionRoot / "journal.json", journal);
+            publicationStarted = true;
+            journal["state"] = "publishing";
+            WriteJsonAtomically(transactionRoot / "journal.json", journal);
+
+            for (const auto& state : replay)
+            {
+                if (state.Desired)
+                {
+                    WriteFileAtomically(state.Destination, state.DesiredSource);
+                    WriteFileAtomically(state.Metadata, state.DesiredMetadata);
+                }
+                else
+                {
+                    RemovePathNoThrow(state.Destination);
+                    RemovePathNoThrow(state.Metadata);
+                }
+            }
+            (void)Refresh();
+            (void)ImportAll(AssetImportPolicy::FailFast);
+            RemovePathNoThrow(transactionRoot);
         }
-        (void)Refresh();
-        (void)ImportAll(AssetImportPolicy::KeepLastGood);
+        catch (...)
+        {
+            if (publicationStarted)
+            {
+                for (auto iterator = replay.rbegin(); iterator != replay.rend(); ++iterator)
+                {
+                    if (iterator->Previous)
+                    {
+                        WriteFileAtomically(iterator->Destination, iterator->PreviousSource);
+                        WriteFileAtomically(iterator->Metadata, iterator->PreviousMetadata);
+                    }
+                    else
+                    {
+                        RemovePathNoThrow(iterator->Destination);
+                        RemovePathNoThrow(iterator->Metadata);
+                    }
+                }
+                (void)Refresh();
+            }
+            RemovePathNoThrow(transactionRoot);
+            throw;
+        }
     }
 
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)

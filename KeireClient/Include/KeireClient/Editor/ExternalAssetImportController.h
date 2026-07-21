@@ -2,12 +2,13 @@
 
 #include "Keire/Core.h"
 
+#include <atomic>
+#include <exception>
 #include <filesystem>
-#include <future>
 #include <optional>
 #include <span>
-#include <stop_token>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace KeireEditor
@@ -22,12 +23,14 @@ namespace KeireEditor
     class ExternalAssetImportController final
     {
       public:
+        ~ExternalAssetImportController();
+
         void Queue(std::span<const std::filesystem::path> paths, const std::filesystem::path& destinationFolder,
                    bool viewport, Keire::EntityId viewportTarget, const Keire::Ref<Keire::AssetDatabase>& database);
         void Draw(Keire::UiFrame& ui, const Keire::Ref<Keire::AssetDatabase>& database);
         [[nodiscard]] std::optional<ExternalAssetImportCompletion> TakeCompletion();
         [[nodiscard]] const std::string& Diagnostic() const noexcept { return m_Diagnostic; }
-        [[nodiscard]] bool Pending() const noexcept { return !m_Items.empty() || m_Future.valid() || m_Failed; }
+        [[nodiscard]] bool Pending() const noexcept { return !m_Items.empty() || m_Worker.joinable() || m_Failed; }
 
       private:
         void Execute(const Keire::Ref<Keire::AssetDatabase>& database);
@@ -41,7 +44,9 @@ namespace KeireEditor
         Keire::EntityId m_ViewportTarget;
         bool m_OpenRequested = false;
         bool m_Failed = false;
-        std::future<Keire::ExternalAssetImportResult> m_Future;
-        std::stop_source m_Cancellation;
+        std::jthread m_Worker;
+        std::optional<Keire::ExternalAssetImportResult> m_WorkerResult;
+        std::exception_ptr m_WorkerError;
+        std::atomic_bool m_WorkerFinished = false;
     };
 } // namespace KeireEditor

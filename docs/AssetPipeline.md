@@ -10,12 +10,16 @@ slots accept data/linear textures. The Material Inspector filters incompatible c
 strict import and cooking retain the same validation as a defense against hand-edited or stale source files.
 
 `AssetDatabase::ImportExternal` confines destinations to the project's source root, rejects symlinks and unsupported
-files, validates through the selected importer, and publishes source plus metadata transactionally. Directory imports
-preserve their relative layout. Batch failure rolls back created files and restores replaced content; explicit Replace
-keeps the destination `AssetId`, while Unique Name never overwrites an existing source. Cancellation is honored during
-preflight, copying, validation, and before publication boundaries. Successful batches retain a private
+files, rejects external `.keiremeta` identities, validates the complete batch in
+`Library/AssetImport/<transaction>/staging`, and publishes source plus metadata transactionally. Directory imports
+preserve their relative layout. A persistent `staged`/`publishing`/`committed` journal restores replaced content or
+removes new files after an interrupted publication before records are exposed at startup. Batch failure rolls back
+created files and restores replaced content; explicit Replace keeps the destination `AssetId`, while Unique Name never
+overwrites an existing source. Cancellation is honored through validation and until the publication boundary; once
+publication begins it finishes or rolls back atomically. Successful batches retain a private
 `Library/AssetImport` before/after receipt so Project undo restores replaced identities and redo republishes the exact
-validated batch.
+validated batch. Receipt replay performs a strict candidate cook and restores its previous sources and metadata if any
+step fails.
 Validated import output flows directly into object caching and development cooking instead of invoking the importer at
 each stage. Mesh and Texture2D importers can reconstruct derived state from unchanged cached canonical bytes, avoiding
 Assimp and image/mipmap work during unrelated imports. The editor mounts the catalog returned by this transaction and
