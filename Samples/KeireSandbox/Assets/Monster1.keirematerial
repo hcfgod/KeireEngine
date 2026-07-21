@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "MainTexture": "38760a1d-9dfa-4bbc-8ba1-50921ae9d748",
+    "MetallicRoughnessTexture": "cda3b77a-3982-42ef-8f7c-b6f8730e8eda",
+    "NormalTexture": "0a8ba309-c28a-4842-8949-09ff8c60a1fa",
+    "RoughnessTexture": "0b904e85-216d-4c6d-889b-2cee89089b02",
+    "Tint": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "schemaVersion": 1,
+  "shader": "b1b2c3d4-1000-4000-8000-000000000001"
+}

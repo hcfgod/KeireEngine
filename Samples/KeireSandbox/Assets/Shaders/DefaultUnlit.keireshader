@@ -46,7 +46,7 @@
       "minimum": 0.0,
       "maximum": 1.0,
       "step": 0.01,
-      "default": [0.0, 0.0, 0.0, 0.0]
+      "default": [1.0, 0.0, 0.0, 0.0]
     },
     {
       "name": "RoughnessFactor",
@@ -115,6 +115,22 @@
       "category": "Textures",
       "type": "Texture2D",
       "semantic": "Emissive",
+      "default": null
+    },
+    {
+      "name": "MetallicTexture",
+      "displayName": "Metallic Map",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Metallic",
+      "default": null
+    },
+    {
+      "name": "RoughnessTexture",
+      "displayName": "Roughness Map",
+      "category": "Textures",
+      "type": "Texture2D",
+      "semantic": "Roughness",
       "default": null
     }
   ]

@@ -26,8 +26,11 @@ namespace KeireEditor
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const;
         [[nodiscard]] bool Focused() const noexcept;
         [[nodiscard]] std::filesystem::path CurrentFolder() const;
+        [[nodiscard]] std::filesystem::path ResolveExternalDropFolder(Keire::UiPosition position) const;
         [[nodiscard]] static std::vector<Keire::AssetId> DecodeDragPayload(std::span<const std::byte> bytes);
+        void InvalidateThumbnail(Keire::AssetId asset);
         void RevealAsset(Keire::AssetId asset, EditorWorkspaceLayer& editor);
+        void RequestCreateMaterial();
         void RecordCreatedAsset(const Keire::Ref<Keire::AssetDatabase>& database, Keire::AssetId asset,
                                 std::string name);
         void Draw(Keire::UiFrame& ui, EditorWorkspaceLayer& editor);

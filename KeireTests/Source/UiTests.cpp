@@ -136,10 +136,19 @@ namespace
                 float trailing = 100.0F;
                 (void)ui.Splitter(Keire::UiAxis::Horizontal, "EditorSplitter", leading, trailing);
                 (void)ui.Shortcut({Keire::UiKey::S, true});
+                (void)ui.Shortcut({.Key = Keire::UiKey::Z, .Primary = true, .Global = true});
                 if (auto disabled = ui.BeginDisabled(); disabled)
                 {
                     (void)ui.Button("Disabled");
                 }
+
+                (void)ui.Button("Overlay layout anchor", {120.0F, 40.0F});
+                const auto anchor = ui.LastItemRect();
+                (void)ui.OverlayIconButton("HeadlessOverlay", Keire::UiIcon::Play,
+                                           {.Position = anchor.Minimum,
+                                            .Size = {28.0F, 28.0F},
+                                            .Tooltip = "Overlay without layout mutation",
+                                            .Selected = true});
             }
 
             std::thread worker(
@@ -318,6 +327,8 @@ namespace
                 CHECK(workspace.Themes().back().Name == "Test Theme");
                 CHECK(workspace.Themes().back().Active);
                 CHECK_FALSE(m_Panel.Visible());
+                m_Panel.RequestFocus();
+                CHECK(m_Panel.Visible());
                 CHECK_THROWS_AS(workspace.DeleteLayout(Keire::UiLayoutId(1)), std::invalid_argument);
                 CHECK_THROWS_AS(workspace.UpdateTheme(Keire::UiThemeId(1), {}), std::invalid_argument);
                 CHECK_THROWS_AS(workspace.ShowImportLayoutDialog(), Keire::UiError);
@@ -337,6 +348,23 @@ namespace
                     });
                 worker.join();
                 CHECK(rejected.load(std::memory_order_acquire));
+
+                rejected.store(false, std::memory_order_release);
+                std::thread focusWorker(
+                    [this, &rejected]
+                    {
+                        try
+                        {
+                            m_Panel.RequestFocus();
+                        }
+                        catch (const std::logic_error&)
+                        {
+                            rejected.store(true, std::memory_order_release);
+                        }
+                    });
+                focusWorker.join();
+                CHECK(rejected.load(std::memory_order_acquire));
+                CHECK(m_Panel.Visible());
 
                 const auto malformed = std::filesystem::temp_directory_path() / "keire-malformed-theme.keiretheme";
                 {

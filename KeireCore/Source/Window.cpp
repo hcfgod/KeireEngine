@@ -569,6 +569,46 @@ namespace Keire
                     return QuitEvent{{event.common.timestamp, {}}};
                 }
 
+                if (event.type == SDL_EVENT_DROP_BEGIN || event.type == SDL_EVENT_DROP_FILE ||
+                    event.type == SDL_EVENT_DROP_POSITION || event.type == SDL_EVENT_DROP_COMPLETE)
+                {
+                    const auto nativeIterator = m_NativeToWindow.find(event.drop.windowID);
+                    if (nativeIterator == m_NativeToWindow.end())
+                        continue;
+                    const WindowId id(nativeIterator->second);
+                    auto& drop = m_FileDrops[event.drop.windowID];
+                    if (event.type == SDL_EVENT_DROP_BEGIN)
+                    {
+                        drop = {};
+                        drop.Timestamp = event.drop.timestamp;
+                    }
+                    else if (event.type == SDL_EVENT_DROP_FILE && event.drop.data && *event.drop.data)
+                    {
+                        const auto* first = reinterpret_cast<const char8_t*>(event.drop.data);
+                        drop.Paths.emplace_back(std::u8string(first, first + std::char_traits<char8_t>::length(first)));
+                        drop.Position = {static_cast<std::int32_t>(event.drop.x),
+                                         static_cast<std::int32_t>(event.drop.y)};
+                        drop.Timestamp = event.drop.timestamp;
+                    }
+                    else if (event.type == SDL_EVENT_DROP_POSITION)
+                    {
+                        drop.Position = {static_cast<std::int32_t>(event.drop.x),
+                                         static_cast<std::int32_t>(event.drop.y)};
+                        drop.Timestamp = event.drop.timestamp;
+                    }
+                    else if (event.type == SDL_EVENT_DROP_COMPLETE)
+                    {
+                        auto completed = std::move(drop);
+                        m_FileDrops.erase(event.drop.windowID);
+                        if (!completed.Paths.empty())
+                        {
+                            return WindowFileDropEvent{
+                                {event.drop.timestamp, id}, completed.Position, std::move(completed.Paths)};
+                        }
+                    }
+                    continue;
+                }
+
                 if (event.type < SDL_EVENT_WINDOW_FIRST || event.type > SDL_EVENT_WINDOW_LAST)
                 {
                     continue;
@@ -991,6 +1031,13 @@ namespace Keire
         }
 
       private:
+        struct FileDropState
+        {
+            std::uint64_t Timestamp = 0;
+            WindowPosition Position;
+            std::vector<std::filesystem::path> Paths;
+        };
+
         struct CachedWindow
         {
             SDL_Window* Native = nullptr;
@@ -1141,6 +1188,7 @@ namespace Keire
         mutable std::mutex m_StateMutex;
         std::unordered_map<std::uint32_t, CachedWindow> m_Windows;
         std::unordered_map<SDL_WindowID, std::uint32_t> m_NativeToWindow;
+        std::unordered_map<SDL_WindowID, FileDropState> m_FileDrops;
         std::uint32_t m_NextWindowId = 1;
         std::mutex m_DeferredMutex;
         std::vector<WindowId> m_DeferredDestruction;

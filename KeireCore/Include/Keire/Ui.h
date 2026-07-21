@@ -93,6 +93,7 @@ namespace Keire
         bool Shift = false;
         bool Alt = false;
         bool Primary = false;
+        bool Global = false;
     };
 
     struct UiItemState
@@ -137,6 +138,36 @@ namespace Keire
     struct UiTooltipOptions
     {
         bool Delayed = false;
+    };
+
+    enum class UiIcon : std::uint8_t
+    {
+        Play,
+        Stop,
+        Pause,
+        Step,
+        View,
+        Translate,
+        Rotate,
+        Scale,
+        Local,
+        Global,
+        Snap,
+        Settings,
+        Perspective,
+        Orthographic,
+        AxisX,
+        AxisY,
+        AxisZ
+    };
+
+    struct UiOverlayIconButtonSpecification
+    {
+        UiPosition Position;
+        UiSize Size{30.0F, 28.0F};
+        std::string_view Tooltip;
+        bool Selected = false;
+        bool Enabled = true;
     };
 
     enum class UiTableSizing : std::uint8_t
@@ -373,7 +404,7 @@ namespace Keire
         [[nodiscard]] UiMenuScope BeginMenu(std::string_view label, bool enabled = true);
         [[nodiscard]] UiTabBarScope BeginTabBar(std::string_view id);
         [[nodiscard]] UiTabItemScope BeginTabItem(std::string_view label, bool* open = nullptr);
-        [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label);
+        [[nodiscard]] UiTreeNodeScope BeginTreeNode(std::string_view label, bool selected = false);
         [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
         [[nodiscard]] UiIdScope PushId(std::string_view id);
         [[nodiscard]] UiMainMenuBarScope BeginMainMenuBar();
@@ -406,6 +437,10 @@ namespace Keire
         [[nodiscard]] UiItemState LastItemState() const;
         [[nodiscard]] UiItemRect LastItemRect() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
+        [[nodiscard]] bool IconButton(std::string_view id, UiIcon icon, bool selected = false,
+                                      UiSize size = {30.0F, 0.0F});
+        [[nodiscard]] bool OverlayIconButton(std::string_view id, UiIcon icon,
+                                             UiOverlayIconButtonSpecification specification);
         [[nodiscard]] bool Checkbox(std::string_view label, bool& value);
         [[nodiscard]] bool DragInteger(std::string_view label, std::int64_t& value, double speed = 1.0,
                                        std::optional<std::int64_t> minimum = {},
@@ -446,6 +481,7 @@ namespace Keire
         void SetTooltip(std::string_view text, UiTooltipOptions options);
         void SetNextWindowSize(UiSize size, bool firstUseOnly = true);
         void SetNextWindowPosition(UiPosition position, bool firstUseOnly = true);
+        void AlignNextItemGroup(float alignment, float width);
 
       private:
         friend class UiScope;

@@ -1,5 +1,26 @@
 # Scene Authoring
 
+## Editing during Play mode
+
+The Hierarchy, Inspector, transform gizmos, and Scene viewport asset drops target the isolated runtime scene while
+Play mode is active. These edits affect the running scene immediately and use a separate Play-mode undo history; the
+authored scene remains unchanged until Play stops.
+
+Stopping with runtime differences opens **Play Mode Changes**. Changes are grouped by entity and component and show
+their previous and runtime values. Deliberate editor changes are selected by default, while simulation-only changes
+remain available but unchecked. **Apply Selected and Stop** applies the validated selection as one authored-scene undo
+step and marks the scene dirty. **Discard and Stop** restores the exact authored scene, and **Cancel** resumes the prior
+Playing or Paused state. Scene close, project changes, and application exit pass through this review before the normal
+unsaved-scene prompt.
+
+Ctrl-click toggles entities in both the Scene viewport and Hierarchy. Dragging from anywhere in the viewport except an
+active gizmo handle draws a marquee and selects every active entity whose projected bounds intersect it; Ctrl-drag adds
+to the existing set. Gizmo handles consume their press before picking begins, so starting a transform never clears the
+selection. The last selected entity is the primary selection shown in Inspector and supplies the gizmo pivot. A gizmo
+transform applies to every selected root; selected descendants follow their selected parent once instead of receiving a
+second transform. Duplicate and Delete apply to the complete selection as one scene undo operation. Editor Ctrl/Cmd-Z
+and redo shortcuts are globally routed from Scene and Hierarchy focus while active text controls retain local undo.
+
 The Scene, Hierarchy, Inspector, Project, and Console panels form the first scene-authoring workflow.
 
 ## Workflow
@@ -21,10 +42,13 @@ Scene uses its own bounded `UndoContext`, `Ctrl+S`, and explicit atomic Save. Th
 `Ctrl/Cmd+Z`, `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, or `Ctrl+Y` route to the focused document history. Continuous Transform and tint
 drags are one undo entry. `Ctrl+Shift+S` uses an asynchronous native dialog,
 requires a new `.keirescene` inside project Assets, assigns a new asset identity, and switches to the copy.
+`Ctrl/Cmd+S` is routed globally so a focused Inspector or text field cannot consume it. Saving an existing scene writes
+its source atomically and returns immediately; runtime catalog rebuilding and handle reload happen in the background.
 
-The Scene toolbar controls Play, Pause, Step, and Stop. Play clones the current authored scene while retaining entity
-IDs. Pause freezes lifecycle updates, Step performs one fixed tick, and Stop discards all runtime mutations. A callback
-failure pauses the runtime clone and writes one actionable Console diagnostic without changing authored state.
+The centered main editor bar controls Play, Pause, Step, and Stop from either the Scene or Game tab. Play clones the
+current authored scene while retaining entity IDs. Pause freezes lifecycle updates, Step performs one fixed tick, and
+Stop opens the selective change review when runtime state differs. A callback failure pauses the runtime clone and
+writes one actionable Console diagnostic without changing authored state.
 
 ## Dirty And Recovery Policy
 
@@ -37,11 +61,14 @@ best-effort snapshot during abnormal shutdown. On the next open, Scene offers Re
 snapshot as dirty authoring state and requires an explicit Save before it becomes project content. Recovery files, logs,
 caches, workspace state, and cooked builds are ignored project-local data.
 
-Scene view renders the edit scene or active runtime clone with a depth-tested grid. `F` frames transformed renderer and
+Scene view renders the edit scene or active runtime clone with a depth-tested grid. A compact top-left overlay owns
+View/Move/Rotate/Scale, Local/Global, Snap, and settings; the top-right overlay owns projection and axis snaps. These
+overlays consume pointer input only inside their visible rectangles, leaving selection, marquee, gizmos, drops, and
+camera navigation active everywhere else. `F` frames transformed renderer and
 child bounds, `Shift+F` locks the pivot, Alt+left orbits, middle drag pans in camera space, the wheel/Alt+right zooms,
 and right drag plus `WASDQE` flies. Shift accelerates navigation; the wheel adjusts fly speed; arrow keys walk/strafe;
-the toolbar snaps axes and toggles perspective/orthographic projection. Horizontal orbit/fly motion follows pointer
+the orientation overlay snaps axes and toggles perspective/orthographic projection. Horizontal orbit/fly motion follows
+pointer
 motion while vertical motion retains Unity's pitch convention. Game view renders the deterministic active scene Camera
 from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content. See
-[Rendering](Rendering.md). Gizmos, prefabs, scripting, native module hot reload, and applying Play changes remain later
-subsystem milestones.
+[Rendering](Rendering.md). Prefabs, scripting, and native module hot reload remain later subsystem milestones.

@@ -55,6 +55,10 @@ Texture2D OcclusionTexture : register(t3, space2);
 SamplerState OcclusionSampler : register(s3, space2);
 Texture2D EmissiveTexture : register(t4, space2);
 SamplerState EmissiveSampler : register(s4, space2);
+Texture2D MetallicTexture : register(t5, space2);
+SamplerState MetallicSampler : register(s5, space2);
+Texture2D RoughnessTexture : register(t6, space2);
+SamplerState RoughnessSampler : register(s6, space2);
 
 VertexOutput VSMain(VertexInput input)
 {
@@ -65,7 +69,7 @@ VertexOutput VSMain(VertexInput input)
     output.Normal = normalize(mul((float3x3)NormalMatrix, input.Normal));
     output.Tangent = normalize(mul((float3x3)Model, input.Tangent.xyz));
     output.Bitangent = normalize(cross(output.Normal, output.Tangent) * input.Tangent.w);
-    output.ViewDirection = normalize(-viewPosition.xyz);
+    output.ViewDirection = normalize(mul(-viewPosition.xyz, (float3x3)View));
     output.UV0 = input.UV0;
     output.Color = input.Color;
     return output;
@@ -103,8 +107,10 @@ float4 PSMain(VertexOutput input) : SV_Target0
     const float3 lightDirection = normalize(-DirectionalDirectionExposure.xyz);
     const float3 halfway = normalize(viewDirection + lightDirection);
     const float4 metallicRoughness = MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, input.UV0);
-    const float metallic = saturate(metallicRoughness.b * MetallicFactor.x);
-    const float roughness = clamp(metallicRoughness.g * RoughnessFactor.x, 0.045F, 1.0F);
+    const float metallicSample = MetallicTexture.Sample(MetallicSampler, input.UV0).r;
+    const float roughnessSample = RoughnessTexture.Sample(RoughnessSampler, input.UV0).r;
+    const float metallic = saturate(max(metallicRoughness.b, metallicSample) * MetallicFactor.x);
+    const float roughness = clamp(min(metallicRoughness.g, roughnessSample) * RoughnessFactor.x, 0.045F, 1.0F);
     const float occlusionSample = OcclusionTexture.Sample(OcclusionSampler, input.UV0).r;
     const float occlusion = lerp(1.0F, occlusionSample, saturate(OcclusionStrength.x));
     const float3 emissive = EmissiveTexture.Sample(EmissiveSampler, input.UV0).rgb * EmissiveFactor.rgb;
@@ -122,5 +128,5 @@ float4 PSMain(VertexOutput input) : SV_Target0
                           DirectionalColorIntensity.a * normalLight;
     const float3 ambient = baseColor.rgb * AmbientColorIntensity.rgb * AmbientColorIntensity.a * occlusion;
     const float3 color = (ambient + direct + emissive) * DirectionalDirectionExposure.w;
-    return float4(color, baseColor.a);
+    return float4(color, 1.0F);
 }

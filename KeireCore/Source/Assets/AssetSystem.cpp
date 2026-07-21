@@ -477,6 +477,48 @@ namespace Keire
             throw std::logic_error("Cannot mount a catalog after the asset system has closed.");
         m_Impl->Mounts = std::move(mounts);
         m_Impl->Resolved = std::move(resolved);
+
+        bool queuedRecovery = false;
+        for (const auto& [id, state] : m_Impl->States)
+        {
+            if (m_Impl->QueueSize >= m_Impl->Specification.QueueCapacity)
+                break;
+            const auto entry = m_Impl->Resolved.find(id);
+            const auto decoder = m_Impl->Decoders.find(state->Type());
+            if (entry == m_Impl->Resolved.end() || decoder == m_Impl->Decoders.end() ||
+                entry->second.Entry.Type != state->Type())
+                continue;
+
+            auto pendingResolve = m_Impl->Completions.end();
+            const auto current = state->State();
+            if (current == AssetState::Queued)
+            {
+                pendingResolve = std::ranges::find_if(m_Impl->Completions,
+                                                      [&state](const Impl::Completion& completion)
+                                                      {
+                                                          return completion.State.Get() == state.Get() &&
+                                                                 !completion.CountedInQueue &&
+                                                                 completion.Diagnostic.Operation == "resolve";
+                                                      });
+                if (pendingResolve == m_Impl->Completions.end())
+                    continue;
+            }
+            else if (current != AssetState::Failed || state->Diagnostic().Operation != "resolve")
+            {
+                continue;
+            }
+
+            m_Impl->Jobs[static_cast<std::size_t>(AssetPriority::Normal)].push_back(
+                {state, entry->second, decoder->second, false, ++m_Impl->Sequence});
+            if (pendingResolve != m_Impl->Completions.end())
+                m_Impl->Completions.erase(pendingResolve);
+            state->SetLoading(false);
+            ++m_Impl->QueueSize;
+            m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
+            queuedRecovery = true;
+        }
+        if (queuedRecovery)
+            m_Impl->WorkAvailable.notify_all();
     }
 
     bool AssetSystem::Unmount(const std::filesystem::path& catalogPath)
@@ -501,6 +543,55 @@ namespace Keire
         return true;
     }
 
+    bool AssetSystem::PublishDevelopmentAsset(const AssetId id, Ref<Asset> asset)
+    {
+        m_Impl->RequireOwnerThread("PublishDevelopmentAsset");
+        if (!id || !asset)
+            throw std::invalid_argument("A development asset publication requires an ID and asset value.");
+
+        Ref<Detail::AssetHandleState> state;
+        bool reload = false;
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (!m_Impl->Open || m_Impl->Specification.Mode != AssetMode::Development)
+                throw std::logic_error("Development asset publication requires an open development asset system.");
+            const auto decoder = m_Impl->Decoders.find(asset->Type());
+            if (decoder == m_Impl->Decoders.end())
+                throw std::invalid_argument("No decoder is registered for the published development asset type.");
+            if (const auto resolved = m_Impl->Resolved.find(id);
+                resolved != m_Impl->Resolved.end() && resolved->second.Entry.Type != asset->Type())
+                throw std::invalid_argument("The published development asset type does not match its catalog entry.");
+
+            const auto existing = m_Impl->States.find(id);
+            if (existing == m_Impl->States.end())
+            {
+                state = CreateRef<Detail::AssetHandleState>(id, asset->Type(), decoder->second.Fallback, ThreadHash());
+                m_Impl->States.emplace(id, state);
+            }
+            else
+            {
+                state = existing->second;
+                if (state->Type() != asset->Type())
+                    throw std::invalid_argument("The published development asset type does not match its handle.");
+                const auto current = state->State();
+                if (current != AssetState::Ready && current != AssetState::Failed)
+                    return false;
+                reload = true;
+            }
+        }
+
+        state->Commit(std::move(asset));
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            ++m_Impl->CompletedLoads;
+            if (reload)
+                ++m_Impl->Reloads;
+        }
+        if (m_Impl->Events)
+            (void)m_Impl->Events->Dispatch(AssetLoadedEvent{state->Id(), state->Type(), state->Revision(), reload});
+        return true;
+    }
+
     bool AssetSystem::Reload(const AssetId id, const AssetPriority priority)
     {
         m_Impl->RequireOwnerThread("Reload");
@@ -511,6 +602,29 @@ namespace Keire
             m_Impl->QueueSize >= m_Impl->Specification.QueueCapacity)
             return false;
         const auto currentState = state->second->State();
+        if (currentState == AssetState::Queued)
+        {
+            const auto pending = std::ranges::find_if(m_Impl->Completions,
+                                                      [&state](const Impl::Completion& completion)
+                                                      {
+                                                          return completion.State.Get() == state->second.Get() &&
+                                                                 !completion.CountedInQueue &&
+                                                                 completion.Diagnostic.Operation == "resolve";
+                                                      });
+            if (pending == m_Impl->Completions.end())
+                return false;
+            const auto decoder = m_Impl->Decoders.find(state->second->Type());
+            if (decoder == m_Impl->Decoders.end() || entry->second.Entry.Type != state->second->Type())
+                return false;
+            m_Impl->Completions.erase(pending);
+            m_Impl->Jobs[static_cast<std::size_t>(priority)].push_back(
+                {state->second, entry->second, decoder->second, false, ++m_Impl->Sequence});
+            ++m_Impl->QueueSize;
+            m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
+            ++m_Impl->Reloads;
+            m_Impl->WorkAvailable.notify_one();
+            return true;
+        }
         if (currentState != AssetState::Ready && currentState != AssetState::Failed)
             return false;
         const auto decoder = m_Impl->Decoders.find(state->second->Type());

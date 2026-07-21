@@ -1,5 +1,29 @@
 # Asset Database And Cook Pipeline
 
+Importer registrations may declare UI-independent Boolean, Integer, Scalar, and Choice options. Normalized values are
+stored in `.keiremeta`, participate in its digest, and arrive in `AssetImportContext`; editor UI is generated from the
+descriptors without exposing ImGui or JSON. Existing `textureImportSettings` metadata remains readable.
+
+Shader texture semantics constrain material authoring as well as cook validation. Base-color and emissive slots accept
+color/sRGB textures, normal slots accept normal/linear textures, and metallic, roughness, occlusion, and packed ORM
+slots accept data/linear textures. The Material Inspector filters incompatible choices before writing the material;
+strict import and cooking retain the same validation as a defense against hand-edited or stale source files.
+
+`AssetDatabase::ImportExternal` confines destinations to the project's source root, rejects symlinks and unsupported
+files, validates through the selected importer, and publishes source plus metadata transactionally. Directory imports
+preserve their relative layout. Batch failure rolls back created files and restores replaced content; explicit Replace
+keeps the destination `AssetId`, while Unique Name never overwrites an existing source. Cancellation is honored during
+preflight, copying, validation, and before publication boundaries. Successful batches retain a private
+`Library/AssetImport` before/after receipt so Project undo restores replaced identities and redo republishes the exact
+validated batch.
+Validated import output flows directly into object caching and development cooking instead of invoking the importer at
+each stage. Mesh and Texture2D importers can reconstruct derived state from unchanged cached canonical bytes, avoiding
+Assimp and image/mipmap work during unrelated imports. The editor mounts the catalog returned by this transaction and
+does not immediately launch a duplicate project-wide import.
+While an external import is running, the Asset Browser keeps its last published record snapshot and does not request
+thumbnails for the transaction's source records. Catalog mounting also recovers any early queued or failed resolve,
+and the editor invalidates fallback previews when publication completes.
+
 ## Source Identity
 
 `AssetDatabase` scans the project `Assets/` directory and owns editor/tooling identity. Every source has an adjacent
@@ -23,7 +47,9 @@ Trash manifests persist the original relative location so editor Undo can restor
 objects are cache hits. It then publishes the development runtime directory transactionally under
 `Library/AssetCache/Runtime`. `PollChangedAssets()` uses file signatures and a 250 ms default stability window; hashing
 and import happen only after a stable change. The editor remounts the published catalog and requests last-good reloads
-for changed IDs.
+for changed IDs. Interactive material authoring first publishes an immutable development asset revision directly to
+loaded handles, then coalesces source persistence and catalog rebuilding at the edit boundary on a background task.
+This preview path is unavailable in cooked mode and does not replace import/cook validation.
 
 The default raw import path classifies common source/configuration/shader extensions as UTF-8 text and all remaining
 files as binary. Owner-configured `AssetImporterRegistration` values claim specialized extensions, validate source
@@ -36,6 +62,10 @@ reader. They return canonical bytes, structured diagnostics, source dependency p
 asset IDs. This is used by shader
 manifests and preserves the byte-only callback for existing importers. Dependency digests participate in the cache key,
 and failed reimports never replace a last-good runtime object.
+
+Development catalogs omit references whose source assets have been removed so editor-time mesh and texture resolution
+uses deterministic error/checkerboard resources without blocking unrelated imports. Strict platform cooking continues
+to reject every missing dependency.
 
 Interactive editors may call `ImportAll(AssetImportPolicy::KeepLastGood)`. Each source receives an `AssetImportStatus`;
 a failed new source stays visible but is omitted from the runtime catalog, while an existing asset keeps its last
@@ -93,11 +123,19 @@ Material texture slots are declared by the referenced shader's `Texture2D` prope
 provides `SetTexture`, `Texture`, and `RemoveTexture` for code and tools, while `MaterialAsset::EncodeSource` and
 `DecodeSource` keep JSON ownership inside the engine. Inspector resolves the shader manifest and presents a
 Texture2D-filtered picker for every declared slot, so base-color, normal, emissive, packed-mask, and project-specific
-maps require no hardcoded editor path. Saving a selection rewrites the material atomically and refreshes the catalog.
+maps require no hardcoded editor path. Committing an edit rewrites the material atomically and schedules a coalesced
+catalog refresh without blocking the UI.
+
+The built-in PBR surface accepts either glTF packed metallic-roughness data (G roughness, B metallic) or separate
+linear Data textures through Metallic Map and Roughness Map. Separate maps use their red channel. Their neutral
+fallbacks are black metallic and white roughness, so omitted optional slots do not alter a packed workflow.
 
 .keiremesh version 2 stores a float4 tangent direction and handedness. Version 1 remains readable and receives
 deterministically generated tangents. Mesh import bounds are written into catalog schema 2; AssetSystem exposes them
 through a read-only metadata query, so viewport picking never reparses OBJ/FBX/glTF/GLB source.
+Assimp sources are normalized during import from its right-handed, lower-left-UV, counter-clockwise output to Kéire's
+left-handed, upper-left-UV, clockwise mesh convention. Node transforms are applied before the canonical mesh is written,
+and the conversion is backend-independent across D3D12, Vulkan, and Metal.
 
 Before a catalog is published or cooked, material overrides are checked against the referenced shader declarations.
 Unknown names, incompatible value types, out-of-range values, missing/wrong asset types, and incompatible texture

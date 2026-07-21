@@ -1,0 +1,23 @@
+{
+  "dependencies": [],
+  "id": "cda3b77a-3982-42ef-8f7c-b6f8730e8eda",
+  "importSettings": {
+    "addressU": "repeat",
+    "addressV": "repeat",
+    "addressW": "repeat",
+    "anisotropy": 1,
+    "colorSpace": "linear",
+    "flipGreen": false,
+    "magFilter": "linear",
+    "maximumSize": 16384,
+    "minFilter": "linear",
+    "mipFilter": "linear",
+    "mips": "generate",
+    "semantic": "data"
+  },
+  "importer": "Keire.Texture2D",
+  "importerVersion": 2,
+  "schemaVersion": 1,
+  "subAssets": [],
+  "type": "4b454952-4554-4558-5455-524532440001"
+}

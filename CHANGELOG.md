@@ -4,7 +4,42 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+### Fixed
+
+- Asset pipelines now use the clockwise render-target front-face convention required by Kéire's left-handed camera
+  matrices, so back-face culling preserves imported mesh exteriors instead of exposing their interiors.
+- OBJ, FBX, glTF, and GLB import now converts Assimp's right-handed geometry, lower-left UVs, and counter-clockwise
+  indices into Kéire's left-handed, upper-left-UV, clockwise asset convention; the importer revision invalidates stale
+  mesh cache entries automatically.
+- PBR materials now keep view and lighting vectors in the same world-space basis and write opaque output for opaque
+  pipelines, preventing normal/specular artifacts and apparent holes on imported models. Material texture pickers also
+  reject incompatible semantic/color-space assignments before they can invalidate the development catalog.
+- Material creation now asks for a name before publishing, and single-asset create/rename operations update the live
+  source index without synchronously hashing and cooking the entire project.
+- The Sandbox monster now uses its textured material, with separate linear Metallic and Roughness map slots instead
+  of incorrectly treating standalone images as packed glTF ORM data.
+- Project Browser breadcrumbs now defer navigation until path enumeration finishes and use stable scoped IDs, avoiding
+  an ImGui empty-ID assertion when navigating from a nested folder to one of its parents.
+- `Ctrl/Cmd+S` now routes globally to Scene save, existing-scene saves defer catalog rebuilding to a background task,
+  and external imports no longer repeat import/cook work or expose IDs from a failed catalog publication.
+- Newly imported meshes and textures remain hidden from thumbnail loading until their replacement catalog is mounted;
+  early handles recover automatically and stale cube/checkerboard thumbnails are invalidated after publication.
+- Texture imports infer normal and packed data semantics from conventional filenames, retain explicit dialog
+  overrides, and report transactional catalog-validation failures without leaving fallback-only assets behind.
+- Scene-view overlay controls no longer mutate ImGui layout cursors or trigger a window-boundary assertion when the
+  editor opens.
+
 ### Added
+
+- Unity-style persistent Play/Pause/Step controls, nonintrusive Scene-view tool/orientation overlays, automatic
+  Game-tab focus on Play and Scene-tab focus after Stop, and content-aware texture, material-sphere, and mesh previews.
+- Scene and Hierarchy multi-selection with Ctrl-toggle, viewport marquee selection, primary-selection Inspector
+  authoring, and batch duplicate/delete commands.
+- Editable Play-mode scenes with isolated runtime undo, property-level change review, selective apply/discard, and
+  guarded scene/exit transitions that leave applied changes dirty for the normal Save workflow.
+- Cross-platform operating-system asset drops with Project-folder/Scene-viewport routing, transactional external
+  copies, importer-owned texture options, cancellation, conflict handling, stable-ID replacement, and receipt-backed
+  batch undo/redo.
 
 - A metallic-roughness material surface with shader-declared semantic slots, neutral base/normal/ORM/emissive
   fallbacks, ranged numeric/color authoring, strict cook validation, and glTF +Y normal-map handling.
@@ -151,6 +186,20 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Stopping Play from the Scene UI no longer closes the runtime scene while the current render frame still references
+  it; Play transitions execute at a safe update boundary and render submissions retain immutable frame-local data.
+
+- Material property edits now publish an in-memory runtime revision immediately and persist their catalog refresh in
+  the background, avoiding a synchronous project-wide import for each texture, color, or slider change.
+- Scene gizmos transform every selected root around the primary pivot without double-transforming selected children,
+  and globally routed editor undo/redo shortcuts work from focused Scene and Hierarchy panels.
+- Current development catalogs open without an unconditional startup recook, and the Hub launches the editor before
+  nonessential recent-project registry maintenance.
+- UI-owned thumbnail textures remain alive until the renderer backend has released them during shutdown.
+- Hierarchy Ctrl-click uses the actual pointer press, viewport marquee selection starts consistently, and gizmo handles
+  no longer clear scene selection.
+- Material Inspector texture edits now reload the live material revision, and viewport material drops decode source
+  definitions without invoking an absent byte-only importer callback.
 - Restored the declared Zstandard, EnTT, GLM, and SDL_shadercross submodule gitlinks so recursive clones reproduce the
   locked vendor tree.
 - SDK packaging now stages only tracked sandbox sources and rejects generated `Library`, `Logs`, `Build`, `Temp`, and

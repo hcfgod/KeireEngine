@@ -244,6 +244,10 @@ The editor discovers the opened project's `Assets/`, creates stable `.keiremeta`
 `Library/AssetCache`, and exposes Project/Inspector browsing plus import and Dist cook actions. The same workflow is
 available without the editor:
 
+Files and folders may be dragged from the operating system into a Project folder or the Scene viewport. Configurable
+textures open an import-options dialog; simple files import directly. External sources are copied into `Assets`, and
+viewport imports reuse the normal typed Scene drop behavior.
+
 ```powershell
 ./Build/Bin/Debug-windows-x86_64/KeireAssetTool/KeireAssetTool.exe import --project Samples/KeireSandbox
 ./Build/Bin/Debug-windows-x86_64/KeireAssetTool/KeireAssetTool.exe cook --project Samples/KeireSandbox --output Build/Assets --profile Dist
@@ -262,14 +266,25 @@ and sampler settings stored in source metadata. Assimp and stb remain private im
 headers are not required by engine or SDK consumers.
 
 Selecting a `.keirematerial` in Inspector exposes every shader-declared numeric, color, and texture property. The
-production surface uses base-color, +Y normal, metallic-roughness, occlusion, and emissive semantics with neutral
-fallbacks. Edits are range-checked, saved atomically, reimported immediately, and recorded in project-asset undo.
+production surface uses base-color, +Y normal, packed metallic-roughness, separate metallic/roughness, occlusion, and
+emissive semantics with neutral fallbacks. Edits are range-checked, previewed through live immutable revisions, saved
+atomically at the edit boundary, persisted to the catalog in the background, and recorded in project-asset undo.
 
 The Sandbox startup scene uses an imported UV-mapped pyramid and Texture2D material through the same renderer-owned
 resource caches used by the editor. Dist cooking follows scene-to-material-to-shader/texture dependencies and emits a
 runtime manifest; omit `--frames` to run the cooked scene as the normal standalone player.
 
 ## Projects And Scenes
+
+During Play mode, Hierarchy, Inspector, gizmo, and viewport edits target the isolated runtime clone. Stop presents the
+runtime differences by entity/component/property; selected changes can be applied as one undoable dirty scene edit,
+discarded, or left running with Cancel. Entering Play focuses the Game tab; review and Cancel retain Game, while a
+completed Stop returns focus to Scene. Play/Pause/Step remain centered in the persistent editor bar, and compact Scene
+tool/orientation overlays consume input only within their visible controls.
+
+Project-grid previews use imported content: textures preserve aspect and alpha, materials appear on a shaded sphere,
+and mesh/model assets use framed imported geometry. Scene, shader, input, folder, missing, and unknown content use
+distinct generated type icons; all preview cache data remains under `Library/Thumbnails`.
 
 `ProjectSettings/Project.keireproject` is the fixed marker for an isolated Kéire project. `Project::Create` produces
 transactional Empty or Starter roots; `Project::Open` validates schema/version and the editor holds an OS-exclusive lock

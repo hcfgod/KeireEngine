@@ -17,6 +17,10 @@ namespace KeireEditor
     struct ThumbnailRequest
     {
         Keire::AssetId Asset;
+        Keire::AssetTypeId Type;
+        Keire::Ref<const Keire::Asset> PreviewAsset;
+        Keire::Ref<const Keire::ShaderAsset> PreviewShader;
+        Keire::Ref<const Keire::Texture2DAsset> PreviewTexture;
         std::filesystem::path RelativePath;
         std::string Digest;
         bool Missing = false;
@@ -39,7 +43,7 @@ namespace KeireEditor
         ThumbnailService(const ThumbnailService&) = delete;
         ThumbnailService& operator=(const ThumbnailService&) = delete;
 
-        using Provider = std::function<std::vector<std::byte>(std::uint32_t, std::uint32_t, bool)>;
+        using Provider = std::function<std::vector<std::byte>(const ThumbnailRequest&, std::uint32_t, std::uint32_t)>;
         void RegisterProvider(std::string extension, std::uint32_t version, Provider provider);
         [[nodiscard]] bool Request(ThumbnailRequest request);
         [[nodiscard]] std::vector<ThumbnailResult> DrainCompleted(std::size_t maximum = 32);

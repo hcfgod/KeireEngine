@@ -175,11 +175,19 @@ namespace Keire
         WindowEventHeader Header;
     };
 
+    struct WindowFileDropEvent
+    {
+        WindowEventHeader Header;
+        WindowPosition Position;
+        std::vector<std::filesystem::path> Paths;
+    };
+
     using WindowEvent =
         std::variant<QuitEvent, WindowCloseRequestedEvent, WindowShownEvent, WindowHiddenEvent, WindowMovedEvent,
                      WindowResizedEvent, WindowPixelSizeChangedEvent, WindowMinimizedEvent, WindowMaximizedEvent,
                      WindowRestoredEvent, WindowFocusGainedEvent, WindowFocusLostEvent, WindowDisplayChangedEvent,
-                     WindowDisplayScaleChangedEvent, WindowEnteredFullscreenEvent, WindowLeftFullscreenEvent>;
+                     WindowDisplayScaleChangedEvent, WindowEnteredFullscreenEvent, WindowLeftFullscreenEvent,
+                     WindowFileDropEvent>;
 
     class KEIRE_API WindowError final : public std::runtime_error
     {

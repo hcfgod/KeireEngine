@@ -55,7 +55,9 @@ namespace Keire
         Normal,
         MetallicRoughness,
         Occlusion,
-        Emissive
+        Emissive,
+        Metallic,
+        Roughness
     };
 
     struct ShaderPropertyDefinition

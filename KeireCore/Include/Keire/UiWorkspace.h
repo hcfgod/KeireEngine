@@ -194,6 +194,7 @@ namespace Keire
         [[nodiscard]] std::string_view Title() const noexcept;
         [[nodiscard]] bool Visible() const noexcept;
         void SetVisible(bool visible);
+        void RequestFocus();
 
       private:
         friend class UiFrame;
@@ -202,6 +203,7 @@ namespace Keire
         explicit UiPanelRegistration(std::unique_ptr<Impl> implementation) noexcept;
         [[nodiscard]] const std::string& SubmittedName() const;
         [[nodiscard]] bool* VisibilityAddress();
+        [[nodiscard]] bool ConsumeFocusRequest();
         void NotifyVisibilityChanged(bool previous);
         std::unique_ptr<Impl> m_Impl;
     };

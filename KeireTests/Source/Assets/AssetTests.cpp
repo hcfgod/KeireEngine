@@ -5,6 +5,8 @@
 #include "Keire/Log.h"
 #include "KeireTests/TestSupport.h"
 
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -69,6 +71,243 @@ TEST_CASE("Asset identifiers are stable canonical 128-bit values")
     CHECK(id);
     CHECK(Keire::AssetId::Parse(id.ToString()) == id);
     CHECK_THROWS_AS((void)Keire::AssetId::Parse("not-an-asset-id"), std::invalid_argument);
+}
+
+TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
+{
+    TemporaryAssetProject project;
+    project.Write("Unrelated.fast", "unrelated");
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.FastMutation";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000011");
+    importer.Extensions = {".fast"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    project.Write("Unrelated.fast.keiremeta", "invalid metadata");
+    const std::string source = "new material-sized asset";
+    const auto created =
+        database->CreateAsset("Created.fast", importer, std::as_bytes(std::span(source.data(), source.size())));
+    REQUIRE(database->Find(created));
+    database->MoveAsset(created, "Renamed.fast");
+    REQUIRE(database->Find(created));
+    CHECK(database->Find(created)->RelativePath == std::filesystem::path("Renamed.fast"));
+    CHECK_THROWS((void)database->Refresh());
+}
+
+TEST_CASE("External asset imports persist normalized options and preserve identities on replace")
+{
+    TemporaryAssetProject project;
+    const auto incoming = project.Root / "Incoming.opt";
+    {
+        std::ofstream stream(incoming, std::ios::binary | std::ios::trunc);
+        stream << "first";
+    }
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.Options";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000010");
+    importer.Extensions = {".opt"};
+    importer.ImportOptions = {{"uppercase", "Uppercase", "Text", Keire::AssetImportOptionKind::Boolean, false}};
+    std::atomic_size_t importCalls = 0;
+    importer.ContextualImport =
+        [&importCalls](const Keire::AssetImportContext& context, const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        CHECK(context.ImportSettings.contains("uppercase"));
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    Keire::ExternalAssetImportItem item{incoming, "Imported/Incoming.opt", {{"uppercase", true}}};
+    const auto created = database->ImportExternal(std::span(&item, 1));
+    REQUIRE(created.Entries.size() == 1);
+    REQUIRE(created.Receipt);
+    CHECK(importCalls.load() == 1);
+    const auto id = created.Entries.front().Id;
+    const auto catalogBytes = ReadAll(created.Import.CatalogPath);
+    CHECK(std::string(catalogBytes.begin(), catalogBytes.end()).find(id.ToString()) != std::string::npos);
+    REQUIRE(database->Find(id));
+    CHECK(std::get<bool>(database->Find(id)->ImportSettings.at("uppercase")));
+    CHECK(std::filesystem::is_regular_file(project.Root / "Assets/Imported/Incoming.opt"));
+    database->UndoExternalImport(created.Receipt);
+    CHECK_FALSE(database->Find(id));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Incoming.opt"));
+    database->RedoExternalImport(created.Receipt);
+    REQUIRE(database->Find(id));
+    CHECK(std::get<bool>(database->Find(id)->ImportSettings.at("uppercase")));
+
+    item.Conflict = Keire::ExternalAssetConflictPolicy::UniqueName;
+    const auto unique = database->ImportExternal(std::span(&item, 1));
+    REQUIRE(unique.Entries.size() == 1);
+    CHECK(unique.Entries.front().Id != id);
+    CHECK(unique.Entries.front().RelativeDestination == std::filesystem::path("Imported/Incoming 2.opt"));
+
+    {
+        std::ofstream stream(incoming, std::ios::binary | std::ios::trunc);
+        stream << "replacement";
+    }
+    item.Conflict = Keire::ExternalAssetConflictPolicy::Replace;
+    const auto replaced = database->ImportExternal(std::span(&item, 1));
+    REQUIRE(replaced.Entries.size() == 1);
+    CHECK(replaced.Entries.front().Id == id);
+    CHECK(replaced.Entries.front().Replaced);
+    const auto replacedBytes = ReadAll(project.Root / "Assets/Imported/Incoming.opt");
+    CHECK(std::string(replacedBytes.begin(), replacedBytes.end()) == "replacement");
+    database->UndoExternalImport(replaced.Receipt);
+    const auto restoredBytes = ReadAll(project.Root / "Assets/Imported/Incoming.opt");
+    CHECK(std::string(restoredBytes.begin(), restoredBytes.end()) == "first");
+    CHECK(database->Find(id)->Id == id);
+    database->RedoExternalImport(replaced.Receipt);
+    CHECK(ReadAll(project.Root / "Assets/Imported/Incoming.opt") == replacedBytes);
+    CHECK(database->Find(id)->Id == id);
+
+    item.Settings = {{"unknown", true}};
+    CHECK_THROWS_AS((void)database->ImportExternal(std::span(&item, 1)), std::invalid_argument);
+    CHECK(database->Find(id));
+
+    item.Settings = {{"uppercase", false}};
+    item.RelativeDestination = "Imported/Cancelled.opt";
+    item.Conflict = Keire::ExternalAssetConflictPolicy::UniqueName;
+    std::stop_source cancellation;
+    cancellation.request_stop();
+    CHECK_THROWS_WITH((void)database->ImportExternal(std::span(&item, 1), cancellation.get_token()),
+                      "External asset import was cancelled.");
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Cancelled.opt"));
+
+    auto validBatchItem = item;
+    validBatchItem.RelativeDestination = "Batch/First.opt";
+    auto invalidBatchItem = item;
+    invalidBatchItem.RelativeDestination = "Batch/Second.opt";
+    invalidBatchItem.Settings = {{"unsupported", true}};
+    const std::array batch{validBatchItem, invalidBatchItem};
+    CHECK_THROWS_AS((void)database->ImportExternal(batch), std::invalid_argument);
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Batch/First.opt"));
+
+    const auto droppedFolder = project.Root / "DroppedFolder";
+    std::filesystem::create_directories(droppedFolder);
+    {
+        std::ofstream supported(droppedFolder / "Supported.opt");
+        supported << "supported";
+        std::ofstream unsupported(droppedFolder / "Unsupported.unknown");
+        unsupported << "unsupported";
+    }
+    Keire::ExternalAssetImportItem folderItem{droppedFolder, "Folder"};
+    CHECK_THROWS_WITH_AS((void)database->ImportExternal(std::span(&folderItem, 1)),
+                         doctest::Contains("No importer supports a dropped directory entry"), std::invalid_argument);
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Supported.opt"));
+}
+
+TEST_CASE("Texture importer exposes UI-independent production import options")
+{
+    const auto importer = Keire::CreateTexture2DAssetImporter();
+    CHECK(importer.ImportOptions.size() == 12);
+    CHECK(std::ranges::any_of(importer.ImportOptions, [](const auto& option) { return option.Key == "semantic"; }));
+    CHECK(std::ranges::any_of(importer.ImportOptions, [](const auto& option) { return option.Key == "flipGreen"; }));
+    CHECK(std::ranges::any_of(importer.ImportOptions, [](const auto& option) { return option.Key == "anisotropy"; }));
+    REQUIRE(importer.SuggestImportSettings);
+    Keire::AssetImportSettings defaults;
+    for (const auto& option : importer.ImportOptions)
+        defaults.emplace(option.Key, option.DefaultValue);
+    const auto normal = importer.SuggestImportSettings("cartoon_monster_normal.png", defaults);
+    CHECK(std::get<std::string>(normal.at("semantic")) == "normal");
+    CHECK(std::get<std::string>(normal.at("colorSpace")) == "linear");
+    const auto roughness = importer.SuggestImportSettings("cartoon-monster-roughness.png", defaults);
+    CHECK(std::get<std::string>(roughness.at("semantic")) == "data");
+    CHECK(std::get<std::string>(roughness.at("colorSpace")) == "linear");
+    const auto baseColor = importer.SuggestImportSettings("cartoon_monster_diffuse.png", defaults);
+    CHECK(std::get<std::string>(baseColor.at("semantic")) == "color");
+    CHECK(std::get<std::string>(baseColor.at("colorSpace")) == "srgb");
+}
+
+TEST_CASE("External asset publication rolls back when the new catalog is invalid")
+{
+    TemporaryAssetProject project;
+    const auto incoming = project.Root / "Broken.dep";
+    {
+        std::ofstream stream(incoming, std::ios::binary | std::ios::trunc);
+        stream << "broken dependency";
+    }
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.BrokenDependency";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000011");
+    importer.Extensions = {".dep"};
+    importer.ContextualImport = [](const Keire::AssetImportContext&, const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    importer.Cook = [](const std::span<const std::byte>, const Keire::AssetTargetPlatform) -> std::vector<std::byte>
+    { throw std::runtime_error("intentional cook failure"); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    Keire::ExternalAssetImportItem item{incoming, "Imported/Broken.dep"};
+    CHECK_THROWS_WITH_AS((void)database->ImportExternal(std::span(&item, 1)),
+                         doctest::Contains("intentional cook failure"), std::runtime_error);
+    CHECK_FALSE(database->Find("Imported/Broken.dep"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Broken.dep"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Imported/Broken.dep.keiremeta"));
+}
+
+TEST_CASE("Dependency-free importers restore unchanged cached output without rerunning expensive source import")
+{
+    TemporaryAssetProject project;
+    project.Write("Model.cache", "expensive source");
+    std::atomic_size_t importCalls = 0;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.RestorableCache";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000012");
+    importer.Extensions = {".cache"};
+    importer.ContextualImport = [&importCalls](const Keire::AssetImportContext&, const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    importer.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const auto first = database->ImportAll();
+    CHECK(first.Imported == 1);
+    CHECK(importCalls.load() == 1);
+    const auto second = database->ImportAll();
+    CHECK(second.CacheHits == 1);
+    CHECK(importCalls.load() == 1);
+}
+
+TEST_CASE("Development catalogs tolerate missing references while strict cooking rejects them")
+{
+    TemporaryAssetProject project;
+    project.Write("MissingReference.dep", "source");
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.MissingReference";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000013");
+    importer.Extensions = {".dep"};
+    importer.ContextualImport = [](const Keire::AssetImportContext&, const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        output.AssetDependencies.push_back(Keire::AssetId::Parse("f1000000-0000-4000-8000-00000000ffff"));
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    CHECK_NOTHROW((void)database->ImportAll());
+    Keire::AssetBuildProfile strict;
+    strict.Strict = true;
+    CHECK_THROWS_WITH_AS((void)Keire::AssetCooker::Cook(*database, strict, project.Root / "StrictCook"),
+                         doctest::Contains("dependency is missing"), std::runtime_error);
 }
 
 TEST_CASE("Asset database preserves metadata identities and produces validated deterministic packs")
@@ -271,6 +510,106 @@ TEST_CASE("Asset handles use fallbacks asynchronously and preserve last-good dat
     CHECK(handle.Revision() == 1);
     CHECK(handle.Get()->Text() == "hello assets");
     CHECK_FALSE(handle.Diagnostic().Message.empty());
+
+    assets->Close();
+    events->Close();
+}
+
+TEST_CASE("Catalog replacement recovers a thumbnail load queued before import publication")
+{
+    TemporaryAssetProject project;
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto initial = database->ImportAll();
+
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.WorkerCount = 1;
+    specification.DevelopmentCatalog = initial.CatalogPath;
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+
+    project.Write("Imported/Monster.txt", "cartoon monster");
+    const auto imported = database->ImportAll();
+    const auto record = database->Find("Imported/Monster.txt");
+    REQUIRE(record);
+
+    const auto earlyThumbnail = assets->Load<Keire::TextAsset>(record->Id);
+    CHECK(earlyThumbnail.State() == Keire::AssetState::Queued);
+    CHECK(earlyThumbnail.UsingFallback());
+
+    REQUIRE(assets->Unmount(imported.CatalogPath));
+    assets->Mount({imported.CatalogPath, 0, true});
+    WaitFor(*assets, [&earlyThumbnail] { return earlyThumbnail.State() == Keire::AssetState::Ready; });
+    CHECK(earlyThumbnail.Get()->Text() == "cartoon monster");
+    CHECK_FALSE(earlyThumbnail.UsingFallback());
+    assets->Close();
+}
+
+TEST_CASE("Catalog replacement recovers a thumbnail load that failed before import publication")
+{
+    TemporaryAssetProject project;
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto initial = database->ImportAll();
+
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.WorkerCount = 1;
+    specification.DevelopmentCatalog = initial.CatalogPath;
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+
+    project.Write("Imported/Monster.txt", "cartoon monster");
+    const auto imported = database->ImportAll();
+    const auto record = database->Find("Imported/Monster.txt");
+    REQUIRE(record);
+
+    const auto earlyThumbnail = assets->Load<Keire::TextAsset>(record->Id);
+    (void)assets->PumpCompletions();
+    REQUIRE(earlyThumbnail.State() == Keire::AssetState::Failed);
+    CHECK(earlyThumbnail.UsingFallback());
+
+    REQUIRE(assets->Unmount(imported.CatalogPath));
+    assets->Mount({imported.CatalogPath, 0, true});
+    WaitFor(*assets, [&earlyThumbnail] { return earlyThumbnail.State() == Keire::AssetState::Ready; });
+    CHECK(earlyThumbnail.Get()->Text() == "cartoon monster");
+    CHECK_FALSE(earlyThumbnail.UsingFallback());
+    assets->Close();
+}
+
+TEST_CASE("Development asset publication advances live handles without rebuilding a catalog")
+{
+    TemporaryAssetProject project;
+    project.Write("Greeting.txt", "catalog value");
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto record = database->Records().front();
+    const auto imported = database->ImportAll();
+
+    auto events = Keire::CreateRef<Keire::EventBus>();
+    std::vector<Keire::AssetLoadedEvent> loaded;
+    auto listener = events->Subscribe<Keire::AssetLoadedEvent>(
+        [&loaded](const Keire::AssetLoadedEvent& event)
+        {
+            loaded.push_back(event);
+            return Keire::EventFlow::Continue;
+        });
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.DevelopmentCatalog = imported.CatalogPath;
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(specification, events);
+    const auto handle = assets->Load<Keire::TextAsset>(record.Id);
+    WaitFor(*assets, [&handle] { return handle.State() == Keire::AssetState::Ready; });
+    REQUIRE(handle.Get());
+    CHECK(handle.Get()->Text() == "catalog value");
+    const auto revision = handle.Revision();
+
+    REQUIRE(assets->PublishDevelopmentAsset(record.Id, Keire::CreateRef<Keire::TextAsset>("live preview")));
+    REQUIRE(handle.Get());
+    CHECK(handle.Get()->Text() == "live preview");
+    CHECK(handle.Revision() == revision + 1);
+    REQUIRE_FALSE(loaded.empty());
+    CHECK(loaded.back().Id == record.Id);
+    CHECK(loaded.back().Reload);
 
     assets->Close();
     events->Close();

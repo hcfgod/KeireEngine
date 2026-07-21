@@ -493,11 +493,15 @@ namespace Keire
         return UiTabItemScope(*this, visible);
     }
 
-    UiTreeNodeScope UiFrame::BeginTreeNode(std::string_view label)
+    UiTreeNodeScope UiFrame::BeginTreeNode(std::string_view label, const bool selected)
     {
         m_Impl->RequireActive("BeginTreeNode");
         const std::string safeLabel(label);
-        const bool visible = ImGui::TreeNode(safeLabel.c_str());
+        ImGuiTreeNodeFlags flags =
+            ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick | ImGuiTreeNodeFlags_SpanAvailWidth;
+        if (selected)
+            flags |= ImGuiTreeNodeFlags_Selected;
+        const bool visible = ImGui::TreeNodeEx(safeLabel.c_str(), flags);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::TreeNode);
         return UiTreeNodeScope(*this, visible);
@@ -634,6 +638,8 @@ namespace Keire
         m_Impl->RequireActive("BeginPanel");
         if (!panel.Visible())
             return UiPanelScope(*this, false, false);
+        if (panel.ConsumeFocusRequest())
+            ImGui::SetNextWindowFocus();
         bool* visible = panel.VisibilityAddress();
         const bool previous = *visible;
         const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible, ToImGuiWindowFlags(options));
@@ -838,7 +844,9 @@ namespace Keire
             chord |= ImGuiMod_Alt;
         if (shortcut.Primary)
             chord |= ImGuiMod_Shortcut;
-        return ImGui::Shortcut(chord);
+        const ImGuiInputFlags flags =
+            shortcut.Global ? ImGuiInputFlags_RouteGlobal | ImGuiInputFlags_RouteOverFocused : ImGuiInputFlags_None;
+        return ImGui::Shortcut(chord, flags);
     }
 
     UiItemState UiFrame::LastItemState() const
@@ -866,6 +874,117 @@ namespace Keire
         m_Impl->RequireActive("Button");
         const std::string safeLabel(label);
         return ImGui::Button(safeLabel.c_str(), {size.Width, size.Height});
+    }
+
+    namespace
+    {
+        [[nodiscard]] const char* UiIconLabel(const UiIcon icon) noexcept
+        {
+            switch (icon)
+            {
+            case UiIcon::Play:
+                return ">";
+            case UiIcon::Stop:
+                return "[]";
+            case UiIcon::Pause:
+                return "||";
+            case UiIcon::Step:
+                return ">|";
+            case UiIcon::View:
+                return "Q";
+            case UiIcon::Translate:
+                return "W";
+            case UiIcon::Rotate:
+                return "E";
+            case UiIcon::Scale:
+                return "R";
+            case UiIcon::Local:
+                return "L";
+            case UiIcon::Global:
+                return "G";
+            case UiIcon::Snap:
+                return "S";
+            case UiIcon::Settings:
+                return "...";
+            case UiIcon::Perspective:
+                return "P";
+            case UiIcon::Orthographic:
+                return "O";
+            case UiIcon::AxisX:
+                return "X";
+            case UiIcon::AxisY:
+                return "Y";
+            case UiIcon::AxisZ:
+                return "Z";
+            }
+            return "?";
+        }
+    } // namespace
+
+    bool UiFrame::IconButton(const std::string_view id, const UiIcon icon, const bool selected, const UiSize size)
+    {
+        m_Impl->RequireActive("IconButton");
+        if (id.empty())
+            throw std::invalid_argument("IconButton requires a stable identifier.");
+        const std::string label = std::string(UiIconLabel(icon)) + "##" + std::string(id);
+        if (selected)
+        {
+            const auto accent = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+            ImGui::PushStyleColor(ImGuiCol_Button, accent);
+        }
+        const bool activated = ImGui::Button(label.c_str(), {size.Width, size.Height});
+        if (selected)
+            ImGui::PopStyleColor();
+        return activated;
+    }
+
+    bool UiFrame::OverlayIconButton(const std::string_view id, const UiIcon icon,
+                                    const UiOverlayIconButtonSpecification specification)
+    {
+        m_Impl->RequireActive("OverlayIconButton");
+        if (id.empty() || specification.Size.Width <= 0.0F || specification.Size.Height <= 0.0F)
+            throw std::invalid_argument("OverlayIconButton requires an identifier and positive size.");
+
+        ImGuiWindow* window = ImGui::GetCurrentWindow();
+        if (window->SkipItems)
+            return false;
+
+        const ImRect bounds{{specification.Position.X, specification.Position.Y},
+                            {specification.Position.X + specification.Size.Width,
+                             specification.Position.Y + specification.Size.Height}};
+        const ImGuiID itemId = ImGui::GetID(id.data(), id.data() + id.size());
+
+        ImGui::BeginDisabled(!specification.Enabled);
+        bool activated = false;
+        bool hovered = false;
+        bool held = false;
+        if (ImGui::ItemAdd(bounds, itemId))
+        {
+            activated = ImGui::ButtonBehavior(bounds, itemId, &hovered, &held);
+
+            const ImGuiCol background = specification.Selected || held ? ImGuiCol_ButtonActive
+                                        : hovered                      ? ImGuiCol_ButtonHovered
+                                                                       : ImGuiCol_Button;
+            const ImGuiStyle& style = ImGui::GetStyle();
+            window->DrawList->AddRectFilled(bounds.Min, bounds.Max, ImGui::GetColorU32(background),
+                                            style.FrameRounding);
+            if (style.FrameBorderSize > 0.0F)
+            {
+                window->DrawList->AddRect(bounds.Min, bounds.Max, ImGui::GetColorU32(ImGuiCol_Border),
+                                          style.FrameRounding, 0, style.FrameBorderSize);
+            }
+
+            const char* glyph = UiIconLabel(icon);
+            const ImVec2 textSize = ImGui::CalcTextSize(glyph);
+            const ImVec2 textPosition{bounds.Min.x + (bounds.GetWidth() - textSize.x) * 0.5F,
+                                      bounds.Min.y + (bounds.GetHeight() - textSize.y) * 0.5F};
+            window->DrawList->AddText(textPosition, ImGui::GetColorU32(ImGuiCol_Text), glyph);
+
+            if (!specification.Tooltip.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                ImGui::SetTooltip("%.*s", static_cast<int>(specification.Tooltip.size()), specification.Tooltip.data());
+        }
+        ImGui::EndDisabled();
+        return activated;
     }
 
     bool UiFrame::Checkbox(std::string_view label, bool& value)
@@ -1302,6 +1421,15 @@ namespace Keire
         ImGui::SetNextWindowPos({position.X, position.Y}, firstUseOnly ? ImGuiCond_FirstUseEver : ImGuiCond_Always);
     }
 
+    void UiFrame::AlignNextItemGroup(const float alignment, const float width)
+    {
+        m_Impl->RequireActive("AlignNextItemGroup");
+        if (!std::isfinite(alignment) || alignment < 0.0F || alignment > 1.0F || !std::isfinite(width) || width < 0.0F)
+            throw std::invalid_argument("Item-group alignment and width are invalid.");
+        const float target = (ImGui::GetWindowWidth() - width) * alignment;
+        ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), target));
+    }
+
     void UiFrame::CloseScope(const UiScope::Kind kind, const std::uint64_t generation) noexcept
     {
         m_Impl->CloseScope(kind, generation);
@@ -1493,13 +1621,13 @@ namespace Keire
             }
             if (Renderer)
                 RenderSystemInternalAccess::WaitIdle(*Renderer);
-            if (Images)
-                Images->Close();
             if (RendererInitialized)
             {
                 ImGui_ImplSDLGPU3_Shutdown();
                 RendererInitialized = false;
             }
+            if (Images)
+                Images->Close();
             if (PlatformInitialized)
             {
                 ImGui_ImplSDL3_Shutdown();

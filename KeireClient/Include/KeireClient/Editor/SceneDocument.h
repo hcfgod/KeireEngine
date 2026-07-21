@@ -3,7 +3,9 @@
 #include "Keire/Core.h"
 
 #include <filesystem>
+#include <span>
 #include <string>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -11,9 +13,13 @@ namespace KeireEditor
     {
       public:
         [[nodiscard]] Keire::Ref<Keire::Scene> Scene() const noexcept { return m_Scene; }
+        [[nodiscard]] Keire::Ref<Keire::Scene> EditingScene() const noexcept { return m_Scene; }
+        [[nodiscard]] Keire::Ref<Keire::Scene> ActiveScene() const noexcept;
         [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession> PlaySession() const noexcept { return m_PlaySession; }
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Asset; }
         [[nodiscard]] Keire::AssetId Selection() const noexcept { return m_Selection; }
+        [[nodiscard]] std::span<const Keire::AssetId> Selections() const noexcept { return m_Selections; }
+        [[nodiscard]] bool IsSelected(Keire::AssetId entity) const noexcept;
         [[nodiscard]] const std::filesystem::path& Source() const noexcept { return m_Source; }
         [[nodiscard]] const std::filesystem::path& RecoveryPath() const noexcept { return m_RecoveryPath; }
         [[nodiscard]] const std::string& Status() const noexcept { return m_Status; }
@@ -21,7 +27,10 @@ namespace KeireEditor
         [[nodiscard]] bool RecoveryAvailable() const noexcept { return m_RecoveryAvailable; }
 
         void Select(Keire::AssetId selection) noexcept;
-        void ClearSelection() noexcept { m_Selection = {}; }
+        void Select(Keire::AssetId selection, bool additive) noexcept;
+        void SetSelections(std::span<const Keire::AssetId> selections) noexcept;
+        void SynchronizeSelection() noexcept;
+        void ClearSelection() noexcept;
         void Close() noexcept;
 
         [[nodiscard]] Keire::Ref<Keire::Scene>& SceneStorage() noexcept { return m_Scene; }
@@ -45,6 +54,7 @@ namespace KeireEditor
         Keire::Ref<Keire::UndoContext> m_Undo;
         Keire::AssetId m_Asset;
         Keire::AssetId m_Selection;
+        std::vector<Keire::AssetId> m_Selections;
         std::filesystem::path m_Source;
         std::filesystem::path m_RecoveryPath;
         std::string m_Status;

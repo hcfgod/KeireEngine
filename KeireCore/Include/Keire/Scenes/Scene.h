@@ -123,6 +123,7 @@ namespace Keire
         [[nodiscard]] bool Step(float fixedDeltaSeconds);
         void FixedUpdate(float deltaSeconds);
         void Update(float deltaSeconds);
+        void ReplaceRuntime(SceneDefinition definition);
         void Stop() noexcept;
 
       private:

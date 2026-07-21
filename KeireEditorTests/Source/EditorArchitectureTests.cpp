@@ -5,13 +5,19 @@
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/SceneGizmoController.h"
 #include "KeireClient/Editor/ScenePicker.h"
+#include "KeireClient/Editor/ScenePlayChanges.h"
+#include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include <doctest/doctest.h>
 
+#include <array>
+#include <chrono>
 #include <filesystem>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace
@@ -76,6 +82,12 @@ namespace
             value = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000010");
             return true;
         }
+        bool EditTextureAsset(std::string_view label, Keire::AssetId& value,
+                              const Keire::ShaderTextureSemantic semantic) override
+        {
+            TextureSemantics.push_back(semantic);
+            return EditAsset(label, value, Keire::Texture2DAsset::StaticType());
+        }
         bool EditEntity(std::string_view, Keire::EntityId& value) override
         {
             value = Keire::EntityId(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000011"));
@@ -84,6 +96,7 @@ namespace
 
         double Scalar = 3.0;
         std::optional<Keire::AssetTypeId> ExpectedAssetType;
+        std::vector<Keire::ShaderTextureSemantic> TextureSemantics;
     };
 
     class CustomComponent final : public Keire::Component
@@ -147,10 +160,18 @@ TEST_CASE("scene document owns selection and deterministic close state")
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000001"),
                                                 Keire::SceneAsset::EmptyDefinition("Document test"));
     auto entity = scene->CreateEntity("Selected");
+    auto second = scene->CreateEntity("Also selected");
     document.SceneStorage() = scene;
     document.AssetStorage() = scene->Asset();
     document.Select(entity.Id().Value());
     CHECK(document.Selection() == entity.Id().Value());
+    document.Select(second.Id().Value(), true);
+    CHECK(document.Selection() == second.Id().Value());
+    CHECK(document.Selections().size() == 2);
+    CHECK(document.IsSelected(entity.Id().Value()));
+    document.Select(entity.Id().Value(), true);
+    CHECK_FALSE(document.IsSelected(entity.Id().Value()));
+    CHECK(document.Selection() == second.Id().Value());
     document.Select(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000099"));
     CHECK_FALSE(document.Selection());
     document.RecoveryAvailableStorage() = true;
@@ -160,6 +181,108 @@ TEST_CASE("scene document owns selection and deterministic close state")
     CHECK_FALSE(document.Asset());
     CHECK_FALSE(document.RecoveryAvailable());
     CHECK_FALSE(scene->IsOpen());
+}
+
+TEST_CASE("scene rectangle selection returns every active projected entity in the marquee")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000031"),
+                                                Keire::SceneAsset::EmptyDefinition("Rectangle picking"));
+    auto left = scene->CreateEntity("Left");
+    auto right = scene->CreateEntity("Right");
+    right.GetComponent<Keire::TransformComponent>()->SetLocalPosition({100.0F, 0.0F, 0.0F});
+    Keire::RenderCamera camera;
+    camera.View = Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {}, {0.0F, 1.0F, 0.0F});
+    camera.Projection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 100.0F);
+    const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+
+    auto selected = KeireEditor::SelectSceneEntitiesInRectangle(scene, viewport, viewport, camera);
+    CHECK(selected == std::vector<Keire::EntityId>{left.Id()});
+    right.GetComponent<Keire::TransformComponent>()->SetLocalPosition({1.0F, 0.0F, 0.0F});
+    selected = KeireEditor::SelectSceneEntitiesInRectangle(scene, viewport, viewport, camera);
+    CHECK(selected.size() == 2);
+    right.SetActive(false);
+    selected = KeireEditor::SelectSceneEntitiesInRectangle(scene, viewport, viewport, camera);
+    CHECK(selected == std::vector<Keire::EntityId>{left.Id()});
+}
+
+TEST_CASE("scene transform groups move every selected root once and restore the drag baseline")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000032"),
+                                                Keire::SceneAsset::EmptyDefinition("Group transform"));
+    auto parent = scene->CreateEntity("Parent");
+    auto child = scene->CreateEntity("Selected child");
+    auto independent = scene->CreateEntity("Independent");
+    child.SetParent(parent, false);
+    parent.GetComponent<Keire::TransformComponent>()->SetLocalPosition({1.0F, 0.0F, 0.0F});
+    child.GetComponent<Keire::TransformComponent>()->SetLocalPosition({2.0F, 0.0F, 0.0F});
+    independent.GetComponent<Keire::TransformComponent>()->SetLocalPosition({5.0F, 0.0F, 0.0F});
+
+    const std::array selections{parent.Id().Value(), child.Id().Value(), independent.Id().Value()};
+    const auto targets = KeireEditor::SceneTransformGroup::Capture(scene, selections, independent.Id());
+    REQUIRE(targets.size() == 2);
+    KeireEditor::SceneTransformGroup::Apply(targets, KeireEditor::SceneTool::Translate,
+                                            KeireEditor::SceneTransformAxis::X, 3.0F, {1.0F, 0.0F, 0.0F},
+                                            independent.GetComponent<Keire::TransformComponent>()->WorldPosition(), {});
+    CHECK(parent.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(4.0F));
+    CHECK(child.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(6.0F));
+    CHECK(independent.GetComponent<Keire::TransformComponent>()->WorldPosition().X == doctest::Approx(8.0F));
+
+    KeireEditor::SceneTransformGroup::Restore(targets);
+    CHECK(parent.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(1.0F));
+    CHECK(child.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(2.0F));
+    CHECK(independent.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(5.0F));
+}
+
+TEST_CASE("scene document targets the isolated runtime scene while playing")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000060"),
+                                                Keire::SceneAsset::EmptyDefinition("Play document"));
+    auto authored = scene->CreateEntity("Authored");
+    document.SceneStorage() = scene;
+    document.PlaySessionStorage() = Keire::CreateRef<Keire::SceneRuntimeSession>(scene);
+    document.PlaySessionStorage()->Play();
+    REQUIRE(document.ActiveScene());
+    CHECK(document.ActiveScene() != document.EditingScene());
+    document.ActiveScene()->FindEntity(authored.Id()).SetName("Runtime");
+    CHECK(scene->FindEntity(authored.Id()).Name() == "Authored");
+    CHECK(document.ActiveScene()->FindEntity(authored.Id()).Name() == "Runtime");
+    document.Close();
+}
+
+TEST_CASE("play changes apply selected property and structural edits transactionally")
+{
+    const auto registry = Keire::ComponentRegistry::CreateDefault();
+    registry->Register(CustomRegistration());
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000061");
+    auto editing = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Play changes"), registry);
+    auto original = editing->CreateEntity("Original");
+    auto custom = Keire::DynamicRefCast<CustomComponent>(original.AddComponent(CustomComponent::StaticType()));
+    REQUIRE(custom);
+    editing->MarkSaved();
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(editing);
+    session->Play();
+    auto runtimeEntity = session->RuntimeScene()->FindEntity(original.Id());
+    runtimeEntity.SetName("Edited in Play");
+    Keire::DynamicRefCast<CustomComponent>(runtimeEntity.GetComponent(CustomComponent::StaticType()))->Value = 4.0;
+    const auto created = session->RuntimeScene()->CreateEntity("Created in Play");
+
+    KeireEditor::ScenePlayChangeSet changes(editing, session->RuntimeScene(),
+                                            {original.Id().Value(), created.Id().Value()});
+    CHECK_FALSE(changes.Empty());
+    CHECK(changes.HasSelectedChanges());
+    const auto applied = changes.BuildAppliedDefinition();
+    auto restored = Keire::CreateRef<Keire::Scene>(asset, applied, registry);
+    CHECK(restored->FindEntity(original.Id()).Name() == "Edited in Play");
+    const auto restoredCustom = Keire::DynamicRefCast<CustomComponent>(
+        restored->FindEntity(original.Id()).GetComponent(CustomComponent::StaticType()));
+    REQUIRE(restoredCustom);
+    CHECK(restoredCustom->Value == doctest::Approx(4.0));
+    CHECK(restored->FindEntity(created.Id()));
+
+    changes.SetAllSelected(false);
+    const auto discarded = changes.BuildAppliedDefinition();
+    CHECK(Keire::SceneAsset::Encode(discarded) == Keire::SceneAsset::Encode(editing->Snapshot()));
 }
 
 TEST_CASE("input actions document owns authoring state and dirty lifecycle")
@@ -261,6 +384,10 @@ TEST_CASE("material documents expose every shader texture property without hardc
                                    {"NormalTexture", Keire::ShaderPropertyType::Texture2D},
                                    {"EmissiveTexture", Keire::ShaderPropertyType::Texture2D},
                                    {"MaskTexture", Keire::ShaderPropertyType::Texture2D}};
+    shaderDefinition.Properties[2].TextureSemantic = Keire::ShaderTextureSemantic::BaseColor;
+    shaderDefinition.Properties[3].TextureSemantic = Keire::ShaderTextureSemantic::Normal;
+    shaderDefinition.Properties[4].TextureSemantic = Keire::ShaderTextureSemantic::Emissive;
+    shaderDefinition.Properties[5].TextureSemantic = Keire::ShaderTextureSemantic::MetallicRoughness;
     const auto resolveShader = [&](const Keire::AssetId id) -> std::optional<Keire::ShaderAssetDefinition>
     { return id == shader ? std::optional(shaderDefinition) : std::nullopt; };
 
@@ -291,6 +418,23 @@ TEST_CASE("material documents expose every shader texture property without hardc
     CHECK(KeireEditor::MaterialInspectorPanel{}.Draw(editor, restored));
     CHECK(std::get<float>(restored.Property("Roughness")) == doctest::Approx(0.6F));
     CHECK(editor.ExpectedAssetType == Keire::Texture2DAsset::StaticType());
+    CHECK(editor.TextureSemantics == std::vector<Keire::ShaderTextureSemantic>{
+                                         Keire::ShaderTextureSemantic::BaseColor, Keire::ShaderTextureSemantic::Normal,
+                                         Keire::ShaderTextureSemantic::Emissive,
+                                         Keire::ShaderTextureSemantic::MetallicRoughness});
+
+    Keire::AssetSourceRecord textureRecord;
+    textureRecord.Type = Keire::Texture2DAsset::StaticType();
+    textureRecord.ImportSettings = {{"semantic", std::string("color")}, {"colorSpace", std::string("srgb")}};
+    CHECK(KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::BaseColor));
+    CHECK_FALSE(
+        KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::Normal));
+    textureRecord.ImportSettings = {{"semantic", std::string("normal")}, {"colorSpace", std::string("linear")}};
+    CHECK(KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::Normal));
+    textureRecord.ImportSettings = {{"semantic", std::string("data")}, {"colorSpace", std::string("linear")}};
+    CHECK(KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::Roughness));
+    CHECK_FALSE(
+        KeireEditor::MaterialInspectorPanel::AcceptsTexture(textureRecord, Keire::ShaderTextureSemantic::BaseColor));
 }
 
 TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")
@@ -379,5 +523,92 @@ TEST_CASE("scene camera state and entity locking persist without a workspace lay
     CHECK(restored.State().YawDegrees == doctest::Approx(state.YawDegrees));
     CHECK(restored.State().Projection == Keire::Detail::EditorCameraProjection::Orthographic);
     CHECK(restored.LockedEntity() == camera.LockedEntity());
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("content previews use immutable loaded assets without blocking shutdown")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-ThumbnailService-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    KeireEditor::ThumbnailService thumbnails(root);
+    const auto await = [&thumbnails]
+    {
+        for (int attempt = 0; attempt < 200; ++attempt)
+        {
+            auto completed = thumbnails.DrainCompleted();
+            if (!completed.empty())
+                return std::move(completed.front());
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return KeireEditor::ThumbnailResult{};
+    };
+
+    Keire::TextureImportSettings textureSettings;
+    textureSettings.Mips = Keire::TextureMipPolicy::None;
+    Keire::TextureMipLevel mip;
+    mip.Width = 2;
+    mip.Height = 1;
+    mip.Pixels = {std::byte{255}, std::byte{0},   std::byte{0}, std::byte{255},
+                  std::byte{0},   std::byte{255}, std::byte{0}, std::byte{0}};
+    auto texture = Keire::CreateRef<Keire::Texture2DAsset>(textureSettings, std::vector{mip});
+    const auto textureId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000070");
+    REQUIRE(thumbnails.Request({.Asset = textureId,
+                                .Type = Keire::Texture2DAsset::StaticType(),
+                                .PreviewAsset = texture,
+                                .RelativePath = "Preview.png",
+                                .Digest = "texture-preview"}));
+    const auto textureResult = await();
+    REQUIRE(textureResult.Pixels.size() == 96U * 96U * 4U);
+    const auto redOffset = (48U * 96U + 24U) * 4U;
+    CHECK(std::to_integer<unsigned>(textureResult.Pixels[redOffset]) >
+          std::to_integer<unsigned>(textureResult.Pixels[redOffset + 1]));
+    const auto alphaOffset = (48U * 96U + 72U) * 4U;
+    CHECK(std::to_integer<unsigned>(textureResult.Pixels[alphaOffset]) ==
+          std::to_integer<unsigned>(textureResult.Pixels[alphaOffset + 1]));
+
+    const auto recoveredTextureId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000073");
+    REQUIRE(thumbnails.Request({.Asset = recoveredTextureId,
+                                .Type = Keire::Texture2DAsset::StaticType(),
+                                .RelativePath = "Recovered.png",
+                                .Digest = "recovered-texture-preview",
+                                .Missing = true}));
+    REQUIRE(await().Pixels.size() == 96U * 96U * 4U);
+    REQUIRE(thumbnails.Request({.Asset = recoveredTextureId,
+                                .Type = Keire::Texture2DAsset::StaticType(),
+                                .PreviewAsset = texture,
+                                .RelativePath = "Recovered.png",
+                                .Digest = "recovered-texture-preview"}));
+    const auto recoveredTexture = await();
+    REQUIRE(recoveredTexture.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::to_integer<unsigned>(recoveredTexture.Pixels[redOffset]) >
+          std::to_integer<unsigned>(recoveredTexture.Pixels[redOffset + 1]));
+
+    Keire::MaterialAssetDefinition materialDefinition;
+    materialDefinition.Properties.emplace("Tint", Keire::Color{1.0F, 0.05F, 0.05F, 1.0F});
+    auto material = Keire::CreateRef<Keire::MaterialAsset>(materialDefinition);
+    const auto materialId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000071");
+    REQUIRE(thumbnails.Request({.Asset = materialId,
+                                .Type = Keire::MaterialAsset::StaticType(),
+                                .PreviewAsset = material,
+                                .RelativePath = "Preview.keirematerial",
+                                .Digest = "material-preview"}));
+    const auto materialResult = await();
+    REQUIRE(materialResult.Pixels.size() == 96U * 96U * 4U);
+    const auto center = (48U * 96U + 48U) * 4U;
+    CHECK(std::to_integer<unsigned>(materialResult.Pixels[center]) >
+          std::to_integer<unsigned>(materialResult.Pixels[center + 1]));
+
+    const auto meshId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000072");
+    REQUIRE(thumbnails.Request({.Asset = meshId,
+                                .Type = Keire::MeshAsset::StaticType(),
+                                .PreviewAsset = Keire::MeshAsset::Cube(),
+                                .RelativePath = "Preview.obj",
+                                .Digest = "mesh-preview"}));
+    const auto meshResult = await();
+    REQUIRE(meshResult.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::ranges::any_of(meshResult.Pixels,
+                              [](const std::byte value) { return std::to_integer<unsigned>(value) > 210U; }));
+    thumbnails.CancelAll();
     std::filesystem::remove_all(root, error);
 }

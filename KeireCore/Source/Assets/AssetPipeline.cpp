@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <functional>
@@ -195,16 +196,48 @@ namespace Keire
             return result;
         }
 
-        void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
-                           const std::string_view importer, const std::uint32_t importerVersion)
+        [[nodiscard]] Json EncodeImportSettings(const AssetImportSettings& settings)
         {
-            const Json metadata{{"schemaVersion", 1},
-                                {"id", id.ToString()},
-                                {"type", type.ToString()},
-                                {"importer", importer},
-                                {"importerVersion", importerVersion},
-                                {"dependencies", Json::array()},
-                                {"subAssets", Json::array()}};
+            Json result = Json::object();
+            for (const auto& [key, value] : settings)
+                std::visit([&](const auto& typed) { result[key] = typed; }, value);
+            return result;
+        }
+
+        [[nodiscard]] AssetImportSettings DecodeImportSettings(const Json& values)
+        {
+            if (!values.is_object())
+                throw std::runtime_error("Asset importSettings metadata must be an object.");
+            AssetImportSettings result;
+            for (auto iterator = values.begin(); iterator != values.end(); ++iterator)
+            {
+                if (iterator->is_boolean())
+                    result.emplace(iterator.key(), iterator->get<bool>());
+                else if (iterator->is_number_integer())
+                    result.emplace(iterator.key(), iterator->get<std::int64_t>());
+                else if (iterator->is_number())
+                    result.emplace(iterator.key(), iterator->get<double>());
+                else if (iterator->is_string())
+                    result.emplace(iterator.key(), iterator->get<std::string>());
+                else
+                    throw std::runtime_error("Asset import setting values must be scalar.");
+            }
+            return result;
+        }
+
+        void WriteMetadata(const std::filesystem::path& path, const AssetId id, const AssetTypeId type,
+                           const std::string_view importer, const std::uint32_t importerVersion,
+                           const AssetImportSettings& settings = {})
+        {
+            Json metadata{{"schemaVersion", 1},
+                          {"id", id.ToString()},
+                          {"type", type.ToString()},
+                          {"importer", importer},
+                          {"importerVersion", importerVersion},
+                          {"dependencies", Json::array()},
+                          {"subAssets", Json::array()}};
+            if (!settings.empty())
+                metadata["importSettings"] = EncodeImportSettings(settings);
             std::filesystem::create_directories(path.parent_path());
             const auto temporary = path.string() + ".tmp";
             std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
@@ -260,6 +293,8 @@ namespace Keire
                 for (const auto& subAsset : metadata["subAssets"])
                     record.SubAssets.push_back(AssetId::Parse(subAsset.get<std::string>()));
             }
+            if (metadata.contains("importSettings"))
+                record.ImportSettings = DecodeImportSettings(metadata["importSettings"]);
             if (digestSource)
             {
                 const auto bytes = ReadSource(source, maximumSourceBytes);
@@ -403,27 +438,52 @@ namespace Keire
                     throw std::runtime_error("Asset dependencies may not be symbolic links.");
                 return ReadSource(path, maximum);
             };
+            context.ImportSettings = record.ImportSettings;
             return context;
         }
 
-        [[nodiscard]] AssetImportOutput Import(const AssetSourceRecord& record) const
+        [[nodiscard]] AssetImportSettings NormalizeSettings(const AssetImporterRegistration& importer,
+                                                            const AssetImportSettings& requested) const
         {
-            const auto source = ReadSource(SourceRoot / record.RelativePath, Specification.MaximumSourceBytes);
-            AssetImportOutput result;
-            if (const auto* importer = FindImporter(record))
+            AssetImportSettings result;
+            for (const auto& option : importer.ImportOptions)
+                result.emplace(option.Key, option.DefaultValue);
+            for (const auto& [key, value] : requested)
             {
-                if (importer->ContextualImport)
-                    result = importer->ContextualImport(CreateImportContext(record), source);
-                else
-                    result.Bytes = importer->Import(source);
+                const auto descriptor =
+                    std::ranges::find(importer.ImportOptions, key, &AssetImportOptionDescriptor::Key);
+                if (descriptor == importer.ImportOptions.end())
+                    throw std::invalid_argument("Unknown import setting '" + key + "'.");
+                const bool typeMatches =
+                    (descriptor->Kind == AssetImportOptionKind::Boolean && std::holds_alternative<bool>(value)) ||
+                    (descriptor->Kind == AssetImportOptionKind::Integer &&
+                     std::holds_alternative<std::int64_t>(value)) ||
+                    (descriptor->Kind == AssetImportOptionKind::Scalar && std::holds_alternative<double>(value)) ||
+                    (descriptor->Kind == AssetImportOptionKind::Choice && std::holds_alternative<std::string>(value));
+                if (!typeMatches)
+                    throw std::invalid_argument("Import setting '" + key + "' has the wrong value type.");
+                result[key] = value;
             }
-            else if ((record.Importer == "Keire.Text" && record.Type == TextAsset::StaticType()) ||
-                     (record.Importer == "Keire.Binary" && record.Type == BinaryAsset::StaticType()))
-                result.Bytes = source;
-            else
-                throw std::runtime_error("No compatible importer is registered for asset: " +
-                                         record.RelativePath.generic_string());
+            for (const auto& option : importer.ImportOptions)
+            {
+                const auto& value = result.at(option.Key);
+                std::optional<double> numeric;
+                if (const auto* integer = std::get_if<std::int64_t>(&value))
+                    numeric = static_cast<double>(*integer);
+                else if (const auto* scalar = std::get_if<double>(&value))
+                    numeric = *scalar;
+                if (numeric && ((!std::isfinite(*numeric)) || (option.Minimum && *numeric < *option.Minimum) ||
+                                (option.Maximum && *numeric > *option.Maximum)))
+                    throw std::invalid_argument("Import setting '" + option.Key + "' is outside its valid range.");
+                if (const auto* choice = std::get_if<std::string>(&value);
+                    choice && std::ranges::find(option.Choices, *choice) == option.Choices.end())
+                    throw std::invalid_argument("Import setting '" + option.Key + "' has an invalid choice.");
+            }
+            return importer.NormalizeImportSettings ? importer.NormalizeImportSettings(result) : result;
+        }
 
+        void ValidateImportOutput(const AssetImportOutput& result) const
+        {
             if (result.Bytes.size() > Specification.MaximumSourceBytes)
                 throw std::runtime_error("Imported asset exceeds the configured maximum size.");
             std::unordered_set<std::string> dependencies;
@@ -451,7 +511,33 @@ namespace Keire
                     diagnostic.RelativePath.is_absolute() || normalized.generic_string().starts_with(".."))
                     throw std::runtime_error("Contextual importer returned an invalid diagnostic.");
             }
+        }
+
+        [[nodiscard]] AssetImportOutput ImportSource(const AssetSourceRecord& record,
+                                                     const std::span<const std::byte> source) const
+        {
+            AssetImportOutput result;
+            if (const auto* importer = FindImporter(record))
+            {
+                if (importer->ContextualImport)
+                    result = importer->ContextualImport(CreateImportContext(record), source);
+                else
+                    result.Bytes = importer->Import(source);
+            }
+            else if ((record.Importer == "Keire.Text" && record.Type == TextAsset::StaticType()) ||
+                     (record.Importer == "Keire.Binary" && record.Type == BinaryAsset::StaticType()))
+                result.Bytes.assign(source.begin(), source.end());
+            else
+                throw std::runtime_error("No compatible importer is registered for asset: " +
+                                         record.RelativePath.generic_string());
+            ValidateImportOutput(result);
             return result;
+        }
+
+        [[nodiscard]] AssetImportOutput Import(const AssetSourceRecord& record) const
+        {
+            const auto source = ReadSource(SourceRoot / record.RelativePath, Specification.MaximumSourceBytes);
+            return ImportSource(record, source);
         }
 
         [[nodiscard]] std::string ImportDigest(const AssetSourceRecord& record, const AssetImportOutput& imported) const
@@ -477,6 +563,83 @@ namespace Keire
             return CacheRoot / "Objects" /
                    (std::string(importDigest) + "-" + record.Type.ToString() + "-" + std::to_string(effectiveVersion) +
                     ".bin");
+        }
+
+        [[nodiscard]] std::optional<AssetImportOutput> RestoreCachedImport(const AssetSourceRecord& record) const
+        {
+            const auto* importer = FindImporter(record);
+            if (!importer || !importer->RestoreCachedOutput)
+                return std::nullopt;
+            const AssetImportOutput dependencyFree;
+            const auto object = ObjectPath(record, ImportDigest(record, dependencyFree));
+            if (!std::filesystem::is_regular_file(object))
+                return std::nullopt;
+            auto restored = importer->RestoreCachedOutput(ReadSource(object, Specification.MaximumSourceBytes));
+            ValidateImportOutput(restored);
+            if (!restored.SourceDependencies.empty())
+                throw std::logic_error("A dependency-free cached importer restored source dependencies.");
+            return restored;
+        }
+
+        struct PreparedImport final
+        {
+            std::string SourceDigest;
+            std::string MetadataDigest;
+            AssetImportOutput Output;
+        };
+
+        void StoreValidatedImport(const AssetSourceRecord& record, AssetImportOutput output)
+        {
+            std::scoped_lock lock(Mutex);
+            ValidatedImports.insert_or_assign(
+                record.Id, PreparedImport{record.SourceDigest, record.MetadataDigest, std::move(output)});
+        }
+
+        [[nodiscard]] std::optional<AssetImportOutput> TakeValidatedImport(const AssetSourceRecord& record)
+        {
+            std::scoped_lock lock(Mutex);
+            const auto found = ValidatedImports.find(record.Id);
+            if (found == ValidatedImports.end())
+                return std::nullopt;
+            if (found->second.SourceDigest != record.SourceDigest ||
+                found->second.MetadataDigest != record.MetadataDigest)
+            {
+                ValidatedImports.erase(found);
+                return std::nullopt;
+            }
+            auto output = std::move(found->second.Output);
+            ValidatedImports.erase(found);
+            return output;
+        }
+
+        void ResetCookInputs()
+        {
+            std::scoped_lock lock(Mutex);
+            CookInputs.clear();
+        }
+
+        void StoreCookInput(const AssetSourceRecord& record, AssetImportOutput output)
+        {
+            std::scoped_lock lock(Mutex);
+            CookInputs.insert_or_assign(record.Id,
+                                        PreparedImport{record.SourceDigest, record.MetadataDigest, std::move(output)});
+        }
+
+        [[nodiscard]] std::optional<AssetImportOutput> TakeCookInput(const AssetSourceRecord& record)
+        {
+            std::scoped_lock lock(Mutex);
+            const auto found = CookInputs.find(record.Id);
+            if (found == CookInputs.end())
+                return std::nullopt;
+            if (found->second.SourceDigest != record.SourceDigest ||
+                found->second.MetadataDigest != record.MetadataDigest)
+            {
+                CookInputs.erase(found);
+                return std::nullopt;
+            }
+            auto output = std::move(found->second.Output);
+            CookInputs.erase(found);
+            return output;
         }
 
         struct ScanResult
@@ -526,6 +689,30 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] FileSignature ReadSignature(const std::filesystem::path& source,
+                                                  const std::filesystem::path& metadata) const
+        {
+            return {std::filesystem::last_write_time(source), std::filesystem::file_size(source),
+                    std::filesystem::last_write_time(metadata), std::filesystem::file_size(metadata)};
+        }
+
+        void PublishRecord(AssetSourceRecord record, const FileSignature& signature)
+        {
+            std::scoped_lock lock(Mutex);
+            const auto id = record.Id;
+            const auto samePath = std::ranges::find(Records, record.RelativePath, &AssetSourceRecord::RelativePath);
+            if (samePath != Records.end() && samePath->Id != record.Id)
+                throw std::runtime_error("Asset path is already registered: " + record.RelativePath.generic_string());
+            const auto existing = std::ranges::find(Records, record.Id, &AssetSourceRecord::Id);
+            if (existing == Records.end())
+                Records.push_back(std::move(record));
+            else
+                *existing = std::move(record);
+            std::ranges::sort(Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
+            Observed.insert_or_assign(id, signature);
+            PendingChanges.erase(id);
+        }
+
         AssetDatabaseSpecification Specification;
         std::filesystem::path SourceRoot;
         std::filesystem::path CacheRoot;
@@ -535,8 +722,12 @@ namespace Keire
         std::unordered_map<std::string, AssetImporterRegistration> Importers;
         std::unordered_map<std::string, std::string> Extensions;
         std::unordered_map<AssetId, AssetImportStatus> ImportStatuses;
+        std::unordered_map<AssetId, PreparedImport> ValidatedImports;
+        std::unordered_map<AssetId, PreparedImport> CookInputs;
         mutable std::mutex Mutex;
     };
+
+    std::string ExternalAssetImportReceiptId::ToString() const { return m_Value.ToString(); }
 
     std::string AssetTrashId::ToString() const { return m_Value.ToString(); }
 
@@ -632,6 +823,7 @@ namespace Keire
     {
         (void)Refresh();
         const auto records = Records();
+        m_Impl->ResetCookInputs();
         const auto objectRoot = m_Impl->CacheRoot / "Objects";
         std::filesystem::create_directories(objectRoot);
         AssetImportResult result;
@@ -642,7 +834,11 @@ namespace Keire
             status.Id = record.Id;
             try
             {
-                const auto imported = m_Impl->Import(record);
+                auto validated = m_Impl->TakeValidatedImport(record);
+                auto restored = validated ? std::optional<AssetImportOutput>{} : m_Impl->RestoreCachedImport(record);
+                auto imported = validated  ? std::move(*validated)
+                                : restored ? std::move(*restored)
+                                           : m_Impl->Import(record);
                 status.Diagnostics = imported.Diagnostics;
                 for (const auto& diagnostic : status.Diagnostics)
                     LogImportDiagnostic(record, diagnostic);
@@ -680,6 +876,7 @@ namespace Keire
                     ++result.Imported;
                     status.State = AssetImportState::Imported;
                 }
+                m_Impl->StoreCookInput(record, std::move(imported));
             }
             catch (const std::exception& error)
             {
@@ -733,6 +930,301 @@ namespace Keire
         return found == m_Impl->ImportStatuses.end() ? AssetImportStatus{.Id = id} : found->second;
     }
 
+    std::optional<AssetImporterRegistration> AssetDatabase::FindImporterForPath(const std::filesystem::path& path) const
+    {
+        const auto* importer = m_Impl->InferImporter(path);
+        return importer ? std::optional<AssetImporterRegistration>(*importer) : std::nullopt;
+    }
+
+    ExternalAssetImportResult AssetDatabase::ImportExternal(const std::span<const ExternalAssetImportItem> items,
+                                                            const std::stop_token cancellation)
+    {
+        const auto throwIfCancelled = [&cancellation]
+        {
+            if (cancellation.stop_requested())
+                throw std::runtime_error("External asset import was cancelled.");
+        };
+        struct PlannedItem final
+        {
+            std::filesystem::path Source;
+            std::filesystem::path Destination;
+            AssetImportSettings Settings;
+            ExternalAssetConflictPolicy Conflict = ExternalAssetConflictPolicy::UniqueName;
+        };
+        std::vector<PlannedItem> planned;
+        for (const auto& item : items)
+        {
+            throwIfCancelled();
+            if (item.SourcePath.empty())
+                throw std::invalid_argument("External import source paths must not be empty.");
+            const auto source = std::filesystem::absolute(item.SourcePath).lexically_normal();
+            if (std::filesystem::is_symlink(source))
+                throw std::invalid_argument("External imports do not follow symbolic links: " + source.string());
+            if (std::filesystem::is_directory(source))
+            {
+                std::error_code error;
+                for (std::filesystem::recursive_directory_iterator
+                         iterator(source, std::filesystem::directory_options::skip_permission_denied, error),
+                     end;
+                     !error && iterator != end; iterator.increment(error))
+                {
+                    throwIfCancelled();
+                    if (iterator->is_symlink(error))
+                    {
+                        if (iterator->is_directory(error))
+                            iterator.disable_recursion_pending();
+                        throw std::invalid_argument("External imports do not follow symbolic links: " +
+                                                    iterator->path().string());
+                    }
+                    if (!iterator->is_regular_file(error) || iterator->path().extension() == ".keiremeta")
+                        continue;
+                    if (!m_Impl->InferImporter(iterator->path()))
+                        throw std::invalid_argument("No importer supports a dropped directory entry: " +
+                                                    iterator->path().string());
+                    const auto relative = std::filesystem::relative(iterator->path(), source, error);
+                    if (error)
+                        throw std::runtime_error("Could not resolve a dropped directory entry.");
+                    planned.push_back(
+                        {iterator->path(), item.RelativeDestination / relative, item.Settings, item.Conflict});
+                }
+                if (error)
+                    throw std::runtime_error("Could not enumerate dropped directory: " + error.message());
+                continue;
+            }
+            if (!std::filesystem::is_regular_file(source))
+                throw std::invalid_argument("External import source is not a regular file: " + source.string());
+            planned.push_back({source, item.RelativeDestination.empty() ? source.filename() : item.RelativeDestination,
+                               item.Settings, item.Conflict});
+        }
+        if (planned.empty())
+            throw std::invalid_argument("No supported asset files were found in the external import.");
+
+        struct Rollback final
+        {
+            std::filesystem::path Source;
+            std::filesystem::path Metadata;
+            std::vector<std::byte> PreviousSource;
+            std::vector<std::byte> PreviousMetadata;
+            bool Replaced = false;
+        };
+        std::vector<Rollback> rollback;
+        ExternalAssetImportResult result;
+        std::filesystem::path receiptRoot;
+        const auto writeBytes = [](const std::filesystem::path& path, const std::span<const std::byte> bytes)
+        {
+            std::filesystem::create_directories(path.parent_path());
+            const auto temporary = path.string() + ".external-import.tmp";
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            if (!stream || (!bytes.empty() && !stream.write(reinterpret_cast<const char*>(bytes.data()),
+                                                            static_cast<std::streamsize>(bytes.size()))))
+                throw std::runtime_error("Could not stage external asset data.");
+            stream.close();
+            Detail::AtomicReplace(temporary, path);
+        };
+        try
+        {
+            for (auto& item : planned)
+            {
+                throwIfCancelled();
+                const auto* importer = m_Impl->InferImporter(item.Source);
+                if (!importer)
+                    throw std::invalid_argument("No importer supports: " + item.Source.string());
+                if (item.Settings.empty() && importer->SuggestImportSettings)
+                    item.Settings = importer->SuggestImportSettings(item.Source, item.Settings);
+                auto destination = item.Destination.lexically_normal();
+                auto absoluteDestination = ConfinedPath(m_Impl->SourceRoot, destination);
+                auto existing = Find(destination);
+                if (existing && item.Conflict == ExternalAssetConflictPolicy::Skip)
+                    continue;
+                if (existing && item.Conflict == ExternalAssetConflictPolicy::UniqueName)
+                {
+                    const auto parent = destination.parent_path();
+                    const auto stem = destination.stem().string();
+                    const auto extension = destination.extension().string();
+                    for (std::size_t copy = 2; existing; ++copy)
+                    {
+                        destination = parent / (stem + " " + std::to_string(copy) + extension);
+                        existing = Find(destination);
+                    }
+                    absoluteDestination = ConfinedPath(m_Impl->SourceRoot, destination);
+                }
+                const auto bytes = ReadSource(item.Source, m_Impl->Specification.MaximumSourceBytes);
+                if (!existing)
+                {
+                    const auto id = CreateAsset(destination, *importer, bytes, item.Settings);
+                    rollback.push_back(
+                        {absoluteDestination, std::filesystem::path(absoluteDestination.string() + ".keiremeta")});
+                    result.Entries.push_back({id, item.Source, destination, false});
+                    continue;
+                }
+                if (existing->Importer != importer->Name || existing->Type != importer->Type)
+                    throw std::invalid_argument("Replace requires a destination with the same importer and type.");
+
+                const auto metadata = std::filesystem::path(absoluteDestination.string() + ".keiremeta");
+                Rollback restore{absoluteDestination, metadata,
+                                 ReadSource(absoluteDestination, m_Impl->Specification.MaximumSourceBytes),
+                                 ReadSource(metadata, 1024U * 1024U), true};
+                const auto settings = m_Impl->NormalizeSettings(*importer, item.Settings);
+                AssetSourceRecord validation = *existing;
+                validation.ImportSettings = settings;
+                validation.Type = importer->Type;
+                validation.Importer = importer->Name;
+                validation.ImporterVersion = importer->Version;
+                const auto validationMetadata = std::filesystem::path(metadata.string() + ".validate.tmp");
+                validation.MetadataPath = validationMetadata;
+                WriteMetadata(validationMetadata, existing->Id, importer->Type, importer->Name, importer->Version,
+                              settings);
+                AssetImportOutput validated;
+                try
+                {
+                    validated = m_Impl->ImportSource(validation, bytes);
+                }
+                catch (...)
+                {
+                    std::error_code ignored;
+                    std::filesystem::remove(validationMetadata, ignored);
+                    throw;
+                }
+                std::error_code ignored;
+                std::filesystem::remove(validationMetadata, ignored);
+                writeBytes(absoluteDestination, bytes);
+                WriteMetadata(metadata, existing->Id, importer->Type, importer->Name, importer->Version, settings);
+                rollback.push_back(std::move(restore));
+                (void)Refresh();
+                if (const auto refreshed = Find(existing->Id))
+                    m_Impl->StoreValidatedImport(*refreshed, std::move(validated));
+                result.Entries.push_back({existing->Id, item.Source, destination, true});
+            }
+            throwIfCancelled();
+            result.Import = ImportAll(AssetImportPolicy::FailFast);
+            throwIfCancelled();
+            const auto receiptValue = AssetId::Generate();
+            receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
+                                       std::filesystem::path("Library/AssetImport") / receiptValue.ToString());
+            std::filesystem::create_directories(receiptRoot);
+            Json receipt{{"schemaVersion", 1}, {"entries", Json::array()}};
+            for (std::size_t index = 0; index < rollback.size(); ++index)
+            {
+                const auto& state = rollback[index];
+                const auto prefix = std::to_string(index);
+                writeBytes(receiptRoot / (prefix + ".after"),
+                           ReadSource(state.Source, m_Impl->Specification.MaximumSourceBytes));
+                writeBytes(receiptRoot / (prefix + ".after.keiremeta"),
+                           ReadSource(state.Metadata, 16U * 1024U * 1024U));
+                if (state.Replaced)
+                {
+                    writeBytes(receiptRoot / (prefix + ".before"), state.PreviousSource);
+                    writeBytes(receiptRoot / (prefix + ".before.keiremeta"), state.PreviousMetadata);
+                }
+                receipt["entries"].push_back(
+                    {{"destination", result.Entries[index].RelativeDestination.generic_string()},
+                     {"replaced", state.Replaced}});
+            }
+            const auto manifest = receipt.dump(2);
+            writeBytes(receiptRoot / "receipt.json", std::as_bytes(std::span(manifest.data(), manifest.size())));
+            result.Receipt = ExternalAssetImportReceiptId(receiptValue);
+            return result;
+        }
+        catch (...)
+        {
+            for (auto iterator = rollback.rbegin(); iterator != rollback.rend(); ++iterator)
+            {
+                std::error_code ignored;
+                if (iterator->Replaced)
+                {
+                    try
+                    {
+                        writeBytes(iterator->Source, iterator->PreviousSource);
+                        writeBytes(iterator->Metadata, iterator->PreviousMetadata);
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                else
+                {
+                    std::filesystem::remove(iterator->Source, ignored);
+                    std::filesystem::remove(iterator->Metadata, ignored);
+                }
+            }
+            (void)Refresh();
+            if (!receiptRoot.empty())
+            {
+                std::error_code ignored;
+                std::filesystem::remove_all(receiptRoot, ignored);
+            }
+            throw;
+        }
+    }
+
+    void AssetDatabase::UndoExternalImport(const ExternalAssetImportReceiptId receipt)
+    {
+        ApplyExternalImportReceipt(receipt, false);
+    }
+
+    void AssetDatabase::RedoExternalImport(const ExternalAssetImportReceiptId receipt)
+    {
+        ApplyExternalImportReceipt(receipt, true);
+    }
+
+    void AssetDatabase::ApplyExternalImportReceipt(const ExternalAssetImportReceiptId receipt, const bool applied)
+    {
+        if (!receipt)
+            throw std::invalid_argument("External import receipt is invalid.");
+        const auto receiptRoot = ConfinedPath(m_Impl->Specification.ProjectRoot,
+                                              std::filesystem::path("Library/AssetImport") / receipt.ToString());
+        const auto manifestBytes = ReadSource(receiptRoot / "receipt.json", 16U * 1024U * 1024U);
+        const auto manifest = Json::parse(reinterpret_cast<const char*>(manifestBytes.data()),
+                                          reinterpret_cast<const char*>(manifestBytes.data() + manifestBytes.size()));
+        if (manifest.value("schemaVersion", 0) != 1 || !manifest.contains("entries") || !manifest["entries"].is_array())
+            throw std::runtime_error("External import receipt is invalid.");
+        const auto writeBytes = [](const std::filesystem::path& path, const std::span<const std::byte> bytes)
+        {
+            std::filesystem::create_directories(path.parent_path());
+            const auto temporary = path.string() + ".external-import-replay.tmp";
+            std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+            if (!stream || (!bytes.empty() && !stream.write(reinterpret_cast<const char*>(bytes.data()),
+                                                            static_cast<std::streamsize>(bytes.size()))))
+                throw std::runtime_error("Could not replay external asset import receipt.");
+            stream.close();
+            Detail::AtomicReplace(temporary, path);
+        };
+        const auto applyEntry = [&](const std::size_t index, const Json& entry)
+        {
+            const auto destination =
+                ConfinedPath(m_Impl->SourceRoot, std::filesystem::path(entry.at("destination").get<std::string>()));
+            const auto metadata = std::filesystem::path(destination.string() + ".keiremeta");
+            const bool replaced = entry.value("replaced", false);
+            if (!applied && !replaced)
+            {
+                std::error_code error;
+                std::filesystem::remove(destination, error);
+                if (error)
+                    throw std::runtime_error("Could not undo imported asset: " + error.message());
+                std::filesystem::remove(metadata, error);
+                if (error)
+                    throw std::runtime_error("Could not undo imported asset metadata: " + error.message());
+                return;
+            }
+            const auto prefix = std::to_string(index) + (applied ? ".after" : ".before");
+            writeBytes(destination, ReadSource(receiptRoot / prefix, m_Impl->Specification.MaximumSourceBytes));
+            writeBytes(metadata, ReadSource(receiptRoot / (prefix + ".keiremeta"), 16U * 1024U * 1024U));
+        };
+        if (applied)
+        {
+            std::size_t index = 0;
+            for (const auto& entry : manifest["entries"])
+                applyEntry(index++, entry);
+        }
+        else
+        {
+            for (std::size_t index = manifest["entries"].size(); index > 0; --index)
+                applyEntry(index - 1, manifest["entries"][index - 1]);
+        }
+        (void)Refresh();
+        (void)ImportAll(AssetImportPolicy::KeepLastGood);
+    }
+
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)
     {
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativePath);
@@ -742,7 +1234,8 @@ namespace Keire
 
     AssetId AssetDatabase::CreateAsset(const std::filesystem::path& relativePath,
                                        const AssetImporterRegistration& importer,
-                                       const std::span<const std::byte> sourceBytes)
+                                       const std::span<const std::byte> sourceBytes,
+                                       const AssetImportSettings& requestedSettings)
     {
         const auto registered = m_Impl->Importers.find(importer.Name);
         if (registered == m_Impl->Importers.end() || registered->second.Version != importer.Version ||
@@ -757,13 +1250,31 @@ namespace Keire
             throw std::invalid_argument("Asset creation path does not use an importer-supported extension.");
         if (sourceBytes.size() > m_Impl->Specification.MaximumSourceBytes)
             throw std::invalid_argument("Asset creation source exceeds the configured maximum size.");
+        const auto settings = m_Impl->NormalizeSettings(registered->second, requestedSettings);
+        const auto id = AssetId::Generate();
         AssetSourceRecord validationRecord;
+        validationRecord.Id = id;
+        validationRecord.Type = importer.Type;
         validationRecord.RelativePath = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
-        validationRecord.MetadataPath = metadata;
-        if (registered->second.ContextualImport)
-            (void)registered->second.ContextualImport(m_Impl->CreateImportContext(validationRecord), sourceBytes);
-        else
-            (void)registered->second.Import(sourceBytes);
+        validationRecord.Importer = importer.Name;
+        validationRecord.ImporterVersion = importer.Version;
+        validationRecord.ImportSettings = settings;
+        const auto validationMetadata = std::filesystem::path(metadata.string() + ".validate.tmp");
+        validationRecord.MetadataPath = validationMetadata;
+        WriteMetadata(validationMetadata, id, importer.Type, importer.Name, importer.Version, settings);
+        AssetImportOutput validated;
+        try
+        {
+            validated = m_Impl->ImportSource(validationRecord, sourceBytes);
+        }
+        catch (...)
+        {
+            std::error_code ignored;
+            std::filesystem::remove(validationMetadata, ignored);
+            throw;
+        }
+        std::error_code ignored;
+        std::filesystem::remove(validationMetadata, ignored);
         std::filesystem::create_directories(destination.parent_path());
         const auto temporary = destination.string() + ".tmp";
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
@@ -771,21 +1282,34 @@ namespace Keire
                                                               static_cast<std::streamsize>(sourceBytes.size()))))
             throw std::runtime_error("Could not create asset source.");
         stream.close();
-        const auto id = AssetId::Generate();
         try
         {
             Detail::AtomicReplace(temporary, destination);
-            WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version);
+            WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings);
         }
         catch (...)
         {
-            std::error_code ignored;
-            std::filesystem::remove(temporary, ignored);
-            std::filesystem::remove(destination, ignored);
-            std::filesystem::remove(metadata, ignored);
+            std::error_code cleanupError;
+            std::filesystem::remove(temporary, cleanupError);
+            std::filesystem::remove(destination, cleanupError);
+            std::filesystem::remove(metadata, cleanupError);
             throw;
         }
-        (void)Refresh();
+        AssetSourceRecord record;
+        try
+        {
+            record = ReadMetadata(m_Impl->SourceRoot, destination, m_Impl->Specification.MaximumSourceBytes, true,
+                                  &registered->second);
+            m_Impl->PublishRecord(record, m_Impl->ReadSignature(destination, metadata));
+        }
+        catch (...)
+        {
+            std::error_code cleanupError;
+            std::filesystem::remove(destination, cleanupError);
+            std::filesystem::remove(metadata, cleanupError);
+            throw;
+        }
+        m_Impl->StoreValidatedImport(record, std::move(validated));
         return id;
     }
 
@@ -827,7 +1351,10 @@ namespace Keire
         }
         try
         {
-            (void)Refresh();
+            auto moved = *record;
+            moved.RelativePath = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
+            moved.MetadataPath = destinationMetadata;
+            m_Impl->PublishRecord(std::move(moved), m_Impl->ReadSignature(destination, destinationMetadata));
         }
         catch (...)
         {
@@ -1104,7 +1631,8 @@ namespace Keire
             if (profile.Strict && record.Importer != ImporterName(record.Type) &&
                 !database.m_Impl->FindImporter(record))
                 throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
-            auto imported = database.m_Impl->Import(record);
+            auto cached = database.m_Impl->TakeCookInput(record);
+            auto imported = cached ? std::move(*cached) : database.m_Impl->Import(record);
             auto dependencies = record.Dependencies;
             for (const auto dependency : imported.AssetDependencies)
             {
@@ -1115,7 +1643,13 @@ namespace Keire
             indices.emplace(record.Id, prepared.size());
             prepared.push_back({&record, std::move(imported), std::move(dependencies)});
         }
-        for (const auto& asset : prepared)
+        if (!profile.Strict)
+        {
+            for (auto& asset : prepared)
+                std::erase_if(asset.Dependencies,
+                              [&indices](const AssetId dependency) { return !indices.contains(dependency); });
+        }
+        for (auto& asset : prepared)
         {
             if (asset.Record->Type != MaterialAsset::StaticType())
                 continue;
@@ -1144,8 +1678,15 @@ namespace Keire
                 if (!texture)
                     continue;
                 const auto textureIndex = indices.find(texture);
-                if (textureIndex == indices.end() ||
-                    prepared[textureIndex->second].Record->Type != Texture2DAsset::StaticType())
+                if (textureIndex == indices.end())
+                {
+                    if (profile.Strict)
+                        throw std::runtime_error("Material texture property '" + property.Name +
+                                                 "' is missing or has the wrong asset type.");
+                    std::erase(asset.Dependencies, texture);
+                    continue;
+                }
+                if (prepared[textureIndex->second].Record->Type != Texture2DAsset::StaticType())
                     throw std::runtime_error("Material texture property '" + property.Name +
                                              "' is missing or has the wrong asset type.");
                 const auto textureAsset = Texture2DAsset::Decode(prepared[textureIndex->second].Imported.Bytes);
@@ -1159,7 +1700,9 @@ namespace Keire
                      settings.Semantic == TextureSemantic::Normal &&
                      settings.ColorSpace == TextureColorSpace::Linear) ||
                     ((property.TextureSemantic == ShaderTextureSemantic::MetallicRoughness ||
-                      property.TextureSemantic == ShaderTextureSemantic::Occlusion) &&
+                      property.TextureSemantic == ShaderTextureSemantic::Occlusion ||
+                      property.TextureSemantic == ShaderTextureSemantic::Metallic ||
+                      property.TextureSemantic == ShaderTextureSemantic::Roughness) &&
                      settings.Semantic == TextureSemantic::Data && settings.ColorSpace == TextureColorSpace::Linear);
                 if (!compatible)
                     throw std::runtime_error("Material texture property '" + property.Name +

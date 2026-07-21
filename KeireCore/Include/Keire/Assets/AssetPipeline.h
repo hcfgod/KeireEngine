@@ -10,14 +10,41 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace Keire
 {
+    enum class AssetImportOptionKind : std::uint8_t
+    {
+        Boolean,
+        Integer,
+        Scalar,
+        Choice
+    };
+
+    using AssetImportOptionValue = std::variant<bool, std::int64_t, double, std::string>;
+    using AssetImportSettings = std::map<std::string, AssetImportOptionValue, std::less<>>;
+
+    struct AssetImportOptionDescriptor
+    {
+        std::string Key;
+        std::string DisplayName;
+        std::string Group;
+        AssetImportOptionKind Kind = AssetImportOptionKind::Boolean;
+        AssetImportOptionValue DefaultValue = false;
+        std::optional<double> Minimum;
+        std::optional<double> Maximum;
+        double Step = 1.0;
+        std::vector<std::string> Choices;
+    };
+
     enum class AssetTargetPlatform : std::uint8_t
     {
         Host,
@@ -57,6 +84,7 @@ namespace Keire
         std::filesystem::path RelativePath;
         std::size_t MaximumDependencyBytes = 64U * 1024U * 1024U;
         std::function<std::vector<std::byte>(const std::filesystem::path&)> ReadProjectFile;
+        AssetImportSettings ImportSettings;
     };
 
     struct AssetImportOutput
@@ -77,6 +105,11 @@ namespace Keire
         std::function<std::vector<std::byte>(std::span<const std::byte>)> Import;
         std::function<AssetImportOutput(const AssetImportContext&, std::span<const std::byte>)> ContextualImport;
         std::function<std::vector<std::byte>(std::span<const std::byte>, AssetTargetPlatform)> Cook;
+        std::vector<AssetImportOptionDescriptor> ImportOptions;
+        std::function<AssetImportSettings(const AssetImportSettings&)> NormalizeImportSettings;
+        std::function<AssetImportSettings(const std::filesystem::path&, const AssetImportSettings&)>
+            SuggestImportSettings;
+        std::function<AssetImportOutput(std::span<const std::byte>)> RestoreCachedOutput;
     };
 
     struct AssetSourceRecord
@@ -93,6 +126,7 @@ namespace Keire
         std::vector<AssetId> SubAssets;
         std::vector<AssetSourceDependency> SourceDependencies;
         AssetDerivedMetadata Metadata;
+        AssetImportSettings ImportSettings;
     };
 
     struct AssetDatabaseSpecification
@@ -132,6 +166,51 @@ namespace Keire
     {
         FailFast,
         KeepLastGood
+    };
+
+    enum class ExternalAssetConflictPolicy : std::uint8_t
+    {
+        UniqueName,
+        Replace,
+        Skip
+    };
+
+    struct ExternalAssetImportItem
+    {
+        std::filesystem::path SourcePath;
+        std::filesystem::path RelativeDestination;
+        AssetImportSettings Settings;
+        ExternalAssetConflictPolicy Conflict = ExternalAssetConflictPolicy::UniqueName;
+    };
+
+    struct ExternalAssetImportEntry
+    {
+        AssetId Id;
+        std::filesystem::path SourcePath;
+        std::filesystem::path RelativeDestination;
+        bool Replaced = false;
+    };
+
+    class KEIRE_API ExternalAssetImportReceiptId final
+    {
+      public:
+        constexpr ExternalAssetImportReceiptId() noexcept = default;
+
+        [[nodiscard]] std::string ToString() const;
+        [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(m_Value); }
+        [[nodiscard]] auto operator<=>(const ExternalAssetImportReceiptId&) const noexcept = default;
+
+      private:
+        friend class AssetDatabase;
+        explicit ExternalAssetImportReceiptId(AssetId value) noexcept : m_Value(value) {}
+        AssetId m_Value;
+    };
+
+    struct ExternalAssetImportResult
+    {
+        std::vector<ExternalAssetImportEntry> Entries;
+        AssetImportResult Import;
+        ExternalAssetImportReceiptId Receipt;
     };
 
     class KEIRE_API AssetTrashId final
@@ -175,11 +254,18 @@ namespace Keire
         [[nodiscard]] AssetImportResult ImportAll();
         [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy);
         [[nodiscard]] AssetImportStatus ImportStatus(AssetId id) const;
+        [[nodiscard]] std::optional<AssetImporterRegistration>
+        FindImporterForPath(const std::filesystem::path& path) const;
+        [[nodiscard]] ExternalAssetImportResult ImportExternal(std::span<const ExternalAssetImportItem> items,
+                                                               std::stop_token cancellation = {});
+        void UndoExternalImport(ExternalAssetImportReceiptId receipt);
+        void RedoExternalImport(ExternalAssetImportReceiptId receipt);
 
         void CreateFolder(const std::filesystem::path& relativePath);
         [[nodiscard]] AssetId CreateAsset(const std::filesystem::path& relativePath,
                                           const AssetImporterRegistration& importer,
-                                          std::span<const std::byte> sourceBytes);
+                                          std::span<const std::byte> sourceBytes,
+                                          const AssetImportSettings& settings = {});
         void Rename(AssetId id, std::string newName);
         void MoveAsset(AssetId id, const std::filesystem::path& destination);
         [[nodiscard]] AssetId Duplicate(AssetId id, const std::filesystem::path& destination);
@@ -197,6 +283,7 @@ namespace Keire
 
       private:
         friend class AssetCooker;
+        void ApplyExternalImportReceipt(ExternalAssetImportReceiptId receipt, bool applied);
         class Impl;
         std::unique_ptr<Impl> m_Impl;
     };

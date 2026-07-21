@@ -6,6 +6,28 @@
 
 namespace KeireEditor
 {
+    bool MaterialInspectorPanel::AcceptsTexture(const Keire::AssetSourceRecord& texture,
+                                                const Keire::ShaderTextureSemantic semantic)
+    {
+        if (texture.Type != Keire::Texture2DAsset::StaticType())
+            return false;
+        if (semantic == Keire::ShaderTextureSemantic::Generic || texture.ImportSettings.empty())
+            return true;
+        const auto semanticSetting = texture.ImportSettings.find("semantic");
+        const auto colorSpaceSetting = texture.ImportSettings.find("colorSpace");
+        if (semanticSetting == texture.ImportSettings.end() || colorSpaceSetting == texture.ImportSettings.end())
+            return true;
+        const auto* importedSemantic = std::get_if<std::string>(&semanticSetting->second);
+        const auto* importedColorSpace = std::get_if<std::string>(&colorSpaceSetting->second);
+        if (!importedSemantic || !importedColorSpace)
+            return false;
+        if (semantic == Keire::ShaderTextureSemantic::BaseColor || semantic == Keire::ShaderTextureSemantic::Emissive)
+            return *importedSemantic == "color" && *importedColorSpace == "srgb";
+        if (semantic == Keire::ShaderTextureSemantic::Normal)
+            return *importedSemantic == "normal" && *importedColorSpace == "linear";
+        return *importedSemantic == "data" && *importedColorSpace == "linear";
+    }
+
     bool MaterialInspectorPanel::Draw(IPropertyEditor& editor, MaterialDocument& document) const
     {
         bool changed = false;
@@ -42,7 +64,7 @@ namespace KeireEditor
                 edited = editor.EditColor(label, std::get<Keire::Color>(value));
                 break;
             case Keire::ShaderPropertyType::Texture2D:
-                edited = editor.EditAsset(label, std::get<Keire::AssetId>(value), Keire::Texture2DAsset::StaticType());
+                edited = editor.EditTextureAsset(label, std::get<Keire::AssetId>(value), property.TextureSemantic);
                 break;
             }
             if (edited)

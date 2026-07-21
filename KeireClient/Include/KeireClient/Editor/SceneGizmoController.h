@@ -7,8 +7,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -18,6 +20,35 @@ namespace KeireEditor
         Translate,
         Rotate,
         Scale
+    };
+
+    enum class SceneTransformAxis : std::uint8_t
+    {
+        X,
+        Y,
+        Z,
+        Uniform
+    };
+
+    struct SceneTransformTarget
+    {
+        Keire::Ref<Keire::TransformComponent> Transform;
+        Keire::Matrix4 InitialWorld;
+        Keire::Vector3 InitialPosition;
+        Keire::Quaternion InitialRotation;
+        Keire::Vector3 InitialScale{1.0F, 1.0F, 1.0F};
+    };
+
+    class SceneTransformGroup final
+    {
+      public:
+        [[nodiscard]] static std::vector<SceneTransformTarget> Capture(const Keire::Ref<Keire::Scene>& scene,
+                                                                       std::span<const Keire::AssetId> selections,
+                                                                       Keire::EntityId primary);
+        static void Restore(std::span<const SceneTransformTarget> targets);
+        static void Apply(std::span<const SceneTransformTarget> targets, SceneTool tool, SceneTransformAxis axis,
+                          float amount, Keire::Vector3 worldAxis, Keire::Vector3 pivot,
+                          Keire::Quaternion pivotRotation);
     };
 
     struct SceneToolSettings
@@ -30,6 +61,13 @@ namespace KeireEditor
         bool ShowIcons = true;
         bool ShowCameraFrustums = true;
         bool ShowLightDirections = true;
+    };
+
+    struct SceneGizmoResult
+    {
+        Keire::EntityId Selection;
+        bool SelectionActivated = false;
+        bool PointerConsumed = false;
     };
 
     class SceneGizmoController final
@@ -46,11 +84,13 @@ namespace KeireEditor
 
         using BeginUndo = std::function<void(std::string_view)>;
 
-        void DrawToolbar(Keire::UiFrame& ui);
-        [[nodiscard]] Keire::EntityId UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
-                                                    Keire::EntityId selected, const Keire::RenderCamera& camera,
-                                                    Keire::UiItemRect viewport, bool allowManipulation,
-                                                    BeginUndo beginUndo, MeshBoundsResolver resolveMeshBounds = {});
+        [[nodiscard]] Keire::UiItemRect DrawOverlayToolbar(Keire::UiFrame& ui, Keire::UiItemRect viewport);
+        [[nodiscard]] SceneGizmoResult UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
+                                                     Keire::EntityId selected, const Keire::RenderCamera& camera,
+                                                     Keire::UiItemRect viewport, bool allowManipulation,
+                                                     bool pointerBlocked, BeginUndo beginUndo,
+                                                     MeshBoundsResolver resolveMeshBounds = {},
+                                                     std::span<const Keire::AssetId> selections = {});
 
         void Load(const std::filesystem::path& projectRoot);
         void Save(const std::filesystem::path& projectRoot) const noexcept;
@@ -63,14 +103,14 @@ namespace KeireEditor
         {
             Axis ActiveAxis = Axis::None;
             Keire::UiPosition StartPointer;
-            Keire::Vector3 InitialPosition;
-            Keire::Vector3 InitialEuler;
-            Keire::Vector3 InitialScale{1.0F, 1.0F, 1.0F};
             Keire::Vector3 WorldAxis;
+            Keire::Vector3 Pivot;
+            Keire::Quaternion PivotRotation;
             Keire::UiPosition ScreenAxis;
             float ScreenLength = 1.0F;
             float WorldLength = 1.0F;
             bool UndoRecorded = false;
+            std::vector<SceneTransformTarget> Targets;
         };
 
         SceneToolSettings m_Settings;

@@ -61,6 +61,7 @@ namespace
         float Red = 0.0F;
         float Green = 0.0F;
         float Blue = 0.0F;
+        float Alpha = 0.0F;
 
         [[nodiscard]] float Luminance() const noexcept { return Red * 0.2126F + Green * 0.7152F + Blue * 0.0722F; }
     };
@@ -80,12 +81,14 @@ namespace
                 result.Red += static_cast<float>(pixels[offset]) / 255.0F;
                 result.Green += static_cast<float>(pixels[offset + 1]) / 255.0F;
                 result.Blue += static_cast<float>(pixels[offset + 2]) / 255.0F;
+                result.Alpha += static_cast<float>(pixels[offset + 3]) / 255.0F;
                 ++count;
             }
         }
         result.Red /= static_cast<float>(count);
         result.Green /= static_cast<float>(count);
         result.Blue /= static_cast<float>(count);
+        result.Alpha /= static_cast<float>(count);
         return result;
     }
 
@@ -100,7 +103,8 @@ namespace
         [[nodiscard]] static std::vector<std::byte>
         SolidTexture(const std::uint8_t red, const std::uint8_t green, const std::uint8_t blue,
                      const Keire::TextureSemantic semantic = Keire::TextureSemantic::Color,
-                     const Keire::TextureColorSpace colorSpace = Keire::TextureColorSpace::Srgb)
+                     const Keire::TextureColorSpace colorSpace = Keire::TextureColorSpace::Srgb,
+                     const std::uint8_t alpha = 255)
         {
             Keire::TextureImportSettings textureSettings;
             textureSettings.Semantic = semantic;
@@ -114,7 +118,7 @@ namespace
                 mip.Pixels.push_back(static_cast<std::byte>(red));
                 mip.Pixels.push_back(static_cast<std::byte>(green));
                 mip.Pixels.push_back(static_cast<std::byte>(blue));
-                mip.Pixels.push_back(std::byte{255});
+                mip.Pixels.push_back(static_cast<std::byte>(alpha));
             }
             return Keire::Texture2DAsset::Encode(textureSettings, {&mip, 1});
         }
@@ -147,6 +151,9 @@ namespace
 
             TexturePath = Root / "Assets/Green.texture";
             Texture = Database->CreateAsset("Green.texture", textureImporter, SolidTexture(0, 255, 0));
+            TransparentTexture = Database->CreateAsset(
+                "TransparentGreen.texture", textureImporter,
+                SolidTexture(0, 255, 0, Keire::TextureSemantic::Color, Keire::TextureColorSpace::Srgb, 0));
             NeutralNormal = Database->CreateAsset(
                 "NeutralNormal.texture", textureImporter,
                 SolidTexture(128, 128, 255, Keire::TextureSemantic::Normal, Keire::TextureColorSpace::Linear));
@@ -161,7 +168,13 @@ namespace
                 SolidTexture(0, 255, 0, Keire::TextureSemantic::Data, Keire::TextureColorSpace::Linear));
             MetallicSmoothOrm = Database->CreateAsset(
                 "MetallicSmoothOrm.texture", textureImporter,
-                SolidTexture(255, 32, 255, Keire::TextureSemantic::Data, Keire::TextureColorSpace::Linear));
+                SolidTexture(255, 0, 255, Keire::TextureSemantic::Data, Keire::TextureColorSpace::Linear));
+            MetallicMap = Database->CreateAsset(
+                "Metallic.texture", textureImporter,
+                SolidTexture(255, 255, 255, Keire::TextureSemantic::Data, Keire::TextureColorSpace::Linear));
+            RoughnessMap = Database->CreateAsset(
+                "Roughness.texture", textureImporter,
+                SolidTexture(0, 0, 0, Keire::TextureSemantic::Data, Keire::TextureColorSpace::Linear));
             BlackEmissive = Database->CreateAsset("BlackEmissive.texture", textureImporter, SolidTexture(0, 0, 0));
             RedEmissive = Database->CreateAsset("RedEmissive.texture", textureImporter, SolidTexture(255, 0, 0));
 
@@ -175,7 +188,7 @@ namespace
   "vertexLayoutVersion": 2,
   "stages": {"vertex": "VSMain", "fragment": "PSMain"},
   "includeRoots": ["Assets/Shaders"],
-  "renderState": {"topology": "TriangleList", "culling": "None", "depthTest": true, "depthWrite": true, "blend": false},
+  "renderState": {"topology": "TriangleList", "culling": "Back", "depthTest": true, "depthWrite": true, "blend": false},
   "properties": [
     {"name": "Tint", "type": "Color", "default": [1, 1, 1, 1]},
     {"name": "MainTexture", "type": "Texture2D", "semantic": "BaseColor", "default": null},
@@ -187,7 +200,9 @@ namespace
     {"name": "NormalTexture", "type": "Texture2D", "semantic": "Normal", "default": null},
     {"name": "MetallicRoughnessTexture", "type": "Texture2D", "semantic": "MetallicRoughness", "default": null},
     {"name": "OcclusionTexture", "type": "Texture2D", "semantic": "Occlusion", "default": null},
-    {"name": "EmissiveTexture", "type": "Texture2D", "semantic": "Emissive", "default": null}
+    {"name": "EmissiveTexture", "type": "Texture2D", "semantic": "Emissive", "default": null},
+    {"name": "MetallicTexture", "type": "Texture2D", "semantic": "Metallic", "default": null},
+    {"name": "RoughnessTexture", "type": "Texture2D", "semantic": "Roughness", "default": null}
   ]
 })";
             Shader = Database->CreateAsset("Shader.keireshader", shaderImporter,
@@ -241,11 +256,11 @@ namespace
         {
             std::ifstream input(ShaderSourcePath, std::ios::binary);
             std::string source(std::istreambuf_iterator<char>(input), {});
-            constexpr std::string_view original = "float4(color, baseColor.a)";
+            constexpr std::string_view original = "float4(color, 1.0F)";
             const auto position = source.find(original);
             if (!input || position == std::string::npos)
                 return false;
-            source.replace(position, original.size(), "float4(color.brg, baseColor.a)");
+            source.replace(position, original.size(), "float4(color.brg, 1.0F)");
             std::ofstream output(ShaderSourcePath, std::ios::binary | std::ios::trunc);
             output << source;
             output.close();
@@ -275,11 +290,14 @@ namespace
         Keire::AssetId Material;
         Keire::AssetId Shader;
         Keire::AssetId Texture;
+        Keire::AssetId TransparentTexture;
         Keire::AssetId NeutralNormal;
         Keire::AssetId PerturbedNormal;
         Keire::AssetId NeutralOrm;
         Keire::AssetId OccludedOrm;
         Keire::AssetId MetallicSmoothOrm;
+        Keire::AssetId MetallicMap;
+        Keire::AssetId RoughnessMap;
         Keire::AssetId BlackEmissive;
         Keire::AssetId RedEmissive;
     };
@@ -418,6 +436,49 @@ namespace
         Keire::RenderEnvironmentSettings m_Environment;
         std::size_t m_NextCapture = 0;
         bool m_Submitted = false;
+    };
+
+    class CloseAfterSubmitLayer final : public Keire::Layer
+    {
+      public:
+        CloseAfterSubmitLayer() : Layer("Close scene after submit") {}
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000010"),
+                                                     Keire::SceneAsset::EmptyDefinition("Frame-local scene packet"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto object = m_Scene->CreateEntity("Closing cube");
+            (void)object.AddComponent<Keire::MeshRendererComponent>();
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Frame-local scene packet";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {}, {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            Owner().Renderer()->Submit({m_Scene, m_View});
+            m_Scene->Close();
+            Owner().RequestExit();
+        }
+
+      private:
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
     };
 
     class AssetMeshCaptureLayer final : public Keire::Layer
@@ -618,7 +679,7 @@ namespace
 
     struct MaterialSemanticResults final
     {
-        std::array<std::vector<std::uint8_t>, 7> Frames;
+        std::array<std::vector<std::uint8_t>, 9> Frames;
         bool ReloadsSucceeded = true;
     };
 
@@ -706,9 +767,10 @@ namespace
         }
 
       private:
-        [[nodiscard]] std::string CommonProperties() const
+        [[nodiscard]] std::string CommonProperties(const Keire::AssetId texture = {}) const
         {
-            return "\"Tint\":[1,1,1,1],\"MainTexture\":\"" + m_Fixture.Texture.ToString() +
+            const auto baseColorTexture = texture ? texture : m_Fixture.Texture;
+            return "\"Tint\":[1,1,1,1],\"MainTexture\":\"" + baseColorTexture.ToString() +
                    "\",\"MetallicFactor\":0,\"RoughnessFactor\":1,\"NormalScale\":1,"
                    "\"OcclusionStrength\":1,\"EmissiveFactor\":[1,1,1,1]";
         }
@@ -745,6 +807,19 @@ namespace
                 m_Light->SetEnabled(false);
                 m_Environment.AmbientIntensity = 0.0F;
                 properties += ",\"EmissiveTexture\":\"" + m_Fixture.RedEmissive.ToString() + "\"";
+            }
+            else if (stage == 7)
+            {
+                m_Light->SetEnabled(true);
+                m_Environment.AmbientIntensity = 0.05F;
+                properties += ",\"MetallicFactor\":1,\"MetallicTexture\":\"" + m_Fixture.MetallicMap.ToString() +
+                              "\",\"RoughnessTexture\":\"" + m_Fixture.RoughnessMap.ToString() + "\"";
+            }
+            else if (stage == 8)
+            {
+                m_Light->SetEnabled(true);
+                m_Environment.AmbientIntensity = 0.05F;
+                properties = CommonProperties(m_Fixture.TransparentTexture);
             }
             return m_Fixture.ReplaceMaterialProperties(Owner(), properties);
         }
@@ -858,6 +933,13 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
           ColorTolerance);
 }
 
+TEST_CASE("submitted scene data remains valid when the scene closes before end frame")
+{
+    Keire::Application application(RenderTestSpecification());
+    (void)application.PushLayer(std::make_unique<CloseAfterSubmitLayer>());
+    CHECK(application.Run() == 0);
+}
+
 TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed indexed mesh")
 {
     RenderAssetFixture assets;
@@ -895,7 +977,7 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     }
 
     REQUIRE(results->ReloadsSucceeded);
-    std::array<PixelStatistics, 7> captures;
+    std::array<PixelStatistics, 9> captures;
     for (std::size_t index = 0; index < captures.size(); ++index)
     {
         REQUIRE_FALSE(results->Frames[index].empty());
@@ -909,6 +991,10 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     CHECK(captures[4].Luminance() > captures[5].Luminance() + MinimumBehaviorDelta);
     CHECK(captures[6].Red > captures[6].Green + MinimumBehaviorDelta);
     CHECK(captures[6].Red > captures[6].Blue + MinimumBehaviorDelta);
+    CHECK(std::abs(captures[3].Red - captures[7].Red) <= ColorTolerance);
+    CHECK(std::abs(captures[3].Green - captures[7].Green) <= ColorTolerance);
+    CHECK(std::abs(captures[3].Blue - captures[7].Blue) <= ColorTolerance);
+    CHECK(captures[8].Alpha >= 1.0F - ColorTolerance);
 }
 
 TEST_CASE("render asset revisions swap atomically and failed reloads preserve last-good output")

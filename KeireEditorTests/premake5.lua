@@ -14,7 +14,10 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/PropertyDrawerRegistry.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneCameraController.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneDocument.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneGizmoController.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ScenePicker.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ScenePlayChanges.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ThumbnailService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ViewportAssetDropRouter.cpp"
     }
 

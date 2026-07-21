@@ -258,6 +258,23 @@ namespace Keire
             bool Enabled = false;
         };
 
+        struct SceneDrawItem final
+        {
+            AssetId Mesh;
+            AssetId Material;
+            Matrix4 World;
+            Color Tint;
+        };
+
+        struct SceneRenderPacket final
+        {
+            RenderCamera Camera;
+            RenderEnvironmentSettings Environment;
+            SceneLighting Lighting;
+            std::vector<SceneDrawItem> DrawItems;
+            bool DrawGrid = false;
+        };
+
         [[nodiscard]] SceneLighting ResolveLighting(const Ref<Scene>& scene)
         {
             SceneLighting result;
@@ -339,7 +356,7 @@ namespace Keire
 
         struct QueuedSceneRequest final
         {
-            SceneRenderRequest Request;
+            SceneRenderPacket Packet;
             RenderSurfaceState* Surface = nullptr;
         };
 
@@ -751,6 +768,12 @@ namespace Keire
                 BlackTexture =
                     CreateTextureResources(*solidTexture({std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255}},
                                                          TextureSemantic::Color, TextureColorSpace::Srgb));
+                BlackDataTexture =
+                    CreateTextureResources(*solidTexture({std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255}},
+                                                         TextureSemantic::Data, TextureColorSpace::Linear));
+                WhiteDataTexture = CreateTextureResources(
+                    *solidTexture({std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}},
+                                  TextureSemantic::Data, TextureColorSpace::Linear));
                 const auto grid = CreateGridVertices();
                 GridVertexCount = static_cast<std::uint32_t>(grid.size());
                 GridBuffer = UploadVertexBuffer(grid);
@@ -998,7 +1021,7 @@ namespace Keire
                     information.primitive_type = primitive;
                     information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
                     information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-                    information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+                    information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
                     information.rasterizer_state.enable_depth_clip = true;
                     information.multisample_state.sample_count = samples;
                     information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
@@ -1144,7 +1167,7 @@ namespace Keire
                         definition.Culling == ShaderCullMode::Front  ? SDL_GPU_CULLMODE_FRONT
                         : definition.Culling == ShaderCullMode::Back ? SDL_GPU_CULLMODE_BACK
                                                                      : SDL_GPU_CULLMODE_NONE;
-                    information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+                    information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
                     information.rasterizer_state.enable_depth_clip = true;
                     information.multisample_state.sample_count = samples;
                     information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
@@ -1237,6 +1260,8 @@ namespace Keire
                     throw std::logic_error("Scene render requests are accepted only during an active render frame.");
                 if (!request.Scene || !request.View || !request.View->Surface())
                     throw std::invalid_argument("SceneRenderRequest requires a scene, view, and render surface.");
+                if (!request.Scene->IsOpen())
+                    throw std::logic_error("SceneRenderRequest cannot submit a closed scene.");
 
                 auto& surface = *static_cast<RenderSurfaceState*>(
                     RenderSystemInternalAccess::SurfaceState(*request.View->Surface()));
@@ -1262,7 +1287,23 @@ namespace Keire
 
                 surface.Submitted = true;
                 surface.FrameClearColor = camera.ClearColor;
-                Requests.push_back({std::move(request), &surface});
+                SceneRenderPacket packet;
+                packet.Camera = camera;
+                packet.Environment = request.Environment;
+                packet.Lighting = ResolveLighting(request.Scene);
+                packet.DrawGrid = request.DrawGrid;
+                for (const auto& entity : request.Scene->Query<MeshRendererComponent>())
+                {
+                    if (!entity.ActiveInHierarchy())
+                        continue;
+                    const auto renderer = entity.GetComponent<MeshRendererComponent>();
+                    const auto transform = entity.GetComponent<TransformComponent>();
+                    if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
+                        continue;
+                    packet.DrawItems.push_back(
+                        {renderer->Mesh(), renderer->Material(), transform->WorldMatrix(), renderer->Tint()});
+                }
+                Requests.push_back({std::move(packet), &surface});
             }
 
             [[nodiscard]] const GpuMeshResources& ResolveMesh(const AssetId id)
@@ -1341,6 +1382,10 @@ namespace Keire
                     return NeutralOrmTexture;
                 case ShaderTextureSemantic::Emissive:
                     return BlackTexture;
+                case ShaderTextureSemantic::Metallic:
+                    return BlackDataTexture;
+                case ShaderTextureSemantic::Roughness:
+                    return WhiteDataTexture;
                 case ShaderTextureSemantic::Generic:
                 default:
                     return CheckerboardTexture;
@@ -1498,18 +1543,18 @@ namespace Keire
             }
 
             void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
-                           const SceneRenderRequest& request)
+                           const SceneRenderPacket& packet)
             {
                 const auto samples = ToSdlSampleCount(surface.ActualSamples);
                 auto& pipelines = PipelinesFor(samples);
-                const auto camera = request.View->Camera();
-                const auto lighting = ResolveLighting(request.Scene);
+                const auto& camera = packet.Camera;
+                const auto& lighting = packet.Lighting;
 
-                if (request.DrawGrid && GridBuffer && GridVertexCount > 0)
+                if (packet.DrawGrid && GridBuffer && GridVertexCount > 0)
                 {
                     const ObjectUniforms object =
                         MakeObjectUniforms(Math::Multiply(camera.Projection, camera.View), {}, {1.0F, 1.0F, 1.0F, 1.0F},
-                                           lighting, request.Environment, false);
+                                           lighting, packet.Environment, false);
                     SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                     const SDL_GPUBufferBinding binding{GridBuffer, 0};
                     SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
@@ -1518,32 +1563,24 @@ namespace Keire
                     ++Statistics.DrawCalls;
                 }
 
-                for (const auto& entity : request.Scene->Query<MeshRendererComponent>())
+                for (const auto& item : packet.DrawItems)
                 {
-                    if (!entity.ActiveInHierarchy())
-                        continue;
-                    const auto renderer = entity.GetComponent<MeshRendererComponent>();
-                    const auto transform = entity.GetComponent<TransformComponent>();
-                    if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
-                        continue;
-
-                    const Matrix4 viewModel = Math::Multiply(camera.View, transform->WorldMatrix());
-                    const auto& mesh = ResolveMesh(renderer->Mesh());
+                    const Matrix4 viewModel = Math::Multiply(camera.View, item.World);
+                    const auto& mesh = ResolveMesh(item.Mesh);
                     const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
-                    const auto material = renderer->Material()
-                                              ? ResolveAssetMaterial(renderer->Material(), renderer->Tint(), samples)
-                                              : std::nullopt;
+                    const auto material =
+                        item.Material ? ResolveAssetMaterial(item.Material, item.Tint, samples) : std::nullopt;
                     if (material)
                     {
-                        const AssetObjectUniforms object{transform->WorldMatrix(), camera.View, camera.Projection,
-                                                         Transpose(Math::Inverse(transform->WorldMatrix()))};
+                        const AssetObjectUniforms object{item.World, camera.View, camera.Projection,
+                                                         Transpose(Math::Inverse(item.World))};
                         const AssetSceneUniforms scene{
-                            {request.Environment.AmbientColor.Red, request.Environment.AmbientColor.Green,
-                             request.Environment.AmbientColor.Blue, request.Environment.AmbientIntensity},
+                            {packet.Environment.AmbientColor.Red, packet.Environment.AmbientColor.Green,
+                             packet.Environment.AmbientColor.Blue, packet.Environment.AmbientIntensity},
                             {lighting.ColorAndIntensity.Red, lighting.ColorAndIntensity.Green,
                              lighting.ColorAndIntensity.Blue, lighting.ColorAndIntensity.Alpha},
                             {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z,
-                             request.Environment.Exposure}};
+                             packet.Environment.Exposure}};
                         SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                         SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
                         SDL_PushGPUFragmentUniformData(
@@ -1560,10 +1597,10 @@ namespace Keire
                     }
                     else
                     {
-                        const Color tint = renderer->Material() ? Color{1.0F, 0.0F, 1.0F, 1.0F} : renderer->Tint();
+                        const Color tint = item.Material ? Color{1.0F, 0.0F, 1.0F, 1.0F} : item.Tint;
                         const ObjectUniforms object =
-                            MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), transform->WorldMatrix(),
-                                               tint, lighting, request.Environment, true);
+                            MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), item.World, tint, lighting,
+                                               packet.Environment, true);
                         SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                         SDL_BindGPUGraphicsPipeline(pass, pipelines.Cube);
                         const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
@@ -1608,7 +1645,7 @@ namespace Keire
                     throw std::runtime_error("SDL_BeginGPURenderPass(surface) failed: " + LastSdlError());
                 const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
                 if (request != Requests.end())
-                    DrawScene(commands, pass, surface, request->Request);
+                    DrawScene(commands, pass, surface, request->Packet);
                 SDL_EndGPURenderPass(pass);
                 ++Statistics.Passes;
                 ++Statistics.Surfaces;
@@ -1764,6 +1801,8 @@ namespace Keire
                 ReleaseTextureResources(FlatNormalTexture);
                 ReleaseTextureResources(NeutralOrmTexture);
                 ReleaseTextureResources(BlackTexture);
+                ReleaseTextureResources(BlackDataTexture);
+                ReleaseTextureResources(WhiteDataTexture);
                 for (const auto& [description, sampler] : SamplerCache)
                 {
                     (void)description;
@@ -1808,6 +1847,8 @@ namespace Keire
             GpuTextureResources FlatNormalTexture;
             GpuTextureResources NeutralOrmTexture;
             GpuTextureResources BlackTexture;
+            GpuTextureResources BlackDataTexture;
+            GpuTextureResources WhiteDataTexture;
             std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
             std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
             std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 
 #include <functional>
@@ -31,6 +32,12 @@ namespace KeireEditor
         [[nodiscard]] virtual bool EditColor(std::string_view label, Keire::Color& value) = 0;
         [[nodiscard]] virtual bool EditAsset(std::string_view label, Keire::AssetId& value,
                                              std::optional<Keire::AssetTypeId> expectedType) = 0;
+        [[nodiscard]] virtual bool EditTextureAsset(std::string_view label, Keire::AssetId& value,
+                                                    Keire::ShaderTextureSemantic semantic)
+        {
+            (void)semantic;
+            return EditAsset(label, value, Keire::Texture2DAsset::StaticType());
+        }
         [[nodiscard]] virtual bool EditEntity(std::string_view label, Keire::EntityId& value) = 0;
     };
 

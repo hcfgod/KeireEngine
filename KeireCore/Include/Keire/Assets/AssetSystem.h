@@ -98,6 +98,7 @@ namespace Keire
 
         void Mount(const AssetMountSpecification& specification);
         [[nodiscard]] bool Unmount(const std::filesystem::path& catalogPath);
+        [[nodiscard]] bool PublishDevelopmentAsset(AssetId id, Ref<Asset> asset);
         [[nodiscard]] bool Reload(AssetId id, AssetPriority priority = AssetPriority::High);
         [[nodiscard]] std::size_t PumpCompletions();
         [[nodiscard]] std::size_t EvictUnused();

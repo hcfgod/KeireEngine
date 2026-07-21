@@ -120,6 +120,10 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     definition.Properties.back().DisplayName = "Base Color Texture";
     definition.Properties.back().Category = "Surface";
     definition.Properties.back().TextureSemantic = Keire::ShaderTextureSemantic::BaseColor;
+    definition.Properties.push_back({"MetallicTexture", Keire::ShaderPropertyType::Texture2D});
+    definition.Properties.back().TextureSemantic = Keire::ShaderTextureSemantic::Metallic;
+    definition.Properties.push_back({"RoughnessTexture", Keire::ShaderPropertyType::Texture2D});
+    definition.Properties.back().TextureSemantic = Keire::ShaderTextureSemantic::Roughness;
     const std::array formats{Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV,
                              Keire::ShaderBinaryFormat::Msl};
     for (std::size_t index = 0; index < formats.size(); ++index)
@@ -135,9 +139,11 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     CHECK(decoded->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
-    CHECK(decoded->Definition().Properties.back().DefaultTexture == defaultTexture);
-    CHECK(decoded->Definition().Properties.back().DisplayName == "Base Color Texture");
-    CHECK(decoded->Definition().Properties.back().TextureSemantic == Keire::ShaderTextureSemantic::BaseColor);
+    CHECK(decoded->Definition().Properties[1].DefaultTexture == defaultTexture);
+    CHECK(decoded->Definition().Properties[1].DisplayName == "Base Color Texture");
+    CHECK(decoded->Definition().Properties[1].TextureSemantic == Keire::ShaderTextureSemantic::BaseColor);
+    CHECK(decoded->Definition().Properties[2].TextureSemantic == Keire::ShaderTextureSemantic::Metallic);
+    CHECK(decoded->Definition().Properties[3].TextureSemantic == Keire::ShaderTextureSemantic::Roughness);
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
 
     const auto importer = Keire::CreateShaderAssetImporter();
@@ -319,6 +325,14 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Bounds().Maximum == (Keire::Vector3{1.0F, 1.0F, 0.0F}));
     REQUIRE(output.Metadata.LocalBounds);
     CHECK(output.Metadata.LocalBounds->Maximum == std::array{1.0F, 1.0F, 0.0F});
+    const auto origin = std::ranges::find(mesh->Vertices(), Keire::Vector3{}, &Keire::MeshVertex::Position);
+    REQUIRE(origin != mesh->Vertices().end());
+    CHECK(origin->UV0 == (Keire::Vector2{0.0F, 1.0F}));
+    CHECK(origin->Normal.Z == doctest::Approx(-1.0F));
+    REQUIRE(mesh->Indices().size() == 3);
+    CHECK(mesh->Indices()[0] == 2);
+    CHECK(mesh->Indices()[1] == 1);
+    CHECK(mesh->Indices()[2] == 0);
     CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
 }
 

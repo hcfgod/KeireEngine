@@ -52,13 +52,18 @@ not expose SDL or GPU resources, perform source I/O, or invoke Assimp on click.
 Shader ABI v2 appends tangent and handedness at vertex location 4 while ABI v1 remains supported. The sandbox surface
 uses Cook-Torrance GGX directional lighting with base color, normal, metallic-roughness (G/B), occlusion (R), emissive,
 ambient, and exposure inputs. Null semantic slots bind renderer-owned white, flat-normal, neutral-ORM, or black
-textures; missing non-null textures retain the checkerboard diagnostic.
+textures; missing non-null textures retain the checkerboard diagnostic. Tangent normals, light direction, and view
+direction are evaluated in world space. Opaque pipelines write opaque alpha even when a source base-color image carries
+transparent texels; authored transparency requires a future explicit surface mode instead of accidental compositing.
+The left-handed camera/projection path produces clockwise exterior winding in render-target space, which is the shared
+front-face convention used by built-in and asset pipelines when applying front/back culling.
 
 Every begun render frame is completed when exit is requested and cancelled without throwing during exceptional
 unwinding. Render tests release scene/view references before GPU shutdown and can be repeated in isolated processes
 with Scripts/Tests/repeat-render-tests.ps1 or repeat-render-tests.sh.
 The PBR suite measures neutral fallbacks, normal perturbation, metallic/roughness response, ambient occlusion, and
-emissive output with tolerant regions. Windows shader catalogs retain DXIL and SPIR-V, and Vulkan pipelines bind the
+emissive output with tolerant regions, including opaque output from a transparent source texel. Windows shader
+catalogs retain DXIL and SPIR-V, and Vulkan pipelines bind the
 shader manifest's declared SPIR-V entrypoint instead of assuming `main`.
 
 Relative cursor capture exists only during fly navigation and is released on focus loss. Camera state is stored below

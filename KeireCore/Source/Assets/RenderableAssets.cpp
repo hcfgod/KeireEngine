@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -267,6 +268,52 @@ namespace Keire
             if (settings.Semantic != TextureSemantic::Color)
                 settings.ColorSpace = TextureColorSpace::Linear;
             return settings;
+        }
+
+        [[nodiscard]] TextureImportSettings ApplyTextureImportSettings(TextureImportSettings settings,
+                                                                       const AssetImportSettings& values)
+        {
+            const auto choice = [&](const std::string_view key, const std::string fallback)
+            {
+                const auto found = values.find(key);
+                return found == values.end() ? fallback : std::get<std::string>(found->second);
+            };
+            const auto semantic = choice("semantic", "color");
+            settings.Semantic = semantic == "normal" ? TextureSemantic::Normal
+                                : semantic == "data" ? TextureSemantic::Data
+                                                     : TextureSemantic::Color;
+            settings.ColorSpace =
+                choice("colorSpace", "srgb") == "linear" ? TextureColorSpace::Linear : TextureColorSpace::Srgb;
+            settings.Mips = choice("mips", "generate") == "none" ? TextureMipPolicy::None : TextureMipPolicy::Generate;
+            if (const auto found = values.find("maximumSize"); found != values.end())
+                settings.MaximumSize = static_cast<std::uint32_t>(std::get<std::int64_t>(found->second));
+            if (const auto found = values.find("flipGreen"); found != values.end())
+                settings.FlipGreen = std::get<bool>(found->second);
+            const auto filter = [&](const std::string_view key, const TextureFilter fallback)
+            {
+                return choice(key, fallback == TextureFilter::Nearest ? "nearest" : "linear") == "nearest"
+                           ? TextureFilter::Nearest
+                           : TextureFilter::Linear;
+            };
+            settings.Sampler.Minimum = filter("minFilter", settings.Sampler.Minimum);
+            settings.Sampler.Magnification = filter("magFilter", settings.Sampler.Magnification);
+            settings.Sampler.Mip = filter("mipFilter", settings.Sampler.Mip);
+            const auto address = [&](const std::string_view key, const TextureAddressMode fallback)
+            {
+                const auto fallbackText = fallback == TextureAddressMode::Clamp    ? "clamp"
+                                          : fallback == TextureAddressMode::Mirror ? "mirror"
+                                                                                   : "repeat";
+                const auto value = choice(key, fallbackText);
+                return value == "clamp"    ? TextureAddressMode::Clamp
+                       : value == "mirror" ? TextureAddressMode::Mirror
+                                           : TextureAddressMode::Repeat;
+            };
+            settings.Sampler.AddressU = address("addressU", settings.Sampler.AddressU);
+            settings.Sampler.AddressV = address("addressV", settings.Sampler.AddressV);
+            settings.Sampler.AddressW = address("addressW", settings.Sampler.AddressW);
+            if (const auto found = values.find("anisotropy"); found != values.end())
+                settings.Sampler.Anisotropy = static_cast<std::uint8_t>(std::get<std::int64_t>(found->second));
+            return NormalizeTextureSettings(settings);
         }
 
         [[nodiscard]] TextureImportSettings ReadTextureSettings(const std::filesystem::path& metadataPath,
@@ -684,7 +731,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 2;
+        result.Version = 3;
         result.Type = MeshAsset::StaticType();
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
         result.ContextualImport = [](const AssetImportContext& context,
@@ -704,7 +751,8 @@ namespace Keire
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
                                            aiProcess_GenSmoothNormals | aiProcess_PreTransformVertices |
                                            aiProcess_CalcTangentSpace | aiProcess_ImproveCacheLocality |
-                                           aiProcess_SortByPType | aiProcess_ValidateDataStructure;
+                                           aiProcess_SortByPType | aiProcess_ValidateDataStructure |
+                                           aiProcess_MakeLeftHanded | aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
             auto extension = context.SourcePath.extension().string();
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
@@ -751,6 +799,16 @@ namespace Keire
                                                       {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
             return output;
         };
+        result.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
+        {
+            const auto mesh = MeshAsset::Decode(bytes);
+            AssetImportOutput output;
+            output.Bytes.assign(bytes.begin(), bytes.end());
+            const auto& bounds = mesh->Bounds();
+            output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
+                                                      {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
+            return output;
+        };
         return result;
     }
 
@@ -767,8 +825,94 @@ namespace Keire
         result.ContextualImport = [settings](const AssetImportContext& context,
                                              const std::span<const std::byte> bytes) -> AssetImportOutput
         {
-            const auto effective = ReadTextureSettings(context.MetadataPath, settings);
+            auto effective = ReadTextureSettings(context.MetadataPath, settings);
+            if (!context.ImportSettings.empty())
+                effective = ApplyTextureImportSettings(effective, context.ImportSettings);
             return {Texture2DAsset::Encode(effective, ImportTexture(bytes, effective))};
+        };
+        const auto choice = [](std::string key, std::string name, std::string group, std::string value,
+                               std::vector<std::string> choices)
+        {
+            return AssetImportOptionDescriptor{std::move(key),
+                                               std::move(name),
+                                               std::move(group),
+                                               AssetImportOptionKind::Choice,
+                                               std::move(value),
+                                               {},
+                                               {},
+                                               1.0,
+                                               std::move(choices)};
+        };
+        result.ImportOptions = {
+            choice("semantic", "Semantic", "Texture", "color", {"color", "data", "normal"}),
+            choice("colorSpace", "Color Space", "Texture", "srgb", {"srgb", "linear"}),
+            choice("mips", "Mip Maps", "Texture", "generate", {"generate", "none"}),
+            {"maximumSize", "Maximum Size", "Texture", AssetImportOptionKind::Integer,
+             std::int64_t{MaximumTextureDimension}, 1.0, static_cast<double>(MaximumTextureDimension), 1.0},
+            {"flipGreen", "Flip Green Channel", "Texture", AssetImportOptionKind::Boolean, false},
+            choice("minFilter", "Min Filter", "Sampler", "linear", {"linear", "nearest"}),
+            choice("magFilter", "Mag Filter", "Sampler", "linear", {"linear", "nearest"}),
+            choice("mipFilter", "Mip Filter", "Sampler", "linear", {"linear", "nearest"}),
+            choice("addressU", "Address U", "Sampler", "repeat", {"repeat", "clamp", "mirror"}),
+            choice("addressV", "Address V", "Sampler", "repeat", {"repeat", "clamp", "mirror"}),
+            choice("addressW", "Address W", "Sampler", "repeat", {"repeat", "clamp", "mirror"}),
+            {"anisotropy", "Anisotropy", "Sampler", AssetImportOptionKind::Integer, std::int64_t{1}, 1.0, 16.0, 1.0}};
+        result.NormalizeImportSettings = [settings](const AssetImportSettings& values)
+        {
+            const auto normalized = ApplyTextureImportSettings(settings, values);
+            auto result = values;
+            if (normalized.Semantic != TextureSemantic::Color)
+                result["colorSpace"] = std::string("linear");
+            return result;
+        };
+        result.SuggestImportSettings = [](const std::filesystem::path& path, const AssetImportSettings& defaults)
+        {
+            auto result = defaults;
+            std::string stem = path.stem().string();
+            std::ranges::transform(stem, stem.begin(),
+                                   [](const unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            for (char& value : stem)
+                if (!std::isalnum(static_cast<unsigned char>(value)))
+                    value = ' ';
+
+            const auto containsToken = [&stem](const std::string_view token)
+            {
+                std::size_t offset = 0;
+                while (offset < stem.size())
+                {
+                    offset = stem.find_first_not_of(' ', offset);
+                    if (offset == std::string::npos)
+                        return false;
+                    const auto end = stem.find(' ', offset);
+                    if (stem.substr(offset, end - offset) == token)
+                        return true;
+                    offset = end == std::string::npos ? stem.size() : end + 1;
+                }
+                return false;
+            };
+            const bool normal =
+                containsToken("normal") || containsToken("norm") || containsToken("nrm") || containsToken("nor");
+            const bool data = containsToken("metallic") || containsToken("metal") || containsToken("roughness") ||
+                              containsToken("rough") || containsToken("occlusion") || containsToken("ao") ||
+                              containsToken("orm") || containsToken("rma") || containsToken("mra") ||
+                              containsToken("mask") || containsToken("pbr");
+            if (normal)
+            {
+                result["semantic"] = std::string("normal");
+                result["colorSpace"] = std::string("linear");
+            }
+            else if (data)
+            {
+                result["semantic"] = std::string("data");
+                result["colorSpace"] = std::string("linear");
+            }
+            return result;
+        };
+        result.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
+        {
+            AssetImportOutput output;
+            output.Bytes.assign(bytes.begin(), bytes.end());
+            return output;
         };
         return result;
     }

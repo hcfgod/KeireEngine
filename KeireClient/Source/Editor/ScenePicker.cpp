@@ -60,6 +60,35 @@ namespace KeireEditor
                 return std::nullopt;
             return minimum;
         }
+
+        [[nodiscard]] std::optional<Keire::UiPosition> ProjectToViewport(const Keire::Vector3 point,
+                                                                         const Keire::Matrix4& viewProjection,
+                                                                         const Keire::UiItemRect viewport)
+        {
+            const auto& value = viewProjection.Elements;
+            const float x = value[0] * point.X + value[4] * point.Y + value[8] * point.Z + value[12];
+            const float y = value[1] * point.X + value[5] * point.Y + value[9] * point.Z + value[13];
+            const float w = value[3] * point.X + value[7] * point.Y + value[11] * point.Z + value[15];
+            if (!std::isfinite(w) || w <= 0.0001F)
+                return std::nullopt;
+            const auto size = viewport.Size();
+            return Keire::UiPosition{viewport.Minimum.X + (x / w * 0.5F + 0.5F) * size.Width,
+                                     viewport.Minimum.Y + (0.5F - y / w * 0.5F) * size.Height};
+        }
+
+        [[nodiscard]] Keire::MeshBounds BoundsForEntity(const Keire::Entity& entity,
+                                                        const MeshBoundsResolver& resolveMeshBounds)
+        {
+            constexpr Keire::MeshBounds transformBounds{{-0.15F, -0.15F, -0.15F}, {0.15F, 0.15F, 0.15F}};
+            constexpr Keire::MeshBounds defaultMeshBounds{{-0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, 0.5F}};
+            const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+            if (!renderer || !renderer->Enabled() || !renderer->Visible())
+                return transformBounds;
+            if (resolveMeshBounds && renderer->Mesh())
+                if (const auto resolved = resolveMeshBounds(renderer->Mesh()))
+                    return *resolved;
+            return defaultMeshBounds;
+        }
     } // namespace
 
     Keire::EntityId PickSceneEntity(const Keire::Ref<Keire::Scene>& scene, const Keire::UiItemRect viewport,
@@ -79,8 +108,6 @@ namespace KeireEditor
         const auto farPoint = Unproject(inverse, x, y, 1.0F);
         const auto direction = NormalizedDirection(nearPoint, farPoint);
 
-        constexpr Keire::MeshBounds transformBounds{{-0.15F, -0.15F, -0.15F}, {0.15F, 0.15F, 0.15F}};
-        constexpr Keire::MeshBounds defaultMeshBounds{{-0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, 0.5F}};
         float closest = std::numeric_limits<float>::max();
         bool closestHasMesh = false;
         Keire::EntityId selected;
@@ -90,18 +117,9 @@ namespace KeireEditor
             if (!transform || !entity.ActiveInHierarchy())
                 continue;
 
-            auto bounds = transformBounds;
             const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
             const bool hasMesh = renderer && renderer->Enabled() && renderer->Visible();
-            if (hasMesh)
-            {
-                bounds = defaultMeshBounds;
-                if (resolveMeshBounds && renderer->Mesh())
-                {
-                    if (const auto resolved = resolveMeshBounds(renderer->Mesh()))
-                        bounds = *resolved;
-                }
-            }
+            const auto bounds = BoundsForEntity(entity, resolveMeshBounds);
             const auto distance = IntersectBounds(transform->WorldMatrix(), bounds, nearPoint, direction);
             if (!distance)
                 continue;
@@ -113,6 +131,51 @@ namespace KeireEditor
                 closestHasMesh = hasMesh;
                 selected = entity.Id();
             }
+        }
+        return selected;
+    }
+
+    std::vector<Keire::EntityId> SelectSceneEntitiesInRectangle(const Keire::Ref<Keire::Scene>& scene,
+                                                                const Keire::UiItemRect viewport,
+                                                                Keire::UiItemRect selection,
+                                                                const Keire::RenderCamera& camera,
+                                                                const MeshBoundsResolver& resolveMeshBounds)
+    {
+        std::vector<Keire::EntityId> selected;
+        if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
+            return selected;
+        if (selection.Minimum.X > selection.Maximum.X)
+            std::swap(selection.Minimum.X, selection.Maximum.X);
+        if (selection.Minimum.Y > selection.Maximum.Y)
+            std::swap(selection.Minimum.Y, selection.Maximum.Y);
+        const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);
+        for (const auto& entity : scene->Entities())
+        {
+            const auto transform = entity.GetComponent<Keire::TransformComponent>();
+            if (!transform || !entity.ActiveInHierarchy())
+                continue;
+            const auto bounds = BoundsForEntity(entity, resolveMeshBounds);
+            Keire::UiItemRect projected{{std::numeric_limits<float>::max(), std::numeric_limits<float>::max()},
+                                        {std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()}};
+            bool visible = false;
+            for (int corner = 0; corner < 8; ++corner)
+            {
+                const Keire::Vector3 local{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
+                                           corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
+                                           corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
+                const auto screen = ProjectToViewport(Keire::Math::TransformPoint(transform->WorldMatrix(), local),
+                                                      viewProjection, viewport);
+                if (!screen)
+                    continue;
+                visible = true;
+                projected.Minimum.X = std::min(projected.Minimum.X, screen->X);
+                projected.Minimum.Y = std::min(projected.Minimum.Y, screen->Y);
+                projected.Maximum.X = std::max(projected.Maximum.X, screen->X);
+                projected.Maximum.Y = std::max(projected.Maximum.Y, screen->Y);
+            }
+            if (visible && projected.Maximum.X >= selection.Minimum.X && projected.Minimum.X <= selection.Maximum.X &&
+                projected.Maximum.Y >= selection.Minimum.Y && projected.Minimum.Y <= selection.Maximum.Y)
+                selected.push_back(entity.Id());
         }
         return selected;
     }

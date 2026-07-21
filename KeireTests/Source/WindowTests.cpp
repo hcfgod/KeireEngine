@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <filesystem>
+#include <string>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -265,6 +267,49 @@ TEST_CASE("WindowSystem translates close and global quit events")
     CHECK_FALSE(translatedQuit->Header.Window);
     CHECK(translatedQuit->Header.TimestampNanoseconds == 987654321);
 
+    window->Close();
+    window.Reset();
+    system->Shutdown();
+}
+
+TEST_CASE("WindowSystem aggregates platform file-drop sessions without exposing SDL")
+{
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto window = system->CreateWindow(HiddenSpecification("file drop"));
+    while (system->PollEvent())
+    {
+    }
+    const auto native = OnlyNativeWindowId();
+    const auto firstUtf8 = std::filesystem::absolute("First Asset.png").u8string();
+    const auto secondPath = std::filesystem::absolute(std::filesystem::path(u8"Unicode-é.obj"));
+    const auto secondUtf8 = secondPath.u8string();
+    SDL_Event begin{};
+    begin.type = SDL_EVENT_DROP_BEGIN;
+    begin.drop.windowID = native;
+    REQUIRE(SDL_PushEvent(&begin));
+    SDL_Event file{};
+    file.type = SDL_EVENT_DROP_FILE;
+    file.drop.windowID = native;
+    file.drop.x = 42.0F;
+    file.drop.y = 84.0F;
+    file.drop.data = reinterpret_cast<const char*>(firstUtf8.c_str());
+    REQUIRE(SDL_PushEvent(&file));
+    file.drop.data = reinterpret_cast<const char*>(secondUtf8.c_str());
+    REQUIRE(SDL_PushEvent(&file));
+    SDL_Event complete{};
+    complete.type = SDL_EVENT_DROP_COMPLETE;
+    complete.drop.windowID = native;
+    REQUIRE(SDL_PushEvent(&complete));
+
+    const auto event = PollFor<Keire::WindowFileDropEvent>(system);
+    REQUIRE(event);
+    CHECK(event->Header.Window == window->Id());
+    CHECK(event->Position == Keire::WindowPosition{42, 84});
+    REQUIRE(event->Paths.size() == 2);
+    CHECK(event->Paths[0].filename() == std::filesystem::path("First Asset.png"));
+    const bool unicodePathPreserved = event->Paths[1].filename() == std::filesystem::path(u8"Unicode-é.obj");
+    CHECK(unicodePathPreserved);
     window->Close();
     window.Reset();
     system->Shutdown();

@@ -265,8 +265,6 @@ namespace
                 return;
             try
             {
-                if (m_Registry)
-                    m_Registry->RecordOpened(*project);
                 const std::array arguments{std::string("--project"), Utf8Path(project->Root())};
                 std::string diagnostic;
                 if (!Keire::Detail::LaunchDetachedProcess(EditorExecutable(), arguments, project->Root(), diagnostic))
@@ -274,6 +272,19 @@ namespace
                 m_Notice = "Opened " + project->Descriptor().Name + ".";
                 m_NoticeError = false;
                 HideHub();
+                if (m_Registry)
+                {
+                    try
+                    {
+                        m_Registry->RecordOpened(*project);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        KEIRE_CLIENT_WARN("[Project Hub] Editor launched, but the recent-project registry could not "
+                                          "be updated: {}",
+                                          error.what());
+                    }
+                }
             }
             catch (const std::exception& error)
             {

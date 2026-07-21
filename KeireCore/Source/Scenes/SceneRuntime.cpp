@@ -108,6 +108,20 @@ namespace Keire
             m_Impl->Invoke("Update", [&] { m_Impl->Runtime->Update(deltaSeconds); });
     }
 
+    void SceneRuntimeSession::ReplaceRuntime(SceneDefinition definition)
+    {
+        m_Impl->RequireOwner("ReplaceRuntime");
+        if (m_Impl->PlayState == ScenePlayState::Stopped || !m_Impl->Runtime)
+            throw std::logic_error("SceneRuntimeSession::ReplaceRuntime requires an active Play session.");
+        auto replacement = CreateRef<Scene>(m_Impl->Edit->Asset(), std::move(definition), m_Impl->Edit->Components());
+        replacement->MarkSaved();
+        m_Impl->Runtime->EndPlay();
+        m_Impl->Runtime->Close();
+        m_Impl->Runtime = std::move(replacement);
+        m_Impl->Failure = {};
+        m_Impl->Invoke("Awake/OnEnable", [&] { m_Impl->Runtime->BeginPlay(); });
+    }
+
     void SceneRuntimeSession::Stop() noexcept
     {
         if (!m_Impl || m_Impl->PlayState == ScenePlayState::Stopped)

@@ -122,7 +122,7 @@ namespace Keire
                 if (property.Type == ShaderPropertyType::Texture2D)
                 {
                     ++textureProperties;
-                    if (property.TextureSemantic > ShaderTextureSemantic::Emissive)
+                    if (property.TextureSemantic > ShaderTextureSemantic::Roughness)
                         throw std::invalid_argument("Shader texture property semantic is invalid.");
                 }
                 else
@@ -587,7 +587,9 @@ namespace Keire
                 {"Normal", ShaderTextureSemantic::Normal},
                 {"MetallicRoughness", ShaderTextureSemantic::MetallicRoughness},
                 {"Occlusion", ShaderTextureSemantic::Occlusion},
-                {"Emissive", ShaderTextureSemantic::Emissive}};
+                {"Emissive", ShaderTextureSemantic::Emissive},
+                {"Metallic", ShaderTextureSemantic::Metallic},
+                {"Roughness", ShaderTextureSemantic::Roughness}};
             for (const auto& property : properties)
             {
                 const auto typeName = property.at("type").get<std::string>();

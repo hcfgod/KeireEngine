@@ -78,6 +78,17 @@ Schema v1 loads migrate inline transforms, while unknown v2 component records re
 callbacks, Step advances one fixed tick, and Stop destroys the clone. Component callback exceptions fault the session
 and preserve the edit scene. Detailed contracts live in [ECS And Components](ECSAndComponents.md).
 
+`SceneDocument::ActiveScene` is the editor authoring target: it resolves to the clone during Play and the edit scene
+otherwise. Play edits have an isolated undo context. A snapshot-derived change set compares entity identity, hierarchy,
+component presence/enabled state, and registered property bags before Stop; selected changes produce one validated
+replacement definition and one authored-scene undo command.
+
+Play-stop decisions are queued from UI callbacks and executed at the next update safe boundary. Render submission
+captures camera, lighting, transforms, mesh/material identities, and tint into an immutable frame-local packet, so
+device recording never queries a Scene that another lifecycle transition has closed. Docked panel focus is requested
+through `UiPanelRegistration` without exposing Dear ImGui: Play selects Game, review/cancel retains Game, and a completed
+Stop selects Scene.
+
 ## Reference Ownership
 
 Project-owned shared objects derive from `RefCounted` and are constructed with `CreateRef`. `Ref` and `WeakRef` point at an external atomic control block containing a type-erased deleter. The last strong release destroys the object; the implicit weak owner then releases the control block when no explicit weak references remain. `WeakRef::Lock` uses atomic increment-if-nonzero, so it cannot resurrect an object or race its destruction. Cyclic graphs must contain at least one weak edge.
@@ -153,9 +164,11 @@ Configuration examples, application-facing workflows, storage details, and troub
 
 Editor material authoring is split between `MaterialDocument`, which owns shader-driven source state and validation,
 and `MaterialInspectorPanel`, which maps that state onto the engine-owned property editor interface. Material file
-snapshots enter the project-assets undo context; the workspace layer composes the panel and coordinates reimport.
-Continuous numeric/color edits share a property-scoped undo command until the UI edit boundary; undo captures the
-final serialized source lazily and performs one catalog refresh.
+snapshots enter the project-assets undo context; the workspace layer composes the panel and coordinates persistence.
+Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
+property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
+refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are
+refreshed after the editor becomes usable.
 Scene picking consumes catalog metadata through `AssetSystem` and does not own an importer or source-model cache.
 `SceneCameraController` owns navigation persistence and entity locking. `ViewportAssetDropRouter` dispatches scene,
 input, mesh, and material drops through narrow commands, leaving the workspace responsible for composition and modal
@@ -176,6 +189,11 @@ crosses this boundary.
 confined rollback-capable file operations. `AssetCooker` sorts stable IDs, writes deterministic sharded packs and a
 versioned build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the
 same public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
+
+Windowing translates SDL drop sessions into an engine-owned event containing only opaque window identity, logical
+position, and filesystem paths. Editor hit-test adapters resolve Project folders or the Scene viewport. External import
+then moves to a worker, stages confined source/metadata pairs, validates with UI-independent importer option values,
+and publishes or rolls back the batch without exposing SDL, ImGui, or JSON through public headers.
 
 `RenderSystem` holds an owned `AssetSystem` reference and resolves renderable IDs only on the render owner thread.
 Revisioned mesh, material, shader, texture, sampler, and attachment-format pipeline caches publish complete GPU
