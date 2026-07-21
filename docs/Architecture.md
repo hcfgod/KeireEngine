@@ -81,7 +81,10 @@ and preserve the edit scene. Detailed contracts live in [ECS And Components](ECS
 `SceneDocument::ActiveScene` is the editor authoring target: it resolves to the clone during Play and the edit scene
 otherwise. Play edits have an isolated undo context. A snapshot-derived change set compares entity identity, hierarchy,
 component presence/enabled state, and registered property bags before Stop; selected changes produce one validated
-replacement definition and one authored-scene undo command.
+replacement definition and one authored-scene undo command. `ScenePlayChangeTracker` records the exact structural or
+component path and editor-produced value before simulation advances again, so the review can distinguish Editor,
+Runtime, and Mixed final values. Its dependency graph locks required created ancestors/components and rejects
+delete/edit or remove/edit contradictions before definition validation.
 
 Play-stop decisions are queued from UI callbacks and executed at the next update safe boundary. Render submission
 captures camera, lighting, transforms, mesh/material identities, and tint into an immutable frame-local packet, so

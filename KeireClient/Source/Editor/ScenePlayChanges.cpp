@@ -68,7 +68,107 @@ namespace KeireEditor
             const auto found = std::ranges::find(object.Components, type, &Keire::SceneComponentDefinition::Type);
             return found == object.Components.end() ? nullptr : &*found;
         }
+
+        [[nodiscard]] std::string ObjectFingerprint(const Keire::SceneObjectDefinition& object)
+        {
+            std::string result = object.Name + '\n' + (object.Active ? "1" : "0") + '\n' + object.Parent.ToString();
+            auto components = object.Components;
+            std::ranges::sort(components, {}, &Keire::SceneComponentDefinition::Type);
+            for (const auto& component : components)
+                result +=
+                    '\n' + component.Type.ToString() + '\n' + (component.Enabled ? "1" : "0") + '\n' + component.Data;
+            return result;
+        }
+
+        [[nodiscard]] ScenePlayChangePath Path(const ScenePlayChangeKind kind, const Keire::AssetId entity = {},
+                                               const Keire::ComponentTypeId component = {}, std::string property = {})
+        {
+            return {kind, entity, component, std::move(property)};
+        }
     } // namespace
+
+    std::size_t ScenePlayChangePathHash::operator()(const ScenePlayChangePath& path) const noexcept
+    {
+        const auto combine = [](std::size_t seed, const std::size_t value)
+        { return seed ^ (value + 0x9e3779b9U + (seed << 6U) + (seed >> 2U)); };
+        auto result = std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(path.Kind));
+        result = combine(result, std::hash<std::string>{}(path.Entity.ToString()));
+        result = combine(result, std::hash<std::string>{}(path.Component.ToString()));
+        return combine(result, std::hash<std::string>{}(path.Property));
+    }
+
+    void ScenePlayChangeTracker::RecordMutation(const Keire::SceneDefinition& before,
+                                                const Keire::SceneDefinition& after)
+    {
+        if (before.Name != after.Name)
+            m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::SceneName), after.Name);
+        const auto beforeObjects = IndexObjects(before);
+        const auto afterObjects = IndexObjects(after);
+        for (const auto& object : before.Objects)
+            if (!afterObjects.contains(object.Id))
+                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::DeleteEntity, object.Id), "Deleted");
+        for (const auto& object : after.Objects)
+        {
+            const auto beforeFound = beforeObjects.find(object.Id);
+            if (beforeFound == beforeObjects.end())
+            {
+                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::CreateEntity, object.Id),
+                                                  ObjectFingerprint(object));
+                continue;
+            }
+            const auto& previous = *beforeFound->second;
+            if (previous.Name != object.Name)
+                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityName, object.Id), object.Name);
+            if (previous.Active != object.Active)
+                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityActive, object.Id),
+                                                  object.Active ? "true" : "false");
+            if (previous.Parent != object.Parent)
+                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityParent, object.Id),
+                                                  object.Parent ? object.Parent.ToString() : "Root");
+
+            std::unordered_map<Keire::ComponentTypeId, const Keire::SceneComponentDefinition*> beforeComponents;
+            std::unordered_map<Keire::ComponentTypeId, const Keire::SceneComponentDefinition*> afterComponents;
+            for (const auto& component : previous.Components)
+                beforeComponents.emplace(component.Type, &component);
+            for (const auto& component : object.Components)
+                afterComponents.emplace(component.Type, &component);
+            for (const auto& [type, component] : beforeComponents)
+                if (!afterComponents.contains(type))
+                    m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::RemoveComponent, object.Id, type),
+                                                      "Removed");
+            for (const auto& [type, component] : afterComponents)
+            {
+                const auto previousComponent = beforeComponents.find(type);
+                if (previousComponent == beforeComponents.end())
+                {
+                    m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::AddComponent, object.Id, type),
+                                                      component->Data);
+                    continue;
+                }
+                if (previousComponent->second->Enabled != component->Enabled)
+                    m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::ComponentEnabled, object.Id, type),
+                                                      component->Enabled ? "true" : "false");
+                if (previousComponent->second->Data != component->Data)
+                    m_AuthoredValues.insert_or_assign(
+                        Path(ScenePlayChangeKind::ComponentProperty, object.Id, type, "*"), component->Data);
+            }
+        }
+    }
+
+    void ScenePlayChangeTracker::Clear() noexcept { m_AuthoredValues.clear(); }
+
+    bool ScenePlayChangeTracker::Empty() const noexcept { return m_AuthoredValues.empty(); }
+
+    ScenePlayChangeOrigin ScenePlayChangeTracker::Origin(const ScenePlayChangePath& path,
+                                                         const std::string_view finalValue) const
+    {
+        auto found = m_AuthoredValues.find(path);
+        if (found == m_AuthoredValues.end() && path.Kind == ScenePlayChangeKind::ComponentProperty)
+            found = m_AuthoredValues.find(Path(path.Kind, path.Entity, path.Component, "*"));
+        if (found == m_AuthoredValues.end())
+            return ScenePlayChangeOrigin::Runtime;
+        return found->second == finalValue ? ScenePlayChangeOrigin::Editor : ScenePlayChangeOrigin::Mixed;
+    }
 
     class ScenePlayChangeSet::Impl final
     {
@@ -95,8 +195,27 @@ namespace KeireEditor
             Build();
         }
 
-        [[nodiscard]] ScenePlayChangeOrigin Origin(const Keire::AssetId entity) const
+        Impl(Keire::Ref<Keire::Scene> editingScene, Keire::Ref<Keire::Scene> runtimeScene,
+             const ScenePlayChangeTracker& tracker)
+            : Editing(std::move(editingScene)), Runtime(std::move(runtimeScene)), Tracker(tracker)
         {
+            if (!Editing || !Runtime)
+                throw std::invalid_argument("Play change tracking requires open edit and runtime scenes.");
+            Registry = Editing->Components();
+            if (!Registry)
+                throw std::invalid_argument("Play change tracking requires a component registry.");
+            Before = Editing->Snapshot();
+            After = Runtime->Snapshot();
+            Build();
+        }
+
+        [[nodiscard]] ScenePlayChangeOrigin Origin(const ScenePlayChangeKind kind, const Keire::AssetId entity,
+                                                   const Keire::ComponentTypeId component,
+                                                   const std::string_view property,
+                                                   const std::string_view finalValue) const
+        {
+            if (Tracker)
+                return Tracker->Origin(Path(kind, entity, component, std::string(property)), finalValue);
             return EditorTouched.contains(entity) ? ScenePlayChangeOrigin::Editor : ScenePlayChangeOrigin::Runtime;
         }
 
@@ -105,6 +224,8 @@ namespace KeireEditor
         {
             change.Id = Details.size();
             change.Selected = change.Origin != ScenePlayChangeOrigin::Runtime;
+            change.RequiredParent = parent;
+            change.CanKeepAtRoot = change.Kind == ScenePlayChangeKind::CreateEntity && static_cast<bool>(parent);
             Details.push_back({std::move(change), std::move(value), parent});
         }
 
@@ -115,7 +236,7 @@ namespace KeireEditor
             if (Before.Name != After.Name)
             {
                 Add({.Kind = ScenePlayChangeKind::SceneName,
-                     .Origin = ScenePlayChangeOrigin::Runtime,
+                     .Origin = Origin(ScenePlayChangeKind::SceneName, {}, {}, {}, After.Name),
                      .Label = "Scene name",
                      .Before = Before.Name,
                      .After = After.Name});
@@ -125,7 +246,7 @@ namespace KeireEditor
                 if (!afterObjects.contains(beforeObject.Id))
                 {
                     Add({.Kind = ScenePlayChangeKind::DeleteEntity,
-                         .Origin = Origin(beforeObject.Id),
+                         .Origin = Origin(ScenePlayChangeKind::DeleteEntity, beforeObject.Id, {}, {}, "Deleted"),
                          .Entity = beforeObject.Id,
                          .EntityName = beforeObject.Name,
                          .Label = "Delete entity",
@@ -139,7 +260,8 @@ namespace KeireEditor
                 if (beforeFound == beforeObjects.end())
                 {
                     Add({.Kind = ScenePlayChangeKind::CreateEntity,
-                         .Origin = Origin(afterObject.Id),
+                         .Origin = Origin(ScenePlayChangeKind::CreateEntity, afterObject.Id, {}, {},
+                                          ObjectFingerprint(afterObject)),
                          .Entity = afterObject.Id,
                          .EntityName = afterObject.Name,
                          .Label = "Create entity",
@@ -153,16 +275,16 @@ namespace KeireEditor
             PublicChanges.reserve(Details.size());
             for (const auto& detail : Details)
                 PublicChanges.push_back(detail.Public);
+            ResolveDependencies();
         }
 
         void BuildEntity(const Keire::SceneObjectDefinition& before, const Keire::SceneObjectDefinition& after)
         {
-            const auto origin = Origin(after.Id);
             const auto addEntityChange = [&](const ScenePlayChangeKind kind, std::string label, std::string oldValue,
                                              std::string newValue, const Keire::AssetId parent = {})
             {
                 Add({.Kind = kind,
-                     .Origin = origin,
+                     .Origin = Origin(kind, after.Id, {}, {}, newValue),
                      .Entity = after.Id,
                      .EntityName = after.Name,
                      .Label = std::move(label),
@@ -191,7 +313,7 @@ namespace KeireEditor
                 if (!afterComponents.contains(type))
                 {
                     Add({.Kind = ScenePlayChangeKind::RemoveComponent,
-                         .Origin = origin,
+                         .Origin = Origin(ScenePlayChangeKind::RemoveComponent, after.Id, type, {}, "Removed"),
                          .Entity = after.Id,
                          .Component = type,
                          .EntityName = after.Name,
@@ -207,7 +329,7 @@ namespace KeireEditor
                 if (beforeFound == beforeComponents.end())
                 {
                     Add({.Kind = ScenePlayChangeKind::AddComponent,
-                         .Origin = origin,
+                         .Origin = Origin(ScenePlayChangeKind::AddComponent, after.Id, type, {}, afterComponent->Data),
                          .Entity = after.Id,
                          .Component = type,
                          .EntityName = after.Name,
@@ -217,13 +339,13 @@ namespace KeireEditor
                          .After = afterComponent->Data});
                     continue;
                 }
-                BuildComponent(after, *beforeFound->second, *afterComponent, origin);
+                BuildComponent(after, *beforeFound->second, *afterComponent);
             }
         }
 
         void BuildComponent(const Keire::SceneObjectDefinition& object,
                             const Keire::SceneComponentDefinition& beforeDefinition,
-                            const Keire::SceneComponentDefinition& afterDefinition, const ScenePlayChangeOrigin origin)
+                            const Keire::SceneComponentDefinition& afterDefinition)
         {
             const auto registration = Registry->Find(afterDefinition.Type);
             if (!registration)
@@ -232,7 +354,8 @@ namespace KeireEditor
                     beforeDefinition.Data != afterDefinition.Data)
                 {
                     Add({.Kind = ScenePlayChangeKind::ReplaceUnknownComponent,
-                         .Origin = origin,
+                         .Origin = Origin(ScenePlayChangeKind::ComponentProperty, object.Id, afterDefinition.Type, "*",
+                                          afterDefinition.Data),
                          .Entity = object.Id,
                          .Component = afterDefinition.Type,
                          .EntityName = object.Name,
@@ -246,7 +369,8 @@ namespace KeireEditor
             if (beforeDefinition.Enabled != afterDefinition.Enabled)
             {
                 Add({.Kind = ScenePlayChangeKind::ComponentEnabled,
-                     .Origin = origin,
+                     .Origin = Origin(ScenePlayChangeKind::ComponentEnabled, object.Id, afterDefinition.Type, {},
+                                      afterDefinition.Enabled ? "true" : "false"),
                      .Entity = object.Id,
                      .Component = afterDefinition.Type,
                      .EntityName = object.Name,
@@ -272,7 +396,8 @@ namespace KeireEditor
                     beforeValue->second == afterValue->second)
                     continue;
                 Add({.Kind = ScenePlayChangeKind::ComponentProperty,
-                     .Origin = origin,
+                     .Origin = Origin(ScenePlayChangeKind::ComponentProperty, object.Id, afterDefinition.Type,
+                                      property.Key, afterDefinition.Data),
                      .Entity = object.Id,
                      .Component = afterDefinition.Type,
                      .Property = property.Key,
@@ -282,6 +407,108 @@ namespace KeireEditor
                      .Before = DisplayValue(beforeValue->second),
                      .After = DisplayValue(afterValue->second)},
                     afterValue->second);
+            }
+        }
+
+        void ResolveDependencies()
+        {
+            for (auto& detail : Details)
+            {
+                detail.Public.Locked = false;
+                detail.Public.LockReason.clear();
+                detail.Public.Conflict.clear();
+                detail.Public.KeepAtRoot = CreatedAtRoot.contains(detail.Public.Entity);
+            }
+            for (auto& detail : Details)
+            {
+                if (!detail.Public.Selected)
+                    continue;
+                if (detail.Public.Kind == ScenePlayChangeKind::CreateEntity && detail.Parent &&
+                    !CreatedAtRoot.contains(detail.Public.Entity))
+                {
+                    const auto parent =
+                        std::ranges::find_if(Details,
+                                             [&](const Detail& candidate)
+                                             {
+                                                 return candidate.Public.Kind == ScenePlayChangeKind::CreateEntity &&
+                                                        candidate.Public.Entity == detail.Parent;
+                                             });
+                    if (parent != Details.end())
+                    {
+                        parent->Public.Selected = true;
+                        parent->Public.Locked = true;
+                        parent->Public.LockReason = "Required by created child '" + detail.Public.EntityName + "'.";
+                    }
+                }
+                if (detail.Public.Kind == ScenePlayChangeKind::ComponentProperty ||
+                    detail.Public.Kind == ScenePlayChangeKind::ComponentEnabled)
+                {
+                    const auto component =
+                        std::ranges::find_if(Details,
+                                             [&](const Detail& candidate)
+                                             {
+                                                 return candidate.Public.Kind == ScenePlayChangeKind::AddComponent &&
+                                                        candidate.Public.Entity == detail.Public.Entity &&
+                                                        candidate.Public.Component == detail.Public.Component;
+                                             });
+                    if (component != Details.end())
+                    {
+                        component->Public.Selected = true;
+                        component->Public.Locked = true;
+                        component->Public.LockReason = "Required by selected component properties.";
+                    }
+                }
+            }
+            for (auto& deletion : Details)
+            {
+                if (!deletion.Public.Selected || deletion.Public.Kind != ScenePlayChangeKind::DeleteEntity)
+                    continue;
+                const auto isDescendant = [&](Keire::AssetId entity)
+                {
+                    const auto beforeObjects = IndexObjects(Before);
+                    std::unordered_set<Keire::AssetId> visited;
+                    while (entity && visited.insert(entity).second)
+                    {
+                        const auto found = beforeObjects.find(entity);
+                        if (found == beforeObjects.end())
+                            return false;
+                        entity = found->second->Parent;
+                        if (entity == deletion.Public.Entity)
+                            return true;
+                    }
+                    return false;
+                };
+                for (auto& candidate : Details)
+                {
+                    if (candidate.Public.Kind == ScenePlayChangeKind::DeleteEntity &&
+                        isDescendant(candidate.Public.Entity))
+                    {
+                        candidate.Public.Selected = true;
+                        candidate.Public.Locked = true;
+                        candidate.Public.LockReason = "Required by ancestor deletion.";
+                        continue;
+                    }
+                    if (&candidate == &deletion || candidate.Public.Entity != deletion.Public.Entity ||
+                        !candidate.Public.Selected)
+                        continue;
+                    candidate.Public.Selected = false;
+                    candidate.Public.Conflict = "Entity deletion supersedes this change.";
+                }
+            }
+            for (auto& removal : Details)
+            {
+                if (!removal.Public.Selected || removal.Public.Kind != ScenePlayChangeKind::RemoveComponent)
+                    continue;
+                for (auto& candidate : Details)
+                {
+                    if (candidate.Public.Entity != removal.Public.Entity ||
+                        candidate.Public.Component != removal.Public.Component || !candidate.Public.Selected ||
+                        (candidate.Public.Kind != ScenePlayChangeKind::ComponentProperty &&
+                         candidate.Public.Kind != ScenePlayChangeKind::ComponentEnabled))
+                        continue;
+                    candidate.Public.Selected = false;
+                    candidate.Public.Conflict = "Component removal supersedes this change.";
+                }
             }
         }
 
@@ -296,7 +523,9 @@ namespace KeireEditor
         Keire::Ref<Keire::ComponentRegistry> Registry;
         Keire::SceneDefinition Before;
         Keire::SceneDefinition After;
+        std::optional<ScenePlayChangeTracker> Tracker;
         std::unordered_set<Keire::AssetId> EditorTouched;
+        std::unordered_set<Keire::AssetId> CreatedAtRoot;
         std::vector<Detail> Details;
         mutable std::vector<ScenePlayChange> PublicChanges;
     };
@@ -305,6 +534,12 @@ namespace KeireEditor
                                            std::unordered_set<Keire::AssetId> editorTouchedEntities)
         : m_Impl(std::make_unique<Impl>(std::move(editingScene), std::move(runtimeScene),
                                         std::move(editorTouchedEntities)))
+    {
+    }
+
+    ScenePlayChangeSet::ScenePlayChangeSet(Keire::Ref<Keire::Scene> editingScene, Keire::Ref<Keire::Scene> runtimeScene,
+                                           const ScenePlayChangeTracker& tracker)
+        : m_Impl(std::make_unique<Impl>(std::move(editingScene), std::move(runtimeScene), tracker))
     {
     }
 
@@ -330,13 +565,26 @@ namespace KeireEditor
         auto& detail = m_Impl->Details[id];
         if (!detail.Public.Locked)
             detail.Public.Selected = selected;
+        m_Impl->ResolveDependencies();
     }
 
     void ScenePlayChangeSet::SetAllSelected(const bool selected)
     {
         for (auto& detail : m_Impl->Details)
-            if (!detail.Public.Locked)
-                detail.Public.Selected = selected;
+        {
+            detail.Public.Locked = false;
+            detail.Public.Selected = selected;
+        }
+        m_Impl->ResolveDependencies();
+    }
+
+    void ScenePlayChangeSet::KeepCreatedEntityAtRoot(const Keire::AssetId entity, const bool keepAtRoot)
+    {
+        if (keepAtRoot)
+            m_Impl->CreatedAtRoot.insert(entity);
+        else
+            m_Impl->CreatedAtRoot.erase(entity);
+        m_Impl->ResolveDependencies();
     }
 
     Keire::SceneDefinition ScenePlayChangeSet::BuildAppliedDefinition() const
@@ -345,6 +593,7 @@ namespace KeireEditor
         std::unordered_set<Keire::AssetId> deleted;
         std::unordered_set<Keire::AssetId> created;
         std::vector<const Impl::Detail*> postponedParents;
+        const auto runtimeObjectIndex = IndexObjects(m_Impl->After);
         for (const auto& detail : m_Impl->Details)
         {
             if (!detail.Public.Selected)
@@ -427,6 +676,35 @@ namespace KeireEditor
         {
             if (const auto found = runtimeObjects.find(entity); found != runtimeObjects.end())
                 result.Objects.push_back(*found->second);
+        }
+        for (const auto& detail : m_Impl->Details)
+        {
+            if (!detail.Public.Selected || (detail.Public.Kind != ScenePlayChangeKind::AddComponent &&
+                                            detail.Public.Kind != ScenePlayChangeKind::RemoveComponent &&
+                                            detail.Public.Kind != ScenePlayChangeKind::ReplaceUnknownComponent))
+                continue;
+            const auto object =
+                std::ranges::find(result.Objects, detail.Public.Entity, &Keire::SceneObjectDefinition::Id);
+            if (object == result.Objects.end())
+                throw std::runtime_error("A selected component change requires an entity that is not in the patch.");
+            const auto component =
+                std::ranges::find(object->Components, detail.Public.Component, &Keire::SceneComponentDefinition::Type);
+            if (detail.Public.Kind == ScenePlayChangeKind::RemoveComponent)
+            {
+                if (component != object->Components.end())
+                    object->Components.erase(component);
+                continue;
+            }
+            const auto runtimeFound = runtimeObjectIndex.find(detail.Public.Entity);
+            if (runtimeFound == runtimeObjectIndex.end())
+                throw std::runtime_error("A selected component change has no runtime entity source.");
+            const auto* runtimeComponent = FindComponentDefinition(*runtimeFound->second, detail.Public.Component);
+            if (!runtimeComponent)
+                throw std::runtime_error("A selected component change has no runtime component source.");
+            if (component == object->Components.end())
+                object->Components.push_back(*runtimeComponent);
+            else
+                *component = *runtimeComponent;
         }
         for (const auto* detail : postponedParents)
         {

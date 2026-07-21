@@ -37,6 +37,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Added
 
+- Play-mode review now tracks editor-authored entity/component/property paths and classifies later simulation output as
+  Mixed, enforces created-parent and component dependencies, preserves unavailable component payloads, and validates
+  the complete selected patch before replacing the edit scene.
 - Asset import and cooking now expose engine-owned progress phases, typed cancellation, and stop-token-aware overloads
   while serializing every source mutation and catalog publication per database.
 - Unity-style persistent Play/Pause/Step controls, nonintrusive Scene-view tool/orientation overlays, automatic

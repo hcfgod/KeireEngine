@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <future>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -35,6 +36,7 @@ namespace KeireEditor
     class SceneGizmoController;
     class SceneCameraController;
     class ScenePlayChangeSet;
+    class ScenePlayChangeTracker;
     class ScenePlayChangesPanel;
     class ViewportAssetDropRouter;
 } // namespace KeireEditor
@@ -166,6 +168,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestStopPlayMode();
     void FinishPlayMode(bool apply);
     void DrawPlayChanges(Keire::UiFrame& ui);
+    void FinalizePendingPlayEditorMutation();
     void UndoSceneEdit();
     void RedoSceneEdit();
     void ApplyActiveUndo(bool redo);
@@ -201,6 +204,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::ViewportAssetDropRouter> m_ViewportAssetDropRouter;
     std::unique_ptr<KeireEditor::ScenePlayChangesPanel> m_PlayChangesPanel;
     std::unique_ptr<KeireEditor::ScenePlayChangeSet> m_PlayChanges;
+    std::unique_ptr<KeireEditor::ScenePlayChangeTracker> m_PlayChangeTracker;
+    std::optional<Keire::SceneDefinition> m_PendingPlayEditorBefore;
     std::unique_ptr<KeireEditor::ExternalAssetImportController> m_ExternalAssetImport;
     Keire::UiThemeDefinition m_Theme;
     Keire::RenderEnvironmentSettings m_RenderEnvironment;

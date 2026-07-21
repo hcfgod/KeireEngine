@@ -46,6 +46,16 @@ namespace KeireEditor
             const auto label = "    " + change.Label + ": " + change.Before + " -> " + change.After + origin;
             if (ui.Checkbox(label, selected) && !change.Locked)
                 changes.SetSelected(change.Id, selected);
+            if (change.Locked && !change.LockReason.empty())
+                ui.TextColored({0.88F, 0.68F, 0.30F, 1.0F}, "      " + change.LockReason);
+            if (!change.Conflict.empty())
+                ui.TextColored({1.0F, 0.38F, 0.34F, 1.0F}, "      " + change.Conflict);
+            if (change.CanKeepAtRoot && change.Selected)
+            {
+                bool keepAtRoot = change.KeepAtRoot;
+                if (ui.Checkbox("      Keep child at scene root##" + std::to_string(change.Id), keepAtRoot))
+                    changes.KeepCreatedEntityAtRoot(change.Entity, keepAtRoot);
+            }
         }
         ui.Separator();
         if (auto disabled = ui.BeginDisabled(!changes.HasSelectedChanges()); disabled)

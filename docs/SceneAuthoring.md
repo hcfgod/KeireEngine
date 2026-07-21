@@ -8,7 +8,11 @@ authored scene remains unchanged until Play stops.
 
 Stopping with runtime differences opens **Play Mode Changes**. Changes are grouped by entity and component and show
 their previous and runtime values. Deliberate editor changes are selected by default, while simulation-only changes
-remain available but unchecked. **Apply Selected and Stop** applies the validated selection as one authored-scene undo
+remain available but unchecked. If simulation changes a path after an editor edit, it is marked **Mixed** and retains
+the runtime-produced final value. Required created parents/components are selected and locked; a created child may be
+explicitly kept at the scene root before its created parent is omitted. Deletions supersede conflicting descendant or
+property edits, and unavailable registered-component payloads remain round-trippable. **Apply Selected and Stop**
+applies the validated selection as one authored-scene undo
 step and marks the scene dirty. **Discard and Stop** restores the exact authored scene, and **Cancel** resumes the prior
 Playing or Paused state. Scene close, project changes, and application exit pass through this review before the normal
 unsaved-scene prompt.

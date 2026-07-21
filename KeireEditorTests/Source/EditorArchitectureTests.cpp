@@ -285,6 +285,111 @@ TEST_CASE("play changes apply selected property and structural edits transaction
     CHECK(Keire::SceneAsset::Encode(discarded) == Keire::SceneAsset::Encode(editing->Snapshot()));
 }
 
+TEST_CASE("play change tracker distinguishes mixed values and enforces created-parent dependencies")
+{
+    const auto registry = Keire::ComponentRegistry::CreateDefault();
+    registry->Register(CustomRegistration());
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000062");
+    auto editing = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Tracked Play"), registry);
+    auto original = editing->CreateEntity("Original");
+    REQUIRE(original.AddComponent(CustomComponent::StaticType()));
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(editing);
+    session->Play();
+    KeireEditor::ScenePlayChangeTracker tracker;
+
+    auto before = session->RuntimeScene()->Snapshot();
+    auto runtimeCustom = Keire::DynamicRefCast<CustomComponent>(
+        session->RuntimeScene()->FindEntity(original.Id()).GetComponent(CustomComponent::StaticType()));
+    REQUIRE(runtimeCustom);
+    runtimeCustom->Value = 4.0;
+    tracker.RecordMutation(before, session->RuntimeScene()->Snapshot());
+    runtimeCustom->Value = 6.0;
+
+    before = session->RuntimeScene()->Snapshot();
+    auto parent = session->RuntimeScene()->CreateEntity("Created Parent");
+    auto child = session->RuntimeScene()->CreateEntity("Created Child");
+    child.SetParent(parent, false);
+    tracker.RecordMutation(before, session->RuntimeScene()->Snapshot());
+
+    KeireEditor::ScenePlayChangeSet changes(editing, session->RuntimeScene(), tracker);
+    const auto all = changes.Changes();
+    const auto property =
+        std::ranges::find_if(all,
+                             [&](const auto& change)
+                             {
+                                 return change.Entity == original.Id().Value() &&
+                                        change.Kind == KeireEditor::ScenePlayChangeKind::ComponentProperty;
+                             });
+    REQUIRE(property != all.end());
+    CHECK(property->Origin == KeireEditor::ScenePlayChangeOrigin::Mixed);
+    CHECK(property->Selected);
+    auto parentChange = std::ranges::find_if(all,
+                                             [&](const auto& change)
+                                             {
+                                                 return change.Entity == parent.Id().Value() &&
+                                                        change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
+                                             });
+    const auto childChange = std::ranges::find_if(
+        all,
+        [&](const auto& change)
+        {
+            return change.Entity == child.Id().Value() && change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
+        });
+    REQUIRE(parentChange != all.end());
+    REQUIRE(childChange != all.end());
+    CHECK(parentChange->Locked);
+    CHECK_FALSE(parentChange->LockReason.empty());
+
+    changes.KeepCreatedEntityAtRoot(child.Id().Value(), true);
+    parentChange = std::ranges::find_if(changes.Changes(),
+                                        [&](const auto& change)
+                                        {
+                                            return change.Entity == parent.Id().Value() &&
+                                                   change.Kind == KeireEditor::ScenePlayChangeKind::CreateEntity;
+                                        });
+    REQUIRE(parentChange != changes.Changes().end());
+    changes.SetSelected(parentChange->Id, false);
+    const auto applied = changes.BuildAppliedDefinition();
+    auto restored = Keire::CreateRef<Keire::Scene>(asset, applied, registry);
+    CHECK_FALSE(restored->FindEntity(parent.Id()));
+    REQUIRE(restored->FindEntity(child.Id()));
+    CHECK_FALSE(restored->FindEntity(child.Id()).Parent());
+    CHECK(Keire::DynamicRefCast<CustomComponent>(
+              restored->FindEntity(original.Id()).GetComponent(CustomComponent::StaticType()))
+              ->Value == doctest::Approx(6.0));
+}
+
+TEST_CASE("play changes preserve selected unavailable component replacements")
+{
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000063");
+    auto definition = Keire::SceneAsset::EmptyDefinition("Unknown component");
+    const auto entityId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000064");
+    const auto unknownType = Keire::ComponentTypeId::Parse("ed170000-0000-4000-8000-000000000065");
+    definition.Objects.push_back(
+        {.Id = entityId,
+         .Name = "Unknown",
+         .Components = {{.Type = unknownType, .SchemaVersion = 7, .Enabled = true, .Data = "{\"value\":1}"}}});
+    auto editing = Keire::CreateRef<Keire::Scene>(asset, definition);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(editing);
+    session->Play();
+    KeireEditor::ScenePlayChangeTracker tracker;
+    const auto before = session->RuntimeScene()->Snapshot();
+    auto after = before;
+    after.Objects.front().Components.back().Data = "{\"value\":2}";
+    session->ReplaceRuntime(after);
+    tracker.RecordMutation(before, after);
+
+    KeireEditor::ScenePlayChangeSet changes(editing, session->RuntimeScene(), tracker);
+    REQUIRE(changes.HasSelectedChanges());
+    const auto applied = changes.BuildAppliedDefinition();
+    const auto object = std::ranges::find(applied.Objects, entityId, &Keire::SceneObjectDefinition::Id);
+    REQUIRE(object != applied.Objects.end());
+    const auto component = std::ranges::find(object->Components, unknownType, &Keire::SceneComponentDefinition::Type);
+    REQUIRE(component != object->Components.end());
+    CHECK(component->SchemaVersion == 7);
+    CHECK(component->Data == "{\"value\":2}");
+}
+
 TEST_CASE("input actions document owns authoring state and dirty lifecycle")
 {
     KeireEditor::InputActionsDocument document;

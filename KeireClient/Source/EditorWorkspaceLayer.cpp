@@ -845,6 +845,7 @@ void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
+    FinalizePendingPlayEditorMutation();
     if (m_PendingPlayTransition != PendingPlayTransition::None)
     {
         const auto transition = std::exchange(m_PendingPlayTransition, PendingPlayTransition::None);
@@ -2444,6 +2445,8 @@ void EditorWorkspaceLayer::BeginPlayMode()
     if (!m_EditingScene || m_PlaySession)
         return;
     m_PlayEditorTouchedEntities.clear();
+    m_PlayChangeTracker = std::make_unique<KeireEditor::ScenePlayChangeTracker>();
+    m_PendingPlayEditorBefore.reset();
     m_PlayChanges.reset();
     if (const auto undo = Owner().Undo())
         m_PlayUndoContext = undo->CreateContext({.Name = "Play Mode"});
@@ -2459,13 +2462,14 @@ void EditorWorkspaceLayer::RequestStopPlayMode()
     if (!m_PlaySession || m_PlaySession->State() == Keire::ScenePlayState::Stopped || m_PlayChanges ||
         m_PendingPlayTransition != PendingPlayTransition::None)
         return;
+    FinalizePendingPlayEditorMutation();
     m_PlayResumeState = m_PlaySession->State();
     if (m_PlayResumeState == Keire::ScenePlayState::Playing)
         m_PlaySession->Pause(true);
     try
     {
         m_PlayChanges = std::make_unique<KeireEditor::ScenePlayChangeSet>(m_EditingScene, m_PlaySession->RuntimeScene(),
-                                                                          m_PlayEditorTouchedEntities);
+                                                                          *m_PlayChangeTracker);
         if (m_PlayChanges->Empty())
         {
             m_PendingPlayTransition = PendingPlayTransition::Discard;
@@ -2515,6 +2519,8 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         m_PlayUndoContext->Close();
     m_PlayUndoContext.Reset();
     m_PlayChanges.reset();
+    m_PlayChangeTracker.reset();
+    m_PendingPlayEditorBefore.reset();
     m_PlayEditorTouchedEntities.clear();
     m_PlayResumeState = Keire::ScenePlayState::Stopped;
     m_PlayFaultReported = false;
@@ -2563,6 +2569,8 @@ void EditorWorkspaceLayer::RecordSceneUndo(const std::string_view name, std::str
         return;
     if (m_PlaySession)
     {
+        FinalizePendingPlayEditorMutation();
+        m_PendingPlayEditorBefore = scene->Snapshot();
         for (const auto selected : m_SceneDocument->Selections())
             m_PlayEditorTouchedEntities.insert(selected);
     }
@@ -2611,6 +2619,15 @@ void EditorWorkspaceLayer::RecordSceneUndo(const std::string_view name, std::str
     }
 }
 
+void EditorWorkspaceLayer::FinalizePendingPlayEditorMutation()
+{
+    if (!m_PendingPlayEditorBefore || !m_PlayChangeTracker || !m_PlaySession)
+        return;
+    if (const auto scene = ActiveScene())
+        m_PlayChangeTracker->RecordMutation(*m_PendingPlayEditorBefore, scene->Snapshot());
+    m_PendingPlayEditorBefore.reset();
+}
+
 void EditorWorkspaceLayer::MarkPlayEditorEntity(const Keire::AssetId entity)
 {
     if (m_PlaySession && entity)
@@ -2621,14 +2638,22 @@ void EditorWorkspaceLayer::UndoSceneEdit()
 {
     const auto context = m_PlaySession ? m_PlayUndoContext : m_SceneUndoContext;
     if (context)
-        (void)context->Undo();
+    {
+        const auto before = m_PlaySession && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
+        if (context->Undo() && before && m_PlayChangeTracker && ActiveScene())
+            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot());
+    }
 }
 
 void EditorWorkspaceLayer::RedoSceneEdit()
 {
     const auto context = m_PlaySession ? m_PlayUndoContext : m_SceneUndoContext;
     if (context)
-        (void)context->Redo();
+    {
+        const auto before = m_PlaySession && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
+        if (context->Redo() && before && m_PlayChangeTracker && ActiveScene())
+            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot());
+    }
 }
 
 void EditorWorkspaceLayer::ApplyActiveUndo(const bool redo)
@@ -2637,10 +2662,14 @@ void EditorWorkspaceLayer::ApplyActiveUndo(const bool redo)
         return;
     try
     {
+        FinalizePendingPlayEditorMutation();
+        const auto before = m_PlaySession && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
         if (redo)
             (void)m_ActiveUndoContext->Redo();
         else
             (void)m_ActiveUndoContext->Undo();
+        if (before && m_PlayChangeTracker && ActiveScene())
+            m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot());
     }
     catch (const std::exception& error)
     {
