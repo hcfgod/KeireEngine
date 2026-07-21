@@ -6,6 +6,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Noninteractive Windows repository launcher commands now preserve child-script failures and their native exit codes,
+  preventing failed builds, tests, runs, or packages from being reported as successful automation steps.
 - Asset pipelines now use the clockwise render-target front-face convention required by Kéire's left-handed camera
   matrices, so back-face culling preserves imported mesh exteriors instead of exposing their interiors.
 - OBJ, FBX, glTF, and GLB import now converts Assimp's right-handed geometry, lower-left UVs, and counter-clockwise

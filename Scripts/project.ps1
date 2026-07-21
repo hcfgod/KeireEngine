@@ -37,46 +37,96 @@ $OutputEncoding = $utf8
 $ConfigurationWasProvided = $PSBoundParameters.ContainsKey("Configuration")
 $WindowsScripts = Join-Path $PSScriptRoot "Windows"
 . (Join-Path $WindowsScripts "common.ps1")
+$script:ProjectCommandExitCode = 0
 $Project = Get-ProjectConfig
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 if ($Command -eq "package" -and -not $ConfigurationWasProvided) { $Configuration = "Release" }
 
+function Invoke-CheckedCommand {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Action,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    $global:LASTEXITCODE = 0
+    & $Action
+    $exitCode = $global:LASTEXITCODE
+    if ($exitCode -ne 0) {
+        $script:ProjectCommandExitCode = $exitCode
+        throw "$Description failed with exit code $exitCode."
+    }
+}
+
 function Invoke-ProjectCommand {
     param([string]$SelectedCommand)
     switch ($SelectedCommand) {
         "bootstrap" {
-            & (Join-Path $WindowsScripts "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
-                -Toolset $Toolset -InstallOptional:$InstallOptional -Update:$Update -Force:$Force
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
+                    -Toolset $Toolset -InstallOptional:$InstallOptional -Update:$Update -Force:$Force
+            } "Bootstrap"
         }
         "generate" {
-            & (Join-Path $WindowsScripts "generate.ps1") -Generator $Generator -Architecture $Architecture `
-                -Toolset $Toolset -CI:$CI -Update:$Update -Force:$Force
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "generate.ps1") -Generator $Generator -Architecture $Architecture `
+                    -Toolset $Toolset -CI:$CI -Update:$Update -Force:$Force
+            } "Project generation"
         }
         "build" {
-            & (Join-Path $WindowsScripts "build.ps1") -Generator $Generator -Configuration $Configuration `
-                -Architecture $Architecture -Toolset $Toolset -Target $Target -CI:$CI -Update:$Update -Generate:$Force
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "build.ps1") -Generator $Generator -Configuration $Configuration `
+                    -Architecture $Architecture -Toolset $Toolset -Target $Target -CI:$CI -Update:$Update `
+                    -Generate:$Force
+            } "Build"
         }
         "test" {
-            & (Join-Path $WindowsScripts "test.ps1") -Generator $Generator -Configuration $Configuration `
-                -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "test.ps1") -Generator $Generator -Configuration $Configuration `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
+            } "Tests"
         }
         "run" {
-            & (Join-Path $WindowsScripts "run.ps1") -Generator $Generator -Configuration $Configuration `
-                -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeUi:$SmokeUi -SmokeProject:$SmokeProject `
-                -Editor:$Editor -ProjectPath $ProjectPath -Update:$Update -Generate:$Force
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "run.ps1") -Generator $Generator -Configuration $Configuration `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeUi:$SmokeUi `
+                    -SmokeProject:$SmokeProject -Editor:$Editor -ProjectPath $ProjectPath -Update:$Update `
+                    -Generate:$Force
+            } "Run"
         }
-        "clean" { & (Join-Path $WindowsScripts "clean.ps1") -Scope $CleanScope }
-        "coverage" { & (Join-Path $WindowsScripts "coverage.ps1") -Architecture $Architecture -CI:$CI -Update:$Update -Generate:$Force }
-        "package" { & (Join-Path $WindowsScripts "package.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force }
-        "doctor" { & (Join-Path $WindowsScripts "doctor.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset }
+        "clean" {
+            Invoke-CheckedCommand { & (Join-Path $WindowsScripts "clean.ps1") -Scope $CleanScope } "Clean"
+        }
+        "coverage" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "coverage.ps1") -Architecture $Architecture -CI:$CI -Update:$Update `
+                    -Generate:$Force
+            } "Coverage"
+        }
+        "package" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "package.ps1") -Generator $Generator -Configuration $Configuration `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
+            } "Package"
+        }
+        "doctor" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "doctor.ps1") -Generator $Generator -Architecture $Architecture `
+                    -Toolset $Toolset
+            } "Doctor"
+        }
         "rename" {
             if (-not $Name) { throw "-Name is required for rename." }
-            & (Join-Path $WindowsScripts "rename.ps1") -Name $Name -DisplayName $DisplayName -Repository $Repository
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "rename.ps1") -Name $Name -DisplayName $DisplayName `
+                    -Repository $Repository
+            } "Rename"
         }
         "vendor-update" {
             if (-not $Tag) { throw "-Tag is required for vendor-update." }
-            & (Join-Path $WindowsScripts "vendor-update.ps1") -Dependency $Dependency -Tag $Tag
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "vendor-update.ps1") -Dependency $Dependency -Tag $Tag
+            } "Vendor update"
         }
         "help" { Show-Help }
     }
@@ -172,4 +222,16 @@ function Show-Menu {
     }
 }
 
-if ($Command -eq "menu") { Show-Menu } else { Invoke-ProjectCommand $Command }
+if ($Command -eq "menu") {
+    Show-Menu
+}
+else {
+    try {
+        Invoke-ProjectCommand $Command
+    }
+    catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        exit $(if ($script:ProjectCommandExitCode -ne 0) { $script:ProjectCommandExitCode } else { 1 })
+    }
+    exit 0
+}

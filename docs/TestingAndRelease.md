@@ -42,6 +42,9 @@ rendered smoke remains responsible for cursor capture and viewport integration.
 
 Kéire validation is proportional to risk. The repository launchers select the correct dependency variant, refresh
 build identity, build the requested target, and run the executable with the expected environment.
+Noninteractive repository launcher commands preserve child-script failures as their process exit code. Automation must
+invoke the repository launcher directly and treat every nonzero result as a failed build, test, run, or package step.
+The interactive menu reports failures and remains open for another command.
 
 ## Baseline Validation
 

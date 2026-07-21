@@ -8,6 +8,24 @@ assert_false() { if "$@"; then printf 'Expected failure: %s\n' "$*" >&2; exit 1;
 
 load_project_config "$ROOT"
 assert_true test -n "$PROJECT_IDENTIFIER"
+launcher_fixture="$(mktemp -d)"
+mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux"
+cp "$ROOT/Scripts/project.sh" "$launcher_fixture/Scripts/project.sh"
+cat > "$launcher_fixture/Scripts/Unix/common.sh" <<'EOF'
+native_architecture() { printf '%s' x86_64; }
+load_project_config() { PROJECT_IDENTIFIER=ExitFixture; CLIENT_TARGET=Client; }
+resolve_unix_toolset() { printf '%s' "$2"; }
+validate_unix_combination() { :; }
+normalize_configuration() { printf '%s' "$1"; }
+EOF
+printf '%s\n' '#!/usr/bin/env bash' 'exit 23' > "$launcher_fixture/Scripts/Linux/test.sh"
+chmod +x "$launcher_fixture/Scripts/Linux/test.sh"
+set +e
+bash "$launcher_fixture/Scripts/project.sh" test --generator ninja --configuration Debug --architecture x86_64 --toolset clang
+launcher_exit=$?
+set -e
+rm -rf "$launcher_fixture"
+assert_equal "$launcher_exit" 23 'top-level Unix launcher child exit propagation'
 assert_true grep -Eq '^PROJECT_VERSION=[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' "$ROOT/Config/Project.conf"
 assert_true is_semantic_version '1.2.3-alpha.1+build.5'
 assert_false is_semantic_version '01.2.3'

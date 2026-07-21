@@ -21,6 +21,26 @@ $bootstrapScript = Get-Content (Join-Path $Windows "bootstrap.ps1") -Raw
 Assert-True ($bootstrapScript.Contains('GetTempPath') -and $bootstrapScript.Contains('$PremakeExe --version')) "Unicode-safe Premake version validation"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
+$launcherFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-launcher-exit-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force (Join-Path $launcherFixture "Scripts\Windows") | Out-Null
+    Copy-Item (Join-Path $Windows "..\project.ps1") (Join-Path $launcherFixture "Scripts\project.ps1")
+    @'
+function Get-ProjectConfig {
+    return [pscustomobject]@{ CLIENT_TARGET = "Client"; PROJECT_IDENTIFIER = "ExitFixture" }
+}
+function Normalize-Architecture([string]$Architecture) { return "x86_64" }
+'@ | Set-Content (Join-Path $launcherFixture "Scripts\Windows\common.ps1") -Encoding UTF8
+    'exit 23' | Set-Content (Join-Path $launcherFixture "Scripts\Windows\test.ps1") -Encoding ASCII
+    $launcher = Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList @(
+        "-NoProfile", "-NonInteractive", "-File", (Join-Path $launcherFixture "Scripts\project.ps1"),
+        "test", "-Generator", "ninja", "-Architecture", "x86_64", "-Toolset", "msc"
+    ) -Wait -PassThru -WindowStyle Hidden
+    Assert-Equal $launcher.ExitCode 23 "Top-level Windows launcher child exit propagation"
+}
+finally {
+    Remove-Item $launcherFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
 Assert-True ($project.PROJECT_VERSION -match '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') "Semantic project version"
 Assert-True (Test-SemanticVersion "1.2.3-alpha.1+build.5") "Complete Semantic Version"
