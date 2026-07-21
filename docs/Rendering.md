@@ -60,6 +60,11 @@ multiplies stored tangent handedness by the model determinant sign, and reconstr
 or nonfinite inputs use a deterministic axis fallback. D3D12 and Vulkan pixel cases cover +Y normal perturbation under
 identity, nonuniform scale, rotation, and mirrored scale while mesh ABI v1 tangent generation remains compatible with
 stored ABI v2 tangents.
+GPU material cache entries retain an immutable, complete binding: the pipeline key, packed numeric slots,
+texture/sampler bindings, tint slot, and all material/shader/texture revision stamps. The renderer resolves this once
+per unique dependency stamp and shares it across entities; only the component tint is copied into per-draw constants.
+Rebuilds are transactional, so a failed material, shader, texture, sampler, or attachment transition leaves the entire
+last-good binding active rather than mixing old and new resources.
 The left-handed camera/projection path produces clockwise exterior winding in render-target space, which is the shared
 front-face convention used by built-in and asset pipelines when applying front/back culling.
 

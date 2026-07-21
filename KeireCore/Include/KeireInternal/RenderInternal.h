@@ -31,6 +31,7 @@ namespace Keire
                                                                      const RenderSurface& surface);
         [[nodiscard]] static void* SurfaceState(RenderSurface& surface) noexcept;
         static void WaitIdle(RenderSystem& renderer) noexcept;
+        [[nodiscard]] static std::uint64_t MaterialBindingBuildCount(const RenderSystem& renderer) noexcept;
         static void BeginFrame(RenderSystem& renderer);
         static void CancelFrame(RenderSystem& renderer) noexcept;
         static void EndFrame(RenderSystem& renderer, ImDrawData* drawData);

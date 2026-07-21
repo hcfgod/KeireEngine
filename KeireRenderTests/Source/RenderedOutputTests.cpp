@@ -95,6 +95,7 @@ namespace
     struct CaptureResults final
     {
         std::vector<std::vector<std::uint8_t>> Frames;
+        std::vector<std::uint64_t> MaterialBindingBuilds;
     };
 
     class RenderAssetFixture final
@@ -501,6 +502,10 @@ namespace
             renderer->SetMesh(m_Mesh);
             renderer->SetMaterial(m_Material);
             renderer->SetTint({1.0F, 1.0F, 1.0F, 1.0F});
+            auto sharedObject = m_Scene->CreateEntity("Shared asset mesh");
+            const auto sharedRenderer = sharedObject.AddComponent<Keire::MeshRendererComponent>();
+            sharedRenderer->SetMesh(m_Mesh);
+            sharedRenderer->SetMaterial(m_Material);
 
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Asset mesh tests";
@@ -530,8 +535,15 @@ namespace
             {
                 m_Results->Frames.push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+                m_Results->MaterialBindingBuilds.push_back(
+                    Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer()));
                 const auto statistics = MeasureCenter(m_Results->Frames.back());
-                if (m_Results->Frames.size() >= 2 && statistics.Green > statistics.Red + MinimumBehaviorDelta &&
+                const auto bindingCountIsStable =
+                    m_Results->MaterialBindingBuilds.size() >= 2 &&
+                    m_Results->MaterialBindingBuilds[m_Results->MaterialBindingBuilds.size() - 2] ==
+                        m_Results->MaterialBindingBuilds.back();
+                if (m_Results->Frames.size() >= 3 && bindingCountIsStable &&
+                    statistics.Green > statistics.Red + MinimumBehaviorDelta &&
                     statistics.Green > statistics.Blue + MinimumBehaviorDelta)
                 {
                     Owner().RequestExit();
@@ -570,6 +582,8 @@ namespace
         bool MaterialReloadQueued = false;
         bool ShaderReloadQueued = false;
         bool InvalidReloadQueued = false;
+        std::uint64_t PenultimateFailureBuilds = 0;
+        std::uint64_t SettledFailureBuilds = 0;
     };
 
     class AssetRevisionCaptureLayer final : public Keire::Layer
@@ -649,8 +663,16 @@ namespace
                 else if (m_Stage == 4 && ++m_FramesAfterFailure == 8)
                 {
                     m_Results->AfterFailure = std::move(pixels);
+                    m_Results->PenultimateFailureBuilds = m_PreviousFailureBuilds;
+                    m_Results->SettledFailureBuilds =
+                        Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer());
                     Owner().RequestExit();
                     return;
+                }
+                if (m_Stage == 4)
+                {
+                    m_PreviousFailureBuilds =
+                        Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer());
                 }
             }
 
@@ -673,6 +695,7 @@ namespace
         Keire::Ref<Keire::RenderView> m_View;
         std::size_t m_FrameCount = 0;
         std::size_t m_FramesAfterFailure = 0;
+        std::uint64_t m_PreviousFailureBuilds = 0;
         int m_Stage = 0;
         bool m_Submitted = false;
     };
@@ -980,6 +1003,10 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(first.Blue > first.Green + MinimumBehaviorDelta);
     CHECK(last.Green > last.Red + MinimumBehaviorDelta);
     CHECK(last.Green > last.Blue + MinimumBehaviorDelta);
+    REQUIRE(results->MaterialBindingBuilds.size() == results->Frames.size());
+    CHECK(results->MaterialBindingBuilds.back() == 1);
+    CHECK(results->MaterialBindingBuilds[results->MaterialBindingBuilds.size() - 2] ==
+          results->MaterialBindingBuilds.back());
 }
 
 TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
@@ -1057,4 +1084,5 @@ TEST_CASE("render asset revisions swap atomically and failed reloads preserve la
     CHECK(std::abs(afterFailure.Red - shaderGreen.Red) <= ColorTolerance);
     CHECK(std::abs(afterFailure.Green - shaderGreen.Green) <= ColorTolerance);
     CHECK(std::abs(afterFailure.Blue - shaderGreen.Blue) <= ColorTolerance);
+    CHECK(results->PenultimateFailureBuilds == results->SettledFailureBuilds);
 }

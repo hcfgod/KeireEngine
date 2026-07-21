@@ -6,6 +6,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- GPU material entries now cache complete last-good pipelines, packed numeric slots, texture/sampler bindings, and
+  dependency revision stamps. Shared-material draws reuse immutable bindings, component tint remains per draw, and a
+  failed dependency rebuild cannot partially replace a working material.
 - PBR tangent frames now transform normals and tangents through their correct matrices, Gram–Schmidt orthogonalize the
   basis, compensate handedness for mirrored instances, and use deterministic finite fallbacks for degenerate tangents.
 - External asset imports now preflight and validate complete batches in private staging, journal publication for crash

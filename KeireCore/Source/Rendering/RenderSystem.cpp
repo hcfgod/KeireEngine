@@ -55,6 +55,17 @@ namespace Keire
                                       : Vector3{0.0F, -1.0F, 0.0F};
         }
 
+        [[nodiscard]] std::uint64_t HashDependencyStamp(std::uint64_t seed, const std::uint64_t value) noexcept
+        {
+            return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U));
+        }
+
+        [[nodiscard]] std::uint64_t HashDependencyStamp(std::uint64_t seed, const AssetId value) noexcept
+        {
+            seed = HashDependencyStamp(seed, value.High());
+            return HashDependencyStamp(seed, value.Low());
+        }
+
         [[nodiscard]] Color TemperatureColor(const float kelvin) noexcept
         {
             const float temperature = std::clamp(kelvin, 1000.0F, 20000.0F) / 100.0F;
@@ -190,19 +201,23 @@ namespace Keire
             std::uint64_t LastAttemptedRevision = 0;
         };
 
-        struct GpuMaterialEntry final
-        {
-            AssetHandle<MaterialAsset> Handle;
-            Ref<const MaterialAsset> LastGood;
-            std::uint64_t LoadedRevision = 0;
-            std::uint64_t LastAttemptedRevision = 0;
-        };
-
         struct ResolvedAssetMaterial final
         {
             SDL_GPUGraphicsPipeline* Pipeline = nullptr;
             std::vector<Vector4> NumericProperties;
             std::vector<SDL_GPUTextureSamplerBinding> Textures;
+            std::optional<std::size_t> TintSlot;
+        };
+
+        struct GpuMaterialEntry final
+        {
+            AssetHandle<MaterialAsset> Handle;
+            Ref<const MaterialAsset> LastGood;
+            ResolvedAssetMaterial Binding;
+            std::uint64_t LoadedRevision = 0;
+            std::uint64_t LastAttemptedRevision = 0;
+            std::uint64_t LastAttemptedDependencyStamp = 0;
+            std::uint64_t LastGoodDependencyStamp = 0;
         };
 
         struct GpuMeshEntry final
@@ -1466,19 +1481,43 @@ namespace Keire
                 return &entry;
             }
 
-            [[nodiscard]] std::optional<ResolvedAssetMaterial>
-            ResolveAssetMaterial(const AssetId id, const Color componentTint, const SDL_GPUSampleCount samples)
+            [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(const AssetId id,
+                                                                            const SDL_GPUSampleCount samples)
             {
                 const auto material = ResolveMaterial(id);
+                auto materialEntry = MaterialCache.find(id);
+                if (materialEntry == MaterialCache.end())
+                    return nullptr;
+                auto& cache = materialEntry->second;
+                std::uint64_t stamp = 1469598103934665603ULL;
+                stamp = HashDependencyStamp(stamp, cache.LastAttemptedRevision);
+                stamp = HashDependencyStamp(stamp, cache.LoadedRevision);
+                stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(samples));
+                stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(ColorFormat));
+                stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(DepthFormat));
+                bool failedDependencyRevision =
+                    cache.LoadedRevision != 0 && cache.LastAttemptedRevision > cache.LoadedRevision;
                 if (!material || !material->Definition().Shader)
-                    return std::nullopt;
+                {
+                    cache.LastAttemptedDependencyStamp = stamp;
+                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                }
+                stamp = HashDependencyStamp(stamp, material->Definition().Shader);
                 auto* shader = ResolveShader(material->Definition().Shader, samples);
                 if (!shader)
-                    return std::nullopt;
+                {
+                    cache.LastAttemptedDependencyStamp = stamp;
+                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                }
+                stamp = HashDependencyStamp(stamp, shader->LastAttemptedRevision);
+                stamp = HashDependencyStamp(stamp, shader->LoadedRevision);
                 const auto pipeline =
                     std::ranges::find(shader->Pipelines, samples, &decltype(shader->Pipelines)::value_type::first);
                 if (pipeline == shader->Pipelines.end())
-                    return std::nullopt;
+                {
+                    cache.LastAttemptedDependencyStamp = stamp;
+                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                }
 
                 const auto& properties = material->Definition().Properties;
                 for (const auto& [name, value] : properties)
@@ -1487,59 +1526,112 @@ namespace Keire
                     if (std::ranges::find(shader->LastGood->Definition().Properties, name,
                                           &ShaderPropertyDefinition::Name) ==
                         shader->LastGood->Definition().Properties.end())
-                        return std::nullopt;
+                    {
+                        cache.LastAttemptedDependencyStamp = stamp;
+                        return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                    }
                 }
 
-                ResolvedAssetMaterial result;
-                result.Pipeline = pipeline->second;
+                failedDependencyRevision |=
+                    shader->LoadedRevision != 0 && shader->LastAttemptedRevision > shader->LoadedRevision;
                 for (const auto& property : shader->LastGood->Definition().Properties)
                 {
-                    const auto found = properties.find(property.Name);
-                    if (property.Type == ShaderPropertyType::Texture2D)
-                    {
-                        AssetId texture = property.DefaultTexture;
-                        if (found != properties.end())
-                        {
-                            const auto* selected = std::get_if<AssetId>(&found->second);
-                            if (!selected)
-                                return std::nullopt;
-                            texture = *selected;
-                        }
-                        const auto& resolved =
-                            texture ? ResolveTexture(texture) : DefaultTexture(property.TextureSemantic);
-                        result.Textures.push_back({resolved.Texture, resolved.Sampler});
+                    if (property.Type != ShaderPropertyType::Texture2D)
                         continue;
-                    }
-
-                    Vector4 packed = property.DefaultValue;
+                    const auto found = properties.find(property.Name);
+                    AssetId texture = property.DefaultTexture;
                     if (found != properties.end())
                     {
-                        const auto& value = found->second;
-                        if (const auto* scalar = std::get_if<float>(&value))
-                            packed = {*scalar, 0.0F, 0.0F, 0.0F};
-                        else if (const auto* vector2 = std::get_if<Vector2>(&value))
-                            packed = {vector2->X, vector2->Y, 0.0F, 0.0F};
-                        else if (const auto* vector3 = std::get_if<Vector3>(&value))
-                            packed = {vector3->X, vector3->Y, vector3->Z, 0.0F};
-                        else if (const auto* vector4 = std::get_if<Vector4>(&value))
-                            packed = *vector4;
-                        else if (const auto* color = std::get_if<Color>(&value))
-                            packed = {color->Red, color->Green, color->Blue, color->Alpha};
-                        else
-                            return std::nullopt;
+                        const auto* selected = std::get_if<AssetId>(&found->second);
+                        if (!selected)
+                        {
+                            cache.LastAttemptedDependencyStamp = stamp;
+                            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                        }
+                        texture = *selected;
                     }
-                    if (property.Name == "Tint")
+                    stamp = HashDependencyStamp(stamp, texture);
+                    if (!texture)
                     {
-                        packed.X *= componentTint.Red;
-                        packed.Y *= componentTint.Green;
-                        packed.Z *= componentTint.Blue;
-                        packed.W *= componentTint.Alpha;
+                        stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(property.TextureSemantic));
+                        continue;
                     }
-                    result.NumericProperties.push_back(packed);
+                    (void)ResolveTexture(texture);
+                    const auto textureEntry = TextureCache.find(texture);
+                    if (textureEntry == TextureCache.end())
+                        continue;
+                    stamp = HashDependencyStamp(stamp, textureEntry->second.LastAttemptedRevision);
+                    stamp = HashDependencyStamp(stamp, textureEntry->second.LoadedRevision);
+                    failedDependencyRevision |=
+                        textureEntry->second.LoadedRevision != 0 &&
+                        textureEntry->second.LastAttemptedRevision > textureEntry->second.LoadedRevision;
                 }
-                if (result.NumericProperties.empty())
-                    result.NumericProperties.emplace_back();
-                return result;
+                if (stamp == cache.LastAttemptedDependencyStamp)
+                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                cache.LastAttemptedDependencyStamp = stamp;
+                if (failedDependencyRevision)
+                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+
+                try
+                {
+                    ResolvedAssetMaterial result;
+                    result.Pipeline = pipeline->second;
+                    for (const auto& property : shader->LastGood->Definition().Properties)
+                    {
+                        const auto found = properties.find(property.Name);
+                        if (property.Type == ShaderPropertyType::Texture2D)
+                        {
+                            AssetId texture = property.DefaultTexture;
+                            if (found != properties.end())
+                            {
+                                const auto* selected = std::get_if<AssetId>(&found->second);
+                                if (!selected)
+                                    throw std::runtime_error("Material texture property has an invalid value type.");
+                                texture = *selected;
+                            }
+                            const auto& resolved =
+                                texture ? ResolveTexture(texture) : DefaultTexture(property.TextureSemantic);
+                            if (result.Textures.size() >= 16)
+                                throw std::runtime_error("Material exceeds the fragment texture binding limit.");
+                            result.Textures.push_back({resolved.Texture, resolved.Sampler});
+                            continue;
+                        }
+
+                        Vector4 packed = property.DefaultValue;
+                        if (found != properties.end())
+                        {
+                            const auto& value = found->second;
+                            if (const auto* scalar = std::get_if<float>(&value))
+                                packed = {*scalar, 0.0F, 0.0F, 0.0F};
+                            else if (const auto* vector2 = std::get_if<Vector2>(&value))
+                                packed = {vector2->X, vector2->Y, 0.0F, 0.0F};
+                            else if (const auto* vector3 = std::get_if<Vector3>(&value))
+                                packed = {vector3->X, vector3->Y, vector3->Z, 0.0F};
+                            else if (const auto* vector4 = std::get_if<Vector4>(&value))
+                                packed = *vector4;
+                            else if (const auto* color = std::get_if<Color>(&value))
+                                packed = {color->Red, color->Green, color->Blue, color->Alpha};
+                            else
+                                throw std::runtime_error("Material numeric property has an invalid value type.");
+                        }
+                        if (property.Name == "Tint")
+                            result.TintSlot = result.NumericProperties.size();
+                        if (result.NumericProperties.size() >= 64)
+                            throw std::runtime_error("Material exceeds the numeric property binding limit.");
+                        result.NumericProperties.push_back(packed);
+                    }
+                    if (result.NumericProperties.empty())
+                        result.NumericProperties.emplace_back();
+                    cache.Binding = std::move(result);
+                    cache.LastGoodDependencyStamp = stamp;
+                    ++MaterialBindingBuilds;
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CORE_ERROR("Material GPU binding rebuild failed for id={} revision={}: {}", id.ToString(),
+                                     cache.LoadedRevision, error.what());
+                }
+                return cache.Binding.Pipeline ? &cache.Binding : nullptr;
             }
 
             void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
@@ -1568,8 +1660,7 @@ namespace Keire
                     const Matrix4 viewModel = Math::Multiply(camera.View, item.World);
                     const auto& mesh = ResolveMesh(item.Mesh);
                     const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
-                    const auto material =
-                        item.Material ? ResolveAssetMaterial(item.Material, item.Tint, samples) : std::nullopt;
+                    const auto* material = item.Material ? ResolveAssetMaterial(item.Material, samples) : nullptr;
                     if (material)
                     {
                         const AssetObjectUniforms object{item.World, camera.View, camera.Projection,
@@ -1583,8 +1674,18 @@ namespace Keire
                              packet.Environment.Exposure}};
                         SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                         SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
+                        std::array<Vector4, 64> numericProperties;
+                        std::ranges::copy(material->NumericProperties, numericProperties.begin());
+                        if (material->TintSlot)
+                        {
+                            auto& tint = numericProperties[*material->TintSlot];
+                            tint.X *= item.Tint.Red;
+                            tint.Y *= item.Tint.Green;
+                            tint.Z *= item.Tint.Blue;
+                            tint.W *= item.Tint.Alpha;
+                        }
                         SDL_PushGPUFragmentUniformData(
-                            commands, 1, material->NumericProperties.data(),
+                            commands, 1, numericProperties.data(),
                             static_cast<std::uint32_t>(material->NumericProperties.size() * sizeof(Vector4)));
                         SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
                         if (!material->Textures.empty())
@@ -1852,6 +1953,7 @@ namespace Keire
             std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
             std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
             std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
+            std::uint64_t MaterialBindingBuilds = 0;
             std::unordered_map<AssetId, GpuShaderEntry> ShaderCache;
             std::vector<std::pair<SamplerDescription, SDL_GPUSampler*>> SamplerCache;
             std::vector<RenderPipelineSet> Pipelines;
@@ -2094,6 +2196,11 @@ namespace Keire
     {
         if (renderer.m_Impl->State->Device)
             (void)SDL_WaitForGPUIdle(renderer.m_Impl->State->Device);
+    }
+
+    std::uint64_t RenderSystemInternalAccess::MaterialBindingBuildCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->MaterialBindingBuilds;
     }
 
     void RenderSystemInternalAccess::BeginFrame(RenderSystem& renderer) { renderer.m_Impl->State->BeginFrame(); }
