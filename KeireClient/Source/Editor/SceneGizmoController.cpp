@@ -289,6 +289,27 @@ namespace KeireEditor
         }
     }
 
+    bool SceneGizmoController::ApplyToolShortcut(const Keire::UiKey key) noexcept
+    {
+        switch (key)
+        {
+        case Keire::UiKey::Q:
+            m_Tool = SceneTool::View;
+            return true;
+        case Keire::UiKey::W:
+            m_Tool = SceneTool::Translate;
+            return true;
+        case Keire::UiKey::E:
+            m_Tool = SceneTool::Rotate;
+            return true;
+        case Keire::UiKey::R:
+            m_Tool = SceneTool::Scale;
+            return true;
+        default:
+            return false;
+        }
+    }
+
     Keire::UiItemRect SceneGizmoController::DrawOverlayToolbar(Keire::UiFrame& ui, const Keire::UiItemRect viewport)
     {
         constexpr float size = 28.0F;
@@ -357,13 +378,13 @@ namespace KeireEditor
         if (hovered && !ui.ControlDown() && !ui.AltDown() && m_Drag.ActiveAxis == Axis::None)
         {
             if (ui.Shortcut({Keire::UiKey::Q}))
-                m_Tool = SceneTool::View;
+                (void)ApplyToolShortcut(Keire::UiKey::Q);
             else if (ui.Shortcut({Keire::UiKey::W}))
-                m_Tool = SceneTool::Translate;
+                (void)ApplyToolShortcut(Keire::UiKey::W);
             else if (ui.Shortcut({Keire::UiKey::E}))
-                m_Tool = SceneTool::Rotate;
+                (void)ApplyToolShortcut(Keire::UiKey::E);
             else if (ui.Shortcut({Keire::UiKey::R}))
-                m_Tool = SceneTool::Scale;
+                (void)ApplyToolShortcut(Keire::UiKey::R);
         }
 
         const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);

@@ -94,6 +94,10 @@ namespace KeireEditor
 
         void Load(const std::filesystem::path& projectRoot);
         void Save(const std::filesystem::path& projectRoot) const noexcept;
+        [[nodiscard]] bool ApplyToolShortcut(Keire::UiKey key) noexcept;
+        void SetSnapping(bool enabled) noexcept { m_Settings.Snapping = enabled; }
+        void SetShowCameraFrustums(bool enabled) noexcept { m_Settings.ShowCameraFrustums = enabled; }
+        void SetShowLightDirections(bool enabled) noexcept { m_Settings.ShowLightDirections = enabled; }
 
         [[nodiscard]] SceneTool ActiveTool() const noexcept { return m_Tool; }
         [[nodiscard]] const SceneToolSettings& Settings() const noexcept { return m_Settings; }

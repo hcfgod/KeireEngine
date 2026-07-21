@@ -138,9 +138,7 @@ Assert-True ($renderSettingsSource.Contains('Rendering.keiresettings') -and (Tes
 $renderingAssetsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\RenderingAssets.cpp') -Raw
 $assetPipelineSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp') -Raw
 $uiSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Ui.cpp') -Raw
-$editorDiagnosticsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireClient\Source\EditorWorkspaceLayer.cpp') -Raw
 Assert-True ($renderingAssetsSource.Contains('SDL_GetBasePath()') -and $renderingAssetsSource.Contains('maximumAncestorDepth')) "Executable-relative shader compiler discovery"
-Assert-True ($assetPipelineSource.Contains('LogImportDiagnostic') -and $editorDiagnosticsSource.Contains('ReportError("Asset Import"')) "Asset import diagnostics reach persistent and editor logs"
 Assert-True ($uiSource.Contains('ImGuiDragDropFlags_SourceAllowNullID')) "Display-item drag sources remain assertion-safe"
 Assert-True ($clientPremake.Contains('LinkKeireCore()') -and $testsPremake.Contains('LinkKeireCore()') -and $premakePolicy.Contains('ProjectConfig.CORE_TARGET') -and $premakePolicy.Contains('DearImGuiProject')) "Static dependency link closure"
 $clientSources = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireClient") -File -Recurse | Get-Content -Raw) -join "`n"
@@ -150,22 +148,16 @@ Assert-True (-not $sourceHeaders) "First-party headers live under Include, never
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Assets\Asset.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Assets\AssetSystem.cpp"))) "Asset subsystem directory organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Input\Input.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Input\InputSystem.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Input\DefaultInput.keireinput"))) "Input subsystem and sample project organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Project\Project.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Scenes\SceneSystem.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp"))) "Project, scene, and hub organization"
-$editorWorkspace = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\Source\EditorWorkspaceLayer.cpp") -Raw
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\AssetBrowserPanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\ConsolePanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\DiagnosticsPanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\ThumbnailService.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\SceneGizmoController.cpp"))) "Focused editor panel, thumbnail, and scene-gizmo classes"
-$sceneGizmoSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireClient\Source\Editor\SceneGizmoController.cpp') -Raw
-Assert-True ($sceneGizmoSource.Contains('Move W') -and $sceneGizmoSource.Contains('RotationSnapDegrees') -and $sceneGizmoSource.Contains('DrawCameraFrustum') -and $sceneGizmoSource.Contains('DrawLightIcon')) "Scene transform tools, snapping, and component gizmos"
 Assert-True ($clientSources.Contains('DisplayName(record.RelativePath)') -and $clientSources.Contains('TrashRecords()') -and $clientSources.Contains('AssetImportPolicy::KeepLastGood')) "Unity-style asset browser labels, trash, and best-effort import"
-Assert-True ($clientSources.Contains('DrawAssetDragSource') -and $editorWorkspace.Contains('DecodeDragPayload') -and $editorWorkspace.Contains('PickSceneEntity')) "Thumbnail drag sources and typed Scene-view asset drops"
-Assert-True ($editorWorkspace.Contains('m_ComponentExpansion') -and $editorWorkspace.Contains('Control Browser') -and $editorWorkspace.Contains('BINDING PROCESSORS') -and $editorWorkspace.Contains('UiKey::R')) "Foldable component cards, advanced Input Actions authoring, and redo shortcut"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Process.cpp') -Raw
 Assert-True ($processSource.Contains('"/select," + utf8Path') -and $processSource.Contains('std::filesystem::weakly_canonical')) "Absolute platform file-manager reveal routing"
-Assert-True ($editorWorkspace.Contains('m_InputForwardToConsole') -and $editorWorkspace.Contains('inputEpsilon') -and $editorWorkspace.Contains('coalescingWindowNanoseconds')) "Input Debugger noise filtering"
 $hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp") -Raw
 Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('Show Hub') -and $hubSource.Contains('m_Tray->IsAvailable()')) "Project Hub tray backgrounding"
 $sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
 Assert-True ($sampleScene.Contains('"schemaVersion": 2') -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Schema-v2 component sample scene"
 $publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire") -File -Recurse | Get-Content -Raw) -join "`n"
-Assert-True ($publicHeaders.Contains('class KEIRE_API UndoService') -and $editorWorkspace.Contains('m_ActiveUndoContext')) "Shared undo service and editor routing"
+Assert-True ($publicHeaders.Contains('class KEIRE_API UndoService')) "Shared undo service"
 Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image')) "Public dependency isolation"
 Assert-True ($publicHeaders.Contains('class KEIRE_API UiWorkspace') -and $clientSources.Contains('BuildFactoryLayout')) "Kéire workspace facade and factory layout wiring"
 $exportedTypes = @(

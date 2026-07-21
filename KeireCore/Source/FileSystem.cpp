@@ -1,5 +1,6 @@
 #include "KeireInternal/FileSystem.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -29,6 +30,20 @@ namespace Keire::Detail
             input.read(contents.data(), static_cast<std::streamsize>(contents.size()));
             return input && contents == expected;
         }
+
+        [[nodiscard]] bool IsTransientRenameError(const std::error_code& error) noexcept
+        {
+            if (error == std::errc::permission_denied || error == std::errc::device_or_resource_busy)
+                return true;
+#if defined(_WIN32)
+            if (error.category() == std::system_category())
+            {
+                return error.value() == ERROR_ACCESS_DENIED || error.value() == ERROR_SHARING_VIOLATION ||
+                       error.value() == ERROR_LOCK_VIOLATION;
+            }
+#endif
+            return false;
+        }
     } // namespace
 
     std::string PathToUtf8(const std::filesystem::path& path)
@@ -44,6 +59,50 @@ namespace Keire::Detail
         for (const char character : value)
             utf8.push_back(static_cast<char8_t>(static_cast<unsigned char>(character)));
         return std::filesystem::path(utf8);
+    }
+
+    bool TryRenamePathWithRetry(const std::filesystem::path& source, const std::filesystem::path& destination,
+                                std::error_code& error, const RenamePathOperation& operation,
+                                const RenamePathDelay& delay)
+    {
+        if (source.empty() || destination.empty())
+        {
+            error = std::make_error_code(std::errc::invalid_argument);
+            return false;
+        }
+        const auto rename = operation
+                                ? operation
+                                : RenamePathOperation{[](const auto& from, const auto& to, std::error_code& result)
+                                                      { std::filesystem::rename(from, to, result); }};
+        constexpr std::array delays{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
+                                    std::chrono::milliseconds(40), std::chrono::milliseconds(80),
+                                    std::chrono::milliseconds(160)};
+        for (std::size_t attempt = 0; attempt < delays.size(); ++attempt)
+        {
+            error.clear();
+            rename(source, destination, error);
+            if (!error)
+                return true;
+            if (!IsTransientRenameError(error))
+                return false;
+            if (delay)
+                delay(attempt, delays[attempt]);
+            else
+                std::this_thread::sleep_for(delays[attempt]);
+        }
+        return false;
+    }
+
+    void RenamePathWithRetry(const std::filesystem::path& source, const std::filesystem::path& destination,
+                             const RenamePathOperation& operation, const RenamePathDelay& delay)
+    {
+        std::error_code error;
+        if (TryRenamePathWithRetry(source, destination, error, operation, delay))
+            return;
+        const auto resolvedSource = std::filesystem::absolute(source).lexically_normal();
+        const auto resolvedDestination = std::filesystem::absolute(destination).lexically_normal();
+        throw std::runtime_error("Cannot rename '" + resolvedSource.string() + "' to '" + resolvedDestination.string() +
+                                 "': " + error.message());
     }
 
     std::string ReadTextFile(const std::filesystem::path& path, const std::size_t maximumBytes)

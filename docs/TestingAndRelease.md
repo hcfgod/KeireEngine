@@ -45,6 +45,9 @@ build identity, build the requested target, and run the executable with the expe
 Noninteractive repository launcher commands preserve child-script failures as their process exit code. Automation must
 invoke the repository launcher directly and treat every nonzero result as a failed build, test, run, or package step.
 The interactive menu reports failures and remains open for another command.
+Direct test executables and top-level launcher commands therefore have identical pass/fail semantics. Both script
+regression harnesses create an isolated child that exits with a known nonzero code and require the launcher to return
+that exact code.
 
 ## Baseline Validation
 
@@ -150,8 +153,13 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset cl
 bash Scripts/Tests/test-unix.sh
 ```
 
-The harnesses exercise argument validation, dependency mappings, generated identity, package-stage requirements,
-public dependency isolation, and safe cleanup behavior without performing a full release build.
+The harnesses exercise argument validation, launcher exit propagation, dependency mappings, generated identity,
+package-stage requirements, public dependency isolation, and safe cleanup behavior without performing a full release
+build. Editor behavior is asserted by compiled controller/document tests rather than source-string matching.
+
+Asset filesystem tests inject rename outcomes and backoff callbacks. Transient sharing/permission failures receive five
+bounded attempts with 10/20/40/80/160 ms delays; nontransient errors fail immediately and identify both resolved paths.
+Asset publication callers use the same helper for forward and rollback moves.
 
 Normal Debug and Release test commands also build `KeireRenderTests`. Windows attempts D3D12 and Vulkan, Linux attempts
 Vulkan, and macOS attempts Metal. An unavailable local driver is reported as a skip; set `KEIRE_REQUIRE_GPU_TESTS=all`

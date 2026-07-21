@@ -1,4 +1,5 @@
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <nlohmann/json.hpp>
 
@@ -294,17 +295,18 @@ namespace Keire::Detail
         error.clear();
         if (std::filesystem::exists(destination))
         {
-            std::filesystem::rename(destination, backup, error);
-            if (error)
-                throw std::runtime_error("Could not preserve the previous file: " + destination.string());
+            RenamePathWithRetry(destination, backup);
         }
-        std::filesystem::rename(temporary, destination, error);
-        if (error)
+        try
+        {
+            RenamePathWithRetry(temporary, destination);
+        }
+        catch (...)
         {
             std::error_code ignored;
             if (std::filesystem::exists(backup))
-                std::filesystem::rename(backup, destination, ignored);
-            throw std::runtime_error("Could not replace file atomically: " + destination.string());
+                (void)TryRenamePathWithRetry(backup, destination, ignored);
+            throw;
         }
         std::filesystem::remove(backup, error);
     }

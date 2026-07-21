@@ -4,6 +4,7 @@
 #include "Keire/Log.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <nlohmann/json.hpp>
 #include <zstd.h>
@@ -351,25 +352,18 @@ namespace Keire
             std::filesystem::remove_all(backup, error);
             if (std::filesystem::exists(destination))
             {
-                std::filesystem::rename(destination, backup, error);
-                if (error)
-                    throw std::runtime_error("Could not preserve the previous cooked asset directory.");
+                Detail::RenamePathWithRetry(destination, backup);
             }
-            constexpr int maximumPublishAttempts = 8;
-            for (int attempt = 0; attempt < maximumPublishAttempts; ++attempt)
+            try
             {
-                error.clear();
-                std::filesystem::rename(temporary, destination, error);
-                if (!error || error != std::errc::permission_denied)
-                    break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(5 * (attempt + 1)));
+                Detail::RenamePathWithRetry(temporary, destination);
             }
-            if (error)
+            catch (...)
             {
                 std::error_code ignored;
                 if (std::filesystem::exists(backup))
-                    std::filesystem::rename(backup, destination, ignored);
-                throw std::runtime_error("Could not publish the cooked asset directory atomically: " + error.message());
+                    (void)Detail::TryRenamePathWithRetry(backup, destination, ignored);
+                throw;
             }
             std::filesystem::remove_all(backup, error);
         }
@@ -1559,15 +1553,15 @@ namespace Keire
         if (std::filesystem::exists(destination) || std::filesystem::exists(destinationMetadata))
             throw std::runtime_error("Asset move destination already exists.");
         std::filesystem::create_directories(destination.parent_path());
-        std::filesystem::rename(source, destination);
+        Detail::RenamePathWithRetry(source, destination);
         try
         {
-            std::filesystem::rename(sourceMetadata, destinationMetadata);
+            Detail::RenamePathWithRetry(sourceMetadata, destinationMetadata);
         }
         catch (...)
         {
             std::error_code ignored;
-            std::filesystem::rename(destination, source, ignored);
+            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
             throw;
         }
         try
@@ -1580,8 +1574,8 @@ namespace Keire
         catch (...)
         {
             std::error_code ignored;
-            std::filesystem::rename(destinationMetadata, sourceMetadata, ignored);
-            std::filesystem::rename(destination, source, ignored);
+            (void)Detail::TryRenamePathWithRetry(destinationMetadata, sourceMetadata, ignored);
+            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
             throw;
         }
     }
@@ -1628,7 +1622,7 @@ namespace Keire
         if (std::filesystem::exists(destination))
             throw std::runtime_error("Asset folder move destination already exists.");
         std::filesystem::create_directories(destination.parent_path());
-        std::filesystem::rename(source, destination);
+        Detail::RenamePathWithRetry(source, destination);
         try
         {
             (void)Refresh();
@@ -1636,7 +1630,7 @@ namespace Keire
         catch (...)
         {
             std::error_code ignored;
-            std::filesystem::rename(destination, source, ignored);
+            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
             throw;
         }
     }
@@ -1696,18 +1690,18 @@ namespace Keire
         const auto source = m_Impl->SourceRoot / record->RelativePath;
         const auto destination = root / source.filename();
         const auto destinationMetadata = root / record->MetadataPath.filename();
-        std::filesystem::rename(source, destination);
+        Detail::RenamePathWithRetry(source, destination);
         try
         {
-            std::filesystem::rename(record->MetadataPath, destinationMetadata);
+            Detail::RenamePathWithRetry(record->MetadataPath, destinationMetadata);
             const std::array assets{id};
             WriteTrashManifest(root, transaction, record->RelativePath, assets, false);
         }
         catch (...)
         {
             std::error_code ignored;
-            std::filesystem::rename(destinationMetadata, record->MetadataPath, ignored);
-            std::filesystem::rename(destination, source, ignored);
+            (void)Detail::TryRenamePathWithRetry(destinationMetadata, record->MetadataPath, ignored);
+            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
             std::filesystem::remove_all(root, ignored);
             throw;
         }
@@ -1730,7 +1724,7 @@ namespace Keire
         const auto root = m_Impl->Specification.ProjectRoot / "Library" / "Trash" / transaction.ToString();
         std::filesystem::create_directories(root);
         const auto destination = root / source.filename();
-        std::filesystem::rename(source, destination);
+        Detail::RenamePathWithRetry(source, destination);
         try
         {
             WriteTrashManifest(root, transaction, normalized, assets, true);
@@ -1738,7 +1732,7 @@ namespace Keire
         catch (...)
         {
             std::error_code ignored;
-            std::filesystem::rename(destination, source, ignored);
+            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
             std::filesystem::remove_all(root, ignored);
             throw;
         }
@@ -1784,22 +1778,22 @@ namespace Keire
         std::filesystem::path sourceMetadata;
         std::filesystem::path destinationMetadata;
         if (record.Folder)
-            std::filesystem::rename(source, destination);
+            Detail::RenamePathWithRetry(source, destination);
         else
         {
             sourceMetadata = root / (record.OriginalPath.filename().string() + ".keiremeta");
             destinationMetadata = std::filesystem::path(destination.string() + ".keiremeta");
             if (std::filesystem::exists(destinationMetadata))
                 throw std::runtime_error("Asset trash restore metadata destination already exists.");
-            std::filesystem::rename(source, destination);
+            Detail::RenamePathWithRetry(source, destination);
             try
             {
-                std::filesystem::rename(sourceMetadata, destinationMetadata);
+                Detail::RenamePathWithRetry(sourceMetadata, destinationMetadata);
             }
             catch (...)
             {
                 std::error_code ignored;
-                std::filesystem::rename(destination, source, ignored);
+                (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
                 throw;
             }
         }
@@ -1811,8 +1805,8 @@ namespace Keire
         {
             std::error_code ignored;
             if (!record.Folder)
-                std::filesystem::rename(destinationMetadata, sourceMetadata, ignored);
-            std::filesystem::rename(destination, source, ignored);
+                (void)Detail::TryRenamePathWithRetry(destinationMetadata, sourceMetadata, ignored);
+            (void)Detail::TryRenamePathWithRetry(destination, source, ignored);
             throw;
         }
         std::error_code ignored;

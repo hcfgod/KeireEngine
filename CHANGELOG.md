@@ -6,6 +6,9 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ### Fixed
 
+- Asset move, folder, trash/restore, and cooked-publication renames now retry only transient sharing/permission
+  failures with bounded backoff and resolved-path diagnostics. Script harnesses rely on compiled editor behavior tests
+  instead of stale implementation-text probes while still proving top-level launcher failure propagation.
 - Scene, Hierarchy, Inspector, Input Actions, and Project Settings panels now own their dock registration and content
   boundary; material drafts own their source/baseline lifecycle in `MaterialDocument`, document mutation storage is no
   longer public, and entity, selection, Play, save, and history actions share the command router.

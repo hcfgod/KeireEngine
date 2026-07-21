@@ -217,6 +217,27 @@ TEST_CASE("scene rectangle selection returns every active projected entity in th
     CHECK(selected == std::vector<Keire::EntityId>{left.Id()});
 }
 
+TEST_CASE("scene gizmo controller owns tool shortcuts and visualization settings")
+{
+    KeireEditor::SceneGizmoController controller;
+    CHECK(controller.ApplyToolShortcut(Keire::UiKey::Q));
+    CHECK(controller.ActiveTool() == KeireEditor::SceneTool::View);
+    CHECK(controller.ApplyToolShortcut(Keire::UiKey::W));
+    CHECK(controller.ActiveTool() == KeireEditor::SceneTool::Translate);
+    CHECK(controller.ApplyToolShortcut(Keire::UiKey::E));
+    CHECK(controller.ActiveTool() == KeireEditor::SceneTool::Rotate);
+    CHECK(controller.ApplyToolShortcut(Keire::UiKey::R));
+    CHECK(controller.ActiveTool() == KeireEditor::SceneTool::Scale);
+    CHECK_FALSE(controller.ApplyToolShortcut(Keire::UiKey::F));
+
+    controller.SetSnapping(true);
+    controller.SetShowCameraFrustums(false);
+    controller.SetShowLightDirections(false);
+    CHECK(controller.Settings().Snapping);
+    CHECK_FALSE(controller.Settings().ShowCameraFrustums);
+    CHECK_FALSE(controller.Settings().ShowLightDirections);
+}
+
 TEST_CASE("scene transform groups move every selected root once and restore the drag baseline")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000032"),
