@@ -1,11 +1,11 @@
 {
   "ambientColor": [
-    0.18,
-    0.2,
-    0.24,
+    0.18000000715255737,
+    0.20000000298023224,
+    0.23999999463558197,
     1.0
   ],
-  "ambientIntensity": 1.0,
+  "ambientIntensity": 0.4169999957084656,
   "exposure": 1.0,
   "schemaVersion": 1
 }

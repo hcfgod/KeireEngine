@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -8,6 +9,7 @@
 #include "KeireClient/Editor/SceneGizmoController.h"
 #include "KeireClient/Editor/ScenePicker.h"
 #include "KeireClient/Editor/ScenePlayChanges.h"
+#include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
@@ -16,6 +18,7 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -165,6 +168,21 @@ TEST_CASE("editor command router centralizes availability and execution")
     for (const auto command : routedCommands)
         CHECK(router.Execute(command));
     CHECK(executions == 1 + routedCommands.size());
+}
+
+TEST_CASE("Play changes review remains pending until it is explicitly resolved")
+{
+    KeireEditor::ScenePlayChangesPanel panel;
+    CHECK_FALSE(panel.Pending());
+
+    panel.Open();
+    CHECK(panel.Pending());
+
+    panel.Open();
+    CHECK(panel.Pending());
+
+    panel.Close();
+    CHECK_FALSE(panel.Pending());
 }
 
 TEST_CASE("scene document owns selection and deterministic close state")
@@ -687,6 +705,57 @@ TEST_CASE("scene camera state and entity locking persist without a workspace lay
     CHECK(restored.State().YawDegrees == doctest::Approx(state.YawDegrees));
     CHECK(restored.State().Projection == Keire::Detail::EditorCameraProjection::Orthographic);
     CHECK(restored.LockedEntity() == camera.LockedEntity());
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("scene camera single F frames and double F locks the selected entity")
+{
+    KeireEditor::SceneCameraController camera;
+    const auto first = Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000051");
+    const auto second = Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000052");
+
+    CHECK(camera.ApplyFocusShortcut(first, Keire::TimeStep::FromSeconds(1.0)) ==
+          KeireEditor::SceneFocusShortcutAction::Frame);
+    CHECK(camera.ApplyFocusShortcut(first, Keire::TimeStep::FromSeconds(1.2)) ==
+          KeireEditor::SceneFocusShortcutAction::Lock);
+    CHECK(camera.LockedEntity() == first);
+    CHECK(camera.ApplyFocusShortcut(second, Keire::TimeStep::FromSeconds(2.0)) ==
+          KeireEditor::SceneFocusShortcutAction::Frame);
+    CHECK(camera.ApplyFocusShortcut(second, Keire::TimeStep::FromSeconds(2.5)) ==
+          KeireEditor::SceneFocusShortcutAction::Frame);
+    CHECK(camera.LockedEntity() == first);
+    CHECK(camera.ApplyFocusShortcut({}, Keire::TimeStep::FromSeconds(2.6)) ==
+          KeireEditor::SceneFocusShortcutAction::None);
+}
+
+TEST_CASE("editor window placement persists windowed bounds and display state")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-EditorWindowPlacement-Test";
+    const auto path = root / "editor-window.state";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+
+    KeireEditor::EditorWindowPlacement placement;
+    placement.Position = {-1440, 90};
+    placement.WindowedSize = {1560, 940};
+    placement.Mode = Keire::WindowMode::BorderlessFullscreen;
+    REQUIRE(KeireEditor::SaveEditorWindowPlacement(path, placement));
+    const auto restored = KeireEditor::LoadEditorWindowPlacement(path);
+    REQUIRE(restored);
+    CHECK(restored->Position == placement.Position);
+    CHECK(restored->WindowedSize == placement.WindowedSize);
+    CHECK(restored->Mode == placement.Mode);
+
+    Keire::WindowSpecification specification;
+    KeireEditor::PrepareEditorWindow(*restored, specification);
+    CHECK(specification.Width == placement.WindowedSize.Width);
+    CHECK(specification.Height == placement.WindowedSize.Height);
+    CHECK_FALSE(specification.Visible);
+    CHECK_FALSE(specification.Maximized);
+    CHECK(specification.Mode == Keire::WindowMode::Windowed);
+
+    std::ofstream(path, std::ios::trunc) << "KEIRE_EDITOR_WINDOW 1\n0 0 10 10\n0 0\n";
+    CHECK_FALSE(KeireEditor::LoadEditorWindowPlacement(path));
     std::filesystem::remove_all(root, error);
 }
 

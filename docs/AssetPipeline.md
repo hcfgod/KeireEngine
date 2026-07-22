@@ -60,6 +60,8 @@ snapshots, while import, cook, external publication, receipt replay, rename, mov
 under one operation boundary. Nested import-to-cook calls remain safe, and parallel callers cannot reset or combine
 each other's prepared cook inputs. Optional stop tokens and operation progress callbacks allow tools to cancel before
 publication and report scanning, importing, cooking, and publication without exposing editor implementation types.
+Snapshot queries use only the record-store lock and never wait for the operation boundary, so Project Browser drawing,
+thumbnail lookup, and editor selection remain responsive while a scene save triggers background catalog work.
 
 `ImportAll()` hashes sources with SHA-256 and stores immutable raw objects below `Library/AssetCache/Objects`. Existing
 objects are cache hits. It then publishes the development runtime directory transactionally under

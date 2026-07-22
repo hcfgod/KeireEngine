@@ -4,14 +4,14 @@ namespace KeireEditor
 {
     ScenePlayDecision ScenePlayChangesPanel::Draw(Keire::UiFrame& ui, ScenePlayChangeSet& changes)
     {
+        if (!m_ReviewPending)
+            return ScenePlayDecision::None;
         if (m_OpenRequested)
-        {
             ui.OpenPopup("Play Mode Changes");
-            m_OpenRequested = false;
-        }
         auto popup = ui.BeginPopupModal("Play Mode Changes");
         if (!popup)
             return ScenePlayDecision::None;
+        m_OpenRequested = false;
 
         ui.Text("Choose the runtime changes to keep in the edit scene.");
         ui.TextColored({0.65F, 0.68F, 0.75F, 1.0F},
@@ -62,6 +62,7 @@ namespace KeireEditor
         {
             if (ui.Button("Apply Selected and Stop"))
             {
+                Close();
                 ui.CloseCurrentPopup();
                 return ScenePlayDecision::Apply;
             }
@@ -69,12 +70,14 @@ namespace KeireEditor
         ui.SameLine();
         if (ui.Button("Discard and Stop"))
         {
+            Close();
             ui.CloseCurrentPopup();
             return ScenePlayDecision::Discard;
         }
         ui.SameLine();
         if (ui.Button("Cancel"))
         {
+            Close();
             ui.CloseCurrentPopup();
             return ScenePlayDecision::Cancel;
         }

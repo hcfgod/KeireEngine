@@ -10,6 +10,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <ranges>
 #include <string>
@@ -462,6 +463,62 @@ TEST_CASE("Dependency-free importers restore unchanged cached output without rer
     const auto second = database->ImportAll();
     CHECK(second.CacheHits == 1);
     CHECK(importCalls.load() == 1);
+}
+
+TEST_CASE("Asset record snapshots remain responsive while an import operation is blocked")
+{
+    TemporaryAssetProject project;
+    std::atomic_bool blockImport = false;
+    std::atomic_bool importerEntered = false;
+    std::atomic_bool releaseImporter = false;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.BlockingSnapshot";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000021");
+    importer.Extensions = {".blocking"};
+    importer.ContextualImport = [&](const Keire::AssetImportContext&, const std::span<const std::byte> bytes)
+    {
+        if (blockImport.load())
+        {
+            importerEntered.store(true);
+            while (!releaseImporter.load())
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string initialSource = "initial source";
+    const auto id = database->CreateAsset("Responsive.blocking", importer,
+                                          std::as_bytes(std::span(initialSource.data(), initialSource.size())));
+    REQUIRE_NOTHROW((void)database->ImportAll());
+
+    project.Write("Responsive.blocking", "changed source that invalidates the cached import");
+    blockImport.store(true);
+    auto import = std::async(std::launch::async, [&] { return database->ImportAll(); });
+    const auto importDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!importerEntered.load() && std::chrono::steady_clock::now() < importDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+
+    const bool entered = importerEntered.load();
+    CHECK(entered);
+    auto query = std::async(std::launch::async,
+                            [&]
+                            {
+                                const auto records = database->Records();
+                                const auto byId = database->Find(id);
+                                const auto byPath = database->Find("Responsive.blocking");
+                                const auto status = database->ImportStatus(id);
+                                return records.size() == 1 && byId && byPath && byId->Id == id && byPath->Id == id &&
+                                       status.Id == id;
+                            });
+    const auto queryState = query.wait_for(std::chrono::milliseconds(250));
+    releaseImporter.store(true);
+
+    CHECK(queryState == std::future_status::ready);
+    CHECK(query.get());
+    CHECK_NOTHROW((void)import.get());
 }
 
 TEST_CASE("Development catalogs tolerate missing references while strict cooking rejects them")

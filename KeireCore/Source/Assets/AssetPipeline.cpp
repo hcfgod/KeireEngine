@@ -874,14 +874,15 @@ namespace Keire
 
     std::vector<AssetSourceRecord> AssetDatabase::Records() const
     {
-        std::scoped_lock operation(m_Impl->OperationMutex);
+        // Queries return value snapshots and must remain available while a background import stages its next
+        // publication. The records mutex protects each snapshot without making editor frames wait for the
+        // operation-wide transaction lock.
         std::scoped_lock lock(m_Impl->Mutex);
         return m_Impl->Records;
     }
 
     std::optional<AssetSourceRecord> AssetDatabase::Find(const AssetId id) const
     {
-        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = std::ranges::find(m_Impl->Records, id, &AssetSourceRecord::Id);
         return found == m_Impl->Records.end() ? std::nullopt : std::optional<AssetSourceRecord>(*found);
@@ -890,7 +891,6 @@ namespace Keire
     std::optional<AssetSourceRecord> AssetDatabase::Find(const std::filesystem::path& relativePath) const
     {
         const auto normalized = relativePath.lexically_normal();
-        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = std::ranges::find(m_Impl->Records, normalized, &AssetSourceRecord::RelativePath);
         return found == m_Impl->Records.end() ? std::nullopt : std::optional<AssetSourceRecord>(*found);
@@ -1081,7 +1081,6 @@ namespace Keire
 
     AssetImportStatus AssetDatabase::ImportStatus(const AssetId id) const
     {
-        std::scoped_lock operation(m_Impl->OperationMutex);
         std::scoped_lock lock(m_Impl->Mutex);
         const auto found = m_Impl->ImportStatuses.find(id);
         return found == m_Impl->ImportStatuses.end() ? AssetImportStatus{.Id = id} : found->second;

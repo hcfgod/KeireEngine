@@ -56,6 +56,8 @@ after layers, Input, Scenes, and Assets stop. No service consults the process wo
 `ProjectRegistry` is Hub-owned per-user discovery state. `KeireHub` may inspect and launch projects but never owns editor
 assets or the exclusive lock. Each detached KeireClient process revalidates and locks its requested project. The packaged
 `samples/KeireSandbox` is a complete project and is validated through the same asset tool contract as user projects.
+KeireClient keeps native window placement below project-local `Library/UserSettings`: normal bounds remain separate from
+maximized/fullscreen state, restore occurs before the window becomes visible, and minimized state is never persisted.
 
 ## Scene Ownership
 

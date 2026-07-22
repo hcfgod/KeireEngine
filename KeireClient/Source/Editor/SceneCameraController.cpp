@@ -8,6 +8,31 @@
 
 namespace KeireEditor
 {
+    SceneFocusShortcutAction SceneCameraController::ApplyFocusShortcut(const Keire::EntityId selection,
+                                                                       const Keire::TimeStep timestamp) noexcept
+    {
+        constexpr double doublePressSeconds = 0.35;
+        if (!selection)
+        {
+            m_LastFocusShortcutEntity = {};
+            m_LastFocusShortcutSeconds = -1.0;
+            return SceneFocusShortcutAction::None;
+        }
+        const auto now = timestamp.Seconds();
+        const bool doublePress = selection == m_LastFocusShortcutEntity && m_LastFocusShortcutSeconds >= 0.0 &&
+                                 now >= m_LastFocusShortcutSeconds &&
+                                 now - m_LastFocusShortcutSeconds <= doublePressSeconds;
+        m_LastFocusShortcutEntity = selection;
+        m_LastFocusShortcutSeconds = now;
+        if (!doublePress)
+            return SceneFocusShortcutAction::Frame;
+
+        SetLockedEntity(selection);
+        m_LastFocusShortcutEntity = {};
+        m_LastFocusShortcutSeconds = -1.0;
+        return SceneFocusShortcutAction::Lock;
+    }
+
     bool SceneCameraController::Load(const std::filesystem::path& path) noexcept
     {
         try

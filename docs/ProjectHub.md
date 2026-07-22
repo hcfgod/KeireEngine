@@ -5,9 +5,10 @@ the Hub, which remains alive while editor processes run.
 
 The Hub provides:
 
+- A persistent left navigation rail for Projects, creation, existing-project discovery, and sample quick start.
 - Starter and Empty project creation with an asynchronous native parent-folder picker.
 - Existing-project opening by folder picker or pasted path.
-- Searchable recent cards with status, pin/unpin, remove, reveal, and open actions.
+- Responsive searchable recent cards with status, path, pin/unpin, remove, reveal, and open actions.
 - A discoverable packaged or repository `KeireSandbox` sample.
 - Clear diagnostics for invalid, missing, incompatible, or already-open projects.
 

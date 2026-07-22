@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -52,6 +53,22 @@ namespace
             return "Open in another editor";
         }
         return "Unknown";
+    }
+
+    [[nodiscard]] Keire::UiColor StatusColor(const Keire::ProjectStatus status) noexcept
+    {
+        switch (status)
+        {
+        case Keire::ProjectStatus::Ready:
+            return {0.32F, 0.84F, 0.58F, 1.0F};
+        case Keire::ProjectStatus::InUse:
+            return {0.96F, 0.72F, 0.28F, 1.0F};
+        case Keire::ProjectStatus::Missing:
+        case Keire::ProjectStatus::Invalid:
+        case Keire::ProjectStatus::RequiresNewerEngine:
+            return {0.96F, 0.38F, 0.42F, 1.0F};
+        }
+        return {0.62F, 0.66F, 0.74F, 1.0F};
     }
 
     class HubLayer final : public Keire::Layer
@@ -148,29 +165,39 @@ namespace
             options.NoSavedSettings = true;
             if (auto window = ui.BeginWindow("Kéire Project Hub", nullptr, options); window)
             {
-                ui.TextColored({0.30F, 0.55F, 1.0F, 1.0F}, "KÉIRE PROJECT HUB");
-                ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F}, "Create and open isolated engine projects.");
-                ui.Separator();
-                if (ui.Button("New Project"))
-                    ui.OpenPopup("Create Project");
+                if (auto sidebar = ui.BeginChild("HubSidebar", {244.0F, 0.0F}, true); sidebar)
+                    DrawSidebar(ui);
                 ui.SameLine();
-                if (ui.Button("Open Existing"))
-                    ui.OpenPopup("Open Project");
-                ui.SameLine();
-                if (ui.Button("Refresh") && m_Registry)
-                    Refresh();
-                ui.SameLine();
-                (void)ui.InputText("Search", m_Search);
-
-                if (!m_Notice.empty())
+                if (auto workspace = ui.BeginChild("HubWorkspace", {}, false); workspace)
                 {
+                    ui.TextColored({0.92F, 0.94F, 0.98F, 1.0F}, "PROJECTS");
+                    ui.TextColored({0.56F, 0.61F, 0.70F, 1.0F}, "Continue a recent project or start something new.");
                     ui.Spacing();
-                    ui.TextColored(m_NoticeError ? Keire::UiColor{0.96F, 0.32F, 0.36F, 1.0F}
-                                                 : Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F},
-                                   m_Notice);
+                    if (ui.Button("New Project", {126.0F, 36.0F}))
+                        m_RequestCreatePopup = true;
+                    ui.SameLine();
+                    if (ui.Button("Open Existing", {126.0F, 36.0F}))
+                        m_RequestOpenPopup = true;
+                    ui.SameLine();
+                    if (ui.Button("Refresh", {86.0F, 36.0F}) && m_Registry)
+                        Refresh();
+                    ui.Spacing();
+                    (void)ui.InputText("Search Projects", m_Search);
+
+                    if (!m_Notice.empty())
+                    {
+                        ui.Spacing();
+                        ui.TextColored(m_NoticeError ? Keire::UiColor{0.96F, 0.32F, 0.36F, 1.0F}
+                                                     : Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F},
+                                       m_Notice);
+                    }
+                    ui.Spacing();
+                    DrawProjects(ui);
                 }
-                ui.Spacing();
-                DrawProjects(ui);
+                if (std::exchange(m_RequestCreatePopup, false))
+                    ui.OpenPopup("Create Project");
+                if (std::exchange(m_RequestOpenPopup, false))
+                    ui.OpenPopup("Open Project");
                 DrawCreateDialog(ui);
                 DrawOpenDialog(ui);
             }
@@ -183,6 +210,40 @@ namespace
             CreateLocation,
             OpenProject
         };
+
+        void DrawSidebar(Keire::UiFrame& ui)
+        {
+            ui.Spacing();
+            ui.TextColored({0.34F, 0.61F, 1.0F, 1.0F}, "KÉIRE");
+            ui.TextColored({0.58F, 0.63F, 0.72F, 1.0F}, "PROJECT HUB");
+            ui.Spacing();
+            ui.Separator();
+            ui.Spacing();
+            const auto width = std::max(ui.ContentAvailable().Width, 1.0F);
+            (void)ui.Button("Projects", {width, 40.0F});
+            if (ui.Button("Create New", {width, 40.0F}))
+                m_RequestCreatePopup = true;
+            if (ui.Button("Add Existing", {width, 40.0F}))
+                m_RequestOpenPopup = true;
+            ui.Spacing();
+            ui.Separator();
+            ui.Spacing();
+            ui.TextColored({0.58F, 0.63F, 0.72F, 1.0F}, "QUICK START");
+            if (const auto sample = SampleProject())
+                if (ui.Button("Kéire Sandbox", {width, 38.0F}))
+                    Open(*sample);
+            ui.Spacing();
+            ui.TextColored({0.46F, 0.50F, 0.58F, 1.0F}, "Engine " + std::string(Keire::GetBuildInfo().Version));
+        }
+
+        [[nodiscard]] std::optional<std::filesystem::path> SampleProject() const
+        {
+            const std::array samples{std::filesystem::current_path() / "Samples" / "KeireSandbox",
+                                     m_Executable.parent_path().parent_path() / "samples" / "KeireSandbox"};
+            const auto sample = std::ranges::find_if(
+                samples, [](const auto& path) { return Keire::Project::Inspect(path) == Keire::ProjectStatus::Ready; });
+            return sample == samples.end() ? std::nullopt : std::optional<std::filesystem::path>(*sample);
+        }
 
         [[nodiscard]] bool TrayAvailable() const noexcept { return m_Tray && m_Tray->IsAvailable(); }
 
@@ -328,7 +389,7 @@ namespace
 
         void DrawProjects(Keire::UiFrame& ui)
         {
-            ui.TextColored({0.91F, 0.92F, 0.95F, 1.0F}, "RECENT PROJECTS");
+            ui.TextColored({0.82F, 0.85F, 0.91F, 1.0F}, "RECENT PROJECTS");
             if (!m_Registry)
             {
                 ui.Text("No project registry is available.");
@@ -336,69 +397,79 @@ namespace
             }
             const auto search = Lower(m_Search);
             const auto entries = m_Registry->Entries();
-            bool visible = false;
+            std::vector<const Keire::RecentProject*> visible;
+            visible.reserve(entries.size());
             for (const auto& entry : entries)
             {
                 if (!search.empty() && Lower(entry.Name).find(search) == std::string::npos &&
                     Lower(Utf8Path(entry.Root)).find(search) == std::string::npos)
                     continue;
-                visible = true;
-                auto id = ui.PushId(entry.Id.ToString());
-                if (auto card = ui.BeginChild("ProjectCard", {0.0F, 92.0F}, true); card)
+                visible.push_back(&entry);
+            }
+            if (visible.empty())
+            {
+                ui.Spacing();
+                ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F},
+                               entries.empty() ? "No recent projects yet. Create or add one to get started."
+                                               : "No recent projects match this search.");
+                return;
+            }
+
+            ui.Spacing();
+            const std::size_t columns = ui.ContentAvailable().Width >= 760.0F ? 2 : 1;
+            Keire::UiTableOptions tableOptions;
+            tableOptions.Sizing = Keire::UiTableSizing::Equal;
+            tableOptions.Borders = false;
+            tableOptions.Resizable = false;
+            tableOptions.RowBackground = false;
+            tableOptions.PersistSettings = false;
+            if (auto grid = ui.BeginTable("RecentProjectCards", columns, tableOptions); grid)
+                for (std::size_t index = 0; index < visible.size(); ++index)
                 {
-                    ui.TextColored({0.30F, 0.55F, 1.0F, 1.0F}, entry.Name);
-                    ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F}, Utf8Path(entry.Root));
-                    ui.Text(StatusLabel(entry.Status));
-                    ui.SameLine();
-                    if (ui.Button(entry.Pinned ? "Unpin" : "Pin"))
+                    const auto& entry = *visible[index];
+                    if (index % columns == 0)
+                        ui.TableNextRow();
+                    (void)ui.TableNextColumn();
+                    auto id = ui.PushId(entry.Id.ToString());
+                    if (auto card = ui.BeginChild("ProjectCard", {0.0F, 126.0F}, true); card)
                     {
-                        try
+                        ui.TextColored({0.88F, 0.91F, 0.97F, 1.0F},
+                                       entry.Pinned ? "PINNED  |  " + entry.Name : entry.Name);
+                        ui.TextColored(StatusColor(entry.Status), StatusLabel(entry.Status));
+                        ui.TextColored({0.55F, 0.59F, 0.67F, 1.0F}, Utf8Path(entry.Root));
+                        ui.Spacing();
+                        if (auto disabled = ui.BeginDisabled(entry.Status != Keire::ProjectStatus::Ready); disabled)
+                            if (ui.Button("Open", {74.0F, 30.0F}))
+                                Open(entry.Root);
+                        ui.SameLine();
+                        if (ui.Button("Reveal", {74.0F, 30.0F}))
+                            Reveal(entry.Root);
+                        ui.SameLine();
+                        if (ui.Button(entry.Pinned ? "Unpin" : "Pin", {64.0F, 30.0F}))
                         {
-                            (void)m_Registry->SetPinned(entry.Id, !entry.Pinned);
+                            try
+                            {
+                                (void)m_Registry->SetPinned(entry.Id, !entry.Pinned);
+                            }
+                            catch (const std::exception& error)
+                            {
+                                SetError(error.what());
+                            }
                         }
-                        catch (const std::exception& error)
+                        ui.SameLine();
+                        if (ui.Button("Remove", {74.0F, 30.0F}))
                         {
-                            SetError(error.what());
+                            try
+                            {
+                                (void)m_Registry->Remove(entry.Id);
+                            }
+                            catch (const std::exception& error)
+                            {
+                                SetError(error.what());
+                            }
                         }
-                    }
-                    ui.SameLine();
-                    if (ui.Button("Remove"))
-                    {
-                        try
-                        {
-                            (void)m_Registry->Remove(entry.Id);
-                        }
-                        catch (const std::exception& error)
-                        {
-                            SetError(error.what());
-                        }
-                    }
-                    ui.SameLine();
-                    if (ui.Button("Reveal"))
-                        Reveal(entry.Root);
-                    ui.SameLine();
-                    if (auto disabled = ui.BeginDisabled(entry.Status != Keire::ProjectStatus::Ready); disabled)
-                    {
-                        if (ui.Button("Open"))
-                            Open(entry.Root);
                     }
                 }
-                ui.Spacing();
-            }
-            if (!visible)
-                ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F}, "No recent projects match this search.");
-
-            const std::array samples{std::filesystem::current_path() / "Samples" / "KeireSandbox",
-                                     m_Executable.parent_path().parent_path() / "samples" / "KeireSandbox"};
-            const auto sample = std::ranges::find_if(
-                samples, [](const auto& path) { return Keire::Project::Inspect(path) == Keire::ProjectStatus::Ready; });
-            if (sample != samples.end())
-            {
-                ui.Separator();
-                ui.TextColored({0.91F, 0.92F, 0.95F, 1.0F}, "SAMPLES");
-                if (ui.Button("Open Kéire Sandbox"))
-                    Open(*sample);
-            }
         }
 
         void DrawCreateDialog(Keire::UiFrame& ui)
@@ -476,6 +547,8 @@ namespace
         std::uint32_t m_Frames = 0;
         bool m_Starter = true;
         bool m_NoticeError = false;
+        bool m_RequestCreatePopup = false;
+        bool m_RequestOpenPopup = false;
         bool m_Smoke = false;
     };
 

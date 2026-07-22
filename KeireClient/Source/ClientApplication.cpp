@@ -1,11 +1,13 @@
 #include "Keire/Core.h"
 
+#include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -107,13 +109,146 @@ namespace
         std::uint32_t m_FrameCount = 0;
     };
 
+    class EditorWindowPlacementLayer final : public Keire::Layer
+    {
+      public:
+        EditorWindowPlacementLayer(std::filesystem::path path,
+                                   std::optional<KeireEditor::EditorWindowPlacement> placement)
+            : Layer("EditorWindowPlacement"), m_Path(std::move(path)), m_Placement(std::move(placement))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            const auto window = Owner().MainWindow();
+            if (m_Placement)
+            {
+                try
+                {
+                    window->SetPosition(m_Placement->Position);
+                    if (m_Placement->Mode == Keire::WindowMode::BorderlessFullscreen)
+                        window->SetMode(m_Placement->Mode);
+                    else if (m_Placement->Maximized)
+                        window->Maximize();
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CLIENT_WARN("Could not fully restore the previous editor window placement: {}", error.what());
+                }
+                window->SetVisible(true);
+            }
+            else
+            {
+                m_Placement = KeireEditor::EditorWindowPlacement{};
+                CaptureWindowedBounds();
+            }
+            m_Placement->Mode = window->Mode();
+            m_Placement->Maximized = window->Maximized();
+
+            Listen<Keire::WindowMovedEvent>(
+                [this](const auto& event)
+                {
+                    if (IsMainWindow(event.Header) && WindowedBoundsAreActive())
+                        m_Placement->Position = event.Position;
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::WindowResizedEvent>(
+                [this](const auto& event)
+                {
+                    if (IsMainWindow(event.Header) && WindowedBoundsAreActive())
+                        m_Placement->WindowedSize = event.Size;
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::WindowMaximizedEvent>(
+                [this](const auto& event)
+                {
+                    if (IsMainWindow(event.Header))
+                        m_Placement->Maximized = true;
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::WindowRestoredEvent>(
+                [this](const auto& event)
+                {
+                    if (IsMainWindow(event.Header))
+                    {
+                        m_Placement->Maximized = Owner().MainWindow()->Maximized();
+                        CaptureWindowedBounds();
+                    }
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::WindowEnteredFullscreenEvent>(
+                [this](const auto& event)
+                {
+                    if (IsMainWindow(event.Header))
+                    {
+                        m_Placement->Mode = Keire::WindowMode::BorderlessFullscreen;
+                        m_Placement->Maximized = false;
+                    }
+                    return Keire::EventFlow::Continue;
+                });
+            Listen<Keire::WindowLeftFullscreenEvent>(
+                [this](const auto& event)
+                {
+                    if (IsMainWindow(event.Header))
+                    {
+                        m_Placement->Mode = Keire::WindowMode::Windowed;
+                        CaptureWindowedBounds();
+                    }
+                    return Keire::EventFlow::Continue;
+                });
+        }
+
+        void OnDetach() noexcept override
+        {
+            try
+            {
+                const auto window = Owner().MainWindow();
+                m_Placement->Mode = window->Mode();
+                m_Placement->Maximized = window->Maximized();
+                CaptureWindowedBounds();
+                if (!KeireEditor::SaveEditorWindowPlacement(m_Path, *m_Placement))
+                    KEIRE_CLIENT_WARN("Could not save the editor window placement.");
+            }
+            catch (...)
+            {
+            }
+        }
+
+      private:
+        [[nodiscard]] bool IsMainWindow(const Keire::WindowEventHeader& header) const noexcept
+        {
+            return header.Window == Owner().MainWindow()->Id();
+        }
+
+        [[nodiscard]] bool WindowedBoundsAreActive() const noexcept
+        {
+            return m_Placement->Mode == Keire::WindowMode::Windowed && !m_Placement->Maximized &&
+                   !Owner().MainWindow()->Minimized();
+        }
+
+        void CaptureWindowedBounds()
+        {
+            const auto window = Owner().MainWindow();
+            if (window->Mode() != Keire::WindowMode::Windowed || window->Maximized() || window->Minimized())
+                return;
+            m_Placement->Position = window->Position();
+            m_Placement->WindowedSize = window->LogicalSize();
+        }
+
+        std::filesystem::path m_Path;
+        std::optional<KeireEditor::EditorWindowPlacement> m_Placement;
+    };
+
     class ClientApplication final : public Keire::Application
     {
       public:
         ClientApplication(Keire::ApplicationSpecification specification, const bool smokeWindow, const bool smokeUi,
-                          const bool smokeProject)
+                          const bool smokeProject, std::filesystem::path windowPlacementPath,
+                          std::optional<KeireEditor::EditorWindowPlacement> windowPlacement)
             : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeUi(smokeUi),
-              m_SmokeProject(smokeProject)
+              m_SmokeProject(smokeProject), m_WindowPlacementPath(std::move(windowPlacementPath)),
+              m_WindowPlacement(std::move(windowPlacement))
         {
         }
 
@@ -127,14 +262,21 @@ namespace
             if (m_SmokeWindow)
                 (void)Layers().PushLayer(std::make_unique<SmokeLayer>());
             else
+            {
+                if (!m_WindowPlacementPath.empty())
+                    (void)Layers().PushLayer(std::make_unique<EditorWindowPlacementLayer>(
+                        m_WindowPlacementPath, std::move(m_WindowPlacement)));
                 (void)Layers().PushOverlay(
                     std::make_unique<EditorWorkspaceLayer>(m_SmokeUi || m_SmokeProject, m_SmokeProject));
+            }
         }
 
       private:
         bool m_SmokeWindow = false;
         bool m_SmokeUi = false;
         bool m_SmokeProject = false;
+        std::filesystem::path m_WindowPlacementPath;
+        std::optional<KeireEditor::EditorWindowPlacement> m_WindowPlacement;
     };
 } // namespace
 
@@ -170,7 +312,18 @@ namespace Keire
             commandLine.SmokeWindow || commandLine.SmokeUi ? SceneMode::Disabled : SceneMode::Enabled;
         specification.Input.Mode =
             commandLine.SmokeWindow || commandLine.SmokeUi ? InputMode::Disabled : InputMode::Enabled;
+        std::filesystem::path windowPlacementPath;
+        std::optional<KeireEditor::EditorWindowPlacement> windowPlacement;
+        if (!commandLine.SmokeWindow && !commandLine.SmokeUi && !commandLine.SmokeProject)
+        {
+            windowPlacementPath = std::filesystem::absolute(commandLine.ProjectPath) / "Library" / "UserSettings" /
+                                  "Workspace" / "editor-window.state";
+            windowPlacement = KeireEditor::LoadEditorWindowPlacement(windowPlacementPath);
+            if (windowPlacement)
+                KeireEditor::PrepareEditorWindow(*windowPlacement, specification.MainWindow);
+        }
         return std::make_unique<ClientApplication>(std::move(specification), commandLine.SmokeWindow,
-                                                   commandLine.SmokeUi, commandLine.SmokeProject);
+                                                   commandLine.SmokeUi, commandLine.SmokeProject,
+                                                   std::move(windowPlacementPath), std::move(windowPlacement));
     }
 } // namespace Keire

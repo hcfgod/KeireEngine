@@ -68,11 +68,14 @@ caches, workspace state, and cooked builds are ignored project-local data.
 Scene view renders the edit scene or active runtime clone with a depth-tested grid. A compact top-left overlay owns
 View/Move/Rotate/Scale, Local/Global, Snap, and settings; the top-right overlay owns projection and axis snaps. These
 overlays consume pointer input only inside their visible rectangles, leaving selection, marquee, gizmos, drops, and
-camera navigation active everywhere else. `F` frames transformed renderer and
-child bounds, `Shift+F` locks the pivot, Alt+left orbits, middle drag pans in camera space, the wheel/Alt+right zooms,
+camera navigation active everywhere else. `F` frames transformed renderer and child bounds while the Scene view is
+focused or hovered; a double-`F` locks the camera to the selected entity, and `Shift+F` toggles that lock. Alt+left
+orbits, middle drag pans in camera space, the wheel/Alt+right zooms,
 and right drag plus `WASDQE` flies. Shift accelerates navigation; the wheel adjusts fly speed; arrow keys walk/strafe;
 the orientation overlay snaps axes and toggles perspective/orthographic projection. Horizontal orbit/fly motion follows
 pointer
 motion while vertical motion retains Unity's pitch convention. Game view renders the deterministic active scene Camera
-from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content. See
+from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content.
+Closing the editor cancels queued catalog refreshes instead of forcing pending background import work to finish;
+already-saved scene and material sources remain durable and refresh on the next launch. See
 [Rendering](Rendering.md). Prefabs, scripting, and native module hot reload remain later subsystem milestones.

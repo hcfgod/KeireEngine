@@ -143,6 +143,10 @@ Logical sizes describe UI coordinates while pixel sizes describe the high-DPI dr
 
 `LoadWindowSpecification` parses `Config/Client.json` without exposing nlohmann/json. The root `window` object accepts `title`, `width`, `height`, `resizable`, `highPixelDensity`, `visible`, `maximized`, and `mode` (`windowed` or `borderlessFullscreen`). Missing optional fields retain API defaults; unknown/duplicate keys, malformed UTF-8, wrong types, invalid dimensions, oversized titles/files, and incompatible fullscreen/maximized state are errors with file and JSON-pointer-style locations.
 
+Interactive project editors additionally remember their last normal window position and size together with maximized or
+borderless-fullscreen state under `Library/UserSettings/Workspace/editor-window.state`. Restoration happens before the
+window is shown, and minimized state is intentionally not restored.
+
 KeireClient accepts `--project <path>`, `--config <path>`, `--smoke-window`, `--smoke-ui`, and `--smoke-project`.
 Interactive editor startup requires a validated project; the normal launcher opens KeireHub first. The default
 `Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. Window, Hub UI, and

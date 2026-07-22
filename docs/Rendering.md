@@ -30,7 +30,7 @@ from the edit scene, or the runtime clone while playing. The active authored Cam
 Scene and Game, so changing Camera clear color gives an immediate, consistent preview without replacing the Scene
 viewpoint. Its controls are:
 
-- `F`: focus the selected entity.
+- `F`: focus the selected entity; double-`F` locks the view to it.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.
 - Alt+left drag: orbit.
 - Middle drag: camera-local pan.

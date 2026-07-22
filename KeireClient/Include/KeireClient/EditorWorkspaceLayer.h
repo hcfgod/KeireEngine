@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -129,6 +130,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void QueueMaterialCatalogRefresh(Keire::AssetId reloadAsset = {});
     void UpdateMaterialCatalogRefresh(const Keire::Time& time);
     void FlushMaterialCatalogRefresh() noexcept;
+    void CancelMaterialCatalogRefresh() noexcept;
     void CommitMaterialDraft();
     void HandleExternalAssetDrop(const Keire::WindowFileDropEvent& event);
     void DrawExternalAssetImport(Keire::UiFrame& ui);
@@ -219,6 +221,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AssetId m_SelectedAsset;
     Keire::AssetId m_EditingAsset;
     std::future<Keire::AssetImportResult> m_MaterialCatalogFuture;
+    std::stop_source m_MaterialCatalogStopSource;
     std::uint64_t m_MaterialCatalogRequestedGeneration = 0;
     std::uint64_t m_MaterialCatalogRunningGeneration = 0;
     std::uint64_t m_MaterialCatalogAppliedGeneration = 0;

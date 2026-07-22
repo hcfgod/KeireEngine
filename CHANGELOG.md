@@ -4,6 +4,15 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Editor shutdown now cancels queued background catalog refreshes instead of forcing a project-wide import to finish;
+  saved asset sources remain durable and refresh normally on the next launch.
+- Scene view `F` reliably frames the selected entity while hovered or focused, and double-`F` locks the camera to the
+  selection like `Shift+F`.
+- Project editors restore their last normal window position and size plus maximized or borderless-fullscreen state from
+  project-local user settings. The Project Hub now uses a modern navigation rail and responsive recent-project cards.
+- Fixed scene saves freezing the editor behind their background asset import by keeping asset record and status
+  snapshot queries independent from the operation-wide publication lock.
+- Fixed Stop after Play edits getting stuck when the Play Changes modal could not open on its first frame.
 - Fixed clean Windows Ninja builds so generated built-in shader headers are produced before any engine source compiles.
 
 ### Fixed

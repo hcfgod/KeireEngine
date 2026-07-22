@@ -402,6 +402,8 @@ namespace Keire
 
             void SetSize(const LogicalExtent size) override { m_Implementation->SetSize(m_Id, size); }
 
+            void SetPosition(const WindowPosition position) override { m_Implementation->SetPosition(m_Id, position); }
+
             void SetVisible(const bool visible) override { m_Implementation->SetVisible(m_Id, visible); }
 
             void Minimize() override { m_Implementation->Minimize(m_Id); }
@@ -904,6 +906,23 @@ namespace Keire
                 iterator->second.Specification.Width = size.Width;
                 iterator->second.Specification.Height = size.Height;
             }
+        }
+
+        void SetPosition(const WindowId id, const WindowPosition position)
+        {
+            if (!RequireActiveOwner("SetPosition"))
+                return;
+
+            SDL_Window* native = NativeFor(id);
+            if (!native)
+                return;
+
+            if (!SDL_SetWindowPosition(native, position.X, position.Y))
+                throw WindowError("SDL_SetWindowPosition", LastSdlError());
+
+            std::scoped_lock lock(m_StateMutex);
+            if (auto iterator = m_Windows.find(id.Value()); iterator != m_Windows.end())
+                iterator->second.Position = position;
         }
 
         void SetVisible(const WindowId id, const bool visible)

@@ -828,7 +828,7 @@ void EditorWorkspaceLayer::OnAttach()
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
     CommitMaterialDraft();
-    FlushMaterialCatalogRefresh();
+    CancelMaterialCatalogRefresh();
     SaveSceneCamera();
     if (m_RenderEnvironmentDirty)
     {
@@ -1026,7 +1026,6 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     OpenPendingDialog(ui);
     DrawNotices(ui, workspace);
     DrawDialogs(ui, workspace);
-    DrawPlayChanges(ui);
     DrawExternalAssetImport(ui);
 
     m_SceneViewportPanel->Draw(ui);
@@ -1042,6 +1041,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     m_InputActionsPanel->Draw(ui);
     DrawInputDebugger(ui);
     m_ProjectSettingsPanel->Draw(ui);
+    DrawPlayChanges(ui);
 }
 
 void EditorWorkspaceLayer::DrawEmptyState(Keire::UiFrame& ui, const std::string_view heading,
@@ -1789,8 +1789,11 @@ void EditorWorkspaceLayer::UpdateMaterialCatalogRefresh(const Keire::Time& time)
     m_MaterialCatalogPendingAsset = {};
     m_MaterialCatalogDelaySeconds = 0.0;
     const auto database = m_AssetDatabase;
-    m_MaterialCatalogFuture = std::async(std::launch::async, [database]
-                                         { return database->ImportAll(Keire::AssetImportPolicy::KeepLastGood); });
+    m_MaterialCatalogStopSource = std::stop_source{};
+    const auto cancellation = m_MaterialCatalogStopSource.get_token();
+    m_MaterialCatalogFuture =
+        std::async(std::launch::async, [database, cancellation]
+                   { return database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, cancellation); });
 }
 
 void EditorWorkspaceLayer::FlushMaterialCatalogRefresh() noexcept
@@ -1828,6 +1831,34 @@ void EditorWorkspaceLayer::FlushMaterialCatalogRefresh() noexcept
         m_MaterialCatalogPendingAsset = {};
         m_MaterialCatalogRunningAsset = {};
     }
+}
+
+void EditorWorkspaceLayer::CancelMaterialCatalogRefresh() noexcept
+{
+    m_MaterialCatalogStopSource.request_stop();
+    if (m_MaterialCatalogFuture.valid())
+    {
+        try
+        {
+            (void)m_MaterialCatalogFuture.get();
+        }
+        catch (const Keire::AssetOperationCancelled&)
+        {
+        }
+        catch (const std::exception& error)
+        {
+            KEIRE_CLIENT_WARN("[Assets] Background catalog refresh ended during shutdown: {}", error.what());
+        }
+        catch (...)
+        {
+            KEIRE_CLIENT_WARN("[Assets] Background catalog refresh ended during shutdown with an unknown error.");
+        }
+    }
+    m_MaterialCatalogAppliedGeneration = m_MaterialCatalogRequestedGeneration;
+    m_MaterialCatalogRunningGeneration = 0;
+    m_MaterialCatalogPendingAsset = {};
+    m_MaterialCatalogRunningAsset = {};
+    m_MaterialCatalogDelaySeconds = 0.0;
 }
 
 void EditorWorkspaceLayer::CommitMaterialDraft()
@@ -2527,7 +2558,6 @@ void EditorWorkspaceLayer::RequestStopPlayMode()
             return;
         }
         m_PlayChangesPanel->Open();
-        m_Game.RequestFocus();
     }
     catch (const std::exception& error)
     {
@@ -2564,11 +2594,14 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         ReportError("Play Mode", std::string("Could not apply runtime changes: ") + error.what());
         if (m_PlaySession && m_PlayResumeState == Keire::ScenePlayState::Playing)
             m_PlaySession->Pause(false);
+        if (m_PlayChanges)
+            m_PlayChangesPanel->Open();
         return;
     }
     if (m_PlayUndoContext)
         m_PlayUndoContext->Close();
     m_PlayUndoContext.Reset();
+    m_PlayChangesPanel->Close();
     m_PlayChanges.reset();
     m_PlayChangeTracker.reset();
     m_PendingPlayEditorBefore.reset();
@@ -3032,24 +3065,29 @@ void EditorWorkspaceLayer::UpdateSceneCamera(Keire::UiFrame& ui, const Keire::Ui
             m_EditorCamera->SetLockedEntity({});
     }
 
-    if (imageState.Hovered && scene && m_SelectedSceneObject)
+    const bool focusShortcutRegion = imageState.Hovered || ui.WindowFocused();
+    if (focusShortcutRegion && scene && m_SelectedSceneObject)
     {
         const auto selected = scene->FindEntity(Keire::EntityId(m_SelectedSceneObject));
-        if (ui.Shortcut({.Key = Keire::UiKey::F, .Shift = true}))
+        const bool routeOverFocusedWindow = imageState.Hovered && !ui.WindowFocused();
+        if (selected && ui.Shortcut({.Key = Keire::UiKey::F, .Shift = true, .Global = routeOverFocusedWindow}))
         {
             m_EditorCamera->SetLockedEntity(m_EditorCamera->LockedEntity() == selected.Id() ? Keire::EntityId{}
                                                                                             : selected.Id());
             changed = true;
         }
-        else if (ui.Shortcut({Keire::UiKey::F}))
+        else if (selected && ui.Shortcut({.Key = Keire::UiKey::F, .Global = routeOverFocusedWindow}))
         {
-            SceneBounds bounds;
-            IncludeEntityBounds(selected, bounds);
-            if (bounds.Valid)
+            const auto action =
+                m_EditorCamera->ApplyFocusShortcut(selected.Id(), Owner().GetTime().RealtimeSinceStartup());
+            if (action == KeireEditor::SceneFocusShortcutAction::Frame)
             {
-                m_EditorCamera->Frame(bounds.Center(), bounds.Radius());
-                changed = true;
+                SceneBounds bounds;
+                IncludeEntityBounds(selected, bounds);
+                if (bounds.Valid)
+                    m_EditorCamera->Frame(bounds.Center(), bounds.Radius());
             }
+            changed = action != KeireEditor::SceneFocusShortcutAction::None;
         }
     }
 

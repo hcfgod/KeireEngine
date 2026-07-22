@@ -7,6 +7,13 @@
 
 namespace KeireEditor
 {
+    enum class SceneFocusShortcutAction : std::uint8_t
+    {
+        None,
+        Frame,
+        Lock
+    };
+
     class SceneCameraController final
     {
       public:
@@ -19,6 +26,8 @@ namespace KeireEditor
         void Snap(Keire::Detail::EditorCameraAxis axis) noexcept { m_Camera.Snap(axis); }
         void SetFocus(Keire::Vector3 focus) { m_Camera.SetFocus(focus); }
         void Frame(Keire::Vector3 center, float radius) { m_Camera.Frame(center, radius); }
+        [[nodiscard]] SceneFocusShortcutAction ApplyFocusShortcut(Keire::EntityId selection,
+                                                                  Keire::TimeStep timestamp) noexcept;
 
         [[nodiscard]] Keire::EntityId LockedEntity() const noexcept { return m_LockedEntity; }
         void SetLockedEntity(Keire::EntityId entity) noexcept
@@ -36,6 +45,8 @@ namespace KeireEditor
       private:
         Keire::Detail::EditorCameraController m_Camera;
         Keire::EntityId m_LockedEntity;
+        Keire::EntityId m_LastFocusShortcutEntity;
+        double m_LastFocusShortcutSeconds = -1.0;
         bool m_Capturing = false;
         bool m_Dirty = false;
     };

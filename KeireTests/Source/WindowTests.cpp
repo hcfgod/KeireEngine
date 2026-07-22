@@ -120,8 +120,10 @@ TEST_CASE("WindowSystem creates and routes multiple opaque window identities")
 
     first->SetTitle("renamed");
     first->SetSize({640, 360});
+    first->SetPosition({24, 48});
     CHECK(first->Title() == "renamed");
     CHECK((first->LogicalSize() == Keire::LogicalExtent{640, 360}));
+    CHECK((first->Position() == Keire::WindowPosition{24, 48}));
     first->SetVisible(true);
     CHECK(first->Visible());
     first->SetVisible(false);

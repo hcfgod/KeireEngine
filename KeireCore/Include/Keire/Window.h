@@ -223,6 +223,10 @@ namespace Keire
 
         virtual void SetTitle(std::string title) = 0;
         virtual void SetSize(LogicalExtent size) = 0;
+        virtual void SetPosition(WindowPosition)
+        {
+            throw std::logic_error("This Window implementation does not support positioning.");
+        }
         virtual void SetVisible(bool visible) = 0;
         virtual void Minimize() = 0;
         virtual void Maximize() = 0;
