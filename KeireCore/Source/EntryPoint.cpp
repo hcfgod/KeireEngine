@@ -3,6 +3,8 @@
 #include "Keire/BuildInfo.h"
 #include "Keire/Log.h"
 
+#include "KeireInternal/Process.h"
+
 #include <cstdio>
 #include <exception>
 #include <optional>
@@ -97,6 +99,41 @@ namespace
         }
         return std::nullopt;
     }
+
+    int RunClient(const int argc, char* const* argv)
+    {
+        ConfigureConsoleEncoding();
+        const Keire::ApplicationCommandLineArguments arguments(argc, argv);
+
+        try
+        {
+            if (const auto result = HandleInformationalCommand(arguments))
+            {
+                return *result;
+            }
+
+            auto application = Keire::CreateApplication(arguments);
+            if (!application)
+            {
+                throw std::runtime_error("CreateApplication returned a null application.");
+            }
+            return application->Run();
+        }
+        catch (const Keire::CommandLineError& exception)
+        {
+            std::fprintf(stderr, "%s\n", exception.what());
+            return 2;
+        }
+        catch (const std::exception& exception)
+        {
+            ReportClientFailure(exception.what());
+        }
+        catch (...)
+        {
+            ReportClientFailure("unknown exception");
+        }
+        return 1;
+    }
 } // namespace
 
 namespace Keire
@@ -124,27 +161,10 @@ namespace Keire
 
 int main(const int argc, char* argv[])
 {
-    ConfigureConsoleEncoding();
-    const Keire::ApplicationCommandLineArguments arguments(argc, argv);
-
     try
     {
-        if (const auto result = HandleInformationalCommand(arguments))
-        {
-            return *result;
-        }
-
-        auto application = Keire::CreateApplication(arguments);
-        if (!application)
-        {
-            throw std::runtime_error("CreateApplication returned a null application.");
-        }
-        return application->Run();
-    }
-    catch (const Keire::CommandLineError& exception)
-    {
-        std::fprintf(stderr, "%s\n", exception.what());
-        return 2;
+        Keire::Detail::Utf8CommandLine commandLine(argc, argv);
+        return RunClient(commandLine.Count(), commandLine.Values());
     }
     catch (const std::exception& exception)
     {

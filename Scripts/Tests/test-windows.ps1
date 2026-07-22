@@ -1,4 +1,9 @@
+param([ValidateSet("All", "Fast", "Integration")][string]$Suite = "All")
+
 $ErrorActionPreference = "Stop"
+$started = [Diagnostics.Stopwatch]::StartNew()
+$runFast = $Suite -in @("All", "Fast")
+$runIntegration = $Suite -in @("All", "Integration")
 $Windows = Resolve-Path (Join-Path $PSScriptRoot "..\Windows")
 . (Join-Path $Windows "common.ps1")
 
@@ -14,11 +19,14 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 $project = Get-ProjectConfig
+if ($runFast) {
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
 $bootstrapScript = Get-Content (Join-Path $Windows "bootstrap.ps1") -Raw
 Assert-True ($bootstrapScript.Contains('GetTempPath') -and $bootstrapScript.Contains('$PremakeExe --version')) "Unicode-safe Premake version validation"
+$processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Process.cpp") -Raw
+Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
 $launcherFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-launcher-exit-" + [guid]::NewGuid().ToString("N"))
@@ -40,6 +48,37 @@ function Normalize-Architecture([string]$Architecture) { return "x86_64" }
 }
 finally {
     Remove-Item $launcherFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
+$checkedCommandFailed = $false
+try {
+    Invoke-CheckedWindowsCommand { & cmd.exe /d /c exit 19 } "Nested package fixture"
+}
+catch {
+    $checkedCommandFailed = $_.Exception.Message.Contains("exit code 19")
+}
+finally {
+    $global:LASTEXITCODE = 0
+}
+Assert-True $checkedCommandFailed "Nested Windows package child exit propagation"
+$packagePolicyFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-package-policy-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force $packagePolicyFixture | Out-Null
+    & git -C $packagePolicyFixture init --quiet
+    & git -C $packagePolicyFixture config user.email "tests@keire.invalid"
+    & git -C $packagePolicyFixture config user.name "Kéire Tests"
+    "clean" | Set-Content (Join-Path $packagePolicyFixture "tracked.txt") -Encoding UTF8
+    & git -C $packagePolicyFixture add tracked.txt
+    & git -C $packagePolicyFixture commit --quiet -m fixture
+    $cleanPolicy = Get-WindowsPackageWorktreePolicy -Root $packagePolicyFixture
+    Assert-True (-not $cleanPolicy.Dirty -and -not $cleanPolicy.DevelopmentArtifact) "Clean production package policy"
+    "dirty" | Set-Content (Join-Path $packagePolicyFixture "untracked.txt") -Encoding UTF8
+    Assert-Throws { Get-WindowsPackageWorktreePolicy -Root $packagePolicyFixture } "Dirty production package rejection"
+    $dirtyPolicy = Get-WindowsPackageWorktreePolicy -Root $packagePolicyFixture -AllowDirty
+    Assert-True ($dirtyPolicy.Dirty -and $dirtyPolicy.DevelopmentArtifact) "Local dirty development package policy"
+    Assert-Throws { Get-WindowsPackageWorktreePolicy -Root $packagePolicyFixture -AllowDirty -CI } "CI dirty override rejection"
+}
+finally {
+    Remove-Item $packagePolicyFixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 Assert-True (-not [string]::IsNullOrWhiteSpace($project.PROJECT_IDENTIFIER)) "Project manifest"
 Assert-True ($project.PROJECT_VERSION -match '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') "Semantic project version"
@@ -125,7 +164,10 @@ Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -a
 Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
 Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') -and $corePremake.Contains('Source/ECS/Components/MeshRendererComponent.cpp')) "Explicit built-in component translation units"
 Assert-True ($corePremake.Contains('builtin-shaders.ps1') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) "First-party built-in shader generation"
-$renderSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSystem.cpp') -Raw
+$renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
+    Where-Object { $_.Name -like 'Render*.cpp' -or $_.Name -like 'Render*.h' } |
+    Get-Content -Raw) -join "`n"
+$renderSource += "`n" + (Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Include\KeireInternal\Rendering\RenderBackendInternal.h') -Raw)
 Assert-True ($renderSource.Contains('BuiltinUnlitShaders.h') -and $renderSource.Contains('renderer->Tint()') -and -not $renderSource.Contains('Vendor/SDL/test')) "Mesh tint shader ownership and draw wiring"
 $builtinShader = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl') -Raw
 Assert-True ($renderSource.Contains('ResolveLighting') -and $renderSource.Contains('DirectionalLightComponent') -and $renderSource.Contains('AmbientAndExposure') -and $builtinShader.Contains('LightDirection') -and $builtinShader.Contains('worldNormal')) "Directional and ambient light wiring"
@@ -133,10 +175,14 @@ Assert-True ($renderSource.Contains('ReadbackRGBA8') -and (Test-Path (Join-Path 
 $testRunner = Get-Content (Join-Path $Windows 'test.ps1') -Raw
 Assert-True ($testRunner.Contains('direct3d12') -and $testRunner.Contains('vulkan') -and $testRunner.Contains('KEIRE_REQUIRE_GPU_TESTS')) "Conditional Windows GPU test backends"
 Assert-True ($renderSource.Contains('BuiltinShaderUniformBufferCount(vertex)') -and $renderSource.Contains('SDL_PushGPUFragmentUniformData')) "Built-in and asset-backed shader uniform bindings"
+$renderFacadeLines = @(Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSystem.cpp')).Count
+Assert-True ($renderFacadeLines -lt 700) "RenderSystem facade remains below 700 lines ($renderFacadeLines lines)"
 $renderSettingsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSettings.cpp') -Raw
 Assert-True ($renderSettingsSource.Contains('Rendering.keiresettings') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'Samples\KeireSandbox\ProjectSettings\Rendering.keiresettings'))) "Persistent project rendering settings"
 $renderingAssetsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\RenderingAssets.cpp') -Raw
 $assetPipelineSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp') -Raw
+Assert-True (@(Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp')).Count -lt 600) "AssetPipeline facade remains below 600 lines"
+Assert-True (-not ((Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Include\KeireInternal\Assets\AssetDatabaseImplementation.h') -Raw).Contains('recursive_mutex'))) "Asset operations use explicit locked and unlocked entry points"
 $uiSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Ui.cpp') -Raw
 Assert-True ($renderingAssetsSource.Contains('SDL_GetBasePath()') -and $renderingAssetsSource.Contains('maximumAncestorDepth')) "Executable-relative shader compiler discovery"
 Assert-True ($uiSource.Contains('ImGuiDragDropFlags_SourceAllowNullID')) "Display-item drag sources remain assertion-safe"
@@ -149,7 +195,28 @@ Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Input\Input.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Input\InputSystem.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Input\DefaultInput.keireinput"))) "Input subsystem and sample project organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Project\Project.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Scenes\SceneSystem.h")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp"))) "Project, scene, and hub organization"
 Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\AssetBrowserPanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\ConsolePanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\DiagnosticsPanel.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\ThumbnailService.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\SceneGizmoController.cpp"))) "Focused editor panel, thumbnail, and scene-gizmo classes"
-Assert-True ($clientSources.Contains('DisplayName(record.RelativePath)') -and $clientSources.Contains('TrashRecords()') -and $clientSources.Contains('AssetImportPolicy::KeepLastGood')) "Unity-style asset browser labels, trash, and best-effort import"
+Assert-True ((Test-Path (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\AssetOperationService.cpp")) -and (Test-Path (Join-Path (Get-RepositoryRoot) "KeireAssetWorker\Source\Main.cpp"))) "Process-isolated editor asset operations"
+$workspaceSourcePath = Join-Path (Get-RepositoryRoot) "KeireClient\Source\EditorWorkspaceLayer.cpp"
+$workspaceLineCount = @(Get-Content $workspaceSourcePath).Count
+Assert-True ($workspaceLineCount -lt 1500) "Editor workspace remains composition-only ($workspaceLineCount lines)"
+$documentHeaders = (Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\Include\KeireClient\Editor\SceneDocument.h") -Raw) + (Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\Include\KeireClient\Editor\InputActionsDocument.h") -Raw)
+Assert-True (-not ($documentHeaders -match 'Storage\(\)|friend\s+class\s+::EditorWorkspaceLayer')) "Editor documents expose commands rather than mutable storage"
+$panelSources = @(
+    'HierarchyPanel.cpp', 'InspectorPanel.cpp', 'SceneViewportPanel.cpp', 'InputActionsPanel.cpp',
+    'ProjectSettingsPanel.cpp', 'AssetBrowserPanel.cpp'
+) | ForEach-Object { Join-Path (Get-RepositoryRoot) ("KeireClient\Source\Editor\" + $_) }
+Assert-True (-not ($panelSources | Where-Object { -not (Test-Path $_) })) "Editor panels have independent implementation units"
+$panelText = ($panelSources | ForEach-Object { Get-Content $_ -Raw }) -join "`n"
+$panelHeader = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireClient\Include\KeireClient\Editor\EditorPanels.h') -Raw
+$workspaceHeader = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireClient\Include\KeireClient\EditorWorkspaceLayer.h') -Raw
+Assert-True ($panelHeader.Contains('class AssetInspectorPanel final') -and
+             $panelText.Contains('AssetInspectorPanel::Draw')) "Asset Inspector has an independent state owner"
+Assert-True (-not ($panelText -match 'if\s*\(auto\s+\w+\s*=\s*ui\.BeginPanel\([^;]+;\s*!\w+\)')) "Panel RAII scopes outlive their visibility checks"
+Assert-True (-not ($panelText.Contains('#include "KeireClient/EditorWorkspaceLayer.h"')) -and
+             -not ($workspaceHeader -match 'friend\s+class\s+KeireEditor::')) "Panels use narrow controllers without workspace friendship"
+Assert-True (-not ($workspaceHeader.Contains('DrawSceneContent')) -and
+             -not ($workspaceHeader.Contains('DrawHierarchyContent')) -and
+             -not ($workspaceHeader.Contains('DrawInspectorContent'))) "Workspace exposes no whole-panel draw forwarding"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Process.cpp') -Raw
 Assert-True ($processSource.Contains('"/select," + utf8Path') -and $processSource.Contains('std::filesystem::weakly_canonical')) "Absolute platform file-manager reveal routing"
 $hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp") -Raw
@@ -188,6 +255,7 @@ Assert-True ($packageScript.Contains('zstandard-LICENSE.txt') -and $packageScrip
 Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Contains('$Lock.ENTT_COMMIT') -and $packageScript.Contains('glm-COPYING.txt') -and $packageScript.Contains('$Lock.GLM_COMMIT')) "ECS and math package metadata and attribution"
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 Assert-True ($packageScript.Contains('assimp-LICENSE.txt') -and $packageScript.Contains('stb-LICENSE.txt') -and $packageScript.Contains('$Lock.ASSIMP_COMMIT') -and $packageScript.Contains('$Lock.STB_COMMIT')) "Asset importer package metadata and attribution"
+Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty')) "Asset worker and clean package policy"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and $packageConfig.Contains('"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}" SDL3::SDL3-static')) "Private archive CMake transitive link"
 Assert-True (-not $packageConfig.Contains('include;${_core_sdk_prefix}/third-party')) "SDK omits general third-party include path"
@@ -203,7 +271,7 @@ try {
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
-    foreach ($path in @("bin\CoreAssetTool.exe", "lib\CoreZstd.lib", "include\Core\Math\Math.h", "include\Core\ECS\Component.h", "include\Core\ECS\Entity.h", "include\Core\ECS\Components\TransformComponent.h", "include\Core\ECS\Components\DirectionalLightComponent.h", "include\Core\Assets\Asset.h", "include\Core\Assets\AssetSystem.h", "include\Core\Assets\AssetPipeline.h", "include\Core\Assets\InputActionAsset.h", "include\Core\Input\Input.h", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput.keiremeta", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt")) {
+    foreach ($path in @("bin\CoreAssetTool.exe", "bin\CoreAssetWorker.exe", "lib\CoreZstd.lib", "include\Core\Math\Math.h", "include\Core\ECS\Component.h", "include\Core\ECS\Entity.h", "include\Core\ECS\Components\TransformComponent.h", "include\Core\ECS\Components\DirectionalLightComponent.h", "include\Core\Assets\Asset.h", "include\Core\Assets\AssetSystem.h", "include\Core\Assets\AssetPipeline.h", "include\Core\Assets\InputActionAsset.h", "include\Core\Input\Input.h", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput.keiremeta", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt")) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
@@ -267,7 +335,11 @@ try {
 finally {
     Remove-Item $trackedSampleStage -Recurse -Force -ErrorAction SilentlyContinue
 }
+Write-Host ("Fast Windows script checks completed in {0:N2}s." -f $started.Elapsed.TotalSeconds)
+}
 
+if ($runIntegration) {
+$integrationStarted = [Diagnostics.Stopwatch]::StartNew()
 $identityFixture = Join-Path ([IO.Path]::GetTempPath()) ("template-identity-test-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force (Join-Path $identityFixture "Scripts\Windows"), (Join-Path $identityFixture "Config") | Out-Null
@@ -400,17 +472,15 @@ finally {
         Remove-Item -LiteralPath $parentFixture -Recurse -Force
     }
 }
+Write-Host ("Windows script integration fixtures completed in {0:N2}s." -f $integrationStarted.Elapsed.TotalSeconds)
+}
 
-$repositoryFiles = Get-ChildItem (Get-RepositoryRoot) -File -Recurse | Where-Object {
-    $_.FullName -notmatch '[\\/](\.git|\.vs|Vendor|Tools|Build|Logs|Artifacts)[\\/]' -and $_.FullName -notmatch '[\\/]Scripts[\\/]Tests[\\/]'
+if ($runFast) {
+    $searchExclusions = @("--glob", "!.git/**", "--glob", "!.vs/**", "--glob", "!Vendor/**", "--glob", "!Tools/**", "--glob", "!Build/**", "--glob", "!Logs/**", "--glob", "!Artifacts/**", "--glob", "!Scripts/Tests/**")
+    & rg -n @searchExclusions '\b(?:CORE|CLIENT)_(?:API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b' (Get-RepositoryRoot)
+    Assert-Equal $LASTEXITCODE 1 "Deprecated public macro batch scan"
+    & rg -n -F @searchExclusions -e '#include "KeireCore/' -e 'Scripts/KeireTests' -e 'Scripts\KeireTests' -e 'Scripts/Windows/Tests' -e 'Scripts/Unix/Tests' -e 'KeireCore.log' -e 'KeireClient.log' (Get-RepositoryRoot)
+    Assert-Equal $LASTEXITCODE 1 "Stale repository identity batch scan"
 }
-$deprecatedNames = foreach ($prefix in @("CORE", "CLIENT")) {
-    foreach ($suffix in @("API", "ASSERT", "ASSERTIONS_ENABLED", "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL")) { "${prefix}_${suffix}" }
-}
-foreach ($name in $deprecatedNames) {
-    Assert-Equal (@($repositoryFiles | Select-String -Pattern "\b$([regex]::Escape($name))\b").Count) 0 "Deprecated public macro check for $name"
-}
-foreach ($stale in @('#include "KeireCore/', 'Scripts/KeireTests', 'Scripts\KeireTests', 'Scripts/Windows/Tests', 'Scripts/Unix/Tests', 'KeireCore.log', 'KeireClient.log')) {
-    Assert-Equal (@($repositoryFiles | Select-String -SimpleMatch $stale).Count) 0 "Stale repository identity check for $stale"
-}
-Write-Host "Windows script regression tests passed."
+Write-Host ("Windows $Suite script regression tests passed in {0:N2}s." -f $started.Elapsed.TotalSeconds)
+$global:LASTEXITCODE = 0

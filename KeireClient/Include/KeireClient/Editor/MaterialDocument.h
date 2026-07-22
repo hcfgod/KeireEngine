@@ -3,6 +3,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -16,6 +17,12 @@ namespace KeireEditor
     {
       public:
         using ShaderResolver = std::function<std::optional<Keire::ShaderAssetDefinition>(Keire::AssetId)>;
+
+        struct CatalogRefresh final
+        {
+            Keire::AssetId Asset;
+            std::uint64_t Generation = 0;
+        };
 
         void Open(std::span<const std::byte> source, const ShaderResolver& resolveShader);
         void OpenAsset(Keire::AssetId asset, std::filesystem::path sourcePath, std::span<const std::byte> source,
@@ -37,6 +44,12 @@ namespace KeireEditor
         [[nodiscard]] std::vector<std::byte> SaveSource() const;
         void CaptureDraft();
         void AcceptSavedSource(std::span<const std::byte> source);
+        void RequestCatalogRefresh(Keire::AssetId asset) noexcept;
+        void AdvanceCatalogRefresh(double seconds) noexcept;
+        [[nodiscard]] std::optional<CatalogRefresh> PendingCatalogRefresh(bool force = false) const noexcept;
+        void MarkCatalogRefreshQueued(std::uint64_t generation) noexcept;
+        void MarkCatalogRefreshApplied(std::uint64_t generation) noexcept;
+        void ResetCatalogRefresh() noexcept;
 
         [[nodiscard]] bool IsOpen(Keire::AssetId asset) const noexcept { return m_Asset == asset; }
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Asset; }
@@ -56,6 +69,11 @@ namespace KeireEditor
         std::filesystem::path m_SourcePath;
         std::vector<std::byte> m_DraftSource;
         std::vector<std::byte> m_BaselineSource;
+        std::uint64_t m_RefreshRequestedGeneration = 0;
+        std::uint64_t m_RefreshQueuedGeneration = 0;
+        std::uint64_t m_RefreshAppliedGeneration = 0;
+        Keire::AssetId m_RefreshAsset;
+        double m_RefreshDelaySeconds = 0.0;
         bool m_Dirty = false;
     };
 } // namespace KeireEditor

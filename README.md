@@ -77,12 +77,16 @@ Common examples:
 ./Scripts/project.ps1 generate -Generator ninja -Architecture ARM64 -Toolset clang -Force
 ./Scripts/project.ps1 clean -CleanScope generated
 ./Scripts/project.ps1 package -Generator vs2022 -Configuration Dist
+# Local diagnostics only; rejected in CI and marked as a development artifact.
+./Scripts/project.ps1 package -Generator ninja -Configuration Release -AllowDirty
 ```
 
 ```sh
 bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset clang --force
 bash Scripts/project.sh clean --clean-scope generated
 bash Scripts/project.sh package --generator ninja --configuration Dist --toolset clang
+# Local diagnostics only; rejected in CI and marked as a development artifact.
+bash Scripts/project.sh package --generator ninja --configuration Release --allow-dirty
 ```
 
 `default` resolves before Premake runs: MSVC for Visual Studio and Windows Ninja, GCC for Windows GNU Make and Linux, and Clang for macOS. Generation stamps record the concrete toolset.
@@ -107,6 +111,7 @@ KeireCore/              Static library and public Keire/<header> API
 KeireClient/            Console application
 KeireHub/               Project discovery, creation, and editor launcher
 AssetTool/              Source scan, import, cook, and package validation CLI
+KeireAssetWorker/       Private process-isolated editor import and cook worker
 KeireTests/             Independent doctest cases
 Samples/KeireSandbox/   Validated starter project packaged with the SDK
 Vendor/                 Pinned runtime, test, UI, compression, ECS, and math submodules

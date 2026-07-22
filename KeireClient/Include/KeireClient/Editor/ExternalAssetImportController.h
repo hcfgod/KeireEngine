@@ -1,14 +1,12 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/AssetOperationService.h"
 
-#include <atomic>
-#include <exception>
 #include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace KeireEditor
@@ -23,17 +21,18 @@ namespace KeireEditor
     class ExternalAssetImportController final
     {
       public:
-        ~ExternalAssetImportController();
-
         void Queue(std::span<const std::filesystem::path> paths, const std::filesystem::path& destinationFolder,
-                   bool viewport, Keire::EntityId viewportTarget, const Keire::Ref<Keire::AssetDatabase>& database);
-        void Draw(Keire::UiFrame& ui, const Keire::Ref<Keire::AssetDatabase>& database);
+                   bool viewport, Keire::EntityId viewportTarget, const Keire::Ref<Keire::AssetDatabase>& database,
+                   AssetOperationService& operations);
+        void Draw(Keire::UiFrame& ui, const Keire::Ref<Keire::AssetDatabase>& database,
+                  AssetOperationService& operations);
+        void Complete(AssetOperationCompletion completion);
         [[nodiscard]] std::optional<ExternalAssetImportCompletion> TakeCompletion();
         [[nodiscard]] const std::string& Diagnostic() const noexcept { return m_Diagnostic; }
-        [[nodiscard]] bool Pending() const noexcept { return !m_Items.empty() || m_Worker.joinable() || m_Failed; }
+        [[nodiscard]] bool Pending() const noexcept { return !m_Items.empty() || m_OperationPending || m_Failed; }
 
       private:
-        void Execute(const Keire::Ref<Keire::AssetDatabase>& database);
+        void Execute(AssetOperationService& operations);
 
         std::vector<Keire::ExternalAssetImportItem> m_Items;
         std::vector<bool> m_Included;
@@ -44,9 +43,6 @@ namespace KeireEditor
         Keire::EntityId m_ViewportTarget;
         bool m_OpenRequested = false;
         bool m_Failed = false;
-        std::jthread m_Worker;
-        std::optional<Keire::ExternalAssetImportResult> m_WorkerResult;
-        std::exception_ptr m_WorkerError;
-        std::atomic_bool m_WorkerFinished = false;
+        bool m_OperationPending = false;
     };
 } // namespace KeireEditor

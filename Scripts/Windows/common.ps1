@@ -24,6 +24,17 @@ function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\
 function Get-ProjectConfig { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Project.conf") }
 function Get-DependencyLock { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") }
 
+function Invoke-CheckedWindowsCommand {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Command,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+    $global:LASTEXITCODE = 0
+    & $Command
+    $exitCode = $global:LASTEXITCODE
+    if ($exitCode -ne 0) { throw "$Description failed with exit code $exitCode." }
+}
+
 function Get-ProjectGenerationFingerprint {
     param([string]$Root = (Get-RepositoryRoot))
 
@@ -34,6 +45,7 @@ function Get-ProjectGenerationFingerprint {
         $project.HUB_DIRECTORY,
         $project.TESTS_DIRECTORY,
         "AssetTool",
+        "KeireAssetWorker",
         "KeireRuntime",
         "Scripts\Premake"
     )
@@ -114,6 +126,25 @@ function Test-GitRepository {
         return $false
     }
     return $LASTEXITCODE -eq 0 -and $inside.Trim() -eq "true"
+}
+
+function Get-WindowsPackageWorktreePolicy {
+    param([string]$Root, [switch]$AllowDirty, [switch]$CI)
+
+    if ($CI -and $AllowDirty) { throw "-AllowDirty cannot be used in CI." }
+    if (-not (Test-GitRepository $Root)) { throw "Release packaging requires a Git working tree." }
+
+    $status = (& git -C $Root status --porcelain --untracked-files=normal 2>$null) -join "`n"
+    if ($LASTEXITCODE -ne 0) { throw "Unable to inspect the package worktree at '$Root'." }
+    $dirty = -not [string]::IsNullOrWhiteSpace($status)
+    if ($dirty -and -not $AllowDirty) {
+        throw "Release packaging requires a clean worktree. Use -AllowDirty only for a local development artifact."
+    }
+
+    return [pscustomobject]@{
+        Dirty = $dirty
+        DevelopmentArtifact = ($dirty -and [bool]$AllowDirty)
+    }
 }
 
 function ConvertTo-MacroPrefix {
@@ -197,7 +228,7 @@ function Assert-WindowsPackageArchiveGeneratedDataFree {
 function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
-        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h", "include\$Namespace\Undo.h",
         "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial",

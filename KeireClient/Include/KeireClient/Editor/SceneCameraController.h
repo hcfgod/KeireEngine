@@ -4,6 +4,8 @@
 #include "KeireInternal/EditorCameraController.h"
 
 #include <filesystem>
+#include <span>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -25,16 +27,21 @@ namespace KeireEditor
         void ToggleProjection() noexcept { m_Camera.ToggleProjection(); }
         void Snap(Keire::Detail::EditorCameraAxis axis) noexcept { m_Camera.Snap(axis); }
         void SetFocus(Keire::Vector3 focus) { m_Camera.SetFocus(focus); }
-        void Frame(Keire::Vector3 center, float radius) { m_Camera.Frame(center, radius); }
+        void Frame(Keire::Vector3 center, float radius, float aspectRatio = 1.0F)
+        {
+            m_Camera.Frame(center, radius, 60.0F, aspectRatio);
+        }
+        void FollowFrame(Keire::Vector3 center, float radius, float aspectRatio, float deltaSeconds);
         [[nodiscard]] SceneFocusShortcutAction ApplyFocusShortcut(Keire::EntityId selection,
                                                                   Keire::TimeStep timestamp) noexcept;
+        [[nodiscard]] SceneFocusShortcutAction ApplyFocusShortcut(std::span<const Keire::EntityId> selection,
+                                                                  Keire::TimeStep timestamp) noexcept;
 
-        [[nodiscard]] Keire::EntityId LockedEntity() const noexcept { return m_LockedEntity; }
-        void SetLockedEntity(Keire::EntityId entity) noexcept
-        {
-            m_LockedEntity = entity;
-            m_Dirty = true;
-        }
+        [[nodiscard]] Keire::EntityId LockedEntity() const noexcept;
+        [[nodiscard]] std::span<const Keire::EntityId> LockedEntities() const noexcept { return m_LockedEntities; }
+        [[nodiscard]] bool LockedTo(std::span<const Keire::EntityId> selection) const noexcept;
+        void SetLockedEntity(Keire::EntityId entity) noexcept;
+        void SetLockedEntities(std::span<const Keire::EntityId> entities) noexcept;
         [[nodiscard]] bool Capturing() const noexcept { return m_Capturing; }
         void SetCapturing(bool capturing) noexcept { m_Capturing = capturing; }
         void MarkDirty() noexcept { m_Dirty = true; }
@@ -44,8 +51,8 @@ namespace KeireEditor
 
       private:
         Keire::Detail::EditorCameraController m_Camera;
-        Keire::EntityId m_LockedEntity;
-        Keire::EntityId m_LastFocusShortcutEntity;
+        std::vector<Keire::EntityId> m_LockedEntities;
+        std::vector<Keire::EntityId> m_LastFocusShortcutSelection;
         double m_LastFocusShortcutSeconds = -1.0;
         bool m_Capturing = false;
         bool m_Dirty = false;

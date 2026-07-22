@@ -27,11 +27,15 @@ jobs:
         run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration ${{ matrix.configuration }} -Backend direct3d12 -Count ${{ matrix.configuration == 'Release' && 25 || 1 }}
       - name: Require Vulkan
         shell: pwsh
-        run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration ${{ matrix.configuration }} -Backend vulkan -Count 1
+        run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration ${{ matrix.configuration }} -Backend vulkan -Count ${{ matrix.configuration == 'Release' && 5 || 1 }}
       - name: D3D12 validation-layer repeats
         if: matrix.configuration == 'Release'
         shell: pwsh
         run: ./Scripts/Tests/repeat-render-tests.ps1 -Configuration Release -Backend direct3d12 -Count 5 -GpuValidation
+      - name: Clean Release package and runtime/SDK validation
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: ./Scripts/project.ps1 package -Generator ninja -Configuration Release -Architecture x86_64 -Toolset msc -CI
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -39,6 +43,11 @@ jobs:
           path: |
             Logs/
             Build/TestLogs/
+            Build/CrashDumps/
+            Build/FailedReadbacks/
+            Samples/**/Library/AssetOperations/**/worker.log
+            Samples/**/Library/AssetOperations/**/*.json
+            Samples/**/Library/AssetImport/**/journal.json
           if-no-files-found: ignore
 
   unix-gpu:
@@ -76,6 +85,9 @@ jobs:
       - run: bash Scripts/project.sh build --target KeireRenderTests --generator ninja --configuration ${{ matrix.configuration }} --architecture x86_64 --toolset clang --ci
       - name: Require backend
         run: bash Scripts/Tests/repeat-render-tests.sh ${{ matrix.configuration }} ${{ matrix.backend }} 1
+      - name: Clean Release package and runtime/SDK validation
+        if: matrix.configuration == 'Release'
+        run: bash Scripts/project.sh package --generator ninja --configuration Release --architecture x86_64 --toolset clang --ci
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -83,4 +95,9 @@ jobs:
           path: |
             Logs/
             Build/TestLogs/
+            Build/CrashDumps/
+            Build/FailedReadbacks/
+            Samples/**/Library/AssetOperations/**/worker.log
+            Samples/**/Library/AssetOperations/**/*.json
+            Samples/**/Library/AssetImport/**/journal.json
           if-no-files-found: ignore

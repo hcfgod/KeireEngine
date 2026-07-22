@@ -1,14 +1,23 @@
 #include "KeireInternal/Process.h"
 
+#include "KeireInternal/FileSystem.h"
+
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
 #include <Windows.h>
+#include <shellapi.h>
+
+#if defined(_MSC_VER)
+#pragma comment(lib, "Shell32.lib")
+#endif
 #else
 #include <cerrno>
 #include <cstring>
@@ -24,6 +33,23 @@ namespace Keire::Detail
     namespace
     {
 #if defined(_WIN32)
+        [[nodiscard]] std::string WideToUtf8(const std::wstring_view value)
+        {
+            if (value.empty())
+                return {};
+            const auto size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                                                  static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+            if (size <= 0)
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Windows command-line argument is not valid Unicode");
+            std::string result(static_cast<std::size_t>(size), '\0');
+            if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+                                    result.data(), size, nullptr, nullptr) != size)
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Windows command-line argument could not be converted to UTF-8");
+            return result;
+        }
+
         [[nodiscard]] std::wstring Utf8ToWide(const std::string_view value)
         {
             if (value.empty())
@@ -70,6 +96,291 @@ namespace Keire::Detail
         }
 #endif
     } // namespace
+
+    Utf8CommandLine::Utf8CommandLine(const int count, char* const* values)
+    {
+#if defined(_WIN32)
+        (void)count;
+        (void)values;
+        int wideCount = 0;
+        auto* wideValues = CommandLineToArgvW(GetCommandLineW(), &wideCount);
+        if (!wideValues)
+            throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                    "Failed to read the Windows command line");
+        const auto release = [](wchar_t** arguments)
+        {
+            if (arguments)
+                LocalFree(arguments);
+        };
+        const std::unique_ptr<wchar_t*, decltype(release)> owner(wideValues, release);
+        m_Arguments.reserve(wideCount > 0 ? static_cast<std::size_t>(wideCount) : 0);
+        for (int index = 0; index < wideCount; ++index)
+            m_Arguments.push_back(
+                WideToUtf8(wideValues[index] ? std::wstring_view{wideValues[index]} : std::wstring_view{}));
+#else
+        m_Arguments.reserve(count > 0 && values ? static_cast<std::size_t>(count) : 0);
+        for (int index = 0; index < count && values; ++index)
+            m_Arguments.emplace_back(values[index] ? values[index] : "");
+#endif
+        m_Pointers.reserve(m_Arguments.size());
+        for (auto& argument : m_Arguments)
+            m_Pointers.push_back(argument.data());
+    }
+
+    class ChildProcess::Impl final
+    {
+      public:
+        ~Impl() { Terminate(); }
+
+        void DrainOutput()
+        {
+            constexpr std::size_t maximumOutputBytes = 4U * 1024U * 1024U;
+            std::array<char, 4096> buffer{};
+#if defined(_WIN32)
+            if (!m_ReadPipe)
+                return;
+            DWORD available = 0;
+            while (PeekNamedPipe(m_ReadPipe, nullptr, 0, nullptr, &available, nullptr) && available > 0)
+            {
+                DWORD read = 0;
+                if (!ReadFile(m_ReadPipe, buffer.data(),
+                              static_cast<DWORD>(std::min<std::size_t>(buffer.size(), available)), &read, nullptr))
+                    break;
+                if (m_Output.size() < maximumOutputBytes)
+                    m_Output.append(buffer.data(), std::min<std::size_t>(read, maximumOutputBytes - m_Output.size()));
+                available -= read;
+            }
+#else
+            if (m_ReadDescriptor < 0)
+                return;
+            for (;;)
+            {
+                const auto count = read(m_ReadDescriptor, buffer.data(), buffer.size());
+                if (count <= 0)
+                    break;
+                if (m_Output.size() < maximumOutputBytes)
+                    m_Output.append(buffer.data(), std::min<std::size_t>(static_cast<std::size_t>(count),
+                                                                         maximumOutputBytes - m_Output.size()));
+            }
+#endif
+        }
+
+        bool Poll()
+        {
+            if (!m_Running)
+                return true;
+            DrainOutput();
+#if defined(_WIN32)
+            const auto status = WaitForSingleObject(m_Process, 0);
+            if (status == WAIT_TIMEOUT)
+                return false;
+            if (status != WAIT_OBJECT_0)
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Child process wait failed");
+            DWORD exitCode = 127;
+            (void)GetExitCodeProcess(m_Process, &exitCode);
+            m_ExitCode = static_cast<int>(exitCode);
+#else
+            int status = 0;
+            const auto waited = waitpid(m_Process, &status, WNOHANG);
+            if (waited == 0)
+                return false;
+            if (waited < 0)
+                throw std::system_error(errno, std::generic_category(), "Child process wait failed");
+            m_ExitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+#endif
+            m_Running = false;
+            DrainOutput();
+            CloseHandles();
+            return true;
+        }
+
+        void Terminate() noexcept
+        {
+            if (!m_Running)
+            {
+                CloseHandles();
+                return;
+            }
+#if defined(_WIN32)
+            (void)TerminateProcess(m_Process, 125);
+            (void)WaitForSingleObject(m_Process, 250);
+            m_ExitCode = 125;
+#else
+            (void)kill(m_Process, SIGKILL);
+            int status = 0;
+            bool reaped = false;
+            for (int attempt = 0; attempt < 50; ++attempt)
+            {
+                const auto waited = waitpid(m_Process, &status, WNOHANG);
+                if (waited == m_Process || (waited < 0 && errno == ECHILD))
+                {
+                    reaped = true;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            if (!reaped)
+            {
+                const auto process = m_Process;
+                std::thread(
+                    [process]
+                    {
+                        int detachedStatus = 0;
+                        (void)waitpid(process, &detachedStatus, 0);
+                    })
+                    .detach();
+            }
+            m_ExitCode = reaped && WIFEXITED(status) ? WEXITSTATUS(status) : 128 + SIGKILL;
+#endif
+            m_Running = false;
+            DrainOutput();
+            CloseHandles();
+        }
+
+        void CloseHandles() noexcept
+        {
+#if defined(_WIN32)
+            if (m_Thread)
+                CloseHandle(std::exchange(m_Thread, nullptr));
+            if (m_Process)
+                CloseHandle(std::exchange(m_Process, nullptr));
+            if (m_ReadPipe)
+                CloseHandle(std::exchange(m_ReadPipe, nullptr));
+#else
+            if (m_ReadDescriptor >= 0)
+            {
+                close(m_ReadDescriptor);
+                m_ReadDescriptor = -1;
+            }
+#endif
+        }
+
+#if defined(_WIN32)
+        HANDLE m_Process = nullptr;
+        HANDLE m_Thread = nullptr;
+        HANDLE m_ReadPipe = nullptr;
+#else
+        pid_t m_Process = -1;
+        int m_ReadDescriptor = -1;
+#endif
+        bool m_Running = true;
+        std::optional<int> m_ExitCode;
+        std::string m_Output;
+    };
+
+    ChildProcess::ChildProcess(std::unique_ptr<Impl> implementation) noexcept : m_Impl(std::move(implementation)) {}
+    ChildProcess::ChildProcess(ChildProcess&&) noexcept = default;
+    ChildProcess& ChildProcess::operator=(ChildProcess&&) noexcept = default;
+    ChildProcess::~ChildProcess() = default;
+
+    ChildProcess ChildProcess::Start(const std::filesystem::path& executable,
+                                     const std::span<const std::string> arguments,
+                                     const std::filesystem::path& workingDirectory)
+    {
+        if (!std::filesystem::is_regular_file(executable) || !std::filesystem::is_directory(workingDirectory))
+            throw std::invalid_argument("Process executable or working directory does not exist.");
+        auto implementation = std::make_unique<Impl>();
+#if defined(_WIN32)
+        SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+        HANDLE writePipe = nullptr;
+        if (!CreatePipe(&implementation->m_ReadPipe, &writePipe, &security, 0))
+            throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "CreatePipe failed");
+        if (!SetHandleInformation(implementation->m_ReadPipe, HANDLE_FLAG_INHERIT, 0))
+        {
+            const auto error = GetLastError();
+            CloseHandle(writePipe);
+            CloseHandle(implementation->m_ReadPipe);
+            implementation->m_ReadPipe = nullptr;
+            throw std::system_error(static_cast<int>(error), std::system_category(), "CreatePipe failed");
+        }
+        auto command = QuoteWindowsArgument(executable.wstring());
+        for (const auto& argument : arguments)
+        {
+            command.push_back(L' ');
+            command += QuoteWindowsArgument(Utf8ToWide(argument));
+        }
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdOutput = writePipe;
+        startup.hStdError = writePipe;
+        startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+        PROCESS_INFORMATION process{};
+        if (!CreateProcessW(executable.wstring().c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                            nullptr, workingDirectory.wstring().c_str(), &startup, &process))
+        {
+            const auto error = GetLastError();
+            CloseHandle(writePipe);
+            CloseHandle(implementation->m_ReadPipe);
+            implementation->m_ReadPipe = nullptr;
+            throw std::system_error(static_cast<int>(error), std::system_category(), "CreateProcess failed");
+        }
+        CloseHandle(writePipe);
+        implementation->m_Process = process.hProcess;
+        implementation->m_Thread = process.hThread;
+#else
+        int descriptors[2]{};
+        if (pipe(descriptors) != 0)
+            throw std::system_error(errno, std::generic_category(), "pipe failed");
+        const auto child = fork();
+        if (child < 0)
+        {
+            const auto error = errno;
+            close(descriptors[0]);
+            close(descriptors[1]);
+            throw std::system_error(error, std::generic_category(), "fork failed");
+        }
+        if (child == 0)
+        {
+            close(descriptors[0]);
+            (void)dup2(descriptors[1], STDOUT_FILENO);
+            (void)dup2(descriptors[1], STDERR_FILENO);
+            close(descriptors[1]);
+            if (chdir(workingDirectory.c_str()) != 0)
+                _exit(126);
+            std::vector<std::string> storage;
+            storage.reserve(arguments.size() + 1);
+            storage.push_back(executable.string());
+            storage.insert(storage.end(), arguments.begin(), arguments.end());
+            std::vector<char*> values;
+            values.reserve(storage.size() + 1);
+            for (auto& value : storage)
+                values.push_back(value.data());
+            values.push_back(nullptr);
+            execv(executable.c_str(), values.data());
+            _exit(127);
+        }
+        close(descriptors[1]);
+        (void)fcntl(descriptors[0], F_SETFL, fcntl(descriptors[0], F_GETFL) | O_NONBLOCK);
+        implementation->m_Process = child;
+        implementation->m_ReadDescriptor = descriptors[0];
+#endif
+        return ChildProcess(std::move(implementation));
+    }
+
+    bool ChildProcess::Poll() { return m_Impl->Poll(); }
+    bool ChildProcess::Running() const noexcept { return m_Impl && m_Impl->m_Running; }
+    std::optional<int> ChildProcess::ExitCode() const noexcept { return m_Impl ? m_Impl->m_ExitCode : std::nullopt; }
+    std::string ChildProcess::TakeOutput() { return std::exchange(m_Impl->m_Output, {}); }
+    bool ChildProcess::WaitFor(const std::chrono::milliseconds timeout)
+    {
+        if (timeout.count() < 0)
+            throw std::invalid_argument("Child process wait timeout cannot be negative.");
+        const auto deadline = std::chrono::steady_clock::now() + timeout;
+        do
+        {
+            if (Poll())
+                return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while (std::chrono::steady_clock::now() < deadline);
+        return Poll();
+    }
+    void ChildProcess::Terminate() noexcept
+    {
+        if (m_Impl)
+            m_Impl->Terminate();
+    }
 
     ProcessResult RunProcess(const std::filesystem::path& executable, const std::span<const std::string> arguments,
                              const std::filesystem::path& workingDirectory, const std::chrono::milliseconds timeout)
@@ -322,6 +633,29 @@ namespace Keire::Detail
             diagnostic = error.what();
             return false;
         }
+    }
+
+    std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,
+                                                     const std::string_view companionTarget)
+    {
+        if (executable.empty() || companionTarget.empty())
+            throw std::invalid_argument("Companion executable resolution requires an executable and target name.");
+
+        const auto owner = std::filesystem::absolute(executable).lexically_normal();
+        auto target = PathFromUtf8(companionTarget);
+#if defined(_WIN32)
+        target += L".exe";
+#endif
+        const std::array candidates{owner.parent_path() / target,
+                                    owner.parent_path().parent_path() / PathFromUtf8(companionTarget) / target};
+        if (const auto found = std::ranges::find_if(candidates, [](const auto& path)
+                                                    { return std::filesystem::is_regular_file(path); });
+            found != candidates.end())
+            return *found;
+
+        throw std::runtime_error("Could not find companion executable '" + std::string(companionTarget) +
+                                 "'. Checked '" + PathToUtf8(candidates[0]) + "' and '" + PathToUtf8(candidates[1]) +
+                                 "'.");
     }
 
     bool RevealInFileManager(const std::filesystem::path& path, std::string& diagnostic) noexcept

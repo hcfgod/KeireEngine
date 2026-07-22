@@ -22,4 +22,6 @@ project(ProjectConfig.CLIENT_TARGET)
 
     LinkKeireCore()
 
+    dependson { AssetWorkerTarget }
+
     LinkSDL3()

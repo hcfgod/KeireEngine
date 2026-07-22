@@ -1,0 +1,425 @@
+#include "KeireInternal/Rendering/RenderBackendInternal.h"
+
+#include "Keire/ECS/Components/MeshRendererComponent.h"
+#include "Keire/Log.h"
+
+#include "KeireInternal/RenderInternal.h"
+
+#include <algorithm>
+#include <stdexcept>
+
+namespace Keire::RenderBackend
+{
+    void RenderSharedState::CollectCompletedFrames()
+    {
+        if (!Device)
+            return;
+        while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
+        {
+            auto frame = std::move(InFlight.front());
+            InFlight.pop_front();
+            for (auto& retired : frame.Retired)
+                ReleaseResources(retired);
+            for (auto& retired : frame.RetiredMeshes)
+                ReleaseMeshResources(retired);
+            for (auto& retired : frame.RetiredTextures)
+                ReleaseTextureResources(retired);
+            for (auto* retired : frame.RetiredPipelines)
+                SDL_ReleaseGPUGraphicsPipeline(Device, retired);
+            SDL_ReleaseGPUFence(Device, frame.Fence);
+        }
+        if (InFlight.size() < Specification.MaximumFramesInFlight)
+            return;
+
+        SDL_GPUFence* fence = InFlight.front().Fence;
+        if (!SDL_WaitForGPUFences(Device, true, &fence, 1))
+            throw std::runtime_error("SDL_WaitForGPUFences failed: " + LastSdlError());
+        CollectCompletedFrames();
+    }
+
+    void RenderSharedState::BeginFrame()
+    {
+        RequireOwner("BeginFrame");
+        if (FrameActive)
+            throw std::logic_error("A render frame is already active.");
+        FrameActive = true;
+        Requests.clear();
+        ++Statistics.Frame;
+        Statistics.Passes = 0;
+        Statistics.Surfaces = 0;
+        Statistics.DrawCalls = 0;
+        Statistics.Triangles = 0;
+        CollectCompletedFrames();
+        for (const auto& surface : LiveSurfaces())
+        {
+            surface->Submitted = false;
+            surface->FrameClearColor = surface->Specification.ClearColor;
+            EnsureSurface(*surface);
+        }
+    }
+
+    void RenderSharedState::CancelFrame() noexcept
+    {
+        FrameActive = false;
+        Requests.clear();
+    }
+
+    void RenderSharedState::Submit(SceneRenderRequest request)
+    {
+        RequireOwner("Submit");
+        if (!FrameActive)
+            throw std::logic_error("Scene render requests are accepted only during an active render frame.");
+        if (!request.Scene || !request.View || !request.View->Surface())
+            throw std::invalid_argument("SceneRenderRequest requires a scene, view, and render surface.");
+        if (!request.Scene->IsOpen())
+            throw std::logic_error("SceneRenderRequest cannot submit a closed scene.");
+
+        auto& surface =
+            *static_cast<RenderSurfaceState*>(RenderSystemInternalAccess::SurfaceState(*request.View->Surface()));
+        const auto owner = surface.Owner.lock();
+        if (owner.get() != this)
+            throw std::invalid_argument("SceneRenderRequest surface belongs to another renderer.");
+        if (surface.Submitted)
+            throw std::logic_error("A render surface may receive only one scene request per frame.");
+        if (!surface.Specification.Depth || !DepthFormat)
+            throw std::logic_error("Scene rendering requires a depth-enabled render surface.");
+        const auto camera = request.View->Camera();
+        if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
+            throw std::invalid_argument("SceneRenderRequest camera contains invalid values.");
+        if (!ValidColor(request.Environment.AmbientColor) || !std::isfinite(request.Environment.AmbientIntensity) ||
+            request.Environment.AmbientIntensity < 0.0F || request.Environment.AmbientIntensity > 16.0F ||
+            !std::isfinite(request.Environment.Exposure) || request.Environment.Exposure < 0.01F ||
+            request.Environment.Exposure > 16.0F)
+        {
+            throw std::invalid_argument("SceneRenderRequest environment contains invalid values.");
+        }
+
+        surface.Submitted = true;
+        surface.FrameClearColor = camera.ClearColor;
+        SceneRenderPacket packet;
+        packet.Camera = camera;
+        packet.Environment = request.Environment;
+        packet.Lighting = ResolveLighting(request.Scene);
+        packet.DrawGrid = request.DrawGrid;
+        for (const auto& entity : request.Scene->Query<MeshRendererComponent>())
+        {
+            if (!entity.ActiveInHierarchy())
+                continue;
+            const auto renderer = entity.GetComponent<MeshRendererComponent>();
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
+                continue;
+            packet.DrawItems.push_back(
+                {renderer->Mesh(), renderer->Material(), transform->WorldMatrix(), renderer->Tint()});
+        }
+        Requests.push_back({std::move(packet), &surface});
+    }
+
+    const GpuMeshResources& RenderSharedState::ResolveMesh(const AssetId id)
+    {
+        if (!id || id == MeshAsset::CubeId())
+            return DefaultMesh;
+        if (id == MeshAsset::ErrorId() || !Assets)
+            return ErrorMesh;
+
+        auto [iterator, inserted] = MeshCache.try_emplace(id);
+        auto& entry = iterator->second;
+        if (inserted)
+            entry.Handle = Assets->Load<MeshAsset>(id, AssetPriority::High);
+        const auto revision = entry.Handle.Revision();
+        if (revision != 0 && revision > entry.LastAttemptedRevision)
+        {
+            entry.LastAttemptedRevision = revision;
+            if (const auto mesh = entry.Handle.TryGetLoaded())
+            {
+                try
+                {
+                    auto replacement = CreateMeshResources(*mesh);
+                    Retire(std::exchange(entry.Resources, replacement));
+                    entry.LoadedRevision = revision;
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CORE_ERROR("Mesh GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
+                                     error.what());
+                }
+            }
+        }
+        return entry.Resources.Empty() ? ErrorMesh : entry.Resources;
+    }
+
+    const GpuTextureResources& RenderSharedState::ResolveTexture(const AssetId id)
+    {
+        if (!id || !Assets)
+            return CheckerboardTexture;
+        auto [iterator, inserted] = TextureCache.try_emplace(id);
+        auto& entry = iterator->second;
+        if (inserted)
+            entry.Handle = Assets->Load<Texture2DAsset>(id, AssetPriority::High);
+        const auto revision = entry.Handle.Revision();
+        if (revision != 0 && revision > entry.LastAttemptedRevision)
+        {
+            entry.LastAttemptedRevision = revision;
+            if (const auto texture = entry.Handle.TryGetLoaded())
+            {
+                try
+                {
+                    auto replacement = CreateTextureResources(*texture);
+                    Retire(std::exchange(entry.Resources, replacement));
+                    entry.LoadedRevision = revision;
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CORE_ERROR("Texture GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
+                                     error.what());
+                }
+            }
+        }
+        return entry.Resources.Empty() ? CheckerboardTexture : entry.Resources;
+    }
+
+    const GpuTextureResources& RenderSharedState::DefaultTexture(const ShaderTextureSemantic semantic) const noexcept
+    {
+        switch (semantic)
+        {
+        case ShaderTextureSemantic::BaseColor:
+            return WhiteTexture;
+        case ShaderTextureSemantic::Normal:
+            return FlatNormalTexture;
+        case ShaderTextureSemantic::MetallicRoughness:
+        case ShaderTextureSemantic::Occlusion:
+            return NeutralOrmTexture;
+        case ShaderTextureSemantic::Emissive:
+            return BlackTexture;
+        case ShaderTextureSemantic::Metallic:
+            return BlackDataTexture;
+        case ShaderTextureSemantic::Roughness:
+            return WhiteDataTexture;
+        case ShaderTextureSemantic::Generic:
+        default:
+            return CheckerboardTexture;
+        }
+    }
+
+    Ref<const MaterialAsset> RenderSharedState::ResolveMaterial(const AssetId id)
+    {
+        if (!id || !Assets)
+            return {};
+        auto [iterator, inserted] = MaterialCache.try_emplace(id);
+        auto& entry = iterator->second;
+        if (inserted)
+            entry.Handle = Assets->Load<MaterialAsset>(id, AssetPriority::High);
+        const auto revision = entry.Handle.Revision();
+        if (revision != 0 && revision > entry.LastAttemptedRevision)
+        {
+            entry.LastAttemptedRevision = revision;
+            if (const auto material = entry.Handle.TryGetLoaded())
+            {
+                entry.LastGood = material;
+                entry.LoadedRevision = revision;
+            }
+        }
+        return entry.LastGood;
+    }
+
+    GpuShaderEntry* RenderSharedState::ResolveShader(const AssetId id, const SDL_GPUSampleCount samples)
+    {
+        if (!id || !Assets)
+            return nullptr;
+        auto [iterator, inserted] = ShaderCache.try_emplace(id);
+        auto& entry = iterator->second;
+        if (inserted)
+            entry.Handle = Assets->Load<ShaderAsset>(id, AssetPriority::High);
+        const auto revision = entry.Handle.Revision();
+        if (revision != 0 && revision > entry.LastAttemptedRevision)
+        {
+            entry.LastAttemptedRevision = revision;
+            if (const auto shader = entry.Handle.TryGetLoaded())
+            {
+                try
+                {
+                    auto replacement = CreateAssetPipeline(shader->Definition(), samples);
+                    for (const auto& [oldSamples, oldPipeline] : entry.Pipelines)
+                    {
+                        (void)oldSamples;
+                        Retire(oldPipeline);
+                    }
+                    entry.Pipelines = {{samples, replacement}};
+                    entry.LastGood = shader;
+                    entry.LoadedRevision = revision;
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CORE_ERROR("Shader GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
+                                     error.what());
+                }
+            }
+        }
+        if (!entry.LastGood)
+            return nullptr;
+        auto pipeline = std::ranges::find(entry.Pipelines, samples, &decltype(entry.Pipelines)::value_type::first);
+        if (pipeline == entry.Pipelines.end())
+        {
+            try
+            {
+                entry.Pipelines.emplace_back(samples, CreateAssetPipeline(entry.LastGood->Definition(), samples));
+            }
+            catch (const std::exception& error)
+            {
+                KEIRE_CORE_ERROR("Shader pipeline creation failed for id={}: {}", id.ToString(), error.what());
+                return nullptr;
+            }
+        }
+        return &entry;
+    }
+
+    const ResolvedAssetMaterial* RenderSharedState::ResolveAssetMaterial(const AssetId id,
+                                                                         const SDL_GPUSampleCount samples)
+    {
+        const auto material = ResolveMaterial(id);
+        auto materialEntry = MaterialCache.find(id);
+        if (materialEntry == MaterialCache.end())
+            return nullptr;
+        auto& cache = materialEntry->second;
+        std::uint64_t stamp = 1469598103934665603ULL;
+        stamp = HashDependencyStamp(stamp, cache.LastAttemptedRevision);
+        stamp = HashDependencyStamp(stamp, cache.LoadedRevision);
+        stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(samples));
+        stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(ColorFormat));
+        stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(DepthFormat));
+        bool failedDependencyRevision = cache.LoadedRevision != 0 && cache.LastAttemptedRevision > cache.LoadedRevision;
+        if (!material || !material->Definition().Shader)
+        {
+            cache.LastAttemptedDependencyStamp = stamp;
+            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+        }
+        stamp = HashDependencyStamp(stamp, material->Definition().Shader);
+        auto* shader = ResolveShader(material->Definition().Shader, samples);
+        if (!shader)
+        {
+            cache.LastAttemptedDependencyStamp = stamp;
+            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+        }
+        stamp = HashDependencyStamp(stamp, shader->LastAttemptedRevision);
+        stamp = HashDependencyStamp(stamp, shader->LoadedRevision);
+        const auto pipeline =
+            std::ranges::find(shader->Pipelines, samples, &decltype(shader->Pipelines)::value_type::first);
+        if (pipeline == shader->Pipelines.end())
+        {
+            cache.LastAttemptedDependencyStamp = stamp;
+            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+        }
+
+        const auto& properties = material->Definition().Properties;
+        for (const auto& [name, value] : properties)
+        {
+            (void)value;
+            if (std::ranges::find(shader->LastGood->Definition().Properties, name, &ShaderPropertyDefinition::Name) ==
+                shader->LastGood->Definition().Properties.end())
+            {
+                cache.LastAttemptedDependencyStamp = stamp;
+                return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+            }
+        }
+
+        failedDependencyRevision |=
+            shader->LoadedRevision != 0 && shader->LastAttemptedRevision > shader->LoadedRevision;
+        for (const auto& property : shader->LastGood->Definition().Properties)
+        {
+            if (property.Type != ShaderPropertyType::Texture2D)
+                continue;
+            const auto found = properties.find(property.Name);
+            AssetId texture = property.DefaultTexture;
+            if (found != properties.end())
+            {
+                const auto* selected = std::get_if<AssetId>(&found->second);
+                if (!selected)
+                {
+                    cache.LastAttemptedDependencyStamp = stamp;
+                    return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+                }
+                texture = *selected;
+            }
+            stamp = HashDependencyStamp(stamp, texture);
+            if (!texture)
+            {
+                stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(property.TextureSemantic));
+                continue;
+            }
+            (void)ResolveTexture(texture);
+            const auto textureEntry = TextureCache.find(texture);
+            if (textureEntry == TextureCache.end())
+                continue;
+            stamp = HashDependencyStamp(stamp, textureEntry->second.LastAttemptedRevision);
+            stamp = HashDependencyStamp(stamp, textureEntry->second.LoadedRevision);
+            failedDependencyRevision |=
+                textureEntry->second.LoadedRevision != 0 &&
+                textureEntry->second.LastAttemptedRevision > textureEntry->second.LoadedRevision;
+        }
+        if (stamp == cache.LastAttemptedDependencyStamp)
+            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+        cache.LastAttemptedDependencyStamp = stamp;
+        if (failedDependencyRevision)
+            return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+
+        try
+        {
+            ResolvedAssetMaterial result;
+            result.Pipeline = pipeline->second;
+            for (const auto& property : shader->LastGood->Definition().Properties)
+            {
+                const auto found = properties.find(property.Name);
+                if (property.Type == ShaderPropertyType::Texture2D)
+                {
+                    AssetId texture = property.DefaultTexture;
+                    if (found != properties.end())
+                    {
+                        const auto* selected = std::get_if<AssetId>(&found->second);
+                        if (!selected)
+                            throw std::runtime_error("Material texture property has an invalid value type.");
+                        texture = *selected;
+                    }
+                    const auto& resolved = texture ? ResolveTexture(texture) : DefaultTexture(property.TextureSemantic);
+                    if (result.Textures.size() >= 16)
+                        throw std::runtime_error("Material exceeds the fragment texture binding limit.");
+                    result.Textures.push_back({resolved.Texture, resolved.Sampler});
+                    continue;
+                }
+
+                Vector4 packed = property.DefaultValue;
+                if (found != properties.end())
+                {
+                    const auto& value = found->second;
+                    if (const auto* scalar = std::get_if<float>(&value))
+                        packed = {*scalar, 0.0F, 0.0F, 0.0F};
+                    else if (const auto* vector2 = std::get_if<Vector2>(&value))
+                        packed = {vector2->X, vector2->Y, 0.0F, 0.0F};
+                    else if (const auto* vector3 = std::get_if<Vector3>(&value))
+                        packed = {vector3->X, vector3->Y, vector3->Z, 0.0F};
+                    else if (const auto* vector4 = std::get_if<Vector4>(&value))
+                        packed = *vector4;
+                    else if (const auto* color = std::get_if<Color>(&value))
+                        packed = {color->Red, color->Green, color->Blue, color->Alpha};
+                    else
+                        throw std::runtime_error("Material numeric property has an invalid value type.");
+                }
+                if (property.Name == "Tint")
+                    result.TintSlot = result.NumericProperties.size();
+                if (result.NumericProperties.size() >= 64)
+                    throw std::runtime_error("Material exceeds the numeric property binding limit.");
+                result.NumericProperties.push_back(packed);
+            }
+            if (result.NumericProperties.empty())
+                result.NumericProperties.emplace_back();
+            cache.Binding = std::move(result);
+            cache.LastGoodDependencyStamp = stamp;
+            ++MaterialBindingBuilds;
+        }
+        catch (const std::exception& error)
+        {
+            KEIRE_CORE_ERROR("Material GPU binding rebuild failed for id={} revision={}: {}", id.ToString(),
+                             cache.LoadedRevision, error.what());
+        }
+        return cache.Binding.Pipeline ? &cache.Binding : nullptr;
+    }
+} // namespace Keire::RenderBackend

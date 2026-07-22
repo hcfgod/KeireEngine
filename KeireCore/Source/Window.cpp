@@ -548,6 +548,39 @@ namespace Keire
             return handle;
         }
 
+        [[nodiscard]] std::vector<DisplayInformation> Displays() const
+        {
+            RequireOwner("Displays");
+            int count = 0;
+            SDL_DisplayID* nativeDisplays = SDL_GetDisplays(&count);
+            if (!nativeDisplays)
+                throw WindowError("SDL_GetDisplays", LastSdlError());
+            const auto release = [](SDL_DisplayID* displays) { SDL_free(displays); };
+            const std::unique_ptr<SDL_DisplayID, decltype(release)> owned(nativeDisplays, release);
+            const auto primary = SDL_GetPrimaryDisplay();
+            std::vector<DisplayInformation> result;
+            result.reserve(static_cast<std::size_t>(std::max(count, 0)));
+            for (int index = 0; index < count; ++index)
+            {
+                SDL_Rect bounds{};
+                SDL_Rect usable{};
+                if (!SDL_GetDisplayBounds(nativeDisplays[index], &bounds))
+                    throw WindowError("SDL_GetDisplayBounds", LastSdlError());
+                if (!SDL_GetDisplayUsableBounds(nativeDisplays[index], &usable))
+                    throw WindowError("SDL_GetDisplayUsableBounds", LastSdlError());
+                const auto name = SDL_GetDisplayName(nativeDisplays[index]);
+                result.push_back({static_cast<std::uint32_t>(index),
+                                  name ? name : "Display " + std::to_string(index + 1),
+                                  {bounds.x, bounds.y, static_cast<std::uint32_t>(std::max(bounds.w, 0)),
+                                   static_cast<std::uint32_t>(std::max(bounds.h, 0))},
+                                  {usable.x, usable.y, static_cast<std::uint32_t>(std::max(usable.w, 0)),
+                                   static_cast<std::uint32_t>(std::max(usable.h, 0))},
+                                  SDL_GetDisplayContentScale(nativeDisplays[index]),
+                                  nativeDisplays[index] == primary});
+            }
+            return result;
+        }
+
         std::optional<WindowEvent> PollEvent()
         {
             RequireOwner("PollEvent");
@@ -1242,6 +1275,8 @@ namespace Keire
     {
         return m_Impl->CreateWindow(m_Impl, specification);
     }
+
+    std::vector<DisplayInformation> WindowSystem::Displays() const { return m_Impl->Displays(); }
 
     std::optional<WindowEvent> WindowSystem::PollEvent() { return m_Impl->PollEvent(); }
 

@@ -23,7 +23,8 @@ param(
     [switch]$SmokeProject,
     [switch]$Editor,
     [string]$ProjectPath = "",
-    [switch]$Force
+    [switch]$Force,
+    [switch]$AllowDirty
 )
 
 $ErrorActionPreference = "Stop"
@@ -106,7 +107,8 @@ function Invoke-ProjectCommand {
         "package" {
             Invoke-CheckedCommand {
                 & (Join-Path $WindowsScripts "package.ps1") -Generator $Generator -Configuration $Configuration `
-                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
+                    -AllowDirty:$AllowDirty
             } "Package"
         }
         "doctor" {

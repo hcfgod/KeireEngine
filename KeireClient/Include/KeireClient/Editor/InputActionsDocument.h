@@ -2,7 +2,9 @@
 
 #include "Keire/Core.h"
 
-class EditorWorkspaceLayer;
+#include <filesystem>
+#include <functional>
+#include <string_view>
 
 namespace KeireEditor
 {
@@ -11,30 +13,36 @@ namespace KeireEditor
       public:
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Asset; }
         [[nodiscard]] const Keire::InputActionAssetDefinition& Definition() const noexcept { return m_Definition; }
+        [[nodiscard]] Keire::AssetId SelectedMap() const noexcept { return m_Map; }
+        [[nodiscard]] Keire::AssetId SelectedScheme() const noexcept { return m_Scheme; }
+        [[nodiscard]] Keire::AssetId SelectedAction() const noexcept { return m_Action; }
+        [[nodiscard]] Keire::AssetId SelectedBinding() const noexcept { return m_Binding; }
+        [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const noexcept { return m_Undo; }
         [[nodiscard]] bool Dirty() const noexcept { return m_Dirty; }
-        void MarkDirty() noexcept { m_Dirty = true; }
-        void MarkSaved() noexcept { m_Dirty = false; }
         void Open(Keire::AssetId asset, Keire::InputActionAssetDefinition definition,
-                  Keire::Ref<Keire::UndoContext> undo = {});
+                  Keire::Ref<Keire::UndoContext> undo = {}, std::filesystem::path source = {});
+        void Save();
+        void ReplaceDefinition(Keire::InputActionAssetDefinition definition, bool dirty = true);
+        void SelectMap(Keire::AssetId map) noexcept;
+        void SelectScheme(Keire::AssetId scheme) noexcept;
+        void SelectAction(Keire::AssetId action) noexcept;
+        void SelectBinding(Keire::AssetId binding) noexcept;
+        void SetSelection(Keire::AssetId map, Keire::AssetId scheme, Keire::AssetId action,
+                          Keire::AssetId binding) noexcept;
+        void ClearSelection() noexcept;
+        void RecordApplied(std::string_view name, Keire::InputActionAssetDefinition before);
+        [[nodiscard]] bool Undo();
+        [[nodiscard]] bool Redo();
         void Close() noexcept;
 
       private:
-        friend class ::EditorWorkspaceLayer;
-        [[nodiscard]] Keire::AssetId& AssetStorage() noexcept { return m_Asset; }
-        [[nodiscard]] Keire::AssetId& MapStorage() noexcept { return m_Map; }
-        [[nodiscard]] Keire::AssetId& SchemeStorage() noexcept { return m_Scheme; }
-        [[nodiscard]] Keire::AssetId& ActionStorage() noexcept { return m_Action; }
-        [[nodiscard]] Keire::AssetId& BindingStorage() noexcept { return m_Binding; }
-        [[nodiscard]] Keire::InputActionAssetDefinition& DefinitionStorage() noexcept { return m_Definition; }
-        [[nodiscard]] Keire::Ref<Keire::UndoContext>& UndoStorage() noexcept { return m_Undo; }
-        [[nodiscard]] bool& DirtyStorage() noexcept { return m_Dirty; }
-
         Keire::AssetId m_Asset;
         Keire::AssetId m_Map;
         Keire::AssetId m_Scheme;
         Keire::AssetId m_Action;
         Keire::AssetId m_Binding;
         Keire::InputActionAssetDefinition m_Definition;
+        std::filesystem::path m_Source;
         Keire::Ref<Keire::UndoContext> m_Undo;
         bool m_Dirty = false;
     };

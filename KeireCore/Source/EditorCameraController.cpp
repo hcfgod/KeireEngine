@@ -111,15 +111,19 @@ namespace Keire::Detail
         return changed;
     }
 
-    void EditorCameraController::Frame(const Vector3 center, const float radius, const float verticalFieldOfViewDegrees)
+    void EditorCameraController::Frame(const Vector3 center, const float radius, const float verticalFieldOfViewDegrees,
+                                       const float aspectRatio)
     {
         if (!Math::IsFinite(center) || !std::isfinite(radius) || radius <= 0.0F || verticalFieldOfViewDegrees <= 1.0F ||
-            verticalFieldOfViewDegrees >= 179.0F)
+            verticalFieldOfViewDegrees >= 179.0F || !std::isfinite(aspectRatio) || aspectRatio <= 0.0F)
             throw std::invalid_argument("Editor camera framing bounds are invalid.");
+        constexpr float padding = 1.25F;
+        const float verticalHalfFieldOfView = verticalFieldOfViewDegrees * DegreesToRadians * 0.5F;
+        const float horizontalHalfFieldOfView = std::atan(std::tan(verticalHalfFieldOfView) * aspectRatio);
+        const float limitingHalfFieldOfView = std::min(verticalHalfFieldOfView, horizontalHalfFieldOfView);
         m_State.Focus = center;
-        m_State.Distance =
-            std::clamp(radius / std::sin(verticalFieldOfViewDegrees * DegreesToRadians * 0.5F) * 1.1F, 0.05F, 5000.0F);
-        m_State.OrthographicSize = std::clamp(radius * 2.2F, 0.01F, 10000.0F);
+        m_State.Distance = std::clamp(radius / std::sin(limitingHalfFieldOfView) * padding, 0.05F, 5000.0F);
+        m_State.OrthographicSize = std::clamp(radius * 2.0F * padding, 0.01F, 10000.0F);
     }
 
     void EditorCameraController::SetFocus(const Vector3 focus)

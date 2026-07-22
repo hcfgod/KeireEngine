@@ -93,6 +93,18 @@ successful runtime revision. Structured diagnostics are mirrored to the editor C
 logs; failed shaders expose the full bounded diagnostic list in Inspector. `Strict` remains the default and is
 mandatory for cooking and release packaging.
 
+The editor runs external import, explicit refresh, material refresh, cook, receipt replay, and Project/Inspector source
+mutations in the private `KeireAssetWorker` process rather than on the UI thread. The worker mutation protocol supports
+folder creation, move, duplicate, trash, restore, and permanent deletion. One prioritized service owns publication and
+exchanges atomic documents below `Library/AssetOperations`. Successful work publishes
+`Library/AssetCache/Runtime/source-index.json`, which the editor validates and reloads without scanning or hashing the
+project again. Operation documents and captured worker logs remain available for diagnostics; the worker is packaged
+with the editor but is not a supported SDK or importer plug-in API.
+Independent editor/tool database instances serialize mutations with a project-scoped, OS-released file lock. Catalog
+directory replacement writes a versioned journal before moving the last-good directory, and database startup repairs
+an interrupted `prepared`, `backedUp`, or `published` state before exposing records. Asset protocol paths remain UTF-8
+and native path suffixes are appended without locale-dependent narrowing.
+
 ## Deterministic Cooking
 
 `AssetCooker::Cook()` walks optional stable-ID roots transitively, sorts the selected entries by stable ID, compresses

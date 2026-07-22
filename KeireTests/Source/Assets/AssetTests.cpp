@@ -5,6 +5,10 @@
 #include "Keire/Log.h"
 #include "KeireTests/TestSupport.h"
 
+#include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
+#include "KeireInternal/Assets/AssetWorkerProtocol.h"
+#include "KeireInternal/FileSystem.h"
+
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -72,6 +76,69 @@ TEST_CASE("Asset identifiers are stable canonical 128-bit values")
     CHECK(id);
     CHECK(Keire::AssetId::Parse(id.ToString()) == id);
     CHECK_THROWS_AS((void)Keire::AssetId::Parse("not-an-asset-id"), std::invalid_argument);
+}
+
+TEST_CASE("Asset worker protocol and published source index round trip without rescanning")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.WorkerProtocol";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".worker"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string source = "worker protocol source";
+    const auto id =
+        database->CreateAsset("Unicode-é.worker", importer, std::as_bytes(std::span(source.data(), source.size())));
+
+    const auto operationId = Keire::AssetId::Generate().ToString();
+    const auto operation = project.Root / "Library/AssetOperations" / operationId;
+    std::filesystem::create_directories(operation);
+    const auto sourceIndex = operation / "source-index.json";
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, sourceIndex);
+    REQUIRE(std::filesystem::is_regular_file(sourceIndex));
+    CHECK(Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*database, sourceIndex) == 1);
+    REQUIRE(database->Find(id));
+    CHECK(database->Find(id)->RelativePath == std::filesystem::path("Unicode-é.worker"));
+
+    Keire::Detail::AssetWorkerRequest request;
+    request.OperationId = operationId;
+    request.ProjectRoot = project.Root;
+    request.SourceIndexPath = sourceIndex;
+    request.Kind = Keire::Detail::AssetWorkerOperationKind::Cook;
+    request.CreateRelativePath = "Scenes/Created.keirescene";
+    request.CreatePayloadPath = operation / "source.keirescene";
+    request.CreateSettings = {{"quality", std::int64_t{2}}};
+    request.CreateAuxiliarySources = {{"Shaders/Created.hlsl", operation / "auxiliary-0.hlsl"}};
+    request.Mutation = {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
+                        .Asset = id,
+                        .Trash = Keire::AssetTrashId::Parse(Keire::AssetId::Generate().ToString()),
+                        .Source = "Old/Unicode-é.worker",
+                        .Destination = "New/Unicode-é.worker"};
+    request.CookOutput = project.Root / "Build/Cooked";
+    request.BuildProfile.Name = "Test";
+    request.BuildProfile.Roots = {id};
+    const auto requestPath = operation / "request.json";
+    Keire::Detail::WriteAssetWorkerRequest(requestPath, request);
+    const auto restored = Keire::Detail::ReadAssetWorkerRequest(requestPath);
+    CHECK(restored.OperationId == request.OperationId);
+    CHECK(restored.ProjectRoot == request.ProjectRoot);
+    CHECK(restored.SourceIndexPath == request.SourceIndexPath);
+    CHECK(restored.CookOutput == request.CookOutput);
+    CHECK(restored.CreateRelativePath == request.CreateRelativePath);
+    CHECK(restored.CreatePayloadPath == request.CreatePayloadPath);
+    CHECK(restored.CreateSettings == request.CreateSettings);
+    REQUIRE(restored.CreateAuxiliarySources.size() == 1);
+    CHECK(restored.CreateAuxiliarySources.front().RelativePath == request.CreateAuxiliarySources.front().RelativePath);
+    CHECK(restored.CreateAuxiliarySources.front().PayloadPath == request.CreateAuxiliarySources.front().PayloadPath);
+    CHECK(restored.Mutation.Kind == request.Mutation.Kind);
+    CHECK(restored.Mutation.Asset == request.Mutation.Asset);
+    CHECK(restored.Mutation.Trash == request.Mutation.Trash);
+    CHECK(restored.Mutation.Source == request.Mutation.Source);
+    CHECK(restored.Mutation.Destination == request.Mutation.Destination);
+    CHECK(restored.BuildProfile.Roots == request.BuildProfile.Roots);
 }
 
 TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
@@ -379,6 +446,43 @@ TEST_CASE("External import staging cancels without publication and startup rolls
     REQUIRE(database->Find(id));
     CHECK(ReadAll(project.Root / "Assets/Recover.txn") == std::vector<char>(original.begin(), original.end()));
     CHECK_FALSE(std::filesystem::exists(transaction));
+}
+
+TEST_CASE("Asset database startup restores the last-good catalog after interrupted directory publication")
+{
+    TemporaryAssetProject project;
+    const auto runtime = std::filesystem::absolute(project.Root / "Library/AssetCache/Runtime").lexically_normal();
+    const auto backup = std::filesystem::path(runtime.string() + ".bak");
+    const auto temporary = std::filesystem::path(runtime.string() + ".tmp-interrupted");
+    const auto journal = std::filesystem::path(runtime.string() + ".publish.json");
+    std::filesystem::create_directories(runtime);
+    std::filesystem::create_directories(backup);
+    std::filesystem::create_directories(temporary);
+    {
+        std::ofstream current(runtime / "generation.txt", std::ios::binary | std::ios::trunc);
+        current << "partial-new";
+        std::ofstream previous(backup / "generation.txt", std::ios::binary | std::ios::trunc);
+        previous << "last-good";
+        std::ofstream staged(temporary / "generation.txt", std::ios::binary | std::ios::trunc);
+        staged << "staged";
+        std::ofstream state(journal, std::ios::binary | std::ios::trunc);
+        state << "{\n"
+                 "  \"schemaVersion\": 1,\n"
+                 "  \"state\": \"backedUp\",\n"
+                 "  \"temporary\": \""
+              << Keire::Detail::PathToUtf8(temporary) << "\",\n"
+              << "  \"destination\": \"" << Keire::Detail::PathToUtf8(runtime) << "\",\n"
+              << "  \"backup\": \"" << Keire::Detail::PathToUtf8(backup) << "\",\n"
+              << "  \"hadDestination\": true\n"
+                 "}\n";
+    }
+
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    CHECK(ReadAll(runtime / "generation.txt") == std::vector<char>{'l', 'a', 's', 't', '-', 'g', 'o', 'o', 'd'});
+    CHECK_FALSE(std::filesystem::exists(backup));
+    CHECK_FALSE(std::filesystem::exists(temporary));
+    CHECK_FALSE(std::filesystem::exists(journal));
 }
 
 TEST_CASE("Texture importer exposes UI-independent production import options")

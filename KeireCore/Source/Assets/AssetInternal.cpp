@@ -99,12 +99,12 @@ namespace Keire::Detail
             std::error_code error;
             const auto size = std::filesystem::file_size(path, error);
             if (error || size > maximum)
-                throw std::runtime_error("Could not read bounded file: " + path.string());
+                throw std::runtime_error("Could not read bounded file: " + PathToUtf8(path));
             std::vector<std::byte> bytes(static_cast<std::size_t>(size));
             std::ifstream stream(path, std::ios::binary);
             if (!stream ||
                 (size > 0 && !stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size))))
-                throw std::runtime_error("Could not read file: " + path.string());
+                throw std::runtime_error("Could not read file: " + PathToUtf8(path));
             return bytes;
         }
     } // namespace
@@ -176,7 +176,7 @@ namespace Keire::Detail
         const auto schemaVersion = document.value("schemaVersion", 0);
         if (!document.is_object() || (schemaVersion != 1 && schemaVersion != 2) || !document.contains("assets") ||
             !document["assets"].is_array())
-            throw std::runtime_error("Asset catalog has an unsupported or malformed schema: " + path.string());
+            throw std::runtime_error("Asset catalog has an unsupported or malformed schema: " + PathToUtf8(path));
 
         CatalogData catalog;
         catalog.Path = std::filesystem::absolute(path).lexically_normal();
@@ -186,7 +186,8 @@ namespace Keire::Detail
             entry.Id = AssetId::Parse(item.at("id").get<std::string>());
             entry.Type = AssetTypeId::Parse(item.at("type").get<std::string>());
             const std::filesystem::path pack = item.at("pack").get<std::string>();
-            if (pack.empty() || pack.is_absolute() || pack.lexically_normal().string().starts_with(".."))
+            if (pack.empty() || pack.is_absolute() ||
+                pack.lexically_normal().native().starts_with(std::filesystem::path("..").native()))
                 throw std::runtime_error("Asset catalog contains an unsafe pack path.");
             entry.PackPath = (catalog.Path.parent_path() / pack).lexically_normal();
             entry.Offset = item.at("offset").get<std::uint64_t>();
@@ -250,14 +251,14 @@ namespace Keire::Detail
         }
         const Json document{{"schemaVersion", 2}, {"assets", std::move(assets)}};
         std::filesystem::create_directories(path.parent_path());
-        const auto temporary = path.string() + ".tmp";
+        const auto temporary = PathWithSuffix(path, ".tmp");
         std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
         if (!stream)
-            throw std::runtime_error("Could not create asset catalog: " + path.string());
+            throw std::runtime_error("Could not create asset catalog: " + PathToUtf8(path));
         stream << document.dump(2) << '\n';
         stream.close();
         if (!stream)
-            throw std::runtime_error("Could not write asset catalog: " + path.string());
+            throw std::runtime_error("Could not write asset catalog: " + PathToUtf8(path));
         AtomicReplace(temporary, path);
     }
 
@@ -284,13 +285,13 @@ namespace Keire::Detail
             std::to_integer<std::uint32_t>(values[0]) | (std::to_integer<std::uint32_t>(values[1]) << 8U) |
             (std::to_integer<std::uint32_t>(values[2]) << 16U) | (std::to_integer<std::uint32_t>(values[3]) << 24U);
         if (!stream || magic != PackMagic || version != PackVersion)
-            throw std::runtime_error("Asset pack has an invalid header: " + path.string());
+            throw std::runtime_error("Asset pack has an invalid header: " + PathToUtf8(path));
     }
 
     void AtomicReplace(const std::filesystem::path& temporary, const std::filesystem::path& destination)
     {
         std::error_code error;
-        const auto backup = destination.string() + ".bak";
+        const auto backup = PathWithSuffix(destination, ".bak");
         std::filesystem::remove(backup, error);
         error.clear();
         if (std::filesystem::exists(destination))

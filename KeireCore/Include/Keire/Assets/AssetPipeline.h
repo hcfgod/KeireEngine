@@ -17,11 +17,17 @@
 #include <stdexcept>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
 namespace Keire
 {
+    namespace Detail
+    {
+        class AssetDatabaseWorkerAccess;
+    }
+
     enum class AssetImportOptionKind : std::uint8_t
     {
         Boolean,
@@ -225,6 +231,7 @@ namespace Keire
       public:
         constexpr ExternalAssetImportReceiptId() noexcept = default;
 
+        [[nodiscard]] static ExternalAssetImportReceiptId Parse(std::string_view value);
         [[nodiscard]] std::string ToString() const;
         [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(m_Value); }
         [[nodiscard]] auto operator<=>(const ExternalAssetImportReceiptId&) const noexcept = default;
@@ -247,6 +254,7 @@ namespace Keire
       public:
         constexpr AssetTrashId() noexcept = default;
 
+        [[nodiscard]] static AssetTrashId Parse(std::string_view value);
         [[nodiscard]] std::string ToString() const;
         [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(m_Value); }
         [[nodiscard]] auto operator<=>(const AssetTrashId&) const noexcept = default;
@@ -315,6 +323,11 @@ namespace Keire
 
       private:
         friend class AssetCooker;
+        friend class Detail::AssetDatabaseWorkerAccess;
+        [[nodiscard]] std::size_t RefreshUnlocked();
+        [[nodiscard]] AssetImportResult ImportAllUnlocked(AssetImportPolicy policy, std::stop_token cancellation,
+                                                          AssetOperationProgressCallback progress);
+        void MoveAssetUnlocked(AssetId id, const std::filesystem::path& destination);
         void ApplyExternalImportReceipt(ExternalAssetImportReceiptId receipt, bool applied);
         class Impl;
         std::unique_ptr<Impl> m_Impl;
@@ -348,6 +361,14 @@ namespace Keire
                                                   AssetOperationProgressCallback progress = {});
         static void Validate(const std::filesystem::path& catalogPath,
                              std::size_t maximumAssetBytes = 1024U * 1024U * 1024U);
+
+      private:
+        friend class AssetDatabase;
+        [[nodiscard]] static AssetCookResult CookUnlocked(const AssetDatabase& database,
+                                                          const AssetBuildProfile& profile,
+                                                          const std::filesystem::path& outputDirectory,
+                                                          std::stop_token cancellation,
+                                                          AssetOperationProgressCallback progress);
     };
 
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateInputActionAssetImporter();

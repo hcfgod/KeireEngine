@@ -12,6 +12,7 @@
 
 namespace KeireTests
 {
+    inline std::filesystem::path TestExecutable;
     inline std::atomic<unsigned int> TestDirectoryCounter = 0;
 
     inline std::filesystem::path MakeTestDirectory(const std::string& name)

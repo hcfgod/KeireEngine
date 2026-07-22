@@ -2,11 +2,24 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
+suite=all
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --suite) suite="${2:?--suite requires fast, integration, or all}"; shift 2 ;;
+    *) printf 'Unknown test-unix option: %s\n' "$1" >&2; exit 2 ;;
+  esac
+done
+[[ "$suite" == all || "$suite" == fast || "$suite" == integration ]] || { printf 'Invalid suite: %s\n' "$suite" >&2; exit 2; }
+started=$SECONDS
+run_fast=0; run_integration=0
+[[ "$suite" == all || "$suite" == fast ]] && run_fast=1
+[[ "$suite" == all || "$suite" == integration ]] && run_integration=1
 assert_equal() { [[ "$1" == "$2" ]] || { printf '%s: expected %s, got %s\n' "$3" "$2" "$1" >&2; exit 1; }; }
 assert_true() { "$@" || { printf 'Assertion failed: %s\n' "$*" >&2; exit 1; }; }
 assert_false() { if "$@"; then printf 'Expected failure: %s\n' "$*" >&2; exit 1; fi; }
 
 load_project_config "$ROOT"
+if [[ $run_fast -eq 1 ]]; then
 assert_true test -n "$PROJECT_IDENTIFIER"
 launcher_fixture="$(mktemp -d)"
 mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux"
@@ -55,6 +68,19 @@ assert_equal "$(package_install_arguments pacman | tr '\n' ' ' | sed 's/ $//')" 
 assert_equal "$(package_install_arguments apt-get)" -y 'APT install arguments'
 assert_equal "$(package_install_arguments dnf)" -y 'DNF install arguments'
 assert_equal "$(package_install_arguments zypper | tr '\n' ' ' | sed 's/ $//')" '--non-interactive install' 'Zypper install arguments'
+package_policy_fixture="$(mktemp -d)"
+git -C "$package_policy_fixture" init --quiet
+git -C "$package_policy_fixture" config user.email tests@keire.invalid
+git -C "$package_policy_fixture" config user.name 'Kéire Tests'
+printf '%s\n' clean > "$package_policy_fixture/tracked.txt"
+git -C "$package_policy_fixture" add tracked.txt
+git -C "$package_policy_fixture" commit --quiet -m fixture
+assert_equal "$(package_worktree_policy "$package_policy_fixture" 0 0)" 'false false' 'clean production package policy'
+printf '%s\n' dirty > "$package_policy_fixture/untracked.txt"
+assert_false package_worktree_policy "$package_policy_fixture" 0 0
+assert_equal "$(package_worktree_policy "$package_policy_fixture" 1 0)" 'true true' 'local dirty development package policy'
+assert_false package_worktree_policy "$package_policy_fixture" 1 1
+rm -rf "$package_policy_fixture"
 assert_true mac_requires_full_xcode xcode4
 assert_false mac_requires_full_xcode ninja
 assert_equal "$(json_escape $'quote" slash\\ tab\t')" 'quote\" slash\\ tab\t' 'JSON escaping'
@@ -117,22 +143,25 @@ assert_true grep -q 'Source/ECS/Components/CameraComponent.cpp' "$ROOT/KeireCore
 assert_true grep -q 'Source/ECS/Components/MeshRendererComponent.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'builtin-shaders.sh' "$ROOT/KeireCore/premake5.lua"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
-assert_true grep -q 'BuiltinUnlitShaders.h' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
-assert_true grep -q 'renderer->Tint()' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
-assert_true grep -q 'ResolveLighting' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
-assert_true grep -q 'DirectionalLightComponent' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
-assert_true grep -q 'AmbientAndExposure' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
+assert_true grep -R -q 'BuiltinUnlitShaders.h' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'renderer->Tint()' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'ResolveLighting' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'DirectionalLightComponent' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'AmbientAndExposure' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -q 'LightDirection' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -q 'worldNormal' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
-assert_true grep -q 'ReadbackRGBA8' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
+assert_true grep -R -q 'ReadbackRGBA8' "$ROOT/KeireCore/Source/Rendering"
 assert_true test -f "$ROOT/KeireRenderTests/Source/RenderedOutputTests.cpp"
 assert_true grep -q 'backends=(vulkan)' "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -q 'backends=(metal)' "$ROOT/Scripts/Unix/run-target.sh"
-assert_true grep -q 'BuiltinShaderUniformBufferCount(vertex)' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
-assert_true grep -q 'SDL_PushGPUFragmentUniformData' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
+assert_true grep -R -q 'BuiltinShaderUniformBufferCount(vertex)' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'SDL_PushGPUFragmentUniformData' "$ROOT/KeireCore/Source/Rendering"
+assert_true test "$(wc -l < "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp" | tr -d ' ')" -lt 700
+assert_true test "$(wc -l < "$ROOT/KeireCore/Source/Assets/AssetPipeline.cpp" | tr -d ' ')" -lt 600
+assert_false grep -q 'recursive_mutex' "$ROOT/KeireCore/Include/KeireInternal/Assets/AssetDatabaseImplementation.h"
 assert_true grep -q 'Rendering.keiresettings' "$ROOT/KeireCore/Source/Rendering/RenderSettings.cpp"
 assert_true test -f "$ROOT/Samples/KeireSandbox/ProjectSettings/Rendering.keiresettings"
-assert_false grep -q 'Vendor/SDL/test' "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp"
+assert_false grep -R -q 'Vendor/SDL/test' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -q 'SDL_GetBasePath()' "$ROOT/KeireCore/Source/Assets/RenderingAssets.cpp"
 assert_true grep -q 'ImGuiDragDropFlags_SourceAllowNullID' "$ROOT/KeireCore/Source/Ui.cpp"
 assert_true test -f "$ROOT/KeireClient/Source/Editor/SceneGizmoController.cpp"
@@ -154,6 +183,32 @@ assert_true test -f "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
 assert_true test -f "$ROOT/KeireClient/Source/Editor/ConsolePanel.cpp"
 assert_true test -f "$ROOT/KeireClient/Source/Editor/DiagnosticsPanel.cpp"
 assert_true test -f "$ROOT/KeireClient/Source/Editor/ThumbnailService.cpp"
+workspace_lines="$(wc -l < "$ROOT/KeireClient/Source/EditorWorkspaceLayer.cpp" | tr -d ' ')"
+assert_true test "$workspace_lines" -lt 1500
+assert_false grep -E -q 'Storage\(\)|friend[[:space:]]+class[[:space:]]+::EditorWorkspaceLayer' \
+  "$ROOT/KeireClient/Include/KeireClient/Editor/SceneDocument.h" \
+  "$ROOT/KeireClient/Include/KeireClient/Editor/InputActionsDocument.h"
+assert_true test -f "$ROOT/KeireClient/Source/Editor/HierarchyPanel.cpp"
+for panel in HierarchyPanel InspectorPanel SceneViewportPanel InputActionsPanel ProjectSettingsPanel AssetBrowserPanel; do
+  assert_true test -f "$ROOT/KeireClient/Source/Editor/${panel}.cpp"
+done
+assert_true grep -q 'class AssetInspectorPanel final' \
+  "$ROOT/KeireClient/Include/KeireClient/Editor/EditorPanels.h"
+assert_true grep -q 'AssetInspectorPanel::Draw' "$ROOT/KeireClient/Source/Editor/InspectorPanel.cpp"
+assert_false grep -E -q 'if[[:space:]]*\(auto[[:space:]]+[[:alnum:]_]+[[:space:]]*=[[:space:]]*ui\.BeginPanel\([^;]+;[[:space:]]*![[:alnum:]_]+\)' \
+  "$ROOT/KeireClient/Source/Editor/HierarchyPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/InspectorPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/SceneViewportPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/InputActionsPanel.cpp"
+assert_false grep -R -q '#include "KeireClient/EditorWorkspaceLayer.h"' \
+  "$ROOT/KeireClient/Source/Editor/HierarchyPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/InspectorPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/SceneViewportPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/InputActionsPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/ProjectSettingsPanel.cpp" \
+  "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
+assert_false grep -E -q 'friend[[:space:]]+class[[:space:]]+KeireEditor::|Draw(Scene|Hierarchy|Inspector)Content' \
+  "$ROOT/KeireClient/Include/KeireClient/EditorWorkspaceLayer.h"
 assert_true grep -q 'DisplayName(record.RelativePath)' "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
 assert_true grep -q 'TrashRecords()' "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
 assert_true grep -q 'class KEIRE_API UndoService' "$ROOT/KeireCore/Include/Keire/Undo.h"
@@ -199,6 +254,9 @@ assert_true grep -q 'GLM_COMMIT' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'KeireShaderCompiler' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'SDL-shadercross-LICENSE.txt' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'SDL_SHADERCROSS_COMMIT' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -q 'asset_worker' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -q 'developmentArtifact' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -q -- '--allow-dirty' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"
 assert_true grep -q '"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}" SDL3::SDL3-static' "$ROOT/Config/PackageConfig.cmake.in"
 security_workflow="$ROOT/.github/workflows/security.yml"
@@ -224,7 +282,7 @@ grep -Fq KEIRE_COMPILED_LOG_LEVEL "$ROOT/KeireCore/Include/Keire/Log.h" || fail 
 for path in bin/Client bin/Hub lib/libCore.a lib/libCoreImGui.a Config/Client.json include/Core/Core.h include/Core/Log.h include/Core/Api.h include/Core/Application.h include/Core/Assert.h include/Core/BuildInfo.h include/Core/EntryPoint.h include/Core/Event.h include/Core/Layer.h include/Core/Ref.h include/Core/Time.h include/Core/Project/Project.h include/Core/Scenes/Scene.h include/Core/Scenes/SceneAsset.h include/Core/Scenes/SceneSystem.h include/Core/Window.h include/Core/WindowConfig.h samples/KeireSandbox/ProjectSettings/Project.keireproject samples/KeireSandbox/ProjectSettings/Rendering.keiresettings samples/KeireSandbox/Assets/Input/DefaultInput.keireinput samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene examples/consumer/Main.cpp examples/consumer/Client.json examples/consumer/CMakeLists.txt examples/consumer/README.md examples/managed-consumer/ClientApplication.cpp examples/managed-consumer/CMakeLists.txt examples/managed-consumer/README.md lib/cmake/CrossPlatformCoreClientTemplate/CrossPlatformCoreClientTemplateConfig.cmake third-party/spdlog/spdlog.h third-party/SDL3/include/SDL3/SDL.h third-party/SDL3/lib/libSDL3.a third-party/SDL3/cmake/SDL3Config.cmake third-party/SDL3/licenses/SDL3/LICENSE.txt third-party/licenses/spdlog-LICENSE.txt third-party/licenses/fmt-LICENSE.rst third-party/licenses/doctest-LICENSE.txt third-party/licenses/nlohmann-json-LICENSE.MIT.txt third-party/licenses/dear-imgui-LICENSE.txt README.md LICENSE.txt THIRD_PARTY_NOTICES.md build-manifest.json; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
-for path in bin/CoreAssetTool lib/libCoreZstd.a include/Core/Math/Math.h include/Core/ECS/Component.h include/Core/ECS/Entity.h include/Core/ECS/Components/TransformComponent.h include/Core/ECS/Components/DirectionalLightComponent.h include/Core/Assets/Asset.h include/Core/Assets/AssetSystem.h include/Core/Assets/AssetPipeline.h include/Core/Assets/InputActionAsset.h include/Core/Input/Input.h samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta third-party/licenses/zstandard-LICENSE.txt third-party/licenses/entt-LICENSE.txt third-party/licenses/glm-COPYING.txt; do
+for path in bin/CoreAssetTool bin/CoreAssetWorker lib/libCoreZstd.a include/Core/Math/Math.h include/Core/ECS/Component.h include/Core/ECS/Entity.h include/Core/ECS/Components/TransformComponent.h include/Core/ECS/Components/DirectionalLightComponent.h include/Core/Assets/Asset.h include/Core/Assets/AssetSystem.h include/Core/Assets/AssetPipeline.h include/Core/Assets/InputActionAsset.h include/Core/Input/Input.h samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta third-party/licenses/zstandard-LICENSE.txt third-party/licenses/entt-LICENSE.txt third-party/licenses/glm-COPYING.txt; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 rm -rf "$package_stage/third-party/spdlog"
@@ -267,7 +325,11 @@ copy_tracked_tree "$ROOT" Samples/KeireSandbox "$tracked_sample_stage"
 assert_true test -f "$tracked_sample_stage/ProjectSettings/Project.keireproject"
 assert_true assert_package_generated_data_free "$tracked_sample_stage"
 rm -rf "$tracked_sample_stage"
+printf 'Fast Unix script checks completed in %ss.\n' "$((SECONDS - started))"
+fi
 
+if [[ $run_integration -eq 1 ]]; then
+integration_started=$SECONDS
 identity_fixture="$(mktemp -d)"
 mkdir -p "$identity_fixture/Scripts/Unix" "$identity_fixture/Config"
 cp "$ROOT/Scripts/Unix/common.sh" "$ROOT/Scripts/Unix/build-info.sh" "$identity_fixture/Scripts/Unix/"
@@ -372,16 +434,13 @@ bash "$fixture/Scripts/Unix/clean.sh" full >/dev/null
 assert_false test -d "$fixture/Build/Bin"
 assert_true test -f "$fixture/Vendor/keep.txt"
 assert_true test -f "$fixture/ScriptFixtureCore/Source/Library.cpp"
+rm -rf "$parent_fixture"
+printf 'Unix script integration fixtures completed in %ss.\n' "$((SECONDS - integration_started))"
+fi
 
-repository_files="$(mktemp)"
-find "$ROOT" -type f \
-  -not -path '*/.git/*' -not -path '*/.vs/*' -not -path '*/Vendor/*' -not -path '*/Tools/*' -not -path '*/Build/*' -not -path '*/Logs/*' -not -path '*/Artifacts/*' -not -path '*/Scripts/Tests/*' > "$repository_files"
-deprecated_pattern='\b(CORE|CLIENT)_(API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b'
-while IFS= read -r file; do
-  ! grep -En "$deprecated_pattern" "$file" || fail "Deprecated public macros remain in $file"
-  for stale in '#include "KeireCore/' 'Scripts/KeireTests' 'Scripts\KeireTests' 'Scripts/Windows/Tests' 'Scripts/Unix/Tests' 'KeireCore.log' 'KeireClient.log'; do
-    ! grep -Fn "$stale" "$file" || fail "Stale repository identity remains in $file: $stale"
-  done
-done < "$repository_files"
-rm -f "$repository_files"
-printf 'Unix script regression tests passed.\n'
+if [[ $run_fast -eq 1 ]]; then
+  search_globs=(--glob '!.git/**' --glob '!.vs/**' --glob '!Vendor/**' --glob '!Tools/**' --glob '!Build/**' --glob '!Logs/**' --glob '!Artifacts/**' --glob '!Scripts/Tests/**')
+  ! rg -n "${search_globs[@]}" '\b(CORE|CLIENT)_(API|ASSERT|ASSERTIONS_ENABLED|TRACE|DEBUG|INFO|WARN|ERROR|CRITICAL)\b' "$ROOT" || fail 'Deprecated public macros remain'
+  ! rg -n -F "${search_globs[@]}" -e '#include "KeireCore/' -e 'Scripts/KeireTests' -e 'Scripts\KeireTests' -e 'Scripts/Windows/Tests' -e 'Scripts/Unix/Tests' -e 'KeireCore.log' -e 'KeireClient.log' "$ROOT" || fail 'Stale repository identity remains'
+fi
+printf 'Unix %s script regression tests passed in %ss.\n' "$suite" "$((SECONDS - started))"

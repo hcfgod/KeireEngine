@@ -1,0 +1,458 @@
+#include "KeireInternal/Rendering/RenderBackendInternal.h"
+
+#include "Keire/Log.h"
+
+#include <algorithm>
+#include <array>
+#include <stdexcept>
+
+namespace Keire::RenderBackend
+{
+    void RenderSharedState::CreateGeometryResources()
+    {
+        DefaultMesh = CreateMeshResources(*MeshAsset::Cube());
+        ErrorMesh = CreateMeshResources(*MeshAsset::Error());
+        CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
+        const auto solidTexture =
+            [](const std::array<std::byte, 4> pixel, const TextureSemantic semantic, const TextureColorSpace colorSpace)
+        {
+            TextureImportSettings settings;
+            settings.Semantic = semantic;
+            settings.ColorSpace = colorSpace;
+            settings.Mips = TextureMipPolicy::None;
+            std::vector<std::byte> pixels(pixel.begin(), pixel.end());
+            return CreateRef<Texture2DAsset>(settings, std::vector<TextureMipLevel>{{1, 1, std::move(pixels)}});
+        };
+        WhiteTexture =
+            CreateTextureResources(*solidTexture({std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}},
+                                                 TextureSemantic::Color, TextureColorSpace::Srgb));
+        FlatNormalTexture =
+            CreateTextureResources(*solidTexture({std::byte{128}, std::byte{128}, std::byte{255}, std::byte{255}},
+                                                 TextureSemantic::Normal, TextureColorSpace::Linear));
+        NeutralOrmTexture =
+            CreateTextureResources(*solidTexture({std::byte{255}, std::byte{255}, std::byte{0}, std::byte{255}},
+                                                 TextureSemantic::Data, TextureColorSpace::Linear));
+        BlackTexture = CreateTextureResources(*solidTexture({std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255}},
+                                                            TextureSemantic::Color, TextureColorSpace::Srgb));
+        BlackDataTexture =
+            CreateTextureResources(*solidTexture({std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255}},
+                                                 TextureSemantic::Data, TextureColorSpace::Linear));
+        WhiteDataTexture =
+            CreateTextureResources(*solidTexture({std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}},
+                                                 TextureSemantic::Data, TextureColorSpace::Linear));
+        const auto grid = CreateGridVertices();
+        GridVertexCount = static_cast<std::uint32_t>(grid.size());
+        GridBuffer = UploadVertexBuffer(grid);
+    }
+
+    void RenderSharedState::ReleaseMeshResources(GpuMeshResources& resources) noexcept
+    {
+        if (Device && resources.Indices)
+            SDL_ReleaseGPUBuffer(Device, resources.Indices);
+        if (Device && resources.Vertices)
+            SDL_ReleaseGPUBuffer(Device, resources.Vertices);
+        if (Device && resources.AssetVertices)
+            SDL_ReleaseGPUBuffer(Device, resources.AssetVertices);
+        resources = {};
+    }
+
+    void RenderSharedState::ReleaseTextureResources(GpuTextureResources& resources) noexcept
+    {
+        if (Device && resources.Texture)
+            SDL_ReleaseGPUTexture(Device, resources.Texture);
+        resources = {};
+    }
+
+    void RenderSharedState::Retire(GpuTextureResources resources) noexcept
+    {
+        if (resources.Empty())
+            return;
+        if (!Open || !Device)
+            ReleaseTextureResources(resources);
+        else if (FrameActive)
+            PendingRetiredTextures.push_back(resources);
+        else if (!InFlight.empty())
+            InFlight.back().RetiredTextures.push_back(resources);
+        else
+            ReleaseTextureResources(resources);
+    }
+
+    void RenderSharedState::Retire(SDL_GPUGraphicsPipeline* pipeline) noexcept
+    {
+        if (!pipeline)
+            return;
+        if (!Open || !Device)
+            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+        else if (FrameActive)
+            PendingRetiredPipelines.push_back(pipeline);
+        else if (!InFlight.empty())
+            InFlight.back().RetiredPipelines.push_back(pipeline);
+        else
+            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+    }
+
+    void RenderSharedState::Retire(GpuMeshResources resources) noexcept
+    {
+        if (resources.Empty())
+            return;
+        if (!Open || !Device)
+        {
+            ReleaseMeshResources(resources);
+            return;
+        }
+        if (FrameActive)
+            PendingRetiredMeshes.push_back(resources);
+        else if (!InFlight.empty())
+            InFlight.back().RetiredMeshes.push_back(resources);
+        else
+            ReleaseMeshResources(resources);
+    }
+
+    void RenderSharedState::Retire(SurfaceResources resources) noexcept
+    {
+        if (resources.Empty())
+            return;
+        if (!Open || !Device)
+        {
+            ReleaseResources(resources);
+            return;
+        }
+        if (FrameActive)
+            PendingRetired.push_back(resources);
+        else if (!InFlight.empty())
+            InFlight.back().Retired.push_back(resources);
+        else
+            ReleaseResources(resources);
+    }
+
+    void RenderSharedState::RetireSurface(RenderSurfaceState& surface) noexcept
+    {
+        Retire(std::exchange(surface.Resources, {}));
+        surface.Owner.reset();
+        surface.Width = 0;
+        surface.Height = 0;
+    }
+
+    SDL_GPUSampleCount RenderSharedState::ResolveSamples(const RenderSampleCount requested) const noexcept
+    {
+        const auto maximum = static_cast<std::uint8_t>(requested);
+        constexpr std::pair<std::uint8_t, SDL_GPUSampleCount> candidates[] = {{std::uint8_t{8}, SDL_GPU_SAMPLECOUNT_8},
+                                                                              {std::uint8_t{4}, SDL_GPU_SAMPLECOUNT_4},
+                                                                              {std::uint8_t{2}, SDL_GPU_SAMPLECOUNT_2},
+                                                                              {std::uint8_t{1}, SDL_GPU_SAMPLECOUNT_1}};
+        for (const auto [value, candidate] : candidates)
+        {
+            if (value > maximum)
+                continue;
+            if (SDL_GPUTextureSupportsSampleCount(Device, ColorFormat, candidate) &&
+                (!DepthFormat || SDL_GPUTextureSupportsSampleCount(Device, DepthFormat, candidate)))
+                return candidate;
+        }
+        return SDL_GPU_SAMPLECOUNT_1;
+    }
+
+    SurfaceResources RenderSharedState::CreateResources(const RenderSurfaceState& surface,
+                                                        const SDL_GPUSampleCount samples)
+    {
+        SurfaceResources result;
+        try
+        {
+            SDL_GPUTextureCreateInfo sampled{};
+            sampled.type = SDL_GPU_TEXTURETYPE_2D;
+            sampled.format = ColorFormat;
+            sampled.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            sampled.width = surface.RequestedWidth;
+            sampled.height = surface.RequestedHeight;
+            sampled.layer_count_or_depth = 1;
+            sampled.num_levels = 1;
+            sampled.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            result.SampledColor = SDL_CreateGPUTexture(Device, &sampled);
+            if (!result.SampledColor)
+                throw std::runtime_error("SDL_CreateGPUTexture(color) failed: " + LastSdlError());
+
+            if (samples != SDL_GPU_SAMPLECOUNT_1)
+            {
+                auto multisample = sampled;
+                multisample.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+                multisample.sample_count = samples;
+                result.MultisampleColor = SDL_CreateGPUTexture(Device, &multisample);
+                if (!result.MultisampleColor)
+                    throw std::runtime_error("SDL_CreateGPUTexture(MSAA color) failed: " + LastSdlError());
+            }
+
+            if (surface.Specification.Depth && DepthFormat)
+            {
+                SDL_GPUTextureCreateInfo depth{};
+                depth.type = SDL_GPU_TEXTURETYPE_2D;
+                depth.format = DepthFormat;
+                depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+                depth.width = surface.RequestedWidth;
+                depth.height = surface.RequestedHeight;
+                depth.layer_count_or_depth = 1;
+                depth.num_levels = 1;
+                depth.sample_count = samples;
+                result.Depth = SDL_CreateGPUTexture(Device, &depth);
+                if (!result.Depth)
+                    throw std::runtime_error("SDL_CreateGPUTexture(depth) failed: " + LastSdlError());
+            }
+            return result;
+        }
+        catch (...)
+        {
+            ReleaseResources(result);
+            throw;
+        }
+    }
+
+    void RenderSharedState::EnsureSurface(RenderSurfaceState& surface)
+    {
+        if (Specification.Mode == RenderMode::Headless)
+        {
+            if (surface.Width != surface.RequestedWidth || surface.Height != surface.RequestedHeight)
+            {
+                surface.Width = surface.RequestedWidth;
+                surface.Height = surface.RequestedHeight;
+                ++surface.Generation;
+            }
+            return;
+        }
+        if (surface.Width == surface.RequestedWidth && surface.Height == surface.RequestedHeight &&
+            surface.Resources.SampledColor)
+            return;
+        if (surface.FailedWidth == surface.RequestedWidth && surface.FailedHeight == surface.RequestedHeight)
+            return;
+
+        const auto samples = ResolveSamples(surface.Specification.SampleCount);
+        try
+        {
+            auto replacement = CreateResources(surface, samples);
+            Retire(std::exchange(surface.Resources, replacement));
+            surface.Width = surface.RequestedWidth;
+            surface.Height = surface.RequestedHeight;
+            surface.ActualSamples = FromSdlSampleCount(samples);
+            surface.FailedWidth = 0;
+            surface.FailedHeight = 0;
+            ++surface.Generation;
+        }
+        catch (const std::exception& error)
+        {
+            surface.FailedWidth = surface.RequestedWidth;
+            surface.FailedHeight = surface.RequestedHeight;
+            KEIRE_CORE_ERROR("Could not resize render surface '{}': {}", surface.Specification.Name, error.what());
+        }
+    }
+
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreatePipeline(const SDL_GPUSampleCount samples,
+                                                               const SDL_GPUPrimitiveType primitive,
+                                                               const bool depthWrite)
+    {
+        SDL_GPUShader* vertex = CreateShader(true);
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            fragment = CreateShader(false);
+
+            SDL_GPUColorTargetDescription color{};
+            color.format = ColorFormat;
+
+            SDL_GPUVertexBufferDescription vertexBuffer{};
+            vertexBuffer.slot = 0;
+            vertexBuffer.pitch = sizeof(RenderVertex);
+            vertexBuffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+            std::array<SDL_GPUVertexAttribute, 3> attributes{};
+            attributes[0].location = 0;
+            attributes[0].buffer_slot = 0;
+            attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+            attributes[0].offset = offsetof(RenderVertex, Position);
+            attributes[1].location = 1;
+            attributes[1].buffer_slot = 0;
+            attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+            attributes[1].offset = offsetof(RenderVertex, Color);
+            attributes[2].location = 2;
+            attributes[2].buffer_slot = 0;
+            attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
+            attributes[2].offset = offsetof(RenderVertex, Normal);
+
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.vertex_input_state.vertex_buffer_descriptions = &vertexBuffer;
+            information.vertex_input_state.num_vertex_buffers = 1;
+            information.vertex_input_state.vertex_attributes = attributes.data();
+            information.vertex_input_state.num_vertex_attributes = static_cast<std::uint32_t>(attributes.size());
+            information.primitive_type = primitive;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+            information.rasterizer_state.enable_depth_clip = true;
+            information.multisample_state.sample_count = samples;
+            information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            information.depth_stencil_state.enable_depth_test = true;
+            information.depth_stencil_state.enable_depth_write = depthWrite;
+            information.target_info.color_target_descriptions = &color;
+            information.target_info.num_color_targets = 1;
+            information.target_info.depth_stencil_format = DepthFormat;
+            information.target_info.has_depth_stencil_target = true;
+
+            KEIRE_CORE_INFO("Creating built-in pipeline (primitive={}, samples={}, color={}, depth={}, attributes=3).",
+                            static_cast<std::uint32_t>(primitive), static_cast<std::uint32_t>(samples),
+                            static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(DepthFormat));
+            SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!pipeline)
+                throw std::runtime_error(
+                    "SDL_CreateGPUGraphicsPipeline failed for " +
+                    std::string(primitive == SDL_GPU_PRIMITIVETYPE_TRIANGLELIST ? "triangle list" : "line list") +
+                    ": " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return pipeline;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
+    }
+
+    RenderPipelineSet& RenderSharedState::PipelinesFor(const SDL_GPUSampleCount samples)
+    {
+        const auto found = std::ranges::find(Pipelines, samples, &RenderPipelineSet::Samples);
+        if (found != Pipelines.end())
+            return *found;
+
+        RenderPipelineSet result;
+        result.Samples = samples;
+        try
+        {
+            result.Cube = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
+            result.Grid = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_LINELIST, false);
+            return Pipelines.emplace_back(result);
+        }
+        catch (...)
+        {
+            if (result.Grid)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.Grid);
+            if (result.Cube)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.Cube);
+            throw;
+        }
+    }
+
+    SDL_GPUShader* RenderSharedState::CreateAssetShader(const ShaderAssetDefinition& definition,
+                                                        const bool vertex) const
+    {
+        const auto supported = SDL_GetGPUShaderFormats(Device);
+        const ShaderVariant* variant = nullptr;
+        SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
+        const auto findVariant = [&definition](const ShaderBinaryFormat requested)
+        {
+            const auto found = std::ranges::find(definition.Variants, requested, &ShaderVariant::Format);
+            return found == definition.Variants.end() ? nullptr : &*found;
+        };
+        if ((supported & SDL_GPU_SHADERFORMAT_DXIL) && (variant = findVariant(ShaderBinaryFormat::Dxil)))
+            format = SDL_GPU_SHADERFORMAT_DXIL;
+        else if ((supported & SDL_GPU_SHADERFORMAT_MSL) && (variant = findVariant(ShaderBinaryFormat::Msl)))
+            format = SDL_GPU_SHADERFORMAT_MSL;
+        else if ((supported & SDL_GPU_SHADERFORMAT_SPIRV) && (variant = findVariant(ShaderBinaryFormat::SpirV)))
+            format = SDL_GPU_SHADERFORMAT_SPIRV;
+        if (!variant)
+            throw std::runtime_error("Shader asset lacks a variant for the active GPU backend.");
+
+        const auto& code = vertex ? variant->Vertex : variant->Fragment;
+        const auto textureCount = static_cast<std::uint32_t>(
+            std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D, &ShaderPropertyDefinition::Type));
+        SDL_GPUShaderCreateInfo information{};
+        information.code_size = code.size();
+        information.code = reinterpret_cast<const std::uint8_t*>(code.data());
+        information.entrypoint = format == SDL_GPU_SHADERFORMAT_SPIRV
+                                     ? (vertex ? definition.VertexEntry.c_str() : definition.FragmentEntry.c_str())
+                                     : nullptr;
+        information.format = format;
+        information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        information.num_samplers = vertex ? 0 : textureCount;
+        information.num_uniform_buffers = vertex ? 1 : 2;
+        SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+        if (!shader)
+            throw std::runtime_error("SDL_CreateGPUShader(asset) failed: " + LastSdlError());
+        return shader;
+    }
+
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateAssetPipeline(const ShaderAssetDefinition& definition,
+                                                                    const SDL_GPUSampleCount samples)
+    {
+        SDL_GPUShader* vertex = CreateAssetShader(definition, true);
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            fragment = CreateAssetShader(definition, false);
+            SDL_GPUColorTargetDescription color{};
+            color.format = ColorFormat;
+            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.enable_blend = definition.Blend;
+
+            SDL_GPUVertexBufferDescription buffer{};
+            buffer.slot = 0;
+            buffer.pitch = sizeof(MeshVertex);
+            buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+            const std::array attributes{
+                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(MeshVertex, Position)},
+                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(MeshVertex, Normal)},
+                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(MeshVertex, UV0)},
+                SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(MeshVertex, VertexColor)},
+                SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(MeshVertex, Tangent)}};
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.vertex_input_state.vertex_buffer_descriptions = &buffer;
+            information.vertex_input_state.num_vertex_buffers = 1;
+            information.vertex_input_state.vertex_attributes = attributes.data();
+            information.vertex_input_state.num_vertex_attributes =
+                definition.VertexLayoutVersion == 2 ? static_cast<std::uint32_t>(attributes.size()) : 4U;
+            information.primitive_type = definition.Topology == ShaderPrimitiveTopology::LineList
+                                             ? SDL_GPU_PRIMITIVETYPE_LINELIST
+                                             : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode =
+                definition.Culling == ShaderCullMode::Front  ? SDL_GPU_CULLMODE_FRONT
+                : definition.Culling == ShaderCullMode::Back ? SDL_GPU_CULLMODE_BACK
+                                                             : SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+            information.rasterizer_state.enable_depth_clip = true;
+            information.multisample_state.sample_count = samples;
+            information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            information.depth_stencil_state.enable_depth_test = definition.DepthTest;
+            information.depth_stencil_state.enable_depth_write = definition.DepthWrite;
+            information.target_info.color_target_descriptions = &color;
+            information.target_info.num_color_targets = 1;
+            information.target_info.depth_stencil_format = DepthFormat;
+            information.target_info.has_depth_stencil_target = true;
+            KEIRE_CORE_INFO("Creating asset pipeline (layout={}, topology={}, samples={}, color={}, depth={}, "
+                            "attributes={}).",
+                            definition.VertexLayoutVersion, static_cast<std::uint32_t>(definition.Topology),
+                            static_cast<std::uint32_t>(samples), static_cast<std::uint32_t>(ColorFormat),
+                            static_cast<std::uint32_t>(DepthFormat),
+                            information.vertex_input_state.num_vertex_attributes);
+            SDL_GPUGraphicsPipeline* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(asset) failed: " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return result;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
+    }
+} // namespace Keire::RenderBackend

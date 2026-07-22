@@ -85,6 +85,25 @@ namespace Keire
         auto operator<=>(const WindowPosition&) const noexcept = default;
     };
 
+    struct DisplayBounds
+    {
+        std::int32_t X = 0;
+        std::int32_t Y = 0;
+        std::uint32_t Width = 0;
+        std::uint32_t Height = 0;
+        auto operator<=>(const DisplayBounds&) const noexcept = default;
+    };
+
+    struct DisplayInformation
+    {
+        std::uint32_t Index = 0;
+        std::string Name;
+        DisplayBounds Bounds;
+        DisplayBounds UsableBounds;
+        float ContentScale = 1.0F;
+        bool Primary = false;
+    };
+
     struct WindowEventHeader
     {
         std::uint64_t TimestampNanoseconds = 0;
@@ -327,6 +346,7 @@ namespace Keire
         ~WindowSystem() override;
 
         [[nodiscard]] Ref<Window> CreateWindow(const WindowSpecification& specification = {});
+        [[nodiscard]] std::vector<DisplayInformation> Displays() const;
         [[nodiscard]] std::optional<WindowEvent> PollEvent();
         [[nodiscard]] Ref<FolderDialogOperation> ShowFolderDialog(WindowId parent,
                                                                   const std::filesystem::path& defaultLocation = {});

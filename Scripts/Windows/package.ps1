@@ -1,8 +1,11 @@
 [CmdletBinding()]
-param([ValidateSet("Release", "Dist")][string]$Configuration = "Release", [string]$Generator = "vs2022", [string]$Architecture = "", [string]$Toolset = "default", [switch]$CI, [switch]$Update, [switch]$Generate)
+param([ValidateSet("Release", "Dist")][string]$Configuration = "Release", [string]$Generator = "vs2022", [string]$Architecture = "", [string]$Toolset = "default", [switch]$CI, [switch]$Update, [switch]$Generate, [switch]$AllowDirty)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot; $Project = Get-ProjectConfig; $Lock = Get-DependencyLock
+$worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$AllowDirty -CI:$CI
+$dirty = $worktreePolicy.Dirty
+$developmentArtifact = $worktreePolicy.DevelopmentArtifact
 $CMake = Get-CMakeExecutable
 if (-not $CMake) { throw "CMake 3.20 or newer is required for SDK package validation." }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
@@ -10,14 +13,16 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset; $outputArchitecture = Get
 $imguiLibraryName = "$($Project.PROJECT_NAMESPACE)ImGui"
 $zstdLibraryName = "$($Project.PROJECT_NAMESPACE)Zstd"
 $assetToolName = "$($Project.PROJECT_NAMESPACE)AssetTool"
+$assetWorkerName = "$($Project.PROJECT_NAMESPACE)AssetWorker"
 $runtimeName = "$($Project.PROJECT_NAMESPACE)Runtime"
-& (Join-Path $PSScriptRoot "build-info.ps1")
-& (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate
-& (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow
-& (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI
-& (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $runtimeName -CI:$CI
-& (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI
-& (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate } "Package test suite"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow } "Package editor smoke test"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI } "AssetTool build"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetWorkerName -CI:$CI } "Asset worker build"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $runtimeName -CI:$CI } "Runtime build"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI } "Project Hub build"
+Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset } "Shader compiler build"
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $stage = Join-Path $Root "Artifacts\$name"
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
@@ -27,6 +32,7 @@ New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName\$assetWorkerName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\$runtimeName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
 Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"
@@ -71,12 +77,17 @@ $compiler = if ($Toolset -eq "msc") {
 }
 elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
-$dirty = if (Test-GitRepository $Root) { [bool]((& git -C $Root status --porcelain --untracked-files=normal) -join "") } else { $false }
 $commit = Get-GitHeadCommit $Root "unknown"
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT }
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
+if ([bool]$parsedManifest.dirty -ne $dirty -or [bool]$parsedManifest.developmentArtifact -ne $developmentArtifact) {
+    throw "Package manifest cleanliness flags do not match the package policy."
+}
+if (-not $AllowDirty -and ($parsedManifest.dirty -or $parsedManifest.developmentArtifact)) {
+    throw "A production package cannot be marked dirty or as a development artifact."
+}
 if ($parsedManifest.imgui -ne $Lock.IMGUI_COMMIT) { throw "Packaged Dear ImGui identity does not match the dependency lock." }
 if ($parsedManifest.zstd -ne $Lock.ZSTD_COMMIT) { throw "Packaged Zstandard identity does not match the dependency lock." }
 if ($parsedManifest.entt -ne $Lock.ENTT_COMMIT) { throw "Packaged EnTT identity does not match the dependency lock." }
@@ -103,6 +114,8 @@ try {
 finally { Remove-Item "$shaderHelpBase.out", "$shaderHelpBase.err" -Force -ErrorAction SilentlyContinue }
 $assetToolHelp = (& (Join-Path $stage "bin\$assetToolName.exe") --help) -join "`n"
 if ($LASTEXITCODE -ne 0 -or -not $assetToolHelp.Contains("KeireAssetTool cook")) { throw "Packaged asset tool validation failed." }
+$assetWorkerHelp = (& (Join-Path $stage "bin\$assetWorkerName.exe") --help) -join "`n"
+if ($LASTEXITCODE -ne 0 -or -not $assetWorkerHelp.Contains("KeireAssetWorker")) { throw "Packaged asset worker validation failed." }
 $sampleProject = Join-Path $stage "samples\KeireSandbox"
 $previousShaderCompiler = $env:KEIRE_SHADER_COMPILER
 $env:KEIRE_SHADER_COMPILER = Join-Path $stage "bin\KeireShaderCompiler.exe"

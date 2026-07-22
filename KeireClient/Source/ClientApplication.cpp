@@ -3,6 +3,8 @@
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireInternal/FileSystem.h"
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -23,6 +25,7 @@ namespace
 
     struct CommandLine
     {
+        std::filesystem::path ExecutablePath;
         std::filesystem::path ConfigurationPath = "Config/Client.json";
         std::filesystem::path ProjectPath;
         bool ConfigurationExplicit = false;
@@ -34,6 +37,7 @@ namespace
     CommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
     {
         CommandLine result;
+        result.ExecutablePath = std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable()));
         for (std::size_t index = 1; index < arguments.Size(); ++index)
         {
             const auto argument = arguments[index];
@@ -53,14 +57,14 @@ namespace
             {
                 if (++index >= arguments.Size())
                     throw Keire::CommandLineError("--config requires a path.");
-                result.ConfigurationPath = std::string(arguments[index]);
+                result.ConfigurationPath = Keire::Detail::PathFromUtf8(arguments[index]);
                 result.ConfigurationExplicit = true;
             }
             else if (argument == "--project")
             {
                 if (++index >= arguments.Size())
                     throw Keire::CommandLineError("--project requires a path.");
-                result.ProjectPath = std::string(arguments[index]);
+                result.ProjectPath = Keire::Detail::PathFromUtf8(arguments[index]);
             }
             else
             {
@@ -126,6 +130,9 @@ namespace
             {
                 try
                 {
+                    *m_Placement =
+                        KeireEditor::CorrectEditorWindowPlacement(*m_Placement, Owner().Windows()->Displays());
+                    window->SetSize(m_Placement->WindowedSize);
                     window->SetPosition(m_Placement->Position);
                     if (m_Placement->Mode == Keire::WindowMode::BorderlessFullscreen)
                         window->SetMode(m_Placement->Mode);
@@ -245,10 +252,11 @@ namespace
       public:
         ClientApplication(Keire::ApplicationSpecification specification, const bool smokeWindow, const bool smokeUi,
                           const bool smokeProject, std::filesystem::path windowPlacementPath,
-                          std::optional<KeireEditor::EditorWindowPlacement> windowPlacement)
+                          std::optional<KeireEditor::EditorWindowPlacement> windowPlacement,
+                          std::filesystem::path executablePath)
             : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeUi(smokeUi),
               m_SmokeProject(smokeProject), m_WindowPlacementPath(std::move(windowPlacementPath)),
-              m_WindowPlacement(std::move(windowPlacement))
+              m_WindowPlacement(std::move(windowPlacement)), m_ExecutablePath(std::move(executablePath))
         {
         }
 
@@ -266,8 +274,8 @@ namespace
                 if (!m_WindowPlacementPath.empty())
                     (void)Layers().PushLayer(std::make_unique<EditorWindowPlacementLayer>(
                         m_WindowPlacementPath, std::move(m_WindowPlacement)));
-                (void)Layers().PushOverlay(
-                    std::make_unique<EditorWorkspaceLayer>(m_SmokeUi || m_SmokeProject, m_SmokeProject));
+                (void)Layers().PushOverlay(std::make_unique<EditorWorkspaceLayer>(m_SmokeUi || m_SmokeProject,
+                                                                                  m_SmokeProject, m_ExecutablePath));
             }
         }
 
@@ -277,6 +285,7 @@ namespace
         bool m_SmokeProject = false;
         std::filesystem::path m_WindowPlacementPath;
         std::optional<KeireEditor::EditorWindowPlacement> m_WindowPlacement;
+        std::filesystem::path m_ExecutablePath;
     };
 } // namespace
 
@@ -322,8 +331,8 @@ namespace Keire
             if (windowPlacement)
                 KeireEditor::PrepareEditorWindow(*windowPlacement, specification.MainWindow);
         }
-        return std::make_unique<ClientApplication>(std::move(specification), commandLine.SmokeWindow,
-                                                   commandLine.SmokeUi, commandLine.SmokeProject,
-                                                   std::move(windowPlacementPath), std::move(windowPlacement));
+        return std::make_unique<ClientApplication>(
+            std::move(specification), commandLine.SmokeWindow, commandLine.SmokeUi, commandLine.SmokeProject,
+            std::move(windowPlacementPath), std::move(windowPlacement), std::move(commandLine.ExecutablePath));
     }
 } // namespace Keire

@@ -154,6 +154,51 @@ namespace KeireEditor
         m_Dirty = false;
     }
 
+    void MaterialDocument::RequestCatalogRefresh(const Keire::AssetId asset) noexcept
+    {
+        if (m_RefreshRequestedGeneration <= m_RefreshQueuedGeneration)
+            m_RefreshAsset = asset;
+        else if (m_RefreshAsset != asset)
+            m_RefreshAsset = {};
+        ++m_RefreshRequestedGeneration;
+        m_RefreshDelaySeconds = 0.0;
+    }
+
+    void MaterialDocument::AdvanceCatalogRefresh(const double seconds) noexcept
+    {
+        if (seconds > 0.0 && m_RefreshQueuedGeneration < m_RefreshRequestedGeneration)
+            m_RefreshDelaySeconds += seconds;
+    }
+
+    std::optional<MaterialDocument::CatalogRefresh>
+    MaterialDocument::PendingCatalogRefresh(const bool force) const noexcept
+    {
+        if (m_RefreshQueuedGeneration >= m_RefreshRequestedGeneration || (!force && m_RefreshDelaySeconds < 0.15))
+            return std::nullopt;
+        return CatalogRefresh{m_RefreshAsset, m_RefreshRequestedGeneration};
+    }
+
+    void MaterialDocument::MarkCatalogRefreshQueued(const std::uint64_t generation) noexcept
+    {
+        m_RefreshQueuedGeneration = std::max(m_RefreshQueuedGeneration, generation);
+        if (generation >= m_RefreshRequestedGeneration)
+            m_RefreshAsset = {};
+        m_RefreshDelaySeconds = 0.0;
+    }
+
+    void MaterialDocument::MarkCatalogRefreshApplied(const std::uint64_t generation) noexcept
+    {
+        m_RefreshAppliedGeneration = std::max(m_RefreshAppliedGeneration, generation);
+    }
+
+    void MaterialDocument::ResetCatalogRefresh() noexcept
+    {
+        m_RefreshAppliedGeneration = m_RefreshRequestedGeneration;
+        m_RefreshQueuedGeneration = m_RefreshRequestedGeneration;
+        m_RefreshAsset = {};
+        m_RefreshDelaySeconds = 0.0;
+    }
+
     void MaterialDocument::SetResolvedShader(std::optional<Keire::ShaderAssetDefinition> definition)
     {
         m_ShaderDefinition = std::move(definition);

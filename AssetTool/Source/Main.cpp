@@ -5,6 +5,9 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneAsset.h"
 
+#include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Process.h"
+
 #include <algorithm>
 #include <charconv>
 #include <filesystem>
@@ -52,7 +55,7 @@ namespace
         throw std::invalid_argument("--target requires host, windows, linux, or macos.");
     }
 
-    [[nodiscard]] CommandLine Parse(const int argc, char** argv)
+    [[nodiscard]] CommandLine Parse(const int argc, char* const* argv)
     {
         if (argc < 2)
             throw std::invalid_argument("A command is required. Run with --help for usage.");
@@ -70,13 +73,13 @@ namespace
                 return argv[index];
             };
             if (option == "--project")
-                result.Project = requireValue();
+                result.Project = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--output")
-                result.Output = requireValue();
+                result.Output = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--catalog")
-                result.Catalog = requireValue();
+                result.Catalog = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--input")
-                result.Input = requireValue();
+                result.Input = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--profile")
             {
                 result.Profile.Name = requireValue();
@@ -130,109 +133,126 @@ namespace
     }
 } // namespace
 
-int main(const int argc, char** argv)
+namespace
+{
+    int RunAssetTool(const int argc, char* const* argv)
+    {
+        try
+        {
+            auto commandLine = Parse(argc, argv);
+            if (commandLine.Command == "--help" || commandLine.Command == "-h")
+            {
+                PrintHelp();
+                return 0;
+            }
+            if (commandLine.Command == "validate")
+            {
+                if (commandLine.Catalog.empty())
+                    throw std::invalid_argument("validate requires --catalog <path>.");
+                Keire::AssetCooker::Validate(commandLine.Catalog);
+                std::cout << "Validated " << commandLine.Catalog.string() << '\n';
+                return 0;
+            }
+            if (commandLine.Command == "convert-mesh")
+            {
+                if (commandLine.Input.empty())
+                    throw std::invalid_argument("convert-mesh requires --input <model>.");
+                const auto input = std::filesystem::absolute(commandLine.Input);
+                std::ifstream source(input, std::ios::binary);
+                if (!source)
+                    throw std::runtime_error("Cannot open mesh source: " + input.string());
+                const std::vector<char> characters{std::istreambuf_iterator<char>(source),
+                                                   std::istreambuf_iterator<char>()};
+                std::vector<std::byte> bytes(characters.size());
+                std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
+                const auto importer = Keire::CreateMeshAssetImporter();
+                Keire::AssetImportContext context;
+                context.ProjectRoot = input.parent_path();
+                context.SourceRoot = input.parent_path();
+                context.SourcePath = input;
+                context.RelativePath = input.filename();
+                const auto imported = importer.ContextualImport(context, bytes);
+                auto output = commandLine.Output;
+                if (output == std::filesystem::path("Build/Assets"))
+                {
+                    output = input;
+                    output.replace_extension(".keiremesh");
+                }
+                if (output.has_parent_path())
+                    std::filesystem::create_directories(output.parent_path());
+                std::ofstream destination(output, std::ios::binary | std::ios::trunc);
+                if (!destination || (!imported.Bytes.empty() &&
+                                     !destination.write(reinterpret_cast<const char*>(imported.Bytes.data()),
+                                                        static_cast<std::streamsize>(imported.Bytes.size()))))
+                    throw std::runtime_error("Cannot write converted mesh: " + output.string());
+                std::cout << "Converted " << input.string() << " to " << output.string() << '\n';
+                return 0;
+            }
+
+            const auto project = Keire::Project::Open(commandLine.Project);
+            Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
+            databaseSpecification.Importers = {
+                Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
+                Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
+                Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
+            auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+            if (commandLine.Command == "scan")
+            {
+                std::cout << "Discovered " << database->Refresh() << " assets.\n";
+            }
+            else if (commandLine.Command == "import")
+            {
+                const auto result = database->ImportAll();
+                std::cout << "Imported " << result.Imported << " assets (" << result.CacheHits
+                          << " cache hits). Catalog: " << result.CatalogPath.string() << '\n';
+            }
+            else if (commandLine.Command == "cook")
+            {
+                (void)database->Refresh();
+                commandLine.Profile.Roots = {project->Descriptor().StartupScene};
+                if (project->Descriptor().DefaultInput)
+                    commandLine.Profile.Roots.push_back(project->Descriptor().DefaultInput);
+                auto output = commandLine.Output;
+                if (output.is_relative())
+                    output = commandLine.Project / output;
+                const auto result = Keire::AssetCooker::Cook(*database, commandLine.Profile, output);
+                Keire::AssetCooker::Validate(result.CatalogPath);
+                WriteRuntimeManifest(*project, result.CatalogPath.parent_path());
+                std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
+                          << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
+            }
+            else
+            {
+                throw std::invalid_argument("Unknown command: " + commandLine.Command);
+            }
+            return 0;
+        }
+        catch (const std::exception& error)
+        {
+            std::cerr << "error: " << error.what() << '\n';
+            try
+            {
+                KEIRE_CORE_ERROR("Asset tool failed: {}", error.what());
+                Keire::Log::Flush();
+            }
+            catch (...)
+            {
+            }
+            return 1;
+        }
+    }
+} // namespace
+
+int main(const int argc, char* argv[])
 {
     try
     {
-        auto commandLine = Parse(argc, argv);
-        if (commandLine.Command == "--help" || commandLine.Command == "-h")
-        {
-            PrintHelp();
-            return 0;
-        }
-        if (commandLine.Command == "validate")
-        {
-            if (commandLine.Catalog.empty())
-                throw std::invalid_argument("validate requires --catalog <path>.");
-            Keire::AssetCooker::Validate(commandLine.Catalog);
-            std::cout << "Validated " << commandLine.Catalog.string() << '\n';
-            return 0;
-        }
-        if (commandLine.Command == "convert-mesh")
-        {
-            if (commandLine.Input.empty())
-                throw std::invalid_argument("convert-mesh requires --input <model>.");
-            const auto input = std::filesystem::absolute(commandLine.Input);
-            std::ifstream source(input, std::ios::binary);
-            if (!source)
-                throw std::runtime_error("Cannot open mesh source: " + input.string());
-            const std::vector<char> characters{std::istreambuf_iterator<char>(source),
-                                               std::istreambuf_iterator<char>()};
-            std::vector<std::byte> bytes(characters.size());
-            std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
-            const auto importer = Keire::CreateMeshAssetImporter();
-            Keire::AssetImportContext context;
-            context.ProjectRoot = input.parent_path();
-            context.SourceRoot = input.parent_path();
-            context.SourcePath = input;
-            context.RelativePath = input.filename();
-            const auto imported = importer.ContextualImport(context, bytes);
-            auto output = commandLine.Output;
-            if (output == std::filesystem::path("Build/Assets"))
-            {
-                output = input;
-                output.replace_extension(".keiremesh");
-            }
-            if (output.has_parent_path())
-                std::filesystem::create_directories(output.parent_path());
-            std::ofstream destination(output, std::ios::binary | std::ios::trunc);
-            if (!destination ||
-                (!imported.Bytes.empty() && !destination.write(reinterpret_cast<const char*>(imported.Bytes.data()),
-                                                               static_cast<std::streamsize>(imported.Bytes.size()))))
-                throw std::runtime_error("Cannot write converted mesh: " + output.string());
-            std::cout << "Converted " << input.string() << " to " << output.string() << '\n';
-            return 0;
-        }
-
-        const auto project = Keire::Project::Open(commandLine.Project);
-        Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
-        databaseSpecification.Importers = {
-            Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
-            Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
-            Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
-        auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
-        if (commandLine.Command == "scan")
-        {
-            std::cout << "Discovered " << database->Refresh() << " assets.\n";
-        }
-        else if (commandLine.Command == "import")
-        {
-            const auto result = database->ImportAll();
-            std::cout << "Imported " << result.Imported << " assets (" << result.CacheHits
-                      << " cache hits). Catalog: " << result.CatalogPath.string() << '\n';
-        }
-        else if (commandLine.Command == "cook")
-        {
-            (void)database->Refresh();
-            commandLine.Profile.Roots = {project->Descriptor().StartupScene};
-            if (project->Descriptor().DefaultInput)
-                commandLine.Profile.Roots.push_back(project->Descriptor().DefaultInput);
-            auto output = commandLine.Output;
-            if (output.is_relative())
-                output = commandLine.Project / output;
-            const auto result = Keire::AssetCooker::Cook(*database, commandLine.Profile, output);
-            Keire::AssetCooker::Validate(result.CatalogPath);
-            WriteRuntimeManifest(*project, result.CatalogPath.parent_path());
-            std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
-                      << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
-        }
-        else
-        {
-            throw std::invalid_argument("Unknown command: " + commandLine.Command);
-        }
-        return 0;
+        Keire::Detail::Utf8CommandLine commandLine(argc, argv);
+        return RunAssetTool(commandLine.Count(), commandLine.Values());
     }
     catch (const std::exception& error)
     {
         std::cerr << "error: " << error.what() << '\n';
-        try
-        {
-            KEIRE_CORE_ERROR("Asset tool failed: {}", error.what());
-            Keire::Log::Flush();
-        }
-        catch (...)
-        {
-        }
         return 1;
     }
 }

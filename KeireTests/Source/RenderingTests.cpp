@@ -97,7 +97,13 @@ TEST_CASE("editor camera framing projection and orientation are deterministic")
     Keire::Detail::EditorCameraController camera;
     camera.Frame({4.0F, 2.0F, -3.0F}, 2.0F);
     CHECK(camera.State().Focus == (Keire::Vector3{4.0F, 2.0F, -3.0F}));
-    CHECK(camera.State().Distance > 2.0F);
+    CHECK(camera.State().Distance == doctest::Approx(5.0F));
+    CHECK(camera.State().OrthographicSize == doctest::Approx(5.0F));
+
+    const float landscapeDistance = camera.State().Distance;
+    camera.Frame({4.0F, 2.0F, -3.0F}, 2.0F, 60.0F, 0.5F);
+    CHECK(camera.State().Distance > landscapeDistance);
+    CHECK_THROWS_AS(camera.Frame({}, 1.0F, 60.0F, 0.0F), std::invalid_argument);
 
     const auto perspective = camera.ProjectionMatrix(16.0F / 9.0F);
     camera.ToggleProjection();
@@ -219,7 +225,7 @@ TEST_CASE("material overrides are validated against shader declarations")
 
 TEST_CASE("sandbox monster material binds dedicated color normal metallic and roughness sources")
 {
-    const auto source = ReadTestBytes("Samples/KeireSandbox/Assets/Monster1.keirematerial");
+    const auto source = ReadTestBytes("Samples/KeireSandbox/Assets/Materials/Monster1.keirematerial");
     const auto definition = Keire::MaterialAsset::DecodeSource(source);
     const auto baseColor = Keire::AssetId::Parse("38760a1d-9dfa-4bbc-8ba1-50921ae9d748");
     const auto normal = Keire::AssetId::Parse("0a8ba309-c28a-4842-8949-09ff8c60a1fa");

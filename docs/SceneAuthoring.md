@@ -68,8 +68,9 @@ caches, workspace state, and cooked builds are ignored project-local data.
 Scene view renders the edit scene or active runtime clone with a depth-tested grid. A compact top-left overlay owns
 View/Move/Rotate/Scale, Local/Global, Snap, and settings; the top-right overlay owns projection and axis snaps. These
 overlays consume pointer input only inside their visible rectangles, leaving selection, marquee, gizmos, drops, and
-camera navigation active everywhere else. `F` frames transformed renderer and child bounds while the Scene view is
-focused or hovered; a double-`F` locks the camera to the selected entity, and `Shift+F` toggles that lock. Alt+left
+camera navigation active everywhere else. `F` frames imported renderer metadata and transformed child bounds with
+aspect-aware padding while the Scene view is focused or hovered; a double-`F` locks the camera to the selected entity,
+and `Shift+F` toggles that lock. Alt+left
 orbits, middle drag pans in camera space, the wheel/Alt+right zooms,
 and right drag plus `WASDQE` flies. Shift accelerates navigation; the wheel adjusts fly speed; arrow keys walk/strafe;
 the orientation overlay snaps axes and toggles perspective/orthographic projection. Horizontal orbit/fly motion follows

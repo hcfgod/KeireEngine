@@ -1,52 +1,64 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 
-#include "KeireClient/EditorWorkspaceLayer.h"
+#include <utility>
 
 namespace KeireEditor
 {
-    void ConsolePanel::Draw(Keire::UiFrame& ui, EditorWorkspaceLayer& editor)
+    void ConsolePanel::Attach(Keire::UiWorkspace& workspace)
     {
-        if (auto console = ui.BeginPanel(editor.m_Console); console)
+        m_Registration = workspace.RegisterPanel({"editor.console", "Console"});
+    }
+
+    void ConsolePanel::Add(std::string category, std::string message, const Keire::UiColor color,
+                           const std::uint64_t frame)
+    {
+        constexpr std::size_t maximumMessages = 500;
+        m_Messages.push_back({std::move(category), std::move(message), color, frame});
+        while (m_Messages.size() > maximumMessages)
+            m_Messages.pop_front();
+    }
+
+    void ConsolePanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
+    {
+        if (auto console = ui.BeginPanel(m_Registration); console)
         {
-            ui.TextColored(editor.m_Theme.Accent, "CONSOLE");
+            ui.TextColored(theme.Accent, "CONSOLE");
             ui.Separator();
-            (void)ui.InputText("Search", editor.m_ConsoleSearch);
+            (void)ui.InputText("Search", m_Search);
             ui.SameLine();
-            if (ui.Checkbox("Pause", editor.m_ConsolePaused))
+            if (ui.Checkbox("Pause", m_Paused))
             {
-                if (editor.m_ConsolePaused)
-                    editor.m_PausedConsoleSnapshot.assign(editor.m_ConsoleMessages.begin(),
-                                                          editor.m_ConsoleMessages.end());
+                if (m_Paused)
+                    m_PausedSnapshot.assign(m_Messages.begin(), m_Messages.end());
                 else
-                    editor.m_PausedConsoleSnapshot.clear();
+                    m_PausedSnapshot.clear();
             }
             ui.SameLine();
             if (ui.Button("Clear"))
             {
-                editor.m_ConsoleMessages.clear();
-                editor.m_PausedConsoleSnapshot.clear();
+                m_Messages.clear();
+                m_PausedSnapshot.clear();
             }
-            if (editor.m_ConsoleMessages.empty())
+            if (m_Messages.empty())
             {
-                ui.TextColored(editor.m_Theme.Success, "Ready");
+                ui.TextColored(theme.Success, "Ready");
                 return;
             }
             const auto drawEntries = [&](const auto& entries)
             {
                 for (const auto& entry : entries)
                 {
-                    if (!editor.m_ConsoleSearch.empty() &&
-                        entry.Category.find(editor.m_ConsoleSearch) == std::string::npos &&
-                        entry.Message.find(editor.m_ConsoleSearch) == std::string::npos)
+                    if (!m_Search.empty() && entry.Category.find(m_Search) == std::string::npos &&
+                        entry.Text.find(m_Search) == std::string::npos)
                         continue;
                     ui.TextColored(entry.Color,
-                                   "[" + std::to_string(entry.Frame) + "] [" + entry.Category + "] " + entry.Message);
+                                   "[" + std::to_string(entry.Frame) + "] [" + entry.Category + "] " + entry.Text);
                 }
             };
-            if (editor.m_ConsolePaused)
-                drawEntries(editor.m_PausedConsoleSnapshot);
+            if (m_Paused)
+                drawEntries(m_PausedSnapshot);
             else
-                drawEntries(editor.m_ConsoleMessages);
+                drawEntries(m_Messages);
         }
     }
 } // namespace KeireEditor

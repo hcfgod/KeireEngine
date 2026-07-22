@@ -42,7 +42,7 @@ load_project_config() {
 project_generation_fingerprint() {
     local root="$1" source_root
     {
-        for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" AssetTool KeireRuntime Scripts/Premake; do
+        for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" AssetTool KeireAssetWorker KeireRuntime Scripts/Premake; do
             [[ -d "$root/$source_root" ]] || continue
             find "$root/$source_root" -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.lua' \) -print
         done | LC_ALL=C sort
@@ -55,6 +55,16 @@ project_generation_fingerprint() {
 
 is_semantic_version() {
     [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$ ]]
+}
+
+package_worktree_policy() {
+    local root="$1" allow_dirty="${2:-0}" ci="${3:-0}" status dirty=false
+    [[ "$ci" == 0 || "$allow_dirty" == 0 ]] || { printf '%s\n' '--allow-dirty cannot be used in CI.' >&2; return 1; }
+    git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf '%s\n' 'Release packaging requires a Git working tree.' >&2; return 1; }
+    status="$(git -C "$root" status --porcelain --untracked-files=normal)" || { printf 'Unable to inspect the package worktree at %s.\n' "$root" >&2; return 1; }
+    [[ -z "$status" ]] || dirty=true
+    [[ "$dirty" == false || "$allow_dirty" == 1 ]] || { printf '%s\n' 'Release packaging requires a clean worktree. Use --allow-dirty only for a local development artifact.' >&2; return 1; }
+    printf '%s %s\n' "$dirty" "$([[ "$dirty" == true && "$allow_dirty" == 1 ]] && printf true || printf false)"
 }
 
 json_escape() {
@@ -129,7 +139,7 @@ validate_package_stage() {
     for path in "${required[@]}"; do
         [[ -f "$stage/$path" ]] || { printf 'Package is missing required content: %s\n' "$path" >&2; return 1; }
     done
-    local asset_required=("bin/${namespace}AssetTool" "bin/${namespace}Runtime" "lib/lib${namespace}Zstd.a" "include/$namespace/Math/Math.h" "include/$namespace/ECS/Component.h" "include/$namespace/ECS/Entity.h" "include/$namespace/ECS/Components/TransformComponent.h" "include/$namespace/ECS/Components/DirectionalLightComponent.h" "include/$namespace/Assets/Asset.h" "include/$namespace/Assets/AssetSystem.h" "include/$namespace/Assets/AssetPipeline.h" "include/$namespace/Assets/InputActionAsset.h" "include/$namespace/Input/Input.h" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta" "third-party/licenses/zstandard-LICENSE.txt" "third-party/licenses/entt-LICENSE.txt" "third-party/licenses/glm-COPYING.txt")
+    local asset_required=("bin/${namespace}AssetTool" "bin/${namespace}AssetWorker" "bin/${namespace}Runtime" "lib/lib${namespace}Zstd.a" "include/$namespace/Math/Math.h" "include/$namespace/ECS/Component.h" "include/$namespace/ECS/Entity.h" "include/$namespace/ECS/Components/TransformComponent.h" "include/$namespace/ECS/Components/DirectionalLightComponent.h" "include/$namespace/Assets/Asset.h" "include/$namespace/Assets/AssetSystem.h" "include/$namespace/Assets/AssetPipeline.h" "include/$namespace/Assets/InputActionAsset.h" "include/$namespace/Input/Input.h" "samples/KeireSandbox/Assets/Input/DefaultInput.keireinput.keiremeta" "third-party/licenses/zstandard-LICENSE.txt" "third-party/licenses/entt-LICENSE.txt" "third-party/licenses/glm-COPYING.txt")
     asset_required+=("include/$namespace/ECS/Components/CameraComponent.h" "include/$namespace/ECS/Components/MeshRendererComponent.h" "include/$namespace/Rendering/RenderSystem.h" "include/$namespace/Assets/RenderingAssets.h" "samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader" "samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl" "samples/KeireSandbox/Assets/Materials/DefaultUnlit.keirematerial" "third-party/licenses/SDL-shadercross-LICENSE.txt" "third-party/licenses/DirectXShaderCompiler-LICENSE.txt" "third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt" "third-party/licenses/SPIRV-Cross-LICENSE.txt" "third-party/licenses/SPIRV-Headers-LICENSE.txt" "third-party/licenses/SPIRV-Tools-LICENSE.txt" "third-party/licenses/assimp-LICENSE.txt" "third-party/licenses/assimp-zlib-LICENSE.txt" "third-party/licenses/stb-LICENSE.txt" "lib/libassimp.a" "lib/libzlibstatic.a")
     for path in "${asset_required[@]}"; do
         [[ -f "$stage/$path" ]] || { printf 'Package is missing required asset content: %s\n' "$path" >&2; return 1; }
@@ -312,6 +322,7 @@ parse_build_arguments() {
             --ci) CI=1; shift ;;
             --update) UPDATE=1; shift ;;
             --force) FORCE=1; shift ;;
+            --allow-dirty) ALLOW_DIRTY=1; shift ;;
             --install-optional) INSTALL_OPTIONAL=1; shift ;;
             *) printf "Unknown argument '%s'.\n" "$1" >&2; return 1 ;;
         esac

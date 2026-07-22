@@ -1,12 +1,22 @@
 # Editor Panels And Commands
 
+All primary editor panels own their persistent UI state and use narrow document/controller contracts. No panel
+includes, retains, or friends `EditorWorkspaceLayer`, and the workspace exposes no whole-panel draw forwarding.
+
+Project Settings is document-backed: its panel edits only `ProjectSettingsDocument`, which validates values, groups a
+continuous gesture into one undo command, and performs the atomic save. Console owns its retained messages, pause
+snapshot, search state, and registration; Diagnostics receives immutable frame/window/capture snapshots. These panels
+do not reach through workspace friendship.
+
 KeireClient is a composition of dockable tools built exclusively on Kéire's public UI façade. Dear ImGui and SDL remain
 inside KeireCore. `SceneDocument` and `InputActionsDocument` own their respective authoring state and undo contexts;
 closing a document deterministically clears its selections, operations, and dirty/recovery state. Scene View,
 Hierarchy, Inspector, Input Actions, and Project Settings are panel objects that depend on narrow controller
-interfaces. Asset Browser, Console, and Diagnostics remain independent panels, and thumbnail generation is a separate
-bounded service. The workspace layer owns services, composes those panels, coordinates modal transitions, and
-orchestrates each frame.
+interfaces. Entity/component inspection and asset inspection have separate state owners, with `AssetInspectorPanel`
+composed inside the Inspector dock. Asset Browser, Console, and Diagnostics are equally independent panels, and thumbnail generation is a
+separate bounded service. Scene View owns its render view, camera, framing, picking, marquee selection, gizmos, toolbar,
+and viewport drops. The workspace layer owns services, composes panels, coordinates modal transitions, and orchestrates
+each frame.
 
 Each primary panel owns its move-only `UiPanelRegistration` and begins/ends its own docked content boundary. The
 workspace supplies the narrow controller interface but does not decide whether a closed panel executes content.
@@ -14,6 +24,9 @@ workspace supplies the narrow controller interface but does not decide whether a
 `MaterialDocument` retains the selected asset, source path, draft bytes, committed baseline, shader schema, and dirty
 state, so material undo and persistence no longer depend on parallel workspace fields. `SceneCameraController` owns
 camera state, focus/lock, capture, and atomic persistence independently of the Scene panel.
+Scene atomic save/recovery serialization is owned by `SceneDocument`; input-action source persistence is owned by
+`InputActionsDocument`; and material catalog refresh generations and coalescing delay are owned by `MaterialDocument`.
+The workspace requests these operations and presents their status but no longer performs those file writes itself.
 
 `EditorCommandRouter` is the single dispatch point shared by menu items, shortcuts, and the Play toolbar. Scene
 creation/save/close, entity create/delete, select all/clear, Play/Pause/Stop, and undo/redo each supply an action and an

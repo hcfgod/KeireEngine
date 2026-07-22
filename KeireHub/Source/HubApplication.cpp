@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
 #include <algorithm>
@@ -306,18 +307,7 @@ namespace
 
         [[nodiscard]] std::filesystem::path EditorExecutable() const
         {
-            const auto hub = std::filesystem::absolute(m_Executable);
-#if defined(_WIN32)
-            constexpr std::string_view extension = ".exe";
-#else
-            constexpr std::string_view extension;
-#endif
-            const auto name = std::string(KEIRE_EDITOR_TARGET) + std::string(extension);
-            const std::array candidates{hub.parent_path() / name,
-                                        hub.parent_path().parent_path() / KEIRE_EDITOR_TARGET / name};
-            const auto found = std::ranges::find_if(candidates, [](const auto& path)
-                                                    { return std::filesystem::is_regular_file(path); });
-            return found == candidates.end() ? candidates.front() : *found;
+            return Keire::Detail::ResolveCompanionExecutable(m_Executable, KEIRE_EDITOR_TARGET);
         }
 
         void Launch(const Keire::Ref<Keire::Project>& project)
@@ -594,6 +584,7 @@ namespace Keire
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.EnableDocking = false;
         specification.TargetFrameRate = smoke ? 240 : 30;
-        return std::make_unique<HubApplication>(std::move(specification), std::string(arguments.Executable()), smoke);
+        return std::make_unique<HubApplication>(std::move(specification), Detail::PathFromUtf8(arguments.Executable()),
+                                                smoke);
     }
 } // namespace Keire

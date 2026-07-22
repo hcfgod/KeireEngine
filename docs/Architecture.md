@@ -17,6 +17,10 @@ window claim, swapchain, command recording, fences, viewport resources, and defe
 private renderer bridge rather than owning presentation. Scene/Game panels exchange only Kéire `RenderView` and
 `RenderSurface` handles; backend resources remain private.
 
+The public `RenderSystem.cpp` PImpl facade delegates to separately compiled private backend units for device/frame
+lifecycle, resource caches, surface/pipeline management, and scene recording. `RenderBackendInternal.h` is an internal
+coordination boundary only; SDL handles and backend state remain absent from supported headers.
+
 `Application` also owns one `UndoService` before layer attachment. Editors create bounded contexts per document rather
 than retaining process-global history. Commands own forward/inverse behavior and availability checks; nested
 transactions preserve all-or-nothing semantics. Contexts close during layer teardown, and the service closes before
@@ -139,6 +143,16 @@ and destroys the context before RenderSystem releases GPU and window resources.
 Scene submissions carry a Kéire-owned `RenderEnvironmentSettings` value. JSON persistence stays private in
 `ProjectSettings/Rendering.keiresettings`; public headers expose only colors, scalar values, paths, and validation
 functions. Fragment-stage lighting consumes that environment together with the deterministic active Directional Light.
+`ProjectSettingsDocument` owns the editor draft, validation, dirty lifecycle, atomic save, and coalesced undo command;
+the workspace consumes its immutable settings for Scene and Game submissions instead of retaining a mutable copy.
+Every primary editor panel owns its registration and persistent UI state. `SceneViewportPanel` owns its render view,
+camera, framing, picking, marquee selection, gizmos, toolbar, and viewport drops; `HierarchyPanel` owns traversal and
+structural commands; `InspectorPanel` owns component inspection while its `AssetInspectorPanel` composition owns asset
+dispatch, diagnostics, naming actions, and material content; and the input-actions, project-settings,
+asset-browser, console, and diagnostics panels own their respective tools. Panels receive document data, frame-value
+snapshots, and named commands through narrow contracts; none retain, friend, or inspect `EditorWorkspaceLayer`.
+The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
+binding, notices, and modal arbitration.
 KeireClient owns the separate Scene gizmo controller and uses only the public UI drawing facade, so neither ImGui draw
 lists nor GPU handles cross into client code.
 
@@ -170,11 +184,26 @@ Configuration examples, application-facing workflows, storage details, and troub
 Editor material authoring is split between `MaterialDocument`, which owns the selected asset/path, draft and committed
 source snapshots, shader-driven state, dirty lifecycle, and validation, and `MaterialInspectorPanel`, which maps that
 state onto the engine-owned property editor interface. Material file snapshots enter the project-assets undo context;
-the workspace layer composes the panel and coordinates persistence.
+the workspace layer composes the panel while `MaterialDocument` and the asset-operation service coordinate persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
 refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are
 refreshed after the editor becomes usable.
+Catalog-producing editor work is isolated in the private `KeireAssetWorker` executable. `AssetOperationService` owns
+one child at a time, prioritizes external imports and explicit actions ahead of cook and coalesced material refreshes,
+and exchanges versioned request/progress/result documents under `Library/AssetOperations/<operation-id>`. A worker
+publishes a validated source-index snapshot beside the development catalog; the editor reloads that immutable snapshot
+instead of hashing the project again. Cancellation is cooperative until publication. Shutdown waits 250 ms, terminates
+an unresponsive worker, and lets the existing publication journal recover before another operation exposes records.
+Native process handles and protocol JSON remain implementation details.
+Every database owner also acquires the same crash-released project file lock for publication and source mutation. Cooked
+directory swaps carry a versioned sibling journal, so startup either finalizes a fully published catalog or restores the
+previous directory. New scene, material, and input-action sources use the external-import staging transaction rather
+than becoming visible before validation and catalog publication succeed.
+The asset database implementation is divided into source indexing/import preparation, external-import journals,
+source mutation/trash transactions, and dependency cooking. Public methods acquire one non-recursive operation mutex;
+explicit private unlocked helpers are used only while that boundary is already held, so nested publication no longer
+depends on recursive-lock behavior. `AssetPipeline.cpp` remains the small stable API facade.
 Scene picking consumes catalog metadata through `AssetSystem` and does not own an importer or source-model cache.
 `SceneCameraController` owns navigation persistence and entity locking. `ViewportAssetDropRouter` dispatches scene,
 input, mesh, and material drops through narrow commands, leaving the workspace responsible for composition and modal

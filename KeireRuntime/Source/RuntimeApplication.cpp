@@ -1,5 +1,7 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/FileSystem.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -44,7 +46,7 @@ namespace
             {
                 if (++index >= arguments.Size())
                     throw Keire::CommandLineError("--content requires a path.");
-                result.Content = std::string(arguments[index]);
+                result.Content = Keire::Detail::PathFromUtf8(arguments[index]);
             }
             else if (option == "--frames")
             {
@@ -67,6 +69,8 @@ namespace
     [[nodiscard]] RuntimeManifest LoadManifest(const std::filesystem::path& content)
     {
         std::ifstream stream(content / "runtime-manifest.json", std::ios::binary);
+        if (!stream)
+            throw Keire::CommandLineError("Cooked content has no readable runtime-manifest.json.");
         nlohmann::json source;
         stream >> source;
         if (!stream || !source.is_object() || source.value("schemaVersion", 0U) != 1)

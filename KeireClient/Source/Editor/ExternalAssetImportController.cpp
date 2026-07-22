@@ -4,19 +4,11 @@
 
 namespace KeireEditor
 {
-    ExternalAssetImportController::~ExternalAssetImportController()
-    {
-        if (m_Worker.joinable())
-        {
-            m_Worker.request_stop();
-            m_Worker.join();
-        }
-    }
-
     void ExternalAssetImportController::Queue(const std::span<const std::filesystem::path> paths,
                                               const std::filesystem::path& destinationFolder, const bool viewport,
                                               const Keire::EntityId viewportTarget,
-                                              const Keire::Ref<Keire::AssetDatabase>& database)
+                                              const Keire::Ref<Keire::AssetDatabase>& database,
+                                              AssetOperationService& operations)
     {
         if (!database || paths.empty())
             return;
@@ -58,10 +50,10 @@ namespace KeireEditor
         if (requiresDialog)
             m_OpenRequested = true;
         else
-            Execute(database);
+            Execute(operations);
     }
 
-    void ExternalAssetImportController::Execute(const Keire::Ref<Keire::AssetDatabase>& database)
+    void ExternalAssetImportController::Execute(AssetOperationService& operations)
     {
         std::vector<Keire::ExternalAssetImportItem> items;
         for (std::size_t index = 0; index < m_Items.size(); ++index)
@@ -76,47 +68,14 @@ namespace KeireEditor
             return;
         }
         m_Diagnostic = "Importing assets...";
-        m_WorkerResult.reset();
-        m_WorkerError = {};
-        m_WorkerFinished.store(false, std::memory_order_relaxed);
-        m_Worker = std::jthread(
-            [this, database, items = std::move(items)](const std::stop_token cancellation)
-            {
-                try
-                {
-                    m_WorkerResult = database->ImportExternal(items, cancellation);
-                }
-                catch (...)
-                {
-                    m_WorkerError = std::current_exception();
-                }
-                m_WorkerFinished.store(true, std::memory_order_release);
-            });
+        operations.QueueExternalImport(std::move(items), {.Viewport = m_Viewport, .ViewportTarget = m_ViewportTarget});
+        m_OperationPending = true;
         m_OpenRequested = true;
     }
 
-    void ExternalAssetImportController::Draw(Keire::UiFrame& ui, const Keire::Ref<Keire::AssetDatabase>& database)
+    void ExternalAssetImportController::Draw(Keire::UiFrame& ui, const Keire::Ref<Keire::AssetDatabase>& database,
+                                             AssetOperationService& operations)
     {
-        if (m_Worker.joinable() && m_WorkerFinished.load(std::memory_order_acquire))
-        {
-            m_Worker.join();
-            try
-            {
-                if (m_WorkerError)
-                    std::rethrow_exception(m_WorkerError);
-                ExternalAssetImportCompletion completion;
-                completion.Result = std::move(*m_WorkerResult);
-                completion.Viewport = m_Viewport;
-                completion.ViewportTarget = m_ViewportTarget;
-                m_Completion = std::move(completion);
-                m_Diagnostic = "Imported " + std::to_string(m_Completion->Result.Entries.size()) + " asset(s).";
-            }
-            catch (const std::exception& error)
-            {
-                m_Diagnostic = error.what();
-                m_Failed = true;
-            }
-        }
         if (m_OpenRequested)
         {
             ui.OpenPopup("Import Assets");
@@ -125,13 +84,13 @@ namespace KeireEditor
         auto popup = ui.BeginPopupModal("Import Assets");
         if (!popup)
             return;
-        if (m_Worker.joinable())
+        if (m_OperationPending)
         {
             ui.Text("Importing and validating assets...");
             ui.TextColored({0.62F, 0.65F, 0.72F, 1.0F}, m_Diagnostic);
             if (ui.Button("Cancel"))
             {
-                m_Worker.request_stop();
+                operations.CancelCurrent();
                 m_Diagnostic = "Cancelling import...";
             }
             return;
@@ -220,7 +179,7 @@ namespace KeireEditor
         if (!m_Diagnostic.empty())
             ui.TextColored({1.0F, 0.62F, 0.25F, 1.0F}, m_Diagnostic);
         if (ui.Button("Import"))
-            Execute(database);
+            Execute(operations);
         ui.SameLine();
         if (ui.Button("Cancel"))
         {
@@ -229,6 +188,26 @@ namespace KeireEditor
             m_Importers.clear();
             ui.CloseCurrentPopup();
         }
+    }
+
+    void ExternalAssetImportController::Complete(AssetOperationCompletion completion)
+    {
+        m_OperationPending = false;
+        if (!completion.Result.Success)
+        {
+            m_Diagnostic = completion.Result.Diagnostic;
+            m_Failed = true;
+            m_OpenRequested = true;
+            return;
+        }
+        ExternalAssetImportCompletion result;
+        result.Result.Entries = std::move(completion.Result.ExternalEntries);
+        result.Result.Import = std::move(completion.Result.Import);
+        result.Result.Receipt = completion.Result.Receipt;
+        result.Viewport = completion.Context.Viewport;
+        result.ViewportTarget = completion.Context.ViewportTarget;
+        m_Completion = std::move(result);
+        m_Diagnostic = "Imported " + std::to_string(m_Completion->Result.Entries.size()) + " asset(s).";
     }
 
     std::optional<ExternalAssetImportCompletion> ExternalAssetImportController::TakeCompletion()

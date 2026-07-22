@@ -4,10 +4,35 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Windows managed clients and private tools now reconstruct the process command line with `CommandLineToArgvW` and
+  normalize it to UTF-8 at one shared boundary before parsing. Asset-worker protocol and publication paths also append
+  suffixes without narrowing native paths, so editor operations work from Unicode checkouts.
+- Scene viewport, Hierarchy, Inspector, Input Actions, Project Settings, and Asset Browser now own their UI and
+  persistent interaction state behind narrow controllers, with no workspace friendship or whole-panel draw forwarding.
+  Scene and Input documents own their save/recovery lifecycles, and the workspace facade is below 1,500 lines.
+- Split asset indexing/import, external transactions, mutations/trash, and cooking behind a sub-600-line facade;
+  nested operations now use explicit unlocked helpers under a non-recursive transaction boundary. Rendering keeps a
+  sub-700-line facade with separately compiled private device, surface/pipeline, cache, and scene-recording units.
+
+- Added a project-settings document with validated atomic saves and coalesced undo, split script checks into timed fast
+  and integration suites, and made Release/Dist packages clean-by-default with an explicitly marked local dirty
+  override that CI rejects.
+
+- Editor import, refresh, cook, and external-import receipt work now runs in the private `KeireAssetWorker` process
+  through atomic versioned protocol documents. The editor coalesces material refreshes, reloads a published source
+  index without rescanning, and bounds shutdown with cooperative cancellation followed by forced termination.
+- New scene, material, and input-action assets are validated and published transactionally by the asset worker. A
+  crash-released project-wide file lock serializes independent database owners, and recoverable directory-publication
+  journals restore the last-good catalog after interruption.
+- Asset-worker mutation requests now cover folder creation, asset/folder move and duplication, recoverable trash,
+  restore, and permanent deletion. Project and Inspector mutations, scene Save As, and shader creation use the isolated
+  publication path; multi-file creation journals recover auxiliary shader sources after interruption.
+- `SceneDocument` now owns atomic scene save and recovery snapshots, while `InputActionsDocument` owns its source path
+  and atomic save lifecycle; material refresh coalescing state is owned by `MaterialDocument`.
 - Editor shutdown now cancels queued background catalog refreshes instead of forcing a project-wide import to finish;
   saved asset sources remain durable and refresh normally on the next launch.
-- Scene view `F` reliably frames the selected entity while hovered or focused, and double-`F` locks the camera to the
-  selection like `Shift+F`.
+- Scene view `F` frames the selected entity's imported mesh metadata and transformed descendants with aspect-aware
+  camera padding, while double-`F` locks the camera to the selection like `Shift+F`.
 - Project editors restore their last normal window position and size plus maximized or borderless-fullscreen state from
   project-local user settings. The Project Hub now uses a modern navigation rail and responsive recent-project cards.
 - Fixed scene saves freezing the editor behind their background asset import by keeping asset record and status
@@ -26,6 +51,14 @@ All notable template changes are documented here. The format follows Keep a Chan
 - Scene, Hierarchy, Inspector, Input Actions, and Project Settings panels now own their dock registration and content
   boundary; material drafts own their source/baseline lifecycle in `MaterialDocument`, document mutation storage is no
   longer public, and entity, selection, Play, save, and history actions share the command router.
+- Asset diagnostics, naming actions, shader/material content, and material draft composition now have an independent
+  `AssetInspectorPanel` state owner instead of sharing entity/component Inspector state.
+- AssetTool now converts its UTF-8 command-line project, output, catalog, and input paths through the engine filesystem
+  boundary, so packaged cooking works from non-ASCII repository and staging paths on Windows.
+- Project Hub now preserves its UTF-8 executable path and resolves the editor in both packaged sibling and nested
+  build-output layouts, with diagnostics listing every checked path when the companion executable is absent.
+- Extracted editor panels now keep their move-only UI panel scope alive for the complete draw call, preventing Scene,
+  Hierarchy, Inspector, or Input Actions content from falling into Dear ImGui's standalone `Debug##Default` window.
 - GPU material entries now cache complete last-good pipelines, packed numeric slots, texture/sampler bindings, and
   dependency revision stamps. Shared-material draws reuse immutable bindings, component tint remains per draw, and a
   failed dependency rebuild cannot partially replace a working material.

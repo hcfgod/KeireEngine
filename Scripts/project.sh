@@ -30,6 +30,7 @@ CLEAN_SCOPE=full
 INSTALL_OPTIONAL=0
 UPDATE=0
 FORCE=0
+ALLOW_DIRTY=0
 CI=0
 SMOKE_UI=0
 SMOKE_PROJECT=0
@@ -52,6 +53,7 @@ while [[ $# -gt 0 ]]; do
         --install-optional) INSTALL_OPTIONAL=1; shift ;;
         --update) UPDATE=1; shift ;;
         --force) FORCE=1; shift ;;
+        --allow-dirty) ALLOW_DIRTY=1; shift ;;
         --ci) CI=1; shift ;;
         --smoke-ui) SMOKE_UI=1; shift ;;
         --smoke-project) SMOKE_PROJECT=1; shift ;;
@@ -81,7 +83,10 @@ run_command() {
         run) KEIRE_SMOKE_UI="$SMOKE_UI" KEIRE_SMOKE_PROJECT="$SMOKE_PROJECT" KEIRE_EDITOR="$EDITOR" KEIRE_PROJECT_PATH="$PROJECT_PATH" bash "$PLATFORM_DIR/run.sh" "${common[@]}" --configuration "$CONFIGURATION" ;;
         clean) bash "$PLATFORM_DIR/clean.sh" "$CLEAN_SCOPE" ;;
         coverage) bash "$SCRIPT_DIR/Unix/coverage.sh" "$PLATFORM_NAME" "${common[@]}" ;;
-        package) bash "$SCRIPT_DIR/Unix/package.sh" "$PLATFORM_NAME" "${common[@]}" --configuration "$CONFIGURATION" ;;
+        package)
+            [[ $ALLOW_DIRTY -eq 0 ]] || common+=(--allow-dirty)
+            bash "$SCRIPT_DIR/Unix/package.sh" "$PLATFORM_NAME" "${common[@]}" --configuration "$CONFIGURATION"
+            ;;
         doctor) bash "$SCRIPT_DIR/Unix/doctor.sh" "$PLATFORM_NAME" "${common[@]}" ;;
         rename)
             [[ -n "$NAME" ]] || { printf '%s\n' '--name is required for rename.' >&2; return 1; }

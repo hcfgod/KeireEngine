@@ -1,8 +1,10 @@
+#include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -15,8 +17,14 @@
 
 #include <doctest/doctest.h>
 
+#include "EditorTestSupport.h"
+
+#include "KeireInternal/FileSystem.h"
+
 #include <array>
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -25,6 +33,19 @@
 
 namespace
 {
+    void SetTestWorkerMode(const char* value)
+    {
+#if defined(_WIN32)
+        if (_putenv_s("KEIRE_EDITOR_TEST_WORKER_MODE", value ? value : "") != 0)
+            throw std::runtime_error("Could not configure the editor-test worker mode.");
+#else
+        const auto result =
+            value ? setenv("KEIRE_EDITOR_TEST_WORKER_MODE", value, 1) : unsetenv("KEIRE_EDITOR_TEST_WORKER_MODE");
+        if (result != 0)
+            throw std::runtime_error("Could not configure the editor-test worker mode.");
+#endif
+    }
+
     class TestPropertyEditor final : public KeireEditor::IPropertyEditor
     {
       public:
@@ -207,7 +228,7 @@ TEST_CASE("scene document owns selection and deterministic close state")
     document.SetRecoveryAvailable(true);
 
     document.Close();
-    CHECK_FALSE(document.Scene());
+    CHECK_FALSE(document.EditingScene());
     CHECK_FALSE(document.Asset());
     CHECK_FALSE(document.RecoveryAvailable());
     CHECK_FALSE(scene->IsOpen());
@@ -290,14 +311,53 @@ TEST_CASE("scene document targets the isolated runtime scene while playing")
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000060"),
                                                 Keire::SceneAsset::EmptyDefinition("Play document"));
     auto authored = scene->CreateEntity("Authored");
-    document.Open(scene);
-    document.BeginPlay();
+    auto undo = Keire::CreateRef<Keire::UndoService>();
+    auto editingHistory = undo->CreateContext({.Name = "Edit"});
+    auto playHistory = undo->CreateContext({.Name = "Play"});
+    document.Open(scene, {}, {}, editingHistory);
+    CHECK(document.History() == editingHistory);
+    document.BeginPlay(playHistory);
+    CHECK(document.History() == playHistory);
     REQUIRE(document.ActiveScene());
     CHECK(document.ActiveScene() != document.EditingScene());
     document.ActiveScene()->FindEntity(authored.Id()).SetName("Runtime");
     CHECK(scene->FindEntity(authored.Id()).Name() == "Authored");
     CHECK(document.ActiveScene()->FindEntity(authored.Id()).Name() == "Runtime");
+    document.EndPlay();
+    CHECK_FALSE(playHistory->IsOpen());
+    CHECK(document.History() == editingHistory);
     document.Close();
+}
+
+TEST_CASE("scene document owns atomic save and recovery lifecycle")
+{
+    const auto root =
+        std::filesystem::temp_directory_path() / ("Keire-SceneDocument-" + Keire::AssetId::Generate().ToString());
+    const auto source = root / "Assets/Scenes/Test.keirescene";
+    const auto recovery = root / "Library/SceneRecovery/Test.keirescene.recovery";
+    std::filesystem::create_directories(source.parent_path());
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000066");
+    auto scene = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Document save"));
+    auto entity = scene->CreateEntity("Recovered name");
+    KeireEditor::SceneDocument document;
+    document.Open(scene, asset, source);
+    document.SetRecoveryPath(recovery);
+    CHECK(document.WriteRecovery());
+    REQUIRE(std::filesystem::is_regular_file(recovery));
+    scene->FindEntity(entity.Id()).SetName("Later name");
+    document.RestoreRecovery();
+    CHECK(document.EditingScene()->FindEntity(entity.Id()).Name() == "Recovered name");
+    CHECK(document.Dirty());
+    document.Save();
+    CHECK_FALSE(document.Dirty());
+    CHECK_FALSE(std::filesystem::exists(recovery));
+    std::ifstream input(source, std::ios::binary);
+    const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    const auto bytes = std::as_bytes(std::span(characters.data(), characters.size()));
+    CHECK(Keire::SceneAsset::Decode(bytes)->Definition().Objects.front().Name == "Recovered name");
+    document.Close();
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
 }
 
 TEST_CASE("play changes apply selected property and structural edits transactionally")
@@ -442,17 +502,102 @@ TEST_CASE("play changes preserve selected unavailable component replacements")
 
 TEST_CASE("input actions document owns authoring state and dirty lifecycle")
 {
+    const auto undoService = Keire::CreateRef<Keire::UndoService>();
+    const auto undo = undoService->CreateContext({.Name = "Input document test"});
+    const auto root =
+        std::filesystem::temp_directory_path() / ("Keire-InputDocument-" + Keire::AssetId::Generate().ToString());
+    const auto source = root / "Assets/Input/Test.keireinput";
+    std::filesystem::create_directories(source.parent_path());
     KeireEditor::InputActionsDocument document;
     document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000002"),
-                  Keire::InputActionAsset::DefaultDefinition());
-    document.MarkDirty();
+                  Keire::InputActionAsset::DefaultDefinition(), undo, source);
+    const auto originalName = document.Definition().Name;
+    auto edited = document.Definition();
+    document.RecordApplied("Rename input actions", edited);
+    edited.Name = "Edited actions";
+    document.ReplaceDefinition(std::move(edited));
     CHECK(document.Dirty());
+    CHECK(document.Definition().Name == "Edited actions");
     CHECK(document.Definition().ActionMaps.size() > 0);
-    document.MarkSaved();
+    CHECK(document.Undo());
+    CHECK(document.Definition().Name == originalName);
+    CHECK(document.Redo());
+    CHECK(document.Definition().Name == "Edited actions");
+    document.Save();
     CHECK_FALSE(document.Dirty());
+    CHECK(std::filesystem::is_regular_file(source));
     document.Close();
     CHECK_FALSE(document.Asset());
     CHECK(document.Definition().ActionMaps.empty());
+    undo->Close();
+    undoService->Close();
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("scene document owns asynchronous operations and replacement lifecycle")
+{
+    KeireEditor::SceneDocument document;
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000003");
+    auto scene = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Original"));
+    const auto selected = scene->CreateEntity("Selected").Id().Value();
+    document.Open(scene, asset, "Assets/Scenes/Original.keirescene");
+    document.Select(selected);
+    document.SetStatus("Opening");
+    document.SetRecoveryPath("Library/SceneRecovery/original.recovery");
+    document.AdvanceRecovery(2.5);
+    CHECK(document.Status() == "Opening");
+    CHECK(document.RecoverySeconds() == doctest::Approx(2.5));
+
+    auto replacement = Keire::CreateRef<Keire::Scene>(asset, scene->Snapshot());
+    document.ReplaceEditingScene(replacement);
+    CHECK(document.EditingScene() == replacement);
+    CHECK(document.Selection() == selected);
+    CHECK_FALSE(scene->IsOpen());
+
+    document.BeginPlay();
+    CHECK(document.PlaySession());
+    CHECK(document.ActiveScene() != document.EditingScene());
+    document.EndPlay();
+    CHECK_FALSE(document.PlaySession());
+    CHECK(document.ActiveScene() == replacement);
+    document.Close();
+}
+
+TEST_CASE("project settings document validates saves and owns one-step edit history")
+{
+    const auto root =
+        std::filesystem::temp_directory_path() / ("Keire-ProjectSettings-" + Keire::AssetId::Generate().ToString());
+    std::filesystem::remove_all(root);
+    const auto undoService = Keire::CreateRef<Keire::UndoService>();
+    const auto undo = undoService->CreateContext({.Name = "Project Settings"});
+    KeireEditor::ProjectSettingsDocument document;
+    document.Open(root, {}, undo);
+
+    auto edited = document.Settings();
+    edited.AmbientIntensity = 2.5F;
+    document.Update(edited);
+    edited.Exposure = 1.5F;
+    document.Update(edited);
+    document.CommitEdit();
+    CHECK(document.Dirty());
+    CHECK(undo->UndoCount() == 1);
+    CHECK(undo->Undo());
+    CHECK(document.Settings().AmbientIntensity == doctest::Approx(0.75F));
+    CHECK(undo->Redo());
+    CHECK(document.Settings().Exposure == doctest::Approx(1.5F));
+
+    document.Save();
+    CHECK_FALSE(document.Dirty());
+    CHECK(Keire::LoadRenderEnvironmentSettings(root) == document.Settings());
+    edited = document.Settings();
+    edited.Exposure = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_AS(document.Update(edited), std::invalid_argument);
+
+    document.Close();
+    undo->Close();
+    undoService->Close();
+    std::filesystem::remove_all(root);
 }
 
 TEST_CASE("custom registered component properties edit transactionally and restore")
@@ -617,6 +762,26 @@ TEST_CASE("material document owns draft and committed source state")
     document.AcceptSavedSource(committed);
     CHECK_FALSE(document.Dirty());
     CHECK(std::ranges::equal(document.DraftSource(), document.BaselineSource()));
+
+    document.RequestCatalogRefresh(asset);
+    CHECK_FALSE(document.PendingCatalogRefresh());
+    document.AdvanceCatalogRefresh(0.15);
+    const auto firstRefresh = document.PendingCatalogRefresh();
+    REQUIRE(firstRefresh);
+    CHECK(firstRefresh->Asset == asset);
+    CHECK(firstRefresh->Generation == 1);
+    document.MarkCatalogRefreshQueued(firstRefresh->Generation);
+    CHECK_FALSE(document.PendingCatalogRefresh(true));
+    document.RequestCatalogRefresh(asset);
+    document.RequestCatalogRefresh(Keire::AssetId::Generate());
+    const auto coalesced = document.PendingCatalogRefresh(true);
+    REQUIRE(coalesced);
+    CHECK_FALSE(coalesced->Asset);
+    CHECK(coalesced->Generation == 3);
+    document.MarkCatalogRefreshQueued(coalesced->Generation);
+    document.MarkCatalogRefreshApplied(coalesced->Generation);
+    document.ResetCatalogRefresh();
+    CHECK_FALSE(document.PendingCatalogRefresh(true));
 }
 
 TEST_CASE("scene picker selects transform-only and rendered entities by nearest viewport hit")
@@ -638,6 +803,64 @@ TEST_CASE("scene picker selects transform-only and rendered entities by nearest 
     CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == rendered.Id());
     rendered.SetActive(false);
     CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == transformOnly.Id());
+}
+
+TEST_CASE("scene framing bounds use imported mesh metadata and transformed descendants")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000031"),
+                                                Keire::SceneAsset::EmptyDefinition("Framing"));
+    auto parent = scene->CreateEntity("Imported mesh");
+    auto renderer = parent.AddComponent<Keire::MeshRendererComponent>();
+    REQUIRE(renderer);
+    const auto mesh = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000032");
+    renderer->SetMesh(mesh);
+    parent.GetComponent<Keire::TransformComponent>()->SetLocalPosition({10.0F, 2.0F, -3.0F});
+
+    auto child = scene->CreateEntity("Child");
+    child.SetParent(parent, false);
+    child.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 8.0F, 0.0F});
+
+    const auto bounds = KeireEditor::CalculateSceneEntityBounds(
+        parent,
+        [mesh](const Keire::AssetId requested) -> std::optional<Keire::MeshBounds>
+        {
+            if (requested == mesh)
+                return Keire::MeshBounds{{-4.0F, -2.0F, -1.0F}, {4.0F, 2.0F, 1.0F}};
+            return std::nullopt;
+        });
+    REQUIRE(bounds.Valid);
+    CHECK(bounds.Minimum == (Keire::Vector3{6.0F, 0.0F, -4.0F}));
+    CHECK(bounds.Maximum == (Keire::Vector3{14.0F, 10.15F, -2.0F}));
+    CHECK(bounds.Center() == (Keire::Vector3{10.0F, 5.075F, -3.0F}));
+    CHECK(bounds.Radius() > 6.5F);
+
+    auto second = scene->CreateEntity("Second selection");
+    second.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-12.0F, 0.0F, 0.0F});
+    const std::array group{parent, second};
+    const auto groupBounds = KeireEditor::CalculateSceneEntityBounds(group, {});
+    REQUIRE(groupBounds.Valid);
+    CHECK(groupBounds.Minimum.X < -12.0F);
+    CHECK(groupBounds.Maximum.X >= 10.15F);
+    second.SetActive(false);
+    const auto activeBounds = KeireEditor::CalculateSceneEntityBounds(group, {});
+    CHECK(activeBounds.Minimum.X >= 9.5F);
+
+    KeireEditor::SceneCameraController camera;
+    camera.Frame(bounds.Center(), bounds.Radius(), 1.0F);
+    const auto viewProjection = Keire::Math::Multiply(camera.ProjectionMatrix(1.0F), camera.ViewMatrix());
+    for (int corner = 0; corner < 8; ++corner)
+    {
+        const Keire::Vector3 point{corner & 1 ? bounds.Maximum.X : bounds.Minimum.X,
+                                   corner & 2 ? bounds.Maximum.Y : bounds.Minimum.Y,
+                                   corner & 4 ? bounds.Maximum.Z : bounds.Minimum.Z};
+        const auto& elements = viewProjection.Elements;
+        const float clipX = elements[0] * point.X + elements[4] * point.Y + elements[8] * point.Z + elements[12];
+        const float clipY = elements[1] * point.X + elements[5] * point.Y + elements[9] * point.Z + elements[13];
+        const float clipW = elements[3] * point.X + elements[7] * point.Y + elements[11] * point.Z + elements[15];
+        REQUIRE(clipW > 0.0F);
+        CHECK(std::abs(clipX / clipW) <= 0.8F);
+        CHECK(std::abs(clipY / clipW) <= 0.8F);
+    }
 }
 
 TEST_CASE("viewport asset drops dispatch through narrow typed commands")
@@ -695,7 +918,9 @@ TEST_CASE("scene camera state and entity locking persist without a workspace lay
     state.MoveSpeed = 3.0F;
     state.Projection = Keire::Detail::EditorCameraProjection::Orthographic;
     camera.SetState(state);
-    camera.SetLockedEntity(Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000050"));
+    const std::array locked{Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000050"),
+                            Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000053")};
+    camera.SetLockedEntities(locked);
     camera.MarkDirty();
     REQUIRE(camera.Save(path));
 
@@ -704,7 +929,7 @@ TEST_CASE("scene camera state and entity locking persist without a workspace lay
     CHECK(restored.State().Focus == state.Focus);
     CHECK(restored.State().YawDegrees == doctest::Approx(state.YawDegrees));
     CHECK(restored.State().Projection == Keire::Detail::EditorCameraProjection::Orthographic);
-    CHECK(restored.LockedEntity() == camera.LockedEntity());
+    CHECK(std::ranges::equal(restored.LockedEntities(), locked));
     std::filesystem::remove_all(root, error);
 }
 
@@ -724,8 +949,24 @@ TEST_CASE("scene camera single F frames and double F locks the selected entity")
     CHECK(camera.ApplyFocusShortcut(second, Keire::TimeStep::FromSeconds(2.5)) ==
           KeireEditor::SceneFocusShortcutAction::Frame);
     CHECK(camera.LockedEntity() == first);
-    CHECK(camera.ApplyFocusShortcut({}, Keire::TimeStep::FromSeconds(2.6)) ==
+    CHECK(camera.ApplyFocusShortcut(Keire::EntityId{}, Keire::TimeStep::FromSeconds(2.6)) ==
           KeireEditor::SceneFocusShortcutAction::None);
+}
+
+TEST_CASE("scene camera double F preserves an ordered multiselection lock and follows framing smoothly")
+{
+    KeireEditor::SceneCameraController camera;
+    const std::array selection{Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000054"),
+                               Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000055")};
+    CHECK(camera.ApplyFocusShortcut(selection, Keire::TimeStep::FromSeconds(1.0)) ==
+          KeireEditor::SceneFocusShortcutAction::Frame);
+    CHECK(camera.ApplyFocusShortcut(selection, Keire::TimeStep::FromSeconds(1.2)) ==
+          KeireEditor::SceneFocusShortcutAction::Lock);
+    CHECK(camera.LockedTo(selection));
+    const auto before = camera.State();
+    camera.FollowFrame({20.0F, 0.0F, 0.0F}, 4.0F, 16.0F / 9.0F, 1.0F / 60.0F);
+    CHECK(camera.State().Focus.X > before.Focus.X);
+    CHECK(camera.State().Focus.X < 20.0F);
 }
 
 TEST_CASE("editor window placement persists windowed bounds and display state")
@@ -757,6 +998,32 @@ TEST_CASE("editor window placement persists windowed bounds and display state")
     std::ofstream(path, std::ios::trunc) << "KEIRE_EDITOR_WINDOW 1\n0 0 10 10\n0 0\n";
     CHECK_FALSE(KeireEditor::LoadEditorWindowPlacement(path));
     std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("editor window restoration selects visible displays and clamps removed-monitor bounds")
+{
+    const std::array displays{
+        Keire::DisplayInformation{0, "Left", {-1920, 0, 1920, 1080}, {-1920, 0, 1920, 1040}, 1.0F, false},
+        Keire::DisplayInformation{1, "Primary", {0, 0, 2560, 1440}, {0, 0, 2560, 1400}, 1.5F, true}};
+    KeireEditor::EditorWindowPlacement visible;
+    visible.Position = {-1500, 80};
+    visible.WindowedSize = {1200, 800};
+    const auto kept = KeireEditor::CorrectEditorWindowPlacement(visible, displays);
+    CHECK(kept.Position == visible.Position);
+    CHECK(kept.WindowedSize == visible.WindowedSize);
+
+    KeireEditor::EditorWindowPlacement removed;
+    removed.Position = {5000, -3000};
+    removed.WindowedSize = {4000, 2000};
+    const auto corrected = KeireEditor::CorrectEditorWindowPlacement(removed, displays);
+    CHECK(corrected.WindowedSize == Keire::LogicalExtent{2560, 1400});
+    CHECK(corrected.Position == Keire::WindowPosition{0, 0});
+
+    const std::array smallDisplay{
+        Keire::DisplayInformation{0, "Small", {0, 0, 800, 600}, {0, 0, 800, 560}, 2.0F, true}};
+    const auto small = KeireEditor::CorrectEditorWindowPlacement(removed, smallDisplay);
+    CHECK(small.WindowedSize == Keire::LogicalExtent{800, 560});
+    CHECK(small.Position == Keire::WindowPosition{0, 0});
 }
 
 TEST_CASE("content previews use immutable loaded assets without blocking shutdown")
@@ -844,4 +1111,181 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
                               [](const std::byte value) { return std::to_integer<unsigned>(value) > 210U; }));
     thumbnails.CancelAll();
     std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("Asset operation service runs the isolated worker and publishes a source index")
+{
+    const auto location = std::filesystem::temp_directory_path() / std::filesystem::path(u8"Kéire-资产-Worker-Test");
+    std::error_code cleanupError;
+    std::filesystem::remove_all(location, cleanupError);
+    std::filesystem::create_directories(location);
+    const auto worker = KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath);
+    REQUIRE(std::filesystem::is_regular_file(worker));
+    {
+        auto project = Keire::Project::Create(
+            {.Location = location, .Name = "Worker Project", .Template = Keire::ProjectTemplate::Empty});
+        REQUIRE(project);
+        const auto interrupted = project->Root() / "Library/AssetOperations" / Keire::AssetId::Generate().ToString();
+        std::filesystem::create_directories(interrupted);
+        std::filesystem::create_directories(project->Root() / "Assets/Shaders");
+        Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets/Shaders/StaleAuxiliary.hlsl", "stale");
+        Keire::Detail::WriteTextFileAtomically(interrupted / "create-auxiliary.journal",
+                                               "Scenes/Missing.keirescene\nShaders/StaleAuxiliary.hlsl\n");
+        KeireEditor::AssetOperationService operations(worker, project->Root());
+        operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < deadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        CHECK_FALSE(operations.Busy());
+        const auto completion = operations.TakeCompletion();
+        REQUIRE(completion);
+        INFO(completion->Result.Diagnostic);
+        CHECK(completion->Result.Success);
+        CHECK(std::filesystem::is_regular_file(completion->SourceIndexPath));
+        CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Shaders/StaleAuxiliary.hlsl"));
+        CHECK_FALSE(std::filesystem::exists(interrupted / "create-auxiliary.journal"));
+
+        const std::string auxiliaryText = "worker auxiliary source";
+        const auto auxiliaryBytes = std::as_bytes(std::span(auxiliaryText));
+        operations.QueueCreateAssetWithAuxiliary(
+            "Scenes/WorkerCreated.keirescene",
+            Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Worker Created")), {}, {},
+            {{"Shaders/WorkerAuxiliary.hlsl", std::vector<std::byte>(auxiliaryBytes.begin(), auxiliaryBytes.end())}});
+        const auto createDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < createDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto created = operations.TakeCompletion();
+        REQUIRE(created);
+        INFO(created->Result.Diagnostic);
+        CHECK(created->Result.Success);
+        CHECK(created->Kind == Keire::Detail::AssetWorkerOperationKind::CreateAsset);
+        CHECK(created->Result.CreatedAsset);
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerCreated.keirescene"));
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Shaders/WorkerAuxiliary.hlsl"));
+
+        operations.QueueMutation({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
+                                  .Asset = created->Result.CreatedAsset,
+                                  .Destination = "Scenes/WorkerRenamed.keirescene"});
+        const auto mutationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < mutationDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto mutated = operations.TakeCompletion();
+        REQUIRE(mutated);
+        INFO(mutated->Result.Diagnostic);
+        CHECK(mutated->Result.Success);
+        CHECK(mutated->Kind == Keire::Detail::AssetWorkerOperationKind::Mutate);
+        CHECK(mutated->Result.MutatedAssets == std::vector{created->Result.CreatedAsset});
+        CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Scenes/WorkerCreated.keirescene"));
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
+
+        operations.QueueMutation(
+            {.Kind = Keire::Detail::AssetWorkerMutationKind::TrashAsset, .Asset = created->Result.CreatedAsset});
+        const auto trashDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < trashDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto trashed = operations.TakeCompletion();
+        REQUIRE(trashed);
+        INFO(trashed->Result.Diagnostic);
+        REQUIRE(trashed->Result.Success);
+        REQUIRE(trashed->Result.Trash);
+        CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
+
+        operations.QueueMutation(
+            {.Kind = Keire::Detail::AssetWorkerMutationKind::RestoreTrash, .Trash = trashed->Result.Trash});
+        const auto restoreDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < restoreDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto restored = operations.TakeCompletion();
+        REQUIRE(restored);
+        INFO(restored->Result.Diagnostic);
+        CHECK(restored->Result.Success);
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
+    }
+    std::filesystem::remove_all(location, cleanupError);
+}
+
+TEST_CASE("Asset operation service reports malformed worker completion and bounds forced shutdown")
+{
+    const auto location =
+        std::filesystem::temp_directory_path() / ("Keire-Worker-Failure-" + Keire::AssetId::Generate().ToString());
+    std::error_code cleanupError;
+    std::filesystem::remove_all(location, cleanupError);
+    std::filesystem::create_directories(location);
+    auto project = Keire::Project::Create(
+        {.Location = location, .Name = "Worker Failure Project", .Template = Keire::ProjectTemplate::Empty});
+
+    SetTestWorkerMode("malformed");
+    {
+        KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root());
+        operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
+        operations.Update();
+        SetTestWorkerMode(nullptr);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (operations.Busy() && std::chrono::steady_clock::now() < deadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto completion = operations.TakeCompletion();
+        REQUIRE(completion);
+        CHECK_FALSE(completion->Result.Success);
+        CHECK_FALSE(completion->Result.Diagnostic.empty());
+    }
+
+    SetTestWorkerMode("hang");
+    {
+        KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root());
+        operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
+        operations.Update();
+        SetTestWorkerMode(nullptr);
+        REQUIRE(operations.Busy());
+        const auto started = std::chrono::steady_clock::now();
+        operations.Shutdown();
+        CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(500));
+        CHECK_FALSE(operations.Busy());
+    }
+    SetTestWorkerMode(nullptr);
+    std::filesystem::remove_all(location, cleanupError);
+}
+
+TEST_CASE("Asset operation service coalesces material refresh generations before dispatch")
+{
+    const auto location =
+        std::filesystem::temp_directory_path() / ("Keire-Worker-Queue-" + Keire::AssetId::Generate().ToString());
+    std::error_code cleanupError;
+    std::filesystem::remove_all(location, cleanupError);
+    std::filesystem::create_directories(location);
+    auto project = Keire::Project::Create(
+        {.Location = location, .Name = "Worker Queue Project", .Template = Keire::ProjectTemplate::Empty});
+    KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root());
+    operations.QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
+                           {.ReloadAsset = Keire::AssetId::Generate(), .Generation = 1});
+    operations.QueueImport(KeireEditor::AssetOperationPriority::MaterialRefresh,
+                           {.ReloadAsset = Keire::AssetId::Generate(), .Generation = 2});
+    operations.QueueCook({.Name = "Test"}, project->Root() / "Build/Cooked");
+    operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
+    CHECK(operations.QueuedCount() == 3);
+    operations.Shutdown();
+    std::filesystem::remove_all(location, cleanupError);
 }

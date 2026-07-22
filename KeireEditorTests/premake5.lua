@@ -7,12 +7,14 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     files
     {
         "Source/**.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetOperationService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorCommandRouter.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorWindowPlacement.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InputActionsDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialInspectorPanel.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/PropertyDrawerRegistry.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ProjectSettingsDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneCameraController.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneGizmoController.cpp",
@@ -35,4 +37,5 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     }
 
     LinkKeireCore()
+    dependson { AssetWorkerTarget }
     LinkSDL3()

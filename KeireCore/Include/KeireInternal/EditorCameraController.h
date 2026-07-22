@@ -54,7 +54,7 @@ namespace Keire::Detail
         [[nodiscard]] const EditorCameraState& State() const noexcept { return m_State; }
         void SetState(EditorCameraState state);
         [[nodiscard]] bool Update(const EditorCameraInput& input);
-        void Frame(Vector3 center, float radius, float verticalFieldOfViewDegrees = 60.0F);
+        void Frame(Vector3 center, float radius, float verticalFieldOfViewDegrees = 60.0F, float aspectRatio = 1.0F);
         void SetFocus(Vector3 focus);
         void Snap(EditorCameraAxis axis);
         void ToggleProjection() noexcept;

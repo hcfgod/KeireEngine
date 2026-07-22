@@ -2,15 +2,17 @@
 set -euo pipefail
 PLATFORM="$1"; shift
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; source "$ROOT/Scripts/Unix/common.sh"
-GENERATOR=ninja; CONFIGURATION=Release; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0
+GENERATOR=ninja; CONFIGURATION=Release; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0; ALLOW_DIRTY=0
 parse_build_arguments "$@"; [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] || { printf 'Package requires Release or Dist.\n' >&2; exit 1; }
 load_project_config "$ROOT"; TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"; system=linux; os_name=linux; [[ "$PLATFORM" == Mac ]] && { system=macosx; os_name=macos; }
+read -r dirty development_artifact < <(package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI")
 bash "$ROOT/Scripts/Unix/build-info.sh"
 command -v cmake >/dev/null 2>&1 || { printf 'CMake 3.20 or newer is required for SDK package validation.\n' >&2; exit 1; }
 common=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET"); [[ $CI -eq 1 ]] && common+=(--ci)
 test_args=("${common[@]}"); [[ $UPDATE -eq 1 ]] && test_args+=(--update); [[ $FORCE -eq 1 ]] && test_args+=(--force)
 bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"; KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
 asset_tool="${PROJECT_NAMESPACE}AssetTool"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_tool"
+asset_worker="${PROJECT_NAMESPACE}AssetWorker"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_worker"
 runtime="${PROJECT_NAMESPACE}Runtime"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$runtime"
 bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$HUB_TARGET"
 bash "$ROOT/Scripts/Unix/shader-compiler.sh" "$PLATFORM" "$ARCHITECTURE" "$TOOLSET"
@@ -25,7 +27,7 @@ hub_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$HUB_TARGET/$HUB
 core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/lib$CORE_TARGET.a"
 imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
 zstd_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/Zstd/lib$zstd_library.a"
-cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
+cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker/$asset_worker" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
 cp "$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install/lib/libassimp.a" "$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install/lib/libzlibstatic.a" "$stage/lib/"
 cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
 find "$ROOT/Build/Tools/ShaderCompiler" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$stage/bin/" \;
@@ -57,11 +59,13 @@ cp -R "$ROOT/Examples/Consumer/"* "$stage/examples/consumer/"
 cp -R "$ROOT/Examples/ManagedConsumer/"* "$stage/examples/managed-consumer/"
 sed -e "s/@CORE_TARGET@/$CORE_TARGET/g" -e "s/@PROJECT_NAMESPACE@/$PROJECT_NAMESPACE/g" -e "s/@PACKAGE_CONFIGURATION@/$CONFIGURATION/g" "$ROOT/Config/PackageConfig.cmake.in" > "$stage/lib/cmake/$PROJECT_IDENTIFIER/${PROJECT_IDENTIFIER}Config.cmake"
 commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"; sdl="$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)"; json="$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)"; imgui="$(config_value "$ROOT/Config/Dependencies.lock" IMGUI_COMMIT)"; zstd="$(config_value "$ROOT/Config/Dependencies.lock" ZSTD_COMMIT)"; entt="$(config_value "$ROOT/Config/Dependencies.lock" ENTT_COMMIT)"; glm="$(config_value "$ROOT/Config/Dependencies.lock" GLM_COMMIT)"; shadercross="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_COMMIT)"; dxc="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_DXC_COMMIT)"; spirv_cross="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)"; spirv_headers="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)"; spirv_tools="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)"; assimp="$(config_value "$ROOT/Config/Dependencies.lock" ASSIMP_COMMIT)"; stb="$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)"
-dirty=false; [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal 2>/dev/null || true)" ]] && dirty=true
 platform_name=Linux; [[ "$PLATFORM" == Mac ]] && platform_name=macOS
 if [[ "$TOOLSET" == clang ]]; then compiler="Clang $(clang++ -dumpversion)"; else compiler="GCC $(g++ -dumpfullversion -dumpversion)"; fi
-printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s",\n  "zstd": "%s",\n  "entt": "%s",\n  "glm": "%s",\n  "sdlShadercross": "%s",\n  "dxc": "%s",\n  "spirvCross": "%s",\n  "spirvHeaders": "%s",\n  "spirvTools": "%s",\n  "assimp": "%s",\n  "stb": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" "$(json_escape "$zstd")" "$(json_escape "$entt")" "$(json_escape "$glm")" "$(json_escape "$shadercross")" "$(json_escape "$dxc")" "$(json_escape "$spirv_cross")" "$(json_escape "$spirv_headers")" "$(json_escape "$spirv_tools")" "$(json_escape "$assimp")" "$(json_escape "$stb")" > "$stage/build-manifest.json"
+printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "developmentArtifact": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s",\n  "zstd": "%s",\n  "entt": "%s",\n  "glm": "%s",\n  "sdlShadercross": "%s",\n  "dxc": "%s",\n  "spirvCross": "%s",\n  "spirvHeaders": "%s",\n  "spirvTools": "%s",\n  "assimp": "%s",\n  "stb": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$development_artifact" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" "$(json_escape "$zstd")" "$(json_escape "$entt")" "$(json_escape "$glm")" "$(json_escape "$shadercross")" "$(json_escape "$dxc")" "$(json_escape "$spirv_cross")" "$(json_escape "$spirv_headers")" "$(json_escape "$spirv_tools")" "$(json_escape "$assimp")" "$(json_escape "$stb")" > "$stage/build-manifest.json"
 validate_package_stage "$stage" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" "$PROJECT_NAMESPACE"
+grep -Fq "\"dirty\": $dirty" "$stage/build-manifest.json" || { printf 'Package manifest dirty flag is invalid.\n' >&2; exit 1; }
+grep -Fq "\"developmentArtifact\": $development_artifact" "$stage/build-manifest.json" || { printf 'Package manifest development flag is invalid.\n' >&2; exit 1; }
+[[ $ALLOW_DIRTY -eq 1 || "$dirty:$development_artifact" == false:false ]] || { printf 'Production package manifest is not clean.\n' >&2; exit 1; }
 grep -Fq "\"imgui\": \"$imgui\"" "$stage/build-manifest.json" || { printf 'Packaged Dear ImGui identity does not match the dependency lock.\n' >&2; exit 1; }
 grep -Fq "\"zstd\": \"$zstd\"" "$stage/build-manifest.json" || { printf 'Packaged Zstandard identity does not match the dependency lock.\n' >&2; exit 1; }
 grep -Fq "\"entt\": \"$entt\"" "$stage/build-manifest.json" || { printf 'Packaged EnTT identity does not match the dependency lock.\n' >&2; exit 1; }
@@ -71,6 +75,7 @@ grep -Fq "\"stb\": \"$stb\"" "$stage/build-manifest.json" || { printf 'Packaged 
 grep -Fq "\"sdlShadercross\": \"$shadercross\"" "$stage/build-manifest.json" || { printf 'Packaged SDL_shadercross identity does not match the dependency lock.\n' >&2; exit 1; }
 "$stage/bin/KeireShaderCompiler" --help 2>&1 | grep -Fq shadercross || { printf 'Packaged shader compiler validation failed.\n' >&2; exit 1; }
 "$stage/bin/$asset_tool" --help | grep -Fq 'KeireAssetTool cook' || { printf 'Packaged asset tool validation failed.\n' >&2; exit 1; }
+"$stage/bin/$asset_worker" --help | grep -Fq 'KeireAssetWorker' || { printf 'Packaged asset worker validation failed.\n' >&2; exit 1; }
 KEIRE_SHADER_COMPILER="$stage/bin/KeireShaderCompiler" "$stage/bin/$asset_tool" cook --project "$stage/samples/KeireSandbox" --output "$stage/content/KeireSandbox" --profile Dist --target "$os_name" | grep -Fq 'Cooked' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
 rm -rf "$stage/samples/KeireSandbox/Library" "$stage/samples/KeireSandbox/Logs" "$stage/samples/KeireSandbox/Build" "$stage/samples/KeireSandbox/Temp"
 [[ -f "$stage/content/KeireSandbox/catalog.json" && -f "$stage/content/KeireSandbox/runtime-manifest.json" ]] || { printf 'Packaged cooked runtime content is incomplete.\n' >&2; exit 1; }

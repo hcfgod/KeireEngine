@@ -7,17 +7,21 @@
 #include <string>
 #include <vector>
 
-class EditorWorkspaceLayer;
-
 namespace KeireEditor
 {
     class SceneDocument final
     {
       public:
-        [[nodiscard]] Keire::Ref<Keire::Scene> Scene() const noexcept { return m_Scene; }
         [[nodiscard]] Keire::Ref<Keire::Scene> EditingScene() const noexcept { return m_Scene; }
         [[nodiscard]] Keire::Ref<Keire::Scene> ActiveScene() const noexcept;
         [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession> PlaySession() const noexcept { return m_PlaySession; }
+        [[nodiscard]] Keire::Ref<Keire::SceneLoadOperation> LoadOperation() const noexcept { return m_LoadOperation; }
+        [[nodiscard]] Keire::Ref<Keire::SaveFileDialogOperation> SaveDialog() const noexcept { return m_SaveDialog; }
+        [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const noexcept { return m_Undo; }
+        [[nodiscard]] Keire::Ref<Keire::UndoContext> History() const noexcept
+        {
+            return m_PlaySession ? m_PlayUndo : m_Undo;
+        }
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Asset; }
         [[nodiscard]] Keire::AssetId Selection() const noexcept { return m_Selection; }
         [[nodiscard]] std::span<const Keire::AssetId> Selections() const noexcept { return m_Selections; }
@@ -27,6 +31,7 @@ namespace KeireEditor
         [[nodiscard]] const std::string& Status() const noexcept { return m_Status; }
         [[nodiscard]] bool Dirty() const noexcept { return m_Scene && m_Scene->Dirty(); }
         [[nodiscard]] bool RecoveryAvailable() const noexcept { return m_RecoveryAvailable; }
+        [[nodiscard]] double RecoverySeconds() const noexcept { return m_RecoverySeconds; }
 
         void Select(Keire::AssetId selection) noexcept;
         void Select(Keire::AssetId selection, bool additive) noexcept;
@@ -35,30 +40,32 @@ namespace KeireEditor
         void ClearSelection() noexcept;
         void Open(Keire::Ref<Keire::Scene> scene, Keire::AssetId asset = {}, std::filesystem::path source = {},
                   Keire::Ref<Keire::UndoContext> undo = {});
-        void BeginPlay();
+        void ReplaceEditingScene(Keire::Ref<Keire::Scene> scene, bool preserveSelection = true);
+        void SetLoadOperation(Keire::Ref<Keire::SceneLoadOperation> operation) noexcept;
+        void SetSaveDialog(Keire::Ref<Keire::SaveFileDialogOperation> operation) noexcept;
+        [[nodiscard]] Keire::Ref<Keire::SaveFileDialogOperation> TakeSaveDialog() noexcept;
+        void SetUndoContext(Keire::Ref<Keire::UndoContext> undo) noexcept;
+        void SetIdentity(Keire::AssetId asset, std::filesystem::path source);
+        void SetRecoveryPath(std::filesystem::path path);
+        void SetStatus(std::string status);
+        void Save();
+        [[nodiscard]] bool WriteRecovery();
+        void RestoreRecovery();
+        void DiscardRecovery() noexcept;
+        void AdvanceRecovery(double seconds) noexcept;
+        void ResetRecoveryTimer() noexcept { m_RecoverySeconds = 0.0; }
+        void BeginPlay(Keire::Ref<Keire::UndoContext> playUndo = {});
+        void EndPlay() noexcept;
         void SetRecoveryAvailable(bool available) noexcept { m_RecoveryAvailable = available; }
         void Close() noexcept;
 
       private:
-        friend class ::EditorWorkspaceLayer;
-        [[nodiscard]] Keire::Ref<Keire::Scene>& SceneStorage() noexcept { return m_Scene; }
-        [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>& PlaySessionStorage() noexcept { return m_PlaySession; }
-        [[nodiscard]] Keire::Ref<Keire::SceneLoadOperation>& LoadOperationStorage() noexcept { return m_LoadOperation; }
-        [[nodiscard]] Keire::Ref<Keire::SaveFileDialogOperation>& SaveDialogStorage() noexcept { return m_SaveDialog; }
-        [[nodiscard]] Keire::Ref<Keire::UndoContext>& UndoStorage() noexcept { return m_Undo; }
-        [[nodiscard]] Keire::AssetId& AssetStorage() noexcept { return m_Asset; }
-        [[nodiscard]] Keire::AssetId& SelectionStorage() noexcept { return m_Selection; }
-        [[nodiscard]] std::filesystem::path& SourceStorage() noexcept { return m_Source; }
-        [[nodiscard]] std::filesystem::path& RecoveryPathStorage() noexcept { return m_RecoveryPath; }
-        [[nodiscard]] std::string& StatusStorage() noexcept { return m_Status; }
-        [[nodiscard]] double& RecoverySecondsStorage() noexcept { return m_RecoverySeconds; }
-        [[nodiscard]] bool& RecoveryAvailableStorage() noexcept { return m_RecoveryAvailable; }
-
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::SceneRuntimeSession> m_PlaySession;
         Keire::Ref<Keire::SceneLoadOperation> m_LoadOperation;
         Keire::Ref<Keire::SaveFileDialogOperation> m_SaveDialog;
         Keire::Ref<Keire::UndoContext> m_Undo;
+        Keire::Ref<Keire::UndoContext> m_PlayUndo;
         Keire::AssetId m_Asset;
         Keire::AssetId m_Selection;
         std::vector<Keire::AssetId> m_Selections;

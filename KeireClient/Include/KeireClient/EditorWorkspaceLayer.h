@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
@@ -8,11 +9,9 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
-#include <future>
 #include <memory>
 #include <optional>
 #include <span>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -22,6 +21,9 @@
 namespace KeireEditor
 {
     class AssetBrowserPanel;
+    class AssetOperationService;
+    struct AssetMutationUndoState;
+    enum class AssetMutationPhase : std::uint8_t;
     class ConsolePanel;
     class DiagnosticsPanel;
     class EditorCommandRouter;
@@ -32,6 +34,7 @@ namespace KeireEditor
     class InspectorPanel;
     class HierarchyPanel;
     class ProjectSettingsPanel;
+    class ProjectSettingsDocument;
     class PropertyDrawerRegistry;
     class SceneDocument;
     class SceneViewportPanel;
@@ -48,11 +51,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::IHierarchyController,
                                    private KeireEditor::IInspectorController,
                                    private KeireEditor::IInputActionsController,
-                                   private KeireEditor::IProjectSettingsController,
+                                   private KeireEditor::IAssetBrowserController,
                                    private KeireEditor::IViewportAssetDropCommands
 {
   public:
-    explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false);
+    explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, std::filesystem::path executable = {});
     ~EditorWorkspaceLayer() override;
 
   protected:
@@ -63,9 +66,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OnUi(Keire::UiFrame& ui) override;
 
   private:
-    friend class KeireEditor::AssetBrowserPanel;
-    friend class KeireEditor::ConsolePanel;
-    friend class KeireEditor::DiagnosticsPanel;
     enum class Dialog : std::uint8_t
     {
         None,
@@ -107,24 +107,104 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawDirtyThemeDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawDirtySceneDialog(Keire::UiFrame& ui);
     void DrawThemeEditor(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
-    void DrawInputActionsContent(Keire::UiFrame& ui) override;
+    [[nodiscard]] KeireEditor::InputActionsDocument& InputActionsState() noexcept override;
+    [[nodiscard]] const Keire::UiThemeDefinition& InputActionsTheme() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetDatabase> InputAssetDatabase() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::InputActionContext> InputActionContext() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::InputSystem> InputSystem() const noexcept override;
+    void ActivateInputHistory() noexcept override;
+    void SaveInputActionsDocument() override;
+    void ReloadInputActionsDocument(Keire::AssetId asset) override;
+    void RecordInputActionsUndo(std::string_view name) override;
+    void UndoInputActions() override;
+    void RedoInputActions() override;
+    void ReportInputActionsError(std::string message) noexcept override;
     void DrawInputDebugger(Keire::UiFrame& ui);
-    void DrawProjectSettingsContent(Keire::UiFrame& ui) override;
-    void DrawSceneContent(Keire::UiFrame& ui) override;
+    [[nodiscard]] KeireEditor::SceneDocument& SceneViewportDocument() noexcept override;
+    [[nodiscard]] const Keire::UiThemeDefinition& SceneViewportTheme() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetDatabase> SceneViewportAssetDatabase() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> SceneViewportAssetSystem() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::RenderSystem> SceneViewportRenderer() const noexcept override;
+    [[nodiscard]] const Keire::RenderEnvironmentSettings& SceneViewportSettings() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept override;
+    [[nodiscard]] Keire::WindowId SceneViewportWindow() const noexcept override;
+    [[nodiscard]] float SceneViewportDisplayScale() const noexcept override;
+    [[nodiscard]] const Keire::Time& SceneViewportTime() const noexcept override;
+    [[nodiscard]] bool SceneViewportPlayReviewActive() const noexcept override;
+    void ActivateSceneViewportHistory() noexcept override;
+    void RestoreSceneViewportRecovery() override;
+    void DiscardSceneViewportRecovery() noexcept override;
+    void ReportSceneViewportError(std::string message) noexcept override;
+    void SetSceneViewportSelectedAsset(Keire::AssetId asset) noexcept override;
+    void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) override;
+    void RecordSceneViewportUndo(std::string_view name) override;
+    void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) override;
+    void SetSceneViewportSelection(std::span<const Keire::EntityId> entities, bool additive) override;
     void DrawGame(Keire::UiFrame& ui);
-    void DrawHierarchyContent(Keire::UiFrame& ui) override;
+    [[nodiscard]] Keire::Ref<Keire::Scene> ActiveHierarchyScene() const noexcept override;
+    [[nodiscard]] KeireEditor::SceneDocument& HierarchyDocument() noexcept override;
+    [[nodiscard]] Keire::UiColor HierarchyAccent() const noexcept override;
+    void ActivateHierarchyHistory() noexcept override;
+    void DeleteHierarchySelection() override;
+    void RecordHierarchyUndo() override;
+    void MarkHierarchyEntity(Keire::AssetId entity) override;
+    void RequestHierarchyRename(Keire::AssetId entity, std::string name) override;
     void DrawConsole(Keire::UiFrame& ui);
     void DrawDiagnostics(Keire::UiFrame& ui);
     void DrawProject(Keire::UiFrame& ui);
-    void DrawInspectorContent(Keire::UiFrame& ui) override;
+    [[nodiscard]] const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> AssetBrowserAssets() const noexcept override;
+    [[nodiscard]] std::span<const Keire::AssetSourceRecord> AssetBrowserRecords() const noexcept override;
+    [[nodiscard]] std::string_view AssetBrowserStatus() const noexcept override;
+    [[nodiscard]] Keire::AssetId AssetBrowserSceneAsset() const noexcept override;
+    [[nodiscard]] bool AssetBrowserSceneDirty() const noexcept override;
+    [[nodiscard]] bool AssetBrowserImportPending() const noexcept override;
+    void RefreshAssetBrowserRecords() override;
+    void SetAssetBrowserSelected(Keire::AssetId asset) noexcept override;
+    void ClearAssetBrowserSceneSelection() noexcept override;
+    void SetAssetBrowserStatus(std::string status) noexcept override;
+    void ReportAssetBrowserError(std::string message) noexcept override;
+    void ImportAssetBrowserAssets() override;
+    void RequestAssetBrowserCreateScene() override;
+    bool CreateAssetBrowserMaterial(std::string_view name) override;
+    void CreateAssetBrowserShader() override;
+    void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
+                                        std::string_view baseName) override;
+    void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation, Keire::Detail::AssetWorkerMutation reverse,
+                            std::string name, bool revealResult) override;
+    void OpenAssetBrowserInputActions(Keire::AssetId asset) override;
+    void OpenAssetBrowserScene(Keire::AssetId asset) override;
+    void CopyAssetBrowserText(std::string_view value) override;
+    [[nodiscard]] KeireEditor::SceneDocument& InspectorSceneDocument() noexcept override;
+    [[nodiscard]] KeireEditor::InputActionsDocument& InspectorInputDocument() noexcept override;
+    [[nodiscard]] KeireEditor::MaterialDocument& InspectorMaterialDocument() noexcept override;
+    [[nodiscard]] KeireEditor::PropertyDrawerRegistry& InspectorPropertyDrawers() noexcept override;
+    [[nodiscard]] const Keire::UiThemeDefinition& InspectorTheme() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetDatabase> InspectorAssetDatabase() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> InspectorAssetSystem() const noexcept override;
+    [[nodiscard]] std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept override;
+    [[nodiscard]] Keire::AssetId InspectorSelectedAsset() const noexcept override;
+    [[nodiscard]] std::string_view InspectorAssetStatus() const noexcept override;
+    void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept override;
+    void ActivateInspectorHistory() noexcept override;
+    void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
+    void CommitInspectorMaterial() override;
+    void OpenInspectorInputActions(Keire::AssetId asset) override;
+    void ImportInspectorAssets() override;
+    void RenameInspectorAsset(Keire::AssetId asset, std::string_view name) override;
+    void DuplicateInspectorAsset(Keire::AssetId asset, const std::filesystem::path& destination) override;
+    void TrashInspectorAsset(Keire::AssetId asset) override;
+    void SetInspectorAssetStatus(std::string status) noexcept override;
+    void ReportInspectorAssetError(std::string message) noexcept override;
     void OpenDroppedScene(Keire::AssetId asset) override;
     void OpenDroppedInputActions(Keire::AssetId asset) override;
     void CreateDroppedMeshEntity(Keire::AssetId asset) override;
     void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
-    void UpdateSceneCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState);
-    void LoadSceneCamera();
-    void SaveSceneCamera() noexcept;
     void ImportAssets();
+    void UpdateAssetOperations();
+    void QueueAssetMutation(std::shared_ptr<KeireEditor::AssetMutationUndoState> state,
+                            KeireEditor::AssetMutationPhase phase);
     void ApplyAssetImportResult(const Keire::AssetImportResult& result, bool reloadLoadedAssets,
                                 Keire::AssetId reloadAsset = {});
     void QueueMaterialCatalogRefresh(Keire::AssetId reloadAsset = {});
@@ -181,17 +261,14 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void LoadTheme(Keire::UiWorkspace& workspace, Keire::UiThemeId id);
 
     Keire::UiPanelRegistration m_Game;
-    Keire::UiPanelRegistration m_Project;
-    Keire::UiPanelRegistration m_Console;
-    Keire::UiPanelRegistration m_Diagnostics;
     Keire::UiPanelRegistration m_ThemeEditor;
     Keire::UiPanelRegistration m_InputDebugger;
     std::unique_ptr<KeireEditor::AssetBrowserPanel> m_AssetBrowserPanel;
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
-    std::unique_ptr<KeireEditor::SceneGizmoController> m_SceneGizmos;
     std::unique_ptr<KeireEditor::SceneDocument> m_SceneDocument;
     std::unique_ptr<KeireEditor::InputActionsDocument> m_InputActionsDocument;
+    std::unique_ptr<KeireEditor::ProjectSettingsDocument> m_ProjectSettingsDocument;
     std::unique_ptr<KeireEditor::MaterialDocument> m_MaterialDocument;
     std::unique_ptr<KeireEditor::EditorCommandRouter> m_CommandRouter;
     std::unique_ptr<KeireEditor::SceneViewportPanel> m_SceneViewportPanel;
@@ -206,42 +283,24 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::ScenePlayChangeTracker> m_PlayChangeTracker;
     std::optional<Keire::SceneDefinition> m_PendingPlayEditorBefore;
     std::unique_ptr<KeireEditor::ExternalAssetImportController> m_ExternalAssetImport;
+    std::unique_ptr<KeireEditor::AssetOperationService> m_AssetOperations;
     Keire::UiThemeDefinition m_Theme;
-    Keire::RenderEnvironmentSettings m_RenderEnvironment;
-    bool m_RenderEnvironmentDirty = false;
     Keire::UiThemeId m_PendingTheme;
     Dialog m_Dialog = Dialog::None;
     std::string m_ProfileName;
     std::string m_Error;
     std::string m_Notice;
     std::string m_AssetStatus;
-    std::string m_AssetName;
     Keire::Ref<Keire::AssetDatabase> m_AssetDatabase;
     std::vector<Keire::AssetSourceRecord> m_AssetRecords;
     Keire::AssetId m_SelectedAsset;
-    Keire::AssetId m_EditingAsset;
-    std::future<Keire::AssetImportResult> m_MaterialCatalogFuture;
-    std::stop_source m_MaterialCatalogStopSource;
-    std::uint64_t m_MaterialCatalogRequestedGeneration = 0;
-    std::uint64_t m_MaterialCatalogRunningGeneration = 0;
-    std::uint64_t m_MaterialCatalogAppliedGeneration = 0;
-    Keire::AssetId m_MaterialCatalogPendingAsset;
-    Keire::AssetId m_MaterialCatalogRunningAsset;
-    double m_MaterialCatalogDelaySeconds = 0.0;
-    Keire::AssetId& m_InputAsset;
-    Keire::AssetId& m_SelectedInputMap;
-    Keire::AssetId& m_SelectedInputScheme;
-    Keire::AssetId& m_SelectedInputAction;
-    Keire::AssetId& m_SelectedInputBinding;
-    Keire::InputActionAssetDefinition& m_InputDocument;
-    Keire::Ref<Keire::UndoContext>& m_InputUndoContext;
+    std::filesystem::path m_ExecutablePath;
+    Keire::AssetId m_PendingStartupScene;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
-    Keire::Ref<Keire::InteractiveRebindOperation> m_Rebind;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;
     Keire::InputUserId m_EditorInputUser;
-    std::string m_InputSearch;
-    std::string m_InputMessage;
+    std::string m_InputDebuggerMessage;
     struct InputHistoryEntry
     {
         Keire::AssetId Action;
@@ -255,56 +314,19 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         std::uint32_t Repetitions = 1;
     };
     std::deque<InputHistoryEntry> m_InputHistory;
-    struct ConsoleMessage
-    {
-        std::string Category;
-        std::string Message;
-        Keire::UiColor Color;
-        std::uint64_t Frame = 0;
-    };
-    std::deque<ConsoleMessage> m_ConsoleMessages;
-    std::vector<ConsoleMessage> m_PausedConsoleSnapshot;
-    std::string m_ConsoleSearch;
-    Keire::Ref<Keire::Scene>& m_EditingScene;
-    Keire::Ref<Keire::SceneRuntimeSession>& m_PlaySession;
-    Keire::Ref<Keire::RenderView> m_SceneRenderView;
     Keire::Ref<Keire::RenderView> m_GameRenderView;
-    Keire::UiItemRect m_SceneViewportRect;
-    Keire::RenderCamera m_LastSceneCamera;
-    Keire::Ref<Keire::SceneLoadOperation>& m_SceneLoad;
-    Keire::Ref<Keire::SaveFileDialogOperation>& m_SaveSceneDialog;
-    Keire::AssetId& m_SceneAsset;
-    Keire::AssetId& m_SelectedSceneObject;
-    std::vector<Keire::AssetId> m_BoxSelectionBase;
-    Keire::UiPosition m_BoxSelectionStart;
-    Keire::Ref<Keire::UndoContext>& m_SceneUndoContext;
-    Keire::Ref<Keire::UndoContext> m_PlayUndoContext;
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
-    std::filesystem::path& m_SceneSource;
-    std::filesystem::path& m_SceneRecovery;
-    std::string& m_SceneStatus;
-    std::unique_ptr<KeireEditor::SceneCameraController> m_EditorCamera;
     PendingSceneAction m_PendingSceneAction = PendingSceneAction::None;
     PendingPlayTransition m_PendingPlayTransition = PendingPlayTransition::None;
     Keire::AssetId m_PendingSceneAsset;
     Keire::UiColor m_NoticeColor;
     std::uint32_t m_FrameCount = 0;
-    std::uint64_t m_ContinuousEditSerial = 0;
-    std::unordered_map<std::string, bool> m_ComponentExpansion;
     double m_AssetPollSeconds = 0.0;
-    double& m_SceneRecoverySeconds;
     bool m_ThemeDirty = false;
-    bool& m_InputDirty;
-    bool m_InputLiveMonitor = false;
     bool m_InputTesting = false;
     bool m_InputForwardToConsole = false;
     bool m_InputRecordReleases = false;
-    bool m_ConsolePaused = false;
-    bool& m_SceneRecoveryAvailable;
-    bool m_UniformScale = false;
-    bool m_BoxSelecting = false;
-    bool m_BoxSelectionAdditive = false;
     bool m_PlayFaultReported = false;
     Keire::ScenePlayState m_PlayResumeState = Keire::ScenePlayState::Stopped;
     std::unordered_set<Keire::AssetId> m_PlayEditorTouchedEntities;

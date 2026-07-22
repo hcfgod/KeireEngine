@@ -1,12 +1,60 @@
 #pragma once
 
+#include <chrono>
 #include <filesystem>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Keire::Detail
 {
+    class Utf8CommandLine final
+    {
+      public:
+        Utf8CommandLine(int count, char* const* values);
+
+        Utf8CommandLine(const Utf8CommandLine&) = delete;
+        Utf8CommandLine& operator=(const Utf8CommandLine&) = delete;
+        Utf8CommandLine(Utf8CommandLine&&) = delete;
+        Utf8CommandLine& operator=(Utf8CommandLine&&) = delete;
+
+        [[nodiscard]] int Count() const noexcept { return static_cast<int>(m_Arguments.size()); }
+        [[nodiscard]] char* const* Values() noexcept { return m_Pointers.data(); }
+
+      private:
+        std::vector<std::string> m_Arguments;
+        std::vector<char*> m_Pointers;
+    };
+
+    class ChildProcess final
+    {
+      public:
+        class Impl;
+
+        ChildProcess(const ChildProcess&) = delete;
+        ChildProcess& operator=(const ChildProcess&) = delete;
+        ChildProcess(ChildProcess&&) noexcept;
+        ChildProcess& operator=(ChildProcess&&) noexcept;
+        ~ChildProcess();
+
+        [[nodiscard]] static ChildProcess Start(const std::filesystem::path& executable,
+                                                std::span<const std::string> arguments,
+                                                const std::filesystem::path& workingDirectory);
+        [[nodiscard]] bool Poll();
+        [[nodiscard]] bool Running() const noexcept;
+        [[nodiscard]] std::optional<int> ExitCode() const noexcept;
+        [[nodiscard]] std::string TakeOutput();
+        [[nodiscard]] bool WaitFor(std::chrono::milliseconds timeout);
+        void Terminate() noexcept;
+
+      private:
+        explicit ChildProcess(std::unique_ptr<Impl> implementation) noexcept;
+        std::unique_ptr<Impl> m_Impl;
+    };
+
     struct ProcessResult
     {
         int ExitCode = -1;
@@ -22,6 +70,8 @@ namespace Keire::Detail
                                              std::span<const std::string> arguments,
                                              const std::filesystem::path& workingDirectory,
                                              std::string& diagnostic) noexcept;
+    [[nodiscard]] std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,
+                                                                   std::string_view companionTarget);
     [[nodiscard]] bool RevealInFileManager(const std::filesystem::path& path, std::string& diagnostic) noexcept;
 } // namespace Keire::Detail
 #include <chrono>

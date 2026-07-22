@@ -117,7 +117,9 @@ fixed at their ownership or synchronization boundary; do not suppress first-part
 ## Smoke Tests
 
 The window smoke creates the client, pumps a bounded loop, and exits without UI. Platform packaging invokes it to
-validate runtime startup without requiring a graphics session.
+validate runtime startup without requiring a graphics session. On Windows, managed executables enter through the
+wide-character CRT boundary and convert arguments to UTF-8 before engine parsing; run smoke validation from the actual
+checkout path so non-ASCII repository and project paths remain covered.
 
 The rendered UI smoke creates the SDL_GPU device, initializes UI backends, submits several editor frames, and performs
 a clean shutdown:
@@ -147,13 +149,19 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset cl
 
 ```powershell
 ./Scripts/Tests/test-windows.ps1
+./Scripts/Tests/test-windows.ps1 -Suite Fast
+./Scripts/Tests/test-windows.ps1 -Suite Integration
 ```
 
 ```sh
 bash Scripts/Tests/test-unix.sh
+bash Scripts/Tests/test-unix.sh --suite fast
+bash Scripts/Tests/test-unix.sh --suite integration
 ```
 
-The harnesses exercise argument validation, launcher exit propagation, dependency mappings, generated identity,
+The umbrella command runs both suites. Fast checks batch repository scans through `rg` and print elapsed time;
+integration keeps the Unicode, rename, rollback, contamination, and launcher fixtures isolated and reports its own
+timing. The harnesses exercise argument validation, launcher exit propagation, dependency mappings, generated identity,
 package-stage requirements, public dependency isolation, and safe cleanup behavior without performing a full release
 build. Editor behavior is asserted by compiled controller/document tests rather than source-string matching.
 
@@ -165,6 +173,11 @@ Normal Debug and Release test commands also build `KeireRenderTests`. Windows at
 Vulkan, and macOS attempts Metal. An unavailable local driver is reported as a skip; set `KEIRE_REQUIRE_GPU_TESTS=all`
 or a comma-separated backend list to turn a missing configured backend into a failure. Pixel tests use central image
 regions and tolerant color/behavior deltas rather than exact screenshots.
+
+The required self-hosted GPU workflow runs Windows D3D12/Vulkan and Linux Vulkan/macOS Metal in Debug and Release.
+Release Windows requires 25 consecutive D3D12 runs, five D3D12 validation-layer runs, and five Vulkan runs. Release
+lanes also create a clean package and run its runtime and SDK-consumer validation; failures upload render diagnostics,
+readbacks, crash dumps, and asset-worker protocol/journal artifacts.
 
 ## Coverage
 
@@ -196,7 +209,8 @@ bash Scripts/project.sh package --generator ninja --configuration Release --tool
 
 Packaging performs tests and a runtime smoke before staging the SDK. It then validates:
 
-- KeireClient plus the KeireCore, private KeireImGui/KeireZstd static libraries, and host shader compiler;
+- KeireClient plus the private KeireAssetWorker, KeireCore, private KeireImGui/KeireZstd static libraries, and host
+  shader compiler;
 - every supported public `Keire/` header;
 - the required SDL static SDK inputs and private-backend license notices;
 - complete third-party license attribution, including Dear ImGui and shader compiler dependencies;
@@ -217,6 +231,11 @@ outside the SDK.
 
 Archives and symbol packages are written under `Artifacts/` with SHA-256 files. They are generated outputs and must not
 be committed.
+
+Release and Dist packaging reject tracked or untracked worktree changes before building. A developer may explicitly
+pass `-AllowDirty` on Windows or `--allow-dirty` on Unix for a local diagnostic package; its manifest records both
+`dirty: true` and `developmentArtifact: true`. CI rejects the override, and publication packages require both flags to
+be false.
 
 ## Final Handoff
 

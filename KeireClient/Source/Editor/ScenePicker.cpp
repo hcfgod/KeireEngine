@@ -89,7 +89,78 @@ namespace KeireEditor
                     return *resolved;
             return defaultMeshBounds;
         }
+
+        void IncludePoint(SceneEntityBounds& bounds, const Keire::Vector3 point) noexcept
+        {
+            if (!bounds.Valid)
+            {
+                bounds.Minimum = point;
+                bounds.Maximum = point;
+                bounds.Valid = true;
+                return;
+            }
+            bounds.Minimum.X = std::min(bounds.Minimum.X, point.X);
+            bounds.Minimum.Y = std::min(bounds.Minimum.Y, point.Y);
+            bounds.Minimum.Z = std::min(bounds.Minimum.Z, point.Z);
+            bounds.Maximum.X = std::max(bounds.Maximum.X, point.X);
+            bounds.Maximum.Y = std::max(bounds.Maximum.Y, point.Y);
+            bounds.Maximum.Z = std::max(bounds.Maximum.Z, point.Z);
+        }
+
+        void IncludeEntity(SceneEntityBounds& bounds, const Keire::Entity& entity,
+                           const MeshBoundsResolver& resolveMeshBounds)
+        {
+            if (!entity || !entity.ActiveInHierarchy())
+                return;
+            if (const auto transform = entity.GetComponent<Keire::TransformComponent>())
+            {
+                const auto local = BoundsForEntity(entity, resolveMeshBounds);
+                const auto world = transform->WorldMatrix();
+                for (int corner = 0; corner < 8; ++corner)
+                {
+                    const Keire::Vector3 point{corner & 1 ? local.Maximum.X : local.Minimum.X,
+                                               corner & 2 ? local.Maximum.Y : local.Minimum.Y,
+                                               corner & 4 ? local.Maximum.Z : local.Minimum.Z};
+                    IncludePoint(bounds, Keire::Math::TransformPoint(world, point));
+                }
+            }
+            for (const auto child : entity.Children())
+                IncludeEntity(bounds, child, resolveMeshBounds);
+        }
     } // namespace
+
+    Keire::Vector3 SceneEntityBounds::Center() const noexcept
+    {
+        return {(Minimum.X + Maximum.X) * 0.5F, (Minimum.Y + Maximum.Y) * 0.5F, (Minimum.Z + Maximum.Z) * 0.5F};
+    }
+
+    float SceneEntityBounds::Radius() const noexcept
+    {
+        if (!Valid)
+            return 0.0F;
+        const auto center = Center();
+        const float x = Maximum.X - center.X;
+        const float y = Maximum.Y - center.Y;
+        const float z = Maximum.Z - center.Z;
+        return std::max(std::sqrt(x * x + y * y + z * z), 0.25F);
+    }
+
+    SceneEntityBounds CalculateSceneEntityBounds(const Keire::Entity& entity,
+                                                 const MeshBoundsResolver& resolveMeshBounds)
+    {
+        SceneEntityBounds bounds;
+        IncludeEntity(bounds, entity, resolveMeshBounds);
+        return bounds;
+    }
+
+    SceneEntityBounds CalculateSceneEntityBounds(const std::span<const Keire::Entity> entities,
+                                                 const MeshBoundsResolver& resolveMeshBounds)
+    {
+        SceneEntityBounds bounds;
+        for (const auto& entity : entities)
+            IncludeEntity(bounds, entity, resolveMeshBounds);
+        return bounds;
+    }
 
     Keire::EntityId PickSceneEntity(const Keire::Ref<Keire::Scene>& scene, const Keire::UiItemRect viewport,
                                     const Keire::UiPosition pointer, const Keire::RenderCamera& camera,

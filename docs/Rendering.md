@@ -1,5 +1,10 @@
 # Rendering
 
+`RenderSystem.cpp` is the stable PImpl facade. Private compiled implementation units separate backend data types,
+device/frame and fence lifecycle, surface/pipeline management, renderer-owned asset caches, and scene recording behind
+`RenderBackendInternal.h`. The split does not change resource ownership: replacement resources remain transactional,
+last-good bindings survive failed reloads, and retired GPU objects remain fence-delayed.
+
 ## Ownership
 
 `Application` owns one `RenderSystem` after Windowing and before UI. In rendered mode the system owns the SDL_GPU
@@ -30,7 +35,7 @@ from the edit scene, or the runtime clone while playing. The active authored Cam
 Scene and Game, so changing Camera clear color gives an immediate, consistent preview without replacing the Scene
 viewpoint. Its controls are:
 
-- `F`: focus the selected entity; double-`F` locks the view to it.
+- `F`: frame the selected entity's full imported bounds with visible padding; double-`F` locks the view to it.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.
 - Alt+left drag: orbit.
 - Middle drag: camera-local pan.

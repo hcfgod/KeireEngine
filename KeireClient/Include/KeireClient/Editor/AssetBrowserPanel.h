@@ -2,20 +2,52 @@
 
 #include "Keire/Core.h"
 
+#include "KeireInternal/Assets/AssetWorkerProtocol.h"
+
 #include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
-
-class EditorWorkspaceLayer;
 
 namespace KeireEditor
 {
+    class IAssetBrowserController
+    {
+      public:
+        virtual ~IAssetBrowserController() = default;
+        [[nodiscard]] virtual const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept = 0;
+        [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept = 0;
+        [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> AssetBrowserAssets() const noexcept = 0;
+        [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> AssetBrowserRecords() const noexcept = 0;
+        [[nodiscard]] virtual std::string_view AssetBrowserStatus() const noexcept = 0;
+        [[nodiscard]] virtual Keire::AssetId AssetBrowserSceneAsset() const noexcept = 0;
+        [[nodiscard]] virtual bool AssetBrowserSceneDirty() const noexcept = 0;
+        [[nodiscard]] virtual bool AssetBrowserImportPending() const noexcept = 0;
+        virtual void RefreshAssetBrowserRecords() = 0;
+        virtual void SetAssetBrowserSelected(Keire::AssetId asset) noexcept = 0;
+        virtual void ClearAssetBrowserSceneSelection() noexcept = 0;
+        virtual void SetAssetBrowserStatus(std::string status) noexcept = 0;
+        virtual void ReportAssetBrowserError(std::string message) noexcept = 0;
+        virtual void ImportAssetBrowserAssets() = 0;
+        virtual void RequestAssetBrowserCreateScene() = 0;
+        virtual bool CreateAssetBrowserMaterial(std::string_view name) = 0;
+        virtual void CreateAssetBrowserShader() = 0;
+        virtual void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
+                                                    std::string_view baseName) = 0;
+        virtual void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation,
+                                        Keire::Detail::AssetWorkerMutation reverse, std::string name,
+                                        bool revealResult = false) = 0;
+        virtual void OpenAssetBrowserInputActions(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserScene(Keire::AssetId asset) = 0;
+        virtual void CopyAssetBrowserText(std::string_view value) = 0;
+    };
+
     class AssetBrowserPanel final
     {
       public:
-        AssetBrowserPanel();
+        explicit AssetBrowserPanel(IAssetBrowserController& controller);
         ~AssetBrowserPanel();
 
         AssetBrowserPanel(const AssetBrowserPanel&) = delete;
@@ -29,11 +61,11 @@ namespace KeireEditor
         [[nodiscard]] std::filesystem::path ResolveExternalDropFolder(Keire::UiPosition position) const;
         [[nodiscard]] static std::vector<Keire::AssetId> DecodeDragPayload(std::span<const std::byte> bytes);
         void InvalidateThumbnail(Keire::AssetId asset);
-        void RevealAsset(Keire::AssetId asset, EditorWorkspaceLayer& editor);
+        void Attach(Keire::UiWorkspace& workspace);
+        [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept;
+        void RevealAsset(Keire::AssetId asset);
         void RequestCreateMaterial();
-        void RecordCreatedAsset(const Keire::Ref<Keire::AssetDatabase>& database, Keire::AssetId asset,
-                                std::string name);
-        void Draw(Keire::UiFrame& ui, EditorWorkspaceLayer& editor);
+        void Draw(Keire::UiFrame& ui);
         void Close() noexcept;
 
       private:

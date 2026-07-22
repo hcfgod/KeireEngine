@@ -8,6 +8,14 @@
 #include <system_error>
 #include <vector>
 
+TEST_CASE("filesystem UTF-8 conversion preserves non-ASCII project paths")
+{
+    const std::string encoded = "KéireEngine/Assets/Créature.png";
+    const auto path = Keire::Detail::PathFromUtf8(encoded);
+    CHECK(Keire::Detail::PathToUtf8(path) == encoded);
+    CHECK(path.filename() == Keire::Detail::PathFromUtf8("Créature.png"));
+}
+
 TEST_CASE("filesystem rename retries only transient failures with bounded backoff")
 {
     std::size_t attempts = 0;
@@ -43,8 +51,8 @@ TEST_CASE("filesystem rename fails nontransient errors immediately and reports r
     CHECK(delays == 0);
     CHECK(error == std::errc::no_such_file_or_directory);
 
-    const auto source = std::filesystem::absolute("missing-source").lexically_normal().string();
-    const auto destination = std::filesystem::absolute("destination").lexically_normal().string();
+    const auto source = Keire::Detail::PathToUtf8(std::filesystem::absolute("missing-source").lexically_normal());
+    const auto destination = Keire::Detail::PathToUtf8(std::filesystem::absolute("destination").lexically_normal());
     try
     {
         Keire::Detail::RenamePathWithRetry("missing-source", "destination", operation, delay);

@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <span>
 
 namespace KeireEditor
 {
@@ -20,4 +21,8 @@ namespace KeireEditor
     [[nodiscard]] bool SaveEditorWindowPlacement(const std::filesystem::path& path,
                                                  const EditorWindowPlacement& placement) noexcept;
     void PrepareEditorWindow(const EditorWindowPlacement& placement, Keire::WindowSpecification& specification);
+    [[nodiscard]] EditorWindowPlacement
+    CorrectEditorWindowPlacement(const EditorWindowPlacement& placement,
+                                 std::span<const Keire::DisplayInformation> displays,
+                                 Keire::LogicalExtent minimumSize = {640, 480});
 } // namespace KeireEditor
