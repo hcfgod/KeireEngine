@@ -1,5 +1,12 @@
 # Architecture
 
+## Persistence boundary
+
+First-party settings, scene/project documents, thumbnails, input overrides, asset metadata/cache objects, catalogs,
+and package manifests use one private atomic-publication service. It creates same-volume temporaries, durably flushes
+data and containing directories where supported, publishes with bounded transient retry, and removes abandoned
+transaction files during recovery. Callers do not implement private rename/write protocols.
+
 ## Ownership
 
 `KeireCore` is a static C++20 library and owns reusable application behavior, including projects, scenes,

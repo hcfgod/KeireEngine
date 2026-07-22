@@ -3,9 +3,12 @@
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
+#include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
+#include "KeireInternal/Rendering/FrameGraphInternal.h"
 
 #include <SDL3/SDL.h>
 
@@ -154,6 +157,9 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* AssetVertices = nullptr;
         SDL_GPUBuffer* Indices = nullptr;
         std::uint32_t IndexCount = 0;
+        std::vector<MeshSubmesh> Submeshes;
+        std::vector<MeshLod> Lods;
+        std::vector<AssetId> DefaultMaterials;
 
         [[nodiscard]] bool Empty() const noexcept { return !Vertices && !AssetVertices && !Indices; }
     };
@@ -185,9 +191,17 @@ namespace Keire::RenderBackend
 
     struct GpuShaderEntry final
     {
+        struct Pipeline final
+        {
+            SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
+            MaterialAlphaMode AlphaMode = MaterialAlphaMode::Opaque;
+            bool DoubleSided = false;
+            SDL_GPUGraphicsPipeline* Handle = nullptr;
+        };
+
         AssetHandle<ShaderAsset> Handle;
         Ref<const ShaderAsset> LastGood;
-        std::vector<std::pair<SDL_GPUSampleCount, SDL_GPUGraphicsPipeline*>> Pipelines;
+        std::vector<Pipeline> Pipelines;
         std::uint64_t LoadedRevision = 0;
         std::uint64_t LastAttemptedRevision = 0;
     };
@@ -198,6 +212,7 @@ namespace Keire::RenderBackend
         std::vector<Vector4> NumericProperties;
         std::vector<SDL_GPUTextureSamplerBinding> Textures;
         std::optional<std::size_t> TintSlot;
+        MaterialSurfaceState Surface;
     };
 
     struct GpuMaterialEntry final
@@ -247,29 +262,72 @@ namespace Keire::RenderBackend
         Matrix4 NormalMatrix;
     };
 
+    inline constexpr std::size_t MaximumShaderLocalLights = 128;
+
+    struct AssetLocalLightUniform final
+    {
+        Vector4 PositionRange;
+        Vector4 DirectionOuter;
+        Vector4 ColorIntensity;
+        Vector4 Parameters;
+    };
+
     struct AssetSceneUniforms final
     {
         Vector4 AmbientColorIntensity;
         Vector4 DirectionalColorIntensity;
         Vector4 DirectionalDirectionExposure;
+        Vector4 SurfaceParameters;
+    };
+
+    struct AssetLocalLightUniforms final
+    {
+        Vector4 Counts;
+        std::array<AssetLocalLightUniform, MaximumShaderLocalLights> Lights;
     };
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
-    static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * 12);
+    static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * 16);
+    static_assert(sizeof(AssetLocalLightUniform) == sizeof(float) * 16);
+    static_assert(sizeof(AssetLocalLightUniforms) == sizeof(float) * (4 + MaximumShaderLocalLights * 16));
 
     struct SceneLighting final
     {
         Vector4 Direction{0.0F, -1.0F, 0.0F, 0.0F};
         Color ColorAndIntensity{1.0F, 1.0F, 1.0F, 0.0F};
+        ShadowQuality Shadows = ShadowQuality::Disabled;
+        float ShadowStrength = 1.0F;
+        float ShadowBias = 0.005F;
         bool Enabled = false;
     };
 
     struct SceneDrawItem final
     {
         AssetId Mesh;
-        AssetId Material;
+        std::vector<AssetId> Materials;
         Matrix4 World;
         Color Tint;
+        EntityId Entity;
+        bool CastShadows = true;
+        bool ReceiveShadows = true;
+    };
+
+    enum class SceneLocalLightType : std::uint8_t
+    {
+        Point,
+        Spot
+    };
+
+    struct SceneLocalLight final
+    {
+        EntityId Entity;
+        SceneLocalLightType Type = SceneLocalLightType::Point;
+        Vector3 Position;
+        float Range = 1.0F;
+        Vector3 Direction{0.0F, 0.0F, 1.0F};
+        float OuterConeCosine = -1.0F;
+        Color ColorAndIntensity;
+        float InnerConeCosine = 1.0F;
     };
 
     struct SceneRenderPacket final
@@ -278,6 +336,7 @@ namespace Keire::RenderBackend
         RenderEnvironmentSettings Environment;
         SceneLighting Lighting;
         std::vector<SceneDrawItem> DrawItems;
+        std::vector<SceneLocalLight> LocalLights;
         bool DrawGrid = false;
     };
 
@@ -301,8 +360,52 @@ namespace Keire::RenderBackend
             result.Direction = {direction.X, direction.Y, direction.Z, 1.0F};
             result.ColorAndIntensity = {color.Red * temperature.Red, color.Green * temperature.Green,
                                         color.Blue * temperature.Blue, light->Intensity()};
+            result.Shadows = light->Shadows();
+            result.ShadowStrength = light->ShadowStrength();
+            result.ShadowBias = light->ShadowBias();
             result.Enabled = true;
         }
+        return result;
+    }
+
+    [[nodiscard]] inline std::vector<SceneLocalLight> ResolveLocalLights(const Ref<Scene>& scene)
+    {
+        std::vector<SceneLocalLight> result;
+        result.reserve(std::min<std::size_t>(scene->ObjectCount(), 4096U));
+        const auto addColor = [](const Color color, const float intensity)
+        { return Color{color.Red, color.Green, color.Blue, intensity}; };
+        for (const auto& entity : scene->Query<PointLightComponent>())
+        {
+            const auto light = entity.GetComponent<PointLightComponent>();
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy())
+                continue;
+            result.push_back({entity.Id(),
+                              SceneLocalLightType::Point,
+                              Math::TransformPoint(transform->WorldMatrix(), {}),
+                              light->Range(),
+                              {},
+                              -1.0F,
+                              addColor(light->LightColor(), light->Intensity()),
+                              1.0F});
+        }
+        constexpr float degreesToRadians = 0.01745329251994329577F;
+        for (const auto& entity : scene->Query<SpotLightComponent>())
+        {
+            const auto light = entity.GetComponent<SpotLightComponent>();
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy())
+                continue;
+            result.push_back({entity.Id(), SceneLocalLightType::Spot,
+                              Math::TransformPoint(transform->WorldMatrix(), {}), light->Range(),
+                              Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F})),
+                              std::cos(light->OuterAngleDegrees() * degreesToRadians),
+                              addColor(light->LightColor(), light->Intensity()),
+                              std::cos(light->InnerAngleDegrees() * degreesToRadians)});
+        }
+        std::ranges::sort(result, {}, &SceneLocalLight::Entity);
+        if (result.size() > 4096U)
+            result.resize(4096U);
         return result;
     }
 
@@ -389,7 +492,8 @@ namespace Keire::RenderBackend
         [[nodiscard]] const GpuTextureResources& ResolveTexture(AssetId id);
         [[nodiscard]] const GpuTextureResources& DefaultTexture(ShaderTextureSemantic semantic) const noexcept;
         [[nodiscard]] Ref<const MaterialAsset> ResolveMaterial(AssetId id);
-        [[nodiscard]] GpuShaderEntry* ResolveShader(AssetId id, SDL_GPUSampleCount samples);
+        [[nodiscard]] GpuShaderEntry* ResolveShader(AssetId id, SDL_GPUSampleCount samples,
+                                                    MaterialSurfaceState surface, bool explicitSurface);
         [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
 
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
@@ -414,7 +518,8 @@ namespace Keire::RenderBackend
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex) const;
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,
-                                                                   SDL_GPUSampleCount samples);
+                                                                   SDL_GPUSampleCount samples,
+                                                                   MaterialSurfaceState surface);
 
         RenderSpecification Specification;
         Ref<WindowSystem> Windows;
@@ -451,6 +556,7 @@ namespace Keire::RenderBackend
         std::vector<GpuTextureResources> PendingRetiredTextures;
         std::vector<SDL_GPUGraphicsPipeline*> PendingRetiredPipelines;
         std::deque<InFlightFrame> InFlight;
+        StaticSceneFrameGraph SceneFrameGraph;
         RenderStatistics Statistics;
         std::uint64_t NextSurfaceId = 1;
         bool WindowClaimed = false;

@@ -219,14 +219,7 @@ namespace Keire
                 }
                 else
                 {
-                    const auto temporary = Detail::PathWithSuffix(object, ".tmp");
-                    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-                    if (!stream ||
-                        (!imported.Bytes.empty() && !stream.write(reinterpret_cast<const char*>(imported.Bytes.data()),
-                                                                  static_cast<std::streamsize>(imported.Bytes.size()))))
-                        throw std::runtime_error("Could not write imported asset cache object.");
-                    stream.close();
-                    Detail::AtomicReplace(temporary, object);
+                    Detail::WriteFileAtomically(object, imported.Bytes);
                     ++result.Imported;
                     status.State = AssetImportState::Imported;
                 }

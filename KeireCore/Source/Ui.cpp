@@ -1,5 +1,6 @@
 #include "Keire/Ui.h"
 
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiInternal.h"
 #include "KeireInternal/WindowInternal.h"
@@ -257,38 +258,13 @@ namespace Keire
                 throw UiError("SaveLayout", "layout data exceeds the 1 MiB safety limit: " + path.string());
             }
 
-            if (const auto parent = path.parent_path(); !parent.empty())
-                std::filesystem::create_directories(parent);
-
-            auto temporary = path;
-            temporary += ".tmp";
+            try
             {
-                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-                if (!output || (size > 0 && !output.write(contents, static_cast<std::streamsize>(size))))
-                    throw UiError("SaveLayout", "cannot write " + temporary.string());
+                Detail::WriteTextFileAtomically(path, std::string_view(contents, size));
             }
-
-            std::error_code error;
-            std::filesystem::rename(temporary, path, error);
-            if (error)
+            catch (const std::exception& exception)
             {
-                auto backup = path;
-                backup += ".bak";
-                std::filesystem::remove(backup, error);
-                error.clear();
-                if (std::filesystem::exists(path))
-                    std::filesystem::rename(path, backup, error);
-                if (!error)
-                    std::filesystem::rename(temporary, path, error);
-                if (error)
-                {
-                    std::error_code ignored;
-                    if (std::filesystem::exists(backup) && !std::filesystem::exists(path))
-                        std::filesystem::rename(backup, path, ignored);
-                    std::filesystem::remove(temporary, ignored);
-                    throw UiError("SaveLayout", "cannot replace " + path.string() + ": " + error.message());
-                }
-                std::filesystem::remove(backup, error);
+                throw UiError("SaveLayout", exception.what());
             }
         }
     } // namespace

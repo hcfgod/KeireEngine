@@ -18,6 +18,7 @@ namespace Keire::RenderBackend
     {
         if (!ValidColor(Specification.SwapchainClearColor))
             throw std::invalid_argument("Render swapchain clear color must contain finite values in 0..1.");
+        SceneFrameGraph = BuildStaticSceneFrameGraph();
         if (Specification.MaximumFramesInFlight < 1 || Specification.MaximumFramesInFlight > 8)
             throw std::invalid_argument("MaximumFramesInFlight must be in the range 1..8.");
         if (Specification.Mode == RenderMode::Automatic)
@@ -369,6 +370,11 @@ namespace Keire::RenderBackend
             result.AssetVertices = UploadBuffer(std::as_bytes(mesh.Vertices()), SDL_GPU_BUFFERUSAGE_VERTEX);
             result.Indices = UploadBuffer(std::as_bytes(mesh.Indices()), SDL_GPU_BUFFERUSAGE_INDEX);
             result.IndexCount = static_cast<std::uint32_t>(mesh.Indices().size());
+            result.Submeshes.assign(mesh.Submeshes().begin(), mesh.Submeshes().end());
+            result.Lods.assign(mesh.Lods().begin(), mesh.Lods().end());
+            result.DefaultMaterials.reserve(mesh.MaterialSlots().size());
+            for (const auto& slot : mesh.MaterialSlots())
+                result.DefaultMaterials.push_back(slot.DefaultMaterial);
             return result;
         }
         catch (...)

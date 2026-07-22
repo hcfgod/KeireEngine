@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ThumbnailService.h"
 
+#include "KeireInternal/FileSystem.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -360,23 +362,13 @@ namespace KeireEditor
 
         void WriteCache(const std::filesystem::path& path, const std::span<const std::byte> pixels) const
         {
-            auto temporary = path;
-            temporary += ".tmp";
+            try
             {
-                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-                if (!output.write(reinterpret_cast<const char*>(pixels.data()),
-                                  static_cast<std::streamsize>(pixels.size())))
-                    return;
+                Keire::Detail::WriteFileAtomically(path, pixels);
             }
-            std::error_code error;
-            std::filesystem::rename(temporary, path, error);
-            if (error)
+            catch (const std::exception&)
             {
-                std::filesystem::remove(path, error);
-                error.clear();
-                std::filesystem::rename(temporary, path, error);
-                if (error)
-                    std::filesystem::remove(temporary, error);
+                // Thumbnail persistence is an optional cache; generation still succeeds in memory.
             }
         }
 

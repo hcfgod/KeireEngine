@@ -36,7 +36,7 @@ namespace KeireEditor
             std::vector<Keire::AssetId> duplicates;
             for (const auto entity : selection)
             {
-                const auto duplicate = scene->DuplicateEntity(Keire::EntityId(entity)).Id().Value();
+                const auto duplicate = document.DuplicateEntity(Keire::EntityId(entity)).Value();
                 duplicates.push_back(duplicate);
                 m_Controller.MarkHierarchyEntity(duplicate);
             }
@@ -67,24 +67,41 @@ namespace KeireEditor
                 if (ui.MenuItem("Create Child"))
                 {
                     m_Controller.RecordHierarchyUndo();
-                    auto parent = scene->FindEntity(Keire::EntityId(object.Id));
-                    document.Select(scene->CreateEntity("GameObject", parent).Id().Value());
+                    document.Select(document.CreateEntity("GameObject", Keire::EntityId(object.Id)).Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
                 if (ui.MenuItem("Directional Light Child"))
                 {
                     m_Controller.RecordHierarchyUndo();
-                    auto parent = scene->FindEntity(Keire::EntityId(object.Id));
-                    auto created = scene->CreateEntity("Directional Light", parent);
-                    (void)created.AddComponent<Keire::DirectionalLightComponent>();
-                    document.Select(created.Id().Value());
+                    document.Select(document
+                                        .CreateEntity("Directional Light", Keire::EntityId(object.Id),
+                                                      Keire::DirectionalLightComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("Point Light Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(document
+                                        .CreateEntity("Point Light", Keire::EntityId(object.Id),
+                                                      Keire::PointLightComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("Spot Light Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(document
+                                        .CreateEntity("Spot Light", Keire::EntityId(object.Id),
+                                                      Keire::SpotLightComponent::StaticType())
+                                        .Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
                 ui.Separator();
                 if (ui.MenuItem("Duplicate"))
                 {
                     m_Controller.RecordHierarchyUndo();
-                    document.Select(scene->DuplicateEntity(Keire::EntityId(object.Id)).Id().Value());
+                    document.Select(document.DuplicateEntity(Keire::EntityId(object.Id)).Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
                 if (ui.MenuItem("Rename"))
@@ -95,7 +112,7 @@ namespace KeireEditor
                 if (ui.MenuItem("Delete"))
                 {
                     m_Controller.RecordHierarchyUndo();
-                    (void)scene->DestroyEntity(Keire::EntityId(object.Id));
+                    document.DeleteEntity(Keire::EntityId(object.Id));
                     document.ClearSelection();
                 }
             }
@@ -115,8 +132,7 @@ namespace KeireEditor
                     if (child != object.Id)
                     {
                         m_Controller.RecordHierarchyUndo();
-                        auto childEntity = scene->FindEntity(Keire::EntityId(child));
-                        childEntity.SetParent(scene->FindEntity(Keire::EntityId(object.Id)), true);
+                        document.ReparentEntity(Keire::EntityId(child), Keire::EntityId(object.Id), true);
                         m_Controller.MarkHierarchyEntity(child);
                     }
                 }
@@ -134,15 +150,29 @@ namespace KeireEditor
             if (ui.MenuItem("Create Empty"))
             {
                 m_Controller.RecordHierarchyUndo();
-                document.Select(scene->CreateEntity().Id().Value());
+                document.Select(document.CreateEntity().Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
             }
             if (ui.MenuItem("Directional Light"))
             {
                 m_Controller.RecordHierarchyUndo();
-                auto created = scene->CreateEntity("Directional Light");
-                (void)created.AddComponent<Keire::DirectionalLightComponent>();
-                document.Select(created.Id().Value());
+                document.Select(
+                    document.CreateEntity("Directional Light", {}, Keire::DirectionalLightComponent::StaticType())
+                        .Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("Point Light"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(
+                    document.CreateEntity("Point Light", {}, Keire::PointLightComponent::StaticType()).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("Spot Light"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(
+                    document.CreateEntity("Spot Light", {}, Keire::SpotLightComponent::StaticType()).Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
             }
         }

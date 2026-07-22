@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 
+#include <array>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -31,6 +32,25 @@ namespace KeireEditor
     bool MaterialInspectorPanel::Draw(IPropertyEditor& editor, MaterialDocument& document) const
     {
         bool changed = false;
+        auto surface = document.Surface();
+        std::int64_t alphaMode = static_cast<std::int64_t>(surface.AlphaMode);
+        constexpr std::array<std::string_view, 3> alphaModes{"Opaque", "Mask", "Blend"};
+        bool surfaceChanged = editor.EditChoice("Surface Mode", alphaMode, alphaModes);
+        if (surfaceChanged)
+            surface.AlphaMode = static_cast<Keire::MaterialAlphaMode>(alphaMode);
+        if (surface.AlphaMode == Keire::MaterialAlphaMode::Mask)
+        {
+            double cutoff = surface.AlphaCutoff;
+            if (editor.EditScalar("Alpha Cutoff", cutoff, 0.01, 0.0, 1.0))
+            {
+                surface.AlphaCutoff = static_cast<float>(cutoff);
+                surfaceChanged = true;
+            }
+        }
+        surfaceChanged |= editor.EditBoolean("Double Sided", surface.DoubleSided);
+        if (surfaceChanged)
+            changed = document.SetSurface(surface) || changed;
+
         for (const auto& property : document.Properties())
         {
             const auto label =

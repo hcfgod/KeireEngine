@@ -329,6 +329,46 @@ TEST_CASE("scene document targets the isolated runtime scene while playing")
     document.Close();
 }
 
+TEST_CASE("scene document commands validate and target the active scene")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000070"),
+                                                Keire::SceneAsset::EmptyDefinition("Document commands"));
+    document.Open(scene);
+    const auto parent = document.CreateEntity("Parent");
+    const auto child = document.CreateEntity("Child", parent, Keire::PointLightComponent::StaticType());
+    document.Select(child.Value());
+    document.RenameEntity(child, "Authored light");
+    document.SetEntityActive(child, false);
+    document.SetTransform(child, {.Position = Keire::Vector3{1.0F, 2.0F, 3.0F}});
+    document.SetComponentProperty(child, Keire::PointLightComponent::StaticType(), "intensity", 12.0);
+
+    auto entity = scene->FindEntity(child);
+    REQUIRE(entity);
+    CHECK(entity.Name() == "Authored light");
+    CHECK_FALSE(entity.ActiveSelf());
+    CHECK(entity.Parent().Id() == parent);
+    CHECK(entity.GetComponent<Keire::TransformComponent>()->LocalPosition() == Keire::Vector3{1.0F, 2.0F, 3.0F});
+    REQUIRE(entity.GetComponent<Keire::PointLightComponent>());
+    CHECK(entity.GetComponent<Keire::PointLightComponent>()->Intensity() == doctest::Approx(12.0F));
+
+    document.BeginPlay();
+    document.RenameEntity(child, "Runtime light");
+    CHECK(document.ActiveScene()->FindEntity(child).Name() == "Runtime light");
+    CHECK(scene->FindEntity(child).Name() == "Authored light");
+    document.DeleteEntity(child);
+    CHECK_FALSE(document.Selection());
+    CHECK_FALSE(document.ActiveScene()->FindEntity(child));
+    CHECK(scene->FindEntity(child));
+    document.EndPlay();
+
+    CHECK_THROWS_AS(document.SetComponentProperty(parent, Keire::PointLightComponent::StaticType(), "intensity", 1.0),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(document.SetComponentProperty(child, Keire::PointLightComponent::StaticType(), "unknown", 1.0),
+                    std::invalid_argument);
+    document.Close();
+}
+
 TEST_CASE("scene document owns atomic save and recovery lifecycle")
 {
     const auto root =

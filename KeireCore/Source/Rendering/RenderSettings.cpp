@@ -30,7 +30,7 @@ namespace Keire
 
         void Validate(const RenderEnvironmentSettings& settings)
         {
-            if (settings.SchemaVersion != 1)
+            if (settings.SchemaVersion != 1 && settings.SchemaVersion != 2)
                 throw std::invalid_argument("Rendering project settings use an unsupported schema version.");
             if (!ValidColor(settings.AmbientColor))
                 throw std::invalid_argument("Ambient color channels must be finite values in 0..1.");
@@ -41,6 +41,19 @@ namespace Keire
             }
             if (!std::isfinite(settings.Exposure) || settings.Exposure < 0.01F || settings.Exposure > 16.0F)
                 throw std::invalid_argument("Rendering exposure must be a finite value in 0.01..16.");
+            if (!std::isfinite(settings.EnvironmentRotationDegrees) ||
+                !std::isfinite(settings.EnvironmentDiffuseIntensity) || settings.EnvironmentDiffuseIntensity < 0.0F ||
+                settings.EnvironmentDiffuseIntensity > 16.0F || !std::isfinite(settings.EnvironmentSpecularIntensity) ||
+                settings.EnvironmentSpecularIntensity < 0.0F || settings.EnvironmentSpecularIntensity > 16.0F)
+                throw std::invalid_argument("Environment rotation/intensities are invalid.");
+            if (!std::isfinite(settings.DirectionalShadowDistance) || settings.DirectionalShadowDistance <= 0.0F ||
+                settings.DirectionalShadowDistance > 100'000.0F || settings.DirectionalShadowCascadeCount < 1U ||
+                settings.DirectionalShadowCascadeCount > 4U || settings.DirectionalShadowResolution < 256U ||
+                settings.DirectionalShadowResolution > 8192U ||
+                (settings.DirectionalShadowResolution & (settings.DirectionalShadowResolution - 1U)) != 0U ||
+                !std::isfinite(settings.DirectionalShadowSplitLambda) || settings.DirectionalShadowSplitLambda < 0.0F ||
+                settings.DirectionalShadowSplitLambda > 1.0F)
+                throw std::invalid_argument("Directional shadow settings are outside supported production limits.");
         }
     } // namespace
 
@@ -60,6 +73,19 @@ namespace Keire
                                ambient.at(3).get<float>()};
         result.AmbientIntensity = document.at("ambientIntensity").get<float>();
         result.Exposure = document.at("exposure").get<float>();
+        if (result.SchemaVersion >= 2)
+        {
+            const auto environment = document.value("environment", std::string{});
+            result.Environment = environment.empty() ? AssetId{} : AssetId::Parse(environment);
+            result.EnvironmentRotationDegrees = document.value("environmentRotationDegrees", 0.0F);
+            result.EnvironmentDiffuseIntensity = document.value("environmentDiffuseIntensity", 1.0F);
+            result.EnvironmentSpecularIntensity = document.value("environmentSpecularIntensity", 1.0F);
+            result.SkyVisible = document.value("skyVisible", true);
+            result.DirectionalShadowDistance = document.value("directionalShadowDistance", 100.0F);
+            result.DirectionalShadowCascadeCount = document.value("directionalShadowCascadeCount", 4U);
+            result.DirectionalShadowResolution = document.value("directionalShadowResolution", 2048U);
+            result.DirectionalShadowSplitLambda = document.value("directionalShadowSplitLambda", 0.65F);
+        }
         Validate(result);
         return result;
     }
@@ -69,12 +95,24 @@ namespace Keire
     {
         Validate(settings);
         std::filesystem::create_directories(SettingsPath(projectRoot).parent_path());
-        const Json document{{"schemaVersion", settings.SchemaVersion},
-                            {"ambientColor",
-                             {settings.AmbientColor.Red, settings.AmbientColor.Green, settings.AmbientColor.Blue,
-                              settings.AmbientColor.Alpha}},
-                            {"ambientIntensity", settings.AmbientIntensity},
-                            {"exposure", settings.Exposure}};
+        Json document{{"schemaVersion", settings.SchemaVersion},
+                      {"ambientColor",
+                       {settings.AmbientColor.Red, settings.AmbientColor.Green, settings.AmbientColor.Blue,
+                        settings.AmbientColor.Alpha}},
+                      {"ambientIntensity", settings.AmbientIntensity},
+                      {"exposure", settings.Exposure}};
+        if (settings.SchemaVersion >= 2)
+        {
+            document["environment"] = settings.Environment ? settings.Environment.ToString() : std::string{};
+            document["environmentRotationDegrees"] = settings.EnvironmentRotationDegrees;
+            document["environmentDiffuseIntensity"] = settings.EnvironmentDiffuseIntensity;
+            document["environmentSpecularIntensity"] = settings.EnvironmentSpecularIntensity;
+            document["skyVisible"] = settings.SkyVisible;
+            document["directionalShadowDistance"] = settings.DirectionalShadowDistance;
+            document["directionalShadowCascadeCount"] = settings.DirectionalShadowCascadeCount;
+            document["directionalShadowResolution"] = settings.DirectionalShadowResolution;
+            document["directionalShadowSplitLambda"] = settings.DirectionalShadowSplitLambda;
+        }
         Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
     }
 } // namespace Keire

@@ -178,6 +178,8 @@ namespace
             camera.Projection =
                 selected->Camera->ProjectionMatrix(static_cast<float>(width) / static_cast<float>(height));
             camera.ClearColor = selected->Camera->ClearColor();
+            camera.NearPlane = selected->Camera->NearPlane();
+            camera.FarPlane = selected->Camera->FarPlane();
             m_View->SetCamera(camera);
             Owner().Renderer()->Submit({m_Scene, m_View, false, m_Rendering});
             if (m_MaximumFrames != 0 && ++m_RenderedFrames >= m_MaximumFrames)

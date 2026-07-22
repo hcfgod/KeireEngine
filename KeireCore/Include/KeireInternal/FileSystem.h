@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -32,6 +33,8 @@ namespace Keire::Detail
     [[nodiscard]] std::filesystem::path PathFromUtf8(std::string_view value);
     [[nodiscard]] std::filesystem::path PathWithSuffix(const std::filesystem::path& path, std::string_view suffix);
     [[nodiscard]] std::string ReadTextFile(const std::filesystem::path& path, std::size_t maximumBytes);
+    void PublishFileAtomically(const std::filesystem::path& temporary, const std::filesystem::path& destination);
+    void WriteFileAtomically(const std::filesystem::path& path, std::span<const std::byte> contents);
     void WriteTextFileAtomically(const std::filesystem::path& path, std::string_view contents);
     using RenamePathOperation =
         std::function<void(const std::filesystem::path&, const std::filesystem::path&, std::error_code&)>;

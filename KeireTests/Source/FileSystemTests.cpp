@@ -2,8 +2,13 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
+#include <fstream>
+#include <ranges>
+#include <span>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -82,4 +87,28 @@ TEST_CASE("filesystem rename bounds persistent transient failures")
     CHECK(delays == std::vector{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
                                 std::chrono::milliseconds(40), std::chrono::milliseconds(80),
                                 std::chrono::milliseconds(160)});
+}
+
+TEST_CASE("atomic file publication replaces complete text and binary contents")
+{
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto directory = std::filesystem::temp_directory_path() / ("KeireAtomicPublication-" + suffix);
+    std::filesystem::create_directories(directory);
+    const auto textPath = directory / "settings.json";
+    const auto binaryPath = directory / "thumbnail.rgba";
+
+    Keire::Detail::WriteTextFileAtomically(textPath, "old");
+    Keire::Detail::WriteTextFileAtomically(textPath, "replacement");
+    CHECK(Keire::Detail::ReadTextFile(textPath, 1024) == "replacement");
+
+    const std::array<std::byte, 3> bytes{std::byte{0x01}, std::byte{0x7f}, std::byte{0xff}};
+    Keire::Detail::WriteFileAtomically(binaryPath, bytes);
+    std::ifstream input(binaryPath, std::ios::binary);
+    std::array<std::byte, 3> actual{};
+    input.read(reinterpret_cast<char*>(actual.data()), static_cast<std::streamsize>(actual.size()));
+    REQUIRE(input);
+    CHECK(actual == bytes);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
 }

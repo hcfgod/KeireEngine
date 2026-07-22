@@ -2,6 +2,8 @@
 
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 
+#include <bit>
+#include <cstdint>
 #include <exception>
 
 namespace KeireEditor
@@ -33,6 +35,34 @@ namespace KeireEditor
         changed |= ui.SliderFloat("Ambient Intensity", settings.AmbientIntensity, 0.0F, 8.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.SliderFloat("Exposure", settings.Exposure, 0.1F, 4.0F);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.SliderFloat("Environment Rotation", settings.EnvironmentRotationDegrees, -180.0F, 180.0F);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.SliderFloat("IBL Diffuse", settings.EnvironmentDiffuseIntensity, 0.0F, 8.0F);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.SliderFloat("IBL Specular", settings.EnvironmentSpecularIntensity, 0.0F, 8.0F);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.Checkbox("Show Environment Sky", settings.SkyVisible);
+        commit |= changed;
+        ui.Spacing();
+        ui.Text("Directional Shadows");
+        changed |= ui.SliderFloat("Shadow Distance", settings.DirectionalShadowDistance, 1.0F, 1000.0F);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        auto cascades = static_cast<std::int32_t>(settings.DirectionalShadowCascadeCount);
+        if (ui.SliderInt("Cascade Count", cascades, 1, 4))
+        {
+            settings.DirectionalShadowCascadeCount = static_cast<std::uint32_t>(cascades);
+            changed = true;
+        }
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        auto resolutionPower = static_cast<std::int32_t>(std::bit_width(settings.DirectionalShadowResolution) - 1U);
+        if (ui.SliderInt("Resolution (2^n)", resolutionPower, 8, 13))
+        {
+            settings.DirectionalShadowResolution = 1U << resolutionPower;
+            changed = true;
+        }
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.SliderFloat("Cascade Split Lambda", settings.DirectionalShadowSplitLambda, 0.0F, 1.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         if (ambient != Keire::UiColor{settings.AmbientColor.Red, settings.AmbientColor.Green,
                                       settings.AmbientColor.Blue, settings.AmbientColor.Alpha})

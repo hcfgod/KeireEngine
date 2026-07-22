@@ -1,5 +1,16 @@
 # Asset Database And Cook Pipeline
 
+## Static mesh version 3
+
+`.keiremesh` version 3 adds ordered LODs, submesh index ranges and bounds, and named material slots with optional
+default material identities. Versions 1 and 2 remain readable as their implied single LOD/submesh/slot. Importers keep
+submeshes deterministic, preserve Assimp slot indices and names, and group names ending in `_LOD0`, `_LOD1`, and so on
+into contiguous LOD ranges with monotonically decreasing default thresholds.
+
+Asset cache objects, metadata, catalogs, and cooked build profiles publish through the shared atomic-file boundary.
+It uses a same-volume temporary, durable flushes where supported, retains the previous target on failure, and retries
+only transient sharing failures.
+
 Importer registrations may declare UI-independent Boolean, Integer, Scalar, and Choice options. Normalized values are
 stored in `.keiremeta`, participate in its digest, and arrive in `AssetImportContext`; editor UI is generated from the
 descriptors without exposing ImGui or JSON. Existing `textureImportSettings` metadata remains readable.

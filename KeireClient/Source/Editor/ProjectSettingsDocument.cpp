@@ -13,7 +13,10 @@ namespace KeireEditor
             const auto finite = [](const float value) { return std::isfinite(value); };
             if (!finite(settings.AmbientColor.Red) || !finite(settings.AmbientColor.Green) ||
                 !finite(settings.AmbientColor.Blue) || !finite(settings.AmbientColor.Alpha) ||
-                !finite(settings.AmbientIntensity) || !finite(settings.Exposure))
+                !finite(settings.AmbientIntensity) || !finite(settings.Exposure) ||
+                !finite(settings.EnvironmentRotationDegrees) || !finite(settings.EnvironmentDiffuseIntensity) ||
+                !finite(settings.EnvironmentSpecularIntensity) || !finite(settings.DirectionalShadowDistance) ||
+                !finite(settings.DirectionalShadowSplitLambda))
                 throw std::invalid_argument("Project rendering settings must be finite.");
             const auto validColor = [](const float value) { return value >= 0.0F && value <= 1.0F; };
             if (!validColor(settings.AmbientColor.Red) || !validColor(settings.AmbientColor.Green) ||
@@ -23,6 +26,15 @@ namespace KeireEditor
                 throw std::invalid_argument("Ambient intensity must be between zero and sixteen.");
             if (settings.Exposure < 0.01F || settings.Exposure > 16.0F)
                 throw std::invalid_argument("Exposure must be between 0.01 and 16.0.");
+            if (settings.EnvironmentDiffuseIntensity < 0.0F || settings.EnvironmentDiffuseIntensity > 16.0F ||
+                settings.EnvironmentSpecularIntensity < 0.0F || settings.EnvironmentSpecularIntensity > 16.0F)
+                throw std::invalid_argument("Environment intensities must be between zero and sixteen.");
+            if (settings.DirectionalShadowDistance <= 0.0F || settings.DirectionalShadowDistance > 100'000.0F ||
+                settings.DirectionalShadowCascadeCount < 1U || settings.DirectionalShadowCascadeCount > 4U ||
+                settings.DirectionalShadowResolution < 256U || settings.DirectionalShadowResolution > 8192U ||
+                (settings.DirectionalShadowResolution & (settings.DirectionalShadowResolution - 1U)) != 0U ||
+                settings.DirectionalShadowSplitLambda < 0.0F || settings.DirectionalShadowSplitLambda > 1.0F)
+                throw std::invalid_argument("Directional shadow settings are outside supported production limits.");
         }
     } // namespace
 

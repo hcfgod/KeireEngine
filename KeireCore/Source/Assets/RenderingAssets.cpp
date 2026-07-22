@@ -152,7 +152,11 @@ namespace Keire
 
         void ValidateMaterialDefinition(const MaterialAssetDefinition& definition)
         {
-            if (definition.SchemaVersion != 1 || definition.Properties.size() > MaximumShaderProperties)
+            if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) ||
+                definition.Properties.size() > MaximumShaderProperties ||
+                definition.Surface.AlphaMode > MaterialAlphaMode::Blend ||
+                !std::isfinite(definition.Surface.AlphaCutoff) || definition.Surface.AlphaCutoff < 0.0F ||
+                definition.Surface.AlphaCutoff > 1.0F)
                 throw std::invalid_argument("Material definition is invalid or exceeds its property limit.");
             for (const auto& [name, value] : definition.Properties)
             {
@@ -186,10 +190,23 @@ namespace Keire
         [[nodiscard]] MaterialAssetDefinition ParseMaterialSource(const Json& source)
         {
             MaterialAssetDefinition definition;
-            if (!source.is_object() || source.value("schemaVersion", 0U) != 1)
+            if (!source.is_object())
+                throw std::invalid_argument("Material manifest has an unsupported schema.");
+            definition.SchemaVersion = source.value("schemaVersion", 0U);
+            if (definition.SchemaVersion != 1 && definition.SchemaVersion != 2)
                 throw std::invalid_argument("Material manifest has an unsupported schema.");
             definition.Shader =
                 source.at("shader").is_null() ? AssetId{} : AssetId::Parse(source.at("shader").get<std::string>());
+            if (definition.SchemaVersion >= 2)
+            {
+                const auto& surface = source.value("surface", Json::object());
+                if (!surface.is_object())
+                    throw std::invalid_argument("Material surface state must be an object.");
+                definition.Surface.AlphaMode =
+                    static_cast<MaterialAlphaMode>(surface.value("alphaMode", static_cast<std::uint8_t>(0)));
+                definition.Surface.AlphaCutoff = surface.value("alphaCutoff", 0.5F);
+                definition.Surface.DoubleSided = surface.value("doubleSided", false);
+            }
             const auto properties = source.value("properties", Json::object());
             if (!properties.is_object())
                 throw std::invalid_argument("Material properties must be an object.");
@@ -436,8 +453,10 @@ namespace Keire
             { return value.value("storage_textures", 0U) == 0 && value.value("storage_buffers", 0U) == 0; };
             const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
                                                          &ShaderPropertyDefinition::Type);
+            const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
             if (!noStorage(vertex) || !noStorage(fragment) || vertex.value("samplers", 0U) != 0 ||
-                vertex.value("uniform_buffers", 0U) != 1 || fragment.value("uniform_buffers", 0U) != 2 ||
+                vertex.value("uniform_buffers", 0U) != 1 ||
+                (fragmentUniformBuffers != 2 && fragmentUniformBuffers != 3) ||
                 fragment.value("samplers", 0U) != textureCount)
                 throw std::invalid_argument("Shader violates Kéire's fixed graphics resource-binding ABI.");
 
@@ -722,11 +741,21 @@ namespace Keire
     Ref<MaterialAsset> MaterialAsset::Decode(const std::span<const std::byte> bytes)
     {
         const auto source = Json::from_cbor(ToUnsigned(bytes));
-        if (!source.is_object() || source.value("schemaVersion", 0U) != 1)
+        if (!source.is_object())
             throw std::invalid_argument("Material asset has an unsupported schema.");
         MaterialAssetDefinition result;
+        result.SchemaVersion = source.value("schemaVersion", 0U);
+        if (result.SchemaVersion != 1 && result.SchemaVersion != 2)
+            throw std::invalid_argument("Material asset has an unsupported schema.");
         result.Shader =
             source.at("shader").is_null() ? AssetId{} : AssetId::Parse(source.at("shader").get<std::string>());
+        if (result.SchemaVersion >= 2)
+        {
+            const auto& surface = source.at("surface");
+            result.Surface.AlphaMode = static_cast<MaterialAlphaMode>(surface.at("alphaMode").get<std::uint8_t>());
+            result.Surface.AlphaCutoff = surface.at("alphaCutoff").get<float>();
+            result.Surface.DoubleSided = surface.at("doubleSided").get<bool>();
+        }
         for (const auto& [name, property] : source.at("properties").items())
         {
             const auto type = property.at("type").get<std::uint8_t>();
@@ -759,6 +788,7 @@ namespace Keire
                 throw std::invalid_argument("Material property type is invalid.");
             }
         }
+        ValidateMaterialDefinition(result);
         return CreateRef<MaterialAsset>(std::move(result));
     }
 
@@ -807,9 +837,13 @@ namespace Keire
                 },
                 value);
         }
-        const Json source{{"schemaVersion", 1},
-                          {"shader", definition.Shader ? Json(definition.Shader.ToString()) : Json(nullptr)},
-                          {"properties", std::move(properties)}};
+        Json source{{"schemaVersion", definition.SchemaVersion},
+                    {"shader", definition.Shader ? Json(definition.Shader.ToString()) : Json(nullptr)},
+                    {"properties", std::move(properties)}};
+        if (definition.SchemaVersion >= 2)
+            source["surface"] = {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
+                                 {"alphaCutoff", definition.Surface.AlphaCutoff},
+                                 {"doubleSided", definition.Surface.DoubleSided}};
         return ToBytes(Json::to_cbor(source));
     }
 
@@ -843,9 +877,13 @@ namespace Keire
                 },
                 value);
         }
-        const Json source{{"schemaVersion", definition.SchemaVersion},
-                          {"shader", definition.Shader ? Json(definition.Shader.ToString()) : Json(nullptr)},
-                          {"properties", std::move(properties)}};
+        Json source{{"schemaVersion", definition.SchemaVersion},
+                    {"shader", definition.Shader ? Json(definition.Shader.ToString()) : Json(nullptr)},
+                    {"properties", std::move(properties)}};
+        if (definition.SchemaVersion >= 2)
+            source["surface"] = {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
+                                 {"alphaCutoff", definition.Surface.AlphaCutoff},
+                                 {"doubleSided", definition.Surface.DoubleSided}};
         const auto text = source.dump(2) + '\n';
         return ToBytes(text);
     }
@@ -1037,7 +1075,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Material";
-        result.Version = 1;
+        result.Version = 2;
         result.Type = MaterialAsset::StaticType();
         result.Extensions = {".keirematerial"};
         result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)

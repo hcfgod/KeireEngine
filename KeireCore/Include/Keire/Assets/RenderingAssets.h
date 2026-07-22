@@ -123,10 +123,27 @@ namespace Keire
 
     using MaterialPropertyValue = std::variant<float, Vector2, Vector3, Vector4, Color, AssetId>;
 
+    enum class MaterialAlphaMode : std::uint8_t
+    {
+        Opaque,
+        Mask,
+        Blend
+    };
+
+    struct MaterialSurfaceState
+    {
+        MaterialAlphaMode AlphaMode = MaterialAlphaMode::Opaque;
+        float AlphaCutoff = 0.5F;
+        bool DoubleSided = false;
+
+        auto operator<=>(const MaterialSurfaceState&) const noexcept = default;
+    };
+
     struct MaterialAssetDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         AssetId Shader;
+        MaterialSurfaceState Surface;
         std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
 
         void SetTexture(std::string name, AssetId texture);
@@ -176,6 +193,36 @@ namespace Keire
     {
         Vector3 Minimum;
         Vector3 Maximum;
+
+        auto operator<=>(const MeshBounds&) const noexcept = default;
+    };
+
+    struct MeshSubmesh
+    {
+        std::uint32_t FirstIndex = 0;
+        std::uint32_t IndexCount = 0;
+        std::uint32_t MaterialSlot = 0;
+        MeshBounds Bounds;
+
+        auto operator<=>(const MeshSubmesh&) const noexcept = default;
+    };
+
+    struct MeshMaterialSlot
+    {
+        std::string Name;
+        AssetId DefaultMaterial;
+
+        auto operator<=>(const MeshMaterialSlot&) const noexcept = default;
+    };
+
+    struct MeshLod
+    {
+        float MinimumScreenHeight = 0.0F;
+        std::uint32_t FirstSubmesh = 0;
+        std::uint32_t SubmeshCount = 0;
+        MeshBounds Bounds;
+
+        auto operator<=>(const MeshLod&) const noexcept = default;
     };
 
     class KEIRE_API MeshAsset final : public Asset
@@ -183,6 +230,9 @@ namespace Keire
       public:
         explicit MeshAsset(BuiltinMesh mesh = BuiltinMesh::Error);
         MeshAsset(std::vector<MeshVertex> vertices, std::vector<std::uint32_t> indices, MeshBounds bounds);
+        MeshAsset(std::vector<MeshVertex> vertices, std::vector<std::uint32_t> indices,
+                  std::vector<MeshSubmesh> submeshes, std::vector<MeshMaterialSlot> materialSlots,
+                  std::vector<MeshLod> lods, MeshBounds bounds);
 
         [[nodiscard]] static constexpr AssetTypeId StaticType() noexcept
         {
@@ -194,6 +244,9 @@ namespace Keire
         [[nodiscard]] std::span<const MeshVertex> Vertices() const noexcept { return m_Vertices; }
         [[nodiscard]] std::span<const std::uint32_t> Indices() const noexcept { return m_Indices; }
         [[nodiscard]] const MeshBounds& Bounds() const noexcept { return m_Bounds; }
+        [[nodiscard]] std::span<const MeshSubmesh> Submeshes() const noexcept { return m_Submeshes; }
+        [[nodiscard]] std::span<const MeshMaterialSlot> MaterialSlots() const noexcept { return m_MaterialSlots; }
+        [[nodiscard]] std::span<const MeshLod> Lods() const noexcept { return m_Lods; }
         [[nodiscard]] static constexpr AssetId CubeId() noexcept
         {
             return AssetId(0x4b45495245435542ULL, 0x454d455348000001ULL);
@@ -207,11 +260,19 @@ namespace Keire
         [[nodiscard]] static Ref<MeshAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(std::span<const MeshVertex> vertices,
                                                            std::span<const std::uint32_t> indices);
+        [[nodiscard]] static std::vector<std::byte> Encode(std::span<const MeshVertex> vertices,
+                                                           std::span<const std::uint32_t> indices,
+                                                           std::span<const MeshSubmesh> submeshes,
+                                                           std::span<const MeshMaterialSlot> materialSlots,
+                                                           std::span<const MeshLod> lods);
 
       private:
         BuiltinMesh m_Mesh;
         std::vector<MeshVertex> m_Vertices;
         std::vector<std::uint32_t> m_Indices;
+        std::vector<MeshSubmesh> m_Submeshes;
+        std::vector<MeshMaterialSlot> m_MaterialSlots;
+        std::vector<MeshLod> m_Lods;
         MeshBounds m_Bounds;
     };
 

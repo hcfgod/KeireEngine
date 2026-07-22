@@ -1,5 +1,6 @@
 #include "KeireInternal/FileSystem.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -117,17 +118,59 @@ namespace Keire::Detail
 
     namespace
     {
-        [[nodiscard]] bool ContentsMatch(const std::filesystem::path& path, const std::string_view expected)
+        [[nodiscard]] bool FilesMatch(const std::filesystem::path& first, const std::filesystem::path& second)
         {
             std::error_code error;
-            if (std::filesystem::file_size(path, error) != expected.size() || error)
+            const auto firstSize = std::filesystem::file_size(first, error);
+            if (error)
                 return false;
-            std::ifstream input(path, std::ios::binary);
-            if (!input)
+            const auto secondSize = std::filesystem::file_size(second, error);
+            if (error || firstSize != secondSize)
                 return false;
-            std::string contents(expected.size(), '\0');
-            input.read(contents.data(), static_cast<std::streamsize>(contents.size()));
-            return input && contents == expected;
+            std::ifstream left(first, std::ios::binary);
+            std::ifstream right(second, std::ios::binary);
+            if (!left || !right)
+                return false;
+            std::array<char, 64U * 1024U> leftBytes{};
+            std::array<char, leftBytes.size()> rightBytes{};
+            while (left && right)
+            {
+                left.read(leftBytes.data(), static_cast<std::streamsize>(leftBytes.size()));
+                right.read(rightBytes.data(), static_cast<std::streamsize>(rightBytes.size()));
+                if (left.gcount() != right.gcount() ||
+                    !std::equal(leftBytes.begin(), leftBytes.begin() + left.gcount(), rightBytes.begin()))
+                    return false;
+            }
+            return left.eof() && right.eof();
+        }
+
+        void FlushFileToStorage(const std::filesystem::path& path)
+        {
+#if defined(_WIN32)
+            const auto handle = CreateFileW(path.wstring().c_str(), GENERIC_WRITE,
+                                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (handle == INVALID_HANDLE_VALUE)
+                throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
+                                        "Cannot open temporary file for durable publication");
+            const auto flushed = FlushFileBuffers(handle);
+            const auto error = flushed ? ERROR_SUCCESS : GetLastError();
+            CloseHandle(handle);
+            if (!flushed)
+                throw std::system_error(static_cast<int>(error), std::system_category(),
+                                        "Cannot flush temporary file for durable publication");
+#else
+            const auto descriptor = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+            if (descriptor < 0)
+                throw std::system_error(errno, std::generic_category(),
+                                        "Cannot open temporary file for durable publication");
+            const auto flushed = fsync(descriptor);
+            const auto error = errno;
+            close(descriptor);
+            if (flushed != 0)
+                throw std::system_error(error, std::generic_category(),
+                                        "Cannot flush temporary file for durable publication");
+#endif
         }
 
         [[nodiscard]] bool IsTransientRenameError(const std::error_code& error) noexcept
@@ -229,7 +272,67 @@ namespace Keire::Detail
         return result;
     }
 
-    void WriteTextFileAtomically(const std::filesystem::path& path, const std::string_view contents)
+    void PublishFileAtomically(const std::filesystem::path& temporary, const std::filesystem::path& destination)
+    {
+        if (temporary.empty() || destination.filename().empty())
+            throw std::invalid_argument("Atomic publication requires source and destination filenames.");
+        if (std::filesystem::absolute(temporary).root_name() != std::filesystem::absolute(destination).root_name())
+            throw std::invalid_argument("Atomic publication requires source and destination on the same volume.");
+
+        std::error_code error;
+        std::filesystem::create_directories(destination.parent_path(), error);
+        if (error)
+            throw std::runtime_error("Cannot create directory '" + PathToUtf8(destination.parent_path()) +
+                                     "': " + error.message());
+        FlushFileToStorage(temporary);
+
+#if defined(_WIN32)
+        const auto target = destination.wstring();
+        const auto source = temporary.wstring();
+        DWORD lastError = ERROR_SUCCESS;
+        constexpr std::size_t maximumAttempts = 6;
+        for (std::size_t attempt = 0; attempt < maximumAttempts; ++attempt)
+        {
+            error.clear();
+            const bool exists = std::filesystem::exists(destination, error) && !error;
+            const BOOL replaced = exists ? ReplaceFileW(target.c_str(), source.c_str(), nullptr,
+                                                        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr)
+                                         : MoveFileExW(source.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH);
+            if (replaced)
+                return;
+
+            lastError = GetLastError();
+            // ReplaceFileW can publish the replacement and still report that it could not remove the old file.
+            if (FilesMatch(temporary, destination))
+            {
+                std::filesystem::remove(temporary, error);
+                return;
+            }
+            const bool retryable = lastError == ERROR_ACCESS_DENIED || lastError == ERROR_SHARING_VIOLATION ||
+                                   lastError == ERROR_LOCK_VIOLATION || lastError == ERROR_UNABLE_TO_MOVE_REPLACEMENT ||
+                                   lastError == ERROR_UNABLE_TO_MOVE_REPLACEMENT_2 ||
+                                   lastError == ERROR_UNABLE_TO_REMOVE_REPLACED;
+            if (!retryable || attempt + 1 == maximumAttempts || !std::filesystem::exists(temporary))
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5U << attempt));
+        }
+
+        const auto diagnostic = std::error_code(static_cast<int>(lastError), std::system_category()).message();
+        throw std::runtime_error("Cannot atomically replace '" + PathToUtf8(destination) + "': " + diagnostic);
+#else
+        std::filesystem::rename(temporary, destination, error);
+        if (error)
+            throw std::runtime_error("Cannot atomically replace '" + PathToUtf8(destination) + "': " + error.message());
+        const auto directory = open(destination.parent_path().c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY);
+        if (directory >= 0)
+        {
+            (void)fsync(directory);
+            close(directory);
+        }
+#endif
+    }
+
+    void WriteFileAtomically(const std::filesystem::path& path, const std::span<const std::byte> contents)
     {
         if (path.filename().empty())
             throw std::invalid_argument("Atomic file writes require a filename.");
@@ -245,62 +348,28 @@ namespace Keire::Detail
             static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
         auto temporary = path;
         temporary += ".tmp." + std::to_string(uniqueValue);
+        try
         {
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
             if (!output)
                 throw std::runtime_error("Cannot create temporary file: " + PathToUtf8(temporary));
-            output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+            output.write(reinterpret_cast<const char*>(contents.data()), static_cast<std::streamsize>(contents.size()));
             output.flush();
             if (!output)
-            {
-                std::filesystem::remove(temporary, error);
                 throw std::runtime_error("Cannot write temporary file: " + PathToUtf8(temporary));
-            }
+            output.close();
+            PublishFileAtomically(temporary, path);
         }
-
-#if defined(_WIN32)
-        const auto target = path.wstring();
-        const auto source = temporary.wstring();
-        DWORD lastError = ERROR_SUCCESS;
-        constexpr std::size_t maximumAttempts = 6;
-        for (std::size_t attempt = 0; attempt < maximumAttempts; ++attempt)
-        {
-            error.clear();
-            const bool exists = std::filesystem::exists(path, error) && !error;
-            const BOOL replaced = exists ? ReplaceFileW(target.c_str(), source.c_str(), nullptr,
-                                                        REPLACEFILE_WRITE_THROUGH, nullptr, nullptr)
-                                         : MoveFileExW(source.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH);
-            if (replaced)
-                return;
-
-            lastError = GetLastError();
-            // ReplaceFileW can publish the replacement and still report that it could not remove the old file.
-            if (ContentsMatch(path, contents))
-            {
-                std::filesystem::remove(temporary, error);
-                return;
-            }
-
-            const bool retryable = lastError == ERROR_ACCESS_DENIED || lastError == ERROR_SHARING_VIOLATION ||
-                                   lastError == ERROR_LOCK_VIOLATION || lastError == ERROR_UNABLE_TO_MOVE_REPLACEMENT ||
-                                   lastError == ERROR_UNABLE_TO_MOVE_REPLACEMENT_2 ||
-                                   lastError == ERROR_UNABLE_TO_REMOVE_REPLACED;
-            if (!retryable || attempt + 1 == maximumAttempts || !std::filesystem::exists(temporary))
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5U << attempt));
-        }
-
-        const auto diagnostic = std::error_code(static_cast<int>(lastError), std::system_category()).message();
-        std::filesystem::remove(temporary, error);
-        throw std::runtime_error("Cannot atomically replace '" + PathToUtf8(path) + "': " + diagnostic);
-#else
-        std::filesystem::rename(temporary, path, error);
-        if (error)
+        catch (...)
         {
             std::filesystem::remove(temporary, error);
-            throw std::runtime_error("Cannot atomically replace '" + PathToUtf8(path) + "': " + error.message());
+            throw;
         }
-#endif
+    }
+
+    void WriteTextFileAtomically(const std::filesystem::path& path, const std::string_view contents)
+    {
+        WriteFileAtomically(path, std::as_bytes(std::span(contents.data(), contents.size())));
     }
 
     std::filesystem::path CanonicalExistingPath(const std::filesystem::path& path)

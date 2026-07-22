@@ -6,6 +6,7 @@
 #include "KeireInternal/RenderInternal.h"
 
 #include <algorithm>
+#include <bit>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
@@ -49,6 +50,13 @@ namespace Keire::RenderBackend
         Statistics.Surfaces = 0;
         Statistics.DrawCalls = 0;
         Statistics.Triangles = 0;
+        Statistics.VisibleSubmeshes = 0;
+        Statistics.CulledSubmeshes = 0;
+        Statistics.InstanceBatches = 0;
+        Statistics.VisibleLocalLights = 0;
+        Statistics.OverflowedLightTiles = 0;
+        Statistics.DirectionalShadowCascades = 0;
+        Statistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
         CollectCompletedFrames();
         for (const auto& surface : LiveSurfaces())
         {
@@ -100,6 +108,7 @@ namespace Keire::RenderBackend
         packet.Camera = camera;
         packet.Environment = request.Environment;
         packet.Lighting = ResolveLighting(request.Scene);
+        packet.LocalLights = ResolveLocalLights(request.Scene);
         packet.DrawGrid = request.DrawGrid;
         for (const auto& entity : request.Scene->Query<MeshRendererComponent>())
         {
@@ -109,8 +118,13 @@ namespace Keire::RenderBackend
             const auto transform = entity.GetComponent<TransformComponent>();
             if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
                 continue;
-            packet.DrawItems.push_back(
-                {renderer->Mesh(), renderer->Material(), transform->WorldMatrix(), renderer->Tint()});
+            packet.DrawItems.push_back({renderer->Mesh(),
+                                        {renderer->Materials().begin(), renderer->Materials().end()},
+                                        transform->WorldMatrix(),
+                                        renderer->Tint(),
+                                        entity.Id(),
+                                        renderer->CastShadows(),
+                                        renderer->ReceiveShadows()});
         }
         Requests.push_back({std::move(packet), &surface});
     }
@@ -222,7 +236,8 @@ namespace Keire::RenderBackend
         return entry.LastGood;
     }
 
-    GpuShaderEntry* RenderSharedState::ResolveShader(const AssetId id, const SDL_GPUSampleCount samples)
+    GpuShaderEntry* RenderSharedState::ResolveShader(const AssetId id, const SDL_GPUSampleCount samples,
+                                                     MaterialSurfaceState surface, const bool explicitSurface)
     {
         if (!id || !Assets)
             return nullptr;
@@ -238,13 +253,12 @@ namespace Keire::RenderBackend
             {
                 try
                 {
-                    auto replacement = CreateAssetPipeline(shader->Definition(), samples);
-                    for (const auto& [oldSamples, oldPipeline] : entry.Pipelines)
-                    {
-                        (void)oldSamples;
-                        Retire(oldPipeline);
-                    }
-                    entry.Pipelines = {{samples, replacement}};
+                    if (!explicitSurface && shader->Definition().Blend)
+                        surface.AlphaMode = MaterialAlphaMode::Blend;
+                    auto replacement = CreateAssetPipeline(shader->Definition(), samples, surface);
+                    for (const auto& pipeline : entry.Pipelines)
+                        Retire(pipeline.Handle);
+                    entry.Pipelines = {{samples, surface.AlphaMode, surface.DoubleSided, replacement}};
                     entry.LastGood = shader;
                     entry.LoadedRevision = revision;
                 }
@@ -257,12 +271,21 @@ namespace Keire::RenderBackend
         }
         if (!entry.LastGood)
             return nullptr;
-        auto pipeline = std::ranges::find(entry.Pipelines, samples, &decltype(entry.Pipelines)::value_type::first);
+        if (!explicitSurface && entry.LastGood->Definition().Blend)
+            surface.AlphaMode = MaterialAlphaMode::Blend;
+        auto pipeline = std::ranges::find_if(entry.Pipelines,
+                                             [&](const GpuShaderEntry::Pipeline& candidate)
+                                             {
+                                                 return candidate.Samples == samples &&
+                                                        candidate.AlphaMode == surface.AlphaMode &&
+                                                        candidate.DoubleSided == surface.DoubleSided;
+                                             });
         if (pipeline == entry.Pipelines.end())
         {
             try
             {
-                entry.Pipelines.emplace_back(samples, CreateAssetPipeline(entry.LastGood->Definition(), samples));
+                entry.Pipelines.push_back({samples, surface.AlphaMode, surface.DoubleSided,
+                                           CreateAssetPipeline(entry.LastGood->Definition(), samples, surface)});
             }
             catch (const std::exception& error)
             {
@@ -287,6 +310,12 @@ namespace Keire::RenderBackend
         stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(samples));
         stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(ColorFormat));
         stamp = HashDependencyStamp(stamp, static_cast<std::uint64_t>(DepthFormat));
+        stamp =
+            HashDependencyStamp(stamp, static_cast<std::uint64_t>(material ? material->Definition().Surface.AlphaMode
+                                                                           : MaterialAlphaMode::Opaque));
+        stamp = HashDependencyStamp(
+            stamp, material ? std::bit_cast<std::uint32_t>(material->Definition().Surface.AlphaCutoff) : 0U);
+        stamp = HashDependencyStamp(stamp, material && material->Definition().Surface.DoubleSided ? 1U : 0U);
         bool failedDependencyRevision = cache.LoadedRevision != 0 && cache.LastAttemptedRevision > cache.LoadedRevision;
         if (!material || !material->Definition().Shader)
         {
@@ -294,7 +323,8 @@ namespace Keire::RenderBackend
             return cache.Binding.Pipeline ? &cache.Binding : nullptr;
         }
         stamp = HashDependencyStamp(stamp, material->Definition().Shader);
-        auto* shader = ResolveShader(material->Definition().Shader, samples);
+        auto* shader = ResolveShader(material->Definition().Shader, samples, material->Definition().Surface,
+                                     material->Definition().SchemaVersion >= 2);
         if (!shader)
         {
             cache.LastAttemptedDependencyStamp = stamp;
@@ -302,8 +332,16 @@ namespace Keire::RenderBackend
         }
         stamp = HashDependencyStamp(stamp, shader->LastAttemptedRevision);
         stamp = HashDependencyStamp(stamp, shader->LoadedRevision);
-        const auto pipeline =
-            std::ranges::find(shader->Pipelines, samples, &decltype(shader->Pipelines)::value_type::first);
+        auto surface = material->Definition().Surface;
+        if (material->Definition().SchemaVersion < 2 && shader->LastGood->Definition().Blend)
+            surface.AlphaMode = MaterialAlphaMode::Blend;
+        const auto pipeline = std::ranges::find_if(shader->Pipelines,
+                                                   [&](const GpuShaderEntry::Pipeline& candidate)
+                                                   {
+                                                       return candidate.Samples == samples &&
+                                                              candidate.AlphaMode == surface.AlphaMode &&
+                                                              candidate.DoubleSided == surface.DoubleSided;
+                                                   });
         if (pipeline == shader->Pipelines.end())
         {
             cache.LastAttemptedDependencyStamp = stamp;
@@ -365,7 +403,8 @@ namespace Keire::RenderBackend
         try
         {
             ResolvedAssetMaterial result;
-            result.Pipeline = pipeline->second;
+            result.Pipeline = pipeline->Handle;
+            result.Surface = surface;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

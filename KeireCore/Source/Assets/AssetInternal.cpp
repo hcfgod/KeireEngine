@@ -251,15 +251,7 @@ namespace Keire::Detail
         }
         const Json document{{"schemaVersion", 2}, {"assets", std::move(assets)}};
         std::filesystem::create_directories(path.parent_path());
-        const auto temporary = PathWithSuffix(path, ".tmp");
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (!stream)
-            throw std::runtime_error("Could not create asset catalog: " + PathToUtf8(path));
-        stream << document.dump(2) << '\n';
-        stream.close();
-        if (!stream)
-            throw std::runtime_error("Could not write asset catalog: " + PathToUtf8(path));
-        AtomicReplace(temporary, path);
+        WriteTextFileAtomically(path, document.dump(2) + '\n');
     }
 
     void WritePackHeader(std::ostream& stream)
@@ -290,25 +282,6 @@ namespace Keire::Detail
 
     void AtomicReplace(const std::filesystem::path& temporary, const std::filesystem::path& destination)
     {
-        std::error_code error;
-        const auto backup = PathWithSuffix(destination, ".bak");
-        std::filesystem::remove(backup, error);
-        error.clear();
-        if (std::filesystem::exists(destination))
-        {
-            RenamePathWithRetry(destination, backup);
-        }
-        try
-        {
-            RenamePathWithRetry(temporary, destination);
-        }
-        catch (...)
-        {
-            std::error_code ignored;
-            if (std::filesystem::exists(backup))
-                (void)TryRenamePathWithRetry(backup, destination, ignored);
-            throw;
-        }
-        std::filesystem::remove(backup, error);
+        PublishFileAtomically(temporary, destination);
     }
 } // namespace Keire::Detail

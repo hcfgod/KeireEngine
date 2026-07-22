@@ -17,6 +17,7 @@ struct VertexOutput
     float3 ViewDirection : TEXCOORD3;
     float2 UV0 : TEXCOORD4;
     float4 Color : TEXCOORD5;
+    float3 WorldPosition : TEXCOORD6;
     float4 Position : SV_Position;
 };
 
@@ -33,6 +34,7 @@ cbuffer SceneData : register(b0, space3)
     float4 AmbientColorIntensity;
     float4 DirectionalColorIntensity;
     float4 DirectionalDirectionExposure;
+    float4 SurfaceParameters;
 };
 
 cbuffer MaterialData : register(b1, space3)
@@ -43,6 +45,20 @@ cbuffer MaterialData : register(b1, space3)
     float4 NormalScale;
     float4 OcclusionStrength;
     float4 EmissiveFactor;
+};
+
+struct LocalLightData
+{
+    float4 PositionRange;
+    float4 DirectionOuter;
+    float4 ColorIntensity;
+    float4 Parameters;
+};
+
+cbuffer LocalLightsData : register(b2, space3)
+{
+    float4 LocalLightCounts;
+    LocalLightData LocalLights[128];
 };
 
 Texture2D MainTexture : register(t0, space2);
@@ -89,6 +105,7 @@ VertexOutput VSMain(VertexInput input)
     output.ViewDirection = normalize(mul(-viewPosition.xyz, (float3x3)View));
     output.UV0 = input.UV0;
     output.Color = input.Color;
+    output.WorldPosition = worldPosition.xyz;
     return output;
 }
 
@@ -113,16 +130,35 @@ float3 FresnelSchlick(const float directionHalfway, const float3 baseReflectance
     return baseReflectance + (1.0F - baseReflectance) * pow(1.0F - directionHalfway, 5.0F);
 }
 
+float3 EvaluateDirectLighting(const float3 normal, const float3 viewDirection, const float3 lightDirection,
+                              const float3 radiance, const float3 baseColor, const float metallic,
+                              const float roughness)
+{
+    const float normalLight = saturate(dot(normal, lightDirection));
+    const float normalView = saturate(dot(normal, viewDirection));
+    if (normalLight <= 0.0F || normalView <= 0.0F)
+        return 0.0F.xxx;
+    const float3 halfway = SafeNormal(viewDirection + lightDirection, normal);
+    const float3 reflectance = lerp(0.04F.xxx, baseColor, metallic);
+    const float3 fresnel = FresnelSchlick(saturate(dot(viewDirection, halfway)), reflectance);
+    const float distribution = DistributionGgx(normal, halfway, roughness);
+    const float geometry = GeometrySchlickGgx(normalView, roughness) * GeometrySchlickGgx(normalLight, roughness);
+    const float3 specular = distribution * geometry * fresnel / max(4.0F * normalView * normalLight, 0.0001F);
+    const float3 diffuse = (1.0F - fresnel) * (1.0F - metallic) * baseColor / Pi;
+    return (diffuse + specular) * radiance * normalLight;
+}
+
 float4 PSMain(VertexOutput input) : SV_Target0
 {
     const float4 baseColor = MainTexture.Sample(MainSampler, input.UV0) * input.Color * Tint;
+    if (SurfaceParameters.y > 0.5F && SurfaceParameters.y < 1.5F)
+        clip(baseColor.a - SurfaceParameters.x);
     float3 tangentNormal = NormalTexture.Sample(NormalSampler, input.UV0).xyz * 2.0F - 1.0F;
     tangentNormal.xy *= NormalScale.x;
     const float3 normal = normalize(input.Tangent * tangentNormal.x + input.Bitangent * tangentNormal.y +
                                     input.Normal * tangentNormal.z);
     const float3 viewDirection = normalize(input.ViewDirection);
     const float3 lightDirection = normalize(-DirectionalDirectionExposure.xyz);
-    const float3 halfway = normalize(viewDirection + lightDirection);
     const float4 metallicRoughness = MetallicRoughnessTexture.Sample(MetallicRoughnessSampler, input.UV0);
     const float metallicSample = MetallicTexture.Sample(MetallicSampler, input.UV0).r;
     const float roughnessSample = RoughnessTexture.Sample(RoughnessSampler, input.UV0).r;
@@ -132,18 +168,40 @@ float4 PSMain(VertexOutput input) : SV_Target0
     const float occlusion = lerp(1.0F, occlusionSample, saturate(OcclusionStrength.x));
     const float3 emissive = EmissiveTexture.Sample(EmissiveSampler, input.UV0).rgb * EmissiveFactor.rgb;
 
-    const float normalLight = saturate(dot(normal, lightDirection));
-    const float normalView = saturate(dot(normal, viewDirection));
-    const float3 reflectance = lerp(0.04F.xxx, baseColor.rgb, metallic);
-    const float3 fresnel = FresnelSchlick(saturate(dot(viewDirection, halfway)), reflectance);
-    const float distribution = DistributionGgx(normal, halfway, roughness);
-    const float geometry = GeometrySchlickGgx(normalView, roughness) *
-                           GeometrySchlickGgx(normalLight, roughness);
-    const float3 specular = distribution * geometry * fresnel / max(4.0F * normalView * normalLight, 0.0001F);
-    const float3 diffuse = (1.0F - fresnel) * (1.0F - metallic) * baseColor.rgb / Pi;
-    const float3 direct = (diffuse + specular) * DirectionalColorIntensity.rgb *
-                          DirectionalColorIntensity.a * normalLight;
+    float3 direct = EvaluateDirectLighting(normal, viewDirection, lightDirection,
+                                           DirectionalColorIntensity.rgb * DirectionalColorIntensity.a,
+                                           baseColor.rgb, metallic, roughness);
+    const uint localLightCount = min((uint)max(LocalLightCounts.x, 0.0F), 128U);
+    for (uint lightIndex = 0U; lightIndex < localLightCount; ++lightIndex)
+    {
+        const float3 toLight = LocalLights[lightIndex].PositionRange.xyz - input.WorldPosition;
+        const float distanceSquared = dot(toLight, toLight);
+        const float distance = sqrt(max(distanceSquared, 1.0e-8F));
+        const float range = max(LocalLights[lightIndex].PositionRange.w, 0.0001F);
+        if (distance >= range)
+            continue;
+        const float3 localDirection = toLight / distance;
+        const float normalizedDistance = distance / range;
+        const float rangeFade = saturate(1.0F - normalizedDistance * normalizedDistance * normalizedDistance *
+                                                    normalizedDistance);
+        float attenuation = rangeFade * rangeFade / max(distanceSquared, 0.01F);
+        if (LocalLights[lightIndex].Parameters.y > 0.5F)
+        {
+            const float3 spotDirection =
+                SafeNormal(LocalLights[lightIndex].DirectionOuter.xyz, float3(0.0F, 0.0F, 1.0F));
+            const float coneCosine = dot(spotDirection, -localDirection);
+            const float outerCosine = LocalLights[lightIndex].DirectionOuter.w;
+            const float innerCosine = max(LocalLights[lightIndex].Parameters.x, outerCosine + 0.0001F);
+            attenuation *= smoothstep(outerCosine, innerCosine, coneCosine);
+        }
+        const float3 radiance =
+            LocalLights[lightIndex].ColorIntensity.rgb * LocalLights[lightIndex].ColorIntensity.a * attenuation;
+        direct += EvaluateDirectLighting(normal, viewDirection, localDirection, radiance, baseColor.rgb, metallic,
+                                         roughness);
+    }
     const float3 ambient = baseColor.rgb * AmbientColorIntensity.rgb * AmbientColorIntensity.a * occlusion;
     const float3 color = (ambient + direct + emissive) * DirectionalDirectionExposure.w;
+    if (SurfaceParameters.y > 1.5F)
+        return float4(color * baseColor.a, baseColor.a);
     return float4(color, 1.0F);
 }

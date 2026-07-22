@@ -178,6 +178,70 @@ namespace KeireEditor
                 }
             }
         }
+
+        void DrawWorldCircle(Keire::UiFrame& ui, const Keire::Vector3 center, const Keire::Vector3 axisA,
+                             const Keire::Vector3 axisB, const float radius, const Keire::Matrix4& viewProjection,
+                             const Keire::UiItemRect viewport, const Keire::UiColor color)
+        {
+            constexpr std::size_t segments = 48;
+            std::optional<Keire::UiPosition> previous;
+            for (std::size_t segment = 0; segment <= segments; ++segment)
+            {
+                const float angle = static_cast<float>(segment) / static_cast<float>(segments) * Pi * 2.0F;
+                const auto point =
+                    Keire::Vector3{center.X + (axisA.X * std::cos(angle) + axisB.X * std::sin(angle)) * radius,
+                                   center.Y + (axisA.Y * std::cos(angle) + axisB.Y * std::sin(angle)) * radius,
+                                   center.Z + (axisA.Z * std::cos(angle) + axisB.Z * std::sin(angle)) * radius};
+                const auto projected = Project(point, viewProjection, viewport);
+                if (previous && projected)
+                    ui.DrawLine(*previous, *projected, color, 1.2F);
+                previous = projected;
+            }
+        }
+
+        void DrawPointLightRange(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
+                                 const Keire::PointLightComponent& light, const Keire::Matrix4& viewProjection,
+                                 const Keire::UiItemRect viewport)
+        {
+            const auto center = transform.WorldPosition();
+            const auto color = Keire::UiColor{LightColor.Red, LightColor.Green, LightColor.Blue, 0.55F};
+            DrawWorldCircle(ui, center, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, light.Range(), viewProjection, viewport,
+                            color);
+            DrawWorldCircle(ui, center, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, light.Range(), viewProjection, viewport,
+                            color);
+            DrawWorldCircle(ui, center, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, light.Range(), viewProjection, viewport,
+                            color);
+        }
+
+        void DrawSpotLightCone(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
+                               const Keire::SpotLightComponent& light, const Keire::Matrix4& viewProjection,
+                               const Keire::UiItemRect viewport)
+        {
+            const auto world = transform.WorldMatrix();
+            const auto origin = transform.WorldPosition();
+            const auto forward = Normalize(Keire::Math::TransformDirection(world, {0.0F, 0.0F, 1.0F}));
+            const auto right = Normalize(Keire::Math::TransformDirection(world, {1.0F, 0.0F, 0.0F}));
+            const auto up = Normalize(Keire::Math::TransformDirection(world, {0.0F, 1.0F, 0.0F}));
+            const float length = light.Range();
+            const float radius = std::tan(light.OuterAngleDegrees() * Pi / 180.0F) * length;
+            const auto end = Keire::Vector3{origin.X + forward.X * length, origin.Y + forward.Y * length,
+                                            origin.Z + forward.Z * length};
+            const auto color = Keire::UiColor{LightColor.Red, LightColor.Green, LightColor.Blue, 0.68F};
+            DrawWorldCircle(ui, end, right, up, radius, viewProjection, viewport, color);
+            if (const auto projectedOrigin = Project(origin, viewProjection, viewport))
+            {
+                constexpr std::array signs{Keire::Vector2{-1.0F, 0.0F}, Keire::Vector2{1.0F, 0.0F},
+                                           Keire::Vector2{0.0F, -1.0F}, Keire::Vector2{0.0F, 1.0F}};
+                for (const auto sign : signs)
+                {
+                    const auto rim = Keire::Vector3{end.X + right.X * radius * sign.X + up.X * radius * sign.Y,
+                                                    end.Y + right.Y * radius * sign.X + up.Y * radius * sign.Y,
+                                                    end.Z + right.Z * radius * sign.X + up.Z * radius * sign.Y};
+                    if (const auto projectedRim = Project(rim, viewProjection, viewport))
+                        ui.DrawLine(*projectedOrigin, *projectedRim, color, 1.3F);
+                }
+            }
+        }
     } // namespace
 
     std::vector<SceneTransformTarget> SceneTransformGroup::Capture(const Keire::Ref<Keire::Scene>& scene,
@@ -390,7 +454,7 @@ namespace KeireEditor
         const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);
         if (m_Settings.ShowIcons)
         {
-            const auto drawIcons = [&](const auto& entities, const bool cameraIcons)
+            const auto drawIcons = [&](const auto& entities, const bool cameraIcons, const bool directionalIcons)
             {
                 for (const auto& entity : entities)
                 {
@@ -420,7 +484,7 @@ namespace KeireEditor
                         pointerConsumed = true;
                     }
 
-                    if (!cameraIcons && m_Settings.ShowLightDirections)
+                    if (directionalIcons && m_Settings.ShowLightDirections)
                     {
                         const auto direction =
                             Normalize(Keire::Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F}));
@@ -433,8 +497,23 @@ namespace KeireEditor
                     }
                 }
             };
-            drawIcons(scene->Query<Keire::CameraComponent>(), true);
-            drawIcons(scene->Query<Keire::DirectionalLightComponent>(), false);
+            drawIcons(scene->Query<Keire::CameraComponent>(), true, false);
+            drawIcons(scene->Query<Keire::DirectionalLightComponent>(), false, true);
+            drawIcons(scene->Query<Keire::PointLightComponent>(), false, false);
+            drawIcons(scene->Query<Keire::SpotLightComponent>(), false, true);
+        }
+
+        if (m_Settings.ShowLightDirections && selected)
+        {
+            const auto selectedLight = scene->FindEntity(selected);
+            const auto selectedTransform = selectedLight.GetComponent<Keire::TransformComponent>();
+            if (selectedTransform)
+            {
+                if (const auto point = selectedLight.GetComponent<Keire::PointLightComponent>())
+                    DrawPointLightRange(ui, *selectedTransform, *point, viewProjection, viewport);
+                if (const auto spot = selectedLight.GetComponent<Keire::SpotLightComponent>())
+                    DrawSpotLightCone(ui, *selectedTransform, *spot, viewProjection, viewport);
+            }
         }
 
         const auto entity = scene->FindEntity(selected);

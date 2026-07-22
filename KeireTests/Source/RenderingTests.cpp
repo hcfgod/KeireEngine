@@ -7,17 +7,65 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <span>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace
 {
+    template <typename T> void AppendLittleEndian(std::vector<std::byte>& output, T value)
+    {
+        static_assert(std::is_unsigned_v<T>);
+        for (std::size_t index = 0; index < sizeof(T); ++index)
+        {
+            output.push_back(std::byte(value & 0xffU));
+            value >>= 8U;
+        }
+    }
+
+    void AppendFloat(std::vector<std::byte>& output, const float value)
+    {
+        AppendLittleEndian(output, std::bit_cast<std::uint32_t>(value));
+    }
+
+    [[nodiscard]] std::vector<std::byte> LegacyMeshPayload(const std::span<const Keire::MeshVertex> vertices,
+                                                           const std::span<const std::uint32_t> indices,
+                                                           const std::uint32_t version)
+    {
+        std::vector<std::byte> output;
+        for (const char value : std::string_view("KEIREMSH"))
+            output.push_back(std::byte(value));
+        AppendLittleEndian(output, version);
+        AppendLittleEndian(output, static_cast<std::uint64_t>(vertices.size()));
+        AppendLittleEndian(output, static_cast<std::uint64_t>(indices.size()));
+        for (const float value : {0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 0.0F})
+            AppendFloat(output, value);
+        for (const auto& vertex : vertices)
+        {
+            for (const float value :
+                 {vertex.Position.X, vertex.Position.Y, vertex.Position.Z, vertex.Normal.X, vertex.Normal.Y,
+                  vertex.Normal.Z, vertex.UV0.X, vertex.UV0.Y, vertex.VertexColor.Red, vertex.VertexColor.Green,
+                  vertex.VertexColor.Blue, vertex.VertexColor.Alpha})
+                AppendFloat(output, value);
+            if (version >= 2)
+            {
+                for (const float value : {vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z, vertex.Tangent.W})
+                    AppendFloat(output, value);
+            }
+        }
+        for (const auto index : indices)
+            AppendLittleEndian(output, index);
+        return output;
+    }
+
     struct TemporaryDirectory final
     {
         explicit TemporaryDirectory(const std::string& name) : Path(KeireTests::MakeTestDirectory(name))
@@ -180,6 +228,9 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     definition.Properties.emplace("Tint", Keire::Color{0.25F, 0.5F, 1.0F, 1.0F});
     const auto texture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
     definition.SetTexture("MainTexture", texture);
+    definition.Surface.AlphaMode = Keire::MaterialAlphaMode::Mask;
+    definition.Surface.AlphaCutoff = 0.35F;
+    definition.Surface.DoubleSided = true;
     CHECK(definition.Texture("MainTexture") == texture);
     CHECK_FALSE(definition.Texture("Missing"));
 
@@ -187,6 +238,7 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     CHECK(decoded->Definition().Shader == definition.Shader);
     CHECK(decoded->Definition().Properties.size() == 3);
     CHECK(std::get<Keire::AssetId>(decoded->Definition().Properties.at("MainTexture")) == texture);
+    CHECK(decoded->Definition().Surface == definition.Surface);
     const auto sourceDecoded = Keire::MaterialAsset::DecodeSource(Keire::MaterialAsset::EncodeSource(definition));
     CHECK(sourceDecoded.Shader == definition.Shader);
     CHECK(sourceDecoded.Texture("MainTexture") == texture);
@@ -282,6 +334,9 @@ TEST_CASE("mesh assets validate and preserve production vertex data")
     CHECK(decoded->Vertices()[1].UV0 == (Keire::Vector2{1.0F, 0.0F}));
     CHECK(decoded->Bounds().Minimum == (Keire::Vector3{0.0F, 0.0F, 0.0F}));
     CHECK(decoded->Bounds().Maximum == (Keire::Vector3{1.0F, 1.0F, 0.0F}));
+    REQUIRE(decoded->Submeshes().size() == 1);
+    REQUIRE(decoded->MaterialSlots().size() == 1);
+    REQUIRE(decoded->Lods().size() == 1);
 
     auto truncated = encoded;
     truncated.pop_back();
@@ -307,30 +362,37 @@ TEST_CASE("mesh version one payloads generate the same deterministic tangent fra
                               Keire::MeshVertex{{1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {1.0F, 0.0F}, {}},
                               Keire::MeshVertex{{0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F}, {}}};
     constexpr std::array<std::uint32_t, 3> indices{0, 1, 2};
-    const auto versionTwo = Keire::MeshAsset::Encode(vertices, indices);
-    constexpr std::size_t headerSize = 8U + 4U + 8U + 8U + 6U * sizeof(float);
-    constexpr std::size_t versionTwoVertexSize = 16U * sizeof(float);
-    constexpr std::size_t versionOneVertexSize = 12U * sizeof(float);
-    std::vector<std::byte> versionOne(versionTwo.begin(), versionTwo.begin() + headerSize);
-    versionOne[8] = std::byte{1};
-    versionOne[9] = std::byte{0};
-    versionOne[10] = std::byte{0};
-    versionOne[11] = std::byte{0};
-    for (std::size_t index = 0; index < vertices.size(); ++index)
-    {
-        const auto begin = versionTwo.begin() + static_cast<std::ptrdiff_t>(headerSize + index * versionTwoVertexSize);
-        versionOne.insert(versionOne.end(), begin, begin + versionOneVertexSize);
-    }
-    versionOne.insert(versionOne.end(),
-                      versionTwo.begin() +
-                          static_cast<std::ptrdiff_t>(headerSize + vertices.size() * versionTwoVertexSize),
-                      versionTwo.end());
+    const auto versionOne = LegacyMeshPayload(vertices, indices, 1);
+    const auto versionTwo = LegacyMeshPayload(vertices, indices, 2);
 
     const auto decodedOne = Keire::MeshAsset::Decode(versionOne);
     const auto decodedTwo = Keire::MeshAsset::Decode(versionTwo);
     REQUIRE(decodedOne->Vertices().size() == decodedTwo->Vertices().size());
     for (std::size_t index = 0; index < decodedOne->Vertices().size(); ++index)
         CHECK(decodedOne->Vertices()[index].Tangent == decodedTwo->Vertices()[index].Tangent);
+    CHECK(decodedOne->Submeshes().size() == 1);
+    CHECK(decodedTwo->MaterialSlots().front().Name == "Default");
+}
+
+TEST_CASE("mesh version three preserves ordered submeshes material slots and LODs")
+{
+    const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}},
+                              Keire::MeshVertex{{1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}},
+                              Keire::MeshVertex{{0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}},
+                              Keire::MeshVertex{{1.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}}};
+    constexpr std::array<std::uint32_t, 6> indices{0, 1, 2, 2, 1, 3};
+    const Keire::MeshBounds bounds{{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 0.0F}};
+    const std::array submeshes{Keire::MeshSubmesh{0, 3, 0, bounds}, Keire::MeshSubmesh{3, 3, 1, bounds}};
+    const auto material = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
+    const std::array slots{Keire::MeshMaterialSlot{"Body", material}, Keire::MeshMaterialSlot{"Glass", {}}};
+    const std::array lods{Keire::MeshLod{0.0F, 0, 2, bounds}};
+    const auto decoded = Keire::MeshAsset::Decode(Keire::MeshAsset::Encode(vertices, indices, submeshes, slots, lods));
+    REQUIRE(decoded->Submeshes().size() == 2);
+    CHECK(decoded->Submeshes()[1].FirstIndex == 3);
+    CHECK(decoded->Submeshes()[1].MaterialSlot == 1);
+    CHECK(decoded->MaterialSlots()[0].DefaultMaterial == material);
+    CHECK(decoded->MaterialSlots()[1].Name == "Glass");
+    CHECK(decoded->Lods()[0].SubmeshCount == 2);
 }
 
 TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format")
@@ -366,6 +428,33 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Indices()[1] == 1);
     CHECK(mesh->Indices()[2] == 0);
     CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
+}
+
+TEST_CASE("static model import groups conventional mesh names into deterministic LOD ranges")
+{
+    TemporaryDirectory directory("MeshLodImportTests");
+    const auto sourcePath = directory.Path / "lods.obj";
+    {
+        std::ofstream source(sourcePath);
+        source << "o Creature_LOD1\n"
+                  "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+                  "o Creature_LOD0\n"
+                  "v 0 0 0\nv 2 0 0\nv 0 2 0\nf 4 5 6\n";
+    }
+    const auto importer = Keire::CreateMeshAssetImporter();
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    const auto mesh = Keire::MeshAsset::Decode(importer.ContextualImport(context, ReadTestBytes(sourcePath)).Bytes);
+    REQUIRE(mesh->Lods().size() == 2);
+    CHECK(mesh->Lods()[0].FirstSubmesh == 0);
+    CHECK(mesh->Lods()[0].SubmeshCount == 1);
+    CHECK(mesh->Lods()[0].MinimumScreenHeight == doctest::Approx(0.5F));
+    CHECK(mesh->Lods()[0].Bounds.Maximum.X == doctest::Approx(2.0F));
+    CHECK(mesh->Lods()[1].FirstSubmesh == 1);
+    CHECK(mesh->Lods()[1].MinimumScreenHeight == doctest::Approx(0.0F));
 }
 
 TEST_CASE("texture importer emits validated RGBA8 mip chains")
@@ -466,9 +555,12 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     auto renderer = Keire::CreateRef<Keire::MeshRendererComponent>();
     renderer->SetMesh(Keire::MeshAsset::CubeId());
     renderer->SetMaterial(Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000002"));
+    renderer->SetMaterial(2, Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000003"));
     renderer->SetTint({0.25F, 0.55F, 1.0F, 1.0F});
     CHECK(renderer->Visible());
     CHECK(renderer->Mesh() == Keire::MeshAsset::CubeId());
+    CHECK(renderer->Materials().size() == 3);
+    CHECK(renderer->Material(2) == Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000003"));
     CHECK_THROWS_AS(renderer->SetTint({2.0F, 0.0F, 0.0F, 1.0F}), std::invalid_argument);
 
     auto light = Keire::CreateRef<Keire::DirectionalLightComponent>();
@@ -480,4 +572,21 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     CHECK(light->UseColorTemperature());
     CHECK(light->ColorTemperatureKelvin() == doctest::Approx(4200.0F));
     CHECK_THROWS_AS(light->SetColorTemperatureKelvin(500.0F), std::invalid_argument);
+
+    auto point = Keire::CreateRef<Keire::PointLightComponent>();
+    point->SetIntensity(12.0F);
+    point->SetRange(18.0F);
+    CHECK(point->Range() == doctest::Approx(18.0F));
+    CHECK_THROWS_AS(point->SetRange(0.0F), std::invalid_argument);
+
+    auto spot = Keire::CreateRef<Keire::SpotLightComponent>();
+    spot->SetRange(25.0F);
+    spot->SetConeAngles(15.0F, 30.0F);
+    CHECK(spot->InnerAngleDegrees() == doctest::Approx(15.0F));
+    CHECK(spot->OuterAngleDegrees() == doctest::Approx(30.0F));
+    CHECK_THROWS_AS(spot->SetConeAngles(45.0F, 30.0F), std::invalid_argument);
+
+    const auto registry = Keire::ComponentRegistry::CreateDefault();
+    CHECK(registry->Contains(Keire::PointLightComponent::StaticType()));
+    CHECK(registry->Contains(Keire::SpotLightComponent::StaticType()));
 }

@@ -3,6 +3,8 @@
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
+#include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "KeireInternal/SceneState.h"
@@ -212,6 +214,8 @@ namespace Keire
         result->Register(CreateTransformComponentRegistration());
         result->Register(CreateCameraComponentRegistration());
         result->Register(CreateDirectionalLightComponentRegistration());
+        result->Register(CreatePointLightComponentRegistration());
+        result->Register(CreateSpotLightComponentRegistration());
         result->Register(CreateMeshRendererComponentRegistration());
         return result;
     }

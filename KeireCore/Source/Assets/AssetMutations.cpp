@@ -55,21 +55,14 @@ namespace Keire
         std::error_code ignored;
         std::filesystem::remove(validationMetadata, ignored);
         std::filesystem::create_directories(destination.parent_path());
-        const auto temporary = Detail::PathWithSuffix(destination, ".tmp");
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        if (!stream || (!sourceBytes.empty() && !stream.write(reinterpret_cast<const char*>(sourceBytes.data()),
-                                                              static_cast<std::streamsize>(sourceBytes.size()))))
-            throw std::runtime_error("Could not create asset source.");
-        stream.close();
         try
         {
-            Detail::AtomicReplace(temporary, destination);
+            Detail::WriteFileAtomically(destination, sourceBytes);
             WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings);
         }
         catch (...)
         {
             std::error_code cleanupError;
-            std::filesystem::remove(temporary, cleanupError);
             std::filesystem::remove(destination, cleanupError);
             std::filesystem::remove(metadata, cleanupError);
             throw;

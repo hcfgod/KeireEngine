@@ -2,6 +2,7 @@
 
 #include "Keire/BuildInfo.h"
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
@@ -1384,13 +1385,7 @@ namespace Keire
                             {"asset", m_Impl->State->AssetIdValue.ToString()},
                             {"overrides", std::move(overrides)}};
         std::filesystem::create_directories(path.parent_path());
-        const auto temporary = path.string() + ".tmp";
-        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-        stream << document.dump(2) << '\n';
-        stream.close();
-        if (!stream)
-            throw std::runtime_error("Could not persist input binding overrides.");
-        Detail::AtomicReplace(temporary, path);
+        Detail::WriteTextFileAtomically(path, document.dump(2) + '\n');
     }
 
     std::size_t InputActionContext::LoadBindingOverrides(const std::string_view profile)

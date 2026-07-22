@@ -82,6 +82,9 @@ $manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PR
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
+if ($parsedManifest.commit -ne $commit -or $parsedManifest.commit -ne (Get-GitHeadCommit $Root "unknown")) {
+    throw "Package manifest commit does not match the packaging worktree HEAD."
+}
 if ([bool]$parsedManifest.dirty -ne $dirty -or [bool]$parsedManifest.developmentArtifact -ne $developmentArtifact) {
     throw "Package manifest cleanliness flags do not match the package policy."
 }

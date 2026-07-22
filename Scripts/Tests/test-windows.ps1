@@ -159,9 +159,11 @@ Assert-True ($rootPremake.Contains('Scripts/Premake/HeaderDependencies.lua') -an
 Assert-True ($headerDependencies.Contains('../../Build/Projects/EnTT') -and $headerDependencies.Contains('../../Build/Projects/GLM') -and $headerDependencies.Contains('warnings "Off"')) "Header-only dependency IDE and warning policy"
 $corePremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\premake5.lua") -Raw
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
+$hubPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\premake5.lua") -Raw
 $testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5.lua") -Raw
 Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
 Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
+Assert-True ($hubPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET }')) "Hub rebuilds its editor runtime dependency"
 Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') -and $corePremake.Contains('Source/ECS/Components/MeshRendererComponent.cpp')) "Explicit built-in component translation units"
 Assert-True ($corePremake.Contains('builtin-shaders.ps1') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
@@ -255,7 +257,7 @@ Assert-True ($packageScript.Contains('zstandard-LICENSE.txt') -and $packageScrip
 Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Contains('$Lock.ENTT_COMMIT') -and $packageScript.Contains('glm-COPYING.txt') -and $packageScript.Contains('$Lock.GLM_COMMIT')) "ECS and math package metadata and attribution"
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 Assert-True ($packageScript.Contains('assimp-LICENSE.txt') -and $packageScript.Contains('stb-LICENSE.txt') -and $packageScript.Contains('$Lock.ASSIMP_COMMIT') -and $packageScript.Contains('$Lock.STB_COMMIT')) "Asset importer package metadata and attribution"
-Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty')) "Asset worker and clean package policy"
+Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty') -and $packageScript.Contains('manifest commit does not match')) "Asset worker and clean package policy"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and $packageConfig.Contains('"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}" SDL3::SDL3-static')) "Private archive CMake transitive link"
 Assert-True (-not $packageConfig.Contains('include;${_core_sdk_prefix}/third-party')) "SDK omits general third-party include path"

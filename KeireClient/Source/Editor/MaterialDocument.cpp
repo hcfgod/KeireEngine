@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/MaterialDocument.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 #include <stdexcept>
 #include <utility>
@@ -90,6 +91,19 @@ namespace KeireEditor
         Keire::ValidateMaterialAgainstShader(replacement, *m_ShaderDefinition);
         m_Definition = std::move(replacement);
         m_LastChangedProperty = property;
+        return true;
+    }
+
+    bool MaterialDocument::SetSurface(const Keire::MaterialSurfaceState surface)
+    {
+        if (surface.AlphaMode > Keire::MaterialAlphaMode::Blend || !std::isfinite(surface.AlphaCutoff) ||
+            surface.AlphaCutoff < 0.0F || surface.AlphaCutoff > 1.0F)
+            throw std::invalid_argument("Material surface state is invalid.");
+        if (m_Definition.Surface == surface && m_Definition.SchemaVersion >= 2)
+            return false;
+        m_Definition.SchemaVersion = 2;
+        m_Definition.Surface = surface;
+        m_LastChangedProperty = "$surface";
         return true;
     }
 

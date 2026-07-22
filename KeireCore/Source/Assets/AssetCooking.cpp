@@ -215,11 +215,7 @@ namespace Keire
                                     {"compressionLevel", profile.CompressionLevel},
                                     {"maximumPackBytes", profile.MaximumPackBytes},
                                     {"strict", profile.Strict}};
-            std::ofstream profileStream(temporary / "build-profile.json", std::ios::binary | std::ios::trunc);
-            profileStream << buildProfile.dump(2) << '\n';
-            profileStream.close();
-            if (!profileStream)
-                throw std::runtime_error("Could not write the asset build profile.");
+            Detail::WriteTextFileAtomically(temporary / "build-profile.json", buildProfile.dump(2) + '\n');
             std::filesystem::create_directories(destination.parent_path());
             ThrowIfOperationCancelled(cancellation);
             ReportOperationProgress(progress, AssetOperationPhase::Publishing, entries.size(), entries.size(),

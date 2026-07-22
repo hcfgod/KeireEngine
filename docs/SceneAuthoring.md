@@ -1,5 +1,13 @@
 # Scene Authoring
 
+Inspector and Hierarchy authoring is routed through `SceneDocument` commands. Commands resolve the active Edit or
+Play scene, validate entity/component membership and registry property types, update selection after structural
+changes, and preserve the existing undo transaction created by the invoking editor control. Mesh Renderer authoring
+supports named indexed material slots plus cast/receive-shadow flags; the slot-zero Material control remains
+compatible with existing scenes. Point Light and Spot Light components can be created from the Hierarchy or generic
+component registry and edited by the component-driven Inspector. Scene icons are pickable for both types; selecting a
+point light shows its three-axis range sphere, while selecting a spot light shows its direction and outer cone.
+
 ## Editing during Play mode
 
 The Hierarchy, Inspector, transform gizmos, and Scene viewport asset drops target the isolated runtime scene while

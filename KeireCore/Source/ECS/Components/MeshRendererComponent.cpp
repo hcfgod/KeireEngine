@@ -4,6 +4,7 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 
 #include <stdexcept>
+#include <string>
 
 namespace Keire
 {
@@ -37,9 +38,27 @@ namespace Keire
         NotifyChanged();
     }
 
-    void MeshRendererComponent::SetMaterial(const AssetId material)
+    void MeshRendererComponent::SetMaterial(const AssetId material) { SetMaterial(0, material); }
+
+    void MeshRendererComponent::SetMaterial(const std::size_t slot, const AssetId material)
     {
-        m_Material = material;
+        if (slot >= 256U)
+            throw std::out_of_range("Mesh Renderer material slot exceeds its limit.");
+        if (m_Materials.size() <= slot)
+            m_Materials.resize(slot + 1U);
+        m_Materials[slot] = material;
+        while (!m_Materials.empty() && !m_Materials.back())
+            m_Materials.pop_back();
+        NotifyChanged();
+    }
+
+    void MeshRendererComponent::SetMaterials(const std::span<const AssetId> materials)
+    {
+        if (materials.size() > 256U)
+            throw std::invalid_argument("Mesh Renderer material overrides exceed their limit.");
+        m_Materials.assign(materials.begin(), materials.end());
+        while (!m_Materials.empty() && !m_Materials.back())
+            m_Materials.pop_back();
         NotifyChanged();
     }
 
@@ -57,12 +76,26 @@ namespace Keire
         NotifyChanged();
     }
 
+    void MeshRendererComponent::SetCastShadows(const bool enabled)
+    {
+        m_CastShadows = enabled;
+        NotifyChanged();
+    }
+
+    void MeshRendererComponent::SetReceiveShadows(const bool enabled)
+    {
+        m_ReceiveShadows = enabled;
+        NotifyChanged();
+    }
+
     void MeshRendererComponent::Reset()
     {
         m_Mesh = {};
-        m_Material = {};
+        m_Materials.clear();
         m_Tint = {0.25F, 0.55F, 1.0F, 1.0F};
         m_Visible = true;
+        m_CastShadows = true;
+        m_ReceiveShadows = true;
         NotifyChanged();
     }
 
@@ -72,6 +105,7 @@ namespace Keire
         result.Type = MeshRendererComponent::StaticType();
         result.Name = "Mesh Renderer";
         result.Category = "Rendering";
+        result.SchemaVersion = 2;
         result.RequiredComponents = {TransformComponent::StaticType()};
         result.Properties = {
             {"mesh", "Mesh", "Rendering", ComponentPropertyKind::Asset, false, {}, {}, 0.1, MeshAsset::StaticType()},
@@ -85,25 +119,56 @@ namespace Keire
              0.1,
              MaterialAsset::StaticType()},
             {"tint", "Tint", "Rendering", ComponentPropertyKind::Color},
-            {"visible", "Visible", "Rendering", ComponentPropertyKind::Boolean}};
+            {"visible", "Visible", "Rendering", ComponentPropertyKind::Boolean},
+            {"castShadows", "Cast Shadows", "Lighting", ComponentPropertyKind::Boolean},
+            {"receiveShadows", "Receive Shadows", "Lighting", ComponentPropertyKind::Boolean}};
         result.Factory = [] { return Ref<Component>(CreateRef<MeshRendererComponent>()); };
         result.Serialize = [](const Component& component)
         {
             const auto& renderer = dynamic_cast<const MeshRendererComponent&>(component);
-            return ComponentPropertyBag{{"mesh", renderer.m_Mesh},
-                                        {"material", renderer.m_Material},
+            ComponentPropertyBag values{{"mesh", renderer.m_Mesh},
+                                        {"material", renderer.Material()},
                                         {"tint", renderer.m_Tint},
-                                        {"visible", renderer.m_Visible}};
+                                        {"visible", renderer.m_Visible},
+                                        {"castShadows", renderer.m_CastShadows},
+                                        {"receiveShadows", renderer.m_ReceiveShadows}};
+            for (std::size_t slot = 1; slot < renderer.m_Materials.size(); ++slot)
+                values.emplace("material." + std::to_string(slot), renderer.m_Materials[slot]);
+            return values;
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1)
+            if (version != 1 && version != 2)
                 throw std::invalid_argument("Unsupported Mesh Renderer component schema version.");
             auto& renderer = dynamic_cast<MeshRendererComponent&>(component);
             renderer.SetMesh(ReadMeshProperty(values, "mesh", AssetId{}));
             renderer.SetMaterial(ReadMeshProperty(values, "material", AssetId{}));
+            if (version >= 2)
+            {
+                for (std::size_t slot = 1; slot < 256U; ++slot)
+                {
+                    const auto found = values.find("material." + std::to_string(slot));
+                    if (found == values.end())
+                        continue;
+                    if (const auto* material = std::get_if<AssetId>(&found->second))
+                        renderer.SetMaterial(slot, *material);
+                    else
+                        throw std::invalid_argument("Mesh Renderer material override has an incompatible type.");
+                }
+            }
             renderer.SetTint(ReadMeshProperty(values, "tint", Color{0.25F, 0.55F, 1.0F, 1.0F}));
             renderer.SetVisible(ReadMeshProperty(values, "visible", true));
+            renderer.SetCastShadows(ReadMeshProperty(values, "castShadows", true));
+            renderer.SetReceiveShadows(ReadMeshProperty(values, "receiveShadows", true));
+        };
+        result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
+        {
+            if (version != 1)
+                throw std::invalid_argument("Unsupported Mesh Renderer component schema migration.");
+            auto migrated = values;
+            migrated.emplace("castShadows", true);
+            migrated.emplace("receiveShadows", true);
+            return migrated;
         };
         return result;
     }

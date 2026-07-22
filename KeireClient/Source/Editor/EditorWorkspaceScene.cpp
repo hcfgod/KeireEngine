@@ -856,6 +856,8 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         camera.View = Keire::Math::Inverse(selected->Transform->WorldMatrix());
         camera.Projection = selected->Camera->ProjectionMatrix(aspect);
         camera.ClearColor = selected->Camera->ClearColor();
+        camera.NearPlane = selected->Camera->NearPlane();
+        camera.FarPlane = selected->Camera->FarPlane();
         m_GameRenderView->SetCamera(camera);
         Owner().Renderer()->Submit({scene, m_GameRenderView, false, m_ProjectSettingsDocument->Settings()});
         ui.Image(m_GameRenderView->Surface(), size);

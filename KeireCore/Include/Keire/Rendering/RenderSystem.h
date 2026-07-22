@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/Assets/Asset.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 
@@ -91,14 +92,25 @@ namespace Keire
         Matrix4 View;
         Matrix4 Projection;
         Color ClearColor{0.08F, 0.09F, 0.11F, 1.0F};
+        float NearPlane = 0.1F;
+        float FarPlane = 1000.0F;
     };
 
     struct RenderEnvironmentSettings
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         Color AmbientColor{0.20F, 0.22F, 0.26F, 1.0F};
         float AmbientIntensity = 0.75F;
         float Exposure = 1.0F;
+        AssetId Environment;
+        float EnvironmentRotationDegrees = 0.0F;
+        float EnvironmentDiffuseIntensity = 1.0F;
+        float EnvironmentSpecularIntensity = 1.0F;
+        bool SkyVisible = true;
+        float DirectionalShadowDistance = 100.0F;
+        std::uint32_t DirectionalShadowCascadeCount = 4;
+        std::uint32_t DirectionalShadowResolution = 2048;
+        float DirectionalShadowSplitLambda = 0.65F;
 
         auto operator<=>(const RenderEnvironmentSettings&) const noexcept = default;
     };
@@ -140,6 +152,14 @@ namespace Keire
         std::uint32_t Surfaces = 0;
         std::uint32_t DrawCalls = 0;
         std::uint32_t Triangles = 0;
+        std::uint32_t VisibleSubmeshes = 0;
+        std::uint32_t CulledSubmeshes = 0;
+        std::uint32_t InstanceBatches = 0;
+        std::uint32_t VisibleLocalLights = 0;
+        std::uint32_t OverflowedLightTiles = 0;
+        std::uint32_t DirectionalShadowCascades = 0;
+        std::uint32_t PlannedFrameGraphPasses = 0;
+        float RendererLatencyMilliseconds = 0.0F;
     };
 
     class KEIRE_API RenderSystem final : public RefCounted

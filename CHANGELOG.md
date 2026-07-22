@@ -4,6 +4,21 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Added the version-3 static mesh format with ordered LODs, submesh ranges and bounds, stable material-slot indices,
+  and v1/v2 compatibility. Model import preserves Assimp slots and recognizes `_LOD0`, `_LOD1`, and later groups.
+- Materials now serialize opaque, masked, or premultiplied-blend surface state, alpha cutoff, and double-sided
+  rasterization. Mesh renderers support indexed material overrides and cast/receive-shadow controls.
+- Static scene submission now performs per-submesh frustum culling, LOD selection, deterministic transparent sorting,
+  and per-slot binding. Point/spot lights now illuminate PBR materials with bounded attenuation/cone evaluation on
+  D3D12 and Vulkan, expose Scene range/cone gizmos, and retain deterministic 16x16 Forward+ CPU tile diagnostics.
+- Hub builds now depend on the editor (which depends on the Asset Worker), preventing stale editor binaries from
+  loading newly compiled shader assets with a mismatched graphics binding ABI.
+- Added the private typed ten-pass static-scene frame graph with deterministic hazard and lifetime validation.
+- Inspector and Hierarchy mutations now route through validated `SceneDocument` commands, including Play/Edit
+  targeting, component properties, material slots, shadows, and point/spot-light creation.
+- Consolidated durable atomic file publication for settings, thumbnails, input overrides, scene/project settings,
+  asset cache objects, catalogs, and build profiles. Packaging removes stale output and verifies manifest `HEAD`.
+
 - Windows managed clients and private tools now reconstruct the process command line with `CommandLineToArgvW` and
   normalize it to UTF-8 at one shared boundary before parsing. Asset-worker protocol and publication paths also append
   suffixes without narrowing native paths, so editor operations work from Unicode checkouts.

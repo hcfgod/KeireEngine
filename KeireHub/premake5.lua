@@ -25,6 +25,8 @@ project(ProjectConfig.HUB_TARGET)
         "KEIRE_EDITOR_TARGET=\"" .. ProjectConfig.CLIENT_TARGET .. "\""
     }
 
+    dependson { ProjectConfig.CLIENT_TARGET }
+
     LinkKeireCore()
 
     LinkSDL3()

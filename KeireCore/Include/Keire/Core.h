@@ -13,6 +13,8 @@
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
+#include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "Keire/EntryPoint.h"

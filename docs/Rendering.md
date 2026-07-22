@@ -1,5 +1,28 @@
 # Rendering
 
+## Static-scene submission contracts
+
+The renderer consumes mesh schema v3 as ordered LOD, submesh, and material-slot records. Schema v1 and v2 meshes
+decode as one LOD with one submesh and one slot. Submission selects a projected-height LOD, frustum-tests its submesh
+bounds, resolves indexed material overrides or imported defaults, and creates a deterministic draw order. Opaque and
+masked work is state sorted; premultiplied blend work remains depth-tested, disables depth writes, and sorts
+back-to-front with stable entity/submesh tie breaking.
+
+Material schema v2 owns `Opaque`, `Mask`, and `Blend` alpha mode, alpha cutoff, and double-sided state. Mask surfaces
+write depth and reject fragments below their cutoff. A shader schema-v1 blend flag remains a compatibility default.
+Failed material or shader revisions retain the complete last-good binding.
+
+The private frame graph declares resource upload, directional-shadow, Forward+ culling, opaque/mask, sky,
+transparency, ACES tone-map, overlay, readback, and presentation passes. Its compiler validates transient reads,
+derives deterministic hazard order, and records resource lifetimes. It is an internal backend contract, not a public
+render-graph API.
+
+Point and spot lights are serializable registry components. Scene packets cap visible local lights at 4,096 and build
+deterministic 16x16 CPU tile lists with 128 lights per tile and explicit overflow statistics. This is the bounded
+reference fallback used when the GPU compute route is unavailable. PBR draws consume the first deterministic 128
+visible local lights through the optional fragment `b2/space3` block, using smooth range attenuation and inner/outer
+spot-cone falloff on D3D12 and Vulkan. GPU tile-list consumption remains the next Forward+ step.
+
 `RenderSystem.cpp` is the stable PImpl facade. Private compiled implementation units separate backend data types,
 device/frame and fence lifecycle, surface/pipeline management, renderer-owned asset caches, and scene recording behind
 `RenderBackendInternal.h`. The split does not change resource ownership: replacement resources remain transactional,

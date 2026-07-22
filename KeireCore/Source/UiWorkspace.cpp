@@ -1,5 +1,6 @@
 #include "Keire/UiWorkspace.h"
 
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include "Keire/BuildInfo.h"
@@ -344,40 +345,14 @@ namespace Keire
         {
             if (contents.size() > MaximumDocumentBytes)
                 throw UiError("WriteWorkspace", "document exceeds the 1 MiB safety limit: " + path.string());
-            if (const auto parent = path.parent_path(); !parent.empty())
-                std::filesystem::create_directories(parent);
-
-            auto temporary = path;
-            temporary += ".tmp";
-            auto backup = path;
-            backup += ".bak";
+            try
             {
-                std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-                output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
-                if (!output)
-                    throw UiError("WriteWorkspace", "cannot write " + temporary.string());
+                Detail::WriteTextFileAtomically(path, contents);
             }
-
-            std::error_code error;
-            std::filesystem::rename(temporary, path, error);
-            if (!error)
-                return;
-            error.clear();
-            std::filesystem::remove(backup, error);
-            error.clear();
-            if (std::filesystem::exists(path))
-                std::filesystem::rename(path, backup, error);
-            if (!error)
-                std::filesystem::rename(temporary, path, error);
-            if (error)
+            catch (const std::exception& exception)
             {
-                std::error_code ignored;
-                if (std::filesystem::exists(backup) && !std::filesystem::exists(path))
-                    std::filesystem::rename(backup, path, ignored);
-                std::filesystem::remove(temporary, ignored);
-                throw UiError("WriteWorkspace", "cannot replace " + path.string() + ": " + error.message());
+                throw UiError("WriteWorkspace", exception.what());
             }
-            std::filesystem::remove(backup, error);
         }
 
         void EnsureExtension(std::filesystem::path& path, const std::string_view extension)

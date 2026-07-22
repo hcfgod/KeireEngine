@@ -373,7 +373,7 @@ namespace Keire::RenderBackend
         information.format = format;
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_samplers = vertex ? 0 : textureCount;
-        information.num_uniform_buffers = vertex ? 1 : 2;
+        information.num_uniform_buffers = vertex ? 1 : 3;
         SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
         if (!shader)
             throw std::runtime_error("SDL_CreateGPUShader(asset) failed: " + LastSdlError());
@@ -381,7 +381,8 @@ namespace Keire::RenderBackend
     }
 
     SDL_GPUGraphicsPipeline* RenderSharedState::CreateAssetPipeline(const ShaderAssetDefinition& definition,
-                                                                    const SDL_GPUSampleCount samples)
+                                                                    const SDL_GPUSampleCount samples,
+                                                                    const MaterialSurfaceState surface)
     {
         SDL_GPUShader* vertex = CreateAssetShader(definition, true);
         SDL_GPUShader* fragment = nullptr;
@@ -390,13 +391,13 @@ namespace Keire::RenderBackend
             fragment = CreateAssetShader(definition, false);
             SDL_GPUColorTargetDescription color{};
             color.format = ColorFormat;
-            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
             color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
             color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
             color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-            color.blend_state.enable_blend = definition.Blend;
+            color.blend_state.enable_blend = surface.AlphaMode == MaterialAlphaMode::Blend;
 
             SDL_GPUVertexBufferDescription buffer{};
             buffer.slot = 0;
@@ -421,15 +422,17 @@ namespace Keire::RenderBackend
                                              : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
             information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
             information.rasterizer_state.cull_mode =
-                definition.Culling == ShaderCullMode::Front  ? SDL_GPU_CULLMODE_FRONT
-                : definition.Culling == ShaderCullMode::Back ? SDL_GPU_CULLMODE_BACK
-                                                             : SDL_GPU_CULLMODE_NONE;
+                surface.DoubleSided                           ? SDL_GPU_CULLMODE_NONE
+                : definition.Culling == ShaderCullMode::Front ? SDL_GPU_CULLMODE_FRONT
+                : definition.Culling == ShaderCullMode::Back  ? SDL_GPU_CULLMODE_BACK
+                                                              : SDL_GPU_CULLMODE_NONE;
             information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
             information.rasterizer_state.enable_depth_clip = true;
             information.multisample_state.sample_count = samples;
             information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
             information.depth_stencil_state.enable_depth_test = definition.DepthTest;
-            information.depth_stencil_state.enable_depth_write = definition.DepthWrite;
+            information.depth_stencil_state.enable_depth_write =
+                definition.DepthWrite && surface.AlphaMode != MaterialAlphaMode::Blend;
             information.target_info.color_target_descriptions = &color;
             information.target_info.num_color_targets = 1;
             information.target_info.depth_stencil_format = DepthFormat;

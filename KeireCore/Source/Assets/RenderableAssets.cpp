@@ -1,6 +1,8 @@
 #include "Keire/Assets/RenderingAssets.h"
 
 #include <assimp/Importer.hpp>
+#include <assimp/config.h>
+#include <assimp/material.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #include <nlohmann/json.hpp>
@@ -17,6 +19,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -27,10 +30,13 @@ namespace Keire
         using Json = nlohmann::json;
         constexpr std::array<char, 8> MeshMagic{'K', 'E', 'I', 'R', 'E', 'M', 'S', 'H'};
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
-        constexpr std::uint32_t MeshVersion = 2;
+        constexpr std::uint32_t MeshVersion = 3;
         constexpr std::uint32_t TextureVersion = 2;
         constexpr std::size_t MaximumMeshVertices = 16U * 1024U * 1024U;
         constexpr std::size_t MaximumMeshIndices = 48U * 1024U * 1024U;
+        constexpr std::size_t MaximumMeshSubmeshes = 1024U * 1024U;
+        constexpr std::size_t MaximumMeshMaterialSlots = 16U * 1024U;
+        constexpr std::size_t MaximumMeshLods = 16U;
         constexpr std::size_t MaximumTextureDimension = 16U * 1024U;
         constexpr std::size_t MaximumTextureBytes = 1024U * 1024U * 1024U;
 
@@ -47,6 +53,15 @@ namespace Keire
         void AppendFloat(std::vector<std::byte>& bytes, const float value)
         {
             AppendUnsigned(bytes, std::bit_cast<std::uint32_t>(value));
+        }
+
+        void AppendString(std::vector<std::byte>& bytes, const std::string_view value)
+        {
+            if (value.size() > 1024U)
+                throw std::invalid_argument("Mesh material slot name exceeds its 1 KiB limit.");
+            AppendUnsigned(bytes, static_cast<std::uint32_t>(value.size()));
+            const auto characters = std::as_bytes(std::span(value.data(), value.size()));
+            bytes.insert(bytes.end(), characters.begin(), characters.end());
         }
 
         class BinaryReader final
@@ -74,6 +89,18 @@ namespace Keire
             }
 
             [[nodiscard]] float Float() { return std::bit_cast<float>(UnsignedValue<std::uint32_t>()); }
+
+            [[nodiscard]] std::string String(const std::size_t maximum)
+            {
+                const auto length = UnsignedValue<std::uint32_t>();
+                if (length > maximum || length > Remaining())
+                    throw std::invalid_argument("Asset string exceeds its limit or is truncated.");
+                std::string result(length, '\0');
+                if (length != 0)
+                    std::memcpy(result.data(), m_Bytes.data() + m_Offset, length);
+                m_Offset += length;
+                return result;
+            }
 
             [[nodiscard]] std::vector<std::byte> Bytes(const std::size_t count)
             {
@@ -124,6 +151,73 @@ namespace Keire
             if (std::ranges::any_of(indices,
                                     [vertices](const std::uint32_t index) { return index >= vertices.size(); }))
                 throw std::invalid_argument("Mesh contains an out-of-range index.");
+        }
+
+        void ValidateMeshStructure(const std::span<const std::uint32_t> indices,
+                                   const std::span<const MeshSubmesh> submeshes,
+                                   const std::span<const MeshMaterialSlot> materialSlots,
+                                   const std::span<const MeshLod> lods)
+        {
+            if (submeshes.empty() || submeshes.size() > MaximumMeshSubmeshes || materialSlots.empty() ||
+                materialSlots.size() > MaximumMeshMaterialSlots || lods.empty() || lods.size() > MaximumMeshLods)
+                throw std::invalid_argument("Mesh submesh, material-slot, or LOD counts are invalid.");
+            for (const auto& slot : materialSlots)
+                if (slot.Name.size() > 1024U)
+                    throw std::invalid_argument("Mesh material slot name exceeds its 1 KiB limit.");
+            for (const auto& submesh : submeshes)
+            {
+                const auto end = static_cast<std::uint64_t>(submesh.FirstIndex) + submesh.IndexCount;
+                if (submesh.IndexCount == 0 || submesh.IndexCount % 3U != 0 || end > indices.size() ||
+                    submesh.MaterialSlot >= materialSlots.size() || !Math::IsFinite(submesh.Bounds.Minimum) ||
+                    !Math::IsFinite(submesh.Bounds.Maximum))
+                    throw std::invalid_argument("Mesh submesh range, material slot, or bounds are invalid.");
+            }
+            float previousThreshold = 1.0F;
+            for (const auto& lod : lods)
+            {
+                const auto end = static_cast<std::uint64_t>(lod.FirstSubmesh) + lod.SubmeshCount;
+                if (!std::isfinite(lod.MinimumScreenHeight) || lod.MinimumScreenHeight < 0.0F ||
+                    lod.MinimumScreenHeight > previousThreshold || lod.SubmeshCount == 0 || end > submeshes.size() ||
+                    !Math::IsFinite(lod.Bounds.Minimum) || !Math::IsFinite(lod.Bounds.Maximum))
+                    throw std::invalid_argument("Mesh LOD range, threshold, or bounds are invalid.");
+                previousThreshold = lod.MinimumScreenHeight;
+            }
+        }
+
+        [[nodiscard]] std::tuple<std::vector<MeshSubmesh>, std::vector<MeshMaterialSlot>, std::vector<MeshLod>>
+        DefaultMeshStructure(const std::span<const std::uint32_t> indices, const MeshBounds bounds)
+        {
+            std::vector<MeshSubmesh> submeshes{{0, static_cast<std::uint32_t>(indices.size()), 0, bounds}};
+            std::vector<MeshMaterialSlot> materials{{"Default", {}}};
+            std::vector<MeshLod> lods{{0.0F, 0, 1, bounds}};
+            return {std::move(submeshes), std::move(materials), std::move(lods)};
+        }
+
+        [[nodiscard]] std::uint32_t MeshLodIndex(const std::string_view name)
+        {
+            std::string normalized(name);
+            std::ranges::transform(normalized, normalized.begin(),
+                                   [](const unsigned char value) { return static_cast<char>(std::toupper(value)); });
+            const auto marker = normalized.rfind("_LOD");
+            if (marker == std::string::npos || marker + 4U == normalized.size())
+                return 0;
+            std::uint32_t result = 0;
+            for (std::size_t index = marker + 4U; index < normalized.size(); ++index)
+            {
+                const auto value = normalized[index];
+                if (value < '0' || value > '9' || result > 100U)
+                    return 0;
+                result = result * 10U + static_cast<std::uint32_t>(value - '0');
+            }
+            return std::min(result, static_cast<std::uint32_t>(MaximumMeshLods - 1U));
+        }
+
+        [[nodiscard]] MeshBounds CombineBounds(const MeshBounds first, const MeshBounds second) noexcept
+        {
+            return {{std::min(first.Minimum.X, second.Minimum.X), std::min(first.Minimum.Y, second.Minimum.Y),
+                     std::min(first.Minimum.Z, second.Minimum.Z)},
+                    {std::max(first.Maximum.X, second.Maximum.X), std::max(first.Maximum.Y, second.Maximum.Y),
+                     std::max(first.Maximum.Z, second.Maximum.Z)}};
         }
 
         [[nodiscard]] std::pair<std::vector<MeshVertex>, std::vector<std::uint32_t>> CubeGeometry(const Color color)
@@ -528,6 +622,7 @@ namespace Keire
         m_Vertices = std::move(vertices);
         m_Indices = std::move(indices);
         m_Bounds = CalculateBounds(m_Vertices);
+        std::tie(m_Submeshes, m_MaterialSlots, m_Lods) = DefaultMeshStructure(m_Indices, m_Bounds);
     }
 
     MeshAsset::MeshAsset(std::vector<MeshVertex> vertices, std::vector<std::uint32_t> indices, const MeshBounds bounds)
@@ -537,11 +632,30 @@ namespace Keire
         const auto calculated = CalculateBounds(m_Vertices);
         if (calculated.Minimum != bounds.Minimum || calculated.Maximum != bounds.Maximum)
             throw std::invalid_argument("Mesh bounds do not match its vertices.");
+        std::tie(m_Submeshes, m_MaterialSlots, m_Lods) = DefaultMeshStructure(m_Indices, m_Bounds);
+    }
+
+    MeshAsset::MeshAsset(std::vector<MeshVertex> vertices, std::vector<std::uint32_t> indices,
+                         std::vector<MeshSubmesh> submeshes, std::vector<MeshMaterialSlot> materialSlots,
+                         std::vector<MeshLod> lods, const MeshBounds bounds)
+        : m_Mesh(BuiltinMesh::Error), m_Vertices(std::move(vertices)), m_Indices(std::move(indices)),
+          m_Submeshes(std::move(submeshes)), m_MaterialSlots(std::move(materialSlots)), m_Lods(std::move(lods)),
+          m_Bounds(bounds)
+    {
+        ValidateMesh(m_Vertices, m_Indices);
+        ValidateMeshStructure(m_Indices, m_Submeshes, m_MaterialSlots, m_Lods);
+        if (CalculateBounds(m_Vertices) != bounds)
+            throw std::invalid_argument("Mesh bounds do not match its vertices.");
     }
 
     std::size_t MeshAsset::ResidentBytes() const noexcept
     {
-        return sizeof(*this) + m_Vertices.size() * sizeof(MeshVertex) + m_Indices.size() * sizeof(std::uint32_t);
+        auto result = sizeof(*this) + m_Vertices.size() * sizeof(MeshVertex) +
+                      m_Indices.size() * sizeof(std::uint32_t) + m_Submeshes.size() * sizeof(MeshSubmesh) +
+                      m_Lods.size() * sizeof(MeshLod) + m_MaterialSlots.size() * sizeof(MeshMaterialSlot);
+        for (const auto& slot : m_MaterialSlots)
+            result += slot.Name.size();
+        return result;
     }
 
     Ref<MeshAsset> MeshAsset::Cube() { return CreateRef<MeshAsset>(BuiltinMesh::Cube); }
@@ -550,7 +664,19 @@ namespace Keire
     std::vector<std::byte> MeshAsset::Encode(const std::span<const MeshVertex> vertices,
                                              const std::span<const std::uint32_t> indices)
     {
+        const auto bounds = CalculateBounds(vertices);
+        auto [submeshes, materialSlots, lods] = DefaultMeshStructure(indices, bounds);
+        return Encode(vertices, indices, submeshes, materialSlots, lods);
+    }
+
+    std::vector<std::byte> MeshAsset::Encode(const std::span<const MeshVertex> vertices,
+                                             const std::span<const std::uint32_t> indices,
+                                             const std::span<const MeshSubmesh> submeshes,
+                                             const std::span<const MeshMaterialSlot> materialSlots,
+                                             const std::span<const MeshLod> lods)
+    {
         ValidateMesh(vertices, indices);
+        ValidateMeshStructure(indices, submeshes, materialSlots, lods);
         const auto bounds = CalculateBounds(vertices);
         std::vector<std::byte> result;
         result.reserve(48U + vertices.size() * 64U + indices.size() * sizeof(std::uint32_t));
@@ -562,6 +688,33 @@ namespace Keire
         for (const float value : {bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z, bounds.Maximum.X,
                                   bounds.Maximum.Y, bounds.Maximum.Z})
             AppendFloat(result, value);
+        AppendUnsigned(result, static_cast<std::uint32_t>(submeshes.size()));
+        AppendUnsigned(result, static_cast<std::uint32_t>(materialSlots.size()));
+        AppendUnsigned(result, static_cast<std::uint32_t>(lods.size()));
+        for (const auto& submesh : submeshes)
+        {
+            AppendUnsigned(result, submesh.FirstIndex);
+            AppendUnsigned(result, submesh.IndexCount);
+            AppendUnsigned(result, submesh.MaterialSlot);
+            for (const float value : {submesh.Bounds.Minimum.X, submesh.Bounds.Minimum.Y, submesh.Bounds.Minimum.Z,
+                                      submesh.Bounds.Maximum.X, submesh.Bounds.Maximum.Y, submesh.Bounds.Maximum.Z})
+                AppendFloat(result, value);
+        }
+        for (const auto& slot : materialSlots)
+        {
+            AppendString(result, slot.Name);
+            AppendUnsigned(result, slot.DefaultMaterial.High());
+            AppendUnsigned(result, slot.DefaultMaterial.Low());
+        }
+        for (const auto& lod : lods)
+        {
+            AppendFloat(result, lod.MinimumScreenHeight);
+            AppendUnsigned(result, lod.FirstSubmesh);
+            AppendUnsigned(result, lod.SubmeshCount);
+            for (const float value : {lod.Bounds.Minimum.X, lod.Bounds.Minimum.Y, lod.Bounds.Minimum.Z,
+                                      lod.Bounds.Maximum.X, lod.Bounds.Maximum.Y, lod.Bounds.Maximum.Z})
+                AppendFloat(result, value);
+        }
         for (const auto& vertex : vertices)
         {
             for (const float value :
@@ -581,7 +734,7 @@ namespace Keire
         BinaryReader reader(bytes);
         reader.Expect(MeshMagic);
         const auto version = reader.UnsignedValue<std::uint32_t>();
-        if (version != 1 && version != MeshVersion)
+        if (version < 1 || version > MeshVersion)
             throw std::invalid_argument("Mesh asset has an unsupported version.");
         const auto vertexCount = reader.UnsignedValue<std::uint64_t>();
         const auto indexCount = reader.UnsignedValue<std::uint64_t>();
@@ -590,9 +743,51 @@ namespace Keire
             throw std::invalid_argument("Mesh asset counts are invalid.");
         MeshBounds bounds{{reader.Float(), reader.Float(), reader.Float()},
                           {reader.Float(), reader.Float(), reader.Float()}};
+        std::vector<MeshSubmesh> submeshes;
+        std::vector<MeshMaterialSlot> materialSlots;
+        std::vector<MeshLod> lods;
+        if (version >= 3)
+        {
+            const auto submeshCount = reader.UnsignedValue<std::uint32_t>();
+            const auto materialSlotCount = reader.UnsignedValue<std::uint32_t>();
+            const auto lodCount = reader.UnsignedValue<std::uint32_t>();
+            if (submeshCount == 0 || submeshCount > MaximumMeshSubmeshes || materialSlotCount == 0 ||
+                materialSlotCount > MaximumMeshMaterialSlots || lodCount == 0 || lodCount > MaximumMeshLods)
+                throw std::invalid_argument("Mesh asset structure counts are invalid.");
+            submeshes.reserve(submeshCount);
+            for (std::uint32_t index = 0; index < submeshCount; ++index)
+            {
+                MeshSubmesh submesh;
+                submesh.FirstIndex = reader.UnsignedValue<std::uint32_t>();
+                submesh.IndexCount = reader.UnsignedValue<std::uint32_t>();
+                submesh.MaterialSlot = reader.UnsignedValue<std::uint32_t>();
+                submesh.Bounds = {{reader.Float(), reader.Float(), reader.Float()},
+                                  {reader.Float(), reader.Float(), reader.Float()}};
+                submeshes.push_back(submesh);
+            }
+            materialSlots.reserve(materialSlotCount);
+            for (std::uint32_t index = 0; index < materialSlotCount; ++index)
+            {
+                MeshMaterialSlot slot;
+                slot.Name = reader.String(1024U);
+                slot.DefaultMaterial = {reader.UnsignedValue<std::uint64_t>(), reader.UnsignedValue<std::uint64_t>()};
+                materialSlots.push_back(std::move(slot));
+            }
+            lods.reserve(lodCount);
+            for (std::uint32_t index = 0; index < lodCount; ++index)
+            {
+                MeshLod lod;
+                lod.MinimumScreenHeight = reader.Float();
+                lod.FirstSubmesh = reader.UnsignedValue<std::uint32_t>();
+                lod.SubmeshCount = reader.UnsignedValue<std::uint32_t>();
+                lod.Bounds = {{reader.Float(), reader.Float(), reader.Float()},
+                              {reader.Float(), reader.Float(), reader.Float()}};
+                lods.push_back(lod);
+            }
+        }
         const auto vertexSize = version == 1 ? 48U : 64U;
         const auto expected = vertexCount * vertexSize + indexCount * sizeof(std::uint32_t);
-        if (expected > reader.Remaining() || expected != reader.Remaining())
+        if (expected != reader.Remaining())
             throw std::invalid_argument("Mesh asset payload size is invalid.");
         std::vector<MeshVertex> vertices(static_cast<std::size_t>(vertexCount));
         for (auto& vertex : vertices)
@@ -609,7 +804,10 @@ namespace Keire
             index = reader.UnsignedValue<std::uint32_t>();
         if (version == 1)
             GenerateTangents(vertices, indices);
-        return CreateRef<MeshAsset>(std::move(vertices), std::move(indices), bounds);
+        if (version < 3)
+            std::tie(submeshes, materialSlots, lods) = DefaultMeshStructure(indices, bounds);
+        return CreateRef<MeshAsset>(std::move(vertices), std::move(indices), std::move(submeshes),
+                                    std::move(materialSlots), std::move(lods), bounds);
     }
 
     Texture2DAsset::Texture2DAsset(TextureImportSettings settings, std::vector<TextureMipLevel> mips)
@@ -748,6 +946,7 @@ namespace Keire
                 return output;
             }
             Assimp::Importer importer;
+            importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, true);
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
                                            aiProcess_GenSmoothNormals | aiProcess_PreTransformVertices |
                                            aiProcess_CalcTangentSpace | aiProcess_ImproveCacheLocality |
@@ -763,38 +962,91 @@ namespace Keire
                 throw std::invalid_argument("Animated meshes are not supported by the static mesh importer.");
             std::vector<MeshVertex> vertices;
             std::vector<std::uint32_t> indices;
+            std::vector<MeshSubmesh> submeshes;
+            std::vector<MeshMaterialSlot> materialSlots;
+            materialSlots.reserve(std::max(scene->mNumMaterials, 1U));
+            for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
+            {
+                aiString materialName;
+                if (scene->mMaterials[materialIndex]->Get(AI_MATKEY_NAME, materialName) != aiReturn_SUCCESS ||
+                    materialName.length == 0)
+                    materialName = aiString(("Material " + std::to_string(materialIndex + 1U)).c_str());
+                materialSlots.push_back({materialName.C_Str(), {}});
+            }
+            if (materialSlots.empty())
+                materialSlots.push_back({"Default", {}});
+            struct OrderedMesh final
+            {
+                unsigned int Index = 0;
+                std::uint32_t Lod = 0;
+            };
+            std::vector<OrderedMesh> orderedMeshes;
+            orderedMeshes.reserve(scene->mNumMeshes);
             for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
             {
                 const auto* mesh = scene->mMeshes[meshIndex];
-                if (!mesh || mesh->mNumBones != 0 || (mesh->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
-                    throw std::invalid_argument("Static mesh import rejects skinning and non-triangle primitives.");
-                if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
-                    throw std::overflow_error("Merged mesh vertex count exceeds 32-bit indices.");
-                const auto base = static_cast<std::uint32_t>(vertices.size());
-                for (unsigned int vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex)
+                orderedMeshes.push_back({meshIndex, mesh ? MeshLodIndex(mesh->mName.C_Str()) : 0U});
+            }
+            std::ranges::stable_sort(orderedMeshes, {}, &OrderedMesh::Lod);
+            std::vector<std::uint32_t> lodValues;
+            for (const auto ordered : orderedMeshes)
+                if (lodValues.empty() || lodValues.back() != ordered.Lod)
+                    lodValues.push_back(ordered.Lod);
+
+            std::vector<MeshLod> lods;
+            lods.reserve(lodValues.size());
+            std::size_t orderedOffset = 0;
+            for (std::size_t lodPosition = 0; lodPosition < lodValues.size(); ++lodPosition)
+            {
+                const auto firstSubmesh = static_cast<std::uint32_t>(submeshes.size());
+                std::optional<MeshBounds> lodBounds;
+                while (orderedOffset < orderedMeshes.size() &&
+                       orderedMeshes[orderedOffset].Lod == lodValues[lodPosition])
                 {
-                    const auto position = mesh->mVertices[vertexIndex];
-                    const auto normal = mesh->mNormals ? mesh->mNormals[vertexIndex] : aiVector3D{0.0F, 1.0F, 0.0F};
-                    const auto uv = mesh->mTextureCoords[0] ? mesh->mTextureCoords[0][vertexIndex] : aiVector3D{};
-                    const auto color = mesh->mColors[0] ? mesh->mColors[0][vertexIndex] : aiColor4D{};
-                    vertices.push_back({{position.x, position.y, position.z},
-                                        {normal.x, normal.y, normal.z},
-                                        {uv.x, uv.y},
-                                        mesh->mColors[0] ? Color{color.r, color.g, color.b, color.a} : Color{}});
+                    const auto* mesh = scene->mMeshes[orderedMeshes[orderedOffset++].Index];
+                    if (!mesh || mesh->mNumBones != 0 || (mesh->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
+                        throw std::invalid_argument("Static mesh import rejects skinning and non-triangle primitives.");
+                    if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
+                        throw std::overflow_error("Merged mesh vertex count exceeds 32-bit indices.");
+                    const auto base = static_cast<std::uint32_t>(vertices.size());
+                    const auto firstIndex = static_cast<std::uint32_t>(indices.size());
+                    const auto firstVertex = vertices.size();
+                    for (unsigned int vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex)
+                    {
+                        const auto position = mesh->mVertices[vertexIndex];
+                        const auto normal = mesh->mNormals ? mesh->mNormals[vertexIndex] : aiVector3D{0.0F, 1.0F, 0.0F};
+                        const auto uv = mesh->mTextureCoords[0] ? mesh->mTextureCoords[0][vertexIndex] : aiVector3D{};
+                        const auto color = mesh->mColors[0] ? mesh->mColors[0][vertexIndex] : aiColor4D{};
+                        vertices.push_back({{position.x, position.y, position.z},
+                                            {normal.x, normal.y, normal.z},
+                                            {uv.x, uv.y},
+                                            mesh->mColors[0] ? Color{color.r, color.g, color.b, color.a} : Color{}});
+                    }
+                    for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
+                    {
+                        const auto& face = mesh->mFaces[faceIndex];
+                        if (face.mNumIndices != 3)
+                            throw std::invalid_argument("Assimp did not triangulate a mesh face.");
+                        for (unsigned int corner = 0; corner < 3; ++corner)
+                            indices.push_back(base + face.mIndices[corner]);
+                    }
+                    const auto meshBounds = CalculateBounds(
+                        std::span(vertices).subspan(firstVertex, static_cast<std::size_t>(mesh->mNumVertices)));
+                    submeshes.push_back(
+                        {firstIndex, static_cast<std::uint32_t>(indices.size()) - firstIndex,
+                         std::min(mesh->mMaterialIndex, static_cast<unsigned int>(materialSlots.size() - 1U)),
+                         meshBounds});
+                    lodBounds = lodBounds ? CombineBounds(*lodBounds, meshBounds) : meshBounds;
                 }
-                for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
-                {
-                    const auto& face = mesh->mFaces[faceIndex];
-                    if (face.mNumIndices != 3)
-                        throw std::invalid_argument("Assimp did not triangulate a mesh face.");
-                    for (unsigned int corner = 0; corner < 3; ++corner)
-                        indices.push_back(base + face.mIndices[corner]);
-                }
+                const auto threshold =
+                    lodPosition + 1U == lodValues.size() ? 0.0F : std::pow(0.5F, static_cast<float>(lodPosition + 1U));
+                lods.push_back(
+                    {threshold, firstSubmesh, static_cast<std::uint32_t>(submeshes.size()) - firstSubmesh, *lodBounds});
             }
             GenerateTangents(vertices, indices);
             const auto bounds = CalculateBounds(vertices);
             AssetImportOutput output;
-            output.Bytes = MeshAsset::Encode(vertices, indices);
+            output.Bytes = MeshAsset::Encode(vertices, indices, submeshes, materialSlots, lods);
             output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
                                                       {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
             return output;

@@ -30,8 +30,10 @@ namespace KeireEditor
         [[nodiscard]] bool SetShader(Keire::AssetId shader, const ShaderResolver& resolveShader);
         [[nodiscard]] bool SetTexture(std::string_view property, Keire::AssetId texture);
         [[nodiscard]] bool SetProperty(std::string_view property, Keire::MaterialPropertyValue value);
+        [[nodiscard]] bool SetSurface(Keire::MaterialSurfaceState surface);
 
         [[nodiscard]] Keire::AssetId Shader() const noexcept { return m_Definition.Shader; }
+        [[nodiscard]] const Keire::MaterialSurfaceState& Surface() const noexcept { return m_Definition.Surface; }
         [[nodiscard]] Keire::AssetId Texture(std::string_view property) const;
         [[nodiscard]] Keire::MaterialPropertyValue Property(std::string_view property) const;
         [[nodiscard]] std::span<const Keire::ShaderPropertyDefinition> Properties() const noexcept;

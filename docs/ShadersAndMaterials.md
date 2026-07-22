@@ -1,5 +1,15 @@
 # Shaders And Materials
 
+Material source schema version 2 adds an explicit `surface` object with `alphaMode`, `alphaCutoff`, and `doubleSided`.
+Opaque and masked surfaces write depth. Masked surfaces reject base-color alpha below the cutoff. Blend surfaces use
+premultiplied-alpha output, retain depth testing, disable depth writes, and are submitted back-to-front. Existing
+schema-v1 materials and shader `blend` state remain readable; authoring a surface option upgrades the material draft
+without rewriting its property names.
+
+Meshes expose named material slots. `MeshRendererComponent::Material()` and `SetMaterial()` remain slot-zero
+compatibility APIs, while indexed overloads author per-slot overrides. A missing override uses the imported mesh slot's
+default material when available.
+
 ## Source Assets
 
 A `.keireshader` manifest names a project-relative HLSL source, vertex and fragment entry points, bounded defines and
@@ -14,7 +24,9 @@ limited to 64 `float4` slots and fragment textures to 16 declaration-ordered bin
 
 The fixed vertex ABI is position, normal, UV0, and color at locations 0 through 3. Object/view/projection and normal
 data use vertex `b0/space1`; scene lighting/exposure use fragment `b0/space3`; packed numeric material data uses
-fragment `b1/space3`; Texture2D properties use matching `tN/sN/space2` pairs.
+fragment `b1/space3`; Texture2D properties use matching `tN/sN/space2` pairs. The PBR ABI additionally consumes a
+bounded local-light block at fragment `b2/space3`. Existing custom shaders with only the two original fragment uniform
+buffers remain valid and ignore that binding.
 
 The Project menu creates an Unlit Shader transactionally: its manifest, HLSL template, and metadata are either all
 published or all rolled back. It can also create a Material that references the selected shader.

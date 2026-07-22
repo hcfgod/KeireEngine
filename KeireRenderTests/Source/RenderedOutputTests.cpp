@@ -3,6 +3,8 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
+#include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Scenes/Scene.h"
 #include "KeireInternal/RenderInternal.h"
@@ -333,7 +335,7 @@ namespace
             surface.Width = SurfaceSize;
             surface.Height = SurfaceSize;
             surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
-            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.SampleCount = Keire::RenderSampleCount::Four;
             surface.Depth = true;
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderCamera camera;
@@ -610,7 +612,7 @@ namespace
             surface.Width = SurfaceSize;
             surface.Height = SurfaceSize;
             surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
-            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.SampleCount = Keire::RenderSampleCount::Four;
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderCamera camera;
             camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
@@ -702,7 +704,7 @@ namespace
 
     struct MaterialSemanticResults final
     {
-        std::array<std::vector<std::uint8_t>, 12> Frames;
+        std::array<std::vector<std::uint8_t>, 15> Frames;
         bool ReloadsSucceeded = true;
     };
 
@@ -732,12 +734,30 @@ namespace
             m_Light = lightEntity.AddComponent<Keire::DirectionalLightComponent>();
             m_Light->SetIntensity(4.0F);
 
+            auto pointEntity = m_Scene->CreateEntity("Point light");
+            m_PointTransform = pointEntity.GetComponent<Keire::TransformComponent>();
+            m_PointTransform->SetLocalPosition({0.0F, 0.0F, 1.5F});
+            m_PointLight = pointEntity.AddComponent<Keire::PointLightComponent>();
+            m_PointLight->SetIntensity(8.0F);
+            m_PointLight->SetRange(4.0F);
+            m_PointLight->SetEnabled(false);
+
+            auto spotEntity = m_Scene->CreateEntity("Spot light");
+            m_SpotTransform = spotEntity.GetComponent<Keire::TransformComponent>();
+            m_SpotTransform->SetLocalPosition({0.0F, 0.0F, 1.5F});
+            m_SpotTransform->SetLocalEulerAngles({0.0F, 180.0F, 0.0F});
+            m_SpotLight = spotEntity.AddComponent<Keire::SpotLightComponent>();
+            m_SpotLight->SetIntensity(8.0F);
+            m_SpotLight->SetRange(4.0F);
+            m_SpotLight->SetConeAngles(20.0F, 35.0F);
+            m_SpotLight->SetEnabled(false);
+
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Material semantic tests";
             surface.Width = SurfaceSize;
             surface.Height = SurfaceSize;
             surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
-            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.SampleCount = Keire::RenderSampleCount::Four;
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderCamera camera;
             camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {}, {0.0F, 1.0F, 0.0F});
@@ -754,6 +774,10 @@ namespace
                 m_Scene->Close();
             m_Light.Reset();
             m_LightTransform.Reset();
+            m_PointLight.Reset();
+            m_PointTransform.Reset();
+            m_SpotLight.Reset();
+            m_SpotTransform.Reset();
             m_ObjectTransform.Reset();
             m_View.Reset();
             m_Scene.Reset();
@@ -862,6 +886,21 @@ namespace
                 m_ObjectTransform->SetLocalEulerAngles({});
                 m_ObjectTransform->SetLocalScale({-1.0F, 1.0F, 1.0F});
             }
+            else if (stage == 12)
+            {
+                m_ObjectTransform->SetLocalScale({1.0F, 1.0F, 1.0F});
+                m_Light->SetEnabled(false);
+                m_Environment.AmbientIntensity = 0.0F;
+                m_PointLight->SetEnabled(true);
+            }
+            else if (stage == 13)
+            {
+                m_PointLight->SetEnabled(false);
+                m_SpotLight->SetEnabled(true);
+                m_SpotTransform->SetLocalEulerAngles({0.0F, 180.0F, 0.0F});
+            }
+            else if (stage == 14)
+                m_SpotTransform->SetLocalEulerAngles({});
             return m_Fixture.ReplaceMaterialProperties(Owner(), properties);
         }
 
@@ -870,8 +909,12 @@ namespace
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         Keire::Ref<Keire::TransformComponent> m_LightTransform;
+        Keire::Ref<Keire::TransformComponent> m_PointTransform;
+        Keire::Ref<Keire::TransformComponent> m_SpotTransform;
         Keire::Ref<Keire::TransformComponent> m_ObjectTransform;
         Keire::Ref<Keire::DirectionalLightComponent> m_Light;
+        Keire::Ref<Keire::PointLightComponent> m_PointLight;
+        Keire::Ref<Keire::SpotLightComponent> m_SpotLight;
         Keire::RenderEnvironmentSettings m_Environment;
         std::size_t m_Stage = 0;
         std::size_t m_SettledFrames = 0;
@@ -1023,7 +1066,7 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     }
 
     REQUIRE(results->ReloadsSucceeded);
-    std::array<PixelStatistics, 12> captures;
+    std::array<PixelStatistics, 15> captures;
     for (std::size_t index = 0; index < captures.size(); ++index)
     {
         REQUIRE_FALSE(results->Frames[index].empty());
@@ -1048,6 +1091,8 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     CHECK(std::abs(captures[2].Red - captures[11].Red) <= ColorTolerance);
     CHECK(std::abs(captures[2].Green - captures[11].Green) <= ColorTolerance);
     CHECK(std::abs(captures[2].Blue - captures[11].Blue) <= ColorTolerance);
+    CHECK(captures[12].Luminance() > MinimumBehaviorDelta);
+    CHECK(captures[13].Luminance() > captures[14].Luminance() + MinimumBehaviorDelta);
 }
 
 TEST_CASE("render asset revisions swap atomically and failed reloads preserve last-good output")
