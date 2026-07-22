@@ -3,7 +3,8 @@
 `KeireHub` is the normal editor entrypoint. Running the repository launcher without direct-editor options builds and opens
 the Hub, which remains alive while editor processes run.
 
-The Hub provides:
+The Hub uses a dark, modern navigation palette, large primary actions, responsive card columns, project-initial badges,
+and compact status treatments while preserving keyboard and narrow-window usability. It provides:
 
 - A persistent left navigation rail for Projects, creation, existing-project discovery, and sample quick start.
 - Starter and Empty project creation with an asynchronous native parent-folder picker.

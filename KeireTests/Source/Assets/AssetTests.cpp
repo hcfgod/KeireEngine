@@ -488,8 +488,10 @@ TEST_CASE("Asset database startup restores the last-good catalog after interrupt
 TEST_CASE("Texture importer exposes UI-independent production import options")
 {
     const auto importer = Keire::CreateTexture2DAssetImporter();
-    CHECK(importer.ImportOptions.size() == 12);
+    CHECK(importer.ImportOptions.size() == 13);
     CHECK(std::ranges::any_of(importer.ImportOptions, [](const auto& option) { return option.Key == "semantic"; }));
+    CHECK(std::ranges::any_of(importer.ImportOptions,
+                              [](const auto& option) { return option.Key == "environmentLayout"; }));
     CHECK(std::ranges::any_of(importer.ImportOptions, [](const auto& option) { return option.Key == "flipGreen"; }));
     CHECK(std::ranges::any_of(importer.ImportOptions, [](const auto& option) { return option.Key == "anisotropy"; }));
     REQUIRE(importer.SuggestImportSettings);

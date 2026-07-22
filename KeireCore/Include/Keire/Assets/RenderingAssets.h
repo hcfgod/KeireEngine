@@ -280,7 +280,8 @@ namespace Keire
     {
         Color,
         Data,
-        Normal
+        Normal,
+        Environment
     };
 
     enum class TextureColorSpace : std::uint8_t
@@ -293,6 +294,16 @@ namespace Keire
     {
         None,
         Generate
+    };
+
+    enum class TextureEnvironmentLayout : std::uint8_t
+    {
+        Auto,
+        Equirectangular,
+        HorizontalCross,
+        VerticalCross,
+        HorizontalStrip,
+        VerticalStrip
     };
 
     enum class TextureFilter : std::uint8_t
@@ -329,6 +340,8 @@ namespace Keire
         std::uint32_t MaximumSize = 4096;
         bool FlipGreen = false;
         SamplerDescription Sampler;
+        TextureEnvironmentLayout EnvironmentLayout = TextureEnvironmentLayout::Auto;
+        bool HighDynamicRange = false;
 
         auto operator<=>(const TextureImportSettings&) const = default;
     };

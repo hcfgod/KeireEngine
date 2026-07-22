@@ -54,6 +54,8 @@ namespace KeireEditor
         void DeleteEntity(Keire::EntityId entity);
         void SetEntityActive(Keire::EntityId entity, bool active);
         void ReparentEntity(Keire::EntityId entity, Keire::EntityId parent, bool keepWorldTransform = true);
+        void MoveEntity(Keire::EntityId entity, Keire::EntityId parent, Keire::EntityId beforeSibling = {},
+                        bool keepWorldTransform = true);
         void SetTransform(Keire::EntityId entity, const TransformValues& values);
         [[nodiscard]] Keire::Ref<Keire::Component> AddComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         void RemoveComponent(Keire::EntityId entity, Keire::ComponentTypeId type);

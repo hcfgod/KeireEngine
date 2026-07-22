@@ -168,6 +168,40 @@ namespace Keire::RenderBackend
         return shader;
     }
 
+    SDL_GPUShader* RenderSharedState::CreateSkyShader(const bool vertex) const
+    {
+        SDL_GPUShaderCreateInfo information{};
+        information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        information.num_uniform_buffers = vertex ? 0U : 1U;
+        information.num_samplers = vertex ? 0U : 1U;
+        const auto formats = SDL_GetGPUShaderFormats(Device);
+        if (formats & SDL_GPU_SHADERFORMAT_DXIL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_DXIL;
+            information.code = vertex ? Detail::BuiltinSkyVertexDxil : Detail::BuiltinSkyFragmentDxil;
+            information.code_size = vertex ? Detail::BuiltinSkyVertexDxilSize : Detail::BuiltinSkyFragmentDxilSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_MSL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_MSL;
+            information.code = vertex ? Detail::BuiltinSkyVertexMsl : Detail::BuiltinSkyFragmentMsl;
+            information.code_size = vertex ? Detail::BuiltinSkyVertexMslSize : Detail::BuiltinSkyFragmentMslSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_SPIRV;
+            information.entrypoint = vertex ? "VSMain" : "PSMain";
+            information.code = vertex ? Detail::BuiltinSkyVertexSpirV : Detail::BuiltinSkyFragmentSpirV;
+            information.code_size = vertex ? Detail::BuiltinSkyVertexSpirVSize : Detail::BuiltinSkyFragmentSpirVSize;
+        }
+        else
+            throw std::runtime_error("The active SDL_GPU backend exposes no supported sky shader format.");
+        SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+        if (!shader)
+            throw std::runtime_error("SDL_CreateGPUShader(sky) failed: " + LastSdlError());
+        return shader;
+    }
+
     SDL_GPUBuffer* RenderSharedState::UploadBuffer(const std::span<const std::byte> bytes,
                                                    const SDL_GPUBufferUsageFlags usage)
     {
@@ -300,6 +334,8 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("SDL_CreateGPUTexture(asset) failed: " + LastSdlError());
 
             result.Sampler = ResolveSampler(asset.Settings().Sampler);
+            result.HdrEncoded = asset.Settings().HighDynamicRange;
+            result.EnvironmentLayout = asset.Settings().EnvironmentLayout;
 
             SDL_GPUTransferBufferCreateInfo transferInformation{};
             transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;

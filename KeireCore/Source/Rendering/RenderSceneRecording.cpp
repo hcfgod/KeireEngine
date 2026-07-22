@@ -80,6 +80,26 @@ namespace Keire::RenderBackend
         const auto& camera = packet.Camera;
         const auto& lighting = packet.Lighting;
 
+        if (packet.Environment.SkyVisible && packet.Environment.Environment && pipelines.Sky)
+        {
+            const auto& environment = ResolveTexture(packet.Environment.Environment);
+            if (!environment.Empty())
+            {
+                const SkyUniforms sky{
+                    Math::Inverse(camera.Projection),
+                    Math::Inverse(camera.View),
+                    {packet.Environment.EnvironmentRotationDegrees, packet.Environment.EnvironmentSpecularIntensity,
+                     packet.Environment.Exposure,
+                     static_cast<float>(environment.EnvironmentLayout) + (environment.HdrEncoded ? 16.0F : 0.0F)}};
+                const SDL_GPUTextureSamplerBinding binding{environment.Texture, environment.Sampler};
+                SDL_PushGPUFragmentUniformData(commands, 0, &sky, sizeof(sky));
+                SDL_BindGPUGraphicsPipeline(pass, pipelines.Sky);
+                SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+                SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+                ++Statistics.DrawCalls;
+            }
+        }
+
         if (packet.DrawGrid && GridBuffer && GridVertexCount > 0)
         {
             const ObjectUniforms object =
@@ -427,6 +447,8 @@ namespace Keire::RenderBackend
 
         for (auto& pipelines : Pipelines)
         {
+            if (pipelines.Sky)
+                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Sky);
             if (pipelines.Grid)
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Grid);
             if (pipelines.Cube)

@@ -16,7 +16,7 @@
     "semantic": "data"
   },
   "importer": "Keire.Texture2D",
-  "importerVersion": 2,
+  "importerVersion": 3,
   "schemaVersion": 1,
   "subAssets": [],
   "type": "4b454952-4554-4558-5455-524532440001"

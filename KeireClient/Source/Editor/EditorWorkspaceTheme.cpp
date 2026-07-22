@@ -158,19 +158,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             }
             ui.Separator();
             if (ui.MenuItem("Duplicate", false, static_cast<bool>(m_SceneDocument->Selection())))
-            {
-                RecordSceneUndo();
-                const auto selected = m_SceneDocument->Selections();
-                const std::vector selection(selected.begin(), selected.end());
-                std::vector<Keire::AssetId> duplicates;
-                for (const auto selectedEntity : selection)
-                {
-                    const auto duplicate = scene->DuplicateEntity(Keire::EntityId(selectedEntity)).Id().Value();
-                    duplicates.push_back(duplicate);
-                    MarkPlayEditorEntity(duplicate);
-                }
-                m_SceneDocument->SetSelections(duplicates);
-            }
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::DuplicateSelection);
             if (ui.MenuItem("Delete", false, static_cast<bool>(m_SceneDocument->Selection())))
             {
                 RecordSceneUndo();

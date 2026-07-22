@@ -154,6 +154,7 @@ namespace Keire
         Global,
         Snap,
         Settings,
+        Camera,
         Perspective,
         Orthographic,
         AxisX,
@@ -437,6 +438,7 @@ namespace Keire
         [[nodiscard]] UiItemState LastItemState() const;
         [[nodiscard]] UiItemRect LastItemRect() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
+        [[nodiscard]] bool InvisibleButton(std::string_view id, UiSize size = {});
         [[nodiscard]] bool IconButton(std::string_view id, UiIcon icon, bool selected = false,
                                       UiSize size = {30.0F, 0.0F});
         [[nodiscard]] bool OverlayIconButton(std::string_view id, UiIcon icon,
@@ -461,6 +463,7 @@ namespace Keire
                                                std::span<const std::byte> rgbaPixels);
         void Image(const Ref<UiImage>& image, UiSize size = {});
         void Image(const Ref<RenderSurface>& surface, UiSize size = {});
+        void DrawImage(const Ref<RenderSurface>& surface, UiItemRect rectangle);
         [[nodiscard]] bool ImageButton(std::string_view id, const Ref<UiImage>& image, UiSize size = {});
         void DrawLine(UiPosition start, UiPosition end, UiColor color, float thickness = 1.0F);
         void DrawCircle(UiPosition center, float radius, UiColor color, float thickness = 1.0F);

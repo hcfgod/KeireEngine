@@ -1,24 +1,24 @@
 {
-  "schemaVersion": 1,
-  "id": "c0ffee00-0000-4000-8000-000000000002",
-  "type": "4b454952-4554-4558-5455-524532440001",
-  "importer": "Keire.Texture2D",
-  "importerVersion": 2,
   "dependencies": [],
+  "id": "c0ffee00-0000-4000-8000-000000000002",
+  "importer": "Keire.Texture2D",
+  "importerVersion": 3,
+  "schemaVersion": 1,
   "subAssets": [],
   "textureImportSettings": {
-    "semantic": "color",
     "colorSpace": "srgb",
-    "mips": "generate",
     "maximumSize": 1024,
+    "mips": "generate",
     "sampler": {
-      "min": "linear",
-      "mag": "linear",
-      "mip": "linear",
       "addressU": "repeat",
       "addressV": "repeat",
       "addressW": "repeat",
-      "anisotropy": 8
-    }
-  }
+      "anisotropy": 8,
+      "mag": "linear",
+      "min": "linear",
+      "mip": "linear"
+    },
+    "semantic": "color"
+  },
+  "type": "4b454952-4554-4558-5455-524532440001"
 }

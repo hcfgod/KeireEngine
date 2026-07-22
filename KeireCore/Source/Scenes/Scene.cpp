@@ -693,6 +693,31 @@ namespace Keire
             m_Impl->Dirty = true;
         }
 
+        void SceneState::Move(const EntityId id, const EntityId parent, const EntityId beforeSibling,
+                              const bool preserveWorldTransform)
+        {
+            RequireOwner("Move");
+            const auto* record = m_Impl->Find(id);
+            const auto* sibling = beforeSibling ? m_Impl->Find(beforeSibling) : nullptr;
+            if (!record || (parent && !Contains(parent)) || (beforeSibling && !sibling))
+                throw std::invalid_argument("Entity, requested parent, or sibling does not exist.");
+            if (beforeSibling == id)
+                return;
+            if (sibling && sibling->Parent != parent)
+                throw std::invalid_argument("The insertion sibling must belong to the requested parent.");
+            if (parent && m_Impl->DescendsFrom(parent, id))
+                throw std::invalid_argument("An entity cannot be parented to itself or one of its descendants.");
+
+            auto reordered = m_Impl->Order;
+            std::erase(reordered, id);
+            const auto insertion = beforeSibling ? std::ranges::find(reordered, beforeSibling) : reordered.end();
+            reordered.insert(insertion, id);
+
+            SetParent(id, parent, preserveWorldTransform);
+            m_Impl->Order.swap(reordered);
+            m_Impl->Dirty = true;
+        }
+
         Ref<Component> SceneState::AddComponent(const EntityId id, const ComponentTypeId type)
         {
             RequireOwner("AddComponent");
@@ -1057,6 +1082,11 @@ namespace Keire
     }
     Entity Scene::DuplicateEntity(const EntityId id) { return m_Impl->State->Duplicate(id); }
     bool Scene::DestroyEntity(const EntityId id) { return m_Impl->State->Destroy(id); }
+    void Scene::MoveEntity(const EntityId id, const EntityId parent, const EntityId beforeSibling,
+                           const bool preserveWorldTransform)
+    {
+        m_Impl->State->Move(id, parent, beforeSibling, preserveWorldTransform);
+    }
     std::vector<Entity> Scene::Query(const ComponentTypeId type) const { return m_Impl->State->Query(type); }
     Ref<ComponentRegistry> Scene::Components() const noexcept { return m_Impl->State->Components(); }
     void Scene::BeginPlay() { m_Impl->State->BeginPlay(); }

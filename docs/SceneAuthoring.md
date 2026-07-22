@@ -42,8 +42,12 @@ asset to open it. The Project panel owns source selection; the scene is decoded 
 is replaced.
 
 Hierarchy supports recursive entities, multi-level selection stability, context-menu creation, subtree
-duplication/deletion, and drag/drop reparenting. Entity creation is available through the top-level **Entity** menu and
-blank-space or row context menus. `F2`, `Delete`, and `Ctrl+D` route to the same operations.
+duplication/deletion, and ordered drag/drop reparenting. Drop on the upper or lower quarter of a row to insert before or
+after that sibling, drop on its center to parent beneath it, or drop on blank Hierarchy space to unparent and append at
+the scene root. World transforms are preserved and a rejected cycle leaves the hierarchy unchanged. Entity creation is
+available through the top-level **Entity** menu and blank-space or row context menus. `F2`, `Delete`, and `Ctrl/Cmd+D`
+route to the same commands; multi-selection duplication copies only selected roots so selected descendants are not
+duplicated twice.
 
 Inspector edits foldable Unity-style component cards that retain their bordered presentation when collapsed. Transform
 position, Euler rotation (stored as a normalized quaternion),
@@ -76,7 +80,9 @@ caches, workspace state, and cooked builds are ignored project-local data.
 Scene view renders the edit scene or active runtime clone with a depth-tested grid. A compact top-left overlay owns
 View/Move/Rotate/Scale, Local/Global, Snap, and settings; the top-right overlay owns projection and axis snaps. These
 overlays consume pointer input only inside their visible rectangles, leaving selection, marquee, gizmos, drops, and
-camera navigation active everywhere else. `F` frames imported renderer metadata and transformed child bounds with
+camera navigation active everywhere else. The camera button in the top-right overlay toggles a live 16:9 preview of
+the active main game camera in the lower-right corner; the preview itself blocks scene picking, while the rest of the
+viewport remains interactive. `F` frames imported renderer metadata and transformed child bounds with
 aspect-aware padding while the Scene view is focused or hovered; a double-`F` locks the camera to the selected entity,
 and `Shift+F` toggles that lock. Alt+left
 orbits, middle drag pans in camera space, the wheel/Alt+right zooms,

@@ -149,6 +149,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RecordHierarchyUndo() override;
     void MarkHierarchyEntity(Keire::AssetId entity) override;
     void RequestHierarchyRename(Keire::AssetId entity, std::string name) override;
+    void ReportHierarchyError(std::string message) noexcept override;
     void DrawConsole(Keire::UiFrame& ui);
     void DrawDiagnostics(Keire::UiFrame& ui);
     void DrawProject(Keire::UiFrame& ui);

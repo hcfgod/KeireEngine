@@ -134,7 +134,20 @@ namespace KeireEditor
             for (std::uint32_t y = 0; y < drawHeight; ++y)
                 for (std::uint32_t x = 0; x < drawWidth; ++x)
                 {
-                    const auto sample = SampleTexture(*texture, (x + 0.5F) / drawWidth, (y + 0.5F) / drawHeight);
+                    auto sample = SampleTexture(*texture, (x + 0.5F) / drawWidth, (y + 0.5F) / drawHeight);
+                    if (texture->Settings().HighDynamicRange)
+                    {
+                        const float exponent = std::ldexp(1.0F, static_cast<int>(sample[3]) - 136);
+                        for (std::size_t channel = 0; channel < 3; ++channel)
+                        {
+                            const float radiance = sample[channel] * exponent;
+                            const float mapped = std::clamp(radiance * (2.51F * radiance + 0.03F) /
+                                                                (radiance * (2.43F * radiance + 0.59F) + 0.14F),
+                                                            0.0F, 1.0F);
+                            sample[channel] = static_cast<std::uint8_t>(std::pow(mapped, 1.0F / 2.2F) * 255.0F);
+                        }
+                        sample[3] = 255;
+                    }
                     const float alpha = sample[3] / 255.0F;
                     const bool light = (((left + x) / 8) + ((top + y) / 8)) % 2 == 0;
                     const float checker = light ? 96.0F : 58.0F;
@@ -255,16 +268,46 @@ namespace KeireEditor
                                         (bounds.Minimum.Z + bounds.Maximum.Z) * 0.5F};
             const float extent = std::max({bounds.Maximum.X - bounds.Minimum.X, bounds.Maximum.Y - bounds.Minimum.Y,
                                            bounds.Maximum.Z - bounds.Minimum.Z, 0.0001F});
-            std::vector<std::array<int, 2>> projected;
+            struct PreviewVertex final
+            {
+                float X = 0.0F;
+                float Y = 0.0F;
+                float Depth = 0.0F;
+                float Light = 0.0F;
+            };
+            std::vector<PreviewVertex> projected;
             projected.reserve(mesh->Vertices().size());
+            float minimumX = std::numeric_limits<float>::max();
+            float minimumY = std::numeric_limits<float>::max();
+            float maximumX = std::numeric_limits<float>::lowest();
+            float maximumY = std::numeric_limits<float>::lowest();
             for (const auto& vertex : mesh->Vertices())
             {
                 const float x = (vertex.Position.X - center.X) / extent;
                 const float y = (vertex.Position.Y - center.Y) / extent;
                 const float z = (vertex.Position.Z - center.Z) / extent;
-                projected.push_back({static_cast<int>(width * (0.5F + (x - z) * 0.58F)),
-                                     static_cast<int>(height * (0.55F - y * 0.78F + (x + z) * 0.22F))});
+                const float viewX = (x - z) * 0.70710678F;
+                const float viewY = y * 0.8660254F - (x + z) * 0.25F;
+                const float depth = (x + z) * 0.6123724F + y * 0.5F;
+                const float diffuse = std::clamp(
+                    vertex.Normal.X * -0.36F + vertex.Normal.Y * 0.78F + vertex.Normal.Z * -0.51F, -1.0F, 1.0F);
+                projected.push_back({viewX, viewY, depth, 0.24F + std::max(diffuse, 0.0F) * 0.76F});
+                minimumX = std::min(minimumX, viewX);
+                minimumY = std::min(minimumY, viewY);
+                maximumX = std::max(maximumX, viewX);
+                maximumY = std::max(maximumY, viewY);
             }
+            const float projectedWidth = std::max(maximumX - minimumX, 0.0001F);
+            const float projectedHeight = std::max(maximumY - minimumY, 0.0001F);
+            const float scale = std::min(width * 0.82F / projectedWidth, height * 0.82F / projectedHeight);
+            for (auto& vertex : projected)
+            {
+                vertex.X = width * 0.5F + (vertex.X - (minimumX + maximumX) * 0.5F) * scale;
+                vertex.Y = height * 0.52F - (vertex.Y - (minimumY + maximumY) * 0.5F) * scale;
+            }
+
+            std::vector<float> depthBuffer(static_cast<std::size_t>(width) * height,
+                                           std::numeric_limits<float>::infinity());
             const auto indices = mesh->Indices();
             constexpr std::size_t maximumPreviewTriangles = 50000;
             const std::size_t triangleStride =
@@ -277,10 +320,109 @@ namespace KeireEditor
                 const auto first = projected[indices[index]];
                 const auto second = projected[indices[index + 1]];
                 const auto third = projected[indices[index + 2]];
-                DrawLine(result, width, height, first[0], first[1], second[0], second[1], {91, 198, 220});
-                DrawLine(result, width, height, second[0], second[1], third[0], third[1], {69, 154, 181});
-                DrawLine(result, width, height, third[0], third[1], first[0], first[1], {115, 220, 229});
+                const float area =
+                    (second.X - first.X) * (third.Y - first.Y) - (second.Y - first.Y) * (third.X - first.X);
+                if (std::abs(area) < 0.0001F)
+                    continue;
+                const int left = std::max(0, static_cast<int>(std::floor(std::min({first.X, second.X, third.X}))));
+                const int right = std::min(static_cast<int>(width) - 1,
+                                           static_cast<int>(std::ceil(std::max({first.X, second.X, third.X}))));
+                const int top = std::max(0, static_cast<int>(std::floor(std::min({first.Y, second.Y, third.Y}))));
+                const int bottom = std::min(static_cast<int>(height) - 1,
+                                            static_cast<int>(std::ceil(std::max({first.Y, second.Y, third.Y}))));
+                for (int y = top; y <= bottom; ++y)
+                    for (int x = left; x <= right; ++x)
+                    {
+                        const float sampleX = x + 0.5F;
+                        const float sampleY = y + 0.5F;
+                        const float firstWeight =
+                            ((second.X - sampleX) * (third.Y - sampleY) - (second.Y - sampleY) * (third.X - sampleX)) /
+                            area;
+                        const float secondWeight =
+                            ((third.X - sampleX) * (first.Y - sampleY) - (third.Y - sampleY) * (first.X - sampleX)) /
+                            area;
+                        const float thirdWeight = 1.0F - firstWeight - secondWeight;
+                        if (firstWeight < -0.0001F || secondWeight < -0.0001F || thirdWeight < -0.0001F)
+                            continue;
+                        const float depth =
+                            first.Depth * firstWeight + second.Depth * secondWeight + third.Depth * thirdWeight;
+                        const auto pixel = static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x);
+                        if (depth >= depthBuffer[pixel])
+                            continue;
+                        depthBuffer[pixel] = depth;
+                        const float light = std::clamp(first.Light * firstWeight + second.Light * secondWeight +
+                                                           third.Light * thirdWeight,
+                                                       0.0F, 1.0F);
+                        PutPixel(result, width, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
+                                 static_cast<std::uint8_t>(48.0F + light * 142.0F),
+                                 static_cast<std::uint8_t>(55.0F + light * 145.0F),
+                                 static_cast<std::uint8_t>(66.0F + light * 151.0F));
+                    }
             }
+            return result;
+        }
+
+        [[nodiscard]] std::vector<std::byte> MakeScenePreview(const ThumbnailRequest& request,
+                                                              const std::uint32_t width, const std::uint32_t height)
+        {
+            auto result = MakeIcon(width, height, {25, 35, 52}, {69, 142, 238}, ' ', request.Missing);
+            const auto horizon = static_cast<int>(height * 0.64F);
+            DrawLine(result, width, height, 12, horizon, static_cast<int>(width) - 12, horizon, {75, 132, 203});
+            DrawLine(result, width, height, 14, horizon, static_cast<int>(width * 0.38F),
+                     static_cast<int>(height * 0.38F), {112, 183, 245});
+            DrawLine(result, width, height, static_cast<int>(width * 0.38F), static_cast<int>(height * 0.38F),
+                     static_cast<int>(width * 0.58F), horizon, {112, 183, 245});
+            DrawLine(result, width, height, static_cast<int>(width * 0.48F), horizon, static_cast<int>(width * 0.70F),
+                     static_cast<int>(height * 0.29F), {84, 158, 229});
+            DrawLine(result, width, height, static_cast<int>(width * 0.70F), static_cast<int>(height * 0.29F),
+                     static_cast<int>(width) - 13, horizon, {84, 158, 229});
+            return result;
+        }
+
+        [[nodiscard]] std::vector<std::byte> MakeShaderPreview(const ThumbnailRequest& request,
+                                                               const std::uint32_t width, const std::uint32_t height)
+        {
+            auto result = MakeIcon(width, height, {25, 42, 39}, {70, 202, 145}, ' ', request.Missing);
+            const auto drawNode = [&](const int centerX, const int centerY, const std::array<std::uint8_t, 3> color)
+            {
+                for (int y = centerY - 6; y <= centerY + 6; ++y)
+                    for (int x = centerX - 9; x <= centerX + 9; ++x)
+                        if (x >= 0 && y >= 0 && x < static_cast<int>(width) && y < static_cast<int>(height))
+                            PutPixel(result, width, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
+                                     color[0], color[1], color[2]);
+            };
+            DrawLine(result, width, height, 28, 30, 68, 48, {91, 219, 168});
+            DrawLine(result, width, height, 28, 66, 68, 48, {91, 219, 168});
+            drawNode(24, 30, {52, 139, 111});
+            drawNode(24, 66, {52, 139, 111});
+            drawNode(72, 48, {69, 196, 139});
+            return result;
+        }
+
+        [[nodiscard]] std::vector<std::byte> MakeInputPreview(const ThumbnailRequest& request,
+                                                              const std::uint32_t width, const std::uint32_t height)
+        {
+            auto result = MakeIcon(width, height, {38, 29, 53}, {157, 100, 237}, ' ', request.Missing);
+            for (std::uint32_t y = height / 3; y < height * 2 / 3; ++y)
+                for (std::uint32_t x = width / 5; x < width * 4 / 5; ++x)
+                {
+                    const float nx = (static_cast<float>(x) - width * 0.5F) / (width * 0.32F);
+                    const float ny = (static_cast<float>(y) - height * 0.52F) / (height * 0.22F);
+                    if (nx * nx + ny * ny < 1.0F)
+                        PutPixel(result, width, x, y, 104, 70, 164);
+                }
+            DrawLine(result, width, height, 28, 49, 44, 49, {225, 211, 248});
+            DrawLine(result, width, height, 36, 41, 36, 57, {225, 211, 248});
+            for (int y = 43; y <= 49; ++y)
+                for (int x = 66; x <= 72; ++x)
+                    if ((x - 69) * (x - 69) + (y - 46) * (y - 46) <= 9)
+                        PutPixel(result, width, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y), 231, 173,
+                                 92);
+            for (int y = 53; y <= 59; ++y)
+                for (int x = 58; x <= 64; ++x)
+                    if ((x - 61) * (x - 61) + (y - 56) * (y - 56) <= 9)
+                        PutPixel(result, width, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y), 101, 207,
+                                 174);
             return result;
         }
     } // namespace
@@ -438,15 +580,16 @@ namespace KeireEditor
         RegisterProvider(".jpeg", 4, MakeTexturePreview);
         RegisterProvider(".tga", 4, MakeTexturePreview);
         RegisterProvider(".bmp", 4, MakeTexturePreview);
-        RegisterProvider(".keiremesh", 4, MakeMeshPreview);
-        RegisterProvider(".obj", 4, MakeMeshPreview);
-        RegisterProvider(".fbx", 4, MakeMeshPreview);
-        RegisterProvider(".gltf", 4, MakeMeshPreview);
-        RegisterProvider(".glb", 4, MakeMeshPreview);
-        RegisterProvider(".keirescene", 2, icon({27, 40, 58}, {74, 153, 246}, 'S'));
-        RegisterProvider(".keireshader", 2, icon({31, 47, 43}, {84, 208, 153}, 'H'));
-        RegisterProvider(".hlsl", 2, icon({31, 47, 43}, {84, 208, 153}, 'H'));
-        RegisterProvider(".keireinput", 2, icon({42, 34, 58}, {172, 115, 246}, 'I'));
+        RegisterProvider(".hdr", 1, MakeTexturePreview);
+        RegisterProvider(".keiremesh", 5, MakeMeshPreview);
+        RegisterProvider(".obj", 5, MakeMeshPreview);
+        RegisterProvider(".fbx", 5, MakeMeshPreview);
+        RegisterProvider(".gltf", 5, MakeMeshPreview);
+        RegisterProvider(".glb", 5, MakeMeshPreview);
+        RegisterProvider(".keirescene", 3, MakeScenePreview);
+        RegisterProvider(".keireshader", 3, MakeShaderPreview);
+        RegisterProvider(".hlsl", 3, MakeShaderPreview);
+        RegisterProvider(".keireinput", 3, MakeInputPreview);
         RegisterProvider("*", 2, icon({40, 44, 52}, {130, 142, 162}, 'X'));
     }
 

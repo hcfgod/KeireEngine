@@ -475,6 +475,31 @@ TEST_CASE("texture importer emits validated RGBA8 mip chains")
     CHECK(texture->Mips().back().Height == 1);
     CHECK(Keire::Texture2DAsset::Encode(texture->Settings(), texture->Mips()) == importer.Import(source));
 
+    const std::string hdrHeader = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n";
+    std::vector<std::byte> hdr;
+    hdr.reserve(hdrHeader.size() + 4);
+    std::ranges::transform(hdrHeader, std::back_inserter(hdr),
+                           [](const char value) { return std::byte(static_cast<unsigned char>(value)); });
+    hdr.insert(hdr.end(), {std::byte{128}, std::byte{64}, std::byte{32}, std::byte{129}});
+    const auto environment = Keire::Texture2DAsset::Decode(importer.Import(hdr));
+    CHECK(environment->Width() == 1);
+    CHECK(environment->Height() == 1);
+    CHECK(environment->Settings().Semantic == Keire::TextureSemantic::Environment);
+    CHECK(environment->Settings().ColorSpace == Keire::TextureColorSpace::Linear);
+    CHECK(environment->Settings().EnvironmentLayout == Keire::TextureEnvironmentLayout::Equirectangular);
+    CHECK(environment->Settings().HighDynamicRange);
+
+    auto versionTwo = Keire::Texture2DAsset::Encode(texture->Settings(), texture->Mips());
+    versionTwo[8] = std::byte{2};
+    versionTwo[9] = std::byte{0};
+    versionTwo[10] = std::byte{0};
+    versionTwo[11] = std::byte{0};
+    versionTwo.erase(versionTwo.begin() + 23, versionTwo.begin() + 25);
+    const auto legacyTexture = Keire::Texture2DAsset::Decode(versionTwo);
+    CHECK(legacyTexture->Width() == texture->Width());
+    CHECK(legacyTexture->Settings().EnvironmentLayout == Keire::TextureEnvironmentLayout::Auto);
+    CHECK_FALSE(legacyTexture->Settings().HighDynamicRange);
+
     auto malformed = Keire::Texture2DAsset::Encode(texture->Settings(), texture->Mips());
     malformed.push_back(std::byte{0});
     CHECK_THROWS_AS((void)Keire::Texture2DAsset::Decode(malformed), std::invalid_argument);
@@ -506,6 +531,17 @@ TEST_CASE("texture importer emits validated RGBA8 mip chains")
     CHECK(configured->Settings().Sampler.AddressU == Keire::TextureAddressMode::Clamp);
     CHECK(configured->Settings().Sampler.Anisotropy == 4);
     CHECK(configured->Settings().FlipGreen);
+
+    auto environmentSettings = texture->Settings();
+    environmentSettings.Semantic = Keire::TextureSemantic::Environment;
+    environmentSettings.ColorSpace = Keire::TextureColorSpace::Linear;
+    environmentSettings.EnvironmentLayout = Keire::TextureEnvironmentLayout::HorizontalCross;
+    environmentSettings.HighDynamicRange = true;
+    const auto encodedEnvironment =
+        Keire::Texture2DAsset::Decode(Keire::Texture2DAsset::Encode(environmentSettings, texture->Mips()));
+    CHECK(encodedEnvironment->Settings().Semantic == Keire::TextureSemantic::Environment);
+    CHECK(encodedEnvironment->Settings().EnvironmentLayout == Keire::TextureEnvironmentLayout::HorizontalCross);
+    CHECK(encodedEnvironment->Settings().HighDynamicRange);
 }
 
 TEST_CASE("pinned shader compiler resolves from the executable while the project is the working directory")

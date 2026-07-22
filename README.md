@@ -270,8 +270,9 @@ Asset APIs are organized beneath `Keire/Assets` (for example, `#include "Keire/A
 `Keire/Core.h` continues to include the supported asset surface for consumers that prefer the aggregate header.
 
 Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicitly with `KeireAssetTool convert-mesh
---input <model>`. PNG, JPEG, TGA, and BMP textures import as validated RGBA8 assets with deterministic mip generation
-and sampler settings stored in source metadata. Assimp and stb remain private implementation dependencies; their
+--input <model>`. PNG, JPEG, TGA, BMP, and Radiance HDR textures import as validated assets with deterministic mip
+generation and sampler settings stored in source metadata. Environment textures support equirectangular panoramas and
+horizontal/vertical cubemap cross or strip atlases. Assimp and stb remain private implementation dependencies; their
 headers are not required by engine or SDK consumers.
 
 Selecting a `.keirematerial` in Inspector exposes every shader-declared numeric, color, and texture property. The
@@ -295,6 +296,11 @@ tool/orientation overlays consume input only within their visible controls.
 Project-grid previews use imported content: textures preserve aspect and alpha, materials appear on a shaded sphere,
 and mesh/model assets use framed imported geometry. Scene, shader, input, folder, missing, and unknown content use
 distinct generated type icons; all preview cache data remains under `Library/Thumbnails`.
+
+`Ctrl/Cmd+D` duplicates selected scene roots as one undoable operation. Hierarchy rows accept drops in three zones: the
+upper and lower edges insert before or after a sibling, while the center parents the selection; dropping on blank
+Hierarchy space moves it to the scene root. The Scene toolbar camera button toggles a live main-camera preview in the
+lower-right corner without intercepting input elsewhere in the viewport.
 
 `ProjectSettings/Project.keireproject` is the fixed marker for an isolated Kéire project. `Project::Create` produces
 transactional Empty or Starter roots; `Project::Open` validates schema/version and the editor holds an OS-exclusive lock

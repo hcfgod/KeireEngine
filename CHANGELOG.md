@@ -4,6 +4,15 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Scene authoring now routes `Ctrl/Cmd+D` through the shared duplicate command and supports hierarchy drag insertion
+  before or after a sibling, parenting onto a row, and unparenting onto blank hierarchy space while preserving world
+  transforms and undo history.
+- Asset Browser thumbnails now use an untextured clay render of imported mesh geometry plus dedicated scene, shader,
+  and input-action artwork. The Scene viewport adds a toggleable live main-camera preview, and the Project Hub uses a
+  refreshed responsive card presentation and modern navigation palette.
+- Project environments now render visible sky backgrounds from LDR or Radiance HDR equirectangular maps and common
+  horizontal/vertical cubemap cross and strip atlases, with rotation, intensity, exposure, layout metadata, and
+  versioned reimport support.
 - Added the version-3 static mesh format with ordered LODs, submesh ranges and bounds, stable material-slot indices,
   and v1/v2 compatibility. Model import preserves Assimp slots and recognizes `_LOD0`, `_LOD1`, and later groups.
 - Materials now serialize opaque, masked, or premultiplied-blend surface state, alpha cutoff, and double-sided

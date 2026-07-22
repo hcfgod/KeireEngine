@@ -31,7 +31,7 @@ namespace Keire
         constexpr std::array<char, 8> MeshMagic{'K', 'E', 'I', 'R', 'E', 'M', 'S', 'H'};
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
         constexpr std::uint32_t MeshVersion = 3;
-        constexpr std::uint32_t TextureVersion = 2;
+        constexpr std::uint32_t TextureVersion = 3;
         constexpr std::size_t MaximumMeshVertices = 16U * 1024U * 1024U;
         constexpr std::size_t MaximumMeshIndices = 48U * 1024U * 1024U;
         constexpr std::size_t MaximumMeshSubmeshes = 1024U * 1024U;
@@ -39,6 +39,13 @@ namespace Keire
         constexpr std::size_t MaximumMeshLods = 16U;
         constexpr std::size_t MaximumTextureDimension = 16U * 1024U;
         constexpr std::size_t MaximumTextureBytes = 1024U * 1024U * 1024U;
+
+        [[nodiscard]] std::string Lowercase(std::string value)
+        {
+            std::ranges::transform(value, value.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            return value;
+        }
 
         template <typename Unsigned> void AppendUnsigned(std::vector<std::byte>& bytes, Unsigned value)
         {
@@ -337,13 +344,15 @@ namespace Keire
 
         [[nodiscard]] TextureImportSettings NormalizeTextureSettings(TextureImportSettings settings)
         {
-            const auto validSemantic = settings.Semantic == TextureSemantic::Color ||
-                                       settings.Semantic == TextureSemantic::Data ||
-                                       settings.Semantic == TextureSemantic::Normal;
+            const auto validSemantic =
+                settings.Semantic == TextureSemantic::Color || settings.Semantic == TextureSemantic::Data ||
+                settings.Semantic == TextureSemantic::Normal || settings.Semantic == TextureSemantic::Environment;
             const auto validColorSpace =
                 settings.ColorSpace == TextureColorSpace::Linear || settings.ColorSpace == TextureColorSpace::Srgb;
             const auto validMipPolicy =
                 settings.Mips == TextureMipPolicy::None || settings.Mips == TextureMipPolicy::Generate;
+            const bool validEnvironmentLayout = settings.EnvironmentLayout >= TextureEnvironmentLayout::Auto &&
+                                                settings.EnvironmentLayout <= TextureEnvironmentLayout::VerticalStrip;
             const auto validFilter = [](const TextureFilter filter)
             { return filter == TextureFilter::Nearest || filter == TextureFilter::Linear; };
             const auto validAddress = [](const TextureAddressMode mode)
@@ -351,16 +360,18 @@ namespace Keire
                 return mode == TextureAddressMode::Repeat || mode == TextureAddressMode::Clamp ||
                        mode == TextureAddressMode::Mirror;
             };
-            if (!validSemantic || !validColorSpace || !validMipPolicy || !validFilter(settings.Sampler.Minimum) ||
-                !validFilter(settings.Sampler.Magnification) || !validFilter(settings.Sampler.Mip) ||
-                !validAddress(settings.Sampler.AddressU) || !validAddress(settings.Sampler.AddressV) ||
-                !validAddress(settings.Sampler.AddressW))
+            if (!validSemantic || !validColorSpace || !validMipPolicy || !validEnvironmentLayout ||
+                !validFilter(settings.Sampler.Minimum) || !validFilter(settings.Sampler.Magnification) ||
+                !validFilter(settings.Sampler.Mip) || !validAddress(settings.Sampler.AddressU) ||
+                !validAddress(settings.Sampler.AddressV) || !validAddress(settings.Sampler.AddressW))
                 throw std::invalid_argument("Texture import settings contain an invalid enum value.");
             if (settings.MaximumSize == 0 || settings.MaximumSize > MaximumTextureDimension ||
                 settings.Sampler.Anisotropy == 0 || settings.Sampler.Anisotropy > 16)
                 throw std::invalid_argument("Texture import settings contain invalid size or anisotropy limits.");
             if (settings.Semantic != TextureSemantic::Color)
                 settings.ColorSpace = TextureColorSpace::Linear;
+            if (settings.HighDynamicRange && settings.Semantic != TextureSemantic::Environment)
+                throw std::invalid_argument("HDR RGBE storage is reserved for environment textures.");
             return settings;
         }
 
@@ -373,12 +384,20 @@ namespace Keire
                 return found == values.end() ? fallback : std::get<std::string>(found->second);
             };
             const auto semantic = choice("semantic", "color");
-            settings.Semantic = semantic == "normal" ? TextureSemantic::Normal
-                                : semantic == "data" ? TextureSemantic::Data
-                                                     : TextureSemantic::Color;
+            settings.Semantic = semantic == "normal"        ? TextureSemantic::Normal
+                                : semantic == "data"        ? TextureSemantic::Data
+                                : semantic == "environment" ? TextureSemantic::Environment
+                                                            : TextureSemantic::Color;
             settings.ColorSpace =
                 choice("colorSpace", "srgb") == "linear" ? TextureColorSpace::Linear : TextureColorSpace::Srgb;
             settings.Mips = choice("mips", "generate") == "none" ? TextureMipPolicy::None : TextureMipPolicy::Generate;
+            const auto layout = choice("environmentLayout", "auto");
+            settings.EnvironmentLayout = layout == "equirectangular"   ? TextureEnvironmentLayout::Equirectangular
+                                         : layout == "horizontalCross" ? TextureEnvironmentLayout::HorizontalCross
+                                         : layout == "verticalCross"   ? TextureEnvironmentLayout::VerticalCross
+                                         : layout == "horizontalStrip" ? TextureEnvironmentLayout::HorizontalStrip
+                                         : layout == "verticalStrip"   ? TextureEnvironmentLayout::VerticalStrip
+                                                                       : TextureEnvironmentLayout::Auto;
             if (const auto found = values.find("maximumSize"); found != values.end())
                 settings.MaximumSize = static_cast<std::uint32_t>(std::get<std::int64_t>(found->second));
             if (const auto found = values.find("flipGreen"); found != values.end())
@@ -435,8 +454,10 @@ namespace Keire
                     settings.Semantic = TextureSemantic::Data;
                 else if (semantic == "normal")
                     settings.Semantic = TextureSemantic::Normal;
+                else if (semantic == "environment")
+                    settings.Semantic = TextureSemantic::Environment;
                 else
-                    throw std::invalid_argument("Texture semantic must be color, data, or normal.");
+                    throw std::invalid_argument("Texture semantic must be color, data, normal, or environment.");
             }
             if (values.contains("colorSpace"))
             {
@@ -457,6 +478,16 @@ namespace Keire
                     settings.Mips = TextureMipPolicy::Generate;
                 else
                     throw std::invalid_argument("Texture mips must be none or generate.");
+            }
+            if (values.contains("environmentLayout"))
+            {
+                const auto layout = values.at("environmentLayout").get<std::string>();
+                settings.EnvironmentLayout = layout == "equirectangular"   ? TextureEnvironmentLayout::Equirectangular
+                                             : layout == "horizontalCross" ? TextureEnvironmentLayout::HorizontalCross
+                                             : layout == "verticalCross"   ? TextureEnvironmentLayout::VerticalCross
+                                             : layout == "horizontalStrip" ? TextureEnvironmentLayout::HorizontalStrip
+                                             : layout == "verticalStrip"   ? TextureEnvironmentLayout::VerticalStrip
+                                                                           : TextureEnvironmentLayout::Auto;
             }
             settings.MaximumSize = values.value("maximumSize", settings.MaximumSize);
             settings.FlipGreen = values.value("flipGreen", settings.FlipGreen);
@@ -579,6 +610,54 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] TextureMipLevel DownsampleRgbe(const TextureMipLevel& source)
+        {
+            TextureMipLevel result;
+            result.Width = std::max(source.Width / 2U, 1U);
+            result.Height = std::max(source.Height / 2U, 1U);
+            result.Pixels.resize(static_cast<std::size_t>(result.Width) * result.Height * 4U);
+            const auto decode = [&source](const std::uint32_t x, const std::uint32_t y)
+            {
+                const auto index = (static_cast<std::size_t>(y) * source.Width + x) * 4U;
+                const auto exponent = std::to_integer<std::uint8_t>(source.Pixels[index + 3U]);
+                if (exponent == 0)
+                    return Vector3{};
+                const float scale = std::ldexp(1.0F, static_cast<int>(exponent) - 136);
+                return Vector3{std::to_integer<std::uint8_t>(source.Pixels[index]) * scale,
+                               std::to_integer<std::uint8_t>(source.Pixels[index + 1U]) * scale,
+                               std::to_integer<std::uint8_t>(source.Pixels[index + 2U]) * scale};
+            };
+            for (std::uint32_t y = 0; y < result.Height; ++y)
+                for (std::uint32_t x = 0; x < result.Width; ++x)
+                {
+                    Vector3 radiance;
+                    for (std::uint32_t offsetY = 0; offsetY < 2; ++offsetY)
+                        for (std::uint32_t offsetX = 0; offsetX < 2; ++offsetX)
+                        {
+                            const auto sample = decode(std::min(x * 2U + offsetX, source.Width - 1U),
+                                                       std::min(y * 2U + offsetY, source.Height - 1U));
+                            radiance.X += sample.X * 0.25F;
+                            radiance.Y += sample.Y * 0.25F;
+                            radiance.Z += sample.Z * 0.25F;
+                        }
+                    const float maximum = std::max({radiance.X, radiance.Y, radiance.Z});
+                    if (maximum < 1.0e-32F)
+                        continue;
+                    int exponent = 0;
+                    const float scale = std::frexp(maximum, &exponent) * 256.0F / maximum;
+                    const auto index = (static_cast<std::size_t>(y) * result.Width + x) * 4U;
+                    result.Pixels[index] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(radiance.X * scale, 0.0F, 255.0F)));
+                    result.Pixels[index + 1U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(radiance.Y * scale, 0.0F, 255.0F)));
+                    result.Pixels[index + 2U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(radiance.Z * scale, 0.0F, 255.0F)));
+                    result.Pixels[index + 3U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(exponent + 128, 0, 255)));
+                }
+            return result;
+        }
+
         [[nodiscard]] std::vector<TextureMipLevel> ImportTexture(const std::span<const std::byte> bytes,
                                                                  const TextureImportSettings& settings)
         {
@@ -587,6 +666,45 @@ namespace Keire
             int width = 0;
             int height = 0;
             int channels = 0;
+            if (settings.Semantic == TextureSemantic::Environment &&
+                stbi_is_hdr_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size())))
+            {
+                std::unique_ptr<float, decltype(&stbi_image_free)> pixels(
+                    stbi_loadf_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
+                                           static_cast<int>(bytes.size()), &width, &height, &channels, 4),
+                    stbi_image_free);
+                if (!pixels || width <= 0 || height <= 0 || width > static_cast<int>(MaximumTextureDimension) ||
+                    height > static_cast<int>(MaximumTextureDimension))
+                    throw std::invalid_argument(std::string("HDR texture decode failed: ") + stbi_failure_reason());
+                TextureMipLevel base;
+                base.Width = static_cast<std::uint32_t>(width);
+                base.Height = static_cast<std::uint32_t>(height);
+                base.Pixels.resize(static_cast<std::size_t>(base.Width) * base.Height * 4U);
+                for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(base.Width) * base.Height; ++pixel)
+                {
+                    const float red = std::max(pixels.get()[pixel * 4U], 0.0F);
+                    const float green = std::max(pixels.get()[pixel * 4U + 1U], 0.0F);
+                    const float blue = std::max(pixels.get()[pixel * 4U + 2U], 0.0F);
+                    const float maximum = std::max({red, green, blue});
+                    if (!std::isfinite(maximum))
+                        throw std::invalid_argument("HDR texture contains a non-finite radiance value.");
+                    if (maximum < 1.0e-32F)
+                        continue;
+                    int exponent = 0;
+                    const float scale = std::frexp(maximum, &exponent) * 256.0F / maximum;
+                    base.Pixels[pixel * 4U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(red * scale, 0.0F, 255.0F)));
+                    base.Pixels[pixel * 4U + 1U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(green * scale, 0.0F, 255.0F)));
+                    base.Pixels[pixel * 4U + 2U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(blue * scale, 0.0F, 255.0F)));
+                    base.Pixels[pixel * 4U + 3U] =
+                        std::byte(static_cast<std::uint8_t>(std::clamp(exponent + 128, 0, 255)));
+                }
+                while (base.Width > settings.MaximumSize || base.Height > settings.MaximumSize)
+                    base = DownsampleRgbe(base);
+                return {std::move(base)};
+            }
             std::unique_ptr<unsigned char, decltype(&stbi_image_free)> pixels(
                 stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()),
                                       &width, &height, &channels, 4),
@@ -855,7 +973,8 @@ namespace Keire
               static_cast<std::uint8_t>(settings.Sampler.Mip), static_cast<std::uint8_t>(settings.Sampler.AddressU),
               static_cast<std::uint8_t>(settings.Sampler.AddressV),
               static_cast<std::uint8_t>(settings.Sampler.AddressW), settings.Sampler.Anisotropy,
-              static_cast<std::uint8_t>(settings.FlipGreen)})
+              static_cast<std::uint8_t>(settings.FlipGreen), static_cast<std::uint8_t>(settings.EnvironmentLayout),
+              static_cast<std::uint8_t>(settings.HighDynamicRange)})
             result.push_back(std::byte(value));
         AppendUnsigned(result, settings.MaximumSize);
         AppendUnsigned(result, static_cast<std::uint32_t>(mips.size()));
@@ -874,7 +993,7 @@ namespace Keire
         BinaryReader reader(bytes);
         reader.Expect(TextureMagic);
         const auto version = reader.UnsignedValue<std::uint32_t>();
-        if (version != 1 && version != TextureVersion)
+        if (version < 1 || version > TextureVersion)
             throw std::invalid_argument("Texture asset has an unsupported version.");
         TextureImportSettings settings;
         settings.Semantic = static_cast<TextureSemantic>(reader.UnsignedValue<std::uint8_t>());
@@ -889,6 +1008,11 @@ namespace Keire
         settings.Sampler.Anisotropy = reader.UnsignedValue<std::uint8_t>();
         if (version >= 2)
             settings.FlipGreen = reader.UnsignedValue<std::uint8_t>() != 0;
+        if (version >= 3)
+        {
+            settings.EnvironmentLayout = static_cast<TextureEnvironmentLayout>(reader.UnsignedValue<std::uint8_t>());
+            settings.HighDynamicRange = reader.UnsignedValue<std::uint8_t>() != 0;
+        }
         settings.MaximumSize = reader.UnsignedValue<std::uint32_t>();
         const auto mipCount = reader.UnsignedValue<std::uint32_t>();
         if (mipCount == 0 || mipCount > 15)
@@ -1069,17 +1193,66 @@ namespace Keire
         settings = NormalizeTextureSettings(settings);
         AssetImporterRegistration result;
         result.Name = "Keire.Texture2D";
-        result.Version = 2;
+        result.Version = 3;
         result.Type = Texture2DAsset::StaticType();
-        result.Extensions = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};
+        result.Extensions = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
         result.Import = [settings](const std::span<const std::byte> bytes)
-        { return Texture2DAsset::Encode(settings, ImportTexture(bytes, settings)); };
+        {
+            auto effective = settings;
+            if (stbi_is_hdr_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
+                                        static_cast<int>(bytes.size())) != 0)
+            {
+                effective.Semantic = TextureSemantic::Environment;
+                effective.ColorSpace = TextureColorSpace::Linear;
+                effective.Mips = TextureMipPolicy::None;
+                effective.EnvironmentLayout = TextureEnvironmentLayout::Equirectangular;
+                effective.HighDynamicRange = true;
+                effective.Sampler.AddressU = TextureAddressMode::Repeat;
+                effective.Sampler.AddressV = TextureAddressMode::Clamp;
+            }
+            return Texture2DAsset::Encode(effective, ImportTexture(bytes, effective));
+        };
         result.ContextualImport = [settings](const AssetImportContext& context,
                                              const std::span<const std::byte> bytes) -> AssetImportOutput
         {
             auto effective = ReadTextureSettings(context.MetadataPath, settings);
             if (!context.ImportSettings.empty())
                 effective = ApplyTextureImportSettings(effective, context.ImportSettings);
+            if (Lowercase(context.SourcePath.extension().string()) == ".hdr")
+            {
+                effective.Semantic = TextureSemantic::Environment;
+                effective.ColorSpace = TextureColorSpace::Linear;
+                effective.Mips = TextureMipPolicy::None;
+                effective.HighDynamicRange = true;
+                effective.Sampler.AddressU = TextureAddressMode::Repeat;
+                effective.Sampler.AddressV = TextureAddressMode::Clamp;
+                if (effective.EnvironmentLayout == TextureEnvironmentLayout::Auto)
+                    effective.EnvironmentLayout = TextureEnvironmentLayout::Equirectangular;
+            }
+            else if (effective.Semantic == TextureSemantic::Environment &&
+                     effective.EnvironmentLayout == TextureEnvironmentLayout::Auto)
+            {
+                int width = 0;
+                int height = 0;
+                int channels = 0;
+                if (!stbi_info_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
+                                           static_cast<int>(bytes.size()), &width, &height, &channels))
+                    throw std::invalid_argument(std::string("Environment texture probe failed: ") +
+                                                stbi_failure_reason());
+                if (width == height * 2)
+                    effective.EnvironmentLayout = TextureEnvironmentLayout::Equirectangular;
+                else if (width * 3 == height * 4)
+                    effective.EnvironmentLayout = TextureEnvironmentLayout::HorizontalCross;
+                else if (width * 4 == height * 3)
+                    effective.EnvironmentLayout = TextureEnvironmentLayout::VerticalCross;
+                else if (width == height * 6)
+                    effective.EnvironmentLayout = TextureEnvironmentLayout::HorizontalStrip;
+                else if (height == width * 6)
+                    effective.EnvironmentLayout = TextureEnvironmentLayout::VerticalStrip;
+                else
+                    throw std::invalid_argument(
+                        "Environment texture must be 2:1 equirectangular, a 4x3/3x4 cross, or a 6x1/1x6 strip.");
+            }
             return {Texture2DAsset::Encode(effective, ImportTexture(bytes, effective))};
         };
         const auto choice = [](std::string key, std::string name, std::string group, std::string value,
@@ -1096,9 +1269,11 @@ namespace Keire
                                                std::move(choices)};
         };
         result.ImportOptions = {
-            choice("semantic", "Semantic", "Texture", "color", {"color", "data", "normal"}),
+            choice("semantic", "Semantic", "Texture", "color", {"color", "data", "normal", "environment"}),
             choice("colorSpace", "Color Space", "Texture", "srgb", {"srgb", "linear"}),
             choice("mips", "Mip Maps", "Texture", "generate", {"generate", "none"}),
+            choice("environmentLayout", "Environment Layout", "Environment", "auto",
+                   {"auto", "equirectangular", "horizontalCross", "verticalCross", "horizontalStrip", "verticalStrip"}),
             {"maximumSize", "Maximum Size", "Texture", AssetImportOptionKind::Integer,
              std::int64_t{MaximumTextureDimension}, 1.0, static_cast<double>(MaximumTextureDimension), 1.0},
             {"flipGreen", "Flip Green Channel", "Texture", AssetImportOptionKind::Boolean, false},
@@ -1148,7 +1323,15 @@ namespace Keire
                               containsToken("rough") || containsToken("occlusion") || containsToken("ao") ||
                               containsToken("orm") || containsToken("rma") || containsToken("mra") ||
                               containsToken("mask") || containsToken("pbr");
-            if (normal)
+            if (Lowercase(path.extension().string()) == ".hdr")
+            {
+                result["semantic"] = std::string("environment");
+                result["colorSpace"] = std::string("linear");
+                result["mips"] = std::string("none");
+                result["addressV"] = std::string("clamp");
+                result["environmentLayout"] = std::string("equirectangular");
+            }
+            else if (normal)
             {
                 result["semantic"] = std::string("normal");
                 result["colorSpace"] = std::string("linear");

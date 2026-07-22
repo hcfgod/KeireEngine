@@ -90,6 +90,11 @@ void KeireEditor::SceneViewportPanel::Initialize(const std::filesystem::path& pr
         surface.Name = "Scene View";
         surface.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_RenderView = renderer->CreateView(surface);
+        surface.Name = "Main Camera Preview";
+        surface.Width = 320;
+        surface.Height = 180;
+        surface.SampleCount = Keire::RenderSampleCount::One;
+        m_CameraPreviewView = renderer->CreateView(surface);
     }
     if (!projectRoot.empty())
     {
@@ -118,6 +123,7 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
         m_Camera->SetCapturing(false);
     }
     m_RenderView.Reset();
+    m_CameraPreviewView.Reset();
 }
 void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
 {
@@ -219,7 +225,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     constexpr float overlaySize = 28.0F;
     constexpr float overlayGap = 3.0F;
     constexpr float overlayPadding = 8.0F;
-    Keire::UiPosition orientationPosition{imageRect.Maximum.X - overlayPadding - overlaySize * 4.0F - overlayGap * 3.0F,
+    Keire::UiPosition orientationPosition{imageRect.Maximum.X - overlayPadding - overlaySize * 5.0F - overlayGap * 4.0F,
                                           imageRect.Minimum.Y + overlayPadding};
     const Keire::UiItemRect orientationRect{
         orientationPosition, {imageRect.Maximum.X - overlayPadding, orientationPosition.Y + overlaySize}};
@@ -255,6 +261,43 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         m_Camera->Snap(Keire::Detail::EditorCameraAxis::PositiveZ);
         m_Camera->MarkDirty();
     }
+    if (orientationButton("SceneCameraPreview", Keire::UiIcon::Camera, "Toggle the main camera preview"))
+        m_CameraPreviewVisible = !m_CameraPreviewVisible;
+
+    Keire::UiItemRect cameraPreviewRect{};
+    if (m_CameraPreviewVisible && m_CameraPreviewView)
+    {
+        constexpr float previewAspect = 16.0F / 9.0F;
+        const float previewWidth = std::clamp(imageRect.Size().Width * 0.30F, 160.0F, 320.0F);
+        const float previewHeight = previewWidth / previewAspect;
+        cameraPreviewRect = {{imageRect.Maximum.X - previewWidth - 12.0F, imageRect.Maximum.Y - previewHeight - 34.0F},
+                             {imageRect.Maximum.X - 12.0F, imageRect.Maximum.Y - 34.0F}};
+        if (const auto sceneCamera = SelectGameCamera(renderScene))
+        {
+            (void)PrepareRenderSurface(m_CameraPreviewView, {previewWidth, previewHeight},
+                                       m_Controller.SceneViewportDisplayScale());
+            Keire::RenderCamera previewCamera;
+            previewCamera.View = Keire::Math::Inverse(sceneCamera->Transform->WorldMatrix());
+            previewCamera.Projection = sceneCamera->Camera->ProjectionMatrix(previewAspect);
+            previewCamera.ClearColor = sceneCamera->Camera->ClearColor();
+            previewCamera.NearPlane = sceneCamera->Camera->NearPlane();
+            previewCamera.FarPlane = sceneCamera->Camera->FarPlane();
+            m_CameraPreviewView->SetCamera(previewCamera);
+            renderer->Submit({renderScene, m_CameraPreviewView, false, m_Controller.SceneViewportSettings()});
+            ui.DrawFilledRectangle(cameraPreviewRect, {0.025F, 0.03F, 0.045F, 0.96F}, 5.0F);
+            ui.DrawImage(m_CameraPreviewView->Surface(), cameraPreviewRect);
+            ui.DrawRectangle(cameraPreviewRect, theme.Border, 1.0F, 5.0F);
+            ui.DrawOverlayText({cameraPreviewRect.Minimum.X + 8.0F, cameraPreviewRect.Minimum.Y + 6.0F}, theme.Text,
+                               "Main Camera");
+        }
+        else
+        {
+            ui.DrawFilledRectangle(cameraPreviewRect, {0.025F, 0.03F, 0.045F, 0.94F}, 5.0F);
+            ui.DrawRectangle(cameraPreviewRect, theme.Border, 1.0F, 5.0F);
+            ui.DrawOverlayText({cameraPreviewRect.Minimum.X + 12.0F, cameraPreviewRect.Minimum.Y + 12.0F},
+                               theme.MutedText, "No active camera");
+        }
+    }
     const std::string viewportStatus = std::to_string(activeScene->ObjectCount()) + " objects  |  " +
                                        (document.PlaySession() ? "Play" : "Edit") +
                                        (document.EditingScene()->Dirty() ? "  |  Unsaved" : "");
@@ -264,8 +307,9 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
          {statusPosition.X + static_cast<float>(viewportStatus.size()) * 7.0F + 5.0F, statusPosition.Y + 18.0F}},
         {0.03F, 0.04F, 0.06F, 0.72F}, 4.0F);
     ui.DrawOverlayText(statusPosition, theme.MutedText, viewportStatus);
-    const bool pointerBlocked =
-        toolbarRect.Contains(ui.PointerState().Position) || orientationRect.Contains(ui.PointerState().Position);
+    const bool pointerBlocked = toolbarRect.Contains(ui.PointerState().Position) ||
+                                orientationRect.Contains(ui.PointerState().Position) ||
+                                (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
     if (renderScene)
     {
         const bool allowManipulation = !m_Controller.SceneViewportPlayReviewActive();

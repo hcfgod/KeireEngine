@@ -168,6 +168,8 @@ namespace Keire::RenderBackend
     {
         SDL_GPUTexture* Texture = nullptr;
         SDL_GPUSampler* Sampler = nullptr;
+        bool HdrEncoded = false;
+        TextureEnvironmentLayout EnvironmentLayout = TextureEnvironmentLayout::Auto;
 
         [[nodiscard]] bool Empty() const noexcept { return !Texture && !Sampler; }
     };
@@ -290,6 +292,13 @@ namespace Keire::RenderBackend
     static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * 16);
     static_assert(sizeof(AssetLocalLightUniform) == sizeof(float) * 16);
     static_assert(sizeof(AssetLocalLightUniforms) == sizeof(float) * (4 + MaximumShaderLocalLights * 16));
+
+    struct SkyUniforms final
+    {
+        Matrix4 InverseProjection;
+        Matrix4 InverseView;
+        Vector4 Parameters;
+    };
 
     struct SceneLighting final
     {
@@ -460,6 +469,7 @@ namespace Keire::RenderBackend
         SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
         SDL_GPUGraphicsPipeline* Cube = nullptr;
         SDL_GPUGraphicsPipeline* Grid = nullptr;
+        SDL_GPUGraphicsPipeline* Sky = nullptr;
     };
 
     struct QueuedSceneRequest final
@@ -478,6 +488,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] std::vector<std::shared_ptr<RenderSurfaceState>> LiveSurfaces();
         void ReleaseResources(SurfaceResources& resources) noexcept;
         [[nodiscard]] SDL_GPUShader* CreateShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateSkyShader(bool vertex) const;
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
@@ -515,6 +526,7 @@ namespace Keire::RenderBackend
         void EnsureSurface(RenderSurfaceState& surface);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreatePipeline(SDL_GPUSampleCount samples,
                                                               SDL_GPUPrimitiveType primitive, bool depthWrite);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex) const;
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,

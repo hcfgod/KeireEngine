@@ -148,6 +148,16 @@ namespace KeireEditor
         target.SetParent(newParent, keepWorldTransform);
     }
 
+    void SceneDocument::MoveEntity(const Keire::EntityId entity, const Keire::EntityId parent,
+                                   const Keire::EntityId beforeSibling, const bool keepWorldTransform)
+    {
+        const auto scene = ActiveScene();
+        if (!scene || !scene->FindEntity(entity) || (parent && !scene->FindEntity(parent)) ||
+            (beforeSibling && !scene->FindEntity(beforeSibling)))
+            throw std::invalid_argument("Cannot move entities outside the active scene.");
+        scene->MoveEntity(entity, parent, beforeSibling, keepWorldTransform);
+    }
+
     void SceneDocument::SetTransform(const Keire::EntityId entity, const TransformValues& values)
     {
         const auto scene = ActiveScene();

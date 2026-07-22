@@ -260,6 +260,41 @@ TEST_CASE("Scene assets and mutable scenes preserve validated hierarchy ordering
     CHECK_FALSE(root);
 }
 
+TEST_CASE("Scene entity moves preserve hierarchy order and reject invalid insertion targets")
+{
+    Keire::SceneDefinition definition;
+    definition.Name = "Ordering";
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), std::move(definition));
+    const auto first = scene->CreateEntity("First");
+    const auto second = scene->CreateEntity("Second");
+    const auto third = scene->CreateEntity("Third");
+    const auto child = scene->CreateEntity("Child", first);
+
+    scene->MoveEntity(third.Id(), {}, first.Id());
+    auto objects = scene->Objects();
+    REQUIRE(objects.size() == 4);
+    CHECK(objects[0].Id == third.Id().Value());
+    CHECK(objects[1].Id == first.Id().Value());
+    CHECK(objects[2].Id == child.Id().Value());
+    CHECK(objects[3].Id == second.Id().Value());
+
+    scene->MoveEntity(second.Id(), first.Id(), child.Id());
+    objects = scene->Objects();
+    REQUIRE(objects.size() == 4);
+    CHECK(objects[0].Id == third.Id().Value());
+    CHECK(objects[1].Id == first.Id().Value());
+    CHECK(objects[2].Id == second.Id().Value());
+    CHECK(objects[3].Id == child.Id().Value());
+    CHECK(objects[2].Parent == first.Id().Value());
+
+    scene->MoveEntity(second.Id());
+    objects = scene->Objects();
+    CHECK(objects.back().Id == second.Id().Value());
+    CHECK_FALSE(objects.back().Parent);
+    CHECK_THROWS_AS(scene->MoveEntity(first.Id(), child.Id()), std::invalid_argument);
+    CHECK_THROWS_AS(scene->MoveEntity(third.Id(), {}, child.Id()), std::invalid_argument);
+}
+
 TEST_CASE("Application scene system activates single and additive scene loads at frame boundaries")
 {
     UseDummyVideoDriver();

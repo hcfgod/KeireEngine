@@ -317,6 +317,43 @@ namespace Keire::RenderBackend
         }
     }
 
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateSkyPipeline(const SDL_GPUSampleCount samples)
+    {
+        SDL_GPUShader* vertex = CreateSkyShader(true);
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            fragment = CreateSkyShader(false);
+            SDL_GPUColorTargetDescription color{};
+            color.format = ColorFormat;
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+            information.multisample_state.sample_count = samples;
+            information.target_info.color_target_descriptions = &color;
+            information.target_info.num_color_targets = 1;
+            information.target_info.depth_stencil_format = DepthFormat;
+            information.target_info.has_depth_stencil_target = true;
+            SDL_GPUGraphicsPipeline* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(sky) failed: " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return result;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
+    }
+
     RenderPipelineSet& RenderSharedState::PipelinesFor(const SDL_GPUSampleCount samples)
     {
         const auto found = std::ranges::find(Pipelines, samples, &RenderPipelineSet::Samples);
@@ -329,12 +366,15 @@ namespace Keire::RenderBackend
         {
             result.Cube = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
             result.Grid = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_LINELIST, false);
+            result.Sky = CreateSkyPipeline(samples);
             return Pipelines.emplace_back(result);
         }
         catch (...)
         {
             if (result.Grid)
                 SDL_ReleaseGPUGraphicsPipeline(Device, result.Grid);
+            if (result.Sky)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.Sky);
             if (result.Cube)
                 SDL_ReleaseGPUGraphicsPipeline(Device, result.Cube);
             throw;

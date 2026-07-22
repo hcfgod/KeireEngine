@@ -868,6 +868,11 @@ Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ActiveHierarchyScene() const noex
 
 KeireEditor::SceneDocument& EditorWorkspaceLayer::HierarchyDocument() noexcept { return *m_SceneDocument; }
 
+void EditorWorkspaceLayer::ReportHierarchyError(std::string message) noexcept
+{
+    ReportError("Hierarchy", std::move(message));
+}
+
 Keire::UiColor EditorWorkspaceLayer::HierarchyAccent() const noexcept { return m_Theme.Accent; }
 
 void EditorWorkspaceLayer::ActivateHierarchyHistory() noexcept { m_ActiveUndoContext = m_SceneDocument->History(); }

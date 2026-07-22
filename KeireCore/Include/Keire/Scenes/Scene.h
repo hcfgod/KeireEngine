@@ -69,6 +69,8 @@ namespace Keire
         [[nodiscard]] Entity CreateEntity(std::string name = "GameObject", Entity parent = {});
         [[nodiscard]] Entity DuplicateEntity(EntityId id);
         [[nodiscard]] bool DestroyEntity(EntityId id);
+        void MoveEntity(EntityId id, EntityId parent = {}, EntityId beforeSibling = {},
+                        bool preserveWorldTransform = true);
         [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
 
         template <std::derived_from<Component> T> [[nodiscard]] std::vector<Entity> Query() const

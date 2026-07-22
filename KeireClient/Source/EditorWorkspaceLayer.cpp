@@ -40,6 +40,7 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -551,6 +552,43 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
         },
         [this] { return ActiveScene() && !m_SceneDocument->Selections().empty() && !m_PlayChanges; });
     m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::DuplicateSelection,
+        [this]
+        {
+            const auto scene = ActiveScene();
+            const auto selected = m_SceneDocument->Selections();
+            const std::unordered_set<Keire::AssetId> selectedSet(selected.begin(), selected.end());
+            std::vector<Keire::AssetId> roots;
+            for (const auto entity : selected)
+            {
+                auto parent = scene->FindEntity(Keire::EntityId(entity)).Parent();
+                bool ancestorSelected = false;
+                while (parent)
+                {
+                    if (selectedSet.contains(parent.Id().Value()))
+                    {
+                        ancestorSelected = true;
+                        break;
+                    }
+                    parent = parent.Parent();
+                }
+                if (!ancestorSelected)
+                    roots.push_back(entity);
+            }
+
+            RecordSceneUndo("Duplicate Entities");
+            std::vector<Keire::AssetId> duplicates;
+            duplicates.reserve(roots.size());
+            for (const auto entity : roots)
+            {
+                const auto duplicate = m_SceneDocument->DuplicateEntity(Keire::EntityId(entity)).Value();
+                duplicates.push_back(duplicate);
+                MarkPlayEditorEntity(duplicate);
+            }
+            m_SceneDocument->SetSelections(duplicates);
+        },
+        [this] { return ActiveScene() && !m_SceneDocument->Selections().empty() && !m_PlayChanges; });
+    m_CommandRouter->Bind(
         KeireEditor::EditorCommand::SelectAll,
         [this]
         {
@@ -945,6 +983,10 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
     else if (ui.Shortcut({.Key = Keire::UiKey::R, .Primary = true, .Global = true}))
         (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
+    if (m_CommandRouter->Available(KeireEditor::EditorCommand::DuplicateSelection) &&
+        m_ActiveUndoContext == m_SceneDocument->History() &&
+        ui.Shortcut({.Key = Keire::UiKey::D, .Primary = true, .Global = true}))
+        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::DuplicateSelection);
     if (ui.Shortcut({.Key = Keire::UiKey::S, .Shift = true, .Primary = true, .Global = true}) &&
         m_SceneDocument->EditingScene() && !m_SceneDocument->SaveDialog())
         SaveSceneAs();

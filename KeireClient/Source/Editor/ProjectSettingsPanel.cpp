@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 
 #include <bit>
@@ -36,6 +37,45 @@ namespace KeireEditor
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.SliderFloat("Exposure", settings.Exposure, 0.1F, 4.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
+        if (!m_EnvironmentEditing && m_EnvironmentAsset != settings.Environment)
+        {
+            m_EnvironmentAsset = settings.Environment;
+            m_EnvironmentText = settings.Environment ? settings.Environment.ToString() : std::string{};
+        }
+        (void)ui.InputText("Environment Texture", m_EnvironmentText);
+        const auto environmentState = ui.LastItemState();
+        m_EnvironmentEditing = environmentState.Active;
+        if (environmentState.DeactivatedAfterEdit)
+        {
+            try
+            {
+                settings.Environment =
+                    m_EnvironmentText.empty() ? Keire::AssetId{} : Keire::AssetId::Parse(m_EnvironmentText);
+                m_EnvironmentAsset = settings.Environment;
+                changed = true;
+                commit = true;
+            }
+            catch (const std::exception& error)
+            {
+                m_Error = std::string("Environment asset ID is invalid: ") + error.what();
+            }
+        }
+        if (auto target = ui.BeginDragTarget(); target)
+        {
+            std::vector<std::byte> payload;
+            if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
+            {
+                const auto assets = AssetBrowserPanel::DecodeDragPayload(payload);
+                if (!assets.empty())
+                {
+                    settings.Environment = assets.front();
+                    m_EnvironmentAsset = assets.front();
+                    m_EnvironmentText = assets.front().ToString();
+                    changed = true;
+                    commit = true;
+                }
+            }
+        }
         changed |= ui.SliderFloat("Environment Rotation", settings.EnvironmentRotationDegrees, -180.0F, 180.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.SliderFloat("IBL Diffuse", settings.EnvironmentDiffuseIntensity, 0.0F, 8.0F);

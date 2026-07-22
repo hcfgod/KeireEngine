@@ -58,6 +58,7 @@ namespace KeireEditor
         virtual void RecordHierarchyUndo() = 0;
         virtual void MarkHierarchyEntity(Keire::AssetId entity) = 0;
         virtual void RequestHierarchyRename(Keire::AssetId entity, std::string name) = 0;
+        virtual void ReportHierarchyError(std::string message) noexcept = 0;
     };
 
     class IInspectorController
@@ -129,6 +130,7 @@ namespace KeireEditor
         std::unique_ptr<SceneGizmoController> m_Gizmos;
         std::unique_ptr<SceneCameraController> m_Camera;
         Keire::Ref<Keire::RenderView> m_RenderView;
+        Keire::Ref<Keire::RenderView> m_CameraPreviewView;
         Keire::UiItemRect m_ViewportRect;
         Keire::RenderCamera m_LastCamera;
         std::filesystem::path m_ProjectRoot;
@@ -136,6 +138,7 @@ namespace KeireEditor
         Keire::UiPosition m_BoxSelectionStart;
         bool m_BoxSelecting = false;
         bool m_BoxSelectionAdditive = false;
+        bool m_CameraPreviewVisible = true;
     };
 
     class HierarchyPanel final
@@ -234,5 +237,8 @@ namespace KeireEditor
         ProjectSettingsDocument& m_Document;
         Keire::UiPanelRegistration m_Registration;
         std::string m_Error;
+        std::string m_EnvironmentText;
+        Keire::AssetId m_EnvironmentAsset;
+        bool m_EnvironmentEditing = false;
     };
 } // namespace KeireEditor

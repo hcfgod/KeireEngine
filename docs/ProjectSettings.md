@@ -4,6 +4,11 @@ Rendering settings include environment identity/rotation, diffuse and specular I
 directional-shadow distance, cascade count, power-of-two resolution, and practical-split lambda. Shadow settings are
 validated to one through four cascades, 256 through 8192 texels, and a split lambda in 0..1 before an atomic save.
 
+The environment identity accepts an imported Texture2D environment. Supported sky sources are LDR or Radiance HDR
+equirectangular panoramas and common horizontal/vertical cubemap cross or six-face strip atlases. Texture import
+metadata records the projection layout; sky rotation, visibility, specular intensity, and exposure update Scene, Game,
+and the main-camera preview together.
+
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
 

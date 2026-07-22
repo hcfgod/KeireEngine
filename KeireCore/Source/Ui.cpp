@@ -739,6 +739,16 @@ namespace Keire
         return true;
     }
 
+    bool UiFrame::InvisibleButton(const std::string_view id, const UiSize size)
+    {
+        m_Impl->RequireActive("InvisibleButton");
+        if (id.empty() || size.Width < 0.0F || size.Height < 0.0F || !std::isfinite(size.Width) ||
+            !std::isfinite(size.Height))
+            throw std::invalid_argument("UI invisible button dimensions and identifier are invalid.");
+        const std::string safeId(id);
+        return ImGui::InvisibleButton(safeId.c_str(), {size.Width, size.Height});
+    }
+
     bool UiFrame::Shortcut(const UiShortcut shortcut)
     {
         m_Impl->RequireActive("Shortcut");
@@ -882,6 +892,8 @@ namespace Keire
                 return "S";
             case UiIcon::Settings:
                 return "...";
+            case UiIcon::Camera:
+                return "C";
             case UiIcon::Perspective:
                 return "P";
             case UiIcon::Orthographic:
@@ -1160,6 +1172,19 @@ namespace Keire
         }
         else
             ImGui::Dummy({size.Width, size.Height});
+    }
+
+    void UiFrame::DrawImage(const Ref<RenderSurface>& surface, const UiItemRect rectangle)
+    {
+        m_Impl->RequireActive("DrawImage(RenderSurface)");
+        if (!surface || rectangle.Maximum.X <= rectangle.Minimum.X || rectangle.Maximum.Y <= rectangle.Minimum.Y)
+            throw std::invalid_argument("UiFrame::DrawImage requires a valid surface and rectangle.");
+        if (auto* texture = RenderSystemInternalAccess::Texture(*surface))
+        {
+            ImGui::GetWindowDrawList()->AddImage(
+                ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture))),
+                {rectangle.Minimum.X, rectangle.Minimum.Y}, {rectangle.Maximum.X, rectangle.Maximum.Y});
+        }
     }
 
     bool UiFrame::ImageButton(const std::string_view id, const Ref<UiImage>& image, UiSize size)

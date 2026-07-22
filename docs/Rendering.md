@@ -68,6 +68,9 @@ viewpoint. Its controls are:
 - `Q`, `W`, `E`, and `R`: select View, Move, Rotate, and Scale tools while the Scene viewport is active.
 - `X`, `Y`, and `Z`: snap orientation; `Persp/Ortho` toggles projection.
 
+The Scene toolbar camera button toggles a live 16:9 preview of the selected primary/highest-priority game Camera. It
+uses a separate renderer-owned view and therefore matches the Game camera without changing the editor camera.
+
 The Scene toolbar exposes Global/Local space, snapping, position/rotation/scale increments, and a Gizmos toggle.
 Move, Rotate, and Scale handles operate directly on the selected Transform and record one scene undo step per drag.
 Camera and Directional Light icons remain visible independently of geometry; camera frustums and light directions can
@@ -132,6 +135,11 @@ Rendering environment values are stored in `ProjectSettings/Rendering.keiresetti
 Settings...** to edit them live. Values update rendering immediately and persist once the active edit finishes; writes
 are schema-validated, atomic, and resilient to transient Windows file sharing. A missing file receives conservative
 defaults, while a malformed file is reported and isolated without preventing the project's asset database from opening.
+
+When Sky Visible is enabled and Environment references a Texture2D environment, the renderer draws it before scene
+geometry using project rotation, intensity, and exposure. It accepts LDR or RGBE Radiance HDR equirectangular maps plus
+horizontal/vertical cubemap cross and six-face strip atlases. Layout and HDR encoding are versioned texture import data,
+so reimport and cooking preserve the same sampling behavior across supported GPU backends.
 
 This foundation renders asset-backed textured PBR meshes plus the editor grid. Transparency sorting, shadows, IBL,
 post-processing, multiple-light accumulation, compute, custom raw GPU passes, and a dedicated render thread remain

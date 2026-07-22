@@ -6,8 +6,10 @@ internal drag. Meshes create entities, materials assign to the entity under the 
 use their guarded open workflows. Texture and shader drops import and reveal the asset without guessing an assignment.
 
 A single unambiguous asset imports directly. Texture files, batches, directories, and destination conflicts open the
-**Import Assets** dialog. Texture settings include semantic, color space, mip policy, maximum size, normal green-channel
-flip, filters, address modes, and anisotropy. Conflicts default to a unique name; Replace is explicit and preserves a
+**Import Assets** dialog. Texture settings include semantic, color space, environment layout, mip policy, maximum size,
+normal green-channel flip, filters, address modes, and anisotropy. Radiance HDR files default to linear equirectangular
+environments; LDR environment images can use equirectangular, horizontal/vertical cross, or horizontal/vertical strip
+layouts. Conflicts default to a unique name; Replace is explicit and preserves a
 compatible asset's stable ID. Imported files are copied into `Assets`; external links and source `.keiremeta` identities
 are never adopted. Each dialog item can be excluded, in-progress validation can be cancelled, and the completed batch
 is one Project undo operation, including recoverable replacement of an existing source and metadata pair.
@@ -63,6 +65,7 @@ and live under `Library/Thumbnails`.
 
 Textures display their imported pixels at the correct aspect ratio with transparency composited over a checkerboard.
 Materials use a neutral shaded sphere driven by their current Base Color semantic, tint, and texture. Mesh/model assets
-use their imported geometry and catalog bounds for a framed isometric preview. Scene, shader, input-action, folder,
+use their imported geometry and catalog bounds for a framed isometric clay preview without material textures. Scene,
+shader, input-action, folder,
 unknown, missing, and failed assets use distinct procedural type/error icons. Provider versions and record digests
 invalidate stale previews without blocking the Project panel.

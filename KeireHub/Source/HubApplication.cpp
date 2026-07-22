@@ -166,21 +166,21 @@ namespace
             options.NoSavedSettings = true;
             if (auto window = ui.BeginWindow("Kéire Project Hub", nullptr, options); window)
             {
-                if (auto sidebar = ui.BeginChild("HubSidebar", {244.0F, 0.0F}, true); sidebar)
+                if (auto sidebar = ui.BeginChild("HubSidebar", {264.0F, 0.0F}, true); sidebar)
                     DrawSidebar(ui);
                 ui.SameLine();
                 if (auto workspace = ui.BeginChild("HubWorkspace", {}, false); workspace)
                 {
-                    ui.TextColored({0.92F, 0.94F, 0.98F, 1.0F}, "PROJECTS");
-                    ui.TextColored({0.56F, 0.61F, 0.70F, 1.0F}, "Continue a recent project or start something new.");
+                    ui.TextColored({0.95F, 0.97F, 1.0F, 1.0F}, "Welcome back");
+                    ui.TextColored({0.53F, 0.58F, 0.68F, 1.0F}, "Open a recent workspace or create your next project.");
                     ui.Spacing();
-                    if (ui.Button("New Project", {126.0F, 36.0F}))
+                    if (ui.Button("+  New Project", {142.0F, 40.0F}))
                         m_RequestCreatePopup = true;
                     ui.SameLine();
-                    if (ui.Button("Open Existing", {126.0F, 36.0F}))
+                    if (ui.Button("Open Folder", {126.0F, 40.0F}))
                         m_RequestOpenPopup = true;
                     ui.SameLine();
-                    if (ui.Button("Refresh", {86.0F, 36.0F}) && m_Registry)
+                    if (ui.Button("Refresh", {88.0F, 40.0F}) && m_Registry)
                         Refresh();
                     ui.Spacing();
                     (void)ui.InputText("Search Projects", m_Search);
@@ -215,16 +215,16 @@ namespace
         void DrawSidebar(Keire::UiFrame& ui)
         {
             ui.Spacing();
-            ui.TextColored({0.34F, 0.61F, 1.0F, 1.0F}, "KÉIRE");
-            ui.TextColored({0.58F, 0.63F, 0.72F, 1.0F}, "PROJECT HUB");
+            ui.TextColored({0.37F, 0.66F, 1.0F, 1.0F}, "KÉIRE");
+            ui.TextColored({0.55F, 0.61F, 0.72F, 1.0F}, "CREATE  •  BUILD  •  SHIP");
             ui.Spacing();
             ui.Separator();
             ui.Spacing();
             const auto width = std::max(ui.ContentAvailable().Width, 1.0F);
-            (void)ui.Button("Projects", {width, 40.0F});
-            if (ui.Button("Create New", {width, 40.0F}))
+            (void)ui.Button("Projects", {width, 42.0F});
+            if (ui.Button("New Project", {width, 42.0F}))
                 m_RequestCreatePopup = true;
-            if (ui.Button("Add Existing", {width, 40.0F}))
+            if (ui.Button("Open Project", {width, 42.0F}))
                 m_RequestOpenPopup = true;
             ui.Spacing();
             ui.Separator();
@@ -406,7 +406,8 @@ namespace
             }
 
             ui.Spacing();
-            const std::size_t columns = ui.ContentAvailable().Width >= 760.0F ? 2 : 1;
+            const float contentWidth = ui.ContentAvailable().Width;
+            const std::size_t columns = contentWidth >= 1120.0F ? 3 : contentWidth >= 700.0F ? 2 : 1;
             Keire::UiTableOptions tableOptions;
             tableOptions.Sizing = Keire::UiTableSizing::Equal;
             tableOptions.Borders = false;
@@ -421,12 +422,30 @@ namespace
                         ui.TableNextRow();
                     (void)ui.TableNextColumn();
                     auto id = ui.PushId(entry.Id.ToString());
-                    if (auto card = ui.BeginChild("ProjectCard", {0.0F, 126.0F}, true); card)
+                    if (auto card = ui.BeginChild("ProjectCard", {0.0F, 150.0F}, true); card)
                     {
-                        ui.TextColored({0.88F, 0.91F, 0.97F, 1.0F},
-                                       entry.Pinned ? "PINNED  |  " + entry.Name : entry.Name);
-                        ui.TextColored(StatusColor(entry.Status), StatusLabel(entry.Status));
-                        ui.TextColored({0.55F, 0.59F, 0.67F, 1.0F}, Utf8Path(entry.Root));
+                        const float cardWidth = std::max(ui.ContentAvailable().Width, 1.0F);
+                        const bool openCard = ui.InvisibleButton("OpenProjectCard", {cardWidth, 54.0F});
+                        const auto header = ui.LastItemRect();
+                        ui.DrawFilledRectangle(header, {0.115F, 0.145F, 0.205F, 1.0F}, 6.0F);
+                        const Keire::UiItemRect badge{{header.Minimum.X + 9.0F, header.Minimum.Y + 8.0F},
+                                                      {header.Minimum.X + 47.0F, header.Maximum.Y - 8.0F}};
+                        ui.DrawFilledRectangle(badge, {0.24F, 0.48F, 0.88F, 1.0F}, 7.0F);
+                        const std::string initial = entry.Name.empty() ? "K" : entry.Name.substr(0, 1);
+                        ui.DrawOverlayText({badge.Minimum.X + 14.0F, badge.Minimum.Y + 9.0F},
+                                           {0.97F, 0.98F, 1.0F, 1.0F}, initial);
+                        ui.DrawOverlayText({header.Minimum.X + 58.0F, header.Minimum.Y + 9.0F},
+                                           {0.92F, 0.95F, 1.0F, 1.0F}, entry.Name);
+                        ui.DrawFilledCircle({header.Minimum.X + 63.0F, header.Minimum.Y + 37.0F}, 3.0F,
+                                            StatusColor(entry.Status));
+                        ui.DrawOverlayText({header.Minimum.X + 72.0F, header.Minimum.Y + 30.0F},
+                                           {0.61F, 0.66F, 0.75F, 1.0F}, StatusLabel(entry.Status));
+                        if (entry.Pinned)
+                            ui.DrawOverlayText({header.Maximum.X - 54.0F, header.Minimum.Y + 9.0F},
+                                               {0.98F, 0.75F, 0.30F, 1.0F}, "PINNED");
+                        if (openCard && entry.Status == Keire::ProjectStatus::Ready)
+                            Open(entry.Root);
+                        ui.TextColored({0.52F, 0.57F, 0.66F, 1.0F}, Utf8Path(entry.Root));
                         ui.Spacing();
                         if (auto disabled = ui.BeginDisabled(entry.Status != Keire::ProjectStatus::Ready); disabled)
                             if (ui.Button("Open", {74.0F, 30.0F}))

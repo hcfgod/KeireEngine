@@ -46,6 +46,7 @@ namespace Keire::Detail
         [[nodiscard]] Entity Parent(EntityId id) const noexcept;
         [[nodiscard]] std::vector<Entity> Children(EntityId id) const;
         void SetParent(EntityId id, EntityId parent, bool preserveWorldTransform);
+        void Move(EntityId id, EntityId parent, EntityId beforeSibling, bool preserveWorldTransform);
 
         [[nodiscard]] Ref<Component> AddComponent(EntityId id, ComponentTypeId type);
         [[nodiscard]] Ref<Component> GetComponent(EntityId id, ComponentTypeId type) const noexcept;
