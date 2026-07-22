@@ -17,6 +17,7 @@
 #include "KeireClient/Editor/ScenePicker.h"
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
+#include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
@@ -421,10 +422,12 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           std::make_unique<KeireEditor::InspectorPanel>(static_cast<KeireEditor::IInspectorController&>(*this))),
       m_InputActionsPanel(
           std::make_unique<KeireEditor::InputActionsPanel>(static_cast<KeireEditor::IInputActionsController&>(*this))),
-      m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(*m_ProjectSettingsDocument)),
+      m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
+          *m_ProjectSettingsDocument, static_cast<KeireEditor::IProjectSettingsController&>(*this))),
       m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
       m_ViewportAssetDropRouter(std::make_unique<KeireEditor::ViewportAssetDropRouter>()),
       m_PlayChangesPanel(std::make_unique<KeireEditor::ScenePlayChangesPanel>()),
+      m_SceneTransitions(std::make_unique<KeireEditor::SceneTransitionCoordinator>()),
       m_ExternalAssetImport(std::make_unique<KeireEditor::ExternalAssetImportController>()),
       m_ExecutablePath(std::move(executable)), m_Smoke(smoke), m_InitializeProject(initializeProject)
 {
@@ -661,7 +664,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                                   OpenDialog(Dialog::DirtyScene);
                               }
                               else
-                                  Owner().RequestExit();
+                                  QueueSceneTransition(PendingSceneAction::Exit);
                           });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::Undo, [this] { ApplyActiveUndo(false); },
@@ -778,20 +781,25 @@ void EditorWorkspaceLayer::OnAttach()
             Listen<Keire::WindowCloseRequestedEvent>(
                 [this](const auto& event)
                 {
-                    if (event.Header.Window == Owner().MainWindow()->Id() && m_SceneDocument->PlaySession())
+                    if (event.Header.Window != Owner().MainWindow()->Id())
+                        return Keire::EventFlow::Continue;
+                    if (m_PendingSceneAction != PendingSceneAction::None ||
+                        (m_SceneTransitions && m_SceneTransitions->Pending()))
+                        return Keire::EventFlow::Handled;
+                    if (m_SceneDocument->PlaySession())
                     {
                         m_PendingSceneAction = PendingSceneAction::Exit;
                         RequestStopPlayMode();
                         return Keire::EventFlow::Handled;
                     }
-                    if (event.Header.Window == Owner().MainWindow()->Id() && m_SceneDocument->EditingScene() &&
-                        m_SceneDocument->EditingScene()->Dirty())
+                    if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
                     {
                         m_PendingSceneAction = PendingSceneAction::Exit;
                         OpenDialog(Dialog::DirtyScene);
                         return Keire::EventFlow::Handled;
                     }
-                    return Keire::EventFlow::Continue;
+                    QueueSceneTransition(PendingSceneAction::Exit);
+                    return Keire::EventFlow::Handled;
                 });
             Listen<Keire::WindowFileDropEvent>(
                 [this](const auto& event)
@@ -809,7 +817,7 @@ void EditorWorkspaceLayer::OnAttach()
                     return Keire::EventFlow::Handled;
                 });
             if (project->Descriptor().StartupScene && !m_PendingStartupScene)
-                OpenScene(project->Descriptor().StartupScene);
+                RequestOpenScene(project->Descriptor().StartupScene);
             if (project->Descriptor().DefaultInput)
             {
                 OpenInputActions(project->Descriptor().DefaultInput);
@@ -880,6 +888,7 @@ void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
+    ProcessSceneTransition();
     FinalizePendingPlayEditorMutation();
     if (m_PendingPlayTransition != PendingPlayTransition::None)
     {
@@ -1009,6 +1018,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     }
     auto& workspace = Owner().GetUiWorkspace();
     DrawMainMenu(ui, workspace);
+    DrawMainToolbar(ui);
+    DrawMainStatusBar(ui);
     OpenPendingDialog(ui);
     DrawNotices(ui, workspace);
     DrawDialogs(ui, workspace);
@@ -1044,7 +1055,7 @@ void EditorWorkspaceLayer::AddConsoleMessage(std::string category, std::string m
     }
     try
     {
-        m_ConsolePanel->Add(std::move(category), std::move(message), color, Owner().GetTime().FrameCount());
+        m_ConsolePanel->Add(std::move(category), std::move(message), color, Owner().GetTime().FrameCount(), level);
     }
     catch (...)
     {

@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AssetOperationService.h"
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -12,6 +13,7 @@
 #include "KeireClient/Editor/ScenePicker.h"
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
+#include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
@@ -1328,4 +1330,71 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
     CHECK(operations.QueuedCount() == 3);
     operations.Shutdown();
     std::filesystem::remove_all(location, cleanupError);
+}
+
+TEST_CASE("Scene transition coordinator serializes requests and retains failure diagnostics")
+{
+    KeireEditor::SceneTransitionCoordinator transitions;
+    const auto scene = Keire::AssetId::Generate();
+    CHECK(transitions.Request({KeireEditor::SceneTransitionKind::Open, scene}));
+    CHECK(transitions.Pending());
+    CHECK_FALSE(transitions.Request({KeireEditor::SceneTransitionKind::Close, {}}));
+
+    const auto request = transitions.BeginCommit();
+    REQUIRE(request);
+    CHECK(request->Kind == KeireEditor::SceneTransitionKind::Open);
+    CHECK(request->Asset == scene);
+    CHECK_FALSE(transitions.BeginCommit());
+    transitions.Fail("decode failed");
+    CHECK_FALSE(transitions.Pending());
+    CHECK(transitions.State() == KeireEditor::SceneTransitionState::Failed);
+    CHECK(transitions.Diagnostic() == "decode failed");
+
+    CHECK(transitions.Request({KeireEditor::SceneTransitionKind::Create, {}}));
+    CHECK(transitions.BeginCommit());
+    transitions.Complete();
+    CHECK(transitions.State() == KeireEditor::SceneTransitionState::Idle);
+}
+
+TEST_CASE("Scene document views become inert after the underlying scene closes")
+{
+    KeireEditor::SceneDocument document;
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Transient"));
+    (void)scene->CreateEntity("Transient");
+    document.Open(scene);
+    CHECK(document.ActiveScene());
+    scene->Close();
+    CHECK_FALSE(document.ActiveScene());
+    CHECK_FALSE(document.EditingScene());
+    CHECK_FALSE(document.Dirty());
+    CHECK_NOTHROW(document.SynchronizeSelection());
+}
+
+TEST_CASE("Asset picker filters environment textures without exposing raw asset IDs")
+{
+    Keire::AssetSourceRecord hdr;
+    hdr.Id = Keire::AssetId::Generate();
+    hdr.Type = Keire::Texture2DAsset::StaticType();
+    hdr.RelativePath = "Sky/Studio.hdr";
+    CHECK(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(hdr));
+
+    auto color = hdr;
+    color.Id = Keire::AssetId::Generate();
+    color.RelativePath = "Textures/Albedo.png";
+    CHECK_FALSE(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(color));
+
+    color.ImportSettings["semantic"] = std::string("environment");
+    CHECK(KeireEditor::AssetPicker::AcceptsEnvironmentTexture(color));
+
+    KeireEditor::AssetPickerOptions options;
+    options.Label = "Skybox";
+    options.ExpectedType = Keire::Texture2DAsset::StaticType();
+    options.Filter = &KeireEditor::AssetPicker::AcceptsEnvironmentTexture;
+    CHECK(KeireEditor::AssetPicker::Accepts(hdr, options));
+    CHECK(KeireEditor::AssetPicker::Accepts(color, options));
+
+    auto mesh = hdr;
+    mesh.Type = Keire::MeshAsset::StaticType();
+    CHECK_FALSE(KeireEditor::AssetPicker::Accepts(mesh, options));
 }

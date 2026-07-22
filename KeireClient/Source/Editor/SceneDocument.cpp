@@ -13,10 +13,10 @@ namespace KeireEditor
     {
         if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
         {
-            if (const auto runtime = m_PlaySession->RuntimeScene())
+            if (const auto runtime = m_PlaySession->RuntimeScene(); runtime && runtime->IsOpen())
                 return runtime;
         }
-        return m_Scene;
+        return m_Scene && m_Scene->IsOpen() ? m_Scene : Keire::Ref<Keire::Scene>{};
     }
 
     bool SceneDocument::IsSelected(const Keire::AssetId entity) const noexcept

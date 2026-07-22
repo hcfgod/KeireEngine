@@ -134,3 +134,17 @@ void EditorWorkspaceLayer::ReportInspectorAssetError(std::string message) noexce
 {
     SetAssetError(std::move(message));
 }
+
+std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::ProjectSettingsAssetRecords() const noexcept
+{
+    return m_AssetRecords;
+}
+
+void EditorWorkspaceLayer::RevealProjectSettingsAsset(const Keire::AssetId asset)
+{
+    if (!asset || !m_AssetBrowserPanel)
+        return;
+    m_SelectedAsset = asset;
+    m_AssetBrowserPanel->RevealAsset(asset);
+    m_AssetBrowserPanel->Registration().SetVisible(true);
+}

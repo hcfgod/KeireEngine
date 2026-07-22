@@ -48,10 +48,10 @@ namespace Keire
 
     struct UiThemeDefinition
     {
-        UiColor Canvas{0.09F, 0.10F, 0.12F, 1.0F};
-        UiColor Panel{0.13F, 0.14F, 0.17F, 1.0F};
-        UiColor RaisedPanel{0.16F, 0.18F, 0.22F, 1.0F};
-        UiColor Border{0.23F, 0.25F, 0.31F, 1.0F};
+        UiColor Canvas{0.075F, 0.078F, 0.086F, 1.0F};
+        UiColor Panel{0.105F, 0.11F, 0.12F, 1.0F};
+        UiColor RaisedPanel{0.145F, 0.15F, 0.165F, 1.0F};
+        UiColor Border{0.225F, 0.23F, 0.25F, 1.0F};
         UiColor Text{0.91F, 0.92F, 0.95F, 1.0F};
         UiColor MutedText{0.61F, 0.65F, 0.72F, 1.0F};
         UiColor Accent{0.30F, 0.55F, 1.0F, 1.0F};
@@ -61,13 +61,13 @@ namespace Keire
         UiColor Success{0.27F, 0.78F, 0.50F, 1.0F};
         UiColor Warning{1.0F, 0.69F, 0.25F, 1.0F};
         UiColor Error{0.96F, 0.32F, 0.36F, 1.0F};
-        UiSize WindowPadding{8.0F, 8.0F};
-        UiSize FramePadding{8.0F, 6.0F};
-        UiSize ItemSpacing{8.0F, 6.0F};
-        float WindowRounding = 6.0F;
-        float FrameRounding = 6.0F;
-        float TabRounding = 4.0F;
-        float ScrollbarRounding = 6.0F;
+        UiSize WindowPadding{7.0F, 6.0F};
+        UiSize FramePadding{7.0F, 4.0F};
+        UiSize ItemSpacing{6.0F, 4.0F};
+        float WindowRounding = 3.0F;
+        float FrameRounding = 3.0F;
+        float TabRounding = 2.0F;
+        float ScrollbarRounding = 3.0F;
         float WindowBorderSize = 1.0F;
         float FrameBorderSize = 0.0F;
         auto operator<=>(const UiThemeDefinition&) const noexcept = default;

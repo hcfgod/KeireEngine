@@ -220,6 +220,36 @@ namespace Keire
                 ImGui::StyleColorsDark();
                 break;
             }
+            auto& style = ImGui::GetStyle();
+            style.WindowPadding = {7.0F, 6.0F};
+            style.FramePadding = {7.0F, 4.0F};
+            style.ItemSpacing = {6.0F, 4.0F};
+            style.WindowRounding = 3.0F;
+            style.ChildRounding = 3.0F;
+            style.FrameRounding = 3.0F;
+            style.PopupRounding = 3.0F;
+            style.TabRounding = 2.0F;
+            style.ScrollbarRounding = 3.0F;
+            style.GrabRounding = 3.0F;
+            style.WindowBorderSize = 1.0F;
+            if (theme == UiTheme::Dark)
+            {
+                auto& colors = style.Colors;
+                colors[ImGuiCol_WindowBg] = {0.075F, 0.078F, 0.086F, 1.0F};
+                colors[ImGuiCol_ChildBg] = {0.105F, 0.11F, 0.12F, 1.0F};
+                colors[ImGuiCol_PopupBg] = {0.125F, 0.13F, 0.145F, 1.0F};
+                colors[ImGuiCol_FrameBg] = {0.145F, 0.15F, 0.165F, 1.0F};
+                colors[ImGuiCol_FrameBgHovered] = {0.18F, 0.20F, 0.23F, 1.0F};
+                colors[ImGuiCol_Button] = {0.16F, 0.17F, 0.19F, 1.0F};
+                colors[ImGuiCol_ButtonHovered] = {0.20F, 0.40F, 0.70F, 1.0F};
+                colors[ImGuiCol_ButtonActive] = {0.16F, 0.34F, 0.64F, 1.0F};
+                colors[ImGuiCol_Header] = {0.16F, 0.34F, 0.60F, 0.65F};
+                colors[ImGuiCol_HeaderHovered] = {0.20F, 0.42F, 0.74F, 0.86F};
+                colors[ImGuiCol_HeaderActive] = {0.16F, 0.34F, 0.64F, 1.0F};
+                colors[ImGuiCol_Border] = {0.225F, 0.23F, 0.25F, 1.0F};
+                colors[ImGuiCol_CheckMark] = {0.30F, 0.58F, 1.0F, 1.0F};
+                colors[ImGuiCol_SliderGrab] = {0.30F, 0.58F, 1.0F, 1.0F};
+            }
         }
 
         void LoadLayout(const std::filesystem::path& path)
@@ -507,6 +537,32 @@ namespace Keire
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::MainMenuBar);
         return UiMainMenuBarScope(*this, visible);
+    }
+
+    UiWindowScope UiFrame::BeginMainToolbar(const std::string_view id, const float height)
+    {
+        m_Impl->RequireActive("BeginMainToolbar");
+        if (id.empty() || !std::isfinite(height) || height <= 0.0F)
+            throw std::invalid_argument("BeginMainToolbar requires an identifier and positive finite height.");
+        constexpr ImGuiWindowFlags flags =
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+        const bool visible = ImGui::Begin("##KeireMainToolbar", nullptr, flags);
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Window);
+        return UiWindowScope(*this, visible);
+    }
+
+    UiWindowScope UiFrame::BeginMainStatusBar(const std::string_view id, const float height)
+    {
+        m_Impl->RequireActive("BeginMainStatusBar");
+        if (id.empty() || !std::isfinite(height) || height <= 0.0F)
+            throw std::invalid_argument("BeginMainStatusBar requires an identifier and positive finite height.");
+        constexpr ImGuiWindowFlags flags =
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+        const bool visible = ImGui::Begin("##KeireMainStatusBar", nullptr, flags);
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::Window);
+        return UiWindowScope(*this, visible);
     }
 
     UiComboScope UiFrame::BeginCombo(std::string_view label, std::string_view preview)
@@ -904,6 +960,26 @@ namespace Keire
                 return "Y";
             case UiIcon::AxisZ:
                 return "Z";
+            case UiIcon::Create:
+                return "+";
+            case UiIcon::Search:
+                return "?";
+            case UiIcon::Filter:
+                return "F";
+            case UiIcon::Lock:
+                return "L";
+            case UiIcon::Folder:
+                return "D";
+            case UiIcon::Refresh:
+                return "R";
+            case UiIcon::List:
+                return "=";
+            case UiIcon::Grid:
+                return "#";
+            case UiIcon::Warning:
+                return "!";
+            case UiIcon::Information:
+                return "i";
             }
             return "?";
         }
@@ -1103,6 +1179,14 @@ namespace Keire
         m_Impl->RequireActive("InputText");
         const std::string safeLabel(label);
         return ImGui::InputText(safeLabel.c_str(), &value);
+    }
+
+    bool UiFrame::InputTextWithHint(const std::string_view label, const std::string_view hint, std::string& value)
+    {
+        m_Impl->RequireActive("InputTextWithHint");
+        const std::string safeLabel(label);
+        const std::string safeHint(hint);
+        return ImGui::InputTextWithHint(safeLabel.c_str(), safeHint.c_str(), &value);
     }
 
     bool UiFrame::Selectable(std::string_view label, const bool selected)
@@ -1568,7 +1652,17 @@ namespace Keire
                 Workspace->AfterNewFrame({static_cast<float>(std::max(displaySize.Width, 1U)),
                                           static_cast<float>(std::max(displaySize.Height, 1U))});
             if (Specification.EnableDocking)
+            {
+                constexpr ImGuiWindowFlags chromeFlags =
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+                (void)ImGui::BeginViewportSideBar("##KeireMainToolbar", ImGui::GetMainViewport(), ImGuiDir_Up, 34.0F,
+                                                  chromeFlags);
+                ImGui::End();
+                (void)ImGui::BeginViewportSideBar("##KeireMainStatusBar", ImGui::GetMainViewport(), ImGuiDir_Down,
+                                                  24.0F, chromeFlags);
+                ImGui::End();
                 (void)ImGui::DockSpaceOverViewport(Workspace ? Workspace->DockspaceId() : 0);
+            }
             Frame->m_Impl->Activate(OwnerThread);
             FrameActive = true;
         }

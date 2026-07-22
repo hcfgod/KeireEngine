@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/SceneTransitionCoordinator.h"
+
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
@@ -267,39 +269,103 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
         }
+    }
+}
+
+void EditorWorkspaceLayer::DrawMainToolbar(Keire::UiFrame& ui)
+{
+    if (auto toolbar = ui.BeginMainToolbar(); toolbar)
+    {
+        if (ui.IconButton("ToolbarNewScene", Keire::UiIcon::Create, false, {28.0F, 24.0F}))
+            (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::NewScene);
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("New Scene", {.Delayed = true});
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(!m_CommandRouter->Available(KeireEditor::EditorCommand::SaveScene));
+            disabled)
+        {
+            if (ui.IconButton("ToolbarSaveScene", Keire::UiIcon::Folder, false, {28.0F, 24.0F}))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveScene);
+        }
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("Save Scene (Ctrl+S)", {.Delayed = true});
+
         ui.AlignNextItemGroup(0.5F, 98.0F);
         const auto playState =
             m_SceneDocument->PlaySession() ? m_SceneDocument->PlaySession()->State() : Keire::ScenePlayState::Stopped;
-        if (ui.IconButton("MainPlay",
+        if (ui.IconButton("ToolbarPlay",
                           playState == Keire::ScenePlayState::Stopped ? Keire::UiIcon::Play : Keire::UiIcon::Stop,
-                          playState != Keire::ScenePlayState::Stopped))
+                          playState != Keire::ScenePlayState::Stopped, {28.0F, 24.0F}))
         {
-            if (playState == Keire::ScenePlayState::Stopped)
-                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Play);
-            else
-                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Stop);
+            (void)m_CommandRouter->Execute(playState == Keire::ScenePlayState::Stopped
+                                               ? KeireEditor::EditorCommand::Play
+                                               : KeireEditor::EditorCommand::Stop);
         }
-        if (ui.LastItemState().Hovered)
-            ui.SetTooltip(playState == Keire::ScenePlayState::Stopped ? "Play" : "Stop", {.Delayed = true});
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(playState == Keire::ScenePlayState::Stopped ||
                                              playState == Keire::ScenePlayState::Faulted);
             disabled)
         {
-            if (ui.IconButton("MainPause", Keire::UiIcon::Pause, playState == Keire::ScenePlayState::Paused))
+            if (ui.IconButton("ToolbarPause", Keire::UiIcon::Pause, playState == Keire::ScenePlayState::Paused,
+                              {28.0F, 24.0F}))
                 (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Pause);
         }
-        if (ui.LastItemState().Hovered)
-            ui.SetTooltip(playState == Keire::ScenePlayState::Paused ? "Resume" : "Pause", {.Delayed = true});
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(playState != Keire::ScenePlayState::Paused); disabled)
         {
-            if (ui.IconButton("MainStep", Keire::UiIcon::Step))
+            if (ui.IconButton("ToolbarStep", Keire::UiIcon::Step, false, {28.0F, 24.0F}))
                 (void)m_SceneDocument->PlaySession()->Step(
                     static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds()));
         }
+
+        ui.AlignNextItemGroup(1.0F, 106.0F);
+        if (m_AssetOperations && m_AssetOperations->Busy())
+        {
+            ui.TextColored(m_Theme.AccentHovered, "Assets...");
+            ui.SameLine();
+        }
+        if (ui.IconButton("ToolbarTheme", Keire::UiIcon::Settings, m_ThemeEditor.Visible(), {28.0F, 24.0F}))
+            m_ThemeEditor.SetVisible(!m_ThemeEditor.Visible());
         if (ui.LastItemState().Hovered)
-            ui.SetTooltip("Step one fixed frame", {.Delayed = true});
+            ui.SetTooltip("Theme and editor appearance", {.Delayed = true});
+        if (!m_Notice.empty())
+        {
+            ui.SameLine();
+            if (ui.IconButton("ToolbarNotice", Keire::UiIcon::Information, false, {28.0F, 24.0F}))
+                m_Notice.clear();
+            if (ui.LastItemState().Hovered)
+                ui.SetTooltip(m_Notice, {.Delayed = true});
+        }
+    }
+}
+
+void EditorWorkspaceLayer::DrawMainStatusBar(Keire::UiFrame& ui)
+{
+    if (auto status = ui.BeginMainStatusBar(); status)
+    {
+        const auto scene = m_SceneDocument->EditingScene();
+        const std::string sceneStatus = scene ? scene->Name() + (scene->Dirty() ? "  *" : "") : "No scene";
+        ui.TextColored(scene && scene->Dirty() ? m_Theme.Warning : m_Theme.MutedText, sceneStatus);
+        ui.SameLine();
+        ui.TextColored(m_Theme.MutedText, std::to_string(m_SceneDocument->Selections().size()) + " selected");
+        if (m_AssetOperations && m_AssetOperations->Busy())
+        {
+            ui.SameLine();
+            const auto progress = m_AssetOperations->Progress();
+            const std::string progressText =
+                progress && progress->Total > 0
+                    ? "Assets " + std::to_string(progress->Completed) + "/" + std::to_string(progress->Total)
+                    : "Assets working";
+            ui.TextColored(m_Theme.AccentHovered, progressText);
+        }
+        ui.SameLine();
+        const auto renderer = Owner().Renderer();
+        const auto statistics = renderer ? renderer->Statistics() : Keire::RenderStatistics{};
+        ui.TextColored(m_Theme.MutedText,
+                       std::string(renderer && renderer->IsOpen() ? "Renderer online  |  " : "Renderer offline  |  ") +
+                           "Frame " + std::to_string(Owner().GetTime().FrameCount()) + "  " +
+                           std::to_string(Owner().GetTime().UnscaledDeltaTime().Milliseconds()) + " ms  " +
+                           std::to_string(statistics.DrawCalls) + " draws");
     }
 }
 
@@ -432,6 +498,8 @@ void EditorWorkspaceLayer::DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace
         if (ui.Button("Cancel"))
         {
             m_Dialog = Dialog::None;
+            if (m_SceneTransitions)
+                m_SceneTransitions->Cancel();
             ui.CloseCurrentPopup();
         }
         if (!m_Error.empty())

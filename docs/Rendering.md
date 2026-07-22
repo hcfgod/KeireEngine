@@ -136,10 +136,11 @@ Settings...** to edit them live. Values update rendering immediately and persist
 are schema-validated, atomic, and resilient to transient Windows file sharing. A missing file receives conservative
 defaults, while a malformed file is reported and isolated without preventing the project's asset database from opening.
 
-When Sky Visible is enabled and Environment references a Texture2D environment, the renderer draws it before scene
-geometry using project rotation, intensity, and exposure. It accepts LDR or RGBE Radiance HDR equirectangular maps plus
-horizontal/vertical cubemap cross and six-face strip atlases. Layout and HDR encoding are versioned texture import data,
-so reimport and cooking preserve the same sampling behavior across supported GPU backends.
+When Sky Visible is enabled, the renderer draws a deterministic built-in equirectangular studio sky before scene
+geometry. Assigning a Texture2D environment replaces it using the same project rotation, intensity, and exposure. The
+custom path accepts LDR or RGBE Radiance HDR equirectangular maps plus horizontal/vertical cubemap cross and six-face
+strip atlases. Layout and HDR encoding are versioned texture import data, so reimport and cooking preserve the same
+sampling behavior across supported GPU backends.
 
 This foundation renders asset-backed textured PBR meshes plus the editor grid. Transparency sorting, shadows, IBL,
 post-processing, multiple-light accumulation, compute, custom raw GPU passes, and a dedicated render thread remain

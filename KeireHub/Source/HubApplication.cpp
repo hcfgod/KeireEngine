@@ -8,7 +8,9 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
 #include <memory>
 #include <optional>
 #include <string>
@@ -72,6 +74,24 @@ namespace
         return {0.62F, 0.66F, 0.74F, 1.0F};
     }
 
+    [[nodiscard]] std::string FormatLastOpened(const std::int64_t seconds)
+    {
+        if (seconds <= 0)
+            return "Never";
+        const std::time_t time = static_cast<std::time_t>(seconds);
+        std::tm local{};
+#if defined(_WIN32)
+        if (localtime_s(&local, &time) != 0)
+            return "Unknown";
+#else
+        if (!localtime_r(&time, &local))
+            return "Unknown";
+#endif
+        std::ostringstream stream;
+        stream << std::put_time(&local, "%b %d, %Y");
+        return stream.str();
+    }
+
     class HubLayer final : public Keire::Layer
     {
       public:
@@ -114,6 +134,7 @@ namespace
                 try
                 {
                     m_Registry = Keire::CreateRef<Keire::ProjectRegistry>();
+                    LoadPreferences();
                 }
                 catch (const std::exception& error)
                 {
@@ -183,7 +204,33 @@ namespace
                     if (ui.Button("Refresh", {88.0F, 40.0F}) && m_Registry)
                         Refresh();
                     ui.Spacing();
-                    (void)ui.InputText("Search Projects", m_Search);
+                    (void)ui.InputTextWithHint("##HubProjectSearch", "Search projects", m_Search);
+                    ui.SameLine();
+                    if (ui.IconButton("HubListView", Keire::UiIcon::List, m_View == ProjectView::List, {32.0F, 28.0F}))
+                    {
+                        m_View = ProjectView::List;
+                        SavePreferences();
+                    }
+                    ui.SameLine();
+                    if (ui.IconButton("HubCardView", Keire::UiIcon::Grid, m_View == ProjectView::Cards, {32.0F, 28.0F}))
+                    {
+                        m_View = ProjectView::Cards;
+                        SavePreferences();
+                    }
+                    ui.SameLine();
+                    constexpr std::array sortLabels{std::string_view("Last Opened"), std::string_view("Name"),
+                                                    std::string_view("Status")};
+                    if (auto sort = ui.BeginCombo("Sort", sortLabels[static_cast<std::size_t>(m_Sort)]); sort)
+                    {
+                        for (std::size_t index = 0; index < sortLabels.size(); ++index)
+                        {
+                            if (ui.Selectable(sortLabels[index], static_cast<std::size_t>(m_Sort) == index))
+                            {
+                                m_Sort = static_cast<ProjectSort>(index);
+                                SavePreferences();
+                            }
+                        }
+                    }
 
                     if (!m_Notice.empty())
                     {
@@ -211,6 +258,61 @@ namespace
             CreateLocation,
             OpenProject
         };
+
+        enum class ProjectView : std::uint8_t
+        {
+            List,
+            Cards
+        };
+
+        enum class ProjectSort : std::uint8_t
+        {
+            LastOpened,
+            Name,
+            Status
+        };
+
+        void LoadPreferences()
+        {
+            if (!m_Registry)
+                return;
+            m_PreferencesPath = m_Registry->Path().parent_path() / "HubUi.settings";
+            if (!std::filesystem::is_regular_file(m_PreferencesPath))
+                return;
+            try
+            {
+                const auto settings = Keire::Detail::ReadTextFile(m_PreferencesPath, 4096);
+                m_View = settings.find("view=cards") != std::string::npos ? ProjectView::Cards : ProjectView::List;
+                if (settings.find("sort=name") != std::string::npos)
+                    m_Sort = ProjectSort::Name;
+                else if (settings.find("sort=status") != std::string::npos)
+                    m_Sort = ProjectSort::Status;
+                else
+                    m_Sort = ProjectSort::LastOpened;
+            }
+            catch (const std::exception& error)
+            {
+                KEIRE_CLIENT_WARN("[Project Hub] Could not read UI preferences: {}", error.what());
+            }
+        }
+
+        void SavePreferences() noexcept
+        {
+            if (m_PreferencesPath.empty())
+                return;
+            try
+            {
+                const std::string view = m_View == ProjectView::Cards ? "cards" : "list";
+                const std::string sort = m_Sort == ProjectSort::Name     ? "name"
+                                         : m_Sort == ProjectSort::Status ? "status"
+                                                                         : "last-opened";
+                Keire::Detail::WriteTextFileAtomically(m_PreferencesPath, "view=" + view + "\nsort=" + sort + "\n");
+            }
+            catch (const std::exception& error)
+            {
+                KEIRE_CLIENT_WARN("[Project Hub] Could not save UI preferences: {}", error.what());
+            }
+        }
 
         void DrawSidebar(Keire::UiFrame& ui)
         {
@@ -396,6 +498,18 @@ namespace
                     continue;
                 visible.push_back(&entry);
             }
+            std::ranges::stable_sort(visible,
+                                     [this](const auto* left, const auto* right)
+                                     {
+                                         if (left->Pinned != right->Pinned)
+                                             return left->Pinned > right->Pinned;
+                                         if (m_Sort == ProjectSort::Name)
+                                             return Lower(left->Name) < Lower(right->Name);
+                                         if (m_Sort == ProjectSort::Status)
+                                             return std::tie(left->Status, left->Name) <
+                                                    std::tie(right->Status, right->Name);
+                                         return left->LastOpenedUnixSeconds > right->LastOpenedUnixSeconds;
+                                     });
             if (visible.empty())
             {
                 ui.Spacing();
@@ -406,6 +520,77 @@ namespace
             }
 
             ui.Spacing();
+            if (m_View == ProjectView::List)
+            {
+                Keire::UiTableOptions options;
+                options.Sizing = Keire::UiTableSizing::Proportional;
+                options.Borders = true;
+                options.Resizable = true;
+                options.RowBackground = true;
+                if (auto table = ui.BeginTable("RecentProjectList", 4, options); table)
+                {
+                    ui.TableNextRow();
+                    (void)ui.TableNextColumn();
+                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "PROJECT");
+                    (void)ui.TableNextColumn();
+                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "STATUS");
+                    (void)ui.TableNextColumn();
+                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "LAST OPENED");
+                    (void)ui.TableNextColumn();
+                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "PATH");
+                    for (const auto* value : visible)
+                    {
+                        const auto& entry = *value;
+                        ui.TableNextRow();
+                        (void)ui.TableNextColumn();
+                        auto id = ui.PushId(entry.Id.ToString());
+                        const bool selected = m_SelectedProject == entry.Id;
+                        if (ui.Selectable((entry.Pinned ? "*  " : "") + entry.Name, selected))
+                            m_SelectedProject = entry.Id;
+                        const auto state = ui.LastItemState();
+                        if (state.DoubleClicked && entry.Status == Keire::ProjectStatus::Ready)
+                            Open(entry.Root);
+                        if (auto context = ui.BeginItemContextMenu("ProjectActions"); context)
+                        {
+                            if (ui.MenuItem("Open", false, entry.Status == Keire::ProjectStatus::Ready))
+                                Open(entry.Root);
+                            if (ui.MenuItem("Reveal"))
+                                Reveal(entry.Root);
+                            if (ui.MenuItem(entry.Pinned ? "Unpin" : "Pin"))
+                                (void)m_Registry->SetPinned(entry.Id, !entry.Pinned);
+                            if (ui.MenuItem("Remove"))
+                                (void)m_Registry->Remove(entry.Id);
+                        }
+                        (void)ui.TableNextColumn();
+                        ui.TextColored(StatusColor(entry.Status), StatusLabel(entry.Status));
+                        (void)ui.TableNextColumn();
+                        ui.Text(FormatLastOpened(entry.LastOpenedUnixSeconds));
+                        (void)ui.TableNextColumn();
+                        ui.TextColored({0.52F, 0.57F, 0.66F, 1.0F}, Utf8Path(entry.Root));
+                    }
+                }
+                if (!visible.empty() &&
+                    (ui.Shortcut({.Key = Keire::UiKey::Down}) || ui.Shortcut({.Key = Keire::UiKey::Up})))
+                {
+                    const auto selected = std::ranges::find_if(visible, [this](const auto* entry)
+                                                               { return entry->Id == m_SelectedProject; });
+                    const auto current = selected == visible.end()
+                                             ? std::size_t{0}
+                                             : static_cast<std::size_t>(selected - visible.begin());
+                    const bool moveUp = ui.KeyDown(Keire::UiKey::Up);
+                    const std::size_t next =
+                        moveUp ? (current == 0 ? visible.size() - 1 : current - 1) : (current + 1) % visible.size();
+                    m_SelectedProject = visible[next]->Id;
+                }
+                if (m_SelectedProject && ui.Shortcut({.Key = Keire::UiKey::Enter}))
+                {
+                    const auto selected = std::ranges::find_if(visible, [this](const auto* entry)
+                                                               { return entry->Id == m_SelectedProject; });
+                    if (selected != visible.end() && (*selected)->Status == Keire::ProjectStatus::Ready)
+                        Open((*selected)->Root);
+                }
+                return;
+            }
             const float contentWidth = ui.ContentAvailable().Width;
             const std::size_t columns = contentWidth >= 1120.0F ? 3 : contentWidth >= 700.0F ? 2 : 1;
             Keire::UiTableOptions tableOptions;
@@ -483,37 +668,56 @@ namespace
 
         void DrawCreateDialog(Keire::UiFrame& ui)
         {
+            ui.SetNextWindowSize({760.0F, 430.0F}, false);
             if (auto dialog = ui.BeginPopupModal("Create Project"); dialog)
             {
-                (void)ui.InputText("Name", m_CreateName);
-                (void)ui.InputText("Location", m_CreateLocation);
-                ui.SameLine();
-                if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_FolderDialog)); disabled)
+                Keire::UiTableOptions layoutOptions;
+                layoutOptions.Borders = false;
+                layoutOptions.Resizable = false;
+                if (auto layout = ui.BeginTable("CreateProjectLayout", 2, layoutOptions); layout)
                 {
-                    if (ui.Button("Browse..."))
-                        BrowseForFolder(FolderTarget::CreateLocation, m_CreateLocation);
-                }
-                if (auto combo = ui.BeginCombo("Template", m_Starter ? "Starter" : "Empty"); combo)
-                {
-                    if (ui.Selectable("Starter", m_Starter))
+                    ui.TableNextRow();
+                    (void)ui.TableNextColumn();
+                    ui.TextColored({0.58F, 0.68F, 0.88F, 1.0F}, "TEMPLATES");
+                    if (ui.Selectable("Starter\nCamera, light, sample scene", m_Starter))
                         m_Starter = true;
-                    if (ui.Selectable("Empty", !m_Starter))
+                    if (ui.Selectable("Empty\nMinimal project structure", !m_Starter))
                         m_Starter = false;
-                }
-                if (ui.Button("Create"))
-                {
-                    try
-                    {
-                        const auto project = Keire::Project::Create(
-                            {m_CreateLocation, m_CreateName,
-                             m_Starter ? Keire::ProjectTemplate::Starter : Keire::ProjectTemplate::Empty});
-                        ui.CloseCurrentPopup();
-                        Launch(project);
-                    }
-                    catch (const std::exception& error)
-                    {
-                        SetError(error.what());
-                    }
+                    (void)ui.TableNextColumn();
+                    ui.TextColored({0.58F, 0.68F, 0.88F, 1.0F}, "PROJECT DETAILS");
+                    (void)ui.InputTextWithHint("Name", "My Project", m_CreateName);
+                    (void)ui.InputTextWithHint("Location", "Parent folder", m_CreateLocation);
+                    ui.SameLine();
+                    if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_FolderDialog)); disabled)
+                        if (ui.Button("Browse..."))
+                            BrowseForFolder(FolderTarget::CreateLocation, m_CreateLocation);
+                    const auto destination = std::filesystem::path(m_CreateLocation) / m_CreateName;
+                    ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F}, "Destination: " + Utf8Path(destination));
+                    const bool validName =
+                        !m_CreateName.empty() && m_CreateName.find_first_of("<>:\"/\\|?*") == std::string::npos;
+                    const bool conflict = validName && std::filesystem::exists(destination);
+                    if (!validName)
+                        ui.TextColored({0.96F, 0.38F, 0.42F, 1.0F}, "Enter a valid project name.");
+                    else if (conflict)
+                        ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "The destination already exists.");
+                    else
+                        ui.TextColored({0.32F, 0.84F, 0.58F, 1.0F}, "Ready to create.");
+                    if (auto disabled = ui.BeginDisabled(!validName || conflict || m_CreateLocation.empty()); disabled)
+                        if (ui.Button("Create Project", {132.0F, 34.0F}))
+                        {
+                            try
+                            {
+                                const auto project = Keire::Project::Create(
+                                    {m_CreateLocation, m_CreateName,
+                                     m_Starter ? Keire::ProjectTemplate::Starter : Keire::ProjectTemplate::Empty});
+                                ui.CloseCurrentPopup();
+                                Launch(project);
+                            }
+                            catch (const std::exception& error)
+                            {
+                                SetError(error.what());
+                            }
+                        }
                 }
                 ui.SameLine();
                 if (ui.Button("Cancel"))
@@ -544,6 +748,7 @@ namespace
         }
 
         std::filesystem::path m_Executable;
+        std::filesystem::path m_PreferencesPath;
         Keire::Ref<Keire::ProjectRegistry> m_Registry;
         Keire::Ref<Keire::SystemTray> m_Tray;
         Keire::Ref<Keire::FolderDialogOperation> m_FolderDialog;
@@ -554,6 +759,9 @@ namespace
         std::string m_OpenPath;
         std::string m_Notice;
         std::uint32_t m_Frames = 0;
+        Keire::ProjectId m_SelectedProject;
+        ProjectView m_View = ProjectView::List;
+        ProjectSort m_Sort = ProjectSort::LastOpened;
         bool m_Starter = true;
         bool m_NoticeError = false;
         bool m_RequestCreatePopup = false;
@@ -607,3 +815,4 @@ namespace Keire
                                                 smoke);
     }
 } // namespace Keire
+#include <sstream>

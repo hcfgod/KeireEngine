@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/SceneDocument.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <span>
 #include <string>
@@ -20,7 +21,17 @@ namespace KeireEditor
         const auto scene = m_Controller.ActiveHierarchyScene();
         if (ui.WindowFocused())
             m_Controller.ActivateHierarchyHistory();
-        ui.TextColored(m_Controller.HierarchyAccent(), "HIERARCHY");
+        if (ui.IconButton("HierarchyCreate", Keire::UiIcon::Create, false, {28.0F, 24.0F}))
+        {
+            if (scene)
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(document.CreateEntity().Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+        }
+        ui.SameLine();
+        (void)ui.InputTextWithHint("##HierarchySearch", "Search entities", m_Search);
         ui.Separator();
         if (!scene)
         {
@@ -39,6 +50,26 @@ namespace KeireEditor
             }
         }
         const auto objects = scene->Objects();
+        ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F},
+                       scene->Name() + "  •  " + std::to_string(objects.size()) + " entities");
+        if (!m_Search.empty())
+        {
+            std::string search = m_Search;
+            std::ranges::transform(search, search.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            for (const auto& object : objects)
+            {
+                std::string name = object.Name;
+                std::ranges::transform(name, name.begin(), [](const unsigned char character)
+                                       { return static_cast<char>(std::tolower(character)); });
+                if (name.find(search) == std::string::npos)
+                    continue;
+                auto id = ui.PushId(object.Id.ToString());
+                if (ui.Selectable(object.Name, document.IsSelected(object.Id)))
+                    document.Select(object.Id, ui.ControlDown());
+            }
+            return;
+        }
         const auto nextSibling = [&objects](const Keire::AssetId id, const Keire::AssetId parent)
         {
             bool found = false;

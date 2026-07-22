@@ -548,6 +548,7 @@ namespace Keire::RenderBackend
         GpuMeshResources DefaultMesh;
         GpuMeshResources ErrorMesh;
         GpuTextureResources CheckerboardTexture;
+        GpuTextureResources DefaultSkyTexture;
         GpuTextureResources WhiteTexture;
         GpuTextureResources FlatNormalTexture;
         GpuTextureResources NeutralOrmTexture;

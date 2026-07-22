@@ -14,6 +14,7 @@
 namespace KeireEditor
 {
     class ProjectSettingsDocument;
+    class AssetPicker;
     class SceneDocument;
     class InputActionsDocument;
     class MaterialDocument;
@@ -40,6 +41,8 @@ namespace KeireEditor
         virtual void DiscardSceneViewportRecovery() noexcept = 0;
         virtual void ReportSceneViewportError(std::string message) noexcept = 0;
         virtual void SetSceneViewportSelectedAsset(Keire::AssetId asset) noexcept = 0;
+        virtual void RequestSceneViewportNewScene() = 0;
+        virtual void RevealSceneViewportScenes() = 0;
         virtual void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) = 0;
         virtual void RecordSceneViewportUndo(std::string_view name) = 0;
         virtual void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) = 0;
@@ -106,6 +109,15 @@ namespace KeireEditor
         virtual void ReportInputActionsError(std::string message) noexcept = 0;
     };
 
+    class IProjectSettingsController
+    {
+      public:
+        virtual ~IProjectSettingsController() = default;
+        [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord>
+        ProjectSettingsAssetRecords() const noexcept = 0;
+        virtual void RevealProjectSettingsAsset(Keire::AssetId asset) = 0;
+    };
+
     class SceneViewportPanel final
     {
       public:
@@ -155,12 +167,14 @@ namespace KeireEditor
       private:
         IHierarchyController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
+        std::string m_Search;
     };
 
     class AssetInspectorPanel final
     {
       public:
-        explicit AssetInspectorPanel(IInspectorController& controller) noexcept : m_Controller(controller) {}
+        explicit AssetInspectorPanel(IInspectorController& controller);
+        ~AssetInspectorPanel();
         void Draw(Keire::UiFrame& ui);
         void ClearState() noexcept
         {
@@ -170,6 +184,7 @@ namespace KeireEditor
 
       private:
         IInspectorController& m_Controller;
+        std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::AssetId m_EditingAsset;
         std::string m_AssetName;
     };
@@ -197,9 +212,12 @@ namespace KeireEditor
       private:
         IInspectorController& m_Controller;
         std::unique_ptr<AssetInspectorPanel> m_AssetInspector;
+        std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::unordered_map<std::string, bool> m_ComponentExpansion;
         std::uint64_t m_EditSerial = 0;
+        Keire::AssetId m_LockedEntity;
+        bool m_Locked = false;
         bool m_UniformScale = false;
     };
 
@@ -228,17 +246,17 @@ namespace KeireEditor
     class ProjectSettingsPanel final
     {
       public:
-        explicit ProjectSettingsPanel(ProjectSettingsDocument& document) noexcept;
+        ProjectSettingsPanel(ProjectSettingsDocument& document, IProjectSettingsController& controller);
+        ~ProjectSettingsPanel();
         void Attach(Keire::UiWorkspace& workspace);
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
         ProjectSettingsDocument& m_Document;
+        IProjectSettingsController& m_Controller;
+        std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::string m_Error;
-        std::string m_EnvironmentText;
-        Keire::AssetId m_EnvironmentAsset;
-        bool m_EnvironmentEditing = false;
     };
 } // namespace KeireEditor

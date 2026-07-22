@@ -94,6 +94,30 @@ namespace
         return result;
     }
 
+    [[nodiscard]] PixelStatistics MeasureSkyCorner(const std::vector<std::uint8_t>& pixels)
+    {
+        REQUIRE(pixels.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
+        PixelStatistics result;
+        constexpr std::uint32_t extent = 12;
+        for (std::uint32_t y = 0; y < extent; ++y)
+        {
+            for (std::uint32_t x = 0; x < extent; ++x)
+            {
+                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                result.Red += static_cast<float>(pixels[offset]) / 255.0F;
+                result.Green += static_cast<float>(pixels[offset + 1]) / 255.0F;
+                result.Blue += static_cast<float>(pixels[offset + 2]) / 255.0F;
+                result.Alpha += static_cast<float>(pixels[offset + 3]) / 255.0F;
+            }
+        }
+        constexpr float count = static_cast<float>(extent * extent);
+        result.Red /= count;
+        result.Green /= count;
+        result.Blue /= count;
+        result.Alpha /= count;
+        return result;
+    }
+
     struct CaptureResults final
     {
         std::vector<std::vector<std::uint8_t>> Frames;
@@ -986,6 +1010,9 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
     }
 
     REQUIRE(results->Frames.size() == CaptureSequence.size());
+    const auto defaultSky = MeasureSkyCorner(results->Frames.front());
+    CHECK(defaultSky.Luminance() > MinimumBehaviorDelta);
+    CHECK(defaultSky.Blue > defaultSky.Red + ColorTolerance);
     std::vector<PixelStatistics> captures;
     captures.reserve(results->Frames.size());
     for (const auto& pixels : results->Frames)

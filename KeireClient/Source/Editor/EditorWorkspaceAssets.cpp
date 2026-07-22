@@ -200,8 +200,15 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
                     {
                         m_ViewportAssetDropRouter->Route(record->Type, record->Id, target, *this);
                     }
-                    catch (const std::invalid_argument&)
+                    catch (const std::invalid_argument& error)
                     {
+                        if (record->Type == Keire::MeshAsset::StaticType() ||
+                            record->Type == Keire::MaterialAsset::StaticType())
+                        {
+                            m_AssetStatus = "Create or open a scene before dropping meshes or materials.";
+                            m_Notice = error.what();
+                            m_NoticeColor = m_Theme.Warning;
+                        }
                     }
                 }
             }
@@ -254,9 +261,16 @@ void EditorWorkspaceLayer::DrawExternalAssetImport(Keire::UiFrame& ui)
             {
                 m_ViewportAssetDropRouter->Route(record->Type, entry.Id, completion->ViewportTarget, *this);
             }
-            catch (const std::invalid_argument&)
+            catch (const std::invalid_argument& error)
             {
                 // Textures and shaders are imported and revealed because they have no unambiguous viewport action.
+                if (record->Type == Keire::MeshAsset::StaticType() ||
+                    record->Type == Keire::MaterialAsset::StaticType())
+                {
+                    m_AssetStatus = "Create or open a scene before dropping meshes or materials.";
+                    m_Notice = error.what();
+                    m_NoticeColor = m_Theme.Warning;
+                }
             }
         }
     }
@@ -411,7 +425,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     }
                 }
                 if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenScene)
-                    OpenScene(created);
+                    RequestOpenScene(created);
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenInputActions)
                     OpenInputActions(created);
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::AdoptSceneCopy)
@@ -467,7 +481,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
             if (m_PendingStartupScene)
             {
                 const auto startup = std::exchange(m_PendingStartupScene, {});
-                OpenScene(startup);
+                RequestOpenScene(startup);
             }
         }
         catch (const std::exception& error)

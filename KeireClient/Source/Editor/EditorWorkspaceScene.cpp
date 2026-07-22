@@ -17,6 +17,7 @@
 #include "KeireClient/Editor/ScenePicker.h"
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
+#include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
@@ -67,8 +68,11 @@ namespace
                                                          const Keire::Ref<Keire::SceneRuntimeSession>& play)
     {
         if (play && play->State() != Keire::ScenePlayState::Stopped)
-            return play->RuntimeScene();
-        return editing;
+        {
+            const auto runtime = play->RuntimeScene();
+            return runtime && runtime->IsOpen() ? runtime : Keire::Ref<Keire::Scene>{};
+        }
+        return editing && editing->IsOpen() ? editing : Keire::Ref<Keire::Scene>{};
     }
 
     struct SceneCamera final
@@ -80,7 +84,7 @@ namespace
 
     [[nodiscard]] std::optional<SceneCamera> SelectGameCamera(const Keire::Ref<Keire::Scene>& scene)
     {
-        if (!scene)
+        if (!scene || !scene->IsOpen())
             return std::nullopt;
         std::optional<SceneCamera> selected;
         bool selectedPrimary = false;
@@ -187,6 +191,12 @@ void EditorWorkspaceLayer::CreateScene()
 
 void EditorWorkspaceLayer::RequestCreateScene()
 {
+    if (m_PendingSceneAction != PendingSceneAction::None || (m_SceneTransitions && m_SceneTransitions->Pending()))
+    {
+        m_Notice = "Finish the pending scene transition before starting another one.";
+        m_NoticeColor = m_Theme.Warning;
+        return;
+    }
     if (m_SceneDocument->PlaySession())
     {
         m_PendingSceneAction = PendingSceneAction::Create;
@@ -199,7 +209,7 @@ void EditorWorkspaceLayer::RequestCreateScene()
         OpenDialog(Dialog::DirtyScene);
         return;
     }
-    CreateScene();
+    QueueSceneTransition(PendingSceneAction::Create);
 }
 
 void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
@@ -219,6 +229,13 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
     Keire::Ref<Keire::UndoContext> context;
     if (const auto undo = Owner().Undo())
         context = undo->CreateContext({.Name = "Scene: " + record->RelativePath.stem().string()});
+    const auto previousAsset = m_SceneDocument->Asset();
+    if (const auto scenes = Owner().Scenes(); scenes && previousAsset)
+        (void)scenes->Unload(previousAsset);
+    m_InspectorPanel->ClearSceneState();
+    DiscardSceneRecovery();
+    if (m_SceneDocument->UndoContext())
+        m_SceneDocument->UndoContext()->Close();
     m_SceneDocument->Open(std::move(scene), asset, source, std::move(context));
     if (const auto project = Owner().GetProject())
         m_SceneDocument->SetRecoveryPath(project->SceneRecoveryDirectory() /
@@ -236,6 +253,12 @@ void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
 {
     if (asset == m_SceneDocument->Asset())
         return;
+    if (m_PendingSceneAction != PendingSceneAction::None || (m_SceneTransitions && m_SceneTransitions->Pending()))
+    {
+        m_Notice = "A scene transition is already pending; the additional request was ignored.";
+        m_NoticeColor = m_Theme.Warning;
+        return;
+    }
     if (m_SceneDocument->PlaySession())
     {
         m_PendingSceneAction = PendingSceneAction::Open;
@@ -250,7 +273,7 @@ void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
         OpenDialog(Dialog::DirtyScene);
         return;
     }
-    OpenScene(asset);
+    QueueSceneTransition(PendingSceneAction::Open, asset);
 }
 
 void EditorWorkspaceLayer::SaveScene()
@@ -337,6 +360,12 @@ void EditorWorkspaceLayer::CompleteSaveSceneAs()
 
 void EditorWorkspaceLayer::RequestCloseScene()
 {
+    if (m_PendingSceneAction != PendingSceneAction::None || (m_SceneTransitions && m_SceneTransitions->Pending()))
+    {
+        m_Notice = "A scene transition is already pending; the additional request was ignored.";
+        m_NoticeColor = m_Theme.Warning;
+        return;
+    }
     if (m_SceneDocument->PlaySession())
     {
         m_PendingSceneAction = PendingSceneAction::Close;
@@ -349,7 +378,7 @@ void EditorWorkspaceLayer::RequestCloseScene()
         OpenDialog(Dialog::DirtyScene);
         return;
     }
-    CloseScene();
+    QueueSceneTransition(PendingSceneAction::Close);
 }
 
 void EditorWorkspaceLayer::CloseScene()
@@ -389,23 +418,70 @@ void EditorWorkspaceLayer::ExecutePendingSceneAction()
     const auto action = std::exchange(m_PendingSceneAction, PendingSceneAction::None);
     const auto asset = std::exchange(m_PendingSceneAsset, Keire::AssetId{});
     m_Dialog = Dialog::None;
-    if (action == PendingSceneAction::Exit)
+    QueueSceneTransition(action, asset);
+}
+
+void EditorWorkspaceLayer::QueueSceneTransition(const PendingSceneAction action, const Keire::AssetId asset)
+{
+    if (action == PendingSceneAction::None || !m_SceneTransitions)
+        return;
+    KeireEditor::SceneTransitionKind kind = KeireEditor::SceneTransitionKind::Open;
+    switch (action)
     {
-        CloseScene();
-        Owner().RequestExit();
+    case PendingSceneAction::Create:
+        kind = KeireEditor::SceneTransitionKind::Create;
+        break;
+    case PendingSceneAction::Open:
+        kind = KeireEditor::SceneTransitionKind::Open;
+        break;
+    case PendingSceneAction::Close:
+        kind = KeireEditor::SceneTransitionKind::Close;
+        break;
+    case PendingSceneAction::Exit:
+        kind = KeireEditor::SceneTransitionKind::Exit;
+        break;
+    case PendingSceneAction::None:
         return;
     }
-    CloseScene();
+    if (!m_SceneTransitions->Request({kind, asset}))
+    {
+        m_Notice = "A scene transition is already pending; the additional request was ignored.";
+        m_NoticeColor = m_Theme.Warning;
+    }
+}
+
+void EditorWorkspaceLayer::ProcessSceneTransition()
+{
+    if (!m_SceneTransitions)
+        return;
+    const auto request = m_SceneTransitions->BeginCommit();
+    if (!request)
+        return;
     try
     {
-        if (action == PendingSceneAction::Create)
+        switch (request->Kind)
+        {
+        case KeireEditor::SceneTransitionKind::Create:
             CreateScene();
-        else if (action == PendingSceneAction::Open)
-            OpenScene(asset);
+            break;
+        case KeireEditor::SceneTransitionKind::Open:
+            OpenScene(request->Asset);
+            break;
+        case KeireEditor::SceneTransitionKind::Close:
+            CloseScene();
+            break;
+        case KeireEditor::SceneTransitionKind::Exit:
+            CloseScene();
+            Owner().RequestExit();
+            break;
+        }
+        m_SceneTransitions->Complete();
     }
     catch (const std::exception& error)
     {
-        m_SceneDocument->SetStatus(std::string("Scene operation failed: ") + error.what());
+        const std::string diagnostic = std::string("Scene operation failed: ") + error.what();
+        m_SceneTransitions->Fail(diagnostic);
+        m_SceneDocument->SetStatus(diagnostic);
         ReportError("Scene", m_SceneDocument->Status());
     }
 }
@@ -731,6 +807,18 @@ void EditorWorkspaceLayer::SetSceneViewportSelectedAsset(const Keire::AssetId as
     m_SelectedAsset = asset;
 }
 
+void EditorWorkspaceLayer::RequestSceneViewportNewScene() { RequestCreateScene(); }
+
+void EditorWorkspaceLayer::RevealSceneViewportScenes()
+{
+    if (m_AssetBrowserPanel)
+    {
+        m_AssetBrowserPanel->Registration().SetVisible(true);
+        m_AssetBrowserPanel->Registration().RequestFocus();
+    }
+    m_AssetStatus = "Choose or drop a .keirescene asset from the Project panel.";
+}
+
 void EditorWorkspaceLayer::RouteSceneViewportAsset(const Keire::AssetTypeId type, const Keire::AssetId asset,
                                                    const Keire::EntityId target)
 {
@@ -819,8 +907,14 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
 {
     if (auto gamePanel = ui.BeginPanel(m_Game); gamePanel)
     {
-        ui.TextColored(m_Theme.Accent, "GAME");
-        ui.Separator();
+        constexpr std::array aspectLabels{std::string_view("Free"), std::string_view("16:9"), std::string_view("16:10"),
+                                          std::string_view("4:3")};
+        if (auto aspect = ui.BeginCombo("Preview", aspectLabels[static_cast<std::size_t>(m_GameAspect)]); aspect)
+        {
+            for (std::size_t index = 0; index < aspectLabels.size(); ++index)
+                if (ui.Selectable(aspectLabels[index], m_GameAspect == static_cast<int>(index)))
+                    m_GameAspect = static_cast<int>(index);
+        }
         const auto scene = RenderedScene(m_SceneDocument->EditingScene(), m_SceneDocument->PlaySession());
         if (!scene)
         {
@@ -850,7 +944,15 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                                 : " (Edit)"));
 
         const auto available = ui.ContentAvailable();
-        const auto size = PrepareRenderSurface(m_GameRenderView, available, Owner().MainWindow()->DisplayScale());
+        auto previewSize = available;
+        constexpr std::array aspectRatios{0.0F, 16.0F / 9.0F, 16.0F / 10.0F, 4.0F / 3.0F};
+        const float requestedAspect = aspectRatios[static_cast<std::size_t>(m_GameAspect)];
+        if (requestedAspect > 0.0F)
+        {
+            previewSize.Width = std::min(available.Width, available.Height * requestedAspect);
+            previewSize.Height = previewSize.Width / requestedAspect;
+        }
+        const auto size = PrepareRenderSurface(m_GameRenderView, previewSize, Owner().MainWindow()->DisplayScale());
         const float aspect = size.Width / std::max(size.Height, 1.0F);
         Keire::RenderCamera camera;
         camera.View = Keire::Math::Inverse(selected->Transform->WorldMatrix());

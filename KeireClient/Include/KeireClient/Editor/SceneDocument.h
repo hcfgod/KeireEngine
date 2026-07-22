@@ -21,7 +21,10 @@ namespace KeireEditor
             std::optional<Keire::Vector3> Scale;
         };
 
-        [[nodiscard]] Keire::Ref<Keire::Scene> EditingScene() const noexcept { return m_Scene; }
+        [[nodiscard]] Keire::Ref<Keire::Scene> EditingScene() const noexcept
+        {
+            return m_Scene && m_Scene->IsOpen() ? m_Scene : Keire::Ref<Keire::Scene>{};
+        }
         [[nodiscard]] Keire::Ref<Keire::Scene> ActiveScene() const noexcept;
         [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession> PlaySession() const noexcept { return m_PlaySession; }
         [[nodiscard]] Keire::Ref<Keire::SceneLoadOperation> LoadOperation() const noexcept { return m_LoadOperation; }
@@ -38,7 +41,7 @@ namespace KeireEditor
         [[nodiscard]] const std::filesystem::path& Source() const noexcept { return m_Source; }
         [[nodiscard]] const std::filesystem::path& RecoveryPath() const noexcept { return m_RecoveryPath; }
         [[nodiscard]] const std::string& Status() const noexcept { return m_Status; }
-        [[nodiscard]] bool Dirty() const noexcept { return m_Scene && m_Scene->Dirty(); }
+        [[nodiscard]] bool Dirty() const noexcept { return m_Scene && m_Scene->IsOpen() && m_Scene->Dirty(); }
         [[nodiscard]] bool RecoveryAvailable() const noexcept { return m_RecoveryAvailable; }
         [[nodiscard]] double RecoverySeconds() const noexcept { return m_RecoverySeconds; }
 

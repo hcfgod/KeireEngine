@@ -84,6 +84,17 @@ namespace
             m_Order.emplace_back("ui");
             CHECK(Owner().UiEnabled());
 
+            {
+                auto toolbar = ui.BeginMainToolbar();
+                if (toolbar)
+                    ui.Text("Toolbar");
+            }
+            {
+                auto status = ui.BeginMainStatusBar();
+                if (status)
+                    ui.Text("Ready");
+            }
+
             ui.SetNextWindowSize({320.0F, 200.0F});
             if (auto window = ui.BeginWindow("Headless UI"); window)
             {
@@ -106,6 +117,7 @@ namespace
                 CHECK_THROWS_AS((void)ui.DragVector3("", vector), std::invalid_argument);
                 std::string text = "editable";
                 (void)ui.InputText("Text", text);
+                (void)ui.InputTextWithHint("Search", "Search items", text);
                 const auto item = ui.LastItemState();
                 CHECK_FALSE(item.DoubleClicked);
                 ui.ProgressBar(0.5F, {120.0F, 4.0F}, "50%");

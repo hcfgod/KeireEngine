@@ -159,7 +159,17 @@ namespace Keire
         Orthographic,
         AxisX,
         AxisY,
-        AxisZ
+        AxisZ,
+        Create,
+        Search,
+        Filter,
+        Lock,
+        Folder,
+        Refresh,
+        List,
+        Grid,
+        Warning,
+        Information
     };
 
     struct UiOverlayIconButtonSpecification
@@ -409,6 +419,8 @@ namespace Keire
         [[nodiscard]] UiDisabledScope BeginDisabled(bool disabled = true);
         [[nodiscard]] UiIdScope PushId(std::string_view id);
         [[nodiscard]] UiMainMenuBarScope BeginMainMenuBar();
+        [[nodiscard]] UiWindowScope BeginMainToolbar(std::string_view id = "Main Toolbar", float height = 34.0F);
+        [[nodiscard]] UiWindowScope BeginMainStatusBar(std::string_view id = "Main Status Bar", float height = 24.0F);
         [[nodiscard]] UiComboScope BeginCombo(std::string_view label, std::string_view preview);
         [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr);
         [[nodiscard]] UiPopupScope BeginPopup(std::string_view id);
@@ -456,6 +468,7 @@ namespace Keire
         [[nodiscard]] bool SliderFloat(std::string_view label, float& value, float minimum, float maximum);
         [[nodiscard]] bool SliderInt(std::string_view label, int& value, int minimum, int maximum);
         [[nodiscard]] bool InputText(std::string_view label, std::string& value);
+        [[nodiscard]] bool InputTextWithHint(std::string_view label, std::string_view hint, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);
         [[nodiscard]] bool MenuItem(std::string_view label, bool selected = false, bool enabled = true);
         [[nodiscard]] bool ColorEdit(std::string_view label, UiColor& color);

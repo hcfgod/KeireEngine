@@ -4,6 +4,18 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Projects now render a built-in studio sky whenever no custom environment is assigned. Project Settings replaces the
+  raw environment AssetId field with the shared searchable, type-filtered asset picker used by Inspector fields, with
+  drag-and-drop validation and one-click reveal in the Project panel.
+- Scene Open/New/Close/Exit actions now commit through an editor-owned frame-safe transition coordinator. Scene and
+  operating-system drops work on an empty viewport, failed scene decoding preserves the current document, and closed
+  scene references become inert before panel helpers can query them.
+- Added compact non-overlapping main toolbar and status-bar primitives, hinted search inputs, expanded editor icons,
+  refreshed Kéire Dark/Light density, Hierarchy search/create, session Inspector lock, Game aspect previews, and
+  Console severity/collapse controls.
+- The Project Hub now defaults to a persistent sortable list with card-view fallback, keyboard/double-click/context
+  actions, atomic view preferences, and a larger validated two-pane project-creation workflow.
+
 - Scene authoring now routes `Ctrl/Cmd+D` through the shared duplicate command and supports hierarchy drag insertion
   before or after a sibling, parenting onto a row, and unparenting onto blank hierarchy space while preserving world
   transforms and undo history.

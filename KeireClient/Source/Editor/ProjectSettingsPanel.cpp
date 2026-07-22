@@ -1,15 +1,22 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
-#include "KeireClient/Editor/AssetBrowserPanel.h"
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 
 #include <bit>
 #include <cstdint>
 #include <exception>
+#include <memory>
 
 namespace KeireEditor
 {
-    ProjectSettingsPanel::ProjectSettingsPanel(ProjectSettingsDocument& document) noexcept : m_Document(document) {}
+    ProjectSettingsPanel::ProjectSettingsPanel(ProjectSettingsDocument& document,
+                                               IProjectSettingsController& controller)
+        : m_Document(document), m_Controller(controller), m_AssetPicker(std::make_unique<AssetPicker>())
+    {
+    }
+
+    ProjectSettingsPanel::~ProjectSettingsPanel() = default;
 
     void ProjectSettingsPanel::Attach(Keire::UiWorkspace& workspace)
     {
@@ -37,52 +44,30 @@ namespace KeireEditor
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.SliderFloat("Exposure", settings.Exposure, 0.1F, 4.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
-        if (!m_EnvironmentEditing && m_EnvironmentAsset != settings.Environment)
+        ui.Spacing();
+        ui.Text("Skybox");
+        ui.TextColored(theme.MutedText,
+                       settings.Environment ? "Custom project environment" : "Built-in Kéire studio sky");
+        KeireEditor::AssetPickerOptions skyOptions;
+        skyOptions.Label = "Skybox Asset";
+        skyOptions.EmptyLabel = "Kéire Default Sky";
+        skyOptions.ExpectedType = Keire::Texture2DAsset::StaticType();
+        skyOptions.Filter = &KeireEditor::AssetPicker::AcceptsEnvironmentTexture;
+        skyOptions.Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealProjectSettingsAsset(asset); };
+        if (m_AssetPicker->Draw(ui, m_Controller.ProjectSettingsAssetRecords(), settings.Environment, skyOptions))
         {
-            m_EnvironmentAsset = settings.Environment;
-            m_EnvironmentText = settings.Environment ? settings.Environment.ToString() : std::string{};
+            changed = true;
+            commit = true;
         }
-        (void)ui.InputText("Environment Texture", m_EnvironmentText);
-        const auto environmentState = ui.LastItemState();
-        m_EnvironmentEditing = environmentState.Active;
-        if (environmentState.DeactivatedAfterEdit)
-        {
-            try
-            {
-                settings.Environment =
-                    m_EnvironmentText.empty() ? Keire::AssetId{} : Keire::AssetId::Parse(m_EnvironmentText);
-                m_EnvironmentAsset = settings.Environment;
-                changed = true;
-                commit = true;
-            }
-            catch (const std::exception& error)
-            {
-                m_Error = std::string("Environment asset ID is invalid: ") + error.what();
-            }
-        }
-        if (auto target = ui.BeginDragTarget(); target)
-        {
-            std::vector<std::byte> payload;
-            if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
-            {
-                const auto assets = AssetBrowserPanel::DecodeDragPayload(payload);
-                if (!assets.empty())
-                {
-                    settings.Environment = assets.front();
-                    m_EnvironmentAsset = assets.front();
-                    m_EnvironmentText = assets.front().ToString();
-                    changed = true;
-                    commit = true;
-                }
-            }
-        }
-        changed |= ui.SliderFloat("Environment Rotation", settings.EnvironmentRotationDegrees, -180.0F, 180.0F);
+        if (!m_AssetPicker->Diagnostic().empty())
+            ui.TextColored(theme.Warning, m_AssetPicker->Diagnostic());
+        changed |= ui.SliderFloat("Sky Rotation", settings.EnvironmentRotationDegrees, -180.0F, 180.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
-        changed |= ui.SliderFloat("IBL Diffuse", settings.EnvironmentDiffuseIntensity, 0.0F, 8.0F);
+        changed |= ui.SliderFloat("Environment Diffuse", settings.EnvironmentDiffuseIntensity, 0.0F, 8.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
-        changed |= ui.SliderFloat("IBL Specular", settings.EnvironmentSpecularIntensity, 0.0F, 8.0F);
+        changed |= ui.SliderFloat("Sky / Specular Intensity", settings.EnvironmentSpecularIntensity, 0.0F, 8.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
-        changed |= ui.Checkbox("Show Environment Sky", settings.SkyVisible);
+        changed |= ui.Checkbox("Render Skybox", settings.SkyVisible);
         commit |= changed;
         ui.Spacing();
         ui.Text("Directional Shadows");

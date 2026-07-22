@@ -25,7 +25,7 @@ namespace
 
     [[nodiscard]] std::optional<SceneCamera> SelectGameCamera(const Keire::Ref<Keire::Scene>& scene)
     {
-        if (!scene)
+        if (!scene || !scene->IsOpen())
             return std::nullopt;
         std::optional<SceneCamera> selected;
         bool primary = false;
@@ -138,13 +138,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     const auto activeScene = document.ActiveScene();
     if (ui.WindowFocused())
         m_Controller.ActivateSceneViewportHistory();
-    if (!document.EditingScene())
-    {
-        DrawEmptyState(ui, "SCENE", "No scene is loaded.",
-                       "Create or double-click a .keirescene asset in the Project panel.");
-        return;
-    }
-    if (document.RecoveryAvailable())
+    const bool hasScene = document.EditingScene() && activeScene && activeScene->IsOpen();
+    if (hasScene && document.RecoveryAvailable())
     {
         ui.TextColored(theme.Warning, "A recovery snapshot is available for this scene.");
         if (ui.Button("Restore Recovery"))
@@ -163,31 +158,48 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (ui.Button("Discard Recovery"))
             m_Controller.DiscardSceneViewportRecovery();
     }
-    if (!m_RenderView)
-    {
-        DrawEmptyState(ui, "SCENE", "The renderer is disabled.",
-                       "Enable rendered or headless rendering in the application specification.");
-        return;
-    }
-
     const auto available = ui.ContentAvailable();
-    const auto size = PrepareRenderSurface(m_RenderView, available, m_Controller.SceneViewportDisplayScale());
-    const float aspect = size.Width / std::max(size.Height, 1.0F);
+    const Keire::UiSize canvasSize{std::max(available.Width, 1.0F), std::max(available.Height, 1.0F)};
+    auto size = canvasSize;
+    Keire::UiItemState imageState;
+    Keire::UiItemRect imageRect;
     Keire::RenderCamera camera;
+    const auto renderScene = hasScene ? activeScene : Keire::Ref<Keire::Scene>{};
+    if (!hasScene || !m_RenderView)
+    {
+        (void)ui.InvisibleButton("SceneViewportCanvas", canvasSize);
+        imageState = ui.LastItemState();
+        imageRect = ui.LastItemRect();
+        ui.DrawFilledRectangle(imageRect, {0.055F, 0.062F, 0.075F, 1.0F});
+        const std::string_view heading = hasScene ? "Renderer unavailable" : "Drop a Scene here";
+        const std::string_view detail = hasScene ? "Scene authoring remains available while rendering is disabled."
+                                                 : "Create a scene or drop a .keirescene asset to begin.";
+        const float headingWidth = static_cast<float>(heading.size()) * 7.0F;
+        const float detailWidth = static_cast<float>(detail.size()) * 7.0F;
+        const float centerX = (imageRect.Minimum.X + imageRect.Maximum.X) * 0.5F;
+        const float centerY = (imageRect.Minimum.Y + imageRect.Maximum.Y) * 0.5F;
+        ui.DrawOverlayText({centerX - headingWidth * 0.5F, centerY - 18.0F}, theme.Text, heading);
+        ui.DrawOverlayText({centerX - detailWidth * 0.5F, centerY + 6.0F}, theme.MutedText, detail);
+    }
+    else
+    {
+        size = PrepareRenderSurface(m_RenderView, available, m_Controller.SceneViewportDisplayScale());
+    }
+    const float aspect = size.Width / std::max(size.Height, 1.0F);
     camera.View = m_Camera->ViewMatrix();
     camera.Projection = m_Camera->ProjectionMatrix(aspect);
-    const auto renderScene = activeScene;
-    if (const auto sceneCamera = SelectGameCamera(renderScene))
-        camera.ClearColor = sceneCamera->Camera->ClearColor();
-    else
-        camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
-    m_RenderView->SetCamera(camera);
-
-    if (renderScene)
+    if (hasScene && m_RenderView)
+    {
+        if (const auto sceneCamera = SelectGameCamera(renderScene))
+            camera.ClearColor = sceneCamera->Camera->ClearColor();
+        else
+            camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
+        m_RenderView->SetCamera(camera);
         renderer->Submit({renderScene, m_RenderView, true, m_Controller.SceneViewportSettings()});
-    ui.Image(m_RenderView->Surface(), size);
-    const auto imageState = ui.LastItemState();
-    const auto imageRect = ui.LastItemRect();
+        ui.Image(m_RenderView->Surface(), size);
+        imageState = ui.LastItemState();
+        imageRect = ui.LastItemRect();
+    }
     m_ViewportRect = imageRect;
     m_LastCamera = camera;
     if (auto target = ui.BeginDragTarget(); target)
@@ -209,6 +221,14 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                         m_Controller.SetSceneViewportSelectedAsset(asset);
                         continue;
                     }
+                    if (record->Type == Keire::SceneAsset::StaticType() ||
+                        record->Type == Keire::InputActionAsset::StaticType())
+                    {
+                        m_Controller.RouteSceneViewportAsset(record->Type, asset, {});
+                        continue;
+                    }
+                    if (!activeScene || !activeScene->IsOpen())
+                        throw std::runtime_error("Create or open a scene before dropping meshes or materials.");
                     const auto hit =
                         KeireEditor::PickSceneEntity(activeScene, imageRect, ui.PointerState().Position, camera);
                     m_Controller.RouteSceneViewportAsset(record->Type, asset, hit);
@@ -220,6 +240,24 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                 m_Controller.ReportSceneViewportError(document.Status());
             }
         }
+    }
+    if (!hasScene || !m_RenderView)
+    {
+        if (!hasScene)
+        {
+            const float centerX = (imageRect.Minimum.X + imageRect.Maximum.X) * 0.5F;
+            const float centerY = (imageRect.Minimum.Y + imageRect.Maximum.Y) * 0.5F + 42.0F;
+            if (ui.OverlayIconButton(
+                    "EmptySceneCreate", Keire::UiIcon::Create,
+                    {.Position = {centerX - 36.0F, centerY}, .Size = {32.0F, 28.0F}, .Tooltip = "Create a new scene"}))
+                m_Controller.RequestSceneViewportNewScene();
+            if (ui.OverlayIconButton("EmptySceneOpen", Keire::UiIcon::Folder,
+                                     {.Position = {centerX + 4.0F, centerY},
+                                      .Size = {32.0F, 28.0F},
+                                      .Tooltip = "Show Scene assets in Project"}))
+                m_Controller.RevealSceneViewportScenes();
+        }
+        return;
     }
     const auto toolbarRect = m_Gizmos->DrawOverlayToolbar(ui, imageRect);
     constexpr float overlaySize = 28.0F;

@@ -4,7 +4,73 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
+#include <utility>
+#include <vector>
+
+namespace
+{
+    [[nodiscard]] Keire::Ref<Keire::Texture2DAsset> CreateDefaultSky()
+    {
+        constexpr std::uint32_t width = 256;
+        constexpr std::uint32_t height = 128;
+        constexpr float pi = 3.14159265358979323846F;
+        std::vector<std::byte> pixels(static_cast<std::size_t>(width) * height * 4U);
+        constexpr Keire::Vector3 sunDirection{0.2996F, 0.4794F, 0.8188F};
+        for (std::uint32_t y = 0; y < height; ++y)
+        {
+            const float v = (static_cast<float>(y) + 0.5F) / static_cast<float>(height);
+            const float latitude = (0.5F - v) * pi;
+            const float horizon = std::exp(-std::abs(latitude) * 3.6F);
+            const float upper = std::clamp((0.5F - v) * 2.0F, 0.0F, 1.0F);
+            const float lower = std::clamp((v - 0.5F) * 2.0F, 0.0F, 1.0F);
+            for (std::uint32_t x = 0; x < width; ++x)
+            {
+                const float u = (static_cast<float>(x) + 0.5F) / static_cast<float>(width);
+                const float longitude = (u - 0.5F) * 2.0F * pi;
+                const float latitudeCosine = std::cos(latitude);
+                const Keire::Vector3 direction{std::sin(longitude) * latitudeCosine, std::sin(latitude),
+                                               std::cos(longitude) * latitudeCosine};
+                const float sunDot = std::max(
+                    direction.X * sunDirection.X + direction.Y * sunDirection.Y + direction.Z * sunDirection.Z, 0.0F);
+                const float sun = std::pow(sunDot, 384.0F);
+                const float glow = std::pow(sunDot, 20.0F) * 0.18F;
+
+                Keire::Vector3 color{0.34F + (0.07F - 0.34F) * upper, 0.48F + (0.16F - 0.48F) * upper,
+                                     0.68F + (0.34F - 0.68F) * upper};
+                const float horizonBlend = horizon * 0.45F;
+                color = {color.X + (0.62F - color.X) * horizonBlend, color.Y + (0.72F - color.Y) * horizonBlend,
+                         color.Z + (0.82F - color.Z) * horizonBlend};
+                const float lowerBlend = lower * 0.72F;
+                color = {color.X + (0.10F - color.X) * lowerBlend, color.Y + (0.12F - color.Y) * lowerBlend,
+                         color.Z + (0.16F - color.Z) * lowerBlend};
+                color = {color.X + sun + glow, color.Y + (sun + glow) * 0.78F, color.Z + (sun + glow) * 0.48F};
+
+                const auto offset = (static_cast<std::size_t>(y) * width + x) * 4U;
+                const auto channel = [](const float value)
+                { return std::byte{static_cast<std::uint8_t>(std::clamp(value, 0.0F, 1.0F) * 255.0F + 0.5F)}; };
+                pixels[offset] = channel(color.X);
+                pixels[offset + 1U] = channel(color.Y);
+                pixels[offset + 2U] = channel(color.Z);
+                pixels[offset + 3U] = std::byte{255};
+            }
+        }
+
+        Keire::TextureImportSettings settings;
+        settings.Semantic = Keire::TextureSemantic::Environment;
+        settings.ColorSpace = Keire::TextureColorSpace::Linear;
+        settings.Mips = Keire::TextureMipPolicy::None;
+        settings.EnvironmentLayout = Keire::TextureEnvironmentLayout::Equirectangular;
+        settings.Sampler.AddressU = Keire::TextureAddressMode::Repeat;
+        settings.Sampler.AddressV = Keire::TextureAddressMode::Clamp;
+        settings.Sampler.AddressW = Keire::TextureAddressMode::Clamp;
+        return Keire::CreateRef<Keire::Texture2DAsset>(
+            settings, std::vector<Keire::TextureMipLevel>{{width, height, std::move(pixels)}});
+    }
+} // namespace
 
 namespace Keire::RenderBackend
 {
@@ -13,6 +79,7 @@ namespace Keire::RenderBackend
         DefaultMesh = CreateMeshResources(*MeshAsset::Cube());
         ErrorMesh = CreateMeshResources(*MeshAsset::Error());
         CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
+        DefaultSkyTexture = CreateTextureResources(*CreateDefaultSky());
         const auto solidTexture =
             [](const std::array<std::byte, 4> pixel, const TextureSemantic semantic, const TextureColorSpace colorSpace)
         {

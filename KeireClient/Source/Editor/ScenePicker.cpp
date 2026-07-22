@@ -166,7 +166,7 @@ namespace KeireEditor
                                     const Keire::UiPosition pointer, const Keire::RenderCamera& camera,
                                     const MeshBoundsResolver& resolveMeshBounds)
     {
-        if (!scene || !viewport.Contains(pointer))
+        if (!scene || !scene->IsOpen() || !viewport.Contains(pointer))
             return {};
         const auto size = viewport.Size();
         if (size.Width <= 1.0F || size.Height <= 1.0F)
@@ -213,7 +213,7 @@ namespace KeireEditor
                                                                 const MeshBoundsResolver& resolveMeshBounds)
     {
         std::vector<Keire::EntityId> selected;
-        if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
+        if (!scene || !scene->IsOpen() || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
             return selected;
         if (selection.Minimum.X > selection.Maximum.X)
             std::swap(selection.Minimum.X, selection.Maximum.X);

@@ -43,6 +43,7 @@ namespace KeireEditor
     class ScenePlayChangeSet;
     class ScenePlayChangeTracker;
     class ScenePlayChangesPanel;
+    class SceneTransitionCoordinator;
     class ViewportAssetDropRouter;
 } // namespace KeireEditor
 
@@ -51,6 +52,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::IHierarchyController,
                                    private KeireEditor::IInspectorController,
                                    private KeireEditor::IInputActionsController,
+                                   private KeireEditor::IProjectSettingsController,
                                    private KeireEditor::IAssetBrowserController,
                                    private KeireEditor::IViewportAssetDropCommands
 {
@@ -100,6 +102,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                std::string_view detail);
     static void DrawPanelMenuItem(Keire::UiFrame& ui, Keire::UiPanelRegistration& panel);
     void DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
+    void DrawMainToolbar(Keire::UiFrame& ui);
+    void DrawMainStatusBar(Keire::UiFrame& ui);
     void DrawNotices(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace, std::string_view title, Dialog dialog);
@@ -136,6 +140,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DiscardSceneViewportRecovery() noexcept override;
     void ReportSceneViewportError(std::string message) noexcept override;
     void SetSceneViewportSelectedAsset(Keire::AssetId asset) noexcept override;
+    void RequestSceneViewportNewScene() override;
+    void RevealSceneViewportScenes() override;
     void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) override;
     void RecordSceneViewportUndo(std::string_view name) override;
     void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) override;
@@ -198,6 +204,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void TrashInspectorAsset(Keire::AssetId asset) override;
     void SetInspectorAssetStatus(std::string status) noexcept override;
     void ReportInspectorAssetError(std::string message) noexcept override;
+    [[nodiscard]] std::span<const Keire::AssetSourceRecord> ProjectSettingsAssetRecords() const noexcept override;
+    void RevealProjectSettingsAsset(Keire::AssetId asset) override;
     void OpenDroppedScene(Keire::AssetId asset) override;
     void OpenDroppedInputActions(Keire::AssetId asset) override;
     void CreateDroppedMeshEntity(Keire::AssetId asset) override;
@@ -240,6 +248,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestCloseScene();
     void CloseScene();
     void ExecutePendingSceneAction();
+    void QueueSceneTransition(PendingSceneAction action, Keire::AssetId asset = {});
+    void ProcessSceneTransition();
     void WriteSceneRecovery();
     void RestoreSceneRecovery();
     void DiscardSceneRecovery() noexcept;
@@ -282,6 +292,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::ScenePlayChangesPanel> m_PlayChangesPanel;
     std::unique_ptr<KeireEditor::ScenePlayChangeSet> m_PlayChanges;
     std::unique_ptr<KeireEditor::ScenePlayChangeTracker> m_PlayChangeTracker;
+    std::unique_ptr<KeireEditor::SceneTransitionCoordinator> m_SceneTransitions;
     std::optional<Keire::SceneDefinition> m_PendingPlayEditorBefore;
     std::unique_ptr<KeireEditor::ExternalAssetImportController> m_ExternalAssetImport;
     std::unique_ptr<KeireEditor::AssetOperationService> m_AssetOperations;
@@ -335,4 +346,5 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_OpenDialog = false;
     bool m_Smoke = false;
     bool m_InitializeProject = false;
+    int m_GameAspect = 0;
 };

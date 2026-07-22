@@ -80,9 +80,10 @@ namespace Keire::RenderBackend
         const auto& camera = packet.Camera;
         const auto& lighting = packet.Lighting;
 
-        if (packet.Environment.SkyVisible && packet.Environment.Environment && pipelines.Sky)
+        if (packet.Environment.SkyVisible && pipelines.Sky)
         {
-            const auto& environment = ResolveTexture(packet.Environment.Environment);
+            const auto& environment =
+                packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
             if (!environment.Empty())
             {
                 const SkyUniforms sky{
@@ -476,6 +477,7 @@ namespace Keire::RenderBackend
         }
         ShaderCache.clear();
         ReleaseTextureResources(CheckerboardTexture);
+        ReleaseTextureResources(DefaultSkyTexture);
         ReleaseTextureResources(WhiteTexture);
         ReleaseTextureResources(FlatNormalTexture);
         ReleaseTextureResources(NeutralOrmTexture);

@@ -1308,23 +1308,31 @@ namespace KeireEditor
                         ImageDigests.emplace(record.Id, std::move(digest));
                 }
 
-                if (ui.Button("Create"))
+                if (ui.IconButton("ProjectCreate", Keire::UiIcon::Create, false, {28.0F, 24.0F}))
                     ui.OpenPopup("AssetCreateMenu");
+                if (ui.LastItemState().Hovered)
+                    ui.SetTooltip("Create asset", {.Delayed = true});
                 if (auto create = ui.BeginPopup("AssetCreateMenu"); create)
                     DrawCreateItems(ui, editor);
                 ui.SameLine();
-                if (ui.Button("Refresh"))
+                if (ui.IconButton("ProjectRefresh", Keire::UiIcon::Refresh, false, {28.0F, 24.0F}))
                     editor.ImportAssetBrowserAssets();
+                if (ui.LastItemState().Hovered)
+                    ui.SetTooltip("Refresh and import", {.Delayed = true});
                 ui.SameLine();
-                if (ui.Button(Mode == ViewMode::List ? "Grid" : "List"))
+                if (ui.IconButton("ProjectView", Mode == ViewMode::List ? Keire::UiIcon::Grid : Keire::UiIcon::List,
+                                  false, {28.0F, 24.0F}))
                 {
                     Mode = Mode == ViewMode::List ? ViewMode::Grid : ViewMode::List;
                     SavePreferences();
                 }
+                if (ui.LastItemState().Hovered)
+                    ui.SetTooltip(Mode == ViewMode::List ? "Grid view" : "List view", {.Delayed = true});
                 ui.SameLine();
                 if (ui.Button("Trash"))
                     OpenTrashPopup = true;
-                (void)ui.InputText("Search Assets", Search);
+                ui.SameLine();
+                (void)ui.InputTextWithHint("##ProjectSearch", "Search Assets", Search);
                 if (Mode == ViewMode::Grid && ui.SliderFloat("Thumbnail Size", ThumbnailSize, 48.0F, 160.0F) &&
                     ui.LastItemState().DeactivatedAfterEdit)
                     SavePreferences();

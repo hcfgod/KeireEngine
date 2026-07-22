@@ -169,6 +169,11 @@ After fixed and variable updates, `Application` begins one UI frame, creates the
 bottom-to-top UI traversal to `LayerStack`; overlays execute last and structural changes remain deferred. `UiFrame`
 validates owner thread and active generation. Its RAII scopes balance backend begin/end calls during normal returns and
 exception unwinding. Scene/Game declarations and UI draw data are recorded into one coordinated RenderSystem frame.
+
+`SceneTransitionCoordinator` is the editor-only serialization point for Open, New, Close, and Exit. UI, shortcuts,
+Project actions, internal drops, and post-import external drops enqueue requests; the next update preflights the target
+before replacing the document. Dirty-scene and Play-change decisions approve or cancel that same request, and duplicate
+requests remain non-destructive. Panels use `Scene::IsOpen()`-filtered document views so an obsolete reference is inert.
 Minimized or unavailable swapchain textures are skipped safely. Docking is active, while multi-viewports are forced off
 because detached native windows require a separate ownership milestone.
 

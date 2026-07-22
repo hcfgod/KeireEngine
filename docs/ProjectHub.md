@@ -3,13 +3,16 @@
 `KeireHub` is the normal editor entrypoint. Running the repository launcher without direct-editor options builds and opens
 the Hub, which remains alive while editor processes run.
 
-The Hub uses a dark, modern navigation palette, large primary actions, responsive card columns, project-initial badges,
-and compact status treatments while preserving keyboard and narrow-window usability. It provides:
+The Hub uses compact charcoal surfaces, restrained blue accents, a persistent navigation rail, and responsive project
+views while preserving keyboard and narrow-window usability. It provides:
 
 - A persistent left navigation rail for Projects, creation, existing-project discovery, and sample quick start.
-- Starter and Empty project creation with an asynchronous native parent-folder picker.
+- A default sortable list with Name, Status, Last Opened, and Path columns plus a persisted responsive card view.
+- Starter and Empty template cards in a validated two-pane creation workflow with destination preview and an
+  asynchronous native parent-folder picker.
 - Existing-project opening by folder picker or pasted path.
-- Responsive searchable recent cards with status, path, pin/unpin, remove, reveal, and open actions.
+- Searchable recent projects with single selection, arrow-key navigation, Enter/double-click open, and context actions
+  for reveal, pin, and non-destructive removal.
 - A discoverable packaged or repository `KeireSandbox` sample.
 - Clear diagnostics for invalid, missing, incompatible, or already-open projects.
 

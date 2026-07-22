@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -53,8 +54,8 @@ namespace
     {
       public:
         InspectorPropertyEditor(Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> assets,
-                                const Keire::Ref<Keire::Scene>& scene)
-            : m_Ui(ui), m_Assets(assets), m_Scene(scene)
+                                const Keire::Ref<Keire::Scene>& scene, KeireEditor::AssetPicker& assetPicker)
+            : m_Ui(ui), m_Assets(assets), m_Scene(scene), m_AssetPicker(assetPicker)
         {
         }
 
@@ -132,28 +133,10 @@ namespace
         bool EditAsset(const std::string_view label, Keire::AssetId& value,
                        const std::optional<Keire::AssetTypeId> expectedType) override
         {
-            const auto selected = std::ranges::find(m_Assets, value, &Keire::AssetSourceRecord::Id);
-            const auto preview = selected == m_Assets.end() ? (value ? "Missing asset" : "None")
-                                                            : selected->RelativePath.filename().string();
-            bool changed = false;
-            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
-            {
-                if (m_Ui.Selectable("None", !value))
-                {
-                    value = {};
-                    changed = true;
-                }
-                for (const auto& asset : m_Assets)
-                {
-                    if (expectedType && asset.Type != *expectedType)
-                        continue;
-                    if (m_Ui.Selectable(asset.RelativePath.generic_string(), asset.Id == value))
-                    {
-                        value = asset.Id;
-                        changed = true;
-                    }
-                }
-            }
+            KeireEditor::AssetPickerOptions options;
+            options.Label = label;
+            options.ExpectedType = expectedType;
+            const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);
             if (changed)
                 m_EditBoundary = true;
             return changed;
@@ -161,31 +144,12 @@ namespace
         bool EditTextureAsset(const std::string_view label, Keire::AssetId& value,
                               const Keire::ShaderTextureSemantic semantic) override
         {
-            const auto selected = std::ranges::find(m_Assets, value, &Keire::AssetSourceRecord::Id);
-            const auto compatible =
-                selected == m_Assets.end() || KeireEditor::MaterialInspectorPanel::AcceptsTexture(*selected, semantic);
-            const auto preview = selected == m_Assets.end() ? (value ? "Missing texture" : "None")
-                                 : compatible               ? selected->RelativePath.filename().string()
-                                                            : "Incompatible texture";
-            bool changed = false;
-            if (auto combo = m_Ui.BeginCombo(label, preview); combo)
-            {
-                if (m_Ui.Selectable("None", !value))
-                {
-                    value = {};
-                    changed = true;
-                }
-                for (const auto& asset : m_Assets)
-                {
-                    if (!KeireEditor::MaterialInspectorPanel::AcceptsTexture(asset, semantic))
-                        continue;
-                    if (m_Ui.Selectable(asset.RelativePath.generic_string(), asset.Id == value))
-                    {
-                        value = asset.Id;
-                        changed = true;
-                    }
-                }
-            }
+            KeireEditor::AssetPickerOptions options;
+            options.Label = label;
+            options.ExpectedType = Keire::Texture2DAsset::StaticType();
+            options.Filter = [semantic](const Keire::AssetSourceRecord& record)
+            { return KeireEditor::MaterialInspectorPanel::AcceptsTexture(record, semantic); };
+            const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);
             if (changed)
                 m_EditBoundary = true;
             return changed;
@@ -228,12 +192,14 @@ namespace
         Keire::UiFrame& m_Ui;
         std::span<const Keire::AssetSourceRecord> m_Assets;
         Keire::Ref<Keire::Scene> m_Scene;
+        KeireEditor::AssetPicker& m_AssetPicker;
         bool m_EditBoundary = false;
     };
 } // namespace
 
 KeireEditor::InspectorPanel::InspectorPanel(IInspectorController& controller)
-    : m_Controller(controller), m_AssetInspector(std::make_unique<AssetInspectorPanel>(controller))
+    : m_Controller(controller), m_AssetInspector(std::make_unique<AssetInspectorPanel>(controller)),
+      m_AssetPicker(std::make_unique<AssetPicker>())
 {
 }
 
@@ -250,16 +216,30 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
     const auto records = m_Controller.InspectorAssetRecords();
     const auto assets = m_Controller.InspectorAssetSystem();
     const auto scene = sceneDocument.ActiveScene();
-    if (ui.WindowFocused() && scene && sceneDocument.Selection())
+    if (m_Locked && (!scene || !m_LockedEntity || !scene->FindEntity(Keire::EntityId(m_LockedEntity))))
+    {
+        m_Locked = false;
+        m_LockedEntity = {};
+    }
+    const auto inspectedEntity = m_Locked ? m_LockedEntity : sceneDocument.Selection();
+    if (ui.WindowFocused() && scene && inspectedEntity)
         m_Controller.ActivateInspectorHistory();
     ui.TextColored(theme.Accent, "INSPECTOR");
+    ui.SameLine();
+    if (ui.IconButton("InspectorLock", Keire::UiIcon::Lock, m_Locked, {28.0F, 24.0F}))
+    {
+        m_Locked = !m_Locked;
+        m_LockedEntity = m_Locked ? sceneDocument.Selection() : Keire::AssetId{};
+    }
+    if (ui.LastItemState().Hovered)
+        ui.SetTooltip(m_Locked ? "Unlock Inspector" : "Lock Inspector to the current object", {.Delayed = true});
     ui.Separator();
-    if (scene && sceneDocument.Selection())
+    if (scene && inspectedEntity)
     {
         if (sceneDocument.Selections().size() > 1)
             ui.TextColored(theme.MutedText, std::to_string(sceneDocument.Selections().size()) +
                                                 " entities selected; editing the primary selection.");
-        auto entity = scene->FindEntity(Keire::EntityId(sceneDocument.Selection()));
+        auto entity = scene->FindEntity(Keire::EntityId(inspectedEntity));
         if (entity)
         {
             auto name = entity.Name();
@@ -604,7 +584,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             ++m_EditSerial;
                         if (const auto registration = scene->Components()->Find(renderer->Type()))
                         {
-                            InspectorPropertyEditor propertyEditor(ui, records, scene);
+                            InspectorPropertyEditor propertyEditor(ui, records, scene, *m_AssetPicker);
                             for (const auto& property : registration->Properties)
                             {
                                 if (property.Key != "mesh")
@@ -631,7 +611,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 }
                             }
                         }
-                        InspectorPropertyEditor propertyEditor(ui, records, scene);
+                        InspectorPropertyEditor propertyEditor(ui, records, scene, *m_AssetPicker);
                         if (assets && renderer->Mesh())
                         {
                             const auto mesh =
@@ -685,7 +665,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     }
                 }
             }
-            InspectorPropertyEditor propertyEditor(ui, records, scene);
+            InspectorPropertyEditor propertyEditor(ui, records, scene, *m_AssetPicker);
             for (const auto& component : entity.GetComponents())
             {
                 if (!component || component->Type() == Keire::TransformComponent::StaticType() ||
@@ -777,6 +757,13 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
     }
     m_AssetInspector->Draw(ui);
 }
+
+KeireEditor::AssetInspectorPanel::AssetInspectorPanel(IInspectorController& controller)
+    : m_Controller(controller), m_AssetPicker(std::make_unique<AssetPicker>())
+{
+}
+
+KeireEditor::AssetInspectorPanel::~AssetInspectorPanel() = default;
 
 void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
 {
@@ -910,7 +897,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
             else
                 materialDocument.Open(materialDocument.DraftSource(), resolveShader);
             auto& document = materialDocument;
-            InspectorPropertyEditor editor(ui, records, scene);
+            InspectorPropertyEditor editor(ui, records, scene, *m_AssetPicker);
             bool changed = false;
             auto shader = document.Shader();
             if (editor.EditAsset("Shader", shader, Keire::ShaderAsset::StaticType()))

@@ -138,7 +138,8 @@ workflows.
 The Scene view uses the selected runtime Camera's clear color while retaining its independent editor viewpoint. Its
 `Q/W/E/R` View/Move/Rotate/Scale tools support Local/Global handles, configurable position/rotation/scale snapping, and
 camera/light gizmos. Project ambient color, intensity, and exposure are edited through **Edit > Project Settings...**
-and light both Scene and Game views together.
+and light both Scene and Game views together. A built-in studio sky renders by default; the same panel provides a
+searchable asset picker for custom HDR, equirectangular, cross-atlas, and strip-atlas environments.
 
 ## Windowing And Configuration
 
@@ -312,6 +313,9 @@ an independent process.
 at application frame boundaries; failures preserve the last-good scene set. Mutable `Scene` instances support stable
 weak object handles, hierarchy edits, transforms, subtree duplication/deletion, cycle-safe reparenting, and dirty state.
 The editor adds atomic Save, bounded undo/redo, Save/Discard/Cancel transitions, and project-local crash recovery.
+Scene replacements requested by menus, Project actions, imports, or viewport drops are decoded first and committed at
+the next editor update boundary. The Scene canvas remains available with no open document, so dropping a scene is the
+same safe operation from an empty or populated workspace.
 
 Schema v2 scenes use stable `Entity` handles and application-registered, reference-counted Components. Transform is
 mandatory; Directional Light supplies the built-in Lambert path while its shadow fields remain future-facing. Play clones authored state, Pause freezes component
