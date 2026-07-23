@@ -12,6 +12,12 @@ namespace Keire
         Orthographic
     };
 
+    enum class CameraClearMode : std::uint8_t
+    {
+        Skybox,
+        SolidColor
+    };
+
     class KEIRE_API CameraComponent final : public Component
     {
       public:
@@ -23,6 +29,7 @@ namespace Keire
         }
 
         [[nodiscard]] CameraProjection Projection() const noexcept { return m_Projection; }
+        [[nodiscard]] CameraClearMode ClearMode() const noexcept { return m_ClearMode; }
         [[nodiscard]] bool Primary() const noexcept { return m_Primary; }
         [[nodiscard]] std::int32_t Priority() const noexcept { return m_Priority; }
         [[nodiscard]] float VerticalFieldOfViewDegrees() const noexcept { return m_VerticalFieldOfViewDegrees; }
@@ -32,6 +39,7 @@ namespace Keire
         [[nodiscard]] Color ClearColor() const noexcept { return m_ClearColor; }
 
         void SetProjection(CameraProjection projection);
+        void SetClearMode(CameraClearMode mode);
         void SetPrimary(bool primary);
         void SetPriority(std::int32_t priority);
         void SetVerticalFieldOfViewDegrees(float degrees);
@@ -44,6 +52,7 @@ namespace Keire
       private:
         friend ComponentRegistration CreateCameraComponentRegistration();
         CameraProjection m_Projection = CameraProjection::Perspective;
+        CameraClearMode m_ClearMode = CameraClearMode::Skybox;
         bool m_Primary = true;
         std::int32_t m_Priority = 0;
         float m_VerticalFieldOfViewDegrees = 60.0F;

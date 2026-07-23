@@ -5,7 +5,8 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $Compiler = Join-Path $Root "Build\Tools\ShaderCompiler\KeireShaderCompiler.exe"
 $Sources = @(
     @{ Prefix = "BuiltinUnlit"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinUnlit.hlsl") },
-    @{ Prefix = "BuiltinSky"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinSky.hlsl") }
+    @{ Prefix = "BuiltinSky"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinSky.hlsl") },
+    @{ Prefix = "BuiltinShadow"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinShadow.hlsl") }
 )
 $Generated = Join-Path $Root "Build\Generated\Keire\BuiltinUnlitShaders.h"
 

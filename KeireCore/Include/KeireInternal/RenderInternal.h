@@ -14,7 +14,7 @@ namespace Keire::Detail
 {
     [[nodiscard]] inline constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool vertex) noexcept
     {
-        return vertex ? 1U : 0U;
+        return vertex ? 1U : 2U;
     }
 } // namespace Keire::Detail
 

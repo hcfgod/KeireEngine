@@ -18,6 +18,7 @@ struct VertexOutput
     float2 UV0 : TEXCOORD4;
     float4 Color : TEXCOORD5;
     float3 WorldPosition : TEXCOORD6;
+    float ViewDepth : TEXCOORD7;
     float4 Position : SV_Position;
 };
 
@@ -29,12 +30,22 @@ cbuffer ObjectData : register(b0, space1)
     float4x4 NormalMatrix;
 };
 
+struct LocalLightData
+{
+    float4 PositionRange;
+    float4 DirectionOuter;
+    float4 ColorIntensity;
+    float4 Parameters;
+};
+
 cbuffer SceneData : register(b0, space3)
 {
     float4 AmbientColorIntensity;
     float4 DirectionalColorIntensity;
     float4 DirectionalDirectionExposure;
     float4 SurfaceParameters;
+    float4 LocalLightCounts;
+    LocalLightData LocalLights[62];
 };
 
 cbuffer MaterialData : register(b1, space3)
@@ -47,18 +58,13 @@ cbuffer MaterialData : register(b1, space3)
     float4 EmissiveFactor;
 };
 
-struct LocalLightData
+cbuffer ShadowData : register(b2, space3)
 {
-    float4 PositionRange;
-    float4 DirectionOuter;
-    float4 ColorIntensity;
-    float4 Parameters;
-};
-
-cbuffer LocalLightsData : register(b2, space3)
-{
-    float4 LocalLightCounts;
-    LocalLightData LocalLights[128];
+    float4 DirectionalShadowParameters;
+    float4 DirectionalCascadeSplits;
+    float4x4 DirectionalShadowMatrices[4];
+    float4x4 LocalShadowMatrices[20];
+    float4 LocalShadowParameters[62];
 };
 
 Texture2D MainTexture : register(t0, space2);
@@ -75,6 +81,10 @@ Texture2D MetallicTexture : register(t5, space2);
 SamplerState MetallicSampler : register(s5, space2);
 Texture2D RoughnessTexture : register(t6, space2);
 SamplerState RoughnessSampler : register(s6, space2);
+Texture2DArray<float> DirectionalShadowTexture : register(t7, space2);
+SamplerState DirectionalShadowSampler : register(s7, space2);
+Texture2DArray<float> LocalShadowTexture : register(t8, space2);
+SamplerState LocalShadowSampler : register(s8, space2);
 
 float3 SafeNormal(const float3 value, const float3 fallback)
 {
@@ -106,7 +116,121 @@ VertexOutput VSMain(VertexInput input)
     output.UV0 = input.UV0;
     output.Color = input.Color;
     output.WorldPosition = worldPosition.xyz;
+    output.ViewDepth = viewPosition.z;
     return output;
+}
+
+float SampleShadowPcf(Texture2DArray<float> textureValue, SamplerState samplerValue, const float2 uv,
+                      const float layer, const float depth, const float inverseResolution, const bool soft)
+{
+    if (any(uv < 0.0F.xx) || any(uv > 1.0F.xx) || depth <= 0.0F || depth >= 1.0F)
+        return 1.0F;
+    if (!soft)
+        return depth <= textureValue.SampleLevel(samplerValue, float3(uv, layer), 0.0F) ? 1.0F : 0.0F;
+    float visibility = 0.0F;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
+        {
+            const float storedDepth =
+                textureValue.SampleLevel(samplerValue, float3(uv + float2(x, y) * inverseResolution, layer), 0.0F);
+            visibility += depth <= storedDepth ? 1.0F : 0.0F;
+        }
+    }
+    return visibility / 9.0F;
+}
+
+float EvaluateDirectionalShadow(const float3 worldPosition, const float viewDepth)
+{
+    const float cascadeCount = abs(DirectionalShadowParameters.x);
+    if (SurfaceParameters.z < 0.5F || cascadeCount < 0.5F)
+        return 1.0F;
+    uint cascade = 0U;
+    cascade += viewDepth > DirectionalCascadeSplits.x;
+    cascade += viewDepth > DirectionalCascadeSplits.y;
+    cascade += viewDepth > DirectionalCascadeSplits.z;
+    cascade = min(cascade, (uint)cascadeCount - 1U);
+    const float4 clip = mul(DirectionalShadowMatrices[cascade], float4(worldPosition, 1.0F));
+    const float3 projected = clip.xyz / clip.w;
+    const float2 uv = float2(projected.x * 0.5F + 0.5F, -projected.y * 0.5F + 0.5F);
+    const float visibility = SampleShadowPcf(DirectionalShadowTexture, DirectionalShadowSampler, uv, cascade,
+                                             projected.z - DirectionalShadowParameters.z,
+                                             DirectionalShadowParameters.w, DirectionalShadowParameters.x > 0.0F);
+    return lerp(1.0F, visibility, saturate(DirectionalShadowParameters.y));
+}
+
+float2 PointShadowCoordinates(const float3 direction, out uint face, out float majorDistance)
+{
+    const float3 absoluteDirection = abs(direction);
+    float2 projected;
+    if (absoluteDirection.x >= absoluteDirection.y && absoluteDirection.x >= absoluteDirection.z)
+    {
+        majorDistance = absoluteDirection.x;
+        if (direction.x >= 0.0F)
+        {
+            face = 0U;
+            projected = float2(-direction.z, direction.y) / majorDistance;
+        }
+        else
+        {
+            face = 1U;
+            projected = float2(direction.z, direction.y) / majorDistance;
+        }
+    }
+    else if (absoluteDirection.y >= absoluteDirection.z)
+    {
+        majorDistance = absoluteDirection.y;
+        if (direction.y >= 0.0F)
+        {
+            face = 2U;
+            projected = float2(direction.x, -direction.z) / majorDistance;
+        }
+        else
+        {
+            face = 3U;
+            projected = float2(direction.x, direction.z) / majorDistance;
+        }
+    }
+    else
+    {
+        majorDistance = absoluteDirection.z;
+        if (direction.z >= 0.0F)
+        {
+            face = 4U;
+            projected = float2(direction.x, direction.y) / majorDistance;
+        }
+        else
+        {
+            face = 5U;
+            projected = float2(-direction.x, direction.y) / majorDistance;
+        }
+    }
+    return float2(projected.x * 0.5F + 0.5F, -projected.y * 0.5F + 0.5F);
+}
+
+float EvaluateLocalShadow(const uint lightIndex, const float3 worldPosition)
+{
+    if (SurfaceParameters.z < 0.5F || LocalShadowParameters[lightIndex].x < 0.0F)
+        return 1.0F;
+    const bool spot = LocalLights[lightIndex].Parameters.y > 0.5F;
+    uint layer = (uint)LocalShadowParameters[lightIndex].x;
+    if (!spot)
+    {
+        const float3 fromLight = worldPosition - LocalLights[lightIndex].PositionRange.xyz;
+        uint face = 0U;
+        float majorDistance = 0.0F;
+        PointShadowCoordinates(fromLight, face, majorDistance);
+        layer += face;
+    }
+    const float4 clip = mul(LocalShadowMatrices[layer], float4(worldPosition, 1.0F));
+    const float3 projected = clip.xyz / clip.w;
+    const float2 uv = float2(projected.x * 0.5F + 0.5F, -projected.y * 0.5F + 0.5F);
+    const float visibility = SampleShadowPcf(LocalShadowTexture, LocalShadowSampler, uv, layer,
+                                             projected.z - LocalShadowParameters[lightIndex].w, 1.0F / 1024.0F,
+                                             LocalShadowParameters[lightIndex].z > 0.5F);
+    return lerp(1.0F, visibility, saturate(LocalShadowParameters[lightIndex].y));
 }
 
 float DistributionGgx(const float3 normal, const float3 halfway, const float roughness)
@@ -171,7 +295,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
     float3 direct = EvaluateDirectLighting(normal, viewDirection, lightDirection,
                                            DirectionalColorIntensity.rgb * DirectionalColorIntensity.a,
                                            baseColor.rgb, metallic, roughness);
-    const uint localLightCount = min((uint)max(LocalLightCounts.x, 0.0F), 128U);
+    direct *= EvaluateDirectionalShadow(input.WorldPosition, input.ViewDepth);
+    const uint localLightCount = min((uint)max(LocalLightCounts.x, 0.0F), 62U);
     for (uint lightIndex = 0U; lightIndex < localLightCount; ++lightIndex)
     {
         const float3 toLight = LocalLights[lightIndex].PositionRange.xyz - input.WorldPosition;
@@ -195,7 +320,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
             attenuation *= smoothstep(outerCosine, innerCosine, coneCosine);
         }
         const float3 radiance =
-            LocalLights[lightIndex].ColorIntensity.rgb * LocalLights[lightIndex].ColorIntensity.a * attenuation;
+            LocalLights[lightIndex].ColorIntensity.rgb * LocalLights[lightIndex].ColorIntensity.a * attenuation *
+            EvaluateLocalShadow(lightIndex, input.WorldPosition);
         direct += EvaluateDirectLighting(normal, viewDirection, localDirection, radiance, baseColor.rgb, metallic,
                                          roughness);
     }

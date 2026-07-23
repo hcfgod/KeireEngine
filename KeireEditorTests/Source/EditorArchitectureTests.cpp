@@ -14,6 +14,7 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
+#include "KeireClient/Editor/SelectionRange.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
@@ -191,6 +192,29 @@ TEST_CASE("editor command router centralizes availability and execution")
     for (const auto command : routedCommands)
         CHECK(router.Execute(command));
     CHECK(executions == 1 + routedCommands.size());
+}
+
+TEST_CASE("Range selection follows display order and retains the clicked item as active")
+{
+    const std::array order{Keire::AssetId::Generate(), Keire::AssetId::Generate(), Keire::AssetId::Generate(),
+                           Keire::AssetId::Generate(), Keire::AssetId::Generate()};
+
+    const auto forward = KeireEditor::BuildRangeSelection(order, order[1], order[4]);
+    REQUIRE(forward.size() == 4);
+    CHECK(forward[0] == order[1]);
+    CHECK(forward[1] == order[2]);
+    CHECK(forward[2] == order[3]);
+    CHECK(forward[3] == order[4]);
+
+    const auto reverse = KeireEditor::BuildRangeSelection(order, order[4], order[1]);
+    REQUIRE(reverse.size() == 4);
+    CHECK(reverse.back() == order[1]);
+
+    const std::array existing{order[0]};
+    const auto additive = KeireEditor::BuildRangeSelection(order, order[2], order[4], existing, true);
+    REQUIRE(additive.size() == 4);
+    CHECK(additive.front() == order[0]);
+    CHECK(additive.back() == order[4]);
 }
 
 TEST_CASE("Play changes review remains pending until it is explicitly resolved")

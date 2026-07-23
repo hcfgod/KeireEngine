@@ -405,6 +405,7 @@ namespace Keire::RenderBackend
             ResolvedAssetMaterial result;
             result.Pipeline = pipeline->Handle;
             result.Surface = surface;
+            result.ReceivesShadows = shader->LastGood->Definition().ReceivesShadows;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

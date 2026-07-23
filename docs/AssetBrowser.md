@@ -22,6 +22,8 @@ mesh or texture import cannot leave a cached cube or checkerboard preview from a
 The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presents a persistent folder tree,
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
 rename, stable-identity duplicate, and recoverable Move to Trash operations.
+Click establishes a selection anchor; Shift-click selects the inclusive visible asset range to the next item, while
+Ctrl/Cmd+Shift-click adds that range to the current selection.
 
 Both the thumbnail and extension-free label are drag handles. Folder targets retain move semantics; Scene-view targets
 dispatch by asset type. Scenes open through the normal dirty-document guard, Input Actions open in their editor, and a

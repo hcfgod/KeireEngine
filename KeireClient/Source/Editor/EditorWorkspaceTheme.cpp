@@ -290,6 +290,7 @@ void EditorWorkspaceLayer::DrawMainToolbar(Keire::UiFrame& ui)
         if (ui.LastItemState().Hovered)
             ui.SetTooltip("Save Scene (Ctrl+S)", {.Delayed = true});
 
+        ui.SameLine();
         ui.AlignNextItemGroup(0.5F, 98.0F);
         const auto playState =
             m_SceneDocument->PlaySession() ? m_SceneDocument->PlaySession()->State() : Keire::ScenePlayState::Stopped;
@@ -318,6 +319,7 @@ void EditorWorkspaceLayer::DrawMainToolbar(Keire::UiFrame& ui)
                     static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds()));
         }
 
+        ui.SameLine();
         ui.AlignNextItemGroup(1.0F, 106.0F);
         if (m_AssetOperations && m_AssetOperations->Busy())
         {

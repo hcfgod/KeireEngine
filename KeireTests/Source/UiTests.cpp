@@ -85,9 +85,30 @@ namespace
             CHECK(Owner().UiEnabled());
 
             {
+                auto menuBar = ui.BeginMainMenuBar();
+                if (menuBar)
+                {
+                    auto menu = ui.BeginMenu("File");
+                    if (menu)
+                        (void)ui.MenuItem("Exit");
+                }
+            }
+            {
                 auto toolbar = ui.BeginMainToolbar();
                 if (toolbar)
-                    ui.Text("Toolbar");
+                {
+                    (void)ui.IconButton("TestNew", Keire::UiIcon::Create, false, {28.0F, 24.0F});
+                    ui.SameLine();
+                    ui.AlignNextItemGroup(0.5F, 98.0F);
+                    (void)ui.IconButton("TestPlay", Keire::UiIcon::Play, false, {28.0F, 24.0F});
+                    const auto button = ui.LastItemRect();
+                    const auto* mainMenu = ImGui::FindWindowByName("##MainMenuBar");
+                    REQUIRE(mainMenu != nullptr);
+                    CHECK(button.Minimum.Y >= mainMenu->Pos.y + mainMenu->Size.y - 1.0F);
+                    const auto* toolbarWindow = ImGui::GetCurrentWindowRead();
+                    REQUIRE(toolbarWindow != nullptr);
+                    CHECK(button.Maximum.Y <= toolbarWindow->Pos.y + toolbarWindow->Size.y + 1.0F);
+                }
             }
             {
                 auto status = ui.BeginMainStatusBar();

@@ -127,8 +127,17 @@ namespace Keire::RenderBackend
         SDL_GPUTexture* SampledColor = nullptr;
         SDL_GPUTexture* MultisampleColor = nullptr;
         SDL_GPUTexture* Depth = nullptr;
+        SDL_GPUTexture* DirectionalShadow = nullptr;
+        SDL_GPUTexture* LocalShadow = nullptr;
+        std::uint32_t DirectionalShadowResolution = 0;
+        std::uint32_t DirectionalShadowLayers = 0;
+        std::uint32_t LocalShadowResolution = 0;
+        std::uint32_t LocalShadowLayers = 0;
 
-        [[nodiscard]] bool Empty() const noexcept { return !SampledColor && !MultisampleColor && !Depth; }
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            return !SampledColor && !MultisampleColor && !Depth && !DirectionalShadow && !LocalShadow;
+        }
     };
 
     struct RenderSharedState;
@@ -215,6 +224,7 @@ namespace Keire::RenderBackend
         std::vector<SDL_GPUTextureSamplerBinding> Textures;
         std::optional<std::size_t> TintSlot;
         MaterialSurfaceState Surface;
+        bool ReceivesShadows = false;
     };
 
     struct GpuMaterialEntry final
@@ -252,9 +262,11 @@ namespace Keire::RenderBackend
         Color LightColor;
         Vector4 AmbientAndExposure;
         Vector4 Parameters;
+        Matrix4 Model;
+        Matrix4 View;
     };
 
-    static_assert(sizeof(ObjectUniforms) == sizeof(float) * 52);
+    static_assert(sizeof(ObjectUniforms) == sizeof(float) * 84);
 
     struct AssetObjectUniforms final
     {
@@ -264,7 +276,7 @@ namespace Keire::RenderBackend
         Matrix4 NormalMatrix;
     };
 
-    inline constexpr std::size_t MaximumShaderLocalLights = 128;
+    inline constexpr std::size_t MaximumShaderLocalLights = 62;
 
     struct AssetLocalLightUniform final
     {
@@ -274,12 +286,46 @@ namespace Keire::RenderBackend
         Vector4 Parameters;
     };
 
+    inline constexpr std::size_t MaximumShadowedSpotLights = 8;
+    inline constexpr std::size_t MaximumShadowedPointLights = 2;
+    inline constexpr std::uint32_t LocalShadowResolution = 1024;
+    inline constexpr std::uint32_t LocalShadowLayerCount =
+        static_cast<std::uint32_t>(MaximumShadowedSpotLights + MaximumShadowedPointLights * 6U);
+
+    struct AssetDirectionalShadowUniforms final
+    {
+        Vector4 DirectionalParameters;
+        Vector4 DirectionalCascadeSplits;
+        std::array<Matrix4, 4> DirectionalMatrices;
+    };
+
+    struct AssetLocalShadowUniforms final
+    {
+        std::array<Matrix4, LocalShadowLayerCount> Matrices;
+        std::array<Vector4, MaximumShaderLocalLights> Parameters;
+    };
+
+    struct AssetShadowUniforms final
+    {
+        AssetDirectionalShadowUniforms Directional;
+        AssetLocalShadowUniforms Local;
+    };
+
+    struct ShadowFrameData final
+    {
+        AssetDirectionalShadowUniforms Directional;
+        AssetLocalShadowUniforms Local;
+        std::array<float, MaximumShaderLocalLights> LocalLayers{};
+    };
+
     struct AssetSceneUniforms final
     {
         Vector4 AmbientColorIntensity;
         Vector4 DirectionalColorIntensity;
         Vector4 DirectionalDirectionExposure;
         Vector4 SurfaceParameters;
+        Vector4 LocalLightCounts;
+        std::array<AssetLocalLightUniform, MaximumShaderLocalLights> LocalLights;
     };
 
     struct AssetLocalLightUniforms final
@@ -289,9 +335,12 @@ namespace Keire::RenderBackend
     };
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
-    static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * 16);
+    static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * (20 + MaximumShaderLocalLights * 16));
     static_assert(sizeof(AssetLocalLightUniform) == sizeof(float) * 16);
     static_assert(sizeof(AssetLocalLightUniforms) == sizeof(float) * (4 + MaximumShaderLocalLights * 16));
+    static_assert(sizeof(AssetSceneUniforms) <= 4096);
+    static_assert(sizeof(AssetShadowUniforms) <= 4096);
+    static_assert(sizeof(AssetLocalLightUniforms) <= 4096);
 
     struct SkyUniforms final
     {
@@ -337,6 +386,9 @@ namespace Keire::RenderBackend
         float OuterConeCosine = -1.0F;
         Color ColorAndIntensity;
         float InnerConeCosine = 1.0F;
+        ShadowQuality Shadows = ShadowQuality::Disabled;
+        float ShadowStrength = 1.0F;
+        float ShadowBias = 0.0025F;
     };
 
     struct SceneRenderPacket final
@@ -396,7 +448,10 @@ namespace Keire::RenderBackend
                               {},
                               -1.0F,
                               addColor(light->LightColor(), light->Intensity()),
-                              1.0F});
+                              1.0F,
+                              light->Shadows(),
+                              light->ShadowStrength(),
+                              light->ShadowBias()});
         }
         constexpr float degreesToRadians = 0.01745329251994329577F;
         for (const auto& entity : scene->Query<SpotLightComponent>())
@@ -410,7 +465,8 @@ namespace Keire::RenderBackend
                               Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F})),
                               std::cos(light->OuterAngleDegrees() * degreesToRadians),
                               addColor(light->LightColor(), light->Intensity()),
-                              std::cos(light->InnerAngleDegrees() * degreesToRadians)});
+                              std::cos(light->InnerAngleDegrees() * degreesToRadians), light->Shadows(),
+                              light->ShadowStrength(), light->ShadowBias()});
         }
         std::ranges::sort(result, {}, &SceneLocalLight::Entity);
         if (result.size() > 4096U)
@@ -430,7 +486,8 @@ namespace Keire::RenderBackend
     }
 
     [[nodiscard]] inline ObjectUniforms MakeObjectUniforms(const Matrix4& modelViewProjection, const Matrix4& model,
-                                                           const Color tint, const SceneLighting& lighting,
+                                                           const Matrix4& view, const Color tint,
+                                                           const SceneLighting& lighting,
                                                            const RenderEnvironmentSettings& environment,
                                                            const bool receiveLighting)
     {
@@ -444,7 +501,9 @@ namespace Keire::RenderBackend
                 {environment.AmbientColor.Red * environment.AmbientIntensity,
                  environment.AmbientColor.Green * environment.AmbientIntensity,
                  environment.AmbientColor.Blue * environment.AmbientIntensity, environment.Exposure},
-                {receiveLighting ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F}};
+                {receiveLighting ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F},
+                model,
+                view};
     }
 
     [[nodiscard]] inline std::vector<RenderVertex> CreateGridVertices()
@@ -489,6 +548,7 @@ namespace Keire::RenderBackend
         void ReleaseResources(SurfaceResources& resources) noexcept;
         [[nodiscard]] SDL_GPUShader* CreateShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateSkyShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
@@ -508,7 +568,9 @@ namespace Keire::RenderBackend
         [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
 
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
-                       const SceneRenderPacket& packet);
+                       const SceneRenderPacket& packet, const ShadowFrameData& shadows);
+        [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                    const SceneRenderPacket& packet);
         void RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void EndFrame(ImDrawData* drawData);
         void Close() noexcept;
@@ -527,6 +589,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreatePipeline(SDL_GPUSampleCount samples,
                                                               SDL_GPUPrimitiveType primitive, bool depthWrite);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateShadowPipeline();
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex) const;
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,
@@ -543,7 +606,11 @@ namespace Keire::RenderBackend
         SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
         SDL_GPUTextureFormat ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
         SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+        SDL_GPUTextureFormat ShadowDepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
         SDL_GPUBuffer* GridBuffer = nullptr;
+        SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
+        SDL_GPUSampler* ShadowSampler = nullptr;
+        SDL_GPUTexture* EmptyShadowTexture = nullptr;
         std::uint32_t GridVertexCount = 0;
         GpuMeshResources DefaultMesh;
         GpuMeshResources ErrorMesh;

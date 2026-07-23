@@ -25,7 +25,8 @@ step and marks the scene dirty. **Discard and Stop** restores the exact authored
 Playing or Paused state. Scene close, project changes, and application exit pass through this review before the normal
 unsaved-scene prompt.
 
-Ctrl-click toggles entities in both the Scene viewport and Hierarchy. Dragging from anywhere in the viewport except an
+Ctrl-click toggles entities in both the Scene viewport and Hierarchy. In Hierarchy, Shift-click selects the inclusive
+display-order range from the previous anchor and Ctrl/Cmd+Shift-click adds that range. Dragging from anywhere in the viewport except an
 active gizmo handle draws a marquee and selects every active entity whose projected bounds intersect it; Ctrl-drag adds
 to the existing set. Gizmo handles consume their press before picking begins, so starting a transform never clears the
 selection. The last selected entity is the primary selection shown in Inspector and supplies the gizmo pivot. A gizmo
@@ -52,7 +53,7 @@ duplicated twice.
 Inspector edits foldable Unity-style component cards that retain their bordered presentation when collapsed. Transform
 position, Euler rotation (stored as a normalized quaternion),
 scale, and parent hierarchy are component data. Camera exposes projection, primary selection, priority, clipping, and
-linear clear color. Mesh Renderer exposes mesh/material IDs, tint, and visibility. Directional Light color, intensity,
+Skybox/Solid Color background, and linear clear color. Mesh Renderer exposes mesh/material IDs, tint, and visibility. Directional Light color, intensity,
 temperature, and orientation feed the built-in Lambert pass; shadow settings remain authoring data for a later pass.
 Scene uses its own bounded `UndoContext`, `Ctrl+S`, and explicit atomic Save. The global Edit menu and
 `Ctrl/Cmd+Z`, `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, or `Ctrl+Y` route to the focused document history. Continuous Transform and tint

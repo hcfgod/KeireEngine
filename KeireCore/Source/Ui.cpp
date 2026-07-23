@@ -544,8 +544,10 @@ namespace Keire
         m_Impl->RequireActive("BeginMainToolbar");
         if (id.empty() || !std::isfinite(height) || height <= 0.0F)
             throw std::invalid_argument("BeginMainToolbar requires an identifier and positive finite height.");
-        constexpr ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                           ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                           ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+                                           ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
         const bool visible = ImGui::Begin("##KeireMainToolbar", nullptr, flags);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::Window);
@@ -557,8 +559,10 @@ namespace Keire
         m_Impl->RequireActive("BeginMainStatusBar");
         if (id.empty() || !std::isfinite(height) || height <= 0.0F)
             throw std::invalid_argument("BeginMainStatusBar requires an identifier and positive finite height.");
-        constexpr ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+        constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                           ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                           ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+                                           ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus;
         const bool visible = ImGui::Begin("##KeireMainStatusBar", nullptr, flags);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::Window);
@@ -1653,6 +1657,11 @@ namespace Keire
                                           static_cast<float>(std::max(displaySize.Height, 1U))});
             if (Specification.EnableDocking)
             {
+                // Reserve the main-menu row before allocating viewport sidebars. The client appends its menu items
+                // later in the frame; without this first reservation, the toolbar occupies the same top strip and
+                // its centered play controls are hidden behind the menu bar.
+                if (ImGui::BeginMainMenuBar())
+                    ImGui::EndMainMenuBar();
                 constexpr ImGuiWindowFlags chromeFlags =
                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
                 (void)ImGui::BeginViewportSideBar("##KeireMainToolbar", ImGui::GetMainViewport(), ImGuiDir_Up, 34.0F,

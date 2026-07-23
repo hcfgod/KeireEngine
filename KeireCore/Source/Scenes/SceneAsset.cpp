@@ -267,6 +267,7 @@ namespace Keire
         camera.Components.push_back(MakeTransformDefinition(camera.Transform));
         camera.Components.push_back({CameraComponent::StaticType(), 1, true,
                                      Json({{"projection", 0},
+                                           {"clearMode", 0},
                                            {"primary", true},
                                            {"priority", 0},
                                            {"fieldOfView", 60.0},

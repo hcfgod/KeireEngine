@@ -69,6 +69,8 @@ namespace KeireEditor
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.Checkbox("Render Skybox", settings.SkyVisible);
         commit |= changed;
+        ui.TextColored(theme.MutedText, "Skyboxes provide the background and environment response.");
+        ui.TextColored(theme.MutedText, "Shadows require a Directional Light; rotate it to match a custom sky's sun.");
         ui.Spacing();
         ui.Text("Directional Shadows");
         changed |= ui.SliderFloat("Shadow Distance", settings.DirectionalShadowDistance, 1.0F, 1000.0F);

@@ -489,6 +489,17 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
             return editor.EditChoice(property.DisplayName, *projection, choices);
         });
     m_PropertyDrawers->RegisterOverride(
+        Keire::CameraComponent::StaticType(), "clearMode",
+        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
+           Keire::ComponentPropertyValue& value)
+        {
+            auto* mode = std::get_if<std::int64_t>(&value);
+            if (!mode)
+                throw std::invalid_argument("Camera clear mode metadata must serialize an Integer.");
+            constexpr std::array choices{std::string_view("Skybox"), std::string_view("Solid Color")};
+            return editor.EditChoice(property.DisplayName, *mode, choices);
+        });
+    m_PropertyDrawers->RegisterOverride(
         Keire::DirectionalLightComponent::StaticType(), "shadows",
         [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
            Keire::ComponentPropertyValue& value)

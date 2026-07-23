@@ -434,7 +434,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             m_Controller.RecordInspectorUndo();
                             sceneDocument.RemoveComponent(entity.Id(), Keire::DirectionalLightComponent::StaticType());
                         }
-                        ui.TextColored(theme.MutedText, "Direct Lambert lighting | Shadows deferred");
+                        ui.TextColored(theme.MutedText, "Direct lighting | Directional shadows");
                     }
                 }
             }
@@ -442,7 +442,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             {
                 ui.Spacing();
                 auto& cameraExpanded = expansion("camera");
-                if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 405.0F : 38.0F}, true); card)
+                if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 440.0F : 38.0F}, true); card)
                 {
                     if (ui.Selectable(cameraExpanded ? "v  CAMERA" : ">  CAMERA"))
                         cameraExpanded = !cameraExpanded;
@@ -478,6 +478,24 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             {
                                 m_Controller.RecordInspectorUndo();
                                 sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
+                                                                   std::int64_t{1});
+                            }
+                        }
+                        const auto clearMode = camera->ClearMode();
+                        if (auto combo = ui.BeginCombo(
+                                "Background", clearMode == Keire::CameraClearMode::Skybox ? "Skybox" : "Solid Color");
+                            combo)
+                        {
+                            if (ui.Selectable("Skybox", clearMode == Keire::CameraClearMode::Skybox))
+                            {
+                                m_Controller.RecordInspectorUndo();
+                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
+                                                                   std::int64_t{0});
+                            }
+                            if (ui.Selectable("Solid Color", clearMode == Keire::CameraClearMode::SolidColor))
+                            {
+                                m_Controller.RecordInspectorUndo();
+                                sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
                                                                    std::int64_t{1});
                             }
                         }
@@ -522,14 +540,17 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "farPlane",
                                                                static_cast<double>(farPlane));
                         }
-                        auto clear = camera->ClearColor();
-                        Keire::UiColor clearColor{clear.Red, clear.Green, clear.Blue, clear.Alpha};
-                        if (ui.ColorEdit("Clear Color", clearColor))
+                        if (camera->ClearMode() == Keire::CameraClearMode::SolidColor)
                         {
-                            m_Controller.RecordInspectorUndo();
-                            sceneDocument.SetComponentProperty(
-                                entity.Id(), camera->Type(), "clearColor",
-                                Keire::Color{clearColor.Red, clearColor.Green, clearColor.Blue, clearColor.Alpha});
+                            auto clear = camera->ClearColor();
+                            Keire::UiColor clearColor{clear.Red, clear.Green, clear.Blue, clear.Alpha};
+                            if (ui.ColorEdit("Clear Color", clearColor))
+                            {
+                                m_Controller.RecordInspectorUndo();
+                                sceneDocument.SetComponentProperty(
+                                    entity.Id(), camera->Type(), "clearColor",
+                                    Keire::Color{clearColor.Red, clearColor.Green, clearColor.Blue, clearColor.Alpha});
+                            }
                         }
                         if (ui.Button("Reset Camera"))
                         {
@@ -709,8 +730,30 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             if (found == values.end())
                                 throw std::invalid_argument("The component omitted a declared property.");
                             auto candidate = found->second;
-                            const bool changed =
-                                propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate);
+                            bool changed = false;
+                            const bool localLight = registration->Type == Keire::PointLightComponent::StaticType() ||
+                                                    registration->Type == Keire::SpotLightComponent::StaticType();
+                            if (localLight && property.Key == "shadows")
+                            {
+                                const auto* current = std::get_if<std::int64_t>(&candidate);
+                                if (!current || *current < 0 || *current > 2)
+                                    throw std::invalid_argument("The local-light shadow mode is invalid.");
+                                constexpr std::array<std::string_view, 3> labels{"Disabled", "Hard", "Soft"};
+                                if (auto shadowMode = ui.BeginCombo(property.DisplayName, labels[*current]); shadowMode)
+                                {
+                                    for (std::int64_t index = 0; index < static_cast<std::int64_t>(labels.size());
+                                         ++index)
+                                    {
+                                        if (ui.Selectable(labels[static_cast<std::size_t>(index)], *current == index))
+                                        {
+                                            candidate = index;
+                                            changed = true;
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                                changed = propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate);
                             if (changed)
                             {
                                 m_Controller.RecordInspectorUndo("Change " + property.DisplayName,

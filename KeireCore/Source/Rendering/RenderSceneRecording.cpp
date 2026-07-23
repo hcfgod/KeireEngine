@@ -28,6 +28,26 @@ namespace
                 value[3] * point.X + value[7] * point.Y + value[11] * point.Z + value[15]};
     }
 
+    [[nodiscard]] Keire::Vector3 Add(const Keire::Vector3 left, const Keire::Vector3 right) noexcept
+    {
+        return {left.X + right.X, left.Y + right.Y, left.Z + right.Z};
+    }
+
+    [[nodiscard]] Keire::Vector3 Subtract(const Keire::Vector3 left, const Keire::Vector3 right) noexcept
+    {
+        return {left.X - right.X, left.Y - right.Y, left.Z - right.Z};
+    }
+
+    [[nodiscard]] Keire::Vector3 Scale(const Keire::Vector3 value, const float scale) noexcept
+    {
+        return {value.X * scale, value.Y * scale, value.Z * scale};
+    }
+
+    [[nodiscard]] float Length(const Keire::Vector3 value) noexcept
+    {
+        return std::sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
+    }
+
     [[nodiscard]] bool IntersectsFrustum(const Keire::Matrix4& clipFromLocal, const Keire::MeshBounds bounds) noexcept
     {
         const std::array corners{Keire::Vector3{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
@@ -73,7 +93,8 @@ namespace
 namespace Keire::RenderBackend
 {
     void RenderSharedState::DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
-                                      RenderSurfaceState& surface, const SceneRenderPacket& packet)
+                                      RenderSurfaceState& surface, const SceneRenderPacket& packet,
+                                      const ShadowFrameData& shadows)
     {
         const auto samples = ToSdlSampleCount(surface.ActualSamples);
         auto& pipelines = PipelinesFor(samples);
@@ -104,11 +125,19 @@ namespace Keire::RenderBackend
         if (packet.DrawGrid && GridBuffer && GridVertexCount > 0)
         {
             const ObjectUniforms object =
-                MakeObjectUniforms(Math::Multiply(camera.Projection, camera.View), {}, {1.0F, 1.0F, 1.0F, 1.0F},
+                MakeObjectUniforms(Math::Multiply(camera.Projection, camera.View), {}, {}, {1.0F, 1.0F, 1.0F, 1.0F},
                                    lighting, packet.Environment, false);
+            const AssetShadowUniforms noShadows{};
+            const AssetLocalLightUniforms noLocalLights{};
+            const std::array shadowBindings{SDL_GPUTextureSamplerBinding{EmptyShadowTexture, ShadowSampler},
+                                            SDL_GPUTextureSamplerBinding{EmptyShadowTexture, ShadowSampler}};
             SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+            SDL_PushGPUFragmentUniformData(commands, 0, &noShadows, sizeof(noShadows));
+            SDL_PushGPUFragmentUniformData(commands, 1, &noLocalLights, sizeof(noLocalLights));
             const SDL_GPUBufferBinding binding{GridBuffer, 0};
             SDL_BindGPUGraphicsPipeline(pass, pipelines.Grid);
+            SDL_BindGPUFragmentSamplers(pass, 0, shadowBindings.data(),
+                                        static_cast<std::uint32_t>(shadowBindings.size()));
             SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
             SDL_DrawGPUPrimitives(pass, GridVertexCount, 1, 0, 0);
             ++Statistics.DrawCalls;
@@ -204,7 +233,24 @@ namespace Keire::RenderBackend
             uniform.Parameters = {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F, 0.0F,
                                   0.0F};
         }
-        bool localLightsPushed = false;
+        enum class FragmentSlot2Binding : std::uint8_t
+        {
+            None,
+            LocalLights,
+            Shadows
+        };
+        auto fragmentSlot2Binding = FragmentSlot2Binding::None;
+        AssetShadowUniforms shadowUniforms{shadows.Directional, shadows.Local};
+        AssetShadowUniforms disabledShadowUniforms{};
+        for (auto& parameters : disabledShadowUniforms.Local.Parameters)
+            parameters.X = -1.0F;
+        for (std::size_t lightIndex = 0; lightIndex < localLightCount; ++lightIndex)
+        {
+            const auto& light = packet.LocalLights[lightIndex];
+            shadowUniforms.Local.Parameters[lightIndex] = {shadows.LocalLayers[lightIndex], light.ShadowStrength,
+                                                           light.Shadows == ShadowQuality::Soft ? 1.0F : 0.0F,
+                                                           std::max(light.ShadowBias * 0.01F, 0.002F)};
+        }
 
         for (const auto& draw : prepared)
         {
@@ -216,6 +262,7 @@ namespace Keire::RenderBackend
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             if (material)
             {
+                SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
                 const AssetObjectUniforms object{item.World, camera.View, camera.Projection,
                                                  Transpose(Math::Inverse(item.World))};
                 AssetSceneUniforms scene{};
@@ -229,6 +276,8 @@ namespace Keire::RenderBackend
                 scene.SurfaceParameters = {material->Surface.AlphaCutoff,
                                            static_cast<float>(material->Surface.AlphaMode),
                                            item.ReceiveShadows ? 1.0F : 0.0F, item.CastShadows ? 1.0F : 0.0F};
+                scene.LocalLightCounts = localLights.Counts;
+                scene.LocalLights = localLights.Lights;
                 SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                 SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
                 std::array<Vector4, 64> numericProperties;
@@ -244,16 +293,35 @@ namespace Keire::RenderBackend
                 SDL_PushGPUFragmentUniformData(
                     commands, 1, numericProperties.data(),
                     static_cast<std::uint32_t>(material->NumericProperties.size() * sizeof(Vector4)));
-                if (!localLightsPushed)
+                if (material->ReceivesShadows)
+                {
+                    if (fragmentSlot2Binding != FragmentSlot2Binding::Shadows)
+                    {
+                        SDL_PushGPUFragmentUniformData(commands, 2, &shadowUniforms, sizeof(shadowUniforms));
+                        fragmentSlot2Binding = FragmentSlot2Binding::Shadows;
+                    }
+                }
+                else if (fragmentSlot2Binding != FragmentSlot2Binding::LocalLights)
                 {
                     SDL_PushGPUFragmentUniformData(commands, 2, &localLights, sizeof(localLights));
-                    localLightsPushed = true;
+                    fragmentSlot2Binding = FragmentSlot2Binding::LocalLights;
                 }
-                SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
-                if (!material->Textures.empty())
+                if (!material->Textures.empty() || material->ReceivesShadows)
                 {
-                    SDL_BindGPUFragmentSamplers(pass, 0, material->Textures.data(),
-                                                static_cast<std::uint32_t>(material->Textures.size()));
+                    std::array<SDL_GPUTextureSamplerBinding, 18> bindings{};
+                    std::ranges::copy(material->Textures, bindings.begin());
+                    auto bindingCount = material->Textures.size();
+                    if (material->ReceivesShadows)
+                    {
+                        bindings[bindingCount++] = {surface.Resources.DirectionalShadow
+                                                        ? surface.Resources.DirectionalShadow
+                                                        : EmptyShadowTexture,
+                                                    ShadowSampler};
+                        bindings[bindingCount++] = {surface.Resources.LocalShadow ? surface.Resources.LocalShadow
+                                                                                  : EmptyShadowTexture,
+                                                    ShadowSampler};
+                    }
+                    SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindingCount));
                 }
                 const SDL_GPUBufferBinding vertexBinding{mesh.AssetVertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
@@ -262,10 +330,22 @@ namespace Keire::RenderBackend
             {
                 const Color tint = draw.Material ? Color{1.0F, 0.0F, 1.0F, 1.0F} : item.Tint;
                 const ObjectUniforms object =
-                    MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), item.World, tint, lighting,
-                                       packet.Environment, item.ReceiveShadows);
+                    MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), item.World, camera.View, tint,
+                                       lighting, packet.Environment, item.ReceiveShadows);
+                const auto& builtInShadows = item.ReceiveShadows ? shadowUniforms : disabledShadowUniforms;
+                const std::array shadowBindings{
+                    SDL_GPUTextureSamplerBinding{
+                        surface.Resources.DirectionalShadow ? surface.Resources.DirectionalShadow : EmptyShadowTexture,
+                        ShadowSampler},
+                    SDL_GPUTextureSamplerBinding{surface.Resources.LocalShadow ? surface.Resources.LocalShadow
+                                                                               : EmptyShadowTexture,
+                                                 ShadowSampler}};
                 SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                SDL_PushGPUFragmentUniformData(commands, 0, &builtInShadows, sizeof(builtInShadows));
+                SDL_PushGPUFragmentUniformData(commands, 1, &localLights, sizeof(localLights));
                 SDL_BindGPUGraphicsPipeline(pass, pipelines.Cube);
+                SDL_BindGPUFragmentSamplers(pass, 0, shadowBindings.data(),
+                                            static_cast<std::uint32_t>(shadowBindings.size()));
                 const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
             }
@@ -275,10 +355,223 @@ namespace Keire::RenderBackend
         }
     }
 
+    ShadowFrameData RenderSharedState::RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                     const SceneRenderPacket& packet)
+    {
+        ShadowFrameData result;
+        result.LocalLayers.fill(-1.0F);
+        if (!ShadowPipeline || !ShadowSampler)
+            return result;
+
+        const auto ensureTexture = [&](SDL_GPUTexture*& texture, std::uint32_t& currentResolution,
+                                       std::uint32_t& currentLayers, const std::uint32_t resolution,
+                                       const std::uint32_t layers)
+        {
+            if (texture && currentResolution == resolution && currentLayers == layers)
+                return;
+            if (texture)
+            {
+                GpuTextureResources retired;
+                retired.Texture = texture;
+                Retire(std::move(retired));
+                texture = nullptr;
+            }
+            SDL_GPUTextureCreateInfo information{};
+            information.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+            information.format = ShadowDepthFormat;
+            information.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+            information.width = resolution;
+            information.height = resolution;
+            information.layer_count_or_depth = layers;
+            information.num_levels = 1;
+            information.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            texture = SDL_CreateGPUTexture(Device, &information);
+            if (!texture)
+                throw std::runtime_error("SDL_CreateGPUTexture(shadow array) failed: " + LastSdlError());
+            currentResolution = resolution;
+            currentLayers = layers;
+        };
+
+        const auto drawLayer = [&](SDL_GPUTexture* texture, const std::uint32_t layer, const Matrix4& lightMatrix)
+        {
+            SDL_GPUDepthStencilTargetInfo depth{};
+            depth.texture = texture;
+            depth.clear_depth = 1.0F;
+            depth.load_op = SDL_GPU_LOADOP_CLEAR;
+            depth.store_op = SDL_GPU_STOREOP_STORE;
+            depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+            depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+            depth.layer = static_cast<std::uint8_t>(layer);
+            auto* pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depth);
+            if (!pass)
+                throw std::runtime_error("SDL_BeginGPURenderPass(shadow) failed: " + LastSdlError());
+            SDL_BindGPUGraphicsPipeline(pass, ShadowPipeline);
+            for (const auto& item : packet.DrawItems)
+            {
+                if (!item.CastShadows)
+                    continue;
+                const auto& mesh = ResolveMesh(item.Mesh);
+                if (mesh.Empty())
+                    continue;
+                const auto object = Math::Multiply(lightMatrix, item.World);
+                SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                const SDL_GPUBufferBinding vertexBinding{mesh.AssetVertices, 0};
+                const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
+                SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                for (const auto& submesh : mesh.Submeshes)
+                    SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
+            }
+            SDL_EndGPURenderPass(pass);
+            ++Statistics.Passes;
+        };
+
+        if (packet.Lighting.Enabled && packet.Lighting.Shadows != ShadowQuality::Disabled)
+        {
+            const auto cascadeCount = std::clamp(packet.Environment.DirectionalShadowCascadeCount, 1U, 4U);
+            const auto resolution = packet.Environment.DirectionalShadowResolution;
+            ensureTexture(surface.Resources.DirectionalShadow, surface.Resources.DirectionalShadowResolution,
+                          surface.Resources.DirectionalShadowLayers, resolution, cascadeCount);
+            const float nearPlane = std::max(packet.Camera.NearPlane, 0.0001F);
+            const float shadowDistance = std::min(
+                std::max(packet.Environment.DirectionalShadowDistance, nearPlane + 0.0001F), packet.Camera.FarPlane);
+            const auto splits = BuildPracticalCascadeSplits(nearPlane, shadowDistance, cascadeCount,
+                                                            packet.Environment.DirectionalShadowSplitLambda);
+            const auto inverseViewProjection =
+                Math::Inverse(Math::Multiply(packet.Camera.Projection, packet.Camera.View));
+            std::array<Vector3, 4> nearCorners{};
+            std::array<Vector3, 4> farCorners{};
+            constexpr std::array<Vector2, 4> coordinates{Vector2{-1.0F, -1.0F}, Vector2{1.0F, -1.0F},
+                                                         Vector2{1.0F, 1.0F}, Vector2{-1.0F, 1.0F}};
+            for (std::size_t index = 0; index < coordinates.size(); ++index)
+            {
+                const auto nearClip =
+                    TransformClip(inverseViewProjection, {coordinates[index].X, coordinates[index].Y, 0.0F});
+                const auto farClip =
+                    TransformClip(inverseViewProjection, {coordinates[index].X, coordinates[index].Y, 1.0F});
+                nearCorners[index] = {nearClip.X / nearClip.W, nearClip.Y / nearClip.W, nearClip.Z / nearClip.W};
+                farCorners[index] = {farClip.X / farClip.W, farClip.Y / farClip.W, farClip.Z / farClip.W};
+            }
+            const auto direction = Normalize(
+                Vector3{packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z});
+            float previousSplit = nearPlane;
+            for (std::uint32_t cascade = 0; cascade < cascadeCount; ++cascade)
+            {
+                const float nearRatio = (previousSplit - nearPlane) / (packet.Camera.FarPlane - nearPlane);
+                const float farRatio = (splits[cascade] - nearPlane) / (packet.Camera.FarPlane - nearPlane);
+                std::array<Vector3, 8> corners{};
+                for (std::size_t corner = 0; corner < 4; ++corner)
+                {
+                    const auto ray = Subtract(farCorners[corner], nearCorners[corner]);
+                    corners[corner] = Add(nearCorners[corner], Scale(ray, nearRatio));
+                    corners[corner + 4] = Add(nearCorners[corner], Scale(ray, farRatio));
+                }
+                Vector3 center{};
+                for (const auto corner : corners)
+                    center = Add(center, corner);
+                center = Scale(center, 1.0F / static_cast<float>(corners.size()));
+                float radius = 0.0F;
+                for (const auto corner : corners)
+                    radius = std::max(radius, Length(Subtract(corner, center)));
+                radius = std::max(std::ceil(radius * 16.0F) / 16.0F, 0.25F);
+                const auto up = std::abs(direction.Y) > 0.95F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
+                const auto eye = Subtract(center, Scale(direction, radius * 2.0F));
+                const auto view = Math::LookAt(eye, center, up);
+                const auto projection = Math::Orthographic(radius * 2.0F, 1.0F, 0.01F, radius * 4.0F);
+                result.Directional.DirectionalMatrices[cascade] = Math::Multiply(projection, view);
+                drawLayer(surface.Resources.DirectionalShadow, cascade,
+                          result.Directional.DirectionalMatrices[cascade]);
+                switch (cascade)
+                {
+                case 0:
+                    result.Directional.DirectionalCascadeSplits.X = splits[cascade];
+                    break;
+                case 1:
+                    result.Directional.DirectionalCascadeSplits.Y = splits[cascade];
+                    break;
+                case 2:
+                    result.Directional.DirectionalCascadeSplits.Z = splits[cascade];
+                    break;
+                default:
+                    result.Directional.DirectionalCascadeSplits.W = splits[cascade];
+                    break;
+                }
+                previousSplit = splits[cascade];
+            }
+            const float encodedCascadeCount = packet.Lighting.Shadows == ShadowQuality::Hard
+                                                  ? -static_cast<float>(cascadeCount)
+                                                  : static_cast<float>(cascadeCount);
+            result.Directional.DirectionalParameters = {encodedCascadeCount, packet.Lighting.ShadowStrength,
+                                                        std::max(packet.Lighting.ShadowBias * 0.01F, 0.002F),
+                                                        1.0F / static_cast<float>(resolution)};
+            Statistics.DirectionalShadowCascades += cascadeCount;
+        }
+
+        const bool hasLocalShadows = std::ranges::any_of(packet.LocalLights, [](const SceneLocalLight& light)
+                                                         { return light.Shadows != ShadowQuality::Disabled; });
+        if (hasLocalShadows)
+        {
+            ensureTexture(surface.Resources.LocalShadow, surface.Resources.LocalShadowResolution,
+                          surface.Resources.LocalShadowLayers, LocalShadowResolution, LocalShadowLayerCount);
+            std::size_t spotCount = 0;
+            std::size_t pointCount = 0;
+            constexpr float radiansToDegrees = 57.295779513082320876F;
+            constexpr std::array<Vector3, 6> pointDirections{Vector3{1.0F, 0.0F, 0.0F}, Vector3{-1.0F, 0.0F, 0.0F},
+                                                             Vector3{0.0F, 1.0F, 0.0F}, Vector3{0.0F, -1.0F, 0.0F},
+                                                             Vector3{0.0F, 0.0F, 1.0F}, Vector3{0.0F, 0.0F, -1.0F}};
+            constexpr std::array<Vector3, 6> pointUps{Vector3{0.0F, 1.0F, 0.0F},  Vector3{0.0F, 1.0F, 0.0F},
+                                                      Vector3{0.0F, 0.0F, -1.0F}, Vector3{0.0F, 0.0F, 1.0F},
+                                                      Vector3{0.0F, 1.0F, 0.0F},  Vector3{0.0F, 1.0F, 0.0F}};
+            const auto lightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
+            for (std::size_t lightIndex = 0; lightIndex < lightCount; ++lightIndex)
+            {
+                const auto& light = packet.LocalLights[lightIndex];
+                if (light.Shadows == ShadowQuality::Disabled)
+                    continue;
+                if (light.Type == SceneLocalLightType::Spot && spotCount < MaximumShadowedSpotLights)
+                {
+                    const float outerAngle = std::acos(std::clamp(light.OuterConeCosine, -1.0F, 1.0F));
+                    const auto up =
+                        std::abs(light.Direction.Y) > 0.95F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
+                    const auto view = Math::LookAt(light.Position, Add(light.Position, light.Direction), up);
+                    const auto projection = Math::Perspective(
+                        std::clamp(outerAngle * 2.0F * radiansToDegrees, 1.01F, 178.0F), 1.0F, 0.05F, light.Range);
+                    result.Local.Matrices[spotCount] = Math::Multiply(projection, view);
+                    result.LocalLayers[lightIndex] = static_cast<float>(spotCount);
+                    drawLayer(surface.Resources.LocalShadow, static_cast<std::uint32_t>(spotCount),
+                              result.Local.Matrices[spotCount]);
+                    ++spotCount;
+                }
+                else if (light.Type == SceneLocalLightType::Point && pointCount < MaximumShadowedPointLights)
+                {
+                    const auto baseLayer = static_cast<std::uint32_t>(MaximumShadowedSpotLights + pointCount * 6U);
+                    result.LocalLayers[lightIndex] = static_cast<float>(baseLayer);
+                    const auto projection = Math::Perspective(90.0F, 1.0F, 0.05F, light.Range);
+                    for (std::uint32_t face = 0; face < 6; ++face)
+                    {
+                        const auto view =
+                            Math::LookAt(light.Position, Add(light.Position, pointDirections[face]), pointUps[face]);
+                        result.Local.Matrices[baseLayer + face] = Math::Multiply(projection, view);
+                        drawLayer(surface.Resources.LocalShadow, baseLayer + face,
+                                  result.Local.Matrices[baseLayer + face]);
+                    }
+                    ++pointCount;
+                }
+            }
+        }
+        return result;
+    }
+
     void RenderSharedState::RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface)
     {
         if (!surface.Resources.SampledColor)
             return;
+
+        const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
+        ShadowFrameData shadows;
+        shadows.LocalLayers.fill(-1.0F);
+        if (request != Requests.end())
+            shadows = RecordShadows(commands, surface, request->Packet);
 
         SDL_GPUColorTargetInfo color{};
         color.texture =
@@ -305,7 +598,6 @@ namespace Keire::RenderBackend
         SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
         if (!pass)
             throw std::runtime_error("SDL_BeginGPURenderPass(surface) failed: " + LastSdlError());
-        const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
         if (request != Requests.end())
         {
             std::vector<ForwardPlusLightBounds> localLightBounds;
@@ -317,17 +609,7 @@ namespace Keire::RenderBackend
                                                         request->Packet.Camera.Projection, localLightBounds);
             Statistics.VisibleLocalLights += static_cast<std::uint32_t>(localLightBounds.size());
             Statistics.OverflowedLightTiles += tiles.OverflowedTiles;
-            if (request->Packet.Lighting.Shadows != ShadowQuality::Disabled)
-            {
-                const auto splits =
-                    BuildPracticalCascadeSplits(std::max(request->Packet.Camera.NearPlane, 0.0001F),
-                                                std::max(request->Packet.Environment.DirectionalShadowDistance,
-                                                         request->Packet.Camera.NearPlane + 0.0001F),
-                                                request->Packet.Environment.DirectionalShadowCascadeCount,
-                                                request->Packet.Environment.DirectionalShadowSplitLambda);
-                Statistics.DirectionalShadowCascades += static_cast<std::uint32_t>(splits.size());
-            }
-            DrawScene(commands, pass, surface, request->Packet);
+            DrawScene(commands, pass, surface, request->Packet, shadows);
         }
         SDL_EndGPURenderPass(pass);
         ++Statistics.Passes;
@@ -490,6 +772,15 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUSampler(Device, sampler);
         }
         SamplerCache.clear();
+        if (ShadowSampler)
+            SDL_ReleaseGPUSampler(Device, ShadowSampler);
+        ShadowSampler = nullptr;
+        if (EmptyShadowTexture)
+            SDL_ReleaseGPUTexture(Device, EmptyShadowTexture);
+        EmptyShadowTexture = nullptr;
+        if (ShadowPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(Device, ShadowPipeline);
+        ShadowPipeline = nullptr;
         ReleaseMeshResources(ErrorMesh);
         ReleaseMeshResources(DefaultMesh);
         if (GridBuffer)

@@ -142,6 +142,7 @@ TEST_CASE("Play mode retains the authored active camera and its transform")
     const auto camera = cameraEntity.AddComponent<Keire::CameraComponent>();
     camera->SetPrimary(true);
     camera->SetPriority(42);
+    camera->SetClearMode(Keire::CameraClearMode::SolidColor);
     camera->SetClearColor({0.12F, 0.24F, 0.36F, 1.0F});
     cameraEntity.GetComponent<Keire::TransformComponent>()->SetLocalPosition({3.0F, 4.0F, -8.0F});
 
@@ -155,6 +156,7 @@ TEST_CASE("Play mode retains the authored active camera and its transform")
     REQUIRE(runtimeTransform);
     CHECK(runtimeCamera->Primary());
     CHECK(runtimeCamera->Priority() == 42);
+    CHECK(runtimeCamera->ClearMode() == Keire::CameraClearMode::SolidColor);
     CHECK(runtimeCamera->ClearColor() == (Keire::Color{0.12F, 0.24F, 0.36F, 1.0F}));
     CHECK(runtimeTransform->LocalPosition() == (Keire::Vector3{3.0F, 4.0F, -8.0F}));
 }

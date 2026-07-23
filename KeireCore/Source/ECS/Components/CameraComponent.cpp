@@ -37,6 +37,14 @@ namespace Keire
         NotifyChanged();
     }
 
+    void CameraComponent::SetClearMode(const CameraClearMode mode)
+    {
+        if (mode != CameraClearMode::Skybox && mode != CameraClearMode::SolidColor)
+            throw std::invalid_argument("Camera clear mode is invalid.");
+        m_ClearMode = mode;
+        NotifyChanged();
+    }
+
     void CameraComponent::SetPrimary(const bool primary)
     {
         m_Primary = primary;
@@ -95,6 +103,7 @@ namespace Keire
     void CameraComponent::Reset()
     {
         m_Projection = CameraProjection::Perspective;
+        m_ClearMode = CameraClearMode::Skybox;
         m_Primary = true;
         m_Priority = 0;
         m_VerticalFieldOfViewDegrees = 60.0F;
@@ -114,6 +123,7 @@ namespace Keire
         result.RequiredComponents = {TransformComponent::StaticType()};
         result.Properties = {
             {"projection", "Projection", "Camera", ComponentPropertyKind::Integer},
+            {"clearMode", "Background", "Environment", ComponentPropertyKind::Integer},
             {"primary", "Primary", "Camera", ComponentPropertyKind::Boolean},
             {"priority", "Priority", "Camera", ComponentPropertyKind::Integer, false, -1'000'000.0, 1'000'000.0, 1.0},
             {"fieldOfView", "Field of View", "Projection", ComponentPropertyKind::Scalar, false, 1.0, 179.0, 0.1},
@@ -126,6 +136,7 @@ namespace Keire
         {
             const auto& camera = dynamic_cast<const CameraComponent&>(component);
             return ComponentPropertyBag{{"projection", static_cast<std::int64_t>(camera.m_Projection)},
+                                        {"clearMode", static_cast<std::int64_t>(camera.m_ClearMode)},
                                         {"primary", camera.m_Primary},
                                         {"priority", static_cast<std::int64_t>(camera.m_Priority)},
                                         {"fieldOfView", static_cast<double>(camera.m_VerticalFieldOfViewDegrees)},
@@ -143,6 +154,10 @@ namespace Keire
             if (projection < 0 || projection > 1)
                 throw std::invalid_argument("Camera projection is invalid.");
             camera.SetProjection(static_cast<CameraProjection>(projection));
+            const auto clearMode = ReadCameraProperty(values, "clearMode", std::int64_t{0});
+            if (clearMode < 0 || clearMode > 1)
+                throw std::invalid_argument("Camera clear mode is invalid.");
+            camera.SetClearMode(static_cast<CameraClearMode>(clearMode));
             camera.SetPrimary(ReadCameraProperty(values, "primary", true));
             camera.SetPriority(static_cast<std::int32_t>(ReadCameraProperty(values, "priority", std::int64_t{0})));
             camera.SetVerticalFieldOfViewDegrees(static_cast<float>(ReadCameraProperty(values, "fieldOfView", 60.0)));

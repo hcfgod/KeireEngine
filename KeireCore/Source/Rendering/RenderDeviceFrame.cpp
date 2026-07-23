@@ -75,8 +75,21 @@ namespace Keire::RenderBackend
                     break;
                 }
             }
-            KEIRE_CORE_INFO("Selected GPU attachment formats (color={}, depth={}).",
-                            static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(DepthFormat));
+            for (const auto candidate : depthCandidates)
+            {
+                if (SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D_ARRAY,
+                                                 SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+                                                     SDL_GPU_TEXTUREUSAGE_SAMPLER))
+                {
+                    ShadowDepthFormat = candidate;
+                    break;
+                }
+            }
+            if (DepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID || ShadowDepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
+                throw std::runtime_error("The active GPU exposes no compatible scene and sampled shadow depth format.");
+            KEIRE_CORE_INFO("Selected GPU attachment formats (color={}, depth={}, shadowDepth={}).",
+                            static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(DepthFormat),
+                            static_cast<std::uint32_t>(ShadowDepthFormat));
 
             CreateGeometryResources();
         }
@@ -123,6 +136,10 @@ namespace Keire::RenderBackend
             resources = {};
             return;
         }
+        if (resources.LocalShadow)
+            SDL_ReleaseGPUTexture(Device, resources.LocalShadow);
+        if (resources.DirectionalShadow)
+            SDL_ReleaseGPUTexture(Device, resources.DirectionalShadow);
         if (resources.Depth)
             SDL_ReleaseGPUTexture(Device, resources.Depth);
         if (resources.MultisampleColor)
@@ -137,6 +154,7 @@ namespace Keire::RenderBackend
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_uniform_buffers = Detail::BuiltinShaderUniformBufferCount(vertex);
+        information.num_samplers = vertex ? 0U : 2U;
 
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)
@@ -199,6 +217,41 @@ namespace Keire::RenderBackend
         SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
         if (!shader)
             throw std::runtime_error("SDL_CreateGPUShader(sky) failed: " + LastSdlError());
+        return shader;
+    }
+
+    SDL_GPUShader* RenderSharedState::CreateShadowShader(const bool vertex) const
+    {
+        SDL_GPUShaderCreateInfo information{};
+        information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        information.num_uniform_buffers = vertex ? 1U : 0U;
+        const auto formats = SDL_GetGPUShaderFormats(Device);
+        if (formats & SDL_GPU_SHADERFORMAT_DXIL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_DXIL;
+            information.code = vertex ? Detail::BuiltinShadowVertexDxil : Detail::BuiltinShadowFragmentDxil;
+            information.code_size =
+                vertex ? Detail::BuiltinShadowVertexDxilSize : Detail::BuiltinShadowFragmentDxilSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_MSL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_MSL;
+            information.code = vertex ? Detail::BuiltinShadowVertexMsl : Detail::BuiltinShadowFragmentMsl;
+            information.code_size = vertex ? Detail::BuiltinShadowVertexMslSize : Detail::BuiltinShadowFragmentMslSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_SPIRV;
+            information.entrypoint = vertex ? "VSMain" : "PSMain";
+            information.code = vertex ? Detail::BuiltinShadowVertexSpirV : Detail::BuiltinShadowFragmentSpirV;
+            information.code_size =
+                vertex ? Detail::BuiltinShadowVertexSpirVSize : Detail::BuiltinShadowFragmentSpirVSize;
+        }
+        else
+            throw std::runtime_error("The active SDL_GPU backend exposes no supported shadow shader format.");
+        SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+        if (!shader)
+            throw std::runtime_error("SDL_CreateGPUShader(shadow) failed: " + LastSdlError());
         return shader;
     }
 

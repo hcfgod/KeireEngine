@@ -4,6 +4,15 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Replaced placeholder shadow statistics with GPU depth-map rendering and receiver sampling for directional, point,
+  and spot lights. Default-material primitives now receive those shadows, local lights expose persistent quality,
+  strength, and bias controls, and the portable local-light uniform path is validated on D3D12 and Vulkan. Shadow
+  metadata is isolated from light color/intensity, and receiver bias prevents a surface from tinting itself when
+  shadows are enabled without a separate occluder.
+- Cameras now choose a serialized Skybox or Solid Color background. Scene view, Game view, camera preview, and
+  standalone runtime honor that choice, the built-in sky sun matches the default directional-light convention, and
+  Project Settings explains that scene shadows remain authored by Directional Lights. Shift-click range selection works in both
+  Hierarchy and Project, and the single-row main toolbar keeps Play/Pause/Step/Stop visible below the menu.
 - Projects now render a built-in studio sky whenever no custom environment is assigned. Project Settings replaces the
   raw environment AssetId field with the shared searchable, type-filtered asset picker used by Inspector fields, with
   drag-and-drop validation and one-click reveal in the Project panel.

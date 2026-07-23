@@ -195,7 +195,11 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_RenderView->SetCamera(camera);
-        renderer->Submit({renderScene, m_RenderView, true, m_Controller.SceneViewportSettings()});
+        auto environment = m_Controller.SceneViewportSettings();
+        if (const auto sceneCamera = SelectGameCamera(renderScene))
+            environment.SkyVisible =
+                environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+        renderer->Submit({renderScene, m_RenderView, true, environment});
         ui.Image(m_RenderView->Surface(), size);
         imageState = ui.LastItemState();
         imageRect = ui.LastItemRect();
@@ -321,7 +325,10 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             previewCamera.NearPlane = sceneCamera->Camera->NearPlane();
             previewCamera.FarPlane = sceneCamera->Camera->FarPlane();
             m_CameraPreviewView->SetCamera(previewCamera);
-            renderer->Submit({renderScene, m_CameraPreviewView, false, m_Controller.SceneViewportSettings()});
+            auto environment = m_Controller.SceneViewportSettings();
+            environment.SkyVisible =
+                environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+            renderer->Submit({renderScene, m_CameraPreviewView, false, environment});
             ui.DrawFilledRectangle(cameraPreviewRect, {0.025F, 0.03F, 0.045F, 0.96F}, 5.0F);
             ui.DrawImage(m_CameraPreviewView->Surface(), cameraPreviewRect);
             ui.DrawRectangle(cameraPreviewRect, theme.Border, 1.0F, 5.0F);

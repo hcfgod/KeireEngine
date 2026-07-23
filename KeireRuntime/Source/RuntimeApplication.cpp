@@ -181,7 +181,10 @@ namespace
             camera.NearPlane = selected->Camera->NearPlane();
             camera.FarPlane = selected->Camera->FarPlane();
             m_View->SetCamera(camera);
-            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Rendering});
+            auto environment = m_Rendering;
+            environment.SkyVisible =
+                environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
             if (m_MaximumFrames != 0 && ++m_RenderedFrames >= m_MaximumFrames)
                 Owner().RequestExit();
         }

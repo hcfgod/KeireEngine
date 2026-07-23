@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/SelectionRange.h"
 
 #include <algorithm>
 #include <cctype>
@@ -50,6 +51,22 @@ namespace KeireEditor
             }
         }
         const auto objects = scene->Objects();
+        std::vector<Keire::AssetId> hierarchyOrder;
+        hierarchyOrder.reserve(objects.size());
+        for (const auto& object : objects)
+            hierarchyOrder.push_back(object.Id);
+        const auto select = [&](const Keire::AssetId entity, const std::span<const Keire::AssetId> order)
+        {
+            if (!ui.ShiftDown() || !m_SelectionAnchor)
+            {
+                document.Select(entity, ui.ControlDown());
+                m_SelectionAnchor = entity;
+                return;
+            }
+            const auto range =
+                BuildRangeSelection(order, m_SelectionAnchor, entity, document.Selections(), ui.ControlDown());
+            document.SetSelections(range);
+        };
         ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F},
                        scene->Name() + "  •  " + std::to_string(objects.size()) + " entities");
         if (!m_Search.empty())
@@ -57,6 +74,7 @@ namespace KeireEditor
             std::string search = m_Search;
             std::ranges::transform(search, search.begin(), [](const unsigned char character)
                                    { return static_cast<char>(std::tolower(character)); });
+            std::vector<const Keire::SceneObjectDefinition*> matches;
             for (const auto& object : objects)
             {
                 std::string name = object.Name;
@@ -64,9 +82,17 @@ namespace KeireEditor
                                        { return static_cast<char>(std::tolower(character)); });
                 if (name.find(search) == std::string::npos)
                     continue;
-                auto id = ui.PushId(object.Id.ToString());
-                if (ui.Selectable(object.Name, document.IsSelected(object.Id)))
-                    document.Select(object.Id, ui.ControlDown());
+                matches.push_back(&object);
+            }
+            std::vector<Keire::AssetId> matchOrder;
+            matchOrder.reserve(matches.size());
+            for (const auto* object : matches)
+                matchOrder.push_back(object->Id);
+            for (const auto* object : matches)
+            {
+                auto id = ui.PushId(object->Id.ToString());
+                if (ui.Selectable(object->Name, document.IsSelected(object->Id)))
+                    select(object->Id, matchOrder);
             }
             return;
         }
@@ -110,7 +136,7 @@ namespace KeireEditor
             const auto state = ui.LastItemState();
             const auto row = ui.LastItemRect();
             if (state.Hovered && ui.PointerState().LeftPressed)
-                document.Select(object.Id, ui.ControlDown());
+                select(object.Id, hierarchyOrder);
             if (auto context = ui.BeginItemContextMenu(); context)
             {
                 if (!document.IsSelected(object.Id))

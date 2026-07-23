@@ -1,6 +1,6 @@
 {
   "properties": {
-    "MainTexture": "0fb56755-5e54-4e49-bdb6-8ac2228fad51",
+    "MainTexture": null,
     "MetallicRoughnessTexture": null,
     "NormalTexture": null,
     "OcclusionTexture": null,

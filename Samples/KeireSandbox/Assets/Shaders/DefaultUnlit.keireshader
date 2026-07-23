@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
   "vertexLayoutVersion": 2,
+  "receivesShadows": true,
   "stages": {
     "vertex": "VSMain",
     "fragment": "PSMain"

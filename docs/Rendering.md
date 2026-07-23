@@ -1,5 +1,20 @@
 # Rendering
 
+## Real-time shadows
+
+Opaque scene geometry with `Cast Shadows` enabled is submitted to stabilized directional cascade maps and to bounded
+spot/point shadow arrays. Materials whose shader manifest opts into `receivesShadows` sample those maps only when the
+renderer component also has `Receive Shadows` enabled. Directional lights support up to four cascades from the project
+rendering settings. To keep local-light cost deterministic, the renderer selects at most eight shadowed spot lights and
+two shadowed point lights in stable entity order; additional lights remain fully lit and are reported by renderer
+diagnostics. Point and spot components expose Disabled, Hard, and Soft authoring modes plus strength and bias.
+The engine-owned default material uses the same receiver contract, so primitives without an assigned material receive
+directional, point, and spot shadows instead of falling through an unshadowed compatibility path.
+Shadow layer, quality, strength, and receiver bias occupy a dedicated shadow uniform block; enabling shadows never
+changes the light's color or intensity. A receiving surface does not darken merely because it is also submitted to the
+shadow pass. Visible shadowing requires another surface of the caster, or separate `Cast Shadows` geometry, to be
+closer to the light along that shadow-map sample.
+
 ## Static-scene submission contracts
 
 The renderer consumes mesh schema v3 as ordered LOD, submesh, and material-slot records. Schema v1 and v2 meshes
@@ -19,8 +34,9 @@ render-graph API.
 
 Point and spot lights are serializable registry components. Scene packets cap visible local lights at 4,096 and build
 deterministic 16x16 CPU tile lists with 128 lights per tile and explicit overflow statistics. This is the bounded
-reference fallback used when the GPU compute route is unavailable. PBR draws consume the first deterministic 128
-visible local lights through the optional fragment `b2/space3` block, using smooth range attenuation and inner/outer
+reference fallback used when the GPU compute route is unavailable. PBR and default-material draws consume the first
+deterministic 62 visible local lights through a fragment uniform block kept below SDL's portable 4 KiB Vulkan limit,
+using smooth range attenuation and inner/outer
 spot-cone falloff on D3D12 and Vulkan. GPU tile-list consumption remains the next Forward+ step.
 
 `RenderSystem.cpp` is the stable PImpl facade. Private compiled implementation units separate backend data types,
@@ -54,9 +70,10 @@ skips presentation safely. Viewport surfaces keep their last valid image through
 ## Views And Cameras
 
 Scene view uses a nonserialized editor camera for navigation and draws a depth-tested grid plus visible mesh renderers
-from the edit scene, or the runtime clone while playing. The active authored Camera supplies the clear color to both
-Scene and Game, so changing Camera clear color gives an immediate, consistent preview without replacing the Scene
-viewpoint. Its controls are:
+from the edit scene, or the runtime clone while playing. An authored Camera chooses **Skybox** or **Solid Color** for
+Game view, its Scene camera preview, and standalone runtime. Solid Color uses that Camera's linear clear color; Skybox
+uses the project environment. Scene view retains its independent editor viewpoint but follows the active authored
+Camera's background choice so authoring and Game previews agree. Its controls are:
 
 - `F`: frame the selected entity's full imported bounds with visible padding; double-`F` locks the view to it.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.
@@ -119,7 +136,10 @@ the project's `Library/Editor` directory, so navigation never dirties a scene or
 Game view selects an enabled, hierarchy-active primary `CameraComponent` by highest priority and then stable entity ID,
 falling back to the highest-priority enabled scene Camera when no Camera is marked Primary. During Play it performs this
 selection against the runtime clone, never the nonserialized editor camera. Perspective and orthographic cameras validate their FOV or
-size, clipping planes, and linear clear color. `MeshRendererComponent` references Kéire-owned mesh/material asset IDs;
+size, clipping planes, background mode, and linear clear color. Skyboxes provide visible environment response but do
+not synthesize shadow-casting geometry: an enabled Directional Light owns shadow direction, quality, strength, and bias.
+The built-in studio sky's sun is aligned with the identity-rotation directional-light convention; custom environments
+should be paired with an authored light rotated to their sun. `MeshRendererComponent` references Kéire-owned mesh/material asset IDs;
 the built-in cube is available without exposing a graphics backend.
 
 ## Current Scope
@@ -142,6 +162,7 @@ custom path accepts LDR or RGBE Radiance HDR equirectangular maps plus horizonta
 strip atlases. Layout and HDR encoding are versioned texture import data, so reimport and cooking preserve the same
 sampling behavior across supported GPU backends.
 
-This foundation renders asset-backed textured PBR meshes plus the editor grid. Transparency sorting, shadows, IBL,
-post-processing, multiple-light accumulation, compute, custom raw GPU passes, and a dedicated render thread remain
+This foundation renders asset-backed textured PBR meshes, deterministic directional and local-light shadow maps,
+multiple-light accumulation, sky backgrounds, and the editor grid. Image-based lighting, the production HDR
+post-processing path, GPU Forward+ tile-list consumption, custom raw GPU passes, and a dedicated render thread remain
 later milestones.

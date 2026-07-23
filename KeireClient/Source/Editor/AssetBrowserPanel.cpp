@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/SelectionRange.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -159,6 +160,8 @@ namespace KeireEditor
             ImageDigests.clear();
             FolderImage.Reset();
             Selection.clear();
+            VisibleSelectionOrder.clear();
+            SelectionAnchor = {};
             Clipboard.clear();
             Undo.Reset();
             Renaming = {};
@@ -251,6 +254,19 @@ namespace KeireEditor
                 Selection.erase(found);
             else if (found == Selection.end())
                 Selection.push_back(asset);
+            SelectionAnchor = asset;
+            editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
+            editor.ClearAssetBrowserSceneSelection();
+        }
+
+        void SelectFromClick(const Keire::AssetId asset, Keire::UiFrame& ui, IAssetBrowserController& editor)
+        {
+            if (!ui.ShiftDown() || !SelectionAnchor)
+            {
+                Select(asset, ui.ControlDown(), editor);
+                return;
+            }
+            Selection = BuildRangeSelection(VisibleSelectionOrder, SelectionAnchor, asset, Selection, ui.ControlDown());
             editor.SetAssetBrowserSelected(Selection.empty() ? Keire::AssetId{} : Selection.back());
             editor.ClearAssetBrowserSceneSelection();
         }
@@ -890,12 +906,12 @@ namespace KeireEditor
             if (grid)
             {
                 if (ui.ImageButton("Thumbnail", image, {ThumbnailSize, ThumbnailSize}))
-                    Select(record.Id, ui.ControlDown(), editor);
+                    SelectFromClick(record.Id, ui, editor);
                 open = ui.LastItemState().DoubleClicked;
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
                 if (ui.Selectable(DisplayName(record.RelativePath), selected))
-                    Select(record.Id, ui.ControlDown(), editor);
+                    SelectFromClick(record.Id, ui, editor);
                 open |= ui.LastItemState().DoubleClicked;
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "LabelContext");
@@ -904,13 +920,13 @@ namespace KeireEditor
             else
             {
                 if (ui.ImageButton("Thumbnail", image, {32.0F, 32.0F}))
-                    Select(record.Id, ui.ControlDown(), editor);
+                    SelectFromClick(record.Id, ui, editor);
                 open = ui.LastItemState().DoubleClicked;
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "ThumbnailContext");
                 ui.SameLine();
                 if (ui.Selectable(DisplayName(record.RelativePath), selected))
-                    Select(record.Id, ui.ControlDown(), editor);
+                    SelectFromClick(record.Id, ui, editor);
                 open |= ui.LastItemState().DoubleClicked;
                 DrawAssetDragSource(ui, record);
                 DrawAssetContext(ui, record, editor, "LabelContext");
@@ -1129,6 +1145,10 @@ namespace KeireEditor
                     (Search.empty() || record.RelativePath.filename().string().find(Search) != std::string::npos))
                     assets.push_back(&record);
             std::ranges::sort(assets, {}, [](const auto* record) { return record->RelativePath.filename(); });
+            VisibleSelectionOrder.clear();
+            VisibleSelectionOrder.reserve(assets.size());
+            for (const auto* record : assets)
+                VisibleSelectionOrder.push_back(record->Id);
 
             if (Mode == ViewMode::List)
             {
@@ -1386,11 +1406,13 @@ namespace KeireEditor
         Keire::Ref<Keire::UiImage> FolderImage;
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;
+        std::vector<Keire::AssetId> VisibleSelectionOrder;
         std::vector<Keire::AssetId> PendingDeleteAssets;
         std::vector<ClipboardEntry> Clipboard;
         std::vector<ExternalDropTarget> ExternalDropTargets;
         Keire::AssetId Renaming;
         Keire::AssetId RevealAsset;
+        Keire::AssetId SelectionAnchor;
         std::string Search;
         std::string RenameBuffer;
         std::string MaterialNameBuffer;

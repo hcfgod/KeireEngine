@@ -961,7 +961,10 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         camera.NearPlane = selected->Camera->NearPlane();
         camera.FarPlane = selected->Camera->FarPlane();
         m_GameRenderView->SetCamera(camera);
-        Owner().Renderer()->Submit({scene, m_GameRenderView, false, m_ProjectSettingsDocument->Settings()});
+        auto environment = m_ProjectSettingsDocument->Settings();
+        environment.SkyVisible =
+            environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+        Owner().Renderer()->Submit({scene, m_GameRenderView, false, environment});
         ui.Image(m_GameRenderView->Surface(), size);
     }
 }

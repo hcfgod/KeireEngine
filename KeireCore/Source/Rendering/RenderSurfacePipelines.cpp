@@ -19,7 +19,9 @@ namespace
         constexpr std::uint32_t height = 128;
         constexpr float pi = 3.14159265358979323846F;
         std::vector<std::byte> pixels(static_cast<std::size_t>(width) * height * 4U);
-        constexpr Keire::Vector3 sunDirection{0.2996F, 0.4794F, 0.8188F};
+        // An identity Directional Light sends rays along +Z, so its visible source is at -Z. Custom skyboxes still
+        // need an authored Directional Light because a background image cannot cast geometry shadows by itself.
+        constexpr Keire::Vector3 sunDirection{0.0F, 0.0F, -1.0F};
         for (std::uint32_t y = 0; y < height; ++y)
         {
             const float v = (static_cast<float>(y) + 0.5F) / static_cast<float>(height);
@@ -76,6 +78,29 @@ namespace Keire::RenderBackend
 {
     void RenderSharedState::CreateGeometryResources()
     {
+        ShadowPipeline = CreateShadowPipeline();
+        SDL_GPUSamplerCreateInfo shadowSampler{};
+        shadowSampler.min_filter = SDL_GPU_FILTER_NEAREST;
+        shadowSampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+        shadowSampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+        shadowSampler.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        shadowSampler.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        shadowSampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        ShadowSampler = SDL_CreateGPUSampler(Device, &shadowSampler);
+        if (!ShadowSampler)
+            throw std::runtime_error("SDL_CreateGPUSampler(shadow) failed: " + LastSdlError());
+        SDL_GPUTextureCreateInfo emptyShadow{};
+        emptyShadow.type = SDL_GPU_TEXTURETYPE_2D_ARRAY;
+        emptyShadow.format = ShadowDepthFormat;
+        emptyShadow.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        emptyShadow.width = 1;
+        emptyShadow.height = 1;
+        emptyShadow.layer_count_or_depth = 1;
+        emptyShadow.num_levels = 1;
+        emptyShadow.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        EmptyShadowTexture = SDL_CreateGPUTexture(Device, &emptyShadow);
+        if (!EmptyShadowTexture)
+            throw std::runtime_error("SDL_CreateGPUTexture(empty shadow) failed: " + LastSdlError());
         DefaultMesh = CreateMeshResources(*MeshAsset::Cube());
         ErrorMesh = CreateMeshResources(*MeshAsset::Error());
         CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
@@ -421,6 +446,55 @@ namespace Keire::RenderBackend
         }
     }
 
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateShadowPipeline()
+    {
+        SDL_GPUShader* vertex = CreateShadowShader(true);
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            fragment = CreateShadowShader(false);
+            SDL_GPUVertexBufferDescription buffer{};
+            buffer.slot = 0;
+            buffer.pitch = sizeof(MeshVertex);
+            buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+            const SDL_GPUVertexAttribute position{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
+                                                  offsetof(MeshVertex, Position)};
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.vertex_input_state.vertex_buffer_descriptions = &buffer;
+            information.vertex_input_state.num_vertex_buffers = 1;
+            information.vertex_input_state.vertex_attributes = &position;
+            information.vertex_input_state.num_vertex_attributes = 1;
+            information.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+            information.rasterizer_state.enable_depth_clip = true;
+            information.rasterizer_state.enable_depth_bias = false;
+            information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            information.depth_stencil_state.enable_depth_test = true;
+            information.depth_stencil_state.enable_depth_write = true;
+            information.target_info.num_color_targets = 0;
+            information.target_info.depth_stencil_format = ShadowDepthFormat;
+            information.target_info.has_depth_stencil_target = true;
+            auto* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(shadow) failed: " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return result;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
+    }
+
     RenderPipelineSet& RenderSharedState::PipelinesFor(const SDL_GPUSampleCount samples)
     {
         const auto found = std::ranges::find(Pipelines, samples, &RenderPipelineSet::Samples);
@@ -479,8 +553,8 @@ namespace Keire::RenderBackend
                                      : nullptr;
         information.format = format;
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        information.num_samplers = vertex ? 0 : textureCount;
-        information.num_uniform_buffers = vertex ? 1 : 3;
+        information.num_samplers = vertex ? 0 : textureCount + (definition.ReceivesShadows ? 2U : 0U);
+        information.num_uniform_buffers = vertex ? 1 : 3U;
         SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
         if (!shader)
             throw std::runtime_error("SDL_CreateGPUShader(asset) failed: " + LastSdlError());

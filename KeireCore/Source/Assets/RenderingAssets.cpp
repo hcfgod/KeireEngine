@@ -271,6 +271,7 @@ namespace Keire
                     {"depthTest", definition.DepthTest},
                     {"depthWrite", definition.DepthWrite},
                     {"blend", definition.Blend},
+                    {"receivesShadows", definition.ReceivesShadows},
                     {"properties", std::move(properties)},
                     {"dependencies", std::move(dependencies)},
                     {"variants", std::move(variants)}};
@@ -291,6 +292,7 @@ namespace Keire
             result.DepthTest = source.at("depthTest").get<bool>();
             result.DepthWrite = source.at("depthWrite").get<bool>();
             result.Blend = source.at("blend").get<bool>();
+            result.ReceivesShadows = source.value("receivesShadows", false);
             for (const auto& property : source.at("properties"))
             {
                 ShaderPropertyDefinition decoded;
@@ -454,10 +456,14 @@ namespace Keire
             const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
                                                          &ShaderPropertyDefinition::Type);
             const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
+            const auto expectedFragmentUniformBuffers = 3U;
+            const auto minimumFragmentUniformBuffers = definition.ReceivesShadows ? 3U : 2U;
+            const auto expectedSamplers = textureCount + (definition.ReceivesShadows ? 2U : 0U);
             if (!noStorage(vertex) || !noStorage(fragment) || vertex.value("samplers", 0U) != 0 ||
                 vertex.value("uniform_buffers", 0U) != 1 ||
-                (fragmentUniformBuffers != 2 && fragmentUniformBuffers != 3) ||
-                fragment.value("samplers", 0U) != textureCount)
+                (fragmentUniformBuffers != minimumFragmentUniformBuffers &&
+                 fragmentUniformBuffers != expectedFragmentUniformBuffers) ||
+                fragment.value("samplers", 0U) != expectedSamplers)
                 throw std::invalid_argument("Shader violates Kéire's fixed graphics resource-binding ABI.");
 
             constexpr std::array<std::string_view, 5> vertexTypes{"float3", "float3", "float2", "float4", "float4"};
@@ -592,6 +598,7 @@ namespace Keire
             result.DepthTest = state.value("depthTest", true);
             result.DepthWrite = state.value("depthWrite", true);
             result.Blend = state.value("blend", false);
+            result.ReceivesShadows = manifest.value("receivesShadows", false);
 
             const auto& properties = manifest.value("properties", Json::array());
             if (!properties.is_array() || properties.size() > MaximumShaderProperties)

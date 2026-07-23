@@ -95,7 +95,7 @@ namespace
 TEST_CASE("built-in shader resource counts match each stage")
 {
     CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 1);
-    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 0);
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 2);
 }
 
 TEST_CASE("editor camera navigation matches scene-view gesture semantics")
@@ -168,6 +168,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
 {
     Keire::ShaderAssetDefinition definition;
     definition.Source = "Assets/Shaders/Test.hlsl";
+    definition.ReceivesShadows = true;
     definition.Properties.push_back({"Tint", Keire::ShaderPropertyType::Color, {1.0F, 0.5F, 0.25F, 1.0F}});
     const auto defaultTexture = Keire::AssetId::Parse("11111111-2222-4333-8444-555555555555");
     definition.Properties.push_back({"MainTexture", Keire::ShaderPropertyType::Texture2D, {}, defaultTexture});
@@ -198,6 +199,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decoded->Definition().Properties[1].TextureSemantic == Keire::ShaderTextureSemantic::BaseColor);
     CHECK(decoded->Definition().Properties[2].TextureSemantic == Keire::ShaderTextureSemantic::Metallic);
     CHECK(decoded->Definition().Properties[3].TextureSemantic == Keire::ShaderTextureSemantic::Roughness);
+    CHECK(decoded->Definition().ReceivesShadows);
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
 
     const auto importer = Keire::CreateShaderAssetImporter();
@@ -570,6 +572,7 @@ TEST_CASE("pinned shader compiler resolves from the executable while the project
     const auto output = importer.ContextualImport(context, ReadTestBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(output.Bytes);
     REQUIRE(shader->Definition().Variants.size() == 3);
+    CHECK(shader->Definition().ReceivesShadows);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
@@ -612,14 +615,24 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     auto point = Keire::CreateRef<Keire::PointLightComponent>();
     point->SetIntensity(12.0F);
     point->SetRange(18.0F);
+    point->SetShadows(Keire::ShadowQuality::Hard);
+    point->SetShadowStrength(0.75F);
+    point->SetShadowBias(0.01F);
     CHECK(point->Range() == doctest::Approx(18.0F));
+    CHECK(point->Shadows() == Keire::ShadowQuality::Hard);
+    CHECK(point->ShadowStrength() == doctest::Approx(0.75F));
     CHECK_THROWS_AS(point->SetRange(0.0F), std::invalid_argument);
 
     auto spot = Keire::CreateRef<Keire::SpotLightComponent>();
     spot->SetRange(25.0F);
     spot->SetConeAngles(15.0F, 30.0F);
+    spot->SetShadows(Keire::ShadowQuality::Soft);
+    spot->SetShadowStrength(0.6F);
+    spot->SetShadowBias(0.012F);
     CHECK(spot->InnerAngleDegrees() == doctest::Approx(15.0F));
     CHECK(spot->OuterAngleDegrees() == doctest::Approx(30.0F));
+    CHECK(spot->Shadows() == Keire::ShadowQuality::Soft);
+    CHECK(spot->ShadowStrength() == doctest::Approx(0.6F));
     CHECK_THROWS_AS(spot->SetConeAngles(45.0F, 30.0F), std::invalid_argument);
 
     const auto registry = Keire::ComponentRegistry::CreateDefault();
