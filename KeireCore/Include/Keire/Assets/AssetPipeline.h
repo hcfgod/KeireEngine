@@ -84,6 +84,7 @@ namespace Keire
 
     struct AssetImportContext
     {
+        AssetId Asset;
         std::filesystem::path ProjectRoot;
         std::filesystem::path SourceRoot;
         std::filesystem::path SourcePath;
@@ -92,6 +93,18 @@ namespace Keire
         std::size_t MaximumDependencyBytes = 64U * 1024U * 1024U;
         std::function<std::vector<std::byte>(const std::filesystem::path&)> ReadProjectFile;
         AssetImportSettings ImportSettings;
+        std::function<AssetId(std::string_view)> ResolveSubAssetId;
+    };
+
+    struct AssetGeneratedSubAsset
+    {
+        AssetId Id;
+        AssetTypeId Type;
+        std::string Key;
+        std::string Name;
+        std::vector<std::byte> Bytes;
+        std::vector<AssetId> AssetDependencies;
+        AssetDerivedMetadata Metadata;
     };
 
     struct AssetImportOutput
@@ -101,6 +114,7 @@ namespace Keire
         std::vector<AssetImportDiagnostic> Diagnostics;
         std::vector<AssetId> AssetDependencies;
         AssetDerivedMetadata Metadata;
+        std::vector<AssetGeneratedSubAsset> SubAssets;
     };
 
     struct AssetImporterRegistration
@@ -306,6 +320,10 @@ namespace Keire
                                           const AssetImporterRegistration& importer,
                                           std::span<const std::byte> sourceBytes,
                                           const AssetImportSettings& settings = {});
+        [[nodiscard]] AssetId ExtractMaterial(AssetId model, AssetId generatedMaterial,
+                                              const std::filesystem::path& relativePath);
+        [[nodiscard]] std::vector<AssetId> ExtractMaterials(AssetId model,
+                                                            const std::filesystem::path& relativeDirectory);
         void Rename(AssetId id, std::string newName);
         void MoveAsset(AssetId id, const std::filesystem::path& destination);
         [[nodiscard]] AssetId Duplicate(AssetId id, const std::filesystem::path& destination);
@@ -327,6 +345,10 @@ namespace Keire
         [[nodiscard]] std::size_t RefreshUnlocked();
         [[nodiscard]] AssetImportResult ImportAllUnlocked(AssetImportPolicy policy, std::stop_token cancellation,
                                                           AssetOperationProgressCallback progress);
+        [[nodiscard]] AssetId CreateAssetUnlocked(const std::filesystem::path& relativePath,
+                                                  const AssetImporterRegistration& importer,
+                                                  std::span<const std::byte> sourceBytes,
+                                                  const AssetImportSettings& settings);
         void MoveAssetUnlocked(AssetId id, const std::filesystem::path& destination);
         void ApplyExternalImportReceipt(ExternalAssetImportReceiptId receipt, bool applied);
         class Impl;
@@ -339,6 +361,7 @@ namespace Keire
         AssetTargetPlatform Target = AssetTargetPlatform::Host;
         int CompressionLevel = 6;
         std::uint64_t MaximumPackBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
+        std::size_t StreamPageBytes = 256U * 1024U;
         bool Strict = false;
         std::vector<AssetId> Roots;
     };

@@ -130,6 +130,29 @@ void EditorWorkspaceLayer::CreateAssetBrowserInputActions(Keire::InputActionAsse
     CreateInputActions(std::move(definition), baseName);
 }
 
+void EditorWorkspaceLayer::ExtractAssetBrowserMaterials(const Keire::AssetId model)
+{
+    if (!m_AssetDatabase)
+        return;
+    try
+    {
+        const auto record = m_AssetDatabase->Find(model);
+        if (!record)
+            throw std::runtime_error("The selected model no longer exists in the project database.");
+        const auto directory =
+            record->RelativePath.parent_path() / (record->RelativePath.stem().string() + " Materials");
+        if (!m_AssetOperations)
+            throw std::logic_error("The isolated asset worker is unavailable.");
+        m_AssetOperations->QueueExtractMaterials(model, directory,
+                                                 {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal});
+        m_AssetStatus = "Extracting editable materials in the isolated worker.";
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("Material extraction failed: ") + error.what());
+    }
+}
+
 void EditorWorkspaceLayer::MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation,
                                               Keire::Detail::AssetWorkerMutation reverse, std::string name,
                                               const bool revealResult)
@@ -328,6 +351,17 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 continue;
             }
             ApplyAssetImportResult(completion->Result.Import, true, completion->Context.ReloadAsset);
+            if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ExtractMaterials)
+            {
+                if (completion->Result.MutatedAssets.empty())
+                    throw std::runtime_error("Material extraction completed without creating any assets.");
+                m_SelectedAsset = completion->Result.MutatedAssets.back();
+                if (m_AssetBrowserPanel)
+                    m_AssetBrowserPanel->RevealAsset(m_SelectedAsset);
+                m_AssetStatus = "Extracted " + std::to_string(completion->Result.MutatedAssets.size()) +
+                                " editable material" + (completion->Result.MutatedAssets.size() == 1 ? "." : "s.");
+                continue;
+            }
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::Mutate)
             {
                 if (const auto& state = completion->Context.MutationUndo)

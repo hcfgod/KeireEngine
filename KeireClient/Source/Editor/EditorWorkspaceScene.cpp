@@ -862,14 +862,15 @@ void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset)
         throw std::runtime_error("The dropped mesh no longer exists in the project database.");
 
     RecordSceneUndo("Create Mesh Entity");
-    auto entity = scene->CreateEntity(record->RelativePath.stem().string());
-    const auto renderer = entity.AddComponent<Keire::MeshRendererComponent>();
-    renderer->SetMesh(asset);
-    m_SceneDocument->Select(entity.Id().Value());
+    const auto entity = m_SceneDocument->CreateEntity(record->RelativePath.stem().string(), {},
+                                                      Keire::MeshRendererComponent::StaticType());
+    m_SceneDocument->SetComponentProperty(entity, Keire::MeshRendererComponent::StaticType(), "mesh", asset);
+    m_SceneDocument->Select(entity.Value());
     if (m_SceneDocument->PlaySession())
-        m_PlayEditorTouchedEntities.insert(entity.Id().Value());
+        m_PlayEditorTouchedEntities.insert(entity.Value());
     m_SelectedAsset = {};
-    m_SceneDocument->SetStatus("Created " + entity.Name() + " from " + record->RelativePath.filename().string() + ".");
+    m_SceneDocument->SetStatus("Created " + scene->FindEntity(entity).Name() + " from " +
+                               record->RelativePath.filename().string() + ".");
 }
 
 void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset)
@@ -895,9 +896,10 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
             materialTint = *color;
     }
     RecordSceneUndo("Assign Material");
-    renderer->SetMaterial(asset);
+    m_SceneDocument->SetMeshRendererMaterial(entity, 0, asset);
     if (materialTint)
-        renderer->SetTint(*materialTint);
+        m_SceneDocument->SetComponentProperty(entity, Keire::MeshRendererComponent::StaticType(), "tint",
+                                              *materialTint);
     m_SceneDocument->Select(destination.Id().Value());
     m_SelectedAsset = {};
     m_SceneDocument->SetStatus("Assigned " + record->RelativePath.stem().string() + " to " + destination.Name() + ".");

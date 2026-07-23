@@ -29,6 +29,13 @@ namespace Keire
         [[nodiscard]] static SDL_GPUTexture* Texture(const RenderSurface& surface) noexcept;
         [[nodiscard]] static std::vector<std::uint8_t> ReadbackRGBA8(RenderSystem& renderer,
                                                                      const RenderSurface& surface);
+        [[nodiscard]] static std::vector<float>
+        ReadbackDirectionalShadow(RenderSystem& renderer, const RenderSurface& surface, std::uint32_t layer);
+        [[nodiscard]] static std::vector<float> ReadbackLocalShadow(RenderSystem& renderer,
+                                                                    const RenderSurface& surface, std::uint32_t layer);
+        static void InjectDeviceLoss(RenderSystem& renderer);
+        [[nodiscard]] static std::uint32_t SaturateRendererQueue(RenderSystem& renderer);
+        static void RequestSurfaceSize(RenderSurface& surface, std::uint32_t width, std::uint32_t height);
         [[nodiscard]] static void* SurfaceState(RenderSurface& surface) noexcept;
         static void WaitIdle(RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t MaterialBindingBuildCount(const RenderSystem& renderer) noexcept;

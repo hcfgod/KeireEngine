@@ -17,6 +17,15 @@ namespace Keire::Detail
 {
     using Sha256Digest = std::array<std::byte, 32>;
 
+    struct CatalogPage
+    {
+        std::uint64_t Offset = 0;
+        std::uint64_t CompressedBytes = 0;
+        std::uint64_t UncompressedOffset = 0;
+        std::uint64_t UncompressedBytes = 0;
+        Sha256Digest Digest{};
+    };
+
     struct CatalogEntry
     {
         AssetId Id;
@@ -26,6 +35,7 @@ namespace Keire::Detail
         std::uint64_t CompressedBytes = 0;
         std::uint64_t UncompressedBytes = 0;
         Sha256Digest Digest{};
+        std::vector<CatalogPage> Pages;
         std::vector<AssetId> Dependencies;
         AssetDerivedMetadata Metadata;
     };
@@ -37,7 +47,8 @@ namespace Keire::Detail
     };
 
     inline constexpr std::array<char, 8> PackMagic{'K', 'E', 'I', 'R', 'E', 'P', 'A', 'K'};
-    inline constexpr std::uint32_t PackVersion = 1;
+    inline constexpr std::uint32_t PackVersion = 2;
+    inline constexpr std::uint32_t MinimumReadablePackVersion = 1;
     inline constexpr std::uint64_t PackHeaderBytes = 16;
 
     [[nodiscard]] Sha256Digest Sha256(std::span<const std::byte> bytes) noexcept;

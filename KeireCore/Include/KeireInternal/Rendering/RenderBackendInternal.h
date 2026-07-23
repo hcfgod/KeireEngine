@@ -13,11 +13,15 @@
 #include <SDL3/SDL.h>
 
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -125,10 +129,13 @@ namespace Keire::RenderBackend
     struct SurfaceResources final
     {
         SDL_GPUTexture* SampledColor = nullptr;
-        SDL_GPUTexture* MultisampleColor = nullptr;
+        SDL_GPUTexture* ExchangeColor = nullptr;
+        SDL_GPUTexture* HdrColor = nullptr;
+        SDL_GPUTexture* MultisampleHdrColor = nullptr;
         SDL_GPUTexture* Depth = nullptr;
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
+        std::vector<SDL_GPUTexture*> TransientTextures;
         std::uint32_t DirectionalShadowResolution = 0;
         std::uint32_t DirectionalShadowLayers = 0;
         std::uint32_t LocalShadowResolution = 0;
@@ -136,8 +143,20 @@ namespace Keire::RenderBackend
 
         [[nodiscard]] bool Empty() const noexcept
         {
-            return !SampledColor && !MultisampleColor && !Depth && !DirectionalShadow && !LocalShadow;
+            return !SampledColor && !ExchangeColor && !HdrColor && !MultisampleHdrColor && !Depth &&
+                   !DirectionalShadow && !LocalShadow;
         }
+    };
+
+    struct ForwardPlusGpuResources final
+    {
+        SDL_GPUBuffer* Lights = nullptr;
+        SDL_GPUBuffer* Tiles = nullptr;
+        SDL_GPUBuffer* LightIndices = nullptr;
+        std::uint32_t Columns = 0;
+        std::uint32_t Rows = 0;
+
+        [[nodiscard]] bool Empty() const noexcept { return !Lights && !Tiles && !LightIndices; }
     };
 
     struct RenderSharedState;
@@ -156,8 +175,10 @@ namespace Keire::RenderBackend
         RenderSampleCount ActualSamples = RenderSampleCount::One;
         Color FrameClearColor;
         SurfaceResources Resources;
+        ForwardPlusGpuResources ForwardPlus;
         std::uint64_t Generation = 0;
         bool Submitted = false;
+        bool HasOutput = false;
     };
 
     struct GpuMeshResources final
@@ -190,6 +211,8 @@ namespace Keire::RenderBackend
         std::vector<GpuMeshResources> RetiredMeshes;
         std::vector<GpuTextureResources> RetiredTextures;
         std::vector<SDL_GPUGraphicsPipeline*> RetiredPipelines;
+        std::vector<ForwardPlusGpuResources> RetiredForwardPlus;
+        std::vector<SDL_GPUBuffer*> TransientBuffers;
     };
 
     struct GpuTextureEntry final
@@ -225,6 +248,8 @@ namespace Keire::RenderBackend
         std::optional<std::size_t> TintSlot;
         MaterialSurfaceState Surface;
         bool ReceivesShadows = false;
+        bool UsesForwardPlus = false;
+        bool UsesInstancing = false;
     };
 
     struct GpuMaterialEntry final
@@ -276,6 +301,13 @@ namespace Keire::RenderBackend
         Matrix4 NormalMatrix;
     };
 
+    struct GpuInstanceUniform final
+    {
+        Matrix4 Model;
+        Matrix4 NormalMatrix;
+        Color Tint;
+    };
+
     inline constexpr std::size_t MaximumShaderLocalLights = 62;
 
     struct AssetLocalLightUniform final
@@ -284,6 +316,19 @@ namespace Keire::RenderBackend
         Vector4 DirectionOuter;
         Vector4 ColorIntensity;
         Vector4 Parameters;
+    };
+
+    struct ForwardPlusTileUniform final
+    {
+        std::uint32_t Offset = 0;
+        std::uint32_t Count = 0;
+        std::uint32_t Padding0 = 0;
+        std::uint32_t Padding1 = 0;
+    };
+
+    struct ForwardPlusIndexGroup final
+    {
+        std::array<std::uint32_t, 4> Indices{};
     };
 
     inline constexpr std::size_t MaximumShadowedSpotLights = 8;
@@ -366,6 +411,7 @@ namespace Keire::RenderBackend
         Matrix4 World;
         Color Tint;
         EntityId Entity;
+        std::vector<Matrix4> SkinPalette;
         bool CastShadows = true;
         bool ReceiveShadows = true;
     };
@@ -549,6 +595,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateSkyShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
@@ -573,15 +620,21 @@ namespace Keire::RenderBackend
                                                     const SceneRenderPacket& packet);
         void RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void EndFrame(ImDrawData* drawData);
+        void ExecuteFrame(ImDrawData* drawData);
+        void StartRenderThread();
+        void StopRenderThread() noexcept;
+        void DispatchRender(std::function<void()> work);
         void Close() noexcept;
 
         void CreateGeometryResources();
         void ReleaseMeshResources(GpuMeshResources& resources) noexcept;
         void ReleaseTextureResources(GpuTextureResources& resources) noexcept;
+        void ReleaseForwardPlusResources(ForwardPlusGpuResources& resources) noexcept;
         void Retire(GpuTextureResources resources) noexcept;
         void Retire(SDL_GPUGraphicsPipeline* pipeline) noexcept;
         void Retire(GpuMeshResources resources) noexcept;
         void Retire(SurfaceResources resources) noexcept;
+        void Retire(ForwardPlusGpuResources resources) noexcept;
         void RetireSurface(RenderSurfaceState& surface) noexcept;
         [[nodiscard]] SDL_GPUSampleCount ResolveSamples(RenderSampleCount requested) const noexcept;
         [[nodiscard]] SurfaceResources CreateResources(const RenderSurfaceState& surface, SDL_GPUSampleCount samples);
@@ -590,6 +643,8 @@ namespace Keire::RenderBackend
                                                               SDL_GPUPrimitiveType primitive, bool depthWrite);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateShadowPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
+        void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex) const;
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,
@@ -601,15 +656,19 @@ namespace Keire::RenderBackend
         Ref<Window> Window;
         Ref<AssetSystem> Assets;
         std::thread::id OwnerThread;
+        std::thread::id RenderThreadId;
         SDL_Window* NativeWindow = nullptr;
         SDL_GPUDevice* Device = nullptr;
         SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
         SDL_GPUTextureFormat ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        SDL_GPUTextureFormat SceneColorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
         SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
         SDL_GPUTextureFormat ShadowDepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
         SDL_GPUBuffer* GridBuffer = nullptr;
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;
+        SDL_GPUSampler* ToneMapSampler = nullptr;
         SDL_GPUTexture* EmptyShadowTexture = nullptr;
         std::uint32_t GridVertexCount = 0;
         GpuMeshResources DefaultMesh;
@@ -635,10 +694,23 @@ namespace Keire::RenderBackend
         std::vector<GpuMeshResources> PendingRetiredMeshes;
         std::vector<GpuTextureResources> PendingRetiredTextures;
         std::vector<SDL_GPUGraphicsPipeline*> PendingRetiredPipelines;
+        std::vector<ForwardPlusGpuResources> PendingRetiredForwardPlus;
+        std::vector<SDL_GPUBuffer*> FrameTransientBuffers;
+        std::vector<SDL_GPUTransferBuffer*> FrameUploadTransfers;
+        SDL_GPUCommandBuffer* FrameUploadCommands = nullptr;
+        SDL_GPUCopyPass* FrameUploadPass = nullptr;
         std::deque<InFlightFrame> InFlight;
         StaticSceneFrameGraph SceneFrameGraph;
         RenderStatistics Statistics;
         std::uint64_t NextSurfaceId = 1;
+        std::mutex RenderQueueMutex;
+        std::condition_variable RenderQueueReady;
+        std::condition_variable RenderQueueSpace;
+        std::deque<std::function<void()>> RenderQueue;
+        std::deque<float> PreparationSamples;
+        std::jthread RenderThread;
+        bool StopRenderQueue = false;
+        std::atomic<bool> InjectDeviceLossAtNextFrame{false};
         bool WindowClaimed = false;
         bool FrameActive = false;
         bool Open = true;

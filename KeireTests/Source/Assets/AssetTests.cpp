@@ -112,6 +112,8 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     request.CreatePayloadPath = operation / "source.keirescene";
     request.CreateSettings = {{"quality", std::int64_t{2}}};
     request.CreateAuxiliarySources = {{"Shaders/Created.hlsl", operation / "auxiliary-0.hlsl"}};
+    request.ExtractModel = id;
+    request.ExtractDirectory = "Materials/Extracted";
     request.Mutation = {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                         .Asset = id,
                         .Trash = Keire::AssetTrashId::Parse(Keire::AssetId::Generate().ToString()),
@@ -130,6 +132,8 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restored.CreateRelativePath == request.CreateRelativePath);
     CHECK(restored.CreatePayloadPath == request.CreatePayloadPath);
     CHECK(restored.CreateSettings == request.CreateSettings);
+    CHECK(restored.ExtractModel == request.ExtractModel);
+    CHECK(restored.ExtractDirectory == request.ExtractDirectory);
     REQUIRE(restored.CreateAuxiliarySources.size() == 1);
     CHECK(restored.CreateAuxiliarySources.front().RelativePath == request.CreateAuxiliarySources.front().RelativePath);
     CHECK(restored.CreateAuxiliarySources.front().PayloadPath == request.CreateAuxiliarySources.front().PayloadPath);
@@ -774,6 +778,149 @@ TEST_CASE("Mesh bounds are persisted in catalog metadata and queried without loa
     CHECK(metadata->LocalBounds->Maximum == std::array{2.0F, 3.0F, 0.0F});
     CHECK(assets->Statistics().KnownAssets == 0);
     assets->Close();
+}
+
+TEST_CASE("Generated subassets keep stable identities and are published with their parent")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.GeneratedSubAssets";
+    importer.Version = 1;
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".generated"};
+    importer.ContextualImport = [](const Keire::AssetImportContext& context, const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if (source == "without child")
+            return output;
+        const auto child = context.ResolveSubAssetId("material/stable");
+        const std::string generated = "generated material payload";
+        const auto generatedBytes = std::as_bytes(std::span(generated.data(), generated.size()));
+        output.SubAssets.push_back({child,
+                                    Keire::BinaryAsset::StaticType(),
+                                    "material/stable",
+                                    "Stable Material",
+                                    {generatedBytes.begin(), generatedBytes.end()}});
+        output.AssetDependencies.push_back(child);
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string source = "with child";
+    const auto parent = database->CreateAsset("Models/Generated.generated", importer,
+                                              std::as_bytes(std::span(source.data(), source.size())));
+
+    const auto firstImport = database->ImportAll();
+    const auto firstRecord = database->Find(parent);
+    REQUIRE(firstRecord);
+    REQUIRE(firstRecord->SubAssets.size() == 1);
+    const auto child = firstRecord->SubAssets.front();
+    CHECK(child);
+    Keire::AssetCooker::Validate(firstImport.CatalogPath);
+
+    Keire::AssetSystemSpecification assetsSpecification;
+    assetsSpecification.Mode = Keire::AssetMode::Development;
+    assetsSpecification.DevelopmentCatalog = firstImport.CatalogPath;
+    assetsSpecification.WorkerCount = 1;
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetsSpecification));
+    const auto childHandle = assets->Load<Keire::BinaryAsset>(child);
+    WaitFor(*assets, [&] { return childHandle.State() == Keire::AssetState::Ready; });
+    const std::string expected = "generated material payload";
+    CHECK(std::ranges::equal(childHandle.Get()->Bytes(), std::as_bytes(std::span(expected))));
+    assets->Close();
+
+    (void)database->ImportAll();
+    REQUIRE(database->Find(parent));
+    REQUIRE(database->Find(parent)->SubAssets.size() == 1);
+    CHECK(database->Find(parent)->SubAssets.front() == child);
+
+    project.Write("Models/Generated.generated", "without child");
+    const auto reconciled = database->ImportAll();
+    REQUIRE(database->Find(parent));
+    CHECK(database->Find(parent)->SubAssets.empty());
+    Keire::AssetCooker::Validate(reconciled.CatalogPath);
+}
+
+TEST_CASE("Generated model materials can be extracted as editable source assets")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration modelImporter;
+    modelImporter.Name = "Test.ExtractableModel";
+    modelImporter.Type = Keire::MeshAsset::StaticType();
+    modelImporter.Extensions = {".model"};
+    modelImporter.ContextualImport = [](const Keire::AssetImportContext& context, std::span<const std::byte>)
+    {
+        const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}}, Keire::MeshVertex{{1.0F, 0.0F, 0.0F}},
+                                  Keire::MeshVertex{{0.0F, 1.0F, 0.0F}}};
+        constexpr std::array<std::uint32_t, 3> indices{0, 1, 2};
+        const Keire::MeshBounds bounds{{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 0.0F}};
+        const auto material = context.ResolveSubAssetId("material/Paint/0");
+        const std::array submeshes{Keire::MeshSubmesh{0, 3, 0, bounds}};
+        const std::array slots{Keire::MeshMaterialSlot{"Paint", material}};
+        const std::array lods{Keire::MeshLod{0.0F, 0, 1, bounds}};
+        Keire::MaterialAssetDefinition definition;
+        definition.Properties.emplace("Tint", Keire::Color{0.2F, 0.4F, 0.6F, 1.0F});
+        Keire::AssetImportOutput output;
+        output.Bytes = Keire::MeshAsset::Encode(vertices, indices, submeshes, slots, lods);
+        output.SubAssets.push_back({material, Keire::MaterialAsset::StaticType(), "material/Paint/0", "Paint",
+                                    Keire::MaterialAsset::Encode(definition)});
+        output.AssetDependencies.push_back(material);
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
+        .ProjectRoot = project.Root, .Importers = {modelImporter, Keire::CreateMaterialAssetImporter()}});
+    const std::string source = "model";
+    const auto model = database->CreateAsset("Models/Vehicle.model", modelImporter,
+                                             std::as_bytes(std::span(source.data(), source.size())));
+    const auto extracted = database->ExtractMaterials(model, "Materials/Vehicle");
+    REQUIRE(extracted.size() == 1);
+    const auto record = database->Find(extracted.front());
+    REQUIRE(record);
+    CHECK(record->RelativePath == std::filesystem::path("Materials/Vehicle/Paint.keirematerial"));
+    const auto materialSource = ReadAll(project.Root / "Assets" / record->RelativePath);
+    const auto definition = Keire::MaterialAsset::DecodeSource(std::as_bytes(std::span(materialSource)));
+    REQUIRE(std::holds_alternative<Keire::Vector4>(definition.Properties.at("Tint")));
+    CHECK(std::get<Keire::Vector4>(definition.Properties.at("Tint")).Z == doctest::Approx(0.6F));
+}
+
+TEST_CASE("Cooked asset pages support bounded asynchronous range reads")
+{
+    TemporaryAssetProject project;
+    std::string payload(20U * 1024U, '\0');
+    for (std::size_t index = 0; index < payload.size(); ++index)
+        payload[index] = static_cast<char>((index * 31U) & 0xffU);
+    project.Write("Stream.bin", payload);
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto record = database->Find("Stream.bin");
+    REQUIRE(record);
+    Keire::AssetBuildProfile profile;
+    profile.StreamPageBytes = 4096;
+    const auto cooked = Keire::AssetCooker::Cook(*database, profile, project.Root / "StreamCook");
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(cooked.CatalogPath));
+    const auto catalogCharacters = ReadAll(cooked.CatalogPath);
+    const std::string catalog(catalogCharacters.begin(), catalogCharacters.end());
+    CHECK(catalog.find("\"pages\"") != std::string::npos);
+    CHECK(catalog.find("\"uncompressedOffset\": 4096") != std::string::npos);
+
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Cooked;
+    specification.WorkerCount = 1;
+    specification.MaximumStreamReadBytes = 8192;
+    specification.Mounts.push_back({cooked.CatalogPath});
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+    const auto operation = assets->ReadRangeAsync(record->Id, 3584, 6144);
+    REQUIRE(operation->Wait(std::chrono::seconds(5)));
+    CHECK(operation->State() == Keire::AssetStreamState::Succeeded);
+    const auto result = operation->Result();
+    REQUIRE(result.size() == 6144);
+    CHECK(std::ranges::equal(result, std::as_bytes(std::span(payload)).subspan(3584, 6144)));
+    CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, 0, 8193), std::invalid_argument);
+    CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, payload.size() - 10U, 20), std::out_of_range);
+    assets->Close();
+    CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, 0, 1), std::logic_error);
 }
 
 TEST_CASE("Asset database editor imports report failures without discarding the last-good catalog")

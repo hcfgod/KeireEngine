@@ -3,6 +3,8 @@
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
   "vertexLayoutVersion": 2,
   "receivesShadows": true,
+  "usesForwardPlus": true,
+  "usesInstancing": true,
   "stages": {
     "vertex": "VSMain",
     "fragment": "PSMain"

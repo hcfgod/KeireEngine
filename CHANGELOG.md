@@ -4,6 +4,33 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Added gameplay-production foundations: scene schema v3 and nested prefab/variant composition, transactional prefab
+  authoring helpers, application-owned profiling/scripting/physics/audio/navigation services, `.keireasm` assembly
+  graphs with cancellable last-good managed builds, Jolt-backed rigid bodies and deterministic convex/triangle
+  collision cooking, miniaudio-owned device/headless engines with offline graph rendering, Recast geometry baking with
+  deterministic dependency hashes, revisioned synchronous/asynchronous navigation paths, and cooked runtime manifest
+  schema v2. The pinned Coral patch now hosts .NET 10 through nethost, performs transactional collectible-context
+  reloads with Behaviour type-registry validation, context-scoped unload cleanup, live Behaviour migration, and
+  stable-ID scene-component lifecycle dispatch, and supports an explicit bundled runtime root. Cook now compiles
+  runtime `.keireasm` graphs and publishes their DLLs; packages carry RID-specific CoreCLR/hostfxr, Coral,
+  Jolt/Recast/miniaudio link closures, identities, and licenses. Added deterministic streamed pack pages, Recast-built
+  Detour tile payloads, skeletal import/animation assets, audio voices/spatial mixing, prefab/build/profiler panels,
+  and a managed third-person sandbox foundation.
+
+- Made the static-scene frame graph operational with compiled transitions and transient alias slots; scene color now
+  renders to RGBA16F and executes fitted ACES into double-buffered display surfaces. Added bounded renderer-thread
+  submission, full Forward+ light/tile/index storage-buffer consumption, GPU instance buffers for compatible opaque
+  draws, CPU preparation p95 diagnostics, and a 10,000-object batch benchmark. Surface HDR attachments now come from
+  the graph-owned physical transient heap, with deterministic device-loss, resize/minimize/restore, and queue-capacity
+  backend tests.
+
+- Model import now publishes stable generated material and embedded-texture sub-assets, converts glTF PBR factors,
+  alpha mode, cutoff, double-sided state, and semantic texture slots, and cooks the complete generated dependency graph.
+  FBX/OBJ material limitations produce actionable diagnostics, and Project context menus can extract generated
+  materials into editable `.keirematerial` sources through the isolated asset worker.
+- Completed scene-document mutation ownership for Entity menu creation/deletion and viewport mesh/material drops, so
+  workspace composition code no longer mutates scene objects directly.
+
 - Replaced placeholder shadow statistics with GPU depth-map rendering and receiver sampling for directional, point,
   and spot lights. Default-material primitives now receive those shadows, local lights expose persistent quality,
   strength, and bias controls, and the portable local-light uniform path is validated on D3D12 and Vulkan. Shadow

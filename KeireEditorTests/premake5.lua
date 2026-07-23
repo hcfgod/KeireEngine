@@ -14,6 +14,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InputActionsDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialInspectorPanel.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/PrefabAuthoring.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/PropertyDrawerRegistry.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ProjectSettingsDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/SceneCameraController.cpp",

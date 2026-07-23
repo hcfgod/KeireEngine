@@ -28,10 +28,29 @@ function LinkKeireCore()
     }
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-        links { DependencyManifest.AssimpDebugLibrary, DependencyManifest.AssimpZlibDebugLibrary }
+        links
+        {
+            DependencyManifest.AssimpDebugLibrary,
+            DependencyManifest.AssimpZlibDebugLibrary,
+            DependencyManifest.JoltDebugLibrary,
+            DependencyManifest.MiniaudioDebugLibrary,
+            DependencyManifest.CoralDebugLibrary
+        }
+        links(DependencyManifest.RecastDebugLibraries)
 
     filter { "configurations:Release or Dist" }
-        links { DependencyManifest.AssimpReleaseLibrary, DependencyManifest.AssimpZlibReleaseLibrary }
+        links
+        {
+            DependencyManifest.AssimpReleaseLibrary,
+            DependencyManifest.AssimpZlibReleaseLibrary,
+            DependencyManifest.JoltReleaseLibrary,
+            DependencyManifest.MiniaudioReleaseLibrary,
+            DependencyManifest.CoralReleaseLibrary
+        }
+        links(DependencyManifest.RecastReleaseLibraries)
+
+    filter {}
+        links { DependencyManifest.CoralNetHostLibrary }
 
     filter {}
 end

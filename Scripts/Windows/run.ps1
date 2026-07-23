@@ -58,7 +58,7 @@ try {
         Write-Host "==> Running KeireClient window smoke $Configuration for $Architecture"
         $originalVideoDriver = $env:SDL_VIDEODRIVER
         $env:SDL_VIDEODRIVER = "dummy"
-        & $ClientExe --smoke-window
+        & $ClientExe --project (Join-Path $Root "Samples\KeireSandbox") --smoke-window
         if ($null -eq $originalVideoDriver) { Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue }
         else { $env:SDL_VIDEODRIVER = $originalVideoDriver }
     }
@@ -74,17 +74,22 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $cliRoot = Join-Path $env:TEMP ("client-cli-" + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory $cliRoot | Out-Null
+    Push-Location $cliRoot
     try {
         foreach ($option in @("--help", "-h", "--version", "-v")) {
-            $result = Start-Process -FilePath $ClientExe -ArgumentList $option -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru
-            if ($result.ExitCode -ne 0) { throw "KeireClient $option failed with exit code $($result.ExitCode)." }
+            & $ClientExe $option
+            $cliExitCode = $LASTEXITCODE
+            if ($cliExitCode -ne 0) { throw "KeireClient $option failed with exit code $cliExitCode." }
         }
         $invalidOutput = Join-Path $cliRoot "invalid.txt"
         $invalid = Start-Process -FilePath $ClientExe -ArgumentList "--invalid" -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru -RedirectStandardError $invalidOutput
         if ($invalid.ExitCode -ne 2) { throw "KeireClient invalid option returned $($invalid.ExitCode), expected 2." }
         if (Test-Path (Join-Path $cliRoot "Logs")) { throw "Informational KeireClient commands created logs." }
     }
-    finally { Remove-Item $cliRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    finally {
+        Pop-Location
+        Remove-Item $cliRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
     exit 0
 }
 finally { $env:PATH = $originalPath; Pop-Location }

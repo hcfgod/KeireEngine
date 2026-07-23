@@ -272,6 +272,8 @@ namespace Keire
                     {"depthWrite", definition.DepthWrite},
                     {"blend", definition.Blend},
                     {"receivesShadows", definition.ReceivesShadows},
+                    {"usesForwardPlus", definition.UsesForwardPlus},
+                    {"usesInstancing", definition.UsesInstancing},
                     {"properties", std::move(properties)},
                     {"dependencies", std::move(dependencies)},
                     {"variants", std::move(variants)}};
@@ -293,6 +295,8 @@ namespace Keire
             result.DepthWrite = source.at("depthWrite").get<bool>();
             result.Blend = source.at("blend").get<bool>();
             result.ReceivesShadows = source.value("receivesShadows", false);
+            result.UsesForwardPlus = source.value("usesForwardPlus", false);
+            result.UsesInstancing = source.value("usesInstancing", false);
             for (const auto& property : source.at("properties"))
             {
                 ShaderPropertyDefinition decoded;
@@ -451,16 +455,18 @@ namespace Keire
 
         void ValidateReflection(const Json& vertex, const Json& fragment, const ShaderAssetDefinition& definition)
         {
-            const auto noStorage = [](const Json& value)
-            { return value.value("storage_textures", 0U) == 0 && value.value("storage_buffers", 0U) == 0; };
+            const auto noStorageTextures = [](const Json& value) { return value.value("storage_textures", 0U) == 0; };
             const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
                                                          &ShaderPropertyDefinition::Type);
             const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
             const auto expectedFragmentUniformBuffers = 3U;
             const auto minimumFragmentUniformBuffers = definition.ReceivesShadows ? 3U : 2U;
             const auto expectedSamplers = textureCount + (definition.ReceivesShadows ? 2U : 0U);
-            if (!noStorage(vertex) || !noStorage(fragment) || vertex.value("samplers", 0U) != 0 ||
-                vertex.value("uniform_buffers", 0U) != 1 ||
+            const auto expectedFragmentStorageBuffers = definition.UsesForwardPlus ? 3U : 0U;
+            if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
+                vertex.value("storage_buffers", 0U) != (definition.UsesInstancing ? 1U : 0U) ||
+                fragment.value("storage_buffers", 0U) != expectedFragmentStorageBuffers ||
+                vertex.value("samplers", 0U) != 0 || vertex.value("uniform_buffers", 0U) != 1 ||
                 (fragmentUniformBuffers != minimumFragmentUniformBuffers &&
                  fragmentUniformBuffers != expectedFragmentUniformBuffers) ||
                 fragment.value("samplers", 0U) != expectedSamplers)
@@ -599,6 +605,8 @@ namespace Keire
             result.DepthWrite = state.value("depthWrite", true);
             result.Blend = state.value("blend", false);
             result.ReceivesShadows = manifest.value("receivesShadows", false);
+            result.UsesForwardPlus = manifest.value("usesForwardPlus", false);
+            result.UsesInstancing = manifest.value("usesInstancing", false);
 
             const auto& properties = manifest.value("properties", Json::array());
             if (!properties.is_array() || properties.size() > MaximumShaderProperties)

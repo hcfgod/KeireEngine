@@ -34,13 +34,21 @@ Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName\$assetWorkerName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\$runtimeName.exe" "$stage\bin\"
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\Managed" "$stage\bin\" -Recurse
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\nethost.dll" "$stage\bin\"
 Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
 Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"
 $dependencyInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
-Copy-Item (Join-Path $dependencyInstall "lib\assimp.lib"), (Join-Path $dependencyInstall "lib\zlibstatic.lib") "$stage\lib\"
+Copy-Item (Join-Path $dependencyInstall "lib\assimp.lib"), (Join-Path $dependencyInstall "lib\zlibstatic.lib"), `
+    (Join-Path $dependencyInstall "lib\Jolt.lib"), (Join-Path $dependencyInstall "lib\Recast.lib"), `
+    (Join-Path $dependencyInstall "lib\Detour.lib"), (Join-Path $dependencyInstall "lib\DetourCrowd.lib"), `
+    (Join-Path $dependencyInstall "lib\DetourTileCache.lib"), (Join-Path $dependencyInstall "lib\miniaudio.lib") "$stage\lib\"
+$coralConfiguration = if ($Configuration -eq "Dist") { "Release" } else { $Configuration }
+Copy-Item "$Root\Build\Dependencies\coral-patched\Build\$coralConfiguration\Coral.Native.lib" "$stage\lib\"
+Copy-Item "$Root\Build\Dependencies\coral-nethost\nethost.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox"
 Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)" "$stage\include\" -Recurse
@@ -61,9 +69,21 @@ Copy-Item "$Root\Vendor\SDL_shadercross\external\SPIRV-Tools\LICENSE" "$stage\th
 Copy-Item "$Root\Vendor\assimp\LICENSE" "$stage\third-party\licenses\assimp-LICENSE.txt"
 Copy-Item "$Root\Vendor\assimp\contrib\zlib\LICENSE" "$stage\third-party\licenses\assimp-zlib-LICENSE.txt"
 Copy-Item "$Root\Vendor\stb\LICENSE" "$stage\third-party\licenses\stb-LICENSE.txt"
+Copy-Item "$dependencyInstall\share\licenses\keire\Jolt-LICENSE.txt", `
+    "$dependencyInstall\share\licenses\keire\Recast-LICENSE.txt", `
+    "$dependencyInstall\share\licenses\keire\miniaudio-LICENSE.txt" "$stage\third-party\licenses\"
+Copy-Item "$Root\Build\Dependencies\coral-patched\LICENSE" "$stage\third-party\licenses\Coral-LICENSE.txt"
+Copy-Item "$Root\Build\Dependencies\dotnet-sdk\LICENSE.txt" "$stage\third-party\licenses\dotnet-LICENSE.txt"
+Copy-Item "$Root\Build\Dependencies\dotnet-sdk\ThirdPartyNotices.txt" `
+    "$stage\third-party\licenses\dotnet-ThirdPartyNotices.txt"
 $sdlInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitecture-$Toolset\Release\install"
 if (-not (Test-Path (Join-Path $sdlInstall "lib\SDL3-static.lib"))) { throw "Packaged SDL Release dependency is missing." }
-Copy-Item "$sdlInstall\*" "$stage\third-party\SDL3\" -Recurse
+New-Item -ItemType Directory -Force "$stage\third-party\SDL3\include", "$stage\third-party\SDL3\lib", `
+    "$stage\third-party\SDL3\cmake", "$stage\third-party\SDL3\licenses" | Out-Null
+Copy-Item "$sdlInstall\include\SDL3" "$stage\third-party\SDL3\include\" -Recurse
+Copy-Item "$sdlInstall\lib\SDL3-static.lib" "$stage\third-party\SDL3\lib\"
+Copy-Item "$sdlInstall\cmake\*" "$stage\third-party\SDL3\cmake\" -Recurse
+Copy-Item "$sdlInstall\licenses\SDL3" "$stage\third-party\SDL3\licenses\" -Recurse
 Copy-Item "$Root\README.md", "$Root\LICENSE.txt", "$Root\THIRD_PARTY_NOTICES.md" $stage
 Copy-Item "$Root\Examples\Consumer\*" "$stage\examples\consumer\" -Recurse
 Copy-Item "$Root\Examples\ManagedConsumer\*" "$stage\examples\managed-consumer\" -Recurse
@@ -78,7 +98,9 @@ $compiler = if ($Toolset -eq "msc") {
 elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
 $commit = Get-GitHeadCommit $Root "unknown"
-$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT }
+$dotnetRuntimeVersion = (Get-ChildItem "$Root\Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App" -Directory |
+    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
+$manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT; jolt=$Lock.JOLT_COMMIT; recast=$Lock.RECAST_COMMIT; miniaudio=$Lock.MINIAUDIO_COMMIT; coral=$Lock.CORAL_COMMIT; dotnetRuntime=$dotnetRuntimeVersion }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
@@ -97,6 +119,14 @@ if ($parsedManifest.entt -ne $Lock.ENTT_COMMIT) { throw "Packaged EnTT identity 
 if ($parsedManifest.glm -ne $Lock.GLM_COMMIT) { throw "Packaged GLM identity does not match the dependency lock." }
 if ($parsedManifest.assimp -ne $Lock.ASSIMP_COMMIT -or $parsedManifest.stb -ne $Lock.STB_COMMIT) {
     throw "Packaged asset importer identities do not match the dependency lock."
+}
+if ($parsedManifest.jolt -ne $Lock.JOLT_COMMIT -or $parsedManifest.recast -ne $Lock.RECAST_COMMIT -or
+    $parsedManifest.miniaudio -ne $Lock.MINIAUDIO_COMMIT) {
+    throw "Packaged gameplay middleware identities do not match the dependency lock."
+}
+if ($parsedManifest.coral -ne $Lock.CORAL_COMMIT -or
+    -not ([string]$parsedManifest.dotnetRuntime).StartsWith("10.", [StringComparison]::Ordinal)) {
+    throw "Packaged managed-runtime identities do not match the dependency lock."
 }
 if ($parsedManifest.sdlShadercross -ne $Lock.SDL_SHADERCROSS_COMMIT -or
     $parsedManifest.dxc -ne $Lock.SDL_SHADERCROSS_DXC_COMMIT -or
@@ -121,9 +151,17 @@ $assetWorkerHelp = (& (Join-Path $stage "bin\$assetWorkerName.exe") --help) -joi
 if ($LASTEXITCODE -ne 0 -or -not $assetWorkerHelp.Contains("KeireAssetWorker")) { throw "Packaged asset worker validation failed." }
 $sampleProject = Join-Path $stage "samples\KeireSandbox"
 $previousShaderCompiler = $env:KEIRE_SHADER_COMPILER
+$previousDotnetRoot = $env:DOTNET_ROOT
+$previousPath = $env:PATH
 $env:KEIRE_SHADER_COMPILER = Join-Path $stage "bin\KeireShaderCompiler.exe"
+$env:DOTNET_ROOT = Join-Path $Root "Build\Dependencies\dotnet-sdk"
+$env:PATH = "$env:DOTNET_ROOT;$env:PATH"
 try { $assetImportOutput = (& (Join-Path $stage "bin\$assetToolName.exe") cook --project $sampleProject --output (Join-Path $stage "content\KeireSandbox") --profile Dist --target windows) -join "`n" }
-finally { $env:KEIRE_SHADER_COMPILER = $previousShaderCompiler }
+finally {
+    $env:KEIRE_SHADER_COMPILER = $previousShaderCompiler
+    $env:DOTNET_ROOT = $previousDotnetRoot
+    $env:PATH = $previousPath
+}
 if ($LASTEXITCODE -ne 0 -or -not $assetImportOutput.Contains("Cooked")) { throw "Packaged sample project asset validation failed." }
 Remove-Item (Join-Path $sampleProject "Library") -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $sampleProject "Logs"), (Join-Path $sampleProject "Build"), (Join-Path $sampleProject "Temp") -Recurse -Force -ErrorAction SilentlyContinue
@@ -165,19 +203,33 @@ if ((Test-Path $symbolStage) -and (Get-ChildItem $symbolStage -File -Recurse | S
     (Get-FileHash $symbols -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name-symbols.zip" | Set-Content "$symbols.sha256" -Encoding ASCII
 }
 $validationRoot = Join-Path $env:LOCALAPPDATA ("CodexSdkValidation\" + [guid]::NewGuid().ToString("N"))
+$previousValidationPath = $env:PATH
 try {
     Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
     $sdkRoot = Join-Path $validationRoot "sdk"
     New-Item -ItemType Directory -Force $sdkRoot | Out-Null
     Expand-Archive $archive $sdkRoot -Force
     Assert-WindowsPackageGeneratedDataFree $sdkRoot
+    $env:PATH = "$(Join-Path $sdkRoot 'bin');$previousValidationPath"
     $consumerSource = Join-Path $sdkRoot "examples\consumer\Main.cpp"
     $consumerExe = Join-Path $validationRoot "consumer.exe"
     $consumerObject = Join-Path $validationRoot "consumer.obj"
+    Copy-Item (Join-Path $sdkRoot "bin\nethost.dll") $validationRoot
+    $gameplayLibraries = @(
+        (Join-Path $sdkRoot "lib\Jolt.lib"),
+        (Join-Path $sdkRoot "lib\Recast.lib"),
+        (Join-Path $sdkRoot "lib\Detour.lib"),
+        (Join-Path $sdkRoot "lib\DetourCrowd.lib"),
+        (Join-Path $sdkRoot "lib\DetourTileCache.lib"),
+        (Join-Path $sdkRoot "lib\miniaudio.lib"),
+        (Join-Path $sdkRoot "lib\Coral.Native.lib"),
+        (Join-Path $sdkRoot "lib\nethost.lib")
+    )
     if ($Toolset -eq "msc") {
         $consumerLinkOptions = if ($Configuration -eq "Dist") { @("/link", "/LTCG") } else { @() }
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" $consumerSource `
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
+            @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
@@ -186,6 +238,7 @@ try {
         $compilerCommand = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" $consumerSource `
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
+            @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $consumerExe
     }
@@ -200,6 +253,7 @@ try {
     if ($Toolset -eq "msc") {
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" $managedSource `
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
+            @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             user32.lib gdi32.lib winmm.lib imm32.lib setupapi.lib version.lib ole32.lib oleaut32.lib shell32.lib advapi32.lib `
             "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
@@ -207,6 +261,7 @@ try {
     else {
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" $managedSource `
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
+            @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             -luser32 -lgdi32 -lwinmm -limm32 -lsetupapi -lversion -lole32 -loleaut32 -lshell32 -ladvapi32 -o $managedExe
     }
@@ -237,6 +292,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Managed SDK CMake consumer failed with exit code $LASTEXITCODE." }
 }
 finally {
+    $env:PATH = $previousValidationPath
     Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host "==> Package created: $archive"

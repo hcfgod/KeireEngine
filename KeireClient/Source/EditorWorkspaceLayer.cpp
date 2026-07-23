@@ -1,5 +1,8 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "Keire/Scenes/PrefabAsset.h"
+#include "Keire/Scripting/ManagedAssemblyAsset.h"
+
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
@@ -542,25 +545,23 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
         KeireEditor::EditorCommand::CreateEntity,
         [this]
         {
-            const auto scene = ActiveScene();
             RecordSceneUndo("Create Entity");
-            const auto created = scene->CreateEntity("GameObject");
-            m_SceneDocument->Select(created.Id().Value());
-            MarkPlayEditorEntity(created.Id().Value());
+            const auto created = m_SceneDocument->CreateEntity("GameObject");
+            m_SceneDocument->Select(created.Value());
+            MarkPlayEditorEntity(created.Value());
         },
         [this] { return static_cast<bool>(ActiveScene()) && !m_PlayChanges; });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::DeleteSelection,
         [this]
         {
-            const auto scene = ActiveScene();
             RecordSceneUndo("Delete Entities");
             const auto selected = m_SceneDocument->Selections();
             const std::vector entities(selected.begin(), selected.end());
             for (const auto entity : entities)
             {
                 MarkPlayEditorEntity(entity);
-                (void)scene->DestroyEntity(Keire::EntityId(entity));
+                m_SceneDocument->DeleteEntity(Keire::EntityId(entity));
             }
             m_SceneDocument->ClearSelection();
         },
@@ -701,6 +702,9 @@ void EditorWorkspaceLayer::OnAttach()
     m_InputActionsPanel->Attach(workspace);
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
     m_ProjectSettingsPanel->Attach(workspace);
+    m_PrefabOverrides = workspace.RegisterPanel({"editor.prefab-overrides", "Prefab Overrides", false});
+    m_BuildSettings = workspace.RegisterPanel({"editor.build-settings", "Build Settings", false});
+    m_Profiler = workspace.RegisterPanel({"editor.profiler", "Profiler", false});
     if (const auto undo = Owner().Undo())
         m_ThemeUndoContext = undo->CreateContext({.Name = "Theme Authoring"});
     if (const auto renderer = Owner().Renderer(); renderer && renderer->Mode() != Keire::RenderMode::Disabled)
@@ -739,9 +743,11 @@ void EditorWorkspaceLayer::OnAttach()
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
             databaseSpecification.Importers = {
-                Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
-                Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
-                Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
+                Keire::CreateInputActionAssetImporter(),   Keire::CreateSceneAssetImporter(),
+                Keire::CreatePrefabAssetImporter(),        Keire::CreateManagedAssemblyAssetImporter(),
+                Keire::CreateShaderAssetImporter(),        Keire::CreateMaterialAssetImporter(),
+                Keire::CreateMeshAssetImporter(),          Keire::CreateTexture2DAssetImporter(),
+                Keire::CreateAnimationGraphAssetImporter()};
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
@@ -920,6 +926,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         }
     }
     CompleteSaveSceneAs();
+    UpdateManagedBuild();
     if (!m_AssetDatabase)
         return;
     UpdateAssetOperations();
@@ -1049,6 +1056,9 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     m_InputActionsPanel->Draw(ui);
     DrawInputDebugger(ui);
     m_ProjectSettingsPanel->Draw(ui, m_Theme);
+    DrawPrefabOverrides(ui);
+    DrawBuildSettings(ui);
+    DrawProfiler(ui);
     DrawPlayChanges(ui);
 }
 

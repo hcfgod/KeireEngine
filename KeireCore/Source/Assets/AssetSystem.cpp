@@ -21,6 +21,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 
 namespace Keire
 {
@@ -88,6 +89,65 @@ namespace Keire
         }
     } // namespace
 
+    class AssetStreamOperation::Impl final
+    {
+      public:
+        mutable std::mutex Mutex;
+        mutable std::condition_variable Changed;
+        AssetStreamState Current = AssetStreamState::Queued;
+        std::vector<std::byte> Bytes;
+        AssetDiagnostic Failure;
+        bool CancellationRequested = false;
+    };
+
+    AssetStreamOperation::AssetStreamOperation() : m_Impl(std::make_unique<Impl>()) {}
+    AssetStreamOperation::~AssetStreamOperation() = default;
+
+    AssetStreamState AssetStreamOperation::State() const noexcept
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        return m_Impl->Current;
+    }
+
+    bool AssetStreamOperation::Wait(const std::chrono::milliseconds timeout) const
+    {
+        if (timeout.count() < 0)
+            throw std::invalid_argument("Asset stream wait timeout cannot be negative.");
+        std::unique_lock lock(m_Impl->Mutex);
+        return m_Impl->Changed.wait_for(lock, timeout,
+                                        [this]
+                                        {
+                                            return m_Impl->Current == AssetStreamState::Succeeded ||
+                                                   m_Impl->Current == AssetStreamState::Failed ||
+                                                   m_Impl->Current == AssetStreamState::Cancelled;
+                                        });
+    }
+
+    std::vector<std::byte> AssetStreamOperation::Result() const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        if (m_Impl->Current != AssetStreamState::Succeeded)
+            throw std::logic_error("Asset stream result is unavailable.");
+        return m_Impl->Bytes;
+    }
+
+    AssetDiagnostic AssetStreamOperation::Diagnostic() const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        return m_Impl->Failure;
+    }
+
+    void AssetStreamOperation::Cancel() noexcept
+    {
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            m_Impl->CancellationRequested = true;
+            if (m_Impl->Current == AssetStreamState::Queued)
+                m_Impl->Current = AssetStreamState::Cancelled;
+        }
+        m_Impl->Changed.notify_all();
+    }
+
     class AssetSystem::Impl final
     {
       public:
@@ -121,12 +181,22 @@ namespace Keire
             bool CountedInQueue = true;
         };
 
+        struct StreamJob
+        {
+            Ref<AssetStreamOperation> Operation;
+            ResolvedEntry Source;
+            std::uint64_t Offset = 0;
+            std::size_t Bytes = 0;
+        };
+
+        using WorkerJob = std::variant<Job, StreamJob>;
+
         explicit Impl(AssetSystemSpecification value, Ref<EventBus> events)
             : Specification(std::move(value)), Events(std::move(events)), OwnerThread(std::this_thread::get_id())
         {
             if (Specification.QueueCapacity == 0)
                 throw std::invalid_argument("Asset queue capacity must be greater than zero.");
-            if (Specification.MaximumAssetBytes == 0)
+            if (Specification.MaximumAssetBytes == 0 || Specification.MaximumStreamReadBytes == 0)
                 throw std::invalid_argument("Maximum asset size must be greater than zero.");
             if (Specification.WorkerCount == 0)
                 Specification.WorkerCount = DefaultWorkerCount();
@@ -182,10 +252,10 @@ namespace Keire
 
         [[nodiscard]] bool HasJobs() const noexcept
         {
-            return std::ranges::any_of(Jobs, [](const auto& queue) { return !queue.empty(); });
+            return std::ranges::any_of(Jobs, [](const auto& queue) { return !queue.empty(); }) || !StreamJobs.empty();
         }
 
-        [[nodiscard]] Job PopJob()
+        [[nodiscard]] WorkerJob PopJob()
         {
             for (auto& queue : Jobs)
             {
@@ -196,6 +266,12 @@ namespace Keire
                     return job;
                 }
             }
+            if (!StreamJobs.empty())
+            {
+                StreamJob job = std::move(StreamJobs.front());
+                StreamJobs.pop_front();
+                return job;
+            }
             throw std::logic_error("Asset worker woke without a queued job.");
         }
 
@@ -203,7 +279,7 @@ namespace Keire
         {
             for (;;)
             {
-                Job job;
+                WorkerJob job;
                 {
                     std::unique_lock lock(Mutex);
                     WorkAvailable.wait(lock, [this] { return Stopping || HasJobs(); });
@@ -212,56 +288,187 @@ namespace Keire
                     job = PopJob();
                 }
 
-                job.State->SetLoading(job.Reload);
-                Completion completion{job.State, {}, {}, job.Reload, true};
-                try
+                if (auto* assetJob = std::get_if<Job>(&job))
                 {
-                    completion.Value = LoadValue(job);
+                    assetJob->State->SetLoading(assetJob->Reload);
+                    Completion completion{assetJob->State, {}, {}, assetJob->Reload, true};
+                    try
+                    {
+                        completion.Value = LoadValue(*assetJob);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        completion.Diagnostic = {"load", error.what()};
+                    }
+                    catch (...)
+                    {
+                        completion.Diagnostic = {"load", "The asset decoder reported an unknown failure."};
+                    }
+                    {
+                        std::scoped_lock lock(Mutex);
+                        Completions.push_back(std::move(completion));
+                    }
                 }
-                catch (const std::exception& error)
+                else
                 {
-                    completion.Diagnostic = {"load", error.what()};
-                }
-                catch (...)
-                {
-                    completion.Diagnostic = {"load", "The asset decoder reported an unknown failure."};
-                }
-                {
+                    RunStreamJob(std::get<StreamJob>(job));
                     std::scoped_lock lock(Mutex);
-                    Completions.push_back(std::move(completion));
+                    if (QueueSize > 0)
+                        --QueueSize;
                 }
             }
+        }
+
+        [[nodiscard]] std::vector<std::byte> DecodeEntry(const Detail::CatalogEntry& entry) const
+        {
+            if (entry.UncompressedBytes > Specification.MaximumAssetBytes ||
+                entry.UncompressedBytes > std::numeric_limits<std::size_t>::max() ||
+                entry.CompressedBytes > std::numeric_limits<std::size_t>::max())
+                throw std::runtime_error("Asset exceeds the configured maximum size.");
+            std::ifstream stream(entry.PackPath, std::ios::binary);
+            if (!stream)
+                throw std::runtime_error("Could not open asset pack: " + entry.PackPath.string());
+            Detail::ValidatePackHeader(stream, entry.PackPath);
+            std::vector<std::byte> decoded(static_cast<std::size_t>(entry.UncompressedBytes));
+            if (entry.Pages.empty())
+            {
+                stream.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
+                std::vector<std::byte> compressed(static_cast<std::size_t>(entry.CompressedBytes));
+                if (!compressed.empty() && !stream.read(reinterpret_cast<char*>(compressed.data()),
+                                                        static_cast<std::streamsize>(compressed.size())))
+                    throw std::runtime_error("Could not read the complete asset payload.");
+                const auto result =
+                    ZSTD_decompress(decoded.data(), decoded.size(), compressed.data(), compressed.size());
+                if (ZSTD_isError(result) || result != decoded.size())
+                    throw std::runtime_error(std::string("Zstandard decompression failed: ") +
+                                             ZSTD_getErrorName(result));
+            }
+            else
+            {
+                for (const auto& page : entry.Pages)
+                {
+                    stream.seekg(static_cast<std::streamoff>(page.Offset), std::ios::beg);
+                    std::vector<std::byte> compressed(static_cast<std::size_t>(page.CompressedBytes));
+                    if (!stream.read(reinterpret_cast<char*>(compressed.data()),
+                                     static_cast<std::streamsize>(compressed.size())))
+                        throw std::runtime_error("Could not read a complete asset stream page.");
+                    auto destination = std::span(decoded).subspan(static_cast<std::size_t>(page.UncompressedOffset),
+                                                                  static_cast<std::size_t>(page.UncompressedBytes));
+                    const auto result =
+                        ZSTD_decompress(destination.data(), destination.size(), compressed.data(), compressed.size());
+                    if (ZSTD_isError(result) || result != destination.size() ||
+                        Detail::Sha256(destination) != page.Digest)
+                        throw std::runtime_error("Asset stream page failed decompression or integrity validation.");
+                }
+            }
+            if (Detail::Sha256(decoded) != entry.Digest)
+                throw std::runtime_error("Asset payload failed its SHA-256 integrity check.");
+            return decoded;
         }
 
         [[nodiscard]] Ref<Asset> LoadValue(const Job& job) const
         {
             const auto& entry = job.Source.Entry;
-            if (entry.UncompressedBytes > Specification.MaximumAssetBytes ||
-                entry.UncompressedBytes > std::numeric_limits<std::size_t>::max() ||
-                entry.CompressedBytes > std::numeric_limits<std::size_t>::max())
-                throw std::runtime_error("Asset exceeds the configured maximum size.");
-
-            std::ifstream stream(entry.PackPath, std::ios::binary);
-            if (!stream)
-                throw std::runtime_error("Could not open asset pack: " + entry.PackPath.string());
-            Detail::ValidatePackHeader(stream, entry.PackPath);
-            stream.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
-            std::vector<std::byte> compressed(static_cast<std::size_t>(entry.CompressedBytes));
-            if (!compressed.empty() && !stream.read(reinterpret_cast<char*>(compressed.data()),
-                                                    static_cast<std::streamsize>(compressed.size())))
-                throw std::runtime_error("Could not read the complete asset payload.");
-
-            std::vector<std::byte> decoded(static_cast<std::size_t>(entry.UncompressedBytes));
-            const auto result = ZSTD_decompress(decoded.data(), decoded.size(), compressed.data(), compressed.size());
-            if (ZSTD_isError(result) || result != decoded.size())
-                throw std::runtime_error(std::string("Zstandard decompression failed: ") + ZSTD_getErrorName(result));
-            if (Detail::Sha256(decoded) != entry.Digest)
-                throw std::runtime_error("Asset payload failed its SHA-256 integrity check.");
+            auto decoded = DecodeEntry(entry);
 
             Ref<Asset> asset = job.Decoder.Decode(decoded);
             if (!asset || asset->Type() != entry.Type)
                 throw std::runtime_error("Asset decoder returned an empty or mismatched asset type.");
             return asset;
+        }
+
+        void RunStreamJob(const StreamJob& job) noexcept
+        {
+            {
+                std::scoped_lock lock(job.Operation->m_Impl->Mutex);
+                if (job.Operation->m_Impl->CancellationRequested)
+                {
+                    job.Operation->m_Impl->Current = AssetStreamState::Cancelled;
+                    job.Operation->m_Impl->Changed.notify_all();
+                    return;
+                }
+                job.Operation->m_Impl->Current = AssetStreamState::Reading;
+            }
+            job.Operation->m_Impl->Changed.notify_all();
+            try
+            {
+                const auto& entry = job.Source.Entry;
+                std::vector<std::byte> result(job.Bytes);
+                if (job.Bytes != 0)
+                {
+                    if (entry.Pages.empty())
+                    {
+                        const auto all = DecodeEntry(entry);
+                        std::ranges::copy(std::span(all).subspan(static_cast<std::size_t>(job.Offset), job.Bytes),
+                                          result.begin());
+                    }
+                    else
+                    {
+                        std::ifstream stream(entry.PackPath, std::ios::binary);
+                        if (!stream)
+                            throw std::runtime_error("Could not open asset pack for a range read.");
+                        Detail::ValidatePackHeader(stream, entry.PackPath);
+                        const auto requestEnd = job.Offset + job.Bytes;
+                        for (const auto& page : entry.Pages)
+                        {
+                            const auto pageEnd = page.UncompressedOffset + page.UncompressedBytes;
+                            if (pageEnd <= job.Offset || page.UncompressedOffset >= requestEnd)
+                                continue;
+                            {
+                                std::scoped_lock lock(job.Operation->m_Impl->Mutex);
+                                if (job.Operation->m_Impl->CancellationRequested)
+                                    throw AssetStreamState::Cancelled;
+                            }
+                            stream.seekg(static_cast<std::streamoff>(page.Offset), std::ios::beg);
+                            std::vector<std::byte> compressed(static_cast<std::size_t>(page.CompressedBytes));
+                            if (!stream.read(reinterpret_cast<char*>(compressed.data()),
+                                             static_cast<std::streamsize>(compressed.size())))
+                                throw std::runtime_error("Could not read a complete streamed asset page.");
+                            std::vector<std::byte> decoded(static_cast<std::size_t>(page.UncompressedBytes));
+                            const auto decodedBytes =
+                                ZSTD_decompress(decoded.data(), decoded.size(), compressed.data(), compressed.size());
+                            if (ZSTD_isError(decodedBytes) || decodedBytes != decoded.size() ||
+                                Detail::Sha256(decoded) != page.Digest)
+                                throw std::runtime_error("Streamed asset page failed integrity validation.");
+                            const auto copyBegin = std::max(job.Offset, page.UncompressedOffset);
+                            const auto copyEnd = std::min(requestEnd, pageEnd);
+                            const auto sourceOffset = static_cast<std::size_t>(copyBegin - page.UncompressedOffset);
+                            const auto destinationOffset = static_cast<std::size_t>(copyBegin - job.Offset);
+                            const auto copyBytes = static_cast<std::size_t>(copyEnd - copyBegin);
+                            std::ranges::copy(std::span(decoded).subspan(sourceOffset, copyBytes),
+                                              result.begin() + static_cast<std::ptrdiff_t>(destinationOffset));
+                        }
+                    }
+                }
+                {
+                    std::scoped_lock lock(job.Operation->m_Impl->Mutex);
+                    if (job.Operation->m_Impl->CancellationRequested)
+                        job.Operation->m_Impl->Current = AssetStreamState::Cancelled;
+                    else
+                    {
+                        job.Operation->m_Impl->Bytes = std::move(result);
+                        job.Operation->m_Impl->Current = AssetStreamState::Succeeded;
+                    }
+                }
+            }
+            catch (const AssetStreamState)
+            {
+                std::scoped_lock lock(job.Operation->m_Impl->Mutex);
+                job.Operation->m_Impl->Current = AssetStreamState::Cancelled;
+            }
+            catch (const std::exception& exception)
+            {
+                std::scoped_lock lock(job.Operation->m_Impl->Mutex);
+                job.Operation->m_Impl->Failure = {"stream", exception.what()};
+                job.Operation->m_Impl->Current = AssetStreamState::Failed;
+            }
+            catch (...)
+            {
+                std::scoped_lock lock(job.Operation->m_Impl->Mutex);
+                job.Operation->m_Impl->Failure = {"stream", "The streamed asset read reported an unknown failure."};
+                job.Operation->m_Impl->Current = AssetStreamState::Failed;
+            }
+            job.Operation->m_Impl->Changed.notify_all();
         }
 
         AssetSystemSpecification Specification;
@@ -272,6 +479,8 @@ namespace Keire
         std::unordered_map<AssetId, ResolvedEntry> Resolved;
         std::unordered_map<AssetId, Ref<Detail::AssetHandleState>> States;
         std::array<std::deque<Job>, 5> Jobs;
+        std::deque<StreamJob> StreamJobs;
+        std::vector<Ref<AssetStreamOperation>> StreamOperations;
         std::deque<Completion> Completions;
         std::vector<std::thread> Workers;
         mutable std::mutex Mutex;
@@ -640,6 +849,40 @@ namespace Keire
         return true;
     }
 
+    Ref<AssetStreamOperation> AssetSystem::ReadRangeAsync(const AssetId id, const std::uint64_t offset,
+                                                          const std::size_t bytes)
+    {
+        m_Impl->RequireOwnerThread("ReadRangeAsync");
+        std::scoped_lock lock(m_Impl->Mutex);
+        if (!m_Impl->Open || m_Impl->Specification.Mode == AssetMode::Disabled)
+            throw std::logic_error("Asset range reads are unavailable because the asset system is disabled or closed.");
+        if (!id || bytes > m_Impl->Specification.MaximumStreamReadBytes ||
+            offset > std::numeric_limits<std::uint64_t>::max() - bytes)
+            throw std::invalid_argument("Asset stream range is invalid or exceeds the configured bound.");
+        const auto entry = m_Impl->Resolved.find(id);
+        if (entry == m_Impl->Resolved.end())
+            throw std::invalid_argument("Asset stream range references an unavailable asset.");
+        if (offset > entry->second.Entry.UncompressedBytes || bytes > entry->second.Entry.UncompressedBytes - offset)
+            throw std::out_of_range("Asset stream range extends beyond the asset.");
+        if (m_Impl->QueueSize >= m_Impl->Specification.QueueCapacity)
+            throw std::runtime_error("Asset loading queue capacity was exhausted.");
+
+        std::erase_if(m_Impl->StreamOperations,
+                      [](const Ref<AssetStreamOperation>& operation)
+                      {
+                          const auto state = operation->State();
+                          return state == AssetStreamState::Succeeded || state == AssetStreamState::Failed ||
+                                 state == AssetStreamState::Cancelled;
+                      });
+        auto operation = CreateRef<AssetStreamOperation>();
+        m_Impl->StreamJobs.push_back({operation, entry->second, offset, bytes});
+        m_Impl->StreamOperations.push_back(operation);
+        ++m_Impl->QueueSize;
+        m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
+        m_Impl->WorkAvailable.notify_one();
+        return operation;
+    }
+
     std::size_t AssetSystem::PumpCompletions()
     {
         m_Impl->RequireOwnerThread("PumpCompletions");
@@ -767,6 +1010,7 @@ namespace Keire
         if (!m_Impl)
             return;
         std::vector<Ref<Detail::AssetHandleState>> cancelled;
+        std::vector<Ref<AssetStreamOperation>> streamOperations;
         {
             std::scoped_lock lock(m_Impl->Mutex);
             if (!m_Impl->Open && m_Impl->Stopping)
@@ -782,9 +1026,13 @@ namespace Keire
             for (auto& completion : m_Impl->Completions)
                 cancelled.push_back(completion.State);
             m_Impl->Completions.clear();
+            m_Impl->StreamJobs.clear();
+            streamOperations = m_Impl->StreamOperations;
         }
         for (const auto& state : cancelled)
             state->Cancel();
+        for (const auto& operation : streamOperations)
+            operation->Cancel();
         m_Impl->WorkAvailable.notify_all();
         for (auto& worker : m_Impl->Workers)
         {

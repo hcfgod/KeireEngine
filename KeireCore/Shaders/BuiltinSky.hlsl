@@ -122,5 +122,5 @@ float4 PSMain(VertexOutput input) : SV_Target0
                           : CubemapAtlasUv(direction, layout);
     const float4 sampleValue = EnvironmentTexture.SampleLevel(EnvironmentSampler, uv, 0.0F);
     const float3 radiance = SkyParameters.w >= 16.0F ? DecodeRgbe(sampleValue) : sampleValue.rgb;
-    return float4(AcesFitted(radiance * SkyParameters.y * SkyParameters.z), 1.0F);
+    return float4(radiance * SkyParameters.y * SkyParameters.z, 1.0F);
 }

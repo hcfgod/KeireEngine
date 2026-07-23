@@ -2,6 +2,7 @@
 
 #include <compare>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <span>
 #include <string>
@@ -37,11 +38,35 @@ namespace Keire::RenderBackend
         Buffer
     };
 
+    enum class FrameGraphPassKind : std::uint8_t
+    {
+        Upload,
+        Graphics,
+        Compute,
+        Transfer,
+        Present
+    };
+
+    enum class FrameGraphResourceState : std::uint8_t
+    {
+        Undefined,
+        External,
+        CopyDestination,
+        ShaderRead,
+        ColorAttachment,
+        StorageRead,
+        StorageWrite,
+        CopySource,
+        Present
+    };
+
     struct FrameGraphResourceDescription final
     {
         std::string Name;
         FrameGraphResourceKind Kind = FrameGraphResourceKind::Texture;
         bool Imported = false;
+        std::uint64_t CompatibilityKey = 0;
+        std::uint64_t SizeBytes = 0;
     };
 
     struct FrameGraphPassDescription final
@@ -49,6 +74,7 @@ namespace Keire::RenderBackend
         std::string Name;
         std::vector<FrameGraphResource> Reads;
         std::vector<FrameGraphResource> Writes;
+        FrameGraphPassKind Kind = FrameGraphPassKind::Graphics;
     };
 
     struct FrameGraphResourceLifetime final
@@ -60,9 +86,40 @@ namespace Keire::RenderBackend
 
     struct CompiledFrameGraph final
     {
+        struct Transition final
+        {
+            FrameGraphResource Resource;
+            FrameGraphResourceState Before = FrameGraphResourceState::Undefined;
+            FrameGraphResourceState After = FrameGraphResourceState::Undefined;
+        };
+
+        struct PassExecution final
+        {
+            FrameGraphPass Pass;
+            std::vector<Transition> Transitions;
+        };
+
+        struct TransientAllocation final
+        {
+            FrameGraphResourceKind Kind = FrameGraphResourceKind::Texture;
+            std::uint64_t CompatibilityKey = 0;
+            std::uint64_t SizeBytes = 0;
+        };
+
         std::vector<FrameGraphPass> Order;
+        std::vector<PassExecution> Execution;
         std::vector<FrameGraphResourceLifetime> Lifetimes;
+        std::vector<std::uint32_t> PhysicalResources;
+        std::vector<TransientAllocation> TransientAllocations;
         std::vector<std::string> Diagnostics;
+    };
+
+    class FrameGraphExecutionContext
+    {
+      public:
+        virtual ~FrameGraphExecutionContext() = default;
+        virtual void Transition(const CompiledFrameGraph::Transition& transition) = 0;
+        virtual void Execute(FrameGraphPass pass, const FrameGraphPassDescription& description) = 0;
     };
 
     class FrameGraph final
@@ -71,6 +128,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] FrameGraphResource AddResource(FrameGraphResourceDescription description);
         [[nodiscard]] FrameGraphPass AddPass(FrameGraphPassDescription description);
         [[nodiscard]] CompiledFrameGraph Compile() const;
+        void Execute(const CompiledFrameGraph& compiled, FrameGraphExecutionContext& context) const;
         void Clear() noexcept;
 
         [[nodiscard]] std::span<const FrameGraphResourceDescription> Resources() const noexcept { return m_Resources; }
@@ -85,6 +143,17 @@ namespace Keire::RenderBackend
     {
         FrameGraph Graph;
         CompiledFrameGraph Compiled;
+        FrameGraphResource HdrScene;
+        FrameGraphPass ResourceUploads;
+        FrameGraphPass DirectionalShadows;
+        FrameGraphPass ForwardPlusCulling;
+        FrameGraphPass Opaque;
+        FrameGraphPass Sky;
+        FrameGraphPass Transparency;
+        FrameGraphPass ToneMap;
+        FrameGraphPass Overlays;
+        FrameGraphPass Readback;
+        FrameGraphPass Presentation;
     };
 
     [[nodiscard]] StaticSceneFrameGraph BuildStaticSceneFrameGraph();

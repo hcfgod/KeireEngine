@@ -303,6 +303,20 @@ namespace Keire
             return true;
         }
 
+        void UpdateMetadataSubAssets(const std::filesystem::path& path,
+                                     const std::span<const AssetGeneratedSubAsset> generated)
+        {
+            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            Json subAssets = Json::array();
+            for (const auto& subAsset : generated)
+                subAssets.push_back(subAsset.Id.ToString());
+            if (!metadata.contains("subAssets") || metadata["subAssets"] != subAssets)
+            {
+                metadata["subAssets"] = std::move(subAssets);
+                WriteJsonAtomically(path, metadata);
+            }
+        }
+
         [[nodiscard]] AssetSourceRecord ReadMetadata(const std::filesystem::path& sourceRoot,
                                                      const std::filesystem::path& source,
                                                      const std::size_t maximumSourceBytes, const bool digestSource,
@@ -650,6 +664,7 @@ namespace Keire
         [[nodiscard]] AssetImportContext CreateImportContext(const AssetSourceRecord& record) const
         {
             AssetImportContext context;
+            context.Asset = record.Id;
             context.ProjectRoot = Specification.ProjectRoot;
             context.SourceRoot = SourceRoot;
             context.SourcePath = SourceRoot / record.RelativePath;
@@ -666,6 +681,26 @@ namespace Keire
                 return ReadSource(path, maximum);
             };
             context.ImportSettings = record.ImportSettings;
+            context.ResolveSubAssetId = [parent = record.Id](const std::string_view key)
+            {
+                if (key.empty())
+                    throw std::invalid_argument("Generated subasset keys must not be empty.");
+                std::string identity = parent.ToString();
+                identity.push_back('\n');
+                identity.append(key);
+                const auto digest = Detail::Sha256(std::as_bytes(std::span(identity)));
+                std::uint64_t high = 0;
+                std::uint64_t low = 0;
+                for (std::size_t index = 0; index < 8; ++index)
+                {
+                    high = (high << 8U) | std::to_integer<std::uint8_t>(digest[index]);
+                    low = (low << 8U) | std::to_integer<std::uint8_t>(digest[index + 8U]);
+                }
+                // Preserve the UUID layout used by AssetId::Generate while deriving the payload deterministically.
+                high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
+                low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
+                return AssetId(high, low);
+            };
             return context;
         }
 
@@ -728,6 +763,20 @@ namespace Keire
             {
                 if (!dependency || !assetDependencies.insert(dependency).second)
                     throw std::runtime_error("Contextual importer returned an invalid asset dependency record.");
+            }
+            std::unordered_set<AssetId> subAssetIds;
+            std::unordered_set<std::string> subAssetKeys;
+            for (const auto& subAsset : result.SubAssets)
+            {
+                if (!subAsset.Id || !subAsset.Type || subAsset.Key.empty() || subAsset.Key.size() > 4096U ||
+                    subAsset.Name.empty() || subAsset.Name.size() > 4096U ||
+                    subAsset.Bytes.size() > Specification.MaximumSourceBytes ||
+                    !subAssetIds.insert(subAsset.Id).second || !subAssetKeys.insert(subAsset.Key).second)
+                    throw std::runtime_error("Contextual importer returned an invalid generated subasset.");
+                std::unordered_set<AssetId> generatedDependencies;
+                for (const auto dependency : subAsset.AssetDependencies)
+                    if (!dependency || !generatedDependencies.insert(dependency).second)
+                        throw std::runtime_error("Generated subasset contains an invalid dependency record.");
             }
             if (result.Diagnostics.size() > 4096)
                 throw std::runtime_error("Contextual importer returned too many diagnostics.");

@@ -31,9 +31,15 @@ namespace
 
     struct RuntimeManifest final
     {
+        std::filesystem::path ContentRoot;
         Keire::AssetId StartupScene;
         Keire::AssetId DefaultInput;
         Keire::RenderEnvironmentSettings Rendering;
+        std::vector<std::filesystem::path> ManagedAssemblyRoots;
+        bool Scripting = false;
+        bool Physics = false;
+        bool Audio = false;
+        bool Navigation = false;
     };
 
     [[nodiscard]] RuntimeCommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
@@ -73,9 +79,17 @@ namespace
             throw Keire::CommandLineError("Cooked content has no readable runtime-manifest.json.");
         nlohmann::json source;
         stream >> source;
-        if (!stream || !source.is_object() || source.value("schemaVersion", 0U) != 1)
+        if (!stream || !source.is_object())
             throw Keire::CommandLineError("Cooked content has no valid runtime-manifest.json.");
+        const auto schema = source.value("schemaVersion", 0U);
+        if (schema < 2)
+            throw Keire::CommandLineError(
+                "Cooked runtime manifest schema is obsolete; recook the project with this Kéire version.");
+        if (schema > 2)
+            throw Keire::CommandLineError(
+                "Cooked runtime manifest requires a newer Kéire runtime (supported schema: 2).");
         RuntimeManifest result;
+        result.ContentRoot = std::filesystem::absolute(content).lexically_normal();
         result.StartupScene = Keire::AssetId::Parse(source.at("startupScene").get<std::string>());
         if (source.contains("defaultInput") && !source.at("defaultInput").is_null())
             result.DefaultInput = Keire::AssetId::Parse(source.at("defaultInput").get<std::string>());
@@ -87,6 +101,24 @@ namespace
                                          ambient[3].get<float>()};
         result.Rendering.AmbientIntensity = rendering.at("ambientIntensity").get<float>();
         result.Rendering.Exposure = rendering.at("exposure").get<float>();
+        const auto& subsystems = source.at("subsystems");
+        result.Scripting = subsystems.at("scripting").get<bool>();
+        result.Physics = subsystems.at("physics").get<bool>();
+        result.Audio = subsystems.at("audio").get<bool>();
+        result.Navigation = subsystems.at("navigation").get<bool>();
+        for (const auto& root : source.at("managedAssemblyRoots"))
+        {
+            const auto path = std::filesystem::path(root.get<std::string>()).lexically_normal();
+            if (path.empty() || path.is_absolute() || std::ranges::find(path, "..") != path.end())
+                throw Keire::CommandLineError("Runtime manifest contains an invalid managed assembly root.");
+            result.ManagedAssemblyRoots.push_back(path);
+        }
+        const auto& streaming = source.at("streaming");
+        const auto pageBytes = streaming.at("pageBytes").get<std::uint64_t>();
+        const auto concurrentReads = streaming.at("maximumConcurrentReads").get<std::uint32_t>();
+        if (!source.at("buildIdentity").is_object() || pageBytes < 4096 || pageBytes > 16U * 1024U * 1024U ||
+            concurrentReads == 0 || concurrentReads > 256)
+            throw Keire::CommandLineError("Runtime manifest contains invalid build or streaming settings.");
         if (!result.StartupScene || !Keire::Math::IsFinite(result.Rendering.AmbientColor) ||
             !std::isfinite(result.Rendering.AmbientIntensity) || !std::isfinite(result.Rendering.Exposure))
             throw Keire::CommandLineError("Runtime manifest contains invalid identities or rendering values.");
@@ -218,6 +250,28 @@ namespace
       protected:
         void OnInitialize() override
         {
+            if (m_Manifest.Scripting)
+            {
+                Keire::ManagedReloadRequest reload;
+                for (const auto& root : m_Manifest.ManagedAssemblyRoots)
+                {
+                    const auto directory = m_Manifest.ContentRoot / root;
+                    if (!std::filesystem::is_directory(directory))
+                        throw std::runtime_error("Cooked managed assembly root is missing: " + directory.string());
+                    for (const auto& entry : std::filesystem::directory_iterator(directory))
+                        if (entry.is_regular_file() && entry.path().extension() == ".dll" &&
+                            entry.path().filename() != "Keire.Managed.dll")
+                            reload.Assemblies.push_back(entry.path());
+                }
+                std::ranges::sort(reload.Assemblies);
+                if (reload.Assemblies.empty())
+                    throw std::runtime_error("Cooked scripting is enabled but no managed gameplay assemblies exist.");
+                if (!Scripts()->PrepareReload(std::move(reload)))
+                    throw std::runtime_error("Managed gameplay startup failed: " +
+                                             Scripts()->ReloadStatus().Diagnostic);
+                Scripts()->CommitReload();
+                Scripts()->InstallManagedComponents(Scenes()->Components());
+            }
             (void)PushLayer(std::make_unique<RuntimeLayer>(m_Manifest.StartupScene, m_Manifest.Rendering, m_Frames));
         }
 
@@ -250,6 +304,27 @@ namespace Keire
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.Workspace.Enabled = false;
         specification.Input.Mode = InputMode::Disabled;
+        if (manifest.Scripting)
+        {
+            specification.Scripting.Mode = ScriptMode::Enabled;
+            specification.Scripting.ProjectRoot = commandLine.Content;
+            specification.Scripting.AssemblyDirectory = ".";
+            specification.Scripting.RuntimeHostDirectory =
+                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).parent_path() /
+                "Managed";
+            specification.Scripting.RuntimeRootDirectory =
+                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).parent_path() /
+                "Managed" / "Dotnet";
+            specification.Scripting.ManagedApiAssembly =
+                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).parent_path() /
+                "Managed" / "Keire.Managed.dll";
+        }
+        if (manifest.Physics || manifest.Navigation)
+            specification.Physics.Mode = PhysicsMode::Enabled;
+        if (manifest.Audio)
+            specification.Audio.Mode = commandLine.Frames == 0 ? AudioMode::Enabled : AudioMode::Headless;
+        if (manifest.Navigation)
+            specification.Navigation.Mode = NavigationMode::Enabled;
         return std::make_unique<RuntimeApplication>(std::move(specification), std::move(manifest), commandLine.Frames);
     }
 } // namespace Keire

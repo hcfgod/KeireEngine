@@ -20,9 +20,11 @@ the root file defines workspace identity, dependency grouping, and project load 
 `Config/Project.conf` defines names and folders. `Config/Dependencies.lock` defines immutable external inputs. Premake and launchers read these files so renaming and dependency verification have one source of truth.
 
 `Application` creates `RenderSystem` after Windowing and before UI. RenderSystem exclusively owns the SDL_GPU device,
-window claim, swapchain, command recording, fences, viewport resources, and deferred retirement. UI records through a
-private renderer bridge rather than owning presentation. Scene/Game panels exchange only Kéire `RenderView` and
-`RenderSurface` handles; backend resources remain private.
+window claim, swapchain, bounded submission thread, command recording, fences, viewport front/back resources, and
+deferred retirement. Owner-thread scene snapshots cross the private queue by value; GPU recording and submission run
+on the renderer thread and complete before the next owner-thread frame boundary. UI records through a private renderer
+bridge rather than owning presentation. Scene/Game panels exchange only Kéire `RenderView` and `RenderSurface` handles;
+backend resources remain private.
 
 The public `RenderSystem.cpp` PImpl facade delegates to separately compiled private backend units for device/frame
 lifecycle, resource caches, surface/pipeline management, and scene recording. `RenderBackendInternal.h` is an internal
@@ -160,6 +162,8 @@ asset-browser, console, and diagnostics panels own their respective tools. Panel
 snapshots, and named commands through narrow contracts; none retain, friend, or inspect `EditorWorkspaceLayer`.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
+All authoring mutations, including menu primitives and viewport mesh/material drops, cross `SceneDocument`; workspace
+code may inspect an active scene for presentation and picking but does not create, destroy, or edit scene objects itself.
 KeireClient owns the separate Scene gizmo controller and uses only the public UI drawing facade, so neither ImGui draw
 lists nor GPU handles cross into client code.
 
@@ -236,6 +240,11 @@ crosses this boundary.
 confined rollback-capable file operations. `AssetCooker` sorts stable IDs, writes deterministic sharded packs and a
 versioned build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the
 same public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
+Contextual importers may publish typed generated sub-assets. Their IDs are derived from the parent identity plus a
+semantic importer key, reconciled into the parent's metadata, validated with their own dependencies, and flattened into
+the same transactional catalog as the parent. Model materials and embedded texture variants use this path. Material
+extraction reimports the model in the isolated asset worker, transactionally creates editable source assets, and only
+then publishes the replacement development catalog and source index.
 
 Windowing translates SDL drop sessions into an engine-owned event containing only opaque window identity, logical
 position, and filesystem paths. Editor hit-test adapters resolve Project folders or the Scene viewport. External import
@@ -274,7 +283,10 @@ documents and uses the public Kéire UI facade. Details live in [Input Actions E
 
 ## Dependency Build Boundary
 
-Assimp and stb are immutable private asset-import dependencies. The dependency bridge builds Assimp statically with
+Assimp and stb are immutable private asset-import dependencies. Coral d53b268 with the versioned Kéire patch set,
+.NET 10, Jolt 5.6.0, Recast/Detour 1.6.0, and miniaudio
+0.11.25 are immutable private gameplay dependencies resolved into compiler-keyed source and build caches from exact
+commits in `Config/Dependencies.lock`. The dependency bridge builds Assimp statically with
 only OBJ, FBX, glTF, and GLB importers and no tools, tests, samples, or exporters; stb_image has exactly one private
 implementation translation unit. SDKs retain the Assimp/stb license notices and the static Assimp link closure, but do
 not redistribute either dependency's headers or add a general third-party include directory for consumers.
@@ -282,7 +294,9 @@ not redistribute either dependency's headers or add a general third-party includ
 Premake remains the Kéire build authority. A dependency-only CMake invocation builds and installs pinned SDL3 Debug
 and Release variants into ignored, compiler-keyed caches. A generated Lua manifest supplies Premake with the selected
 include/archive paths and platform requirements. SDK packages preserve SDL's official CMake target and make
-`Keire::Core` transitively depend on the private ImGui and Zstd archives followed by `SDL3::SDL3-static`.
+`Keire::Core` transitively depends on the private ImGui, Zstd, Assimp, Jolt, Recast/Detour, miniaudio, Coral.Native,
+and nethost libraries
+followed by `SDL3::SDL3-static`. Gameplay middleware headers never cross the supported include tree.
 
 The pinned Dear ImGui docking sources, standard-string adapter, SDL3 platform backend, and SDL_GPU renderer compile in
 the dedicated `DearImGui` static-library project. It emits `KeireImGui.lib` on Windows and `libKeireImGui.a` on Unix,

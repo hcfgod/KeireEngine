@@ -85,3 +85,47 @@ switch ($Generator) {
         break
     }
 }
+
+$OutputArchitecture = Get-ArchitectureOutputName $Architecture
+$TargetDirectory = Join-Path $Root "Build\Bin\$Configuration-windows-$OutputArchitecture\$Target"
+if (Test-Path -LiteralPath $TargetDirectory) {
+    $CoralConfiguration = if ($Configuration -in @("Release", "Dist")) { "Release" } else { "Debug" }
+    $CoralDirectory = Join-Path $Root "Build\Dependencies\coral-patched\Build\$CoralConfiguration"
+    $ManagedDirectory = Join-Path $TargetDirectory "Managed"
+    $NetHost = Join-Path $Root "Build\Dependencies\coral-nethost\nethost.dll"
+    $DotnetRoot = Join-Path $Root "Build\Dependencies\dotnet-sdk"
+    $CoralFiles = @("Coral.Managed.dll", "Coral.Managed.deps.json", "Coral.Managed.runtimeconfig.json")
+    foreach ($File in $CoralFiles) {
+        if (-not (Test-Path -LiteralPath (Join-Path $CoralDirectory $File))) {
+            throw "The patched Coral runtime output is missing: $File"
+        }
+    }
+    if (-not (Test-Path -LiteralPath $NetHost)) {
+        throw "The .NET nethost runtime is missing."
+    }
+    $HostFxr = Get-ChildItem (Join-Path $DotnetRoot "host\fxr") -Directory |
+        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+    $CoreRuntime = Get-ChildItem (Join-Path $DotnetRoot "shared\Microsoft.NETCore.App") -Directory |
+        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+    if (-not $HostFxr -or -not $CoreRuntime) {
+        throw "The bundled .NET hostfxr or CoreCLR runtime is missing."
+    }
+    New-Item -ItemType Directory -Force -Path $ManagedDirectory | Out-Null
+    foreach ($File in $CoralFiles) {
+        Copy-Item -LiteralPath (Join-Path $CoralDirectory $File) -Destination $ManagedDirectory -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $Root "Build\Managed\Keire.Managed.dll") -Destination $ManagedDirectory -Force
+    Copy-Item -LiteralPath $NetHost -Destination $TargetDirectory -Force
+    $BundledRoot = Join-Path $ManagedDirectory "Dotnet"
+    $BundledHost = Join-Path $BundledRoot "host\fxr\$($HostFxr.Name)"
+    $BundledRuntime = Join-Path $BundledRoot "shared\Microsoft.NETCore.App\$($CoreRuntime.Name)"
+    New-Item -ItemType Directory -Force -Path $BundledHost, $BundledRuntime | Out-Null
+    Copy-Item -Path (Join-Path $HostFxr.FullName "*") -Destination $BundledHost -Recurse -Force
+    Copy-Item -Path (Join-Path $CoreRuntime.FullName "*") -Destination $BundledRuntime -Recurse -Force
+    foreach ($Notice in @("LICENSE.txt", "ThirdPartyNotices.txt")) {
+        $NoticePath = Join-Path $DotnetRoot $Notice
+        if (Test-Path -LiteralPath $NoticePath) {
+            Copy-Item -LiteralPath $NoticePath -Destination $BundledRoot -Force
+        }
+    }
+}

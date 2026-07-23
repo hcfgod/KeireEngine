@@ -140,6 +140,46 @@ The Scene view uses the selected runtime Camera's clear color while retaining it
 camera/light gizmos. Project ambient color, intensity, and exposure are edited through **Edit > Project Settings...**
 and light both Scene and Game views together. A built-in studio sky renders by default; the same panel provides a
 searchable asset picker for custom HDR, equirectangular, cross-atlas, and strip-atlas environments.
+Scene and Game surfaces render through the private frame graph into RGBA16F, resolve with fitted ACES, upload bounded
+Forward+ tile lists, and instance compatible opaque objects on a dedicated renderer submission thread. Renderer
+statistics expose graph transitions, transient allocation slots, instance batches, queue high-water mark, and CPU
+preparation p95 for scalability captures.
+
+## Gameplay-Production Foundations
+
+`ApplicationSpecification` can independently enable application-owned scripting, physics, audio, navigation, and
+profiling services. Scene-owned physics and navigation worlds remain isolated and become inert when their application
+service closes. Public contracts contain only Kéire handles and value types; Jolt, Recast/Detour, and miniaudio remain
+private implementation dependencies.
+
+Physics worlds now simulate static, dynamic, kinematic, and trigger bodies through pinned Jolt 5.6.0. Box, sphere,
+capsule, deterministic convex, and static triangle collision are available. `CookCollisionMesh` validates finite input,
+canonicalizes convex points, produces a stable content hash, honors cancellation, and rejects dynamic triangle bodies
+before registration. Queries and contact events retain deterministic Kéire ordering.
+
+The patched Coral host targets .NET 10, resolves hostfxr through nethost, accepts UTF-8 paths, and owns shutdown
+idempotently. Managed builds reference the staged `Keire.Managed.dll`; successful reloads validate Behaviour type
+registries in a candidate collectible load context, transactionally recreate live Behaviour objects, and replace
+stable-ID script component registrations at an explicit boundary while failed loads retain the active context and
+caller-supplied migration payload. Managed components then receive the same Awake/enable/start/fixed/update/disable/destroy scene
+lifecycle as native components. Cooked games carry RID-specific hostfxr/CoreCLR files and load published gameplay DLLs
+without requiring a system .NET installation. The .NET 10 SDK is required only for project compilation and cook.
+
+Headless audio owns the same pinned miniaudio 0.11.25 engine as device-backed runtime audio. It provides bounded
+resident voices, priority virtualization, listener/source spatial state, doppler and attenuation, snapshot
+interpolation, immutable DSP graphs, meters, and deterministic offline interleaved-PCM rendering without physical
+hardware. Invalid graph replacement remains transactional.
+
+`BakeNavigationMesh` rasterizes explicit triangle geometry with pinned Recast 1.6.0, emits deterministic Detour tile
+data plus an inspection graph, and integrates with revisioned synchronous/asynchronous queries and crowd agents.
+Published meshes, async cancellation/stale rejection, dynamic obstacle invalidation, and deterministic dependency
+hashes remain middleware-free public contracts.
+
+FBX/glTF/GLB import emits stable skeleton, skinned-mesh, and animation-clip subassets with normalized bounded
+influences. Animation graph assets, animator sampling, transitions, root motion, events, and skin palettes are exposed
+through first-party types. The sample project includes a `.keireasm` gameplay assembly, reload-aware third-person and
+navigation scripts, and base/variant prefab assets; `AssetTool cook` compiles and publishes those DLLs before writing
+the runtime manifest.
 
 ## Windowing And Configuration
 
@@ -275,6 +315,11 @@ Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicit
 generation and sampler settings stored in source metadata. Environment textures support equirectangular panoramas and
 horizontal/vertical cubemap cross or strip atlases. Assimp and stb remain private implementation dependencies; their
 headers are not required by engine or SDK consumers.
+
+Model import publishes referenced materials and embedded images as generated sub-assets with stable IDs, so mesh slots,
+PBR factors, alpha/double-sided state, and texture dependencies cook as one graph. Right-click an imported model in the
+Project panel and choose **Extract Materials** to create editable `.keirematerial` copies beside the model. External
+FBX/OBJ texture channels that cannot be converted are reported as import diagnostics instead of being silently dropped.
 
 Selecting a `.keirematerial` in Inspector exposes every shader-declared numeric, color, and texture property. The
 production surface uses base-color, +Y normal, packed metallic-roughness, separate metallic/roughness, occlusion, and

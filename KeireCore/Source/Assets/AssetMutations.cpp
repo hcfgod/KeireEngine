@@ -16,6 +16,14 @@ namespace Keire
                                        const AssetImportSettings& requestedSettings)
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
+        return CreateAssetUnlocked(relativePath, importer, sourceBytes, requestedSettings);
+    }
+
+    AssetId AssetDatabase::CreateAssetUnlocked(const std::filesystem::path& relativePath,
+                                               const AssetImporterRegistration& importer,
+                                               const std::span<const std::byte> sourceBytes,
+                                               const AssetImportSettings& requestedSettings)
+    {
         const auto registered = m_Impl->Importers.find(importer.Name);
         if (registered == m_Impl->Importers.end() || registered->second.Version != importer.Version ||
             registered->second.Type != importer.Type)
@@ -59,6 +67,7 @@ namespace Keire
         {
             Detail::WriteFileAtomically(destination, sourceBytes);
             WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings);
+            UpdateMetadataSubAssets(metadata, validated.SubAssets);
         }
         catch (...)
         {
@@ -83,6 +92,88 @@ namespace Keire
         }
         m_Impl->StoreValidatedImport(record, std::move(validated));
         return id;
+    }
+
+    AssetId AssetDatabase::ExtractMaterial(const AssetId model, const AssetId generatedMaterial,
+                                           const std::filesystem::path& relativePath)
+    {
+        std::scoped_lock operation(*m_Impl->OperationMutex);
+        const auto record = Find(model);
+        if (!record || record->Type != MeshAsset::StaticType())
+            throw std::invalid_argument("Material extraction requires a model asset.");
+        const auto imported = m_Impl->Import(*record);
+        const auto generated = std::ranges::find(imported.SubAssets, generatedMaterial, &AssetGeneratedSubAsset::Id);
+        if (generated == imported.SubAssets.end() || generated->Type != MaterialAsset::StaticType())
+            throw std::invalid_argument("The selected model does not contain that generated material.");
+        const auto definition = MaterialAsset::Decode(generated->Bytes)->Definition();
+        const auto materialImporter = m_Impl->Importers.find("Keire.Material");
+        if (materialImporter == m_Impl->Importers.end())
+            throw std::logic_error("Material extraction requires the Kéire material importer.");
+        const auto source = MaterialAsset::EncodeSource(definition);
+        return CreateAssetUnlocked(relativePath, materialImporter->second, source, {});
+    }
+
+    std::vector<AssetId> AssetDatabase::ExtractMaterials(const AssetId model,
+                                                         const std::filesystem::path& relativeDirectory)
+    {
+        std::scoped_lock operation(*m_Impl->OperationMutex);
+        const auto record = Find(model);
+        if (!record || record->Type != MeshAsset::StaticType())
+            throw std::invalid_argument("Material extraction requires a model asset.");
+        const auto imported = m_Impl->Import(*record);
+        const auto mesh = MeshAsset::Decode(imported.Bytes);
+        const auto materialImporter = m_Impl->Importers.find("Keire.Material");
+        if (materialImporter == m_Impl->Importers.end())
+            throw std::logic_error("Material extraction requires the Kéire material importer.");
+
+        std::vector<AssetId> result;
+        std::vector<std::filesystem::path> createdPaths;
+        std::unordered_set<AssetId> extracted;
+        try
+        {
+            for (const auto& slot : mesh->MaterialSlots())
+            {
+                if (!slot.DefaultMaterial || !extracted.insert(slot.DefaultMaterial).second)
+                    continue;
+                const auto generated =
+                    std::ranges::find(imported.SubAssets, slot.DefaultMaterial, &AssetGeneratedSubAsset::Id);
+                if (generated == imported.SubAssets.end() || generated->Type != MaterialAsset::StaticType())
+                    continue;
+                std::string name = generated->Name.empty() ? slot.Name : generated->Name;
+                for (char& character : name)
+                    if (static_cast<unsigned char>(character) < 32U ||
+                        std::string_view("<>:\"/\\|?*").find(character) != std::string_view::npos)
+                        character = '_';
+                while (!name.empty() && (name.back() == ' ' || name.back() == '.'))
+                    name.pop_back();
+                if (name.empty() || name == "." || name == "..")
+                    name = "Material";
+                auto destination = relativeDirectory / (name + ".keirematerial");
+                for (std::size_t copy = 2;
+                     std::filesystem::exists(m_Impl->SourceRoot / destination) ||
+                     std::filesystem::exists(Detail::PathWithSuffix(m_Impl->SourceRoot / destination, ".keiremeta"));
+                     ++copy)
+                    destination = relativeDirectory / (name + " " + std::to_string(copy) + ".keirematerial");
+                const auto definition = MaterialAsset::Decode(generated->Bytes)->Definition();
+                const auto source = MaterialAsset::EncodeSource(definition);
+                result.push_back(CreateAssetUnlocked(destination, materialImporter->second, source, {}));
+                createdPaths.push_back(destination);
+            }
+        }
+        catch (...)
+        {
+            for (const auto& path : createdPaths)
+            {
+                std::error_code ignored;
+                std::filesystem::remove(m_Impl->SourceRoot / path, ignored);
+                std::filesystem::remove(Detail::PathWithSuffix(m_Impl->SourceRoot / path, ".keiremeta"), ignored);
+            }
+            (void)RefreshUnlocked();
+            throw;
+        }
+        if (result.empty())
+            throw std::runtime_error("The model does not contain extractable generated materials.");
+        return result;
     }
 
     void AssetDatabase::Rename(const AssetId id, std::string newName)

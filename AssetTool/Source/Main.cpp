@@ -1,15 +1,22 @@
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/BuildInfo.h"
 #include "Keire/Log.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Rendering/RenderSystem.h"
+#include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
+#include "Keire/Scripting/ManagedAssemblyAsset.h"
+#include "Keire/Scripting/ScriptSystem.h"
 
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -111,23 +118,126 @@ namespace
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
     }
 
-    void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output)
+    [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
+    {
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            throw std::runtime_error("Could not read managed assembly definition: " + path.string());
+        const std::vector<char> characters{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+        std::vector<std::byte> result(characters.size());
+        std::ranges::transform(characters, result.begin(), [](const char value) { return std::byte(value); });
+        return result;
+    }
+
+    [[nodiscard]] bool BuildManagedAssemblies(const Keire::AssetDatabase& database, const Keire::Project& project,
+                                              const std::filesystem::path& output, const std::string& profile,
+                                              const std::filesystem::path& executable)
+    {
+        Keire::ManagedBuildRequest request;
+        for (const auto& record : database.Records())
+        {
+            if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
+                continue;
+            const auto assembly =
+                Keire::ManagedAssemblyAsset::Decode(ReadBytes(project.Root() / "Assets" / record.RelativePath));
+            if (assembly->Definition().Classification != Keire::ManagedAssemblyClassification::Runtime)
+                continue;
+            request.Assemblies.push_back({record.Id, assembly->Definition()});
+        }
+        if (request.Assemblies.empty())
+            return false;
+        std::vector<std::string> assemblyNames;
+        assemblyNames.reserve(request.Assemblies.size());
+        for (const auto& assembly : request.Assemblies)
+            assemblyNames.push_back(assembly.Definition.Name);
+
+        Keire::ScriptSystemSpecification specification;
+        specification.Mode = Keire::ScriptMode::Enabled;
+        specification.ProjectRoot = project.Root();
+        specification.ManagedApiAssembly = executable.parent_path() / "Managed" / "Keire.Managed.dll";
+#if defined(_WIN32)
+        const auto developmentDotnet =
+            executable.parent_path().parent_path().parent_path().parent_path().parent_path() /
+            "Build/Dependencies/dotnet-sdk/dotnet.exe";
+#else
+        const auto developmentDotnet =
+            executable.parent_path().parent_path().parent_path().parent_path().parent_path() /
+            "Build/Dependencies/dotnet-sdk/dotnet";
+#endif
+        if (std::filesystem::is_regular_file(developmentDotnet))
+            specification.DotnetExecutable = developmentDotnet;
+        auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
+        request.Configuration = profile == "Development" ? "Debug" : "Release";
+        const auto operation = scripts->StartBuild(std::move(request));
+        if (!scripts->WaitForBuild(operation, std::chrono::minutes(5)))
+        {
+            scripts->CancelBuild(operation);
+            throw std::runtime_error("Managed gameplay build timed out.");
+        }
+        const auto status = scripts->BuildStatus();
+        if (status.State != Keire::ManagedBuildState::Succeeded)
+        {
+            const auto detail = status.Diagnostics.empty() ? std::string("no diagnostic was produced")
+                                                           : status.Diagnostics.front().Message;
+            throw std::runtime_error("Managed gameplay build failed: " + detail);
+        }
+
+        const auto destination = output / "ManagedAssemblies";
+        const auto staging = output / ".managed-staging";
+        std::error_code error;
+        std::filesystem::remove_all(staging, error);
+        if (error)
+            throw std::filesystem::filesystem_error("Could not clear managed assembly staging.", staging, error);
+        std::filesystem::create_directories(staging);
+        for (const auto& entry : std::filesystem::directory_iterator(status.ActiveAssemblyDirectory))
+        {
+            const auto filename = entry.path().filename().string();
+            const bool requested = std::ranges::any_of(
+                assemblyNames, [&](const std::string& name)
+                { return filename == name + ".dll" || filename == name + ".pdb" || filename == name + ".deps.json"; });
+            if (entry.is_regular_file() && requested)
+                std::filesystem::copy_file(entry.path(), staging / entry.path().filename(),
+                                           std::filesystem::copy_options::overwrite_existing);
+        }
+        if (std::filesystem::is_empty(staging))
+            throw std::runtime_error("Managed gameplay build published no runtime assemblies.");
+        std::filesystem::remove_all(destination, error);
+        if (error)
+            throw std::filesystem::filesystem_error("Could not replace managed assembly output.", destination, error);
+        std::filesystem::rename(staging, destination);
+        scripts->Close();
+        return true;
+    }
+
+    void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output, const bool scripting)
     {
         const auto& descriptor = project.Descriptor();
         if (!descriptor.StartupScene)
             throw std::runtime_error("Runtime cooking requires a configured startup scene.");
         const auto rendering = Keire::LoadRenderEnvironmentSettings(project.Root());
+        const auto& build = Keire::GetBuildInfo();
+        nlohmann::json manifest{
+            {"schemaVersion", 2},
+            {"startupScene", descriptor.StartupScene.ToString()},
+            {"defaultInput",
+             descriptor.DefaultInput ? nlohmann::json(descriptor.DefaultInput.ToString()) : nlohmann::json(nullptr)},
+            {"buildIdentity",
+             {{"engineVersion", build.Version},
+              {"configuration", build.Configuration},
+              {"platform", build.Platform},
+              {"architecture", build.Architecture}}},
+            {"managedAssemblyRoots",
+             scripting ? nlohmann::json::array({"ManagedAssemblies"}) : nlohmann::json::array()},
+            {"subsystems", {{"scripting", scripting}, {"physics", true}, {"audio", true}, {"navigation", true}}},
+            {"streaming", {{"pageBytes", 262144}, {"maximumConcurrentReads", 8}}},
+            {"rendering",
+             {{"ambientColor",
+               {rendering.AmbientColor.Red, rendering.AmbientColor.Green, rendering.AmbientColor.Blue,
+                rendering.AmbientColor.Alpha}},
+              {"ambientIntensity", rendering.AmbientIntensity},
+              {"exposure", rendering.Exposure}}}};
         std::ofstream stream(output / "runtime-manifest.json", std::ios::binary | std::ios::trunc);
-        stream << std::setprecision(9) << "{\n  \"schemaVersion\": 1,\n  \"startupScene\": \""
-               << descriptor.StartupScene.ToString() << "\",\n  \"defaultInput\": ";
-        if (descriptor.DefaultInput)
-            stream << '"' << descriptor.DefaultInput.ToString() << '"';
-        else
-            stream << "null";
-        stream << ",\n  \"rendering\": {\n    \"ambientColor\": [" << rendering.AmbientColor.Red << ", "
-               << rendering.AmbientColor.Green << ", " << rendering.AmbientColor.Blue << ", "
-               << rendering.AmbientColor.Alpha << "],\n    \"ambientIntensity\": " << rendering.AmbientIntensity
-               << ",\n    \"exposure\": " << rendering.Exposure << "\n  }\n}\n";
+        stream << std::setprecision(9) << manifest.dump(2) << '\n';
         if (!stream)
             throw std::runtime_error("Could not write the cooked runtime manifest.");
     }
@@ -193,6 +303,7 @@ namespace
             Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
             databaseSpecification.Importers = {
                 Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
+                Keire::CreatePrefabAssetImporter(),      Keire::CreateManagedAssemblyAssetImporter(),
                 Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
                 Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
             auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
@@ -217,7 +328,10 @@ namespace
                     output = commandLine.Project / output;
                 const auto result = Keire::AssetCooker::Cook(*database, commandLine.Profile, output);
                 Keire::AssetCooker::Validate(result.CatalogPath);
-                WriteRuntimeManifest(*project, result.CatalogPath.parent_path());
+                const auto scripting = BuildManagedAssemblies(
+                    *database, *project, result.CatalogPath.parent_path(), commandLine.Profile.Name,
+                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])));
+                WriteRuntimeManifest(*project, result.CatalogPath.parent_path(), scripting);
                 std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
                           << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
             }

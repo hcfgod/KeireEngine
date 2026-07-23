@@ -27,17 +27,21 @@ Material schema v2 owns `Opaque`, `Mask`, and `Blend` alpha mode, alpha cutoff, 
 write depth and reject fragments below their cutoff. A shader schema-v1 blend flag remains a compatibility default.
 Failed material or shader revisions retain the complete last-good binding.
 
-The private frame graph declares resource upload, directional-shadow, Forward+ culling, opaque/mask, sky,
+The private frame graph executes resource upload, directional-shadow, Forward+ culling, opaque/mask, sky,
 transparency, ACES tone-map, overlay, readback, and presentation passes. Its compiler validates transient reads,
-derives deterministic hazard order, and records resource lifetimes. It is an internal backend contract, not a public
-render-graph API.
+derives deterministic hazard order, records resource lifetimes, aliases compatible non-overlapping transients, and
+emits every resource transition before invoking a backend pass. SDL_GPU consumes those transitions at copy, render,
+and presentation encoder boundaries and performs the native D3D12/Vulkan/Metal barriers. It is an internal backend
+contract, not a public render-graph API. Each surface materializes the compiled physical texture slots in a
+graph-owned transient heap; HDR scene color is resolved through that heap rather than through an independently
+allocated attachment.
 
 Point and spot lights are serializable registry components. Scene packets cap visible local lights at 4,096 and build
-deterministic 16x16 CPU tile lists with 128 lights per tile and explicit overflow statistics. This is the bounded
-reference fallback used when the GPU compute route is unavailable. PBR and default-material draws consume the first
-deterministic 62 visible local lights through a fragment uniform block kept below SDL's portable 4 KiB Vulkan limit,
-using smooth range attenuation and inner/outer
-spot-cone falloff on D3D12 and Vulkan. GPU tile-list consumption remains the next Forward+ step.
+deterministic 16x16 tile lists with 128 lights per tile and explicit overflow statistics. The renderer uploads the full
+light array, compact tile records, and packed light indices to graphics storage buffers. PBR and default-material
+fragments consume only the current tile's list; the first 62 lights retain the portable shadow-uniform ABI while later
+lights remain unshadowed rather than disappearing. The CPU builder is the deterministic fallback and reference for a
+future compute builder, not the fragment-lighting path.
 
 `RenderSystem.cpp` is the stable PImpl facade. Private compiled implementation units separate backend data types,
 device/frame and fence lifecycle, surface/pipeline management, renderer-owned asset caches, and scene recording behind
@@ -59,13 +63,17 @@ renderer. UI-only applications therefore require no migration.
 
 Viewport layout happens before GPU recording. Scene and Game panels request pixel extents from their logical size and
 display scale, then submit a `SceneRenderRequest` to an opaque `RenderView`. The renderer applies pending resizes at a
-safe boundary, records scene/grid passes, resolves multisampling, composites UI, acquires the swapchain, and submits one
-coordinated command buffer. A fence retires replaced textures, buffers, and pipelines without a device-idle wait during
-normal resize churn.
+safe boundary, then a bounded dedicated submission thread records scene/grid passes, resolves multisampling,
+composites UI, acquires the swapchain, and submits one coordinated command buffer. Each surface exchanges two display
+textures, so UI consumes a stable front image while ACES writes the back image. A fence retires replaced textures,
+buffers, instance data, light lists, and pipelines without a device-idle wait during normal resize churn.
+Backend-only test hooks deterministically exercise device-loss propagation, bounded queue saturation, and
+resize/minimize/restore transitions without exposing fault injection through the supported renderer API.
 
-Color rendering is linear into an sRGB target. The renderer selects D32, D24, then D16 depth and falls back through 4x,
-2x, then 1x sampling when a requested format is unsupported. A hidden, minimized, zero-sized, or unavailable swapchain
-skips presentation safely. Viewport surfaces keep their last valid image through transient zero-sized layout changes.
+Scene color is linear RGBA16F. Multisampling resolves in HDR before a fullscreen fitted-ACES pass writes the sRGB
+display surface. The renderer selects D32, D24, then D16 depth and falls back through 4x, 2x, then 1x sampling when a
+requested format is unsupported. A hidden, minimized, zero-sized, or unavailable swapchain skips presentation safely.
+Viewport surfaces keep their last valid image through transient zero-sized layout changes.
 
 ## Views And Cameras
 
@@ -163,6 +171,6 @@ strip atlases. Layout and HDR encoding are versioned texture import data, so rei
 sampling behavior across supported GPU backends.
 
 This foundation renders asset-backed textured PBR meshes, deterministic directional and local-light shadow maps,
-multiple-light accumulation, sky backgrounds, and the editor grid. Image-based lighting, the production HDR
-post-processing path, GPU Forward+ tile-list consumption, custom raw GPU passes, and a dedicated render thread remain
-later milestones.
+GPU-consumed Forward+ light lists, instanced compatible geometry, sky backgrounds, an RGBA16F/ACES pipeline, and the
+editor grid through a dedicated submission thread. Image-based lighting and custom raw GPU passes remain later
+milestones.

@@ -1,5 +1,6 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
+#include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/Log.h"
 
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
@@ -27,6 +29,10 @@ namespace Keire::RenderBackend
                 ReleaseTextureResources(retired);
             for (auto* retired : frame.RetiredPipelines)
                 SDL_ReleaseGPUGraphicsPipeline(Device, retired);
+            for (auto& retired : frame.RetiredForwardPlus)
+                ReleaseForwardPlusResources(retired);
+            for (auto* transient : frame.TransientBuffers)
+                SDL_ReleaseGPUBuffer(Device, transient);
             SDL_ReleaseGPUFence(Device, frame.Fence);
         }
         if (InFlight.size() < Specification.MaximumFramesInFlight)
@@ -57,6 +63,10 @@ namespace Keire::RenderBackend
         Statistics.OverflowedLightTiles = 0;
         Statistics.DirectionalShadowCascades = 0;
         Statistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
+        Statistics.ExecutedFrameGraphPasses = 0;
+        Statistics.FrameGraphTransitions = 0;
+        Statistics.TransientResourceAllocations =
+            static_cast<std::uint32_t>(SceneFrameGraph.Compiled.TransientAllocations.size());
         CollectCompletedFrames();
         for (const auto& surface : LiveSurfaces())
         {
@@ -74,6 +84,7 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::Submit(SceneRenderRequest request)
     {
+        const auto preparationStarted = std::chrono::steady_clock::now();
         RequireOwner("Submit");
         if (!FrameActive)
             throw std::logic_error("Scene render requests are accepted only during an active render frame.");
@@ -118,15 +129,29 @@ namespace Keire::RenderBackend
             const auto transform = entity.GetComponent<TransformComponent>();
             if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
                 continue;
+            std::vector<Matrix4> skinPalette;
+            if (const auto animator = entity.GetComponent<AnimatorComponent>(); animator && animator->Enabled())
+                skinPalette.assign(animator->SkinPalette().begin(), animator->SkinPalette().end());
             packet.DrawItems.push_back({renderer->Mesh(),
                                         {renderer->Materials().begin(), renderer->Materials().end()},
                                         transform->WorldMatrix(),
                                         renderer->Tint(),
                                         entity.Id(),
+                                        std::move(skinPalette),
                                         renderer->CastShadows(),
                                         renderer->ReceiveShadows()});
         }
         Requests.push_back({std::move(packet), &surface});
+        Statistics.CpuPreparationMilliseconds =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count();
+        PreparationSamples.push_back(Statistics.CpuPreparationMilliseconds);
+        constexpr std::size_t sampleWindow = 120;
+        if (PreparationSamples.size() > sampleWindow)
+            PreparationSamples.pop_front();
+        std::vector<float> orderedSamples(PreparationSamples.begin(), PreparationSamples.end());
+        std::ranges::sort(orderedSamples);
+        const auto percentileIndex = (orderedSamples.size() * 95U + 99U) / 100U - 1U;
+        Statistics.CpuPreparationP95Milliseconds = orderedSamples[percentileIndex];
     }
 
     const GpuMeshResources& RenderSharedState::ResolveMesh(const AssetId id)
@@ -406,6 +431,8 @@ namespace Keire::RenderBackend
             result.Pipeline = pipeline->Handle;
             result.Surface = surface;
             result.ReceivesShadows = shader->LastGood->Definition().ReceivesShadows;
+            result.UsesForwardPlus = shader->LastGood->Definition().UsesForwardPlus;
+            result.UsesInstancing = shader->LastGood->Definition().UsesInstancing;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

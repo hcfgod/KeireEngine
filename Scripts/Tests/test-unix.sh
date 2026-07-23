@@ -260,7 +260,9 @@ assert_true grep -q 'developmentArtifact' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'manifest commit does not match' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q -- '--allow-dirty' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"
-assert_true grep -q '"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}" SDL3::SDL3-static' "$ROOT/Config/PackageConfig.cmake.in"
+assert_true grep -q '"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}"' "$ROOT/Config/PackageConfig.cmake.in"
+assert_true grep -q '"${_jolt_sdk_library}" "${_recast_sdk_libraries}" "${_miniaudio_sdk_library}"' "$ROOT/Config/PackageConfig.cmake.in"
+assert_true grep -q 'SDL3::SDL3-static' "$ROOT/Config/PackageConfig.cmake.in"
 security_workflow="$ROOT/.github/workflows/security.yml"
 grep -q '^  security-status:$' "$security_workflow" || fail 'Security activation sentinel is missing'
 grep -q '^    if: always()$' "$security_workflow" || fail 'Security activation sentinel is not unconditional'

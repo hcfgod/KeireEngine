@@ -806,6 +806,9 @@ namespace KeireEditor
                 ui.Separator();
                 if (ui.MenuItem("Reimport"))
                     editor.ImportAssetBrowserAssets();
+                if (record.Type == Keire::MeshAsset::StaticType() && !record.SubAssets.empty() &&
+                    ui.MenuItem("Extract Materials"))
+                    editor.ExtractAssetBrowserMaterials(record.Id);
                 if (ui.MenuItem("Reveal in File Explorer"))
                     RevealPath(editor, AssetRoot / record.RelativePath);
                 if (ui.MenuItem("Copy Relative Path"))

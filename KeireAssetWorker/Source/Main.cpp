@@ -1,6 +1,8 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Project/Project.h"
+#include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
+#include "Keire/Scripting/ManagedAssemblyAsset.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
@@ -64,6 +66,7 @@ namespace
         (void)Keire::Project::Open(projectRoot);
         Keire::AssetDatabaseSpecification specification{.ProjectRoot = projectRoot};
         specification.Importers = {Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
+                                   Keire::CreatePrefabAssetImporter(),      Keire::CreateManagedAssemblyAssetImporter(),
                                    Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
                                    Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
         return Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
@@ -126,6 +129,10 @@ namespace
             if (request.Kind == Keire::Detail::AssetWorkerOperationKind::CreateAsset &&
                 !IsWithin(operationRoot, request.CreatePayloadPath))
                 throw std::invalid_argument("Asset-worker create payload escapes its operation directory.");
+            if (request.Kind == Keire::Detail::AssetWorkerOperationKind::ExtractMaterials &&
+                (!request.ExtractModel || request.ExtractDirectory.empty() || request.ExtractDirectory.is_absolute() ||
+                 !IsWithin(request.ProjectRoot / "Assets", request.ProjectRoot / "Assets" / request.ExtractDirectory)))
+                throw std::invalid_argument("Asset-worker material extraction escapes Assets.");
             for (const auto& auxiliary : request.CreateAuxiliarySources)
             {
                 if (!IsWithin(operationRoot, auxiliary.PayloadPath))
@@ -208,6 +215,10 @@ namespace
                 }
                 break;
             }
+            case Keire::Detail::AssetWorkerOperationKind::ExtractMaterials:
+                result.MutatedAssets = database->ExtractMaterials(request.ExtractModel, request.ExtractDirectory);
+                result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                break;
             case Keire::Detail::AssetWorkerOperationKind::Mutate:
             {
                 const auto& mutation = request.Mutation;

@@ -321,6 +321,20 @@ namespace Keire
             commandLine.SmokeWindow || commandLine.SmokeUi ? SceneMode::Disabled : SceneMode::Enabled;
         specification.Input.Mode =
             commandLine.SmokeWindow || commandLine.SmokeUi ? InputMode::Disabled : InputMode::Enabled;
+        if (!commandLine.SmokeWindow && !commandLine.SmokeUi)
+        {
+            specification.Profiling.Mode = ProfilerMode::Enabled;
+            specification.Scripting.Mode = ScriptMode::Enabled;
+            specification.Scripting.ProjectRoot = commandLine.ProjectPath;
+            specification.Scripting.RuntimeHostDirectory = commandLine.ExecutablePath.parent_path() / "Managed";
+            specification.Scripting.RuntimeRootDirectory =
+                commandLine.ExecutablePath.parent_path() / "Managed" / "Dotnet";
+            specification.Scripting.ManagedApiAssembly =
+                commandLine.ExecutablePath.parent_path() / "Managed" / "Keire.Managed.dll";
+            specification.Physics.Mode = PhysicsMode::Enabled;
+            specification.Audio.Mode = AudioMode::Enabled;
+            specification.Navigation.Mode = NavigationMode::Enabled;
+        }
         std::filesystem::path windowPlacementPath;
         std::optional<KeireEditor::EditorWindowPlacement> windowPlacement;
         if (!commandLine.SmokeWindow && !commandLine.SmokeUi && !commandLine.SmokeProject)

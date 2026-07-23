@@ -122,40 +122,41 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             if (ui.MenuItem("Create Empty"))
             {
                 RecordSceneUndo();
-                m_SceneDocument->Select(scene->CreateEntity().Id().Value());
+                m_SceneDocument->Select(m_SceneDocument->CreateEntity().Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }
             if (ui.MenuItem("Create Child", false, static_cast<bool>(m_SceneDocument->Selection())))
             {
                 RecordSceneUndo();
-                const auto parent = scene->FindEntity(Keire::EntityId(m_SceneDocument->Selection()));
-                m_SceneDocument->Select(scene->CreateEntity("GameObject", parent).Id().Value());
+                m_SceneDocument->Select(
+                    m_SceneDocument->CreateEntity("GameObject", Keire::EntityId(m_SceneDocument->Selection())).Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }
             if (ui.MenuItem("Directional Light"))
             {
                 RecordSceneUndo();
-                auto created = scene->CreateEntity("Directional Light");
-                (void)created.AddComponent<Keire::DirectionalLightComponent>();
-                m_SceneDocument->Select(created.Id().Value());
+                const auto created = m_SceneDocument->CreateEntity("Directional Light", {},
+                                                                   Keire::DirectionalLightComponent::StaticType());
+                m_SceneDocument->Select(created.Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }
             if (ui.MenuItem("Main Camera"))
             {
                 RecordSceneUndo();
-                auto created = scene->CreateEntity("Main Camera");
-                created.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.0F, -10.0F});
-                (void)created.AddComponent<Keire::CameraComponent>();
-                m_SceneDocument->Select(created.Id().Value());
+                const auto created =
+                    m_SceneDocument->CreateEntity("Main Camera", {}, Keire::CameraComponent::StaticType());
+                m_SceneDocument->SetTransform(created, {.Position = Keire::Vector3{0.0F, 1.0F, -10.0F}});
+                m_SceneDocument->Select(created.Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }
             if (ui.MenuItem("3D Object/Cube"))
             {
                 RecordSceneUndo();
-                auto created = scene->CreateEntity("Cube");
-                auto renderer = created.AddComponent<Keire::MeshRendererComponent>();
-                renderer->SetMesh(Keire::MeshAsset::CubeId());
-                m_SceneDocument->Select(created.Id().Value());
+                const auto created =
+                    m_SceneDocument->CreateEntity("Cube", {}, Keire::MeshRendererComponent::StaticType());
+                m_SceneDocument->SetComponentProperty(created, Keire::MeshRendererComponent::StaticType(), "mesh",
+                                                      Keire::MeshAsset::CubeId());
+                m_SceneDocument->Select(created.Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }
             ui.Separator();
@@ -169,7 +170,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
                 for (const auto selectedEntity : selection)
                 {
                     MarkPlayEditorEntity(selectedEntity);
-                    (void)scene->DestroyEntity(Keire::EntityId(selectedEntity));
+                    m_SceneDocument->DeleteEntity(Keire::EntityId(selectedEntity));
                 }
                 m_SceneDocument->ClearSelection();
             }
@@ -268,6 +269,9 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_InputActionsPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
+            DrawPanelMenuItem(ui, m_PrefabOverrides);
+            DrawPanelMenuItem(ui, m_BuildSettings);
+            DrawPanelMenuItem(ui, m_Profiler);
         }
     }
 }
@@ -485,7 +489,11 @@ void EditorWorkspaceLayer::DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace
                     else if (dialog == Dialog::RenameTheme)
                         workspace.RenameTheme(workspace.ActiveTheme(), m_ProfileName);
                     else if (dialog == Dialog::RenameEntity && ActiveScene() && m_SceneDocument->Selection())
-                        (void)ActiveScene()->RenameObject(m_SceneDocument->Selection(), m_ProfileName);
+                    {
+                        RecordSceneUndo("Rename Entity");
+                        m_SceneDocument->RenameEntity(Keire::EntityId(m_SceneDocument->Selection()), m_ProfileName);
+                        MarkPlayEditorEntity(m_SceneDocument->Selection());
+                    }
                     m_Dialog = Dialog::None;
                     ui.CloseCurrentPopup();
                 }

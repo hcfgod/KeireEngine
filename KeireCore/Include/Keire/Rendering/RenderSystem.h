@@ -159,6 +159,12 @@ namespace Keire
         std::uint32_t OverflowedLightTiles = 0;
         std::uint32_t DirectionalShadowCascades = 0;
         std::uint32_t PlannedFrameGraphPasses = 0;
+        std::uint32_t ExecutedFrameGraphPasses = 0;
+        std::uint32_t FrameGraphTransitions = 0;
+        std::uint32_t TransientResourceAllocations = 0;
+        std::uint32_t RendererQueueHighWaterMark = 0;
+        float CpuPreparationMilliseconds = 0.0F;
+        float CpuPreparationP95Milliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
     };
 

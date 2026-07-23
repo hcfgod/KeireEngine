@@ -176,8 +176,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
         if (LocalLights[lightIndex].Parameters.y > 0.5F)
         {
             const float coneCosine = dot(normalize(LocalLights[lightIndex].DirectionOuter.xyz), -direction);
-            attenuation *= smoothstep(LocalLights[lightIndex].DirectionOuter.w,
-                                      LocalLights[lightIndex].Parameters.x, coneCosine);
+            attenuation *= smoothstep(LocalLights[lightIndex].DirectionOuter.w, LocalLights[lightIndex].Parameters.x,
+                                      coneCosine);
         }
         const float diffuse = saturate(dot(normalize(input.WorldNormal), direction));
         localLighting += input.BaseColor.rgb * LocalLights[lightIndex].ColorIntensity.rgb *

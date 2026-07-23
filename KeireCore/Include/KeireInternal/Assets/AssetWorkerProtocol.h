@@ -14,6 +14,7 @@ namespace Keire::Detail
         ImportAll,
         ExternalImport,
         CreateAsset,
+        ExtractMaterials,
         Mutate,
         Cook,
         UndoExternalImport,
@@ -59,6 +60,8 @@ namespace Keire::Detail
         std::filesystem::path CreatePayloadPath;
         AssetImportSettings CreateSettings;
         std::vector<AssetWorkerAuxiliarySource> CreateAuxiliarySources;
+        AssetId ExtractModel;
+        std::filesystem::path ExtractDirectory;
         AssetWorkerMutation Mutation;
         AssetBuildProfile BuildProfile;
         std::filesystem::path CookOutput;

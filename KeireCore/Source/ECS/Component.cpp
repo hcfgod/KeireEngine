@@ -1,5 +1,6 @@
 #include "Keire/ECS/Component.h"
 
+#include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
@@ -10,10 +11,12 @@
 #include "KeireInternal/SceneState.h"
 
 #include <algorithm>
+#include <atomic>
 #include <ranges>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace Keire
@@ -163,7 +166,27 @@ namespace Keire
 
         std::thread::id OwnerThread = std::this_thread::get_id();
         std::unordered_map<ComponentTypeId, ComponentRegistration> Registrations;
+        std::atomic<std::uint64_t> Revision{0};
     };
+
+    namespace
+    {
+        void ValidateComponentRegistration(const ComponentRegistration& registration)
+        {
+            if (!registration.Type || registration.Name.empty() || registration.Name.size() > 128 ||
+                registration.SchemaVersion == 0 || !registration.Factory || !registration.Serialize ||
+                !registration.Deserialize)
+                throw std::invalid_argument("Component registration is incomplete or invalid.");
+            if (std::ranges::any_of(registration.RequiredComponents,
+                                    [&](const auto type) { return !type || type == registration.Type; }))
+                throw std::invalid_argument(
+                    "Component dependencies must be non-empty and cannot reference themselves.");
+            auto dependencies = registration.RequiredComponents;
+            std::ranges::sort(dependencies);
+            if (std::ranges::adjacent_find(dependencies) != dependencies.end())
+                throw std::invalid_argument("Component registration contains duplicate dependencies.");
+        }
+    } // namespace
 
     ComponentRegistry::ComponentRegistry() : m_Impl(std::make_unique<Impl>()) {}
 
@@ -172,21 +195,57 @@ namespace Keire
     void ComponentRegistry::Register(ComponentRegistration registration)
     {
         m_Impl->RequireOwner("Register");
-        if (!registration.Type || registration.Name.empty() || registration.Name.size() > 128 ||
-            registration.SchemaVersion == 0 || !registration.Factory || !registration.Serialize ||
-            !registration.Deserialize)
-            throw std::invalid_argument("Component registration is incomplete or invalid.");
-        if (std::ranges::any_of(registration.RequiredComponents,
-                                [&](const auto type) { return !type || type == registration.Type; }))
-            throw std::invalid_argument("Component dependencies must be non-empty and cannot reference themselves.");
+        ValidateComponentRegistration(registration);
         const auto [_, inserted] = m_Impl->Registrations.emplace(registration.Type, std::move(registration));
         if (!inserted)
             throw std::invalid_argument("A component registration already uses this stable type ID.");
+        m_Impl->Revision.fetch_add(1, std::memory_order_release);
+    }
+
+    void ComponentRegistry::ReplaceBatch(const std::span<const ComponentTypeId> removals,
+                                         std::vector<ComponentRegistration> registrations)
+    {
+        m_Impl->RequireOwner("ReplaceBatch");
+        auto replacement = m_Impl->Registrations;
+        std::unordered_set<ComponentTypeId> removed;
+        for (const auto type : removals)
+        {
+            if (!type || !removed.insert(type).second)
+                throw std::invalid_argument("Component registration removal set is invalid.");
+            replacement.erase(type);
+        }
+
+        std::unordered_set<ComponentTypeId> inserted;
+        for (const auto& registration : registrations)
+        {
+            ValidateComponentRegistration(registration);
+            if (!inserted.insert(registration.Type).second)
+                throw std::invalid_argument("Component registration batch contains a duplicate stable type ID.");
+        }
+        for (auto& registration : registrations)
+            replacement.insert_or_assign(registration.Type, std::move(registration));
+
+        for (const auto& [_, registration] : replacement)
+        {
+            for (const auto required : registration.RequiredComponents)
+            {
+                if (!replacement.contains(required))
+                    throw std::invalid_argument("Component registration batch leaves an unresolved dependency.");
+            }
+        }
+
+        m_Impl->Registrations.swap(replacement);
+        m_Impl->Revision.fetch_add(1, std::memory_order_release);
     }
 
     bool ComponentRegistry::Contains(const ComponentTypeId type) const noexcept
     {
         return m_Impl->Registrations.contains(type);
+    }
+
+    std::uint64_t ComponentRegistry::Revision() const noexcept
+    {
+        return m_Impl->Revision.load(std::memory_order_acquire);
     }
 
     std::optional<ComponentRegistration> ComponentRegistry::Find(const ComponentTypeId type) const
@@ -217,6 +276,7 @@ namespace Keire
         result->Register(CreatePointLightComponentRegistration());
         result->Register(CreateSpotLightComponentRegistration());
         result->Register(CreateMeshRendererComponentRegistration());
+        result->Register(CreateAnimatorComponentRegistration());
         return result;
     }
 } // namespace Keire

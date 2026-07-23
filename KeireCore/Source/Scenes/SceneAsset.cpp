@@ -30,6 +30,24 @@ namespace Keire
         [[nodiscard]] std::vector<AssetId> RenderingDependencies(const SceneDefinition& definition)
         {
             std::set<AssetId> unique;
+            for (const auto& instance : definition.PrefabInstances)
+                unique.insert(instance.Prefab);
+            const auto collectOverrideDependencies = [&](const std::vector<PrefabOverrideDefinition>& overrides)
+            {
+                for (const auto& overrideValue : overrides)
+                {
+                    if (overrideValue.Kind == PrefabOverrideKind::SetComponentProperty &&
+                        std::holds_alternative<AssetId>(overrideValue.Value))
+                    {
+                        const auto dependency = std::get<AssetId>(overrideValue.Value);
+                        if (dependency)
+                            unique.insert(dependency);
+                    }
+                }
+            };
+            collectOverrideDependencies(definition.PrefabOverrides);
+            for (const auto& instance : definition.PrefabInstances)
+                collectOverrideDependencies(instance.Overrides);
             for (const auto& object : definition.Objects)
             {
                 for (const auto& component : object.Components)
@@ -131,9 +149,217 @@ namespace Keire
             return object;
         }
 
+        [[nodiscard]] Json EncodePropertyValue(const ComponentPropertyValue& value)
+        {
+            return std::visit(
+                [](const auto& current) -> Json
+                {
+                    using T = std::remove_cvref_t<decltype(current)>;
+                    if constexpr (std::same_as<T, Vector2>)
+                        return Json::array({current.X, current.Y});
+                    else if constexpr (std::same_as<T, Vector3>)
+                        return Json::array({current.X, current.Y, current.Z});
+                    else if constexpr (std::same_as<T, Vector4>)
+                        return Json::array({current.X, current.Y, current.Z, current.W});
+                    else if constexpr (std::same_as<T, Quaternion>)
+                        return Json::array({current.X, current.Y, current.Z, current.W});
+                    else if constexpr (std::same_as<T, Color>)
+                        return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
+                    else if constexpr (std::same_as<T, AssetId> || std::same_as<T, EntityId>)
+                        return current ? Json(current.ToString()) : Json(nullptr);
+                    else
+                        return Json(current);
+                },
+                value);
+        }
+
+        [[nodiscard]] ComponentPropertyValue DecodePropertyValue(const std::size_t type, const Json& value)
+        {
+            const auto array = [&](const std::size_t count)
+            {
+                if (!value.is_array() || value.size() != count)
+                    throw std::runtime_error("Prefab override value has an invalid shape.");
+            };
+            switch (type)
+            {
+            case 0:
+                return value.get<bool>();
+            case 1:
+                return value.get<std::int64_t>();
+            case 2:
+                return value.get<double>();
+            case 3:
+                return value.get<std::string>();
+            case 4:
+                array(2);
+                return Vector2{value[0].get<float>(), value[1].get<float>()};
+            case 5:
+                array(3);
+                return Vector3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+            case 6:
+                array(4);
+                return Vector4{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
+                               value[3].get<float>()};
+            case 7:
+                array(4);
+                return Quaternion{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
+                                  value[3].get<float>()};
+            case 8:
+                array(4);
+                return Color{value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
+                             value[3].get<float>()};
+            case 9:
+                return value.is_null() ? AssetId{} : AssetId::Parse(value.get<std::string>());
+            case 10:
+                return value.is_null() ? EntityId{} : EntityId::Parse(value.get<std::string>());
+            default:
+                throw std::runtime_error("Prefab override value uses an unsupported type.");
+            }
+        }
+
+        [[nodiscard]] Json EncodeEntity(const SceneObjectDefinition& object)
+        {
+            Json components = Json::array();
+            bool hasTransform = false;
+            for (const auto& component : object.Components)
+            {
+                components.push_back({{"type", component.Type.ToString()},
+                                      {"version", component.SchemaVersion},
+                                      {"enabled", component.Enabled},
+                                      {"data", Json::parse(component.Data)}});
+                hasTransform |= component.Type == TransformComponent::StaticType();
+            }
+            if (!hasTransform)
+            {
+                const auto transform = MakeTransformDefinition(object.Transform);
+                Json serializedTransform{{"type", transform.Type.ToString()},
+                                         {"version", transform.SchemaVersion},
+                                         {"enabled", transform.Enabled},
+                                         {"data", Json::parse(transform.Data)}};
+                components.insert(components.begin(), std::move(serializedTransform));
+            }
+            Json result{{"id", object.Id.ToString()},
+                        {"name", object.Name},
+                        {"active", object.Active},
+                        {"components", std::move(components)}};
+            result["parent"] = object.Parent ? Json(object.Parent.ToString()) : Json(nullptr);
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeOverride(const PrefabOverrideDefinition& value)
+        {
+            Json result{{"kind", static_cast<std::uint8_t>(value.Kind)},
+                        {"object", value.Object ? Json(value.Object.ToString()) : Json(nullptr)}};
+            switch (value.Kind)
+            {
+            case PrefabOverrideKind::RenameObject:
+                result["name"] = value.Name;
+                break;
+            case PrefabOverrideKind::SetObjectActive:
+                result["active"] = value.Active;
+                break;
+            case PrefabOverrideKind::SetObjectTransform:
+                result["transform"] = TransformData(value.Transform);
+                break;
+            case PrefabOverrideKind::SetComponentProperty:
+                result["component"] = value.Component.ToString();
+                result["property"] = value.Property;
+                result["value"] = {{"type", value.Value.index()}, {"data", EncodePropertyValue(value.Value)}};
+                break;
+            case PrefabOverrideKind::AddComponent:
+                result["componentValue"] = {{"type", value.AddedComponent->Type.ToString()},
+                                            {"version", value.AddedComponent->SchemaVersion},
+                                            {"enabled", value.AddedComponent->Enabled},
+                                            {"data", Json::parse(value.AddedComponent->Data)}};
+                break;
+            case PrefabOverrideKind::RemoveComponent:
+                result["component"] = value.Component.ToString();
+                break;
+            case PrefabOverrideKind::AddObject:
+                result["objectValue"] = EncodeEntity(*value.AddedObject);
+                break;
+            case PrefabOverrideKind::RemoveObject:
+                break;
+            }
+            return result;
+        }
+
+        [[nodiscard]] PrefabOverrideDefinition DecodeOverride(const Json& value)
+        {
+            PrefabOverrideDefinition result;
+            result.Kind = static_cast<PrefabOverrideKind>(value.at("kind").get<std::uint8_t>());
+            if (value.contains("object") && !value.at("object").is_null())
+                result.Object = AssetId::Parse(value.at("object").get<std::string>());
+            switch (result.Kind)
+            {
+            case PrefabOverrideKind::RenameObject:
+                result.Name = value.at("name").get<std::string>();
+                break;
+            case PrefabOverrideKind::SetObjectActive:
+                result.Active = value.at("active").get<bool>();
+                break;
+            case PrefabOverrideKind::SetObjectTransform:
+                result.Transform = ParseTransformData(value.at("transform"));
+                break;
+            case PrefabOverrideKind::SetComponentProperty:
+                result.Component = ComponentTypeId::Parse(value.at("component").get<std::string>());
+                result.Property = value.at("property").get<std::string>();
+                result.Value =
+                    DecodePropertyValue(value.at("value").at("type").get<std::size_t>(), value.at("value").at("data"));
+                break;
+            case PrefabOverrideKind::AddComponent:
+            {
+                const auto& component = value.at("componentValue");
+                result.AddedComponent =
+                    SceneComponentDefinition{ComponentTypeId::Parse(component.at("type").get<std::string>()),
+                                             component.at("version").get<std::uint32_t>(),
+                                             component.value("enabled", true), component.at("data").dump()};
+                break;
+            }
+            case PrefabOverrideKind::RemoveComponent:
+                result.Component = ComponentTypeId::Parse(value.at("component").get<std::string>());
+                break;
+            case PrefabOverrideKind::AddObject:
+                result.AddedObject = DecodeEntity(value.at("objectValue"));
+                break;
+            case PrefabOverrideKind::RemoveObject:
+                break;
+            default:
+                throw std::runtime_error("Prefab override uses an unsupported operation.");
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeInstance(const PrefabInstanceDefinition& instance)
+        {
+            Json mappings = Json::array();
+            for (const auto& mapping : instance.Objects)
+                mappings.push_back({{"source", mapping.Source.ToString()}, {"instance", mapping.Instance.ToString()}});
+            Json overrides = Json::array();
+            for (const auto& value : instance.Overrides)
+                overrides.push_back(EncodeOverride(value));
+            return {{"prefab", instance.Prefab.ToString()},
+                    {"root", instance.Root.ToString()},
+                    {"objects", std::move(mappings)},
+                    {"overrides", std::move(overrides)}};
+        }
+
+        [[nodiscard]] PrefabInstanceDefinition DecodeInstance(const Json& value)
+        {
+            PrefabInstanceDefinition result;
+            result.Prefab = AssetId::Parse(value.at("prefab").get<std::string>());
+            result.Root = AssetId::Parse(value.at("root").get<std::string>());
+            for (const auto& mapping : value.at("objects"))
+                result.Objects.push_back({AssetId::Parse(mapping.at("source").get<std::string>()),
+                                          AssetId::Parse(mapping.at("instance").get<std::string>())});
+            for (const auto& overrideValue : value.value("overrides", Json::array()))
+                result.Overrides.push_back(DecodeOverride(overrideValue));
+            return result;
+        }
+
         [[nodiscard]] SceneDefinition DecodeVersionOne(const Json& document)
         {
-            SceneDefinition definition{.SchemaVersion = 2, .Name = document.at("name").get<std::string>()};
+            SceneDefinition definition{.SchemaVersion = 3, .Name = document.at("name").get<std::string>()};
             const auto& objects = document.at("objects");
             if (!objects.is_array())
                 throw std::runtime_error("Scene objects must be an array.");
@@ -186,9 +412,9 @@ namespace Keire
         {
             definition = DecodeVersionOne(document);
         }
-        else if (version == 2)
+        else if (version == 2 || version == 3)
         {
-            definition.SchemaVersion = 2;
+            definition.SchemaVersion = 3;
             definition.Name = document.at("name").get<std::string>();
             const auto& entities = document.at("entities");
             if (!entities.is_array())
@@ -196,6 +422,13 @@ namespace Keire
             definition.Objects.reserve(entities.size());
             for (const auto& value : entities)
                 definition.Objects.push_back(DecodeEntity(value));
+            if (version == 3)
+            {
+                for (const auto& instance : document.value("prefabInstances", Json::array()))
+                    definition.PrefabInstances.push_back(DecodeInstance(instance));
+                for (const auto& overrideValue : document.value("prefabOverrides", Json::array()))
+                    definition.PrefabOverrides.push_back(DecodeOverride(overrideValue));
+            }
         }
         else
         {
@@ -210,34 +443,18 @@ namespace Keire
         Validate(definition);
         Json entities = Json::array();
         for (const auto& object : definition.Objects)
-        {
-            Json components = Json::array();
-            bool hasTransform = false;
-            for (const auto& component : object.Components)
-            {
-                const auto data = Json::parse(component.Data);
-                components.push_back({{"type", component.Type.ToString()},
-                                      {"version", component.SchemaVersion},
-                                      {"enabled", component.Enabled},
-                                      {"data", data}});
-                hasTransform |= component.Type == TransformComponent::StaticType();
-            }
-            if (!hasTransform)
-            {
-                const auto transform = MakeTransformDefinition(object.Transform);
-                components.insert(components.begin(), {{"type", transform.Type.ToString()},
-                                                       {"version", transform.SchemaVersion},
-                                                       {"enabled", transform.Enabled},
-                                                       {"data", Json::parse(transform.Data)}});
-            }
-            Json entity{{"id", object.Id.ToString()},
-                        {"name", object.Name},
-                        {"active", object.Active},
-                        {"components", std::move(components)}};
-            entity["parent"] = object.Parent ? Json(object.Parent.ToString()) : Json(nullptr);
-            entities.push_back(std::move(entity));
-        }
-        const Json document{{"schemaVersion", 2}, {"name", definition.Name}, {"entities", std::move(entities)}};
+            entities.push_back(EncodeEntity(object));
+        Json instances = Json::array();
+        for (const auto& instance : definition.PrefabInstances)
+            instances.push_back(EncodeInstance(instance));
+        Json overrides = Json::array();
+        for (const auto& overrideValue : definition.PrefabOverrides)
+            overrides.push_back(EncodeOverride(overrideValue));
+        const Json document{{"schemaVersion", 3},
+                            {"name", definition.Name},
+                            {"entities", std::move(entities)},
+                            {"prefabInstances", std::move(instances)},
+                            {"prefabOverrides", std::move(overrides)}};
         const auto text = document.dump(2) + '\n';
         std::vector<std::byte> result(text.size());
         std::memcpy(result.data(), text.data(), text.size());
@@ -246,7 +463,7 @@ namespace Keire
 
     SceneDefinition SceneAsset::EmptyDefinition(std::string name)
     {
-        return {.SchemaVersion = 2, .Name = std::move(name)};
+        return {.SchemaVersion = 3, .Name = std::move(name)};
     }
 
     SceneDefinition SceneAsset::SampleDefinition()
@@ -313,8 +530,8 @@ namespace Keire
 
     void SceneAsset::Validate(const SceneDefinition& definition)
     {
-        if (definition.SchemaVersion != 2)
-            throw std::invalid_argument("Scene definition must use canonical schema version 2.");
+        if (definition.SchemaVersion != 3)
+            throw std::invalid_argument("Scene definition must use canonical schema version 3.");
         if (definition.Name.empty() || definition.Name.size() > MaximumNameBytes)
             throw std::invalid_argument("Scene name is empty or exceeds 256 UTF-8 bytes.");
         if (definition.Objects.size() > MaximumObjects)
@@ -367,6 +584,73 @@ namespace Keire
                 throw std::invalid_argument("Scene compatibility transform contains invalid values.");
             depths.emplace(object.Id, depth);
         }
+
+        for (const auto& instance : definition.PrefabInstances)
+        {
+            if (!instance.Prefab || !instance.Root || !depths.contains(instance.Root) || instance.Objects.empty())
+                throw std::invalid_argument("Prefab instance is incomplete or references a missing scene root.");
+            std::set<AssetId> sources;
+            std::set<AssetId> instances;
+            for (const auto& mapping : instance.Objects)
+            {
+                if (!mapping.Source || !mapping.Instance || !depths.contains(mapping.Instance) ||
+                    !sources.insert(mapping.Source).second || !instances.insert(mapping.Instance).second)
+                    throw std::invalid_argument("Prefab instance object mapping is invalid.");
+            }
+            if (!instances.contains(instance.Root))
+                throw std::invalid_argument("Prefab instance root must participate in its object mapping.");
+        }
+
+        const auto validateOverrides = [](const std::vector<PrefabOverrideDefinition>& overrides)
+        {
+            for (const auto& value : overrides)
+            {
+                switch (value.Kind)
+                {
+                case PrefabOverrideKind::RenameObject:
+                    if (!value.Object || value.Name.empty() || value.Name.size() > MaximumNameBytes)
+                        throw std::invalid_argument("Prefab rename override is invalid.");
+                    break;
+                case PrefabOverrideKind::SetObjectActive:
+                    if (!value.Object)
+                        throw std::invalid_argument("Prefab active override has no target.");
+                    break;
+                case PrefabOverrideKind::SetObjectTransform:
+                    if (!value.Object || !Math::IsFinite(value.Transform.Position) ||
+                        !Math::IsFinite(value.Transform.Rotation) || !Math::IsFinite(value.Transform.Scale) ||
+                        std::abs(Math::Length(value.Transform.Rotation) - 1.0F) > 0.001F)
+                        throw std::invalid_argument("Prefab transform override is invalid.");
+                    break;
+                case PrefabOverrideKind::SetComponentProperty:
+                    if (!value.Object || !value.Component || value.Property.empty() || value.Property.size() > 256)
+                        throw std::invalid_argument("Prefab component property override is invalid.");
+                    break;
+                case PrefabOverrideKind::AddComponent:
+                    if (!value.Object || !value.AddedComponent || !value.AddedComponent->Type ||
+                        value.AddedComponent->SchemaVersion == 0 || value.AddedComponent->Data.empty() ||
+                        !Json::parse(value.AddedComponent->Data).is_object())
+                        throw std::invalid_argument("Prefab add-component override is invalid.");
+                    break;
+                case PrefabOverrideKind::RemoveComponent:
+                    if (!value.Object || !value.Component || value.Component == TransformComponent::StaticType())
+                        throw std::invalid_argument("Prefab remove-component override is invalid.");
+                    break;
+                case PrefabOverrideKind::AddObject:
+                    if (!value.AddedObject || !value.AddedObject->Id || value.AddedObject->Name.empty())
+                        throw std::invalid_argument("Prefab add-object override is invalid.");
+                    break;
+                case PrefabOverrideKind::RemoveObject:
+                    if (!value.Object)
+                        throw std::invalid_argument("Prefab remove-object override has no target.");
+                    break;
+                default:
+                    throw std::invalid_argument("Prefab override uses an unsupported operation.");
+                }
+            }
+        };
+        validateOverrides(definition.PrefabOverrides);
+        for (const auto& instance : definition.PrefabInstances)
+            validateOverrides(instance.Overrides);
     }
 
     AssetDecoderRegistration CreateSceneAssetDecoder()
@@ -379,7 +663,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Scene";
-        result.Version = 2;
+        result.Version = 3;
         result.Type = SceneAsset::StaticType();
         result.Extensions = {".keirescene"};
         result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)

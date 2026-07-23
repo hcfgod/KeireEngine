@@ -27,3 +27,4 @@ case "$GENERATOR" in
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; make -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;
     *) printf "Unsupported build generator '%s'.\n" "$GENERATOR" >&2; exit 1 ;;
 esac
+bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$TARGET"

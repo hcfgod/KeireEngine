@@ -203,6 +203,10 @@ namespace Keire
                     {
                         stored->SourceDependencies = imported.SourceDependencies;
                         stored->Metadata = imported.Metadata;
+                        stored->SubAssets.clear();
+                        stored->SubAssets.reserve(imported.SubAssets.size());
+                        for (const auto& subAsset : imported.SubAssets)
+                            stored->SubAssets.push_back(subAsset.Id);
                         for (const auto dependency : imported.AssetDependencies)
                         {
                             if (std::ranges::find(stored->Dependencies, dependency) == stored->Dependencies.end())
@@ -211,6 +215,7 @@ namespace Keire
                         std::ranges::sort(stored->Dependencies);
                     }
                 }
+                UpdateMetadataSubAssets(record.MetadataPath, imported.SubAssets);
                 const auto object = m_Impl->ObjectPath(record, m_Impl->ImportDigest(record, imported));
                 if (std::filesystem::exists(object))
                 {

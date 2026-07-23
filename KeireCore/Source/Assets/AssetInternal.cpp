@@ -194,6 +194,37 @@ namespace Keire::Detail
             entry.CompressedBytes = item.at("compressedBytes").get<std::uint64_t>();
             entry.UncompressedBytes = item.at("uncompressedBytes").get<std::uint64_t>();
             entry.Digest = ParseDigest(item.at("sha256").get<std::string>());
+            if (item.contains("pages"))
+            {
+                if (!item.at("pages").is_array())
+                    throw std::runtime_error("Asset catalog contains malformed streamed pages.");
+                for (const auto& page : item.at("pages"))
+                {
+                    entry.Pages.push_back({page.at("offset").get<std::uint64_t>(),
+                                           page.at("compressedBytes").get<std::uint64_t>(),
+                                           page.at("uncompressedOffset").get<std::uint64_t>(),
+                                           page.at("uncompressedBytes").get<std::uint64_t>(),
+                                           ParseDigest(page.at("sha256").get<std::string>())});
+                }
+                std::uint64_t expectedCompressedOffset = entry.Offset;
+                std::uint64_t expectedUncompressedOffset = 0;
+                std::uint64_t compressedBytes = 0;
+                for (const auto& page : entry.Pages)
+                {
+                    if (page.Offset != expectedCompressedOffset ||
+                        page.UncompressedOffset != expectedUncompressedOffset || page.CompressedBytes == 0 ||
+                        page.UncompressedBytes == 0 ||
+                        page.CompressedBytes > std::numeric_limits<std::uint64_t>::max() - expectedCompressedOffset ||
+                        page.UncompressedBytes > std::numeric_limits<std::uint64_t>::max() - expectedUncompressedOffset)
+                        throw std::runtime_error("Asset catalog contains invalid streamed page ranges.");
+                    expectedCompressedOffset += page.CompressedBytes;
+                    expectedUncompressedOffset += page.UncompressedBytes;
+                    compressedBytes += page.CompressedBytes;
+                }
+                if (!entry.Pages.empty() &&
+                    (compressedBytes != entry.CompressedBytes || expectedUncompressedOffset != entry.UncompressedBytes))
+                    throw std::runtime_error("Asset catalog streamed page totals do not match the asset.");
+            }
             if (item.contains("dependencies"))
             {
                 for (const auto& dependency : item["dependencies"])
@@ -239,6 +270,13 @@ namespace Keire::Detail
                 const auto& bounds = *entry.Metadata.LocalBounds;
                 metadata["localBounds"] = {{"minimum", bounds.Minimum}, {"maximum", bounds.Maximum}};
             }
+            Json pages = Json::array();
+            for (const auto& page : entry.Pages)
+                pages.push_back({{"offset", page.Offset},
+                                 {"compressedBytes", page.CompressedBytes},
+                                 {"uncompressedOffset", page.UncompressedOffset},
+                                 {"uncompressedBytes", page.UncompressedBytes},
+                                 {"sha256", DigestToString(page.Digest)}});
             assets.push_back({{"id", entry.Id.ToString()},
                               {"type", entry.Type.ToString()},
                               {"pack", entry.PackPath.generic_string()},
@@ -246,6 +284,7 @@ namespace Keire::Detail
                               {"compressedBytes", entry.CompressedBytes},
                               {"uncompressedBytes", entry.UncompressedBytes},
                               {"sha256", DigestToString(entry.Digest)},
+                              {"pages", std::move(pages)},
                               {"dependencies", std::move(dependencies)},
                               {"metadata", std::move(metadata)}});
         }
@@ -276,7 +315,7 @@ namespace Keire::Detail
         const auto version =
             std::to_integer<std::uint32_t>(values[0]) | (std::to_integer<std::uint32_t>(values[1]) << 8U) |
             (std::to_integer<std::uint32_t>(values[2]) << 16U) | (std::to_integer<std::uint32_t>(values[3]) << 24U);
-        if (!stream || magic != PackMagic || version != PackVersion)
+        if (!stream || magic != PackMagic || version < MinimumReadablePackVersion || version > PackVersion)
             throw std::runtime_error("Asset pack has an invalid header: " + PathToUtf8(path));
     }
 

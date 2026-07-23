@@ -19,9 +19,13 @@ namespace Keire
         if (profile.Name.empty() || profile.CompressionLevel < ZSTD_minCLevel() ||
             profile.CompressionLevel > ZSTD_maxCLevel() || profile.MaximumPackBytes <= Detail::PackHeaderBytes)
             throw std::invalid_argument("Asset build profile contains invalid compression or shard settings.");
+        if (profile.StreamPageBytes < 4096U || profile.StreamPageBytes > 16U * 1024U * 1024U)
+            throw std::invalid_argument("Asset stream page size must be in the range 4 KiB..16 MiB.");
         const auto records = database.Records();
         struct PreparedAsset final
         {
+            AssetId Id;
+            AssetTypeId Type;
             const AssetSourceRecord* Record = nullptr;
             AssetImportOutput Imported;
             std::vector<AssetId> Dependencies;
@@ -46,8 +50,22 @@ namespace Keire
                     dependencies.push_back(dependency);
             }
             std::ranges::sort(dependencies);
-            indices.emplace(record.Id, prepared.size());
-            prepared.push_back({&record, std::move(imported), std::move(dependencies)});
+            const auto parentIndex = prepared.size();
+            if (!indices.emplace(record.Id, parentIndex).second)
+                throw std::runtime_error("Asset import produced a duplicate catalog identity: " + record.Id.ToString());
+            prepared.push_back({record.Id, record.Type, &record, std::move(imported), std::move(dependencies)});
+            for (const auto& subAsset : prepared[parentIndex].Imported.SubAssets)
+            {
+                if (!indices.emplace(subAsset.Id, prepared.size()).second)
+                    throw std::runtime_error("Generated subasset identity collides with another catalog entry: " +
+                                             subAsset.Id.ToString());
+                AssetImportOutput generated;
+                generated.Bytes = subAsset.Bytes;
+                generated.AssetDependencies = subAsset.AssetDependencies;
+                generated.Metadata = subAsset.Metadata;
+                prepared.push_back(
+                    {subAsset.Id, subAsset.Type, nullptr, std::move(generated), subAsset.AssetDependencies});
+            }
             ++preparedCount;
             ReportOperationProgress(progress, AssetOperationPhase::Cooking, preparedCount, records.size(),
                                     record.RelativePath);
@@ -60,13 +78,13 @@ namespace Keire
         }
         for (auto& asset : prepared)
         {
-            if (asset.Record->Type != MaterialAsset::StaticType())
+            if (asset.Type != MaterialAsset::StaticType())
                 continue;
             const auto material = MaterialAsset::Decode(asset.Imported.Bytes);
             if (!material->Definition().Shader)
-                throw std::runtime_error("Material asset must reference a shader: " + asset.Record->Id.ToString());
+                throw std::runtime_error("Material asset must reference a shader: " + asset.Id.ToString());
             const auto shaderIndex = indices.find(material->Definition().Shader);
-            if (shaderIndex == indices.end() || prepared[shaderIndex->second].Record->Type != ShaderAsset::StaticType())
+            if (shaderIndex == indices.end() || prepared[shaderIndex->second].Type != ShaderAsset::StaticType())
                 throw std::runtime_error("Material shader dependency is missing or has the wrong type: " +
                                          material->Definition().Shader.ToString());
             const auto shader = ShaderAsset::Decode(prepared[shaderIndex->second].Imported.Bytes);
@@ -95,7 +113,7 @@ namespace Keire
                     std::erase(asset.Dependencies, texture);
                     continue;
                 }
-                if (prepared[textureIndex->second].Record->Type != Texture2DAsset::StaticType())
+                if (prepared[textureIndex->second].Type != Texture2DAsset::StaticType())
                     throw std::runtime_error("Material texture property '" + property.Name +
                                              "' is missing or has the wrong asset type.");
                 const auto textureAsset = Texture2DAsset::Decode(prepared[textureIndex->second].Imported.Bytes);
@@ -121,8 +139,8 @@ namespace Keire
         std::unordered_set<AssetId> included;
         if (profile.Roots.empty())
         {
-            for (const auto& record : records)
-                included.insert(record.Id);
+            for (const auto& asset : prepared)
+                included.insert(asset.Id);
         }
         else
         {
@@ -172,36 +190,69 @@ namespace Keire
             for (auto& asset : prepared)
             {
                 ThrowIfOperationCancelled(cancellation);
-                const auto& record = *asset.Record;
-                if (!included.contains(record.Id))
+                if (!included.contains(asset.Id))
                     continue;
                 auto bytes = std::move(asset.Imported.Bytes);
-                if (const auto* importer = database.m_Impl->FindImporter(record); importer && importer->Cook)
-                    bytes = importer->Cook(bytes, profile.Target);
-                const auto compressed = Compress(bytes, profile.CompressionLevel);
-                if (compressed.size() > profile.MaximumPackBytes - Detail::PackHeaderBytes)
+                if (asset.Record)
+                    if (const auto* importer = database.m_Impl->FindImporter(*asset.Record); importer && importer->Cook)
+                        bytes = importer->Cook(bytes, profile.Target);
+                struct PreparedPage final
+                {
+                    std::size_t UncompressedOffset = 0;
+                    std::size_t UncompressedBytes = 0;
+                    std::vector<std::byte> Compressed;
+                    Detail::Sha256Digest Digest{};
+                };
+                std::vector<PreparedPage> pages;
+                std::uint64_t compressedBytes = 0;
+                if (bytes.empty())
+                {
+                    auto compressed = Compress(bytes, profile.CompressionLevel);
+                    compressedBytes = compressed.size();
+                    pages.push_back({0, 0, std::move(compressed), Detail::Sha256(bytes)});
+                }
+                else
+                {
+                    for (std::size_t offset = 0; offset < bytes.size(); offset += profile.StreamPageBytes)
+                    {
+                        const auto count = std::min(profile.StreamPageBytes, bytes.size() - offset);
+                        const auto source = std::span(bytes).subspan(offset, count);
+                        auto compressed = Compress(source, profile.CompressionLevel);
+                        if (compressed.size() > std::numeric_limits<std::uint64_t>::max() - compressedBytes)
+                            throw std::runtime_error("Compressed streamed asset size overflowed.");
+                        compressedBytes += compressed.size();
+                        pages.push_back({offset, count, std::move(compressed), Detail::Sha256(source)});
+                    }
+                }
+                if (compressedBytes > profile.MaximumPackBytes - Detail::PackHeaderBytes)
                     throw std::runtime_error("Compressed asset exceeds the build profile's maximum pack size.");
                 if (!pack.is_open() ||
-                    (packBytes > Detail::PackHeaderBytes && compressed.size() > profile.MaximumPackBytes - packBytes))
+                    (packBytes > Detail::PackHeaderBytes && compressedBytes > profile.MaximumPackBytes - packBytes))
                     openPack();
                 Detail::CatalogEntry entry;
-                entry.Id = record.Id;
-                entry.Type = record.Type;
+                entry.Id = asset.Id;
+                entry.Type = asset.Type;
                 entry.PackPath = packPath.filename();
                 entry.Offset = packBytes;
-                entry.CompressedBytes = compressed.size();
+                entry.CompressedBytes = compressedBytes;
                 entry.UncompressedBytes = bytes.size();
                 entry.Digest = Detail::Sha256(bytes);
                 entry.Dependencies = std::move(asset.Dependencies);
                 entry.Metadata = asset.Imported.Metadata;
-                if (!compressed.empty())
-                    pack.write(reinterpret_cast<const char*>(compressed.data()),
-                               static_cast<std::streamsize>(compressed.size()));
+                for (const auto& page : pages)
+                {
+                    if (page.UncompressedBytes != 0)
+                        entry.Pages.push_back({packBytes, page.Compressed.size(), page.UncompressedOffset,
+                                               page.UncompressedBytes, page.Digest});
+                    if (!page.Compressed.empty())
+                        pack.write(reinterpret_cast<const char*>(page.Compressed.data()),
+                                   static_cast<std::streamsize>(page.Compressed.size()));
+                    packBytes += page.Compressed.size();
+                }
                 if (!pack)
                     throw std::runtime_error("Could not write asset pack payload.");
-                packBytes += compressed.size();
                 result.UncompressedBytes += bytes.size();
-                result.CompressedBytes += compressed.size();
+                result.CompressedBytes += compressedBytes;
                 entries.push_back(std::move(entry));
             }
             if (pack.is_open())
@@ -213,6 +264,7 @@ namespace Keire
                                     {"target", static_cast<std::uint8_t>(profile.Target)},
                                     {"compression", "zstd"},
                                     {"compressionLevel", profile.CompressionLevel},
+                                    {"streamPageBytes", profile.StreamPageBytes},
                                     {"maximumPackBytes", profile.MaximumPackBytes},
                                     {"strict", profile.Strict}};
             Detail::WriteTextFileAtomically(temporary / "build-profile.json", buildProfile.dump(2) + '\n');
@@ -252,14 +304,36 @@ namespace Keire
             const auto packSize = std::filesystem::file_size(entry.PackPath, error);
             if (error || entry.Offset > packSize || entry.CompressedBytes > packSize - entry.Offset)
                 throw std::runtime_error("Cooked asset payload is outside its pack.");
-            pack.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
-            std::vector<std::byte> compressed(static_cast<std::size_t>(entry.CompressedBytes));
-            if (!compressed.empty() &&
-                !pack.read(reinterpret_cast<char*>(compressed.data()), static_cast<std::streamsize>(compressed.size())))
-                throw std::runtime_error("Could not read cooked asset payload.");
             std::vector<std::byte> bytes(static_cast<std::size_t>(entry.UncompressedBytes));
-            const auto size = ZSTD_decompress(bytes.data(), bytes.size(), compressed.data(), compressed.size());
-            if (ZSTD_isError(size) || size != bytes.size() || Detail::Sha256(bytes) != entry.Digest)
+            if (entry.Pages.empty())
+            {
+                pack.seekg(static_cast<std::streamoff>(entry.Offset), std::ios::beg);
+                std::vector<std::byte> compressed(static_cast<std::size_t>(entry.CompressedBytes));
+                if (!compressed.empty() && !pack.read(reinterpret_cast<char*>(compressed.data()),
+                                                      static_cast<std::streamsize>(compressed.size())))
+                    throw std::runtime_error("Could not read cooked asset payload.");
+                const auto size = ZSTD_decompress(bytes.data(), bytes.size(), compressed.data(), compressed.size());
+                if (ZSTD_isError(size) || size != bytes.size())
+                    throw std::runtime_error("Cooked asset payload failed decompression.");
+            }
+            else
+            {
+                for (const auto& page : entry.Pages)
+                {
+                    pack.seekg(static_cast<std::streamoff>(page.Offset), std::ios::beg);
+                    std::vector<std::byte> compressed(static_cast<std::size_t>(page.CompressedBytes));
+                    if (!pack.read(reinterpret_cast<char*>(compressed.data()),
+                                   static_cast<std::streamsize>(compressed.size())))
+                        throw std::runtime_error("Could not read cooked asset stream page.");
+                    auto destination = std::span(bytes).subspan(static_cast<std::size_t>(page.UncompressedOffset),
+                                                                static_cast<std::size_t>(page.UncompressedBytes));
+                    const auto size =
+                        ZSTD_decompress(destination.data(), destination.size(), compressed.data(), compressed.size());
+                    if (ZSTD_isError(size) || size != destination.size() || Detail::Sha256(destination) != page.Digest)
+                        throw std::runtime_error("Cooked asset stream page failed decompression or integrity.");
+                }
+            }
+            if (Detail::Sha256(bytes) != entry.Digest)
                 throw std::runtime_error("Cooked asset payload failed decompression or integrity validation.");
         }
     }

@@ -1,16 +1,45 @@
 #include "KeireInternal/Rendering/DirectionalShadowInternal.h"
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
+#include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "Keire/Log.h"
 
 #include <imgui_impl_sdlgpu3.h>
 
+#include <chrono>
 #include <stdexcept>
 #include <tuple>
 
 namespace
 {
+    class CallbackFrameGraphExecutionContext final : public Keire::RenderBackend::FrameGraphExecutionContext
+    {
+      public:
+        using TransitionCallback = std::function<void(const Keire::RenderBackend::CompiledFrameGraph::Transition&)>;
+        using PassCallback = std::function<void(Keire::RenderBackend::FrameGraphPass)>;
+
+        CallbackFrameGraphExecutionContext(TransitionCallback transition, PassCallback pass)
+            : m_Transition(std::move(transition)), m_Pass(std::move(pass))
+        {
+        }
+
+        void Transition(const Keire::RenderBackend::CompiledFrameGraph::Transition& transition) override
+        {
+            m_Transition(transition);
+        }
+
+        void Execute(const Keire::RenderBackend::FrameGraphPass pass,
+                     const Keire::RenderBackend::FrameGraphPassDescription&) override
+        {
+            m_Pass(pass);
+        }
+
+      private:
+        TransitionCallback m_Transition;
+        PassCallback m_Pass;
+    };
+
     struct ClipPoint final
     {
         float X;
@@ -100,6 +129,10 @@ namespace Keire::RenderBackend
         auto& pipelines = PipelinesFor(samples);
         const auto& camera = packet.Camera;
         const auto& lighting = packet.Lighting;
+        if (surface.ForwardPlus.Empty())
+            throw std::logic_error("Forward+ GPU resources were not prepared before scene recording.");
+        std::array<SDL_GPUBuffer*, 3> forwardPlusBuffers{surface.ForwardPlus.Lights, surface.ForwardPlus.Tiles,
+                                                         surface.ForwardPlus.LightIndices};
 
         if (packet.Environment.SkyVisible && pipelines.Sky)
         {
@@ -208,9 +241,12 @@ namespace Keire::RenderBackend
                     return left.Depth > right.Depth;
                 if (!leftBlended)
                 {
-                    const auto leftKey = std::tie(left.Surface.AlphaMode, left.Material, left.Item->Mesh, left.Depth);
+                    const auto leftKey =
+                        std::tie(left.Surface.AlphaMode, left.Material, left.Item->Mesh, left.SubmeshIndex,
+                                 left.Item->ReceiveShadows, left.Item->CastShadows, left.Depth);
                     const auto rightKey =
-                        std::tie(right.Surface.AlphaMode, right.Material, right.Item->Mesh, right.Depth);
+                        std::tie(right.Surface.AlphaMode, right.Material, right.Item->Mesh, right.SubmeshIndex,
+                                 right.Item->ReceiveShadows, right.Item->CastShadows, right.Depth);
                     if (leftKey != rightKey)
                         return leftKey < rightKey;
                 }
@@ -221,7 +257,8 @@ namespace Keire::RenderBackend
 
         AssetLocalLightUniforms localLights{};
         const auto localLightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
-        localLights.Counts.X = static_cast<float>(localLightCount);
+        localLights.Counts.X = static_cast<float>(packet.LocalLights.size());
+        localLights.Counts.Y = static_cast<float>(surface.ForwardPlus.Columns);
         for (std::size_t lightIndex = 0; lightIndex < localLightCount; ++lightIndex)
         {
             const auto& light = packet.LocalLights[lightIndex];
@@ -249,20 +286,54 @@ namespace Keire::RenderBackend
             const auto& light = packet.LocalLights[lightIndex];
             shadowUniforms.Local.Parameters[lightIndex] = {shadows.LocalLayers[lightIndex], light.ShadowStrength,
                                                            light.Shadows == ShadowQuality::Soft ? 1.0F : 0.0F,
-                                                           std::max(light.ShadowBias * 0.01F, 0.002F)};
+                                                           std::max(light.ShadowBias * 0.01F, 0.0001F)};
         }
 
+        SDL_GPUBuffer* instanceBuffer = nullptr;
+        if (std::ranges::any_of(prepared,
+                                [&](const PreparedDraw& draw)
+                                {
+                                    const auto* material =
+                                        draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
+                                    return material && material->UsesInstancing;
+                                }))
+        {
+            std::vector<GpuInstanceUniform> instances;
+            instances.reserve(prepared.size());
+            for (const auto& draw : prepared)
+                instances.push_back({draw.Item->World, Transpose(Math::Inverse(draw.Item->World)), draw.Item->Tint});
+            instanceBuffer =
+                UploadBuffer(std::as_bytes(std::span(instances)), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+            FrameTransientBuffers.push_back(instanceBuffer);
+        }
+
+        std::vector<InstanceBatchKey> instanceKeys;
+        instanceKeys.reserve(prepared.size());
         for (const auto& draw : prepared)
         {
+            const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
+            instanceKeys.push_back({draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
+                                    draw.Item->ReceiveShadows, draw.Item->CastShadows,
+                                    material && material->UsesInstancing});
+        }
+        const auto batches = BuildInstanceBatches(instanceKeys);
+        for (const auto batch : batches)
+        {
+            const auto drawIndex = static_cast<std::size_t>(batch.First);
+            const auto& draw = prepared[drawIndex];
             const auto& item = *draw.Item;
             const auto& mesh = ResolveMesh(item.Mesh);
             const auto viewModel = Math::Multiply(camera.View, item.World);
             const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
             SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
+            const auto instanceCount = batch.Count;
             if (material)
             {
                 SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
+                if (material->UsesForwardPlus)
+                    SDL_BindGPUFragmentStorageBuffers(pass, 0, forwardPlusBuffers.data(),
+                                                      static_cast<std::uint32_t>(forwardPlusBuffers.size()));
                 const AssetObjectUniforms object{item.World, camera.View, camera.Projection,
                                                  Transpose(Math::Inverse(item.World))};
                 AssetSceneUniforms scene{};
@@ -282,7 +353,7 @@ namespace Keire::RenderBackend
                 SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
                 std::array<Vector4, 64> numericProperties;
                 std::ranges::copy(material->NumericProperties, numericProperties.begin());
-                if (material->TintSlot)
+                if (material->TintSlot && !material->UsesInstancing)
                 {
                     auto& tint = numericProperties[*material->TintSlot];
                     tint.X *= item.Tint.Red;
@@ -325,6 +396,8 @@ namespace Keire::RenderBackend
                 }
                 const SDL_GPUBufferBinding vertexBinding{mesh.AssetVertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                if (material->UsesInstancing)
+                    SDL_BindGPUVertexStorageBuffers(pass, 0, &instanceBuffer, 1);
             }
             else
             {
@@ -349,9 +422,11 @@ namespace Keire::RenderBackend
                 const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
             }
-            SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, 1, draw.Submesh.FirstIndex, 0, 0);
+            SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, instanceCount, draw.Submesh.FirstIndex, 0,
+                                         static_cast<std::uint32_t>(drawIndex));
             ++Statistics.DrawCalls;
-            Statistics.Triangles += draw.Submesh.IndexCount / 3;
+            Statistics.Triangles += draw.Submesh.IndexCount / 3 * instanceCount;
+            Statistics.InstanceBatches += instanceCount > 1 ? 1U : 0U;
         }
     }
 
@@ -502,7 +577,7 @@ namespace Keire::RenderBackend
                                                   ? -static_cast<float>(cascadeCount)
                                                   : static_cast<float>(cascadeCount);
             result.Directional.DirectionalParameters = {encodedCascadeCount, packet.Lighting.ShadowStrength,
-                                                        std::max(packet.Lighting.ShadowBias * 0.01F, 0.002F),
+                                                        std::max(packet.Lighting.ShadowBias * 0.01F, 0.0001F),
                                                         1.0F / static_cast<float>(resolution)};
             Statistics.DirectionalShadowCascades += cascadeCount;
         }
@@ -564,56 +639,131 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface)
     {
-        if (!surface.Resources.SampledColor)
+        if (!surface.Resources.SampledColor || !surface.Resources.HdrColor)
             return;
 
         const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
         ShadowFrameData shadows;
         shadows.LocalLayers.fill(-1.0F);
-        if (request != Requests.end())
-            shadows = RecordShadows(commands, surface, request->Packet);
+        CallbackFrameGraphExecutionContext execution(
+            [&](const CompiledFrameGraph::Transition&) { ++Statistics.FrameGraphTransitions; },
+            [&](const FrameGraphPass frameGraphPass)
+            {
+                ++Statistics.ExecutedFrameGraphPasses;
+                if (frameGraphPass == SceneFrameGraph.DirectionalShadows)
+                {
+                    if (request != Requests.end())
+                        shadows = RecordShadows(commands, surface, request->Packet);
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.ForwardPlusCulling)
+                {
+                    if (request == Requests.end())
+                        return;
+                    std::vector<ForwardPlusLightBounds> localLightBounds;
+                    localLightBounds.reserve(request->Packet.LocalLights.size());
+                    for (const auto& light : request->Packet.LocalLights)
+                        localLightBounds.push_back(
+                            {Math::TransformPoint(request->Packet.Camera.View, light.Position), light.Range});
+                    const auto tiles = BuildForwardPlusCpuTiles(surface.Width, surface.Height,
+                                                                request->Packet.Camera.Projection, localLightBounds);
+                    Statistics.VisibleLocalLights += static_cast<std::uint32_t>(localLightBounds.size());
+                    Statistics.OverflowedLightTiles += tiles.OverflowedTiles;
+                    std::vector<AssetLocalLightUniform> gpuLights(
+                        std::max<std::size_t>(1, request->Packet.LocalLights.size()));
+                    for (std::size_t lightIndex = 0; lightIndex < request->Packet.LocalLights.size(); ++lightIndex)
+                    {
+                        const auto& light = request->Packet.LocalLights[lightIndex];
+                        gpuLights[lightIndex] = {
+                            {light.Position.X, light.Position.Y, light.Position.Z, light.Range},
+                            {light.Direction.X, light.Direction.Y, light.Direction.Z, light.OuterConeCosine},
+                            {light.ColorAndIntensity.Red, light.ColorAndIntensity.Green, light.ColorAndIntensity.Blue,
+                             light.ColorAndIntensity.Alpha},
+                            {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F, 0.0F, 0.0F}};
+                    }
+                    std::vector<ForwardPlusTileUniform> gpuTiles(tiles.Offsets.size());
+                    for (std::size_t tileIndex = 0; tileIndex < gpuTiles.size(); ++tileIndex)
+                        gpuTiles[tileIndex] = {tiles.Offsets[tileIndex], tiles.Counts[tileIndex]};
+                    std::vector<ForwardPlusIndexGroup> gpuIndices(
+                        std::max<std::size_t>(1, (tiles.LightIndices.size() + 3U) / 4U));
+                    for (std::size_t index = 0; index < tiles.LightIndices.size(); ++index)
+                        gpuIndices[index / 4U].Indices[index % 4U] = tiles.LightIndices[index];
 
-        SDL_GPUColorTargetInfo color{};
-        color.texture =
-            surface.Resources.MultisampleColor ? surface.Resources.MultisampleColor : surface.Resources.SampledColor;
-        color.clear_color = {surface.FrameClearColor.Red, surface.FrameClearColor.Green, surface.FrameClearColor.Blue,
-                             surface.FrameClearColor.Alpha};
-        color.load_op = SDL_GPU_LOADOP_CLEAR;
-        color.store_op = surface.Resources.MultisampleColor ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
-        color.resolve_texture = surface.Resources.MultisampleColor ? surface.Resources.SampledColor : nullptr;
+                    ForwardPlusGpuResources replacement;
+                    try
+                    {
+                        constexpr auto usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+                        replacement.Lights = UploadBuffer(std::as_bytes(std::span(gpuLights)), usage);
+                        replacement.Tiles = UploadBuffer(std::as_bytes(std::span(gpuTiles)), usage);
+                        replacement.LightIndices = UploadBuffer(std::as_bytes(std::span(gpuIndices)), usage);
+                        replacement.Columns = tiles.Columns;
+                        replacement.Rows = tiles.Rows;
+                    }
+                    catch (...)
+                    {
+                        ReleaseForwardPlusResources(replacement);
+                        throw;
+                    }
+                    Retire(std::exchange(surface.ForwardPlus, replacement));
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.Opaque)
+                {
+                    SDL_GPUColorTargetInfo color{};
+                    color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
+                                                                          : surface.Resources.HdrColor;
+                    color.clear_color = {surface.FrameClearColor.Red, surface.FrameClearColor.Green,
+                                         surface.FrameClearColor.Blue, surface.FrameClearColor.Alpha};
+                    color.load_op = SDL_GPU_LOADOP_CLEAR;
+                    color.store_op =
+                        surface.Resources.MultisampleHdrColor ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+                    color.resolve_texture =
+                        surface.Resources.MultisampleHdrColor ? surface.Resources.HdrColor : nullptr;
+                    SDL_GPUDepthStencilTargetInfo depth{};
+                    SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
+                    if (surface.Resources.Depth)
+                    {
+                        depth.texture = surface.Resources.Depth;
+                        depth.clear_depth = 1.0F;
+                        depth.load_op = SDL_GPU_LOADOP_CLEAR;
+                        depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+                        depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+                        depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+                        depthPointer = &depth;
+                    }
+                    SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
+                    if (!pass)
+                        throw std::runtime_error("SDL_BeginGPURenderPass(HDR scene) failed: " + LastSdlError());
+                    if (request != Requests.end())
+                        DrawScene(commands, pass, surface, request->Packet, shadows);
+                    SDL_EndGPURenderPass(pass);
+                    ++Statistics.Passes;
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.ToneMap)
+                    RecordToneMap(commands, surface);
+            });
+        SceneFrameGraph.Graph.Execute(SceneFrameGraph.Compiled, execution);
+        ++Statistics.Surfaces;
+    }
 
-        SDL_GPUDepthStencilTargetInfo depth{};
-        SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
-        if (surface.Resources.Depth)
-        {
-            depth.texture = surface.Resources.Depth;
-            depth.clear_depth = 1.0F;
-            depth.load_op = SDL_GPU_LOADOP_CLEAR;
-            depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
-            depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-            depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-            depthPointer = &depth;
-        }
-
-        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
+    void RenderSharedState::RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface)
+    {
+        if (!ToneMapPipeline || !ToneMapSampler || !surface.Resources.HdrColor || !surface.Resources.SampledColor)
+            throw std::logic_error("Tone-map resources are unavailable for an active render surface.");
+        SDL_GPUColorTargetInfo target{};
+        target.texture = surface.HasOutput ? surface.Resources.ExchangeColor : surface.Resources.SampledColor;
+        target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        target.store_op = SDL_GPU_STOREOP_STORE;
+        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
         if (!pass)
-            throw std::runtime_error("SDL_BeginGPURenderPass(surface) failed: " + LastSdlError());
-        if (request != Requests.end())
-        {
-            std::vector<ForwardPlusLightBounds> localLightBounds;
-            localLightBounds.reserve(request->Packet.LocalLights.size());
-            for (const auto& light : request->Packet.LocalLights)
-                localLightBounds.push_back(
-                    {Math::TransformPoint(request->Packet.Camera.View, light.Position), light.Range});
-            const auto tiles = BuildForwardPlusCpuTiles(surface.Width, surface.Height,
-                                                        request->Packet.Camera.Projection, localLightBounds);
-            Statistics.VisibleLocalLights += static_cast<std::uint32_t>(localLightBounds.size());
-            Statistics.OverflowedLightTiles += tiles.OverflowedTiles;
-            DrawScene(commands, pass, surface, request->Packet, shadows);
-        }
+            throw std::runtime_error("SDL_BeginGPURenderPass(tone map) failed: " + LastSdlError());
+        const SDL_GPUTextureSamplerBinding binding{surface.Resources.HdrColor, ToneMapSampler};
+        SDL_BindGPUGraphicsPipeline(pass, ToneMapPipeline);
+        SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+        SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
         SDL_EndGPURenderPass(pass);
         ++Statistics.Passes;
-        ++Statistics.Surfaces;
     }
 
     void RenderSharedState::EndFrame(ImDrawData* drawData)
@@ -630,19 +780,58 @@ namespace Keire::RenderBackend
             return;
         }
 
+        const auto started = std::chrono::steady_clock::now();
+        DispatchRender([this, drawData] { ExecuteFrame(drawData); });
+        Statistics.RendererLatencyMilliseconds =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+    }
+
+    void RenderSharedState::ExecuteFrame(ImDrawData* drawData)
+    {
+        if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
+            throw std::runtime_error("Injected GPU device loss.");
+        if (FrameUploadCommands || FrameUploadPass || !FrameUploadTransfers.empty())
+            throw std::logic_error("A previous frame left the GPU upload context active.");
+        FrameUploadCommands = SDL_AcquireGPUCommandBuffer(Device);
+        if (!FrameUploadCommands)
+            throw std::runtime_error("SDL_AcquireGPUCommandBuffer(frame uploads) failed: " + LastSdlError());
+        FrameUploadPass = SDL_BeginGPUCopyPass(FrameUploadCommands);
+        if (!FrameUploadPass)
+        {
+            (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
+            FrameUploadCommands = nullptr;
+            throw std::runtime_error("SDL_BeginGPUCopyPass(frame uploads) failed: " + LastSdlError());
+        }
+
         SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
         if (!commands)
+        {
+            SDL_EndGPUCopyPass(FrameUploadPass);
+            FrameUploadPass = nullptr;
+            (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
+            FrameUploadCommands = nullptr;
             throw std::runtime_error("SDL_AcquireGPUCommandBuffer failed: " + LastSdlError());
+        }
 
         try
         {
             for (const auto& surface : LiveSurfaces())
                 RecordSurface(commands, *surface);
 
+            SDL_EndGPUCopyPass(FrameUploadPass);
+            FrameUploadPass = nullptr;
+            auto* uploadCommands = std::exchange(FrameUploadCommands, nullptr);
+            if (!SDL_SubmitGPUCommandBuffer(uploadCommands))
+                throw std::runtime_error("SDL_SubmitGPUCommandBuffer(frame uploads) failed: " + LastSdlError());
+            for (auto* transfer : FrameUploadTransfers)
+                SDL_ReleaseGPUTransferBuffer(Device, transfer);
+            FrameUploadTransfers.clear();
+
             SDL_GPUTexture* swapchain = nullptr;
             if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, NativeWindow, &swapchain, nullptr, nullptr))
             {
                 (void)SDL_CancelGPUCommandBuffer(commands);
+                commands = nullptr;
                 throw std::runtime_error("SDL_WaitAndAcquireGPUSwapchainTexture failed: " + LastSdlError());
             }
 
@@ -668,17 +857,46 @@ namespace Keire::RenderBackend
             }
 
             SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+            commands = nullptr;
             if (!fence)
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
             InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
-                                std::move(PendingRetiredTextures), std::move(PendingRetiredPipelines)});
+                                std::move(PendingRetiredTextures), std::move(PendingRetiredPipelines),
+                                std::move(PendingRetiredForwardPlus), std::move(FrameTransientBuffers)});
             PendingRetired.clear();
             PendingRetiredMeshes.clear();
             PendingRetiredTextures.clear();
             PendingRetiredPipelines.clear();
+            PendingRetiredForwardPlus.clear();
+            FrameTransientBuffers.clear();
+            for (const auto& surface : LiveSurfaces())
+            {
+                if (surface->HasOutput)
+                    std::swap(surface->Resources.SampledColor, surface->Resources.ExchangeColor);
+                else
+                    surface->HasOutput = true;
+            }
         }
         catch (...)
         {
+            if (FrameUploadPass)
+            {
+                SDL_EndGPUCopyPass(FrameUploadPass);
+                FrameUploadPass = nullptr;
+            }
+            if (FrameUploadCommands)
+            {
+                (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
+                FrameUploadCommands = nullptr;
+            }
+            for (auto* transfer : FrameUploadTransfers)
+                SDL_ReleaseGPUTransferBuffer(Device, transfer);
+            FrameUploadTransfers.clear();
+            if (commands)
+                (void)SDL_CancelGPUCommandBuffer(commands);
+            for (auto* buffer : FrameTransientBuffers)
+                SDL_ReleaseGPUBuffer(Device, buffer);
+            FrameTransientBuffers.clear();
             FrameActive = false;
             throw;
         }
@@ -690,12 +908,14 @@ namespace Keire::RenderBackend
             return;
         Open = false;
         FrameActive = false;
+        StopRenderThread();
 
         if (Device)
             (void)SDL_WaitForGPUIdle(Device);
         for (const auto& surface : LiveSurfaces())
         {
             ReleaseResources(surface->Resources);
+            ReleaseForwardPlusResources(surface->ForwardPlus);
             surface->Owner.reset();
             surface->Width = 0;
             surface->Height = 0;
@@ -712,6 +932,17 @@ namespace Keire::RenderBackend
         for (auto* pipeline : PendingRetiredPipelines)
             SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
         PendingRetiredPipelines.clear();
+        for (auto& resources : PendingRetiredForwardPlus)
+            ReleaseForwardPlusResources(resources);
+        PendingRetiredForwardPlus.clear();
+        for (auto* buffer : FrameTransientBuffers)
+            SDL_ReleaseGPUBuffer(Device, buffer);
+        FrameTransientBuffers.clear();
+        for (auto* transfer : FrameUploadTransfers)
+            SDL_ReleaseGPUTransferBuffer(Device, transfer);
+        FrameUploadTransfers.clear();
+        FrameUploadPass = nullptr;
+        FrameUploadCommands = nullptr;
         for (auto& frame : InFlight)
         {
             for (auto& resources : frame.Retired)
@@ -722,6 +953,10 @@ namespace Keire::RenderBackend
                 ReleaseTextureResources(resources);
             for (auto* pipeline : frame.RetiredPipelines)
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+            for (auto& resources : frame.RetiredForwardPlus)
+                ReleaseForwardPlusResources(resources);
+            for (auto* buffer : frame.TransientBuffers)
+                SDL_ReleaseGPUBuffer(Device, buffer);
             if (Device && frame.Fence)
                 SDL_ReleaseGPUFence(Device, frame.Fence);
         }
@@ -775,12 +1010,18 @@ namespace Keire::RenderBackend
         if (ShadowSampler)
             SDL_ReleaseGPUSampler(Device, ShadowSampler);
         ShadowSampler = nullptr;
+        if (ToneMapSampler)
+            SDL_ReleaseGPUSampler(Device, ToneMapSampler);
+        ToneMapSampler = nullptr;
         if (EmptyShadowTexture)
             SDL_ReleaseGPUTexture(Device, EmptyShadowTexture);
         EmptyShadowTexture = nullptr;
         if (ShadowPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, ShadowPipeline);
         ShadowPipeline = nullptr;
+        if (ToneMapPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
+        ToneMapPipeline = nullptr;
         ReleaseMeshResources(ErrorMesh);
         ReleaseMeshResources(DefaultMesh);
         if (GridBuffer)

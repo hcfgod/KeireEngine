@@ -182,7 +182,7 @@ TEST_CASE("Scene schema v1 migrates to canonical component schema v2")
 })";
     const auto migrated = Keire::SceneAsset::Decode(Bytes(versionOne));
     REQUIRE(migrated);
-    CHECK(migrated->Definition().SchemaVersion == 2);
+    CHECK(migrated->Definition().SchemaVersion == 3);
     REQUIRE(migrated->Definition().Objects.size() == 1);
     REQUIRE(migrated->Definition().Objects.front().Components.size() == 1);
     CHECK(migrated->Definition().Objects.front().Components.front().Type == Keire::TransformComponent::StaticType());

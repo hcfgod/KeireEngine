@@ -1,5 +1,7 @@
+#include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 
+#include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
 #include <assimp/material.h>
@@ -17,10 +19,13 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace Keire
@@ -45,6 +50,23 @@ namespace Keire
             std::ranges::transform(value, value.begin(), [](const unsigned char character)
                                    { return static_cast<char>(std::tolower(character)); });
             return value;
+        }
+
+        [[nodiscard]] Matrix4 ConvertMatrix(const aiMatrix4x4& value) noexcept
+        {
+            return {{value.a1, value.b1, value.c1, value.d1, value.a2, value.b2, value.c2, value.d2, value.a3, value.b3,
+                     value.c3, value.d3, value.a4, value.b4, value.c4, value.d4}};
+        }
+
+        [[nodiscard]] BoneTransform ConvertTransform(const aiMatrix4x4& value)
+        {
+            aiVector3D scale;
+            aiVector3D translation;
+            aiQuaternion rotation;
+            value.Decompose(scale, rotation, translation);
+            return {{translation.x, translation.y, translation.z},
+                    Math::Normalize({rotation.x, rotation.y, rotation.z, rotation.w}),
+                    {scale.x, scale.y, scale.z}};
         }
 
         template <typename Unsigned> void AppendUnsigned(std::vector<std::byte>& bytes, Unsigned value)
@@ -732,6 +754,49 @@ namespace Keire
             }
             return result;
         }
+
+        struct ImportedMaterialShader final
+        {
+            AssetId Id;
+            std::unordered_set<std::string> Properties;
+        };
+
+        [[nodiscard]] std::optional<ImportedMaterialShader>
+        FindImportedMaterialShader(const AssetImportContext& context)
+        {
+            std::vector<std::filesystem::path> candidates;
+            const auto standard = context.SourceRoot / "Shaders/DefaultUnlit.keireshader";
+            if (std::filesystem::is_regular_file(standard))
+                candidates.push_back(standard);
+            std::error_code error;
+            const auto shaderRoot = context.SourceRoot / "Shaders";
+            for (std::filesystem::directory_iterator iterator(shaderRoot, error), end; !error && iterator != end;
+                 iterator.increment(error))
+                if (iterator->is_regular_file(error) && iterator->path().extension() == ".keireshader" &&
+                    iterator->path() != standard)
+                    candidates.push_back(iterator->path());
+            for (const auto& source : candidates)
+            {
+                const auto metadataPath = std::filesystem::path(source.string() + ".keiremeta");
+                if (!std::filesystem::is_regular_file(metadataPath))
+                    continue;
+                try
+                {
+                    const auto metadata = Json::parse(std::ifstream(metadataPath));
+                    const auto manifest = Json::parse(std::ifstream(source));
+                    ImportedMaterialShader result;
+                    result.Id = AssetId::Parse(metadata.at("id").get<std::string>());
+                    for (const auto& property : manifest.at("properties"))
+                        result.Properties.insert(property.at("name").get<std::string>());
+                    if (result.Id)
+                        return result;
+                }
+                catch (const std::exception&)
+                {
+                }
+            }
+            return std::nullopt;
+        }
     } // namespace
 
     MeshAsset::MeshAsset(const BuiltinMesh mesh) : m_Mesh(mesh)
@@ -1053,7 +1118,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 3;
+        result.Version = 4;
         result.Type = MeshAsset::StaticType();
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
         result.ContextualImport = [](const AssetImportContext& context,
@@ -1070,35 +1135,465 @@ namespace Keire
                 return output;
             }
             Assimp::Importer importer;
+            AssetImportOutput output;
             importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, true);
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
-                                           aiProcess_GenSmoothNormals | aiProcess_PreTransformVertices |
-                                           aiProcess_CalcTangentSpace | aiProcess_ImproveCacheLocality |
-                                           aiProcess_SortByPType | aiProcess_ValidateDataStructure |
-                                           aiProcess_MakeLeftHanded | aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
+                                           aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
+                                           aiProcess_ImproveCacheLocality | aiProcess_SortByPType |
+                                           aiProcess_ValidateDataStructure | aiProcess_MakeLeftHanded |
+                                           aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
             auto extension = context.SourcePath.extension().string();
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
+            extension = Lowercase(std::move(extension));
             const auto* scene = importer.ReadFileFromMemory(bytes.data(), bytes.size(), flags, extension.c_str());
             if (!scene)
                 throw std::invalid_argument(std::string("Mesh import failed: ") + importer.GetErrorString());
-            if (scene->mNumAnimations != 0)
-                throw std::invalid_argument("Animated meshes are not supported by the static mesh importer.");
+            bool hasSkinning = false;
+            for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
+                hasSkinning = hasSkinning || (scene->mMeshes[meshIndex] && scene->mMeshes[meshIndex]->mNumBones != 0);
+            const bool animated = hasSkinning || scene->mNumAnimations != 0;
+            if (!animated)
+            {
+                scene = importer.ApplyPostProcessing(aiProcess_PreTransformVertices);
+                if (!scene)
+                    throw std::invalid_argument(std::string("Static mesh transform baking failed: ") +
+                                                importer.GetErrorString());
+            }
+            if (const std::string diagnostic = importer.GetErrorString(); !diagnostic.empty())
+                output.Diagnostics.push_back(
+                    {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0, "Assimp: " + diagnostic});
             std::vector<MeshVertex> vertices;
             std::vector<std::uint32_t> indices;
             std::vector<MeshSubmesh> submeshes;
             std::vector<MeshMaterialSlot> materialSlots;
             materialSlots.reserve(std::max(scene->mNumMaterials, 1U));
+            std::vector<std::string> materialNames;
+            materialNames.reserve(scene->mNumMaterials);
             for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
             {
                 aiString materialName;
                 if (scene->mMaterials[materialIndex]->Get(AI_MATKEY_NAME, materialName) != aiReturn_SUCCESS ||
                     materialName.length == 0)
+                {
                     materialName = aiString(("Material " + std::to_string(materialIndex + 1U)).c_str());
+                    if (extension == "fbx" || extension == "obj")
+                        output.Diagnostics.push_back(
+                            {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                             "Imported material " + std::to_string(materialIndex + 1U) +
+                                 " has no stable name; generated-subasset identity uses its fallback name."});
+                }
+                materialNames.emplace_back(materialName.C_Str());
                 materialSlots.push_back({materialName.C_Str(), {}});
             }
             if (materialSlots.empty())
                 materialSlots.push_back({"Default", {}});
+            if (extension == "obj")
+            {
+                const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                if (source.find("mtllib") != std::string::npos && scene->mNumMaterials <= 1)
+                    output.Diagnostics.push_back(
+                        {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                         "OBJ declares a material library that was not resolved. Import the OBJ with its MTL and "
+                         "texture files together, or extract and repair the generated material."});
+            }
+            if (extension == "fbx" || extension == "obj")
+            {
+                constexpr std::array legacyTextureTypes{aiTextureType_SPECULAR, aiTextureType_SHININESS,
+                                                        aiTextureType_OPACITY, aiTextureType_REFLECTION,
+                                                        aiTextureType_UNKNOWN};
+                for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
+                    for (const auto type : legacyTextureTypes)
+                        if (scene->mMaterials[materialIndex]->GetTextureCount(type) != 0)
+                        {
+                            output.Diagnostics.push_back(
+                                {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                                 "Material '" + materialNames[materialIndex] + "' uses unsupported " +
+                                     aiTextureTypeToString(type) +
+                                     " texture channels; review the extracted metallic/roughness material."});
+                            break;
+                        }
+            }
+
+            const auto shader = FindImportedMaterialShader(context);
+            if (!shader)
+            {
+                output.Diagnostics.push_back(
+                    {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                     "Model materials were not published because no project material shader was found."});
+            }
+            else if (!context.ResolveSubAssetId)
+            {
+                throw std::logic_error("Mesh importing requires a generated-subasset identity resolver.");
+            }
+            else
+            {
+                const auto declared = [&shader](const std::string_view property)
+                { return shader->Properties.contains(std::string(property)); };
+                std::unordered_map<std::string, AssetId> publishedTextures;
+                const auto publishTexture = [&](const unsigned int materialIndex, const aiTextureType type,
+                                                const std::string_view property, const TextureSemantic semantic,
+                                                const TextureColorSpace colorSpace) -> AssetId
+                {
+                    const auto* material = scene->mMaterials[materialIndex];
+                    const auto count = material->GetTextureCount(type);
+                    if (count == 0)
+                        return {};
+                    if (count > 1)
+                        output.Diagnostics.push_back({AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                                                      "Material '" + materialNames[materialIndex] + "' has " +
+                                                          std::to_string(count) + " textures for " +
+                                                          std::string(property) + "; only the first is supported."});
+                    aiString path;
+                    if (material->GetTexture(type, 0, &path) != aiReturn_SUCCESS)
+                        return {};
+                    const auto* embedded = scene->GetEmbeddedTexture(path.C_Str());
+                    if (!embedded)
+                    {
+                        output.Diagnostics.push_back(
+                            {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                             "Material '" + materialNames[materialIndex] + "' references external texture '" +
+                                 path.C_Str() + "'; import it as a project texture and assign it after extraction."});
+                        return {};
+                    }
+                    const auto textureIterator =
+                        std::find(scene->mTextures, scene->mTextures + scene->mNumTextures, embedded);
+                    if (textureIterator == scene->mTextures + scene->mNumTextures)
+                        throw std::logic_error("Assimp returned an embedded texture outside the imported scene.");
+                    const auto textureIndex = static_cast<std::size_t>(textureIterator - scene->mTextures);
+                    const auto key = "texture/" + std::to_string(textureIndex) + "/" +
+                                     std::to_string(static_cast<unsigned int>(semantic));
+                    if (const auto existing = publishedTextures.find(key); existing != publishedTextures.end())
+                        return existing->second;
+
+                    TextureImportSettings settings;
+                    settings.Semantic = semantic;
+                    settings.ColorSpace = colorSpace;
+                    std::vector<TextureMipLevel> mips;
+                    if (embedded->mHeight == 0)
+                    {
+                        const auto textureBytes = std::span(reinterpret_cast<const std::byte*>(embedded->pcData),
+                                                            static_cast<std::size_t>(embedded->mWidth));
+                        mips = ImportTexture(textureBytes, settings);
+                    }
+                    else
+                    {
+                        if (embedded->mWidth == 0 || embedded->mHeight == 0 ||
+                            embedded->mWidth > MaximumTextureDimension || embedded->mHeight > MaximumTextureDimension)
+                            throw std::invalid_argument("Embedded model texture dimensions are invalid.");
+                        TextureMipLevel base;
+                        base.Width = embedded->mWidth;
+                        base.Height = embedded->mHeight;
+                        base.Pixels.resize(static_cast<std::size_t>(base.Width) * base.Height * 4U);
+                        for (std::size_t pixel = 0; pixel < static_cast<std::size_t>(base.Width) * base.Height; ++pixel)
+                        {
+                            base.Pixels[pixel * 4U] = std::byte(embedded->pcData[pixel].r);
+                            base.Pixels[pixel * 4U + 1U] = std::byte(embedded->pcData[pixel].g);
+                            base.Pixels[pixel * 4U + 2U] = std::byte(embedded->pcData[pixel].b);
+                            base.Pixels[pixel * 4U + 3U] = std::byte(embedded->pcData[pixel].a);
+                        }
+                        mips.push_back(std::move(base));
+                        while (mips.back().Width > 1 || mips.back().Height > 1)
+                            mips.push_back(Downsample(mips.back(), semantic == TextureSemantic::Normal));
+                    }
+                    const auto id = context.ResolveSubAssetId(key);
+                    output.SubAssets.push_back({id, Texture2DAsset::StaticType(), key,
+                                                materialNames[materialIndex] + " " + std::string(property),
+                                                Texture2DAsset::Encode(settings, mips)});
+                    publishedTextures.emplace(key, id);
+                    return id;
+                };
+
+                std::unordered_map<std::string, std::size_t> materialNameOccurrences;
+                std::vector<bool> materialUsed(scene->mNumMaterials);
+                for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
+                    if (scene->mMeshes[meshIndex] && scene->mMeshes[meshIndex]->mMaterialIndex < materialUsed.size())
+                        materialUsed[scene->mMeshes[meshIndex]->mMaterialIndex] = true;
+                for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
+                {
+                    if (!materialUsed[materialIndex])
+                        continue;
+                    const auto* sourceMaterial = scene->mMaterials[materialIndex];
+                    const auto occurrence = materialNameOccurrences[materialNames[materialIndex]]++;
+                    const auto key = "material/" + materialNames[materialIndex] + "/" + std::to_string(occurrence);
+                    MaterialAssetDefinition definition;
+                    definition.SchemaVersion = 2;
+                    definition.Shader = shader->Id;
+
+                    aiColor4D baseColor{1.0F, 1.0F, 1.0F, 1.0F};
+                    if (sourceMaterial->Get(AI_MATKEY_BASE_COLOR, baseColor) != aiReturn_SUCCESS)
+                        (void)sourceMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, baseColor);
+                    if (declared("Tint"))
+                        definition.Properties.emplace("Tint",
+                                                      Color{baseColor.r, baseColor.g, baseColor.b, baseColor.a});
+                    float scalar = 1.0F;
+                    if (declared("MetallicFactor") &&
+                        sourceMaterial->Get(AI_MATKEY_METALLIC_FACTOR, scalar) == aiReturn_SUCCESS)
+                        definition.Properties.emplace("MetallicFactor", std::clamp(scalar, 0.0F, 1.0F));
+                    scalar = 1.0F;
+                    if (declared("RoughnessFactor") &&
+                        sourceMaterial->Get(AI_MATKEY_ROUGHNESS_FACTOR, scalar) == aiReturn_SUCCESS)
+                        definition.Properties.emplace("RoughnessFactor", std::clamp(scalar, 0.0F, 1.0F));
+                    scalar = 1.0F;
+                    if (declared("NormalScale") &&
+                        sourceMaterial->Get(AI_MATKEY_GLTF_TEXTURE_SCALE(aiTextureType_NORMALS, 0), scalar) ==
+                            aiReturn_SUCCESS)
+                        definition.Properties.emplace("NormalScale", std::max(scalar, 0.0F));
+                    scalar = 1.0F;
+                    if (declared("OcclusionStrength") &&
+                        sourceMaterial->Get(AI_MATKEY_GLTF_TEXTURE_STRENGTH(aiTextureType_AMBIENT_OCCLUSION, 0),
+                                            scalar) == aiReturn_SUCCESS)
+                        definition.Properties.emplace("OcclusionStrength", std::clamp(scalar, 0.0F, 1.0F));
+                    aiColor3D emissive{};
+                    if (declared("EmissiveFactor") &&
+                        sourceMaterial->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == aiReturn_SUCCESS)
+                        definition.Properties.emplace("EmissiveFactor",
+                                                      Color{emissive.r, emissive.g, emissive.b, 1.0F});
+
+                    const auto addTexture = [&](const aiTextureType type, const std::string_view property,
+                                                const TextureSemantic semantic,
+                                                const TextureColorSpace colorSpace) -> AssetId
+                    {
+                        if (const auto texture = publishTexture(materialIndex, type, property, semantic, colorSpace))
+                        {
+                            if (declared(property))
+                                definition.Properties.insert_or_assign(std::string(property), texture);
+                            else
+                                output.Diagnostics.push_back(
+                                    {AssetDiagnosticSeverity::Warning, context.RelativePath, 0, 0,
+                                     "Material '" + materialNames[materialIndex] + "' has " + std::string(property) +
+                                         ", but the project material shader does not declare that property."});
+                            return texture;
+                        }
+                        return {};
+                    };
+                    const auto baseColorTexture = addTexture(aiTextureType_BASE_COLOR, "MainTexture",
+                                                             TextureSemantic::Color, TextureColorSpace::Srgb);
+                    if (!baseColorTexture)
+                        addTexture(aiTextureType_DIFFUSE, "MainTexture", TextureSemantic::Color,
+                                   TextureColorSpace::Srgb);
+                    addTexture(aiTextureType_NORMALS, "NormalTexture", TextureSemantic::Normal,
+                               TextureColorSpace::Linear);
+                    addTexture(aiTextureType_GLTF_METALLIC_ROUGHNESS, "MetallicRoughnessTexture", TextureSemantic::Data,
+                               TextureColorSpace::Linear);
+                    addTexture(aiTextureType_AMBIENT_OCCLUSION, "OcclusionTexture", TextureSemantic::Data,
+                               TextureColorSpace::Linear);
+                    addTexture(aiTextureType_EMISSIVE, "EmissiveTexture", TextureSemantic::Color,
+                               TextureColorSpace::Srgb);
+                    addTexture(aiTextureType_METALNESS, "MetallicTexture", TextureSemantic::Data,
+                               TextureColorSpace::Linear);
+                    addTexture(aiTextureType_DIFFUSE_ROUGHNESS, "RoughnessTexture", TextureSemantic::Data,
+                               TextureColorSpace::Linear);
+
+                    aiString alphaMode;
+                    const bool explicitAlphaMode =
+                        sourceMaterial->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == aiReturn_SUCCESS;
+                    if (explicitAlphaMode)
+                    {
+                        const auto mode = Lowercase(alphaMode.C_Str());
+                        if (mode == "mask")
+                            definition.Surface.AlphaMode = MaterialAlphaMode::Mask;
+                        else if (mode == "blend")
+                            definition.Surface.AlphaMode = MaterialAlphaMode::Blend;
+                    }
+                    scalar = 0.5F;
+                    if (sourceMaterial->Get(AI_MATKEY_GLTF_ALPHACUTOFF, scalar) == aiReturn_SUCCESS)
+                        definition.Surface.AlphaCutoff = std::clamp(scalar, 0.0F, 1.0F);
+                    int twoSided = 0;
+                    if (sourceMaterial->Get(AI_MATKEY_TWOSIDED, twoSided) == aiReturn_SUCCESS)
+                        definition.Surface.DoubleSided = twoSided != 0;
+                    scalar = 1.0F;
+                    if (!explicitAlphaMode && sourceMaterial->Get(AI_MATKEY_OPACITY, scalar) == aiReturn_SUCCESS &&
+                        scalar < 1.0F)
+                    {
+                        definition.Surface.AlphaMode = MaterialAlphaMode::Blend;
+                        if (auto tint = definition.Properties.find("Tint"); tint != definition.Properties.end())
+                            if (auto* color = std::get_if<Color>(&tint->second))
+                                color->Alpha = std::min(color->Alpha, std::clamp(scalar, 0.0F, 1.0F));
+                    }
+
+                    std::vector<AssetId> dependencies{shader->Id};
+                    for (const auto& [name, value] : definition.Properties)
+                    {
+                        (void)name;
+                        if (const auto* texture = std::get_if<AssetId>(&value); texture && *texture)
+                            dependencies.push_back(*texture);
+                    }
+                    std::ranges::sort(dependencies);
+                    dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
+                    const auto materialId = context.ResolveSubAssetId(key);
+                    output.SubAssets.push_back({materialId, MaterialAsset::StaticType(), key,
+                                                materialNames[materialIndex], MaterialAsset::Encode(definition),
+                                                dependencies});
+                    output.AssetDependencies.push_back(materialId);
+                    materialSlots[materialIndex].DefaultMaterial = materialId;
+                }
+            }
+            AssetId skeletonId;
+            AssetId skinnedMeshId;
+            std::vector<SkeletonBone> skeletonBones;
+            std::unordered_map<std::string, std::uint16_t> boneIndices;
+            std::vector<SkinVertexInfluence> skinInfluences;
+            if (animated)
+            {
+                if (!hasSkinning)
+                    throw std::invalid_argument("Animation import requires at least one skinned mesh.");
+                if (!context.ResolveSubAssetId)
+                    throw std::logic_error("Animated mesh importing requires generated-subasset identities.");
+                std::unordered_map<std::string, aiMatrix4x4> inverseBindPoses;
+                std::unordered_set<std::string> requiredNodes;
+                for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
+                {
+                    const auto* mesh = scene->mMeshes[meshIndex];
+                    if (!mesh)
+                        continue;
+                    for (unsigned int boneIndex = 0; boneIndex < mesh->mNumBones; ++boneIndex)
+                    {
+                        const auto* bone = mesh->mBones[boneIndex];
+                        if (!bone || bone->mName.length == 0)
+                            throw std::invalid_argument("Animated mesh contains an unnamed bone.");
+                        const std::string name = bone->mName.C_Str();
+                        if (const auto existing = inverseBindPoses.find(name);
+                            existing != inverseBindPoses.end() && existing->second != bone->mOffsetMatrix)
+                            throw std::invalid_argument("Animated meshes disagree on a bone inverse bind pose.");
+                        inverseBindPoses.insert_or_assign(name, bone->mOffsetMatrix);
+                        const auto* node = scene->mRootNode->FindNode(bone->mName);
+                        if (!node)
+                            throw std::invalid_argument("Animated mesh bone is absent from the scene hierarchy.");
+                        while (node)
+                        {
+                            requiredNodes.insert(node->mName.C_Str());
+                            node = node->mParent;
+                        }
+                    }
+                }
+                const auto appendBone = [&](const auto& self, const aiNode& node, const std::int32_t parent) -> void
+                {
+                    const std::string name = node.mName.C_Str();
+                    std::int32_t nextParent = parent;
+                    if (requiredNodes.contains(name))
+                    {
+                        if (skeletonBones.size() >= std::numeric_limits<std::uint16_t>::max())
+                            throw std::overflow_error("Skeleton exceeds 16-bit skinning bone indices.");
+                        const auto index = static_cast<std::uint16_t>(skeletonBones.size());
+                        boneIndices.emplace(name, index);
+                        SkeletonBone bone;
+                        bone.Name = name;
+                        bone.Parent = parent;
+                        bone.BindPose = ConvertTransform(node.mTransformation);
+                        if (const auto inverse = inverseBindPoses.find(name); inverse != inverseBindPoses.end())
+                            bone.InverseBindPose = ConvertMatrix(inverse->second);
+                        else
+                            bone.InverseBindPose = Math::Inverse(ConvertMatrix(node.mTransformation));
+                        skeletonBones.push_back(std::move(bone));
+                        nextParent = index;
+                    }
+                    for (unsigned int child = 0; child < node.mNumChildren; ++child)
+                        if (node.mChildren[child])
+                            self(self, *node.mChildren[child], nextParent);
+                };
+                appendBone(appendBone, *scene->mRootNode, -1);
+                ValidateSkeleton(skeletonBones);
+                skeletonId = context.ResolveSubAssetId("skeleton/default");
+                output.SubAssets.push_back({skeletonId, SkeletonAsset::StaticType(), "skeleton/default", "Skeleton",
+                                            SkeletonAsset::Encode(skeletonBones)});
+
+                for (unsigned int animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
+                {
+                    const auto* animation = scene->mAnimations[animationIndex];
+                    if (!animation || animation->mDuration <= 0.0)
+                        continue;
+                    const auto ticksPerSecond = animation->mTicksPerSecond > 0.0 ? animation->mTicksPerSecond : 30.0;
+                    const auto duration = static_cast<float>(animation->mDuration / ticksPerSecond);
+                    std::vector<AnimationTrack> tracks;
+                    for (unsigned int channelIndex = 0; channelIndex < animation->mNumChannels; ++channelIndex)
+                    {
+                        const auto* channel = animation->mChannels[channelIndex];
+                        if (!channel)
+                            continue;
+                        const auto bone = boneIndices.find(channel->mNodeName.C_Str());
+                        if (bone == boneIndices.end())
+                            continue;
+                        std::set<double> times;
+                        for (unsigned int key = 0; key < channel->mNumPositionKeys; ++key)
+                            times.insert(channel->mPositionKeys[key].mTime);
+                        for (unsigned int key = 0; key < channel->mNumRotationKeys; ++key)
+                            times.insert(channel->mRotationKeys[key].mTime);
+                        for (unsigned int key = 0; key < channel->mNumScalingKeys; ++key)
+                            times.insert(channel->mScalingKeys[key].mTime);
+                        if (times.empty())
+                            continue;
+                        const auto sampleVector = [](const aiVectorKey* keys, const unsigned int count,
+                                                     const double time, const aiVector3D fallback)
+                        {
+                            if (count == 0)
+                                return fallback;
+                            if (count == 1 || time <= keys[0].mTime)
+                                return keys[0].mValue;
+                            unsigned int upper = 1;
+                            while (upper < count && keys[upper].mTime < time)
+                                ++upper;
+                            if (upper == count)
+                                return keys[count - 1].mValue;
+                            const auto alpha = static_cast<float>((time - keys[upper - 1].mTime) /
+                                                                  (keys[upper].mTime - keys[upper - 1].mTime));
+                            return keys[upper - 1].mValue + (keys[upper].mValue - keys[upper - 1].mValue) * alpha;
+                        };
+                        const auto sampleRotation = [](const aiQuatKey* keys, const unsigned int count,
+                                                       const double time, const aiQuaternion fallback)
+                        {
+                            if (count == 0)
+                                return fallback;
+                            if (count == 1 || time <= keys[0].mTime)
+                                return keys[0].mValue;
+                            unsigned int upper = 1;
+                            while (upper < count && keys[upper].mTime < time)
+                                ++upper;
+                            if (upper == count)
+                                return keys[count - 1].mValue;
+                            const auto alpha = static_cast<float>((time - keys[upper - 1].mTime) /
+                                                                  (keys[upper].mTime - keys[upper - 1].mTime));
+                            aiQuaternion result;
+                            aiQuaternion::Interpolate(result, keys[upper - 1].mValue, keys[upper].mValue, alpha);
+                            return result.Normalize();
+                        };
+                        const auto& bind = skeletonBones[bone->second].BindPose;
+                        AnimationTrack track;
+                        track.Bone = bone->second;
+                        for (const auto time : times)
+                        {
+                            const auto position =
+                                sampleVector(channel->mPositionKeys, channel->mNumPositionKeys, time,
+                                             {bind.Translation.X, bind.Translation.Y, bind.Translation.Z});
+                            const auto scale = sampleVector(channel->mScalingKeys, channel->mNumScalingKeys, time,
+                                                            {bind.Scale.X, bind.Scale.Y, bind.Scale.Z});
+                            const auto rotation =
+                                sampleRotation(channel->mRotationKeys, channel->mNumRotationKeys, time,
+                                               {bind.Rotation.W, bind.Rotation.X, bind.Rotation.Y, bind.Rotation.Z});
+                            track.Keys.push_back({static_cast<float>(time / ticksPerSecond),
+                                                  {{position.x, position.y, position.z},
+                                                   Math::Normalize({rotation.x, rotation.y, rotation.z, rotation.w}),
+                                                   {scale.x, scale.y, scale.z}}});
+                        }
+                        tracks.push_back(std::move(track));
+                    }
+                    if (tracks.empty())
+                        continue;
+                    auto name = std::string(animation->mName.C_Str());
+                    if (name.empty())
+                        name = "Animation " + std::to_string(animationIndex + 1U);
+                    const auto key = "animation/" + name + "/" + std::to_string(animationIndex);
+                    const auto clipId = context.ResolveSubAssetId(key);
+                    output.SubAssets.push_back({clipId,
+                                                AnimationClipAsset::StaticType(),
+                                                key,
+                                                name,
+                                                AnimationClipAsset::Encode(skeletonId, duration, tracks, {}, true),
+                                                {skeletonId}});
+                }
+                skinnedMeshId = context.ResolveSubAssetId("skinned-mesh/default");
+            }
+
             struct OrderedMesh final
             {
                 unsigned int Index = 0;
@@ -1128,8 +1623,8 @@ namespace Keire
                        orderedMeshes[orderedOffset].Lod == lodValues[lodPosition])
                 {
                     const auto* mesh = scene->mMeshes[orderedMeshes[orderedOffset++].Index];
-                    if (!mesh || mesh->mNumBones != 0 || (mesh->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
-                        throw std::invalid_argument("Static mesh import rejects skinning and non-triangle primitives.");
+                    if (!mesh || (mesh->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
+                        throw std::invalid_argument("Mesh import rejects non-triangle primitives.");
                     if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
                         throw std::overflow_error("Merged mesh vertex count exceeds 32-bit indices.");
                     const auto base = static_cast<std::uint32_t>(vertices.size());
@@ -1145,6 +1640,56 @@ namespace Keire
                                             {normal.x, normal.y, normal.z},
                                             {uv.x, uv.y},
                                             mesh->mColors[0] ? Color{color.r, color.g, color.b, color.a} : Color{}});
+                    }
+                    if (animated)
+                    {
+                        std::vector<std::vector<std::pair<std::uint16_t, float>>> weights(mesh->mNumVertices);
+                        for (unsigned int meshBoneIndex = 0; meshBoneIndex < mesh->mNumBones; ++meshBoneIndex)
+                        {
+                            const auto* sourceBone = mesh->mBones[meshBoneIndex];
+                            const auto bone = boneIndices.find(sourceBone->mName.C_Str());
+                            if (bone == boneIndices.end())
+                                throw std::invalid_argument("Skinned mesh references an unavailable skeleton bone.");
+                            for (unsigned int weightIndex = 0; weightIndex < sourceBone->mNumWeights; ++weightIndex)
+                            {
+                                const auto& weight = sourceBone->mWeights[weightIndex];
+                                if (weight.mVertexId >= mesh->mNumVertices || !std::isfinite(weight.mWeight) ||
+                                    weight.mWeight < 0.0F)
+                                    throw std::invalid_argument("Skinned mesh contains an invalid vertex weight.");
+                                if (weight.mWeight > 0.0F)
+                                    weights[weight.mVertexId].emplace_back(bone->second, weight.mWeight);
+                            }
+                        }
+                        for (auto& vertexWeights : weights)
+                        {
+                            std::ranges::sort(vertexWeights,
+                                              [](const auto& first, const auto& second)
+                                              {
+                                                  if (first.second != second.second)
+                                                      return first.second > second.second;
+                                                  return first.first < second.first;
+                                              });
+                            SkinVertexInfluence influence;
+                            const auto count = std::min<std::size_t>(4, vertexWeights.size());
+                            float sum = 0.0F;
+                            for (std::size_t influenceIndex = 0; influenceIndex < count; ++influenceIndex)
+                            {
+                                influence.Bones[influenceIndex] = vertexWeights[influenceIndex].first;
+                                influence.Weights[influenceIndex] = vertexWeights[influenceIndex].second;
+                                sum += influence.Weights[influenceIndex];
+                            }
+                            if (sum <= 1.0e-6F)
+                            {
+                                influence.Bones[0] = 0;
+                                influence.Weights[0] = 1.0F;
+                            }
+                            else
+                            {
+                                for (auto& weight : influence.Weights)
+                                    weight /= sum;
+                            }
+                            skinInfluences.push_back(influence);
+                        }
                     }
                     for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
                     {
@@ -1169,18 +1714,18 @@ namespace Keire
             }
             GenerateTangents(vertices, indices);
             const auto bounds = CalculateBounds(vertices);
-            AssetImportOutput output;
             output.Bytes = MeshAsset::Encode(vertices, indices, submeshes, materialSlots, lods);
-            output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
-                                                      {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
-            return output;
-        };
-        result.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
-        {
-            const auto mesh = MeshAsset::Decode(bytes);
-            AssetImportOutput output;
-            output.Bytes.assign(bytes.begin(), bytes.end());
-            const auto& bounds = mesh->Bounds();
+            if (animated)
+            {
+                if (skinInfluences.size() != vertices.size())
+                    throw std::logic_error("Skinned mesh import did not produce one influence set per vertex.");
+                output.SubAssets.push_back({skinnedMeshId,
+                                            SkinnedMeshAsset::StaticType(),
+                                            "skinned-mesh/default",
+                                            "Skinned Mesh",
+                                            SkinnedMeshAsset::Encode(context.Asset, skeletonId, skinInfluences),
+                                            {context.Asset, skeletonId}});
+            }
             output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
                                                       {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
             return output;

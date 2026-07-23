@@ -3,6 +3,28 @@
 #include <doctest/doctest.h>
 
 #include <stdexcept>
+#include <vector>
+
+namespace
+{
+    class RecordingExecutionContext final : public Keire::RenderBackend::FrameGraphExecutionContext
+    {
+      public:
+        void Transition(const Keire::RenderBackend::CompiledFrameGraph::Transition& transition) override
+        {
+            Transitions.push_back(transition);
+        }
+
+        void Execute(const Keire::RenderBackend::FrameGraphPass pass,
+                     const Keire::RenderBackend::FrameGraphPassDescription&) override
+        {
+            Passes.push_back(pass);
+        }
+
+        std::vector<Keire::RenderBackend::CompiledFrameGraph::Transition> Transitions;
+        std::vector<Keire::RenderBackend::FrameGraphPass> Passes;
+    };
+} // namespace
 
 TEST_CASE("frame graph compiles deterministic hazards and resource lifetimes")
 {
@@ -25,6 +47,31 @@ TEST_CASE("frame graph compiles deterministic hazards and resource lifetimes")
     CHECK(compiled.Lifetimes[uploaded.Value].LastPass == 2);
     CHECK(compiled.Lifetimes[scene.Value].FirstPass == 2);
     CHECK(compiled.Lifetimes[scene.Value].LastPass == 3);
+    REQUIRE(compiled.Execution.size() == 4);
+    CHECK(compiled.Execution.front().Transitions.front().After ==
+          Keire::RenderBackend::FrameGraphResourceState::StorageWrite);
+
+    RecordingExecutionContext execution;
+    graph.Execute(compiled, execution);
+    CHECK(execution.Passes == compiled.Order);
+    CHECK_FALSE(execution.Transitions.empty());
+}
+
+TEST_CASE("frame graph aliases compatible transient resources with disjoint lifetimes")
+{
+    using namespace Keire::RenderBackend;
+    FrameGraph graph;
+    const auto first = graph.AddResource({"First HDR", FrameGraphResourceKind::Texture, false, 16U, 1024U});
+    const auto dependency = graph.AddResource({"Dependency", FrameGraphResourceKind::Buffer});
+    const auto second = graph.AddResource({"Second HDR", FrameGraphResourceKind::Texture, false, 16U, 2048U});
+    (void)graph.AddPass({"First", {}, {first}});
+    (void)graph.AddPass({"Consume first", {first}, {dependency}, FrameGraphPassKind::Compute});
+    (void)graph.AddPass({"Second", {dependency}, {second}});
+
+    const auto compiled = graph.Compile();
+    REQUIRE(compiled.PhysicalResources[first.Value] != std::numeric_limits<std::uint32_t>::max());
+    CHECK(compiled.PhysicalResources[first.Value] == compiled.PhysicalResources[second.Value]);
+    CHECK(compiled.TransientAllocations[compiled.PhysicalResources[first.Value]].SizeBytes == 2048U);
 }
 
 TEST_CASE("frame graph rejects reads before transient production and ambiguous feedback")
@@ -50,4 +97,11 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
     CHECK(scene.Compiled.Diagnostics[3] == "3: Opaque and mask");
     CHECK(scene.Compiled.Diagnostics[6] == "6: ACES tone map");
     CHECK(scene.Compiled.Diagnostics.back() == "9: Presentation");
+    REQUIRE(scene.HdrScene);
+    REQUIRE(scene.Compiled.TransientAllocations.size() == 1);
+    const auto hdrAllocation = scene.Compiled.PhysicalResources[scene.HdrScene.Value];
+    REQUIRE(hdrAllocation < scene.Compiled.TransientAllocations.size());
+    CHECK(scene.Compiled.TransientAllocations[hdrAllocation].Kind ==
+          Keire::RenderBackend::FrameGraphResourceKind::Texture);
+    CHECK(scene.Compiled.TransientAllocations[hdrAllocation].CompatibilityKey == 4);
 }

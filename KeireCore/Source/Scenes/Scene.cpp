@@ -143,6 +143,8 @@ namespace Keire
                     ComponentsRegistry = ComponentRegistry::CreateDefault();
                 SceneAsset::Validate(definition);
                 Name = std::move(definition.Name);
+                PrefabInstances = std::move(definition.PrefabInstances);
+                PrefabOverrides = std::move(definition.PrefabOverrides);
                 for (const auto& object : definition.Objects)
                 {
                     const auto native = Registry.create();
@@ -312,6 +314,8 @@ namespace Keire
 
             AssetId AssetValue;
             std::string Name;
+            std::vector<PrefabInstanceDefinition> PrefabInstances;
+            std::vector<PrefabOverrideDefinition> PrefabOverrides;
             Ref<ComponentRegistry> ComponentsRegistry;
             std::thread::id OwnerThread;
             entt::registry Registry;
@@ -403,7 +407,10 @@ namespace Keire
         SceneDefinition SceneState::Snapshot() const
         {
             RequireOwner("Snapshot");
-            SceneDefinition result{.SchemaVersion = 2, .Name = m_Impl->Name};
+            SceneDefinition result{.SchemaVersion = 3,
+                                   .Name = m_Impl->Name,
+                                   .PrefabInstances = m_Impl->PrefabInstances,
+                                   .PrefabOverrides = m_Impl->PrefabOverrides};
             result.Objects.reserve(m_Impl->Entities.size());
             for (const auto id : m_Impl->HierarchyOrder())
             {

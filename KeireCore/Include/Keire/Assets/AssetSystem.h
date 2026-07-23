@@ -12,8 +12,10 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace Keire
@@ -49,6 +51,7 @@ namespace Keire
         std::size_t QueueCapacity = 4096;
         std::size_t ResidentCacheBudgetBytes = 512U * 1024U * 1024U;
         std::size_t MaximumAssetBytes = 1024U * 1024U * 1024U;
+        std::size_t MaximumStreamReadBytes = 16U * 1024U * 1024U;
     };
 
     struct AssetSystemStatistics
@@ -80,6 +83,33 @@ namespace Keire
         bool Reload = false;
     };
 
+    enum class AssetStreamState : std::uint8_t
+    {
+        Queued,
+        Reading,
+        Succeeded,
+        Failed,
+        Cancelled
+    };
+
+    class KEIRE_API AssetStreamOperation final : public RefCounted
+    {
+      public:
+        AssetStreamOperation();
+        ~AssetStreamOperation() override;
+
+        [[nodiscard]] AssetStreamState State() const noexcept;
+        [[nodiscard]] bool Wait(std::chrono::milliseconds timeout) const;
+        [[nodiscard]] std::vector<std::byte> Result() const;
+        [[nodiscard]] AssetDiagnostic Diagnostic() const;
+        void Cancel() noexcept;
+
+      private:
+        friend class AssetSystem;
+        class Impl;
+        std::unique_ptr<Impl> m_Impl;
+    };
+
     class KEIRE_API AssetSystem final : public RefCounted
     {
       public:
@@ -100,6 +130,7 @@ namespace Keire
         [[nodiscard]] bool Unmount(const std::filesystem::path& catalogPath);
         [[nodiscard]] bool PublishDevelopmentAsset(AssetId id, Ref<Asset> asset);
         [[nodiscard]] bool Reload(AssetId id, AssetPriority priority = AssetPriority::High);
+        [[nodiscard]] Ref<AssetStreamOperation> ReadRangeAsync(AssetId id, std::uint64_t offset, std::size_t bytes);
         [[nodiscard]] std::size_t PumpCompletions();
         [[nodiscard]] std::size_t EvictUnused();
         [[nodiscard]] AssetSystemStatistics Statistics() const;

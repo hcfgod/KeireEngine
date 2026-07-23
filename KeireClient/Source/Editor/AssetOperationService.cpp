@@ -114,6 +114,22 @@ namespace KeireEditor
         Queue(std::move(operation));
     }
 
+    void AssetOperationService::QueueExtractMaterials(const Keire::AssetId model,
+                                                      std::filesystem::path relativeDirectory,
+                                                      AssetOperationContext context)
+    {
+        if (!model || relativeDirectory.empty() || relativeDirectory.is_absolute() ||
+            relativeDirectory.lexically_normal().generic_string().starts_with(".."))
+            throw std::invalid_argument("Material extraction requires a model and confined relative directory.");
+        PendingOperation operation;
+        operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::ExtractMaterials;
+        operation.Request.ExtractModel = model;
+        operation.Request.ExtractDirectory = std::move(relativeDirectory);
+        operation.Priority = AssetOperationPriority::ExplicitAction;
+        operation.Context = std::move(context);
+        Queue(std::move(operation));
+    }
+
     void AssetOperationService::QueueMutation(Keire::Detail::AssetWorkerMutation mutation,
                                               AssetOperationContext context)
     {

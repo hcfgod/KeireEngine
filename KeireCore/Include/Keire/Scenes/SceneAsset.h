@@ -9,6 +9,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -45,11 +46,53 @@ namespace Keire
         std::vector<SceneComponentDefinition> Components;
     };
 
+    enum class PrefabOverrideKind : std::uint8_t
+    {
+        RenameObject,
+        SetObjectActive,
+        SetObjectTransform,
+        SetComponentProperty,
+        AddComponent,
+        RemoveComponent,
+        AddObject,
+        RemoveObject
+    };
+
+    struct PrefabOverrideDefinition
+    {
+        PrefabOverrideKind Kind = PrefabOverrideKind::SetComponentProperty;
+        AssetId Object;
+        ComponentTypeId Component;
+        std::string Property;
+        ComponentPropertyValue Value = false;
+        std::string Name;
+        bool Active = true;
+        SceneTransform Transform;
+        std::optional<SceneComponentDefinition> AddedComponent;
+        std::optional<SceneObjectDefinition> AddedObject;
+    };
+
+    struct PrefabObjectMapping
+    {
+        AssetId Source;
+        AssetId Instance;
+    };
+
+    struct PrefabInstanceDefinition
+    {
+        AssetId Prefab;
+        AssetId Root;
+        std::vector<PrefabObjectMapping> Objects;
+        std::vector<PrefabOverrideDefinition> Overrides;
+    };
+
     struct SceneDefinition
     {
-        std::uint32_t SchemaVersion = 2;
+        std::uint32_t SchemaVersion = 3;
         std::string Name;
         std::vector<SceneObjectDefinition> Objects;
+        std::vector<PrefabInstanceDefinition> PrefabInstances;
+        std::vector<PrefabOverrideDefinition> PrefabOverrides;
     };
 
     class KEIRE_API SceneAsset final : public Asset

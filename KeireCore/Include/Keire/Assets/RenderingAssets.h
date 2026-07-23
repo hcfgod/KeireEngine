@@ -94,6 +94,8 @@ namespace Keire
         bool DepthWrite = true;
         bool Blend = false;
         bool ReceivesShadows = false;
+        bool UsesForwardPlus = false;
+        bool UsesInstancing = false;
         std::vector<ShaderPropertyDefinition> Properties;
         std::vector<AssetSourceDependency> Dependencies;
         std::vector<ShaderVariant> Variants;

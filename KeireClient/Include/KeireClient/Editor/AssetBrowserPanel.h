@@ -36,6 +36,7 @@ namespace KeireEditor
         virtual void CreateAssetBrowserShader() = 0;
         virtual void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                                     std::string_view baseName) = 0;
+        virtual void ExtractAssetBrowserMaterials(Keire::AssetId model) = 0;
         virtual void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation,
                                         Keire::Detail::AssetWorkerMutation reverse, std::string name,
                                         bool revealResult = false) = 0;

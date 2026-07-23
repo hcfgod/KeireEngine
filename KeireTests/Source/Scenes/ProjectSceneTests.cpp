@@ -357,13 +357,13 @@ TEST_CASE("Newer scene importers upgrade older metadata revisions but reject fut
                << importerVersion << ",\n  \"dependencies\": [],\n  \"subAssets\": []\n}\n";
         REQUIRE(stream.good());
     };
-    writeMetadata(1);
+    writeMetadata(2);
     Keire::AssetDatabaseSpecification specification{.ProjectRoot = directory.Path};
     specification.Importers.push_back(Keire::CreateSceneAssetImporter());
     auto database = Keire::CreateRef<Keire::AssetDatabase>(specification);
     CHECK_NOTHROW((void)database->ImportAll());
 
-    writeMetadata(3);
+    writeMetadata(4);
     database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     CHECK_THROWS_WITH_AS((void)database->ImportAll(),
                          "No compatible importer is registered for asset: Legacy.keirescene", std::runtime_error);

@@ -95,6 +95,8 @@ namespace KeireEditor
         void QueueCreateAssetWithAuxiliary(std::filesystem::path relativePath, std::vector<std::byte> source,
                                            Keire::AssetImportSettings settings, AssetOperationContext context,
                                            std::vector<AssetCreationAuxiliarySource> auxiliarySources);
+        void QueueExtractMaterials(Keire::AssetId model, std::filesystem::path relativeDirectory,
+                                   AssetOperationContext context = {});
         void QueueMutation(Keire::Detail::AssetWorkerMutation mutation, AssetOperationContext context = {});
         void QueueCook(Keire::AssetBuildProfile profile, std::filesystem::path output);
         void QueueReceipt(Keire::ExternalAssetImportReceiptId receipt, bool redo);

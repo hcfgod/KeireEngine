@@ -19,6 +19,49 @@ $Ninja = Get-NinjaExecutable
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $Bridge = Join-Path $Root "Scripts\Dependencies\CMakeLists.txt"
 $bridgeHash = (Get-FileHash -Algorithm SHA256 $Bridge).Hash.ToLowerInvariant()
+
+function Get-LockedDependencySource {
+    param([string]$Name, [string]$Url, [string]$Commit)
+
+    $sourceBase = Join-Path $env:LOCALAPPDATA "KeireDependencySources"
+    $source = Join-Path $sourceBase "$Name-$Commit"
+    if (Test-Path -LiteralPath $source) {
+        $actual = ([string](& git -C $source rev-parse HEAD 2>$null)).Trim()
+        if ($LASTEXITCODE -ne 0 -or $actual -ne $Commit) {
+            throw "Locked $Name source cache is not the expected commit: $source"
+        }
+        return $source
+    }
+
+    New-Item -ItemType Directory -Force $sourceBase | Out-Null
+    $temporary = Join-Path $sourceBase "$Name-$Commit.tmp-$PID"
+    if (Test-Path -LiteralPath $temporary) {
+        $resolvedTemporary = [IO.Path]::GetFullPath($temporary)
+        $resolvedBase = [IO.Path]::GetFullPath($sourceBase) + [IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedTemporary.StartsWith($resolvedBase, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to replace a dependency source outside $sourceBase."
+        }
+        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force
+    }
+    try {
+        & git clone --quiet --filter=blob:none --no-checkout $Url $temporary
+        if ($LASTEXITCODE -ne 0) { throw "Could not clone $Name." }
+        & git -C $temporary fetch --quiet --depth 1 origin $Commit
+        if ($LASTEXITCODE -ne 0) { throw "Could not fetch locked $Name commit $Commit." }
+        & git -C $temporary checkout --quiet --detach $Commit
+        if ($LASTEXITCODE -ne 0) { throw "Could not check out locked $Name commit $Commit." }
+        Move-Item -LiteralPath $temporary -Destination $source
+    }
+    catch {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
+        throw
+    }
+    return $source
+}
+
+$joltSource = Get-LockedDependencySource "jolt" $Lock.JOLT_URL $Lock.JOLT_COMMIT
+$recastSource = Get-LockedDependencySource "recast" $Lock.RECAST_URL $Lock.RECAST_COMMIT
+$miniaudioSource = Get-LockedDependencySource "miniaudio" $Lock.MINIAUDIO_URL $Lock.MINIAUDIO_COMMIT
 $assimpSource = Join-Path $Root "Vendor\assimp"
 $assimpSourceLink = Join-Path $env:LOCALAPPDATA "KeireDependencySources\assimp-$($Lock.ASSIMP_COMMIT)"
 if (Test-Path -LiteralPath $assimpSourceLink) {
@@ -43,15 +86,29 @@ $options = @(
     "-DSDL_HAPTIC=OFF", "-DSDL_SENSOR=OFF", "-DSDL_RENDER=OFF", "-DSDL_GPU=ON",
     "-DSDL_DUMMYVIDEO=ON", "-DSDL_OFFSCREEN=ON", "-DSDL_INSTALL=ON", "-DSDL_INSTALL_DOCS=OFF",
     "-DSDL_DEPS_SHARED=ON", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON", "-DCMAKE_INSTALL_LIBDIR=lib",
+    "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
     "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`$<`$<CONFIG:Debug>:Debug>DLL",
     "-DBUILD_SHARED_LIBS=OFF", "-DASSIMP_BUILD_TESTS=OFF", "-DASSIMP_BUILD_ASSIMP_TOOLS=OFF",
     "-DASSIMP_BUILD_SAMPLES=OFF", "-DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF",
     "-DASSIMP_BUILD_OBJ_IMPORTER=ON", "-DASSIMP_BUILD_FBX_IMPORTER=ON", "-DASSIMP_BUILD_GLTF_IMPORTER=ON",
     "-DASSIMP_NO_EXPORT=ON", "-DASSIMP_BUILD_ZLIB=ON",
     "-DASSIMP_BUILD_DRACO=OFF", "-DASSIMP_WARNINGS_AS_ERRORS=OFF", "-DASSIMP_INSTALL=ON",
-    "-DASSIMP_INJECT_DEBUG_POSTFIX=OFF", "-DASSIMP_IGNORE_GIT_HASH=ON", "-DLIBRARY_SUFFIX="
+    "-DASSIMP_INJECT_DEBUG_POSTFIX=OFF", "-DASSIMP_IGNORE_GIT_HASH=ON", "-DLIBRARY_SUFFIX=",
+    "-DJPH_BUILD_SHARED_LIBS=OFF", "-DENABLE_INSTALL=ON", "-DOVERRIDE_CXX_FLAGS=OFF",
+    "-DINTERPROCEDURAL_OPTIMIZATION=OFF", "-DENABLE_ALL_WARNINGS=OFF",
+    "-DFLOATING_POINT_EXCEPTIONS_ENABLED=OFF", "-DUSE_SSE4_1=OFF", "-DUSE_SSE4_2=OFF",
+    "-DUSE_AVX=OFF", "-DUSE_AVX2=OFF", "-DUSE_AVX512=OFF", "-DUSE_LZCNT=OFF",
+    "-DUSE_TZCNT=OFF", "-DUSE_F16C=OFF", "-DUSE_FMADD=OFF",
+    "-DDEBUG_RENDERER_IN_DEBUG_AND_RELEASE=OFF", "-DPROFILER_IN_DEBUG_AND_RELEASE=OFF",
+    "-DENABLE_OBJECT_STREAM=OFF", "-DUSE_STATIC_MSVC_RUNTIME_LIBRARY=OFF", "-DJPH_USE_DX12=OFF",
+    "-DJPH_USE_VK=OFF", "-DJPH_USE_MTL=OFF", "-DJPH_USE_CPU_COMPUTE=OFF",
+    "-DRECASTNAVIGATION_DEMO=OFF", "-DRECASTNAVIGATION_TESTS=OFF", "-DRECASTNAVIGATION_EXAMPLES=OFF",
+    "-DRECASTNAVIGATION_DT_POLYREF64=ON", "-DMINIAUDIO_BUILD_EXAMPLES=OFF", "-DMINIAUDIO_BUILD_TESTS=OFF",
+    "-DMINIAUDIO_BUILD_TOOLS=OFF", "-DMINIAUDIO_NO_EXTRA_NODES=ON", "-DMINIAUDIO_NO_LIBVORBIS=ON",
+    "-DMINIAUDIO_NO_LIBOPUS=ON", "-DMINIAUDIO_INSTALL=ON"
 )
-$key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
+$key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Lock.JOLT_COMMIT, $Lock.RECAST_COMMIT,
+    $Lock.MINIAUDIO_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
     ($options -join ";")) -join "|"
 $base = Join-Path $Root "Build\Dependencies\windows-$OutputArchitecture-$Toolset"
 
@@ -60,13 +117,23 @@ foreach ($configuration in @("Debug", "Release")) {
     $install = Join-Path $build "install"
     $library = Join-Path $install "lib\SDL3-static.lib"
     $assimpLibrary = Join-Path $install "lib\assimp.lib"
+    $joltLibrary = Join-Path $install "lib\Jolt.lib"
+    $recastSuffix = if ($configuration -eq "Debug") { "-d" } else { "" }
+    $recastLibrary = Join-Path $install "lib\Recast$recastSuffix.lib"
+    $detourLibrary = Join-Path $install "lib\Detour$recastSuffix.lib"
+    $detourCrowdLibrary = Join-Path $install "lib\DetourCrowd$recastSuffix.lib"
+    $detourTileCacheLibrary = Join-Path $install "lib\DetourTileCache$recastSuffix.lib"
+    $miniaudioLibrary = Join-Path $install "lib\miniaudio.lib"
     $zlibName = if ($configuration -eq "Debug") { "lib\zlibstaticd.lib" } else { "lib\zlibstatic.lib" }
     $zlibLibrary = Join-Path $install $zlibName
     $stamp = Join-Path $build "keire-dependency.stamp"
     $valid = -not $Force -and (Test-Path $library) -and (Test-Path $assimpLibrary) -and
+        (Test-Path $joltLibrary) -and (Test-Path $recastLibrary) -and (Test-Path $detourLibrary) -and
+        (Test-Path $detourCrowdLibrary) -and (Test-Path $detourTileCacheLibrary) -and
+        (Test-Path $miniaudioLibrary) -and
         (Test-Path $zlibLibrary) -and (Test-Path $stamp) -and
         ((Get-Content $stamp -Raw).Trim() -eq "$key|$configuration")
-    if ($valid) { Write-Host "==> SDL $configuration dependency cache is current"; continue }
+    if ($valid) { Write-Host "==> Native $configuration dependency cache is current"; continue }
 
     if (Test-Path -LiteralPath $build) {
         $resolvedBuild = [IO.Path]::GetFullPath($build)
@@ -77,25 +144,71 @@ foreach ($configuration in @("Debug", "Release")) {
         Remove-Item -LiteralPath $resolvedBuild -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $build | Out-Null
-    Write-Host "==> Configuring SDL and Assimp ($configuration)"
+    Write-Host "==> Configuring native dependencies ($configuration)"
     & cmake -S (Join-Path $Root "Scripts\Dependencies") -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$Ninja" `
         "-DKEIRE_SDL_SOURCE=$(Join-Path $Root 'Vendor\SDL')" `
-        "-DKEIRE_ASSIMP_SOURCE=$assimpSourceLink" "-DCMAKE_BUILD_TYPE=$configuration" `
+        "-DKEIRE_ASSIMP_SOURCE=$assimpSourceLink" "-DKEIRE_JOLT_SOURCE=$joltSource" `
+        "-DKEIRE_RECAST_SOURCE=$recastSource" "-DKEIRE_MINIAUDIO_SOURCE=$miniaudioSource" `
+        "-DCMAKE_BUILD_TYPE=$configuration" `
         "-DCMAKE_INSTALL_PREFIX=$install" @options
-    if ($LASTEXITCODE -ne 0) { throw "SDL/Assimp $configuration configuration failed." }
+    if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency configuration failed." }
     & cmake --build $build --target install --parallel
-    if ($LASTEXITCODE -ne 0) { throw "SDL/Assimp $configuration build failed." }
+    if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency build failed." }
     if (-not (Test-Path -LiteralPath $library) -or -not (Test-Path -LiteralPath $assimpLibrary) -or
+        -not (Test-Path -LiteralPath $joltLibrary) -or -not (Test-Path -LiteralPath $recastLibrary) -or
+        -not (Test-Path -LiteralPath $detourLibrary) -or -not (Test-Path -LiteralPath $detourCrowdLibrary) -or
+        -not (Test-Path -LiteralPath $detourTileCacheLibrary) -or -not (Test-Path -LiteralPath $miniaudioLibrary) -or
         -not (Test-Path -LiteralPath $zlibLibrary) -or
         -not (Test-Path -LiteralPath (Join-Path $install "include\assimp\Importer.hpp")) -or
         -not (Test-Path -LiteralPath (Join-Path $install "include\SDL3\SDL.h")) -or
         -not (Test-Path -LiteralPath (Join-Path $install "cmake\SDL3Config.cmake"))) {
-        throw "SDL/Assimp $configuration install is incomplete."
+        throw "Native $configuration dependency install is incomplete."
     }
     [IO.File]::WriteAllText($stamp, "$key|$configuration`n", [Text.UTF8Encoding]::new($false))
 }
 
 & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset -Force:$Force
+
+$coralDebug = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Debug -Build -Force:$Force
+$coralRelease = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Release -Build -Force:$Force
+
+function Set-DependencyJunction {
+    param([string]$Path, [string]$Target)
+    if (Test-Path -LiteralPath $Path) {
+        $Item = Get-Item -LiteralPath $Path -Force
+        $LinkTarget = [string]($Item.Target | Select-Object -First 1)
+        if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            [IO.Path]::GetFullPath($LinkTarget) -eq [IO.Path]::GetFullPath($Target)) {
+            return
+        }
+        $AllowedRoot = [IO.Path]::GetFullPath((Join-Path $Root "Build\Dependencies")) +
+            [IO.Path]::DirectorySeparatorChar
+        if (-not ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            -not [IO.Path]::GetFullPath($Path).StartsWith($AllowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Dependency junction points somewhere unexpected: $Path"
+        }
+        [IO.Directory]::Delete([IO.Path]::GetFullPath($Path))
+    }
+    New-Item -ItemType Directory -Force (Split-Path $Path) | Out-Null
+    New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
+}
+
+$coralLink = Join-Path $Root "Build\Dependencies\coral-patched"
+$dotnetLink = Join-Path $Root "Build\Dependencies\coral-nethost"
+$dotnetSdkLink = Join-Path $Root "Build\Dependencies\dotnet-sdk"
+Set-DependencyJunction $coralLink $coralDebug.Source
+Set-DependencyJunction $dotnetLink (Split-Path $coralDebug.NetHostLibrary)
+Set-DependencyJunction $dotnetSdkLink $env:DOTNET_ROOT
+
+$managedOutput = Join-Path $Root "Build\Managed"
+$managedIntermediate = Join-Path $managedOutput "obj\"
+New-Item -ItemType Directory -Force -Path $managedOutput | Out-Null
+& (Join-Path $env:DOTNET_ROOT "dotnet.exe") build (Join-Path $Root "KeireManaged\Keire.Managed.csproj") `
+    --configuration Release --output $managedOutput --nologo `
+    "/p:BaseIntermediateOutputPath=$managedIntermediate"
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $managedOutput "Keire.Managed.dll"))) {
+    throw "Keire.Managed API build failed."
+}
 
 $generated = Join-Path $Root "Build\Generated"
 New-Item -ItemType Directory -Force -Path $generated | Out-Null
@@ -106,6 +219,19 @@ DependencyManifest = {
     SDLCommit = "$($Lock.SDL_COMMIT)",
     JSONCommit = "$($Lock.JSON_COMMIT)",
     AssimpCommit = "$($Lock.ASSIMP_COMMIT)",
+    JoltCommit = "$($Lock.JOLT_COMMIT)",
+    RecastCommit = "$($Lock.RECAST_COMMIT)",
+    MiniaudioCommit = "$($Lock.MINIAUDIO_COMMIT)",
+    CoralCommit = "$($coralDebug.Commit)",
+    CoralPatchDigest = "$($coralDebug.PatchDigest)",
+    CoralSource = "../Build/Dependencies/coral-patched",
+    CoralInclude = "../Build/Dependencies/coral-patched/Coral.Native/Include",
+    CoralDebugLibrary = "../Build/Dependencies/coral-patched/Build/Debug/Coral.Native.lib",
+    CoralReleaseLibrary = "../Build/Dependencies/coral-patched/Build/Release/Coral.Native.lib",
+    CoralManagedDebug = "../Build/Dependencies/coral-patched/Build/Debug",
+    CoralManagedRelease = "../Build/Dependencies/coral-patched/Build/Release",
+    CoralNetHostLibrary = "../Build/Dependencies/coral-nethost/nethost.lib",
+    CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/nethost.dll",
     SDL3Include = "$debugInstall/include",
     SDL3DebugLibrary = "$debugInstall/lib/SDL3-static.lib",
     SDL3ReleaseLibrary = "$releaseInstall/lib/SDL3-static.lib",
@@ -114,6 +240,15 @@ DependencyManifest = {
     AssimpReleaseLibrary = "$releaseInstall/lib/assimp.lib",
     AssimpZlibDebugLibrary = "$debugInstall/lib/zlibstaticd.lib",
     AssimpZlibReleaseLibrary = "$releaseInstall/lib/zlibstatic.lib",
+    JoltInclude = "$debugInstall/include",
+    JoltDebugLibrary = "$debugInstall/lib/Jolt.lib",
+    JoltReleaseLibrary = "$releaseInstall/lib/Jolt.lib",
+    RecastInclude = "$debugInstall/include/recastnavigation",
+    RecastDebugLibraries = { "$debugInstall/lib/Recast-d.lib", "$debugInstall/lib/Detour-d.lib", "$debugInstall/lib/DetourCrowd-d.lib", "$debugInstall/lib/DetourTileCache-d.lib" },
+    RecastReleaseLibraries = { "$releaseInstall/lib/Recast.lib", "$releaseInstall/lib/Detour.lib", "$releaseInstall/lib/DetourCrowd.lib", "$releaseInstall/lib/DetourTileCache.lib" },
+    MiniaudioInclude = "$debugInstall/include/miniaudio",
+    MiniaudioDebugLibrary = "$debugInstall/lib/miniaudio.lib",
+    MiniaudioReleaseLibrary = "$releaseInstall/lib/miniaudio.lib",
     SDL3PlatformLinks = { "kernel32", "user32", "gdi32", "winmm", "imm32", "setupapi", "version", "ole32", "oleaut32", "shell32", "advapi32", "uuid" }
 }
 "@

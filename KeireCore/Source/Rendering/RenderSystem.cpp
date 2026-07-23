@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstring>
 #include <deque>
+#include <future>
 #include <limits>
 #include <optional>
 #include <span>
@@ -253,6 +254,232 @@ namespace Keire
                 SDL_ReleaseGPUFence(renderState.Device, fence);
             SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
             throw;
+        }
+    }
+
+    std::vector<float> RenderSystemInternalAccess::ReadbackDirectionalShadow(RenderSystem& renderer,
+                                                                             const RenderSurface& surface,
+                                                                             const std::uint32_t layer)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("ReadbackDirectionalShadow");
+        const auto& surfaceState = *surface.m_Impl->State;
+        const auto owner = surfaceState.Owner.lock();
+        if (owner.get() != &renderState)
+            throw std::invalid_argument("Render surface belongs to another renderer.");
+        if (renderState.ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT ||
+            !surfaceState.Resources.DirectionalShadow || layer >= surfaceState.Resources.DirectionalShadowLayers)
+            throw std::logic_error("Directional shadow surface is not available for D32 readback.");
+
+        const auto resolution = surfaceState.Resources.DirectionalShadowResolution;
+        const std::uint64_t byteSize64 =
+            static_cast<std::uint64_t>(resolution) * static_cast<std::uint64_t>(resolution) * sizeof(float);
+        if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("Directional shadow surface is too large for readback.");
+        const auto byteSize = static_cast<std::uint32_t>(byteSize64);
+
+        SDL_GPUTransferBufferCreateInfo transferInformation{};
+        transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+        transferInformation.size = byteSize;
+        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(renderState.Device, &transferInformation);
+        if (!transfer)
+            throw std::runtime_error("SDL_CreateGPUTransferBuffer(shadow readback) failed: " + LastSdlError());
+
+        SDL_GPUFence* fence = nullptr;
+        try
+        {
+            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(renderState.Device);
+            if (!commands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(shadow readback) failed: " + LastSdlError());
+            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+            if (!copy)
+            {
+                (void)SDL_CancelGPUCommandBuffer(commands);
+                throw std::runtime_error("SDL_BeginGPUCopyPass(shadow readback) failed: " + LastSdlError());
+            }
+            const SDL_GPUTextureRegion source{
+                surfaceState.Resources.DirectionalShadow, 0, layer, 0, 0, 0, resolution, resolution, 1};
+            const SDL_GPUTextureTransferInfo destination{transfer, 0, resolution, resolution};
+            SDL_DownloadFromGPUTexture(copy, &source, &destination);
+            SDL_EndGPUCopyPass(copy);
+            fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+            if (!fence)
+                throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence(shadow readback) failed: " +
+                                         LastSdlError());
+            if (!SDL_WaitForGPUFences(renderState.Device, true, &fence, 1))
+                throw std::runtime_error("SDL_WaitForGPUFences(shadow readback) failed: " + LastSdlError());
+
+            const void* mapped = SDL_MapGPUTransferBuffer(renderState.Device, transfer, false);
+            if (!mapped)
+                throw std::runtime_error("SDL_MapGPUTransferBuffer(shadow readback) failed: " + LastSdlError());
+            std::vector<float> depth(static_cast<std::size_t>(resolution) * resolution);
+            std::memcpy(depth.data(), mapped, byteSize);
+            SDL_UnmapGPUTransferBuffer(renderState.Device, transfer);
+            SDL_ReleaseGPUFence(renderState.Device, fence);
+            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+            return depth;
+        }
+        catch (...)
+        {
+            if (fence)
+                SDL_ReleaseGPUFence(renderState.Device, fence);
+            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+            throw;
+        }
+    }
+
+    std::vector<float> RenderSystemInternalAccess::ReadbackLocalShadow(RenderSystem& renderer,
+                                                                       const RenderSurface& surface,
+                                                                       const std::uint32_t layer)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("ReadbackLocalShadow");
+        const auto& surfaceState = *surface.m_Impl->State;
+        const auto owner = surfaceState.Owner.lock();
+        if (owner.get() != &renderState)
+            throw std::invalid_argument("Render surface belongs to another renderer.");
+        if (renderState.ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT || !surfaceState.Resources.LocalShadow ||
+            layer >= surfaceState.Resources.LocalShadowLayers)
+            throw std::logic_error("Local shadow surface is not available for D32 readback.");
+
+        const auto resolution = surfaceState.Resources.LocalShadowResolution;
+        const std::uint64_t byteSize64 =
+            static_cast<std::uint64_t>(resolution) * static_cast<std::uint64_t>(resolution) * sizeof(float);
+        if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("Local shadow surface is too large for readback.");
+        const auto byteSize = static_cast<std::uint32_t>(byteSize64);
+
+        SDL_GPUTransferBufferCreateInfo transferInformation{};
+        transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+        transferInformation.size = byteSize;
+        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(renderState.Device, &transferInformation);
+        if (!transfer)
+            throw std::runtime_error("SDL_CreateGPUTransferBuffer(local shadow readback) failed: " + LastSdlError());
+
+        SDL_GPUFence* fence = nullptr;
+        try
+        {
+            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(renderState.Device);
+            if (!commands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(local shadow readback) failed: " +
+                                         LastSdlError());
+            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+            if (!copy)
+            {
+                (void)SDL_CancelGPUCommandBuffer(commands);
+                throw std::runtime_error("SDL_BeginGPUCopyPass(local shadow readback) failed: " + LastSdlError());
+            }
+            const SDL_GPUTextureRegion source{
+                surfaceState.Resources.LocalShadow, 0, layer, 0, 0, 0, resolution, resolution, 1};
+            const SDL_GPUTextureTransferInfo destination{transfer, 0, resolution, resolution};
+            SDL_DownloadFromGPUTexture(copy, &source, &destination);
+            SDL_EndGPUCopyPass(copy);
+            fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+            if (!fence)
+                throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence(local shadow readback) failed: " +
+                                         LastSdlError());
+            if (!SDL_WaitForGPUFences(renderState.Device, true, &fence, 1))
+                throw std::runtime_error("SDL_WaitForGPUFences(local shadow readback) failed: " + LastSdlError());
+
+            const void* mapped = SDL_MapGPUTransferBuffer(renderState.Device, transfer, false);
+            if (!mapped)
+                throw std::runtime_error("SDL_MapGPUTransferBuffer(local shadow readback) failed: " + LastSdlError());
+            std::vector<float> depth(static_cast<std::size_t>(resolution) * resolution);
+            std::memcpy(depth.data(), mapped, byteSize);
+            SDL_UnmapGPUTransferBuffer(renderState.Device, transfer);
+            SDL_ReleaseGPUFence(renderState.Device, fence);
+            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+            return depth;
+        }
+        catch (...)
+        {
+            if (fence)
+                SDL_ReleaseGPUFence(renderState.Device, fence);
+            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+            throw;
+        }
+    }
+
+    void RenderSystemInternalAccess::InjectDeviceLoss(RenderSystem& renderer)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("InjectDeviceLoss");
+        if (renderState.Specification.Mode != RenderMode::Rendered)
+            throw std::logic_error("Device-loss injection requires a rendered backend.");
+        renderState.InjectDeviceLossAtNextFrame.store(true, std::memory_order_release);
+    }
+
+    std::uint32_t RenderSystemInternalAccess::SaturateRendererQueue(RenderSystem& renderer)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("SaturateRendererQueue");
+        if (!renderState.RenderThread.joinable())
+            throw std::logic_error("Queue saturation requires an active renderer thread.");
+
+        std::promise<void> workerStarted;
+        std::promise<void> releaseWorker;
+        auto release = releaseWorker.get_future().share();
+        std::exception_ptr producerFailure;
+        std::mutex failureMutex;
+        const auto produce = [&](std::function<void()> work)
+        {
+            try
+            {
+                renderState.DispatchRender(std::move(work));
+            }
+            catch (...)
+            {
+                std::scoped_lock lock(failureMutex);
+                if (!producerFailure)
+                    producerFailure = std::current_exception();
+            }
+        };
+
+        std::jthread first(
+            [&]
+            {
+                produce(
+                    [&]
+                    {
+                        workerStarted.set_value();
+                        release.wait();
+                    });
+            });
+        workerStarted.get_future().wait();
+        std::jthread second([&] { produce([] {}); });
+        std::jthread third([&] { produce([] {}); });
+
+        bool saturated = false;
+        std::uint32_t highWaterMark = 0;
+        {
+            std::unique_lock lock(renderState.RenderQueueMutex);
+            saturated = renderState.RenderQueueReady.wait_for(lock, std::chrono::seconds(2),
+                                                              [&] { return renderState.RenderQueue.size() == 2; });
+            highWaterMark = renderState.Statistics.RendererQueueHighWaterMark;
+        }
+        releaseWorker.set_value();
+        first.join();
+        second.join();
+        third.join();
+        if (producerFailure)
+            std::rethrow_exception(producerFailure);
+        if (!saturated)
+            throw std::runtime_error("Renderer queue did not reach its bounded capacity.");
+        return highWaterMark;
+    }
+
+    void RenderSystemInternalAccess::RequestSurfaceSize(RenderSurface& surface, const std::uint32_t width,
+                                                        const std::uint32_t height)
+    {
+        if (width > 16384 || height > 16384)
+            throw std::invalid_argument("Test surface dimensions must be in the range 0..16384.");
+        if (const auto owner = surface.m_Impl->State->Owner.lock())
+        {
+            owner->RequireOwner("RequestSurfaceSize");
+            surface.m_Impl->State->RequestedWidth = width;
+            surface.m_Impl->State->RequestedHeight = height;
+            surface.m_Impl->State->FailedWidth = 0;
+            surface.m_Impl->State->FailedHeight = 0;
         }
     }
 

@@ -33,6 +33,8 @@ namespace
     constexpr std::uint32_t SurfaceSize = 96;
     constexpr float ColorTolerance = 0.04F;
     constexpr float MinimumBehaviorDelta = 0.08F;
+    constexpr float MinimumShadowDelta = 0.025F;
+    constexpr float MinimumShadowDepthDelta = 0.01F;
 
     enum class CaptureKind : std::uint8_t
     {
@@ -133,10 +135,23 @@ namespace
         return maximum;
     }
 
+    [[nodiscard]] float MaximumDifference(const std::vector<float>& left, const std::vector<float>& right)
+    {
+        if (left.size() != right.size())
+            return 0.0F;
+        float maximum = 0.0F;
+        for (std::size_t index = 0; index < left.size(); ++index)
+            maximum = std::max(maximum, std::abs(left[index] - right[index]));
+        return maximum;
+    }
+
     struct CaptureResults final
     {
         std::vector<std::vector<std::uint8_t>> Frames;
+        std::vector<std::vector<float>> ShadowDepth;
         std::vector<std::uint64_t> MaterialBindingBuilds;
+        Keire::RenderStatistics Statistics;
+        bool HasStatistics = false;
     };
 
     class RenderAssetFixture final
@@ -232,6 +247,8 @@ namespace
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
   "vertexLayoutVersion": 2,
   "receivesShadows": true,
+  "usesForwardPlus": true,
+  "usesInstancing": true,
   "stages": {"vertex": "VSMain", "fragment": "PSMain"},
   "includeRoots": ["Assets/Shaders"],
   "renderState": {"topology": "TriangleList", "culling": "None", "depthTest": true, "depthWrite": true, "blend": false},
@@ -391,6 +408,11 @@ namespace
 
         void OnDetach() noexcept override
         {
+            if (Owner().Renderer())
+            {
+                m_Results->Statistics = Owner().Renderer()->Statistics();
+                m_Results->HasStatistics = true;
+            }
             if (m_Scene)
                 m_Scene->Close();
             m_Light.Reset();
@@ -569,6 +591,11 @@ namespace
 
         void OnDetach() noexcept override
         {
+            if (Owner().Renderer())
+            {
+                m_Results->Statistics = Owner().Renderer()->Statistics();
+                m_Results->HasStatistics = true;
+            }
             if (m_Scene)
                 m_Scene->Close();
             m_View.Reset();
@@ -577,6 +604,7 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            bool exitAfterSubmit = false;
             if (m_Submitted)
             {
                 m_Results->Frames.push_back(
@@ -591,21 +619,17 @@ namespace
                 if (m_Results->Frames.size() >= 3 && bindingCountIsStable &&
                     statistics.Green > statistics.Red + MinimumBehaviorDelta &&
                     statistics.Green > statistics.Blue + MinimumBehaviorDelta)
-                {
-                    Owner().RequestExit();
-                    return;
-                }
+                    exitAfterSubmit = true;
                 if (m_Results->Frames.size() >= 120)
-                {
-                    Owner().RequestExit();
-                    return;
-                }
+                    exitAfterSubmit = true;
             }
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
             m_Submitted = true;
+            if (exitAfterSubmit)
+                Owner().RequestExit();
         }
 
       private:
@@ -637,9 +661,11 @@ namespace
             floor.GetComponent<Keire::TransformComponent>()->SetLocalScale({4.0F, 0.15F, 4.0F});
             const auto floorRenderer = floor.AddComponent<Keire::MeshRendererComponent>();
             floorRenderer->SetMesh(m_Mesh);
+            floorRenderer->SetMaterial(m_Material);
+            floorRenderer->SetCastShadows(false);
 
             auto caster = m_Scene->CreateEntity("Shadow caster");
-            caster.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.0F, 0.0F});
+            caster.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.5F, 0.0F});
             caster.GetComponent<Keire::TransformComponent>()->SetLocalScale({0.65F, 0.65F, 0.65F});
             const auto casterRenderer = caster.AddComponent<Keire::MeshRendererComponent>();
             casterRenderer->SetMesh(m_Mesh);
@@ -650,7 +676,7 @@ namespace
 
             auto sun = m_Scene->CreateEntity("Sun");
             sun.GetComponent<Keire::TransformComponent>()->SetLocalRotation(
-                Keire::Math::EulerDegreesToQuaternion({60.0F, -30.0F, 0.0F}));
+                Keire::Math::EulerDegreesToQuaternion({124.0F, 0.0F, 0.0F}));
             m_Light = sun.AddComponent<Keire::DirectionalLightComponent>();
             m_Light->SetIntensity(4.0F);
             m_Light->SetShadows(Keire::ShadowQuality::Disabled);
@@ -665,6 +691,7 @@ namespace
             Keire::RenderCamera camera;
             camera.View = Keire::Math::LookAt({3.0F, 3.0F, 5.0F}, {0.0F, -0.25F, 0.0F}, {0.0F, 1.0F, 0.0F});
             camera.Projection = Keire::Math::Perspective(50.0F, 1.0F, 0.1F, 100.0F);
+            camera.FarPlane = 100.0F;
             camera.ClearColor = surface.ClearColor;
             m_View->SetCamera(camera);
         }
@@ -691,12 +718,16 @@ namespace
             {
                 m_Results->Frames.push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+                m_Results->ShadowDepth.push_back(Keire::RenderSystemInternalAccess::ReadbackDirectionalShadow(
+                    *Owner().Renderer(), *m_View->Surface(), 0));
                 m_Caster->SetCastShadows(true);
             }
             else if (m_Frame == 72)
             {
                 m_Results->Frames.push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+                m_Results->ShadowDepth.push_back(Keire::RenderSystemInternalAccess::ReadbackDirectionalShadow(
+                    *Owner().Renderer(), *m_View->Surface(), 0));
                 Owner().RequestExit();
                 return;
             }
@@ -740,8 +771,11 @@ namespace
             floor.GetComponent<Keire::TransformComponent>()->SetLocalScale({4.0F, 0.15F, 4.0F});
             const auto floorRenderer = floor.AddComponent<Keire::MeshRendererComponent>();
             floorRenderer->SetMesh(m_Mesh);
+            floorRenderer->SetMaterial(m_Material);
+            floorRenderer->SetCastShadows(false);
 
             auto caster = m_Scene->CreateEntity("Shadow caster");
+            caster.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.5F, 0.0F});
             caster.GetComponent<Keire::TransformComponent>()->SetLocalScale({0.65F, 0.65F, 0.65F});
             const auto casterRenderer = caster.AddComponent<Keire::MeshRendererComponent>();
             casterRenderer->SetMesh(m_Mesh);
@@ -751,7 +785,7 @@ namespace
             m_Caster = casterRenderer;
 
             auto pointEntity = m_Scene->CreateEntity("Point shadow light");
-            pointEntity.GetComponent<Keire::TransformComponent>()->SetLocalPosition({1.5F, 2.5F, 1.5F});
+            pointEntity.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-1.5F, 2.5F, 1.5F});
             m_Point = pointEntity.AddComponent<Keire::PointLightComponent>();
             m_Point->SetIntensity(16.0F);
             m_Point->SetRange(10.0F);
@@ -777,6 +811,7 @@ namespace
             Keire::RenderCamera camera;
             camera.View = Keire::Math::LookAt({3.0F, 3.0F, 5.0F}, {0.0F, -0.25F, 0.0F}, {0.0F, 1.0F, 0.0F});
             camera.Projection = Keire::Math::Perspective(50.0F, 1.0F, 0.1F, 100.0F);
+            camera.FarPlane = 100.0F;
             camera.ClearColor = surface.ClearColor;
             m_View->SetCamera(camera);
         }
@@ -802,11 +837,13 @@ namespace
             else if (m_Frame == 60)
             {
                 Capture();
+                CaptureShadow(11);
                 m_Caster->SetCastShadows(true);
             }
             else if (m_Frame == 72)
             {
                 Capture();
+                CaptureShadow(11);
                 m_Point->SetShadows(Keire::ShadowQuality::Disabled);
                 m_Caster->SetCastShadows(false);
                 m_Spot->SetShadows(Keire::ShadowQuality::Soft);
@@ -814,11 +851,13 @@ namespace
             else if (m_Frame == 84)
             {
                 Capture();
+                CaptureShadow(0);
                 m_Caster->SetCastShadows(true);
             }
             else if (m_Frame == 96)
             {
                 Capture();
+                CaptureShadow(0);
                 Owner().RequestExit();
                 return;
             }
@@ -836,6 +875,12 @@ namespace
                 Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
         }
 
+        void CaptureShadow(const std::uint32_t layer)
+        {
+            m_Results->ShadowDepth.push_back(
+                Keire::RenderSystemInternalAccess::ReadbackLocalShadow(*Owner().Renderer(), *m_View->Surface(), layer));
+        }
+
         Keire::AssetId m_Mesh;
         Keire::AssetId m_Material;
         std::shared_ptr<CaptureResults> m_Results;
@@ -845,6 +890,87 @@ namespace
         Keire::Ref<Keire::SpotLightComponent> m_Spot;
         Keire::Ref<Keire::MeshRendererComponent> m_Caster;
         std::uint32_t m_Frame = 0;
+    };
+
+    struct RendererLifecycleResults final
+    {
+        std::uint32_t QueueHighWaterMark = 0;
+        std::uint64_t InitialGeneration = 0;
+        std::uint64_t ResizedGeneration = 0;
+        std::uint64_t MinimizedGeneration = 0;
+        std::uint64_t RestoredGeneration = 0;
+        bool Resized = false;
+        bool Minimized = false;
+        bool Restored = false;
+    };
+
+    class RendererLifecycleLayer final : public Keire::Layer
+    {
+      public:
+        explicit RendererLifecycleLayer(std::shared_ptr<RendererLifecycleResults> results)
+            : Layer("Renderer lifecycle"), m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Renderer lifecycle";
+            surface.Width = 64;
+            surface.Height = 64;
+            m_Surface = Owner().Renderer()->CreateSurface(surface);
+        }
+
+        void OnDetach() noexcept override { m_Surface.Reset(); }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Frame == 0)
+            {
+                m_Results->InitialGeneration = m_Surface->Generation();
+                m_Results->QueueHighWaterMark =
+                    Keire::RenderSystemInternalAccess::SaturateRendererQueue(*Owner().Renderer());
+                m_Surface->RequestSize(128, 80);
+            }
+            else if (m_Frame == 1)
+            {
+                m_Results->ResizedGeneration = m_Surface->Generation();
+                m_Results->Resized = m_Surface->Available() && m_Surface->Width() == 128 && m_Surface->Height() == 80;
+                Keire::RenderSystemInternalAccess::RequestSurfaceSize(*m_Surface, 0, 0);
+            }
+            else if (m_Frame == 2)
+            {
+                m_Results->MinimizedGeneration = m_Surface->Generation();
+                m_Results->Minimized = !m_Surface->Available() && m_Surface->Width() == 0 && m_Surface->Height() == 0;
+                Keire::RenderSystemInternalAccess::RequestSurfaceSize(*m_Surface, 96, 48);
+            }
+            else
+            {
+                m_Results->RestoredGeneration = m_Surface->Generation();
+                m_Results->Restored = m_Surface->Available() && m_Surface->Width() == 96 && m_Surface->Height() == 48;
+                Owner().RequestExit();
+                return;
+            }
+            ++m_Frame;
+        }
+
+      private:
+        std::shared_ptr<RendererLifecycleResults> m_Results;
+        Keire::Ref<Keire::RenderSurface> m_Surface;
+        std::uint32_t m_Frame = 0;
+    };
+
+    class DeviceLossLayer final : public Keire::Layer
+    {
+      public:
+        DeviceLossLayer() : Layer("Device loss") {}
+
+      protected:
+        void OnUpdate(const Keire::Time&) override
+        {
+            Keire::RenderSystemInternalAccess::InjectDeviceLoss(*Owner().Renderer());
+        }
     };
 
     struct ReloadCaptureResults final
@@ -1327,6 +1453,15 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(results->MaterialBindingBuilds.back() == 1);
     CHECK(results->MaterialBindingBuilds[results->MaterialBindingBuilds.size() - 2] ==
           results->MaterialBindingBuilds.back());
+    REQUIRE(results->HasStatistics);
+    CHECK(results->Statistics.ExecutedFrameGraphPasses == results->Statistics.PlannedFrameGraphPasses);
+    CHECK(results->Statistics.FrameGraphTransitions > 0);
+    CHECK(results->Statistics.TransientResourceAllocations > 0);
+    CHECK(results->Statistics.RendererQueueHighWaterMark > 0);
+    CHECK(results->Statistics.InstanceBatches == 1);
+    CHECK(results->Statistics.DrawCalls < 25);
+    CHECK(results->Statistics.CpuPreparationP95Milliseconds >= 0.0F);
+    CHECK(results->Statistics.RendererLatencyMilliseconds >= 0.0F);
 }
 
 TEST_CASE("directional shadow maps occlude a separate receiving mesh")
@@ -1348,7 +1483,34 @@ TEST_CASE("directional shadow maps occlude a separate receiving mesh")
     CHECK(std::abs(unshadowed.Red - withoutCaster.Red) <= ColorTolerance);
     CHECK(std::abs(unshadowed.Green - withoutCaster.Green) <= ColorTolerance);
     CHECK(std::abs(unshadowed.Blue - withoutCaster.Blue) <= ColorTolerance);
-    CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumBehaviorDelta);
+    REQUIRE(results->ShadowDepth.size() == 2);
+    CHECK(MaximumDifference(results->ShadowDepth[0], results->ShadowDepth[1]) >= MinimumShadowDepthDelta);
+    CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumShadowDelta);
+}
+
+TEST_CASE("renderer thread handles resize minimize restore and bounded queue saturation")
+{
+    const auto results = std::make_shared<RendererLifecycleResults>();
+    {
+        Keire::Application application(RenderTestSpecification());
+        (void)application.PushLayer(std::make_unique<RendererLifecycleLayer>(results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    CHECK(results->QueueHighWaterMark == 2);
+    CHECK(results->Resized);
+    CHECK(results->Minimized);
+    CHECK(results->Restored);
+    CHECK(results->ResizedGeneration > results->InitialGeneration);
+    CHECK(results->MinimizedGeneration > results->ResizedGeneration);
+    CHECK(results->RestoredGeneration > results->MinimizedGeneration);
+}
+
+TEST_CASE("injected GPU device loss propagates and renderer shutdown remains safe")
+{
+    Keire::Application application(RenderTestSpecification());
+    (void)application.PushLayer(std::make_unique<DeviceLossLayer>());
+    CHECK_THROWS_WITH((void)application.Run(), "Injected GPU device loss.");
 }
 
 TEST_CASE("point and spot shadow maps occlude a separate receiving mesh")
@@ -1366,6 +1528,9 @@ TEST_CASE("point and spot shadow maps occlude a separate receiving mesh")
     }
 
     REQUIRE(results->Frames.size() == 5);
+    REQUIRE(results->ShadowDepth.size() == 4);
+    CHECK(MaximumDifference(results->ShadowDepth[0], results->ShadowDepth[1]) >= MinimumShadowDepthDelta);
+    CHECK(MaximumDifference(results->ShadowDepth[2], results->ShadowDepth[3]) >= MinimumShadowDepthDelta);
     const auto unshadowed = MeasureCenter(results->Frames[0]);
     const auto pointWithoutCaster = MeasureCenter(results->Frames[1]);
     const auto spotWithoutCaster = MeasureCenter(results->Frames[3]);
@@ -1375,8 +1540,8 @@ TEST_CASE("point and spot shadow maps occlude a separate receiving mesh")
     CHECK(std::abs(unshadowed.Red - spotWithoutCaster.Red) <= ColorTolerance);
     CHECK(std::abs(unshadowed.Green - spotWithoutCaster.Green) <= ColorTolerance);
     CHECK(std::abs(unshadowed.Blue - spotWithoutCaster.Blue) <= ColorTolerance);
-    CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumBehaviorDelta);
-    CHECK(MaximumDarkening(results->Frames[3], results->Frames[4]) >= MinimumBehaviorDelta);
+    CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumShadowDelta);
+    CHECK(MaximumDarkening(results->Frames[3], results->Frames[4]) >= MinimumShadowDelta);
 }
 
 TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")

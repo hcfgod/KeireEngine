@@ -9,11 +9,14 @@ Artifacts/
 Logs/
 Library/
 Temp/
+bin/
+obj/
 .ninja_deps
 .ninja_lock
 .ninja_log
 __pycache__/
 *.pyc
+*.[Tt][Mm][Pp]
 
 # Downloaded project-local tools
 Tools/*

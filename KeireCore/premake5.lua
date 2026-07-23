@@ -24,7 +24,7 @@ project(ProjectConfig.CORE_TARGET)
         "../Build/Generated"
     }
 
-    defines { "KEIRE_BUILDING_LIBRARY" }
+    defines { "KEIRE_BUILDING_LIBRARY", "DT_POLYREF64" }
 
     filter "system:windows"
         prebuildcommands {
@@ -51,6 +51,10 @@ project(ProjectConfig.CORE_TARGET)
         VendorIncludeDirs.glm,
         VendorIncludeDirs.stb,
         DependencyManifest.AssimpInclude,
+        DependencyManifest.JoltInclude,
+        DependencyManifest.RecastInclude,
+        DependencyManifest.MiniaudioInclude,
+        DependencyManifest.CoralInclude,
         DependencyManifest.SDL3Include
     }
 

@@ -16,6 +16,7 @@
 #include <string>
 #include <system_error>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -430,6 +431,90 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Indices()[1] == 1);
     CHECK(mesh->Indices()[2] == 0);
     CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
+}
+
+TEST_CASE("glTF import publishes faithful material and embedded texture subassets")
+{
+    TemporaryDirectory directory("GltfMaterialImportTests");
+    const auto shaderRoot = directory.Path / "Shaders";
+    std::filesystem::create_directories(shaderRoot);
+    const auto shaderId = Keire::AssetId::Parse("11aa22bb-33cc-44dd-8eee-ff0011223344");
+    {
+        std::ofstream shader(shaderRoot / "DefaultUnlit.keireshader");
+        shader
+            << R"({"properties":[{"name":"Tint"},{"name":"MainTexture"},{"name":"MetallicFactor"},{"name":"RoughnessFactor"},{"name":"NormalScale"},{"name":"NormalTexture"}]})";
+        std::ofstream metadata(shaderRoot / "DefaultUnlit.keireshader.keiremeta");
+        metadata << "{\"id\":\"" << shaderId.ToString() << "\"}";
+    }
+    const auto sourcePath = directory.Path / "material.gltf";
+    const std::string gltf = R"({
+        "asset":{"version":"2.0"},
+        "buffers":[{"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA=","byteLength":104}],
+        "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":36},{"buffer":0,"byteOffset":36,"byteLength":36},{"buffer":0,"byteOffset":72,"byteLength":24},{"buffer":0,"byteOffset":96,"byteLength":6}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},{"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},{"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},{"bufferView":3,"componentType":5123,"count":3,"type":"SCALAR"}],
+        "images":[{"uri":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAF/gL+3f2Z5QAAAABJRU5ErkJggg=="}],
+        "textures":[{"source":0}],
+        "materials":[{"name":"Paint","pbrMetallicRoughness":{"baseColorFactor":[0.2,0.4,0.6,0.8],"baseColorTexture":{"index":0},"metallicFactor":0.3,"roughnessFactor":0.7},"normalTexture":{"index":0,"scale":0.4},"alphaMode":"MASK","alphaCutoff":0.25,"doubleSided":true}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2},"indices":3,"material":0}]}],
+        "nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0
+    })";
+    {
+        std::ofstream source(sourcePath);
+        source << gltf;
+    }
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    std::unordered_map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto importer = Keire::CreateMeshAssetImporter();
+    CHECK_FALSE(importer.RestoreCachedOutput);
+    const auto output = importer.ContextualImport(context, std::as_bytes(std::span(gltf)));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    const auto paintSlot =
+        std::ranges::find(mesh->MaterialSlots(), std::string("Paint"), &Keire::MeshMaterialSlot::Name);
+    REQUIRE(paintSlot != mesh->MaterialSlots().end());
+    const auto materialId = paintSlot->DefaultMaterial;
+    REQUIRE(materialId);
+    const auto materialOutput = std::ranges::find(output.SubAssets, materialId, &Keire::AssetGeneratedSubAsset::Id);
+    REQUIRE(materialOutput != output.SubAssets.end());
+    CHECK(materialOutput->Type == Keire::MaterialAsset::StaticType());
+    const auto material = Keire::MaterialAsset::Decode(materialOutput->Bytes);
+    CHECK(material->Definition().Shader == shaderId);
+    CHECK(material->Definition().Surface.AlphaMode == Keire::MaterialAlphaMode::Mask);
+    CHECK(material->Definition().Surface.AlphaCutoff == doctest::Approx(0.25F));
+    CHECK(material->Definition().Surface.DoubleSided);
+    REQUIRE(std::holds_alternative<Keire::Color>(material->Definition().Properties.at("Tint")));
+    const auto tint = std::get<Keire::Color>(material->Definition().Properties.at("Tint"));
+    CHECK(tint.Red == doctest::Approx(0.2F));
+    CHECK(tint.Alpha == doctest::Approx(0.8F));
+    CHECK(std::get<float>(material->Definition().Properties.at("MetallicFactor")) == doctest::Approx(0.3F));
+    CHECK(std::get<float>(material->Definition().Properties.at("RoughnessFactor")) == doctest::Approx(0.7F));
+    CHECK(std::get<float>(material->Definition().Properties.at("NormalScale")) == doctest::Approx(0.4F));
+
+    const auto colorTexture = std::get<Keire::AssetId>(material->Definition().Properties.at("MainTexture"));
+    const auto normalTexture = std::get<Keire::AssetId>(material->Definition().Properties.at("NormalTexture"));
+    CHECK(colorTexture != normalTexture);
+    const auto colorOutput = std::ranges::find(output.SubAssets, colorTexture, &Keire::AssetGeneratedSubAsset::Id);
+    const auto normalOutput = std::ranges::find(output.SubAssets, normalTexture, &Keire::AssetGeneratedSubAsset::Id);
+    REQUIRE(colorOutput != output.SubAssets.end());
+    REQUIRE(normalOutput != output.SubAssets.end());
+    CHECK(Keire::Texture2DAsset::Decode(colorOutput->Bytes)->Settings().ColorSpace == Keire::TextureColorSpace::Srgb);
+    CHECK(Keire::Texture2DAsset::Decode(normalOutput->Bytes)->Settings().Semantic == Keire::TextureSemantic::Normal);
+
+    const auto repeated = importer.ContextualImport(context, std::as_bytes(std::span(gltf)));
+    std::vector<Keire::AssetId> firstIds;
+    std::vector<Keire::AssetId> repeatedIds;
+    std::ranges::transform(output.SubAssets, std::back_inserter(firstIds), &Keire::AssetGeneratedSubAsset::Id);
+    std::ranges::transform(repeated.SubAssets, std::back_inserter(repeatedIds), &Keire::AssetGeneratedSubAsset::Id);
+    std::ranges::sort(firstIds);
+    std::ranges::sort(repeatedIds);
+    CHECK(firstIds == repeatedIds);
 }
 
 TEST_CASE("static model import groups conventional mesh names into deterministic LOD ranges")

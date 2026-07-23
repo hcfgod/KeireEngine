@@ -1,6 +1,9 @@
 #include "Keire/Application.h"
 
+#include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Scenes/PrefabAsset.h"
+#include "Keire/Scripting/ManagedAssemblyAsset.h"
 
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/UiInternal.h"
@@ -47,9 +50,14 @@ namespace Keire
         State RuntimeState = State::Constructed;
         std::atomic<int> ExitCode{NoExitRequested};
         Ref<EventBus> EventSystem;
+        Ref<Profiler> ProfilerService;
         Ref<UndoService> UndoHistory;
         Ref<Project> ProjectService;
         Ref<AssetSystem> Assets;
+        Ref<ScriptSystem> ScriptService;
+        Ref<PhysicsSystem> PhysicsService;
+        Ref<AudioSystem> AudioService;
+        Ref<NavigationSystem> NavigationService;
         Ref<SceneSystem> SceneService;
         Ref<InputSystem> InputService;
         std::unique_ptr<Time> Clock;
@@ -114,6 +122,8 @@ namespace Keire
             }
 
             m_Impl->EventSystem = CreateRef<EventBus>(m_Impl->Specification.Events);
+            if (m_Impl->Specification.Profiling.Mode == ProfilerMode::Enabled)
+                m_Impl->ProfilerService = CreateRef<Profiler>(m_Impl->Specification.Profiling);
             m_Impl->UndoHistory = CreateRef<UndoService>(m_Impl->Specification.Undo);
             if (m_Impl->Specification.Input.Mode == InputMode::Enabled &&
                 m_Impl->Specification.Assets.Mode == AssetMode::Disabled)
@@ -154,10 +164,36 @@ namespace Keire
                 addDecoder(CreateMaterialAssetDecoder());
                 addDecoder(CreateMeshAssetDecoder());
                 addDecoder(CreateTexture2DAssetDecoder());
+                addDecoder(CreateSkeletonAssetDecoder());
+                addDecoder(CreateSkinnedMeshAssetDecoder());
+                addDecoder(CreateAnimationClipAssetDecoder());
+                addDecoder(CreateAnimationGraphAssetDecoder());
+                addDecoder(CreatePrefabAssetDecoder());
+                addDecoder(CreateManagedAssemblyAssetDecoder());
             }
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
             {
                 m_Impl->Assets = CreateRef<AssetSystem>(m_Impl->Specification.Assets, m_Impl->EventSystem);
+            }
+            if (m_Impl->Specification.Scripting.Mode == ScriptMode::Enabled)
+            {
+                if (!m_Impl->Assets)
+                    throw std::invalid_argument("Enabled scripting requires enabled assets.");
+                m_Impl->ScriptService = CreateRef<ScriptSystem>(m_Impl->Specification.Scripting);
+            }
+            if (m_Impl->Specification.Physics.Mode == PhysicsMode::Enabled)
+                m_Impl->PhysicsService = CreateRef<PhysicsSystem>(m_Impl->Specification.Physics);
+            if (m_Impl->Specification.Navigation.Mode == NavigationMode::Enabled)
+            {
+                if (!m_Impl->Assets || !m_Impl->PhysicsService)
+                    throw std::invalid_argument("Enabled navigation requires enabled assets and physics.");
+                m_Impl->NavigationService = CreateRef<NavigationSystem>(m_Impl->Specification.Navigation);
+            }
+            if (m_Impl->Specification.Audio.Mode != AudioMode::Disabled)
+            {
+                if (!m_Impl->Assets)
+                    throw std::invalid_argument("Enabled audio requires enabled assets.");
+                m_Impl->AudioService = CreateRef<AudioSystem>(m_Impl->Specification.Audio);
             }
             if (m_Impl->Specification.Scenes.Mode == SceneMode::Enabled)
             {
@@ -228,6 +264,8 @@ namespace Keire
                 previousFrame = frameStart;
 
                 m_Impl->Clock->AdvanceFrame(rawDelta, suspended);
+                if (m_Impl->ProfilerService)
+                    m_Impl->ProfilerService->BeginFrame();
                 m_Impl->LayerSystem->ApplyPending();
 
                 while (const auto event = m_Impl->Windowing->PollEvent())
@@ -311,6 +349,13 @@ namespace Keire
 
                 m_Impl->LayerSystem->ApplyPending();
 
+                if (m_Impl->ProfilerService)
+                {
+                    m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Frame",
+                                                        static_cast<double>(m_Impl->Clock->FrameCount()));
+                    m_Impl->ProfilerService->EndFrame();
+                }
+
                 if (ExitRequested())
                 {
                     break;
@@ -376,7 +421,17 @@ namespace Keire
 
     Ref<EventBus> Application::Events() const noexcept { return m_Impl->EventSystem; }
 
+    Ref<Profiler> Application::GetProfiler() const noexcept { return m_Impl->ProfilerService; }
+
     Ref<AssetSystem> Application::Assets() const noexcept { return m_Impl->Assets; }
+
+    Ref<ScriptSystem> Application::Scripts() const noexcept { return m_Impl->ScriptService; }
+
+    Ref<PhysicsSystem> Application::Physics() const noexcept { return m_Impl->PhysicsService; }
+
+    Ref<AudioSystem> Application::Audio() const noexcept { return m_Impl->AudioService; }
+
+    Ref<NavigationSystem> Application::Navigation() const noexcept { return m_Impl->NavigationService; }
 
     Ref<Project> Application::GetProject() const noexcept { return m_Impl->ProjectService; }
 
@@ -512,6 +567,30 @@ namespace Keire
             m_Impl->SceneService.Reset();
         }
 
+        if (m_Impl->AudioService)
+        {
+            m_Impl->AudioService->Close();
+            m_Impl->AudioService.Reset();
+        }
+
+        if (m_Impl->NavigationService)
+        {
+            m_Impl->NavigationService->Close();
+            m_Impl->NavigationService.Reset();
+        }
+
+        if (m_Impl->PhysicsService)
+        {
+            m_Impl->PhysicsService->Close();
+            m_Impl->PhysicsService.Reset();
+        }
+
+        if (m_Impl->ScriptService)
+        {
+            m_Impl->ScriptService->Close();
+            m_Impl->ScriptService.Reset();
+        }
+
         if (m_Impl->EventSystem && m_Impl->EventSystem->IsOpen())
         {
             try
@@ -546,6 +625,12 @@ namespace Keire
         }
 
         m_Impl->ProjectService.Reset();
+
+        if (m_Impl->ProfilerService)
+        {
+            m_Impl->ProfilerService->Close();
+            m_Impl->ProfilerService.Reset();
+        }
 
         m_Impl->EventSystem.Reset();
 

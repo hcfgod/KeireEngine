@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shaders/BuiltinSky.hlsl" \
-  "$ROOT/KeireCore/Shaders/BuiltinShadow.hlsl")
-prefixes=(BuiltinUnlit BuiltinSky BuiltinShadow)
+  "$ROOT/KeireCore/Shaders/BuiltinShadow.hlsl" "$ROOT/KeireCore/Shaders/BuiltinToneMap.hlsl")
+prefixes=(BuiltinUnlit BuiltinSky BuiltinShadow BuiltinToneMap)
 generated="$ROOT/Build/Generated/Keire/BuiltinUnlitShaders.h"
 temporary="$ROOT/Build/Generated/Keire/BuiltinShaderTemporary"
 

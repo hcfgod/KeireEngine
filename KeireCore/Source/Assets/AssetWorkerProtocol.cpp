@@ -52,6 +52,8 @@ namespace Keire::Detail
                 return "external-import";
             case AssetWorkerOperationKind::CreateAsset:
                 return "create-asset";
+            case AssetWorkerOperationKind::ExtractMaterials:
+                return "extract-materials";
             case AssetWorkerOperationKind::Mutate:
                 return "mutate";
             case AssetWorkerOperationKind::Cook:
@@ -72,6 +74,8 @@ namespace Keire::Detail
                 return AssetWorkerOperationKind::ExternalImport;
             if (value == "create-asset")
                 return AssetWorkerOperationKind::CreateAsset;
+            if (value == "extract-materials")
+                return AssetWorkerOperationKind::ExtractMaterials;
             if (value == "mutate")
                 return AssetWorkerOperationKind::Mutate;
             if (value == "cook")
@@ -247,6 +251,8 @@ namespace Keire::Detail
                          {"createPayloadPath", PathToUtf8(request.CreatePayloadPath)},
                          {"createSettings", EncodeSettings(request.CreateSettings)},
                          {"createAuxiliarySources", std::move(auxiliarySources)},
+                         {"extractModel", request.ExtractModel ? request.ExtractModel.ToString() : std::string{}},
+                         {"extractDirectory", PathToUtf8(request.ExtractDirectory)},
                          {"mutation",
                           {{"kind", static_cast<std::uint8_t>(request.Mutation.Kind)},
                            {"asset", request.Mutation.Asset ? request.Mutation.Asset.ToString() : std::string{}},
@@ -279,6 +285,9 @@ namespace Keire::Detail
         request.CreateRelativePath = PathFromUtf8(value.value("createRelativePath", std::string{}));
         request.CreatePayloadPath = PathFromUtf8(value.value("createPayloadPath", std::string{}));
         request.CreateSettings = DecodeSettings(value.value("createSettings", Json::object()));
+        if (const auto model = value.value("extractModel", std::string{}); !model.empty())
+            request.ExtractModel = AssetId::Parse(model);
+        request.ExtractDirectory = PathFromUtf8(value.value("extractDirectory", std::string{}));
         for (const auto& auxiliary : value.value("createAuxiliarySources", Json::array()))
             request.CreateAuxiliarySources.push_back({PathFromUtf8(auxiliary.at("relativePath").get<std::string>()),
                                                       PathFromUtf8(auxiliary.at("payloadPath").get<std::string>())});

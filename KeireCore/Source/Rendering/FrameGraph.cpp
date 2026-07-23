@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <optional>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
@@ -129,7 +130,109 @@ namespace Keire::RenderBackend
                 update(resource);
             result.Diagnostics.push_back(std::to_string(orderedIndex) + ": " + pass.Name);
         }
+
+        constexpr auto invalidPhysical = std::numeric_limits<std::uint32_t>::max();
+        result.PhysicalResources.assign(m_Resources.size(), invalidPhysical);
+        struct PhysicalLifetime final
+        {
+            std::uint32_t LastPass = 0;
+        };
+        std::vector<PhysicalLifetime> physicalLifetimes;
+        std::vector<std::uint32_t> allocationOrder;
+        allocationOrder.reserve(m_Resources.size());
+        for (std::uint32_t resourceIndex = 0; resourceIndex < m_Resources.size(); ++resourceIndex)
+        {
+            if (!m_Resources[resourceIndex].Imported && result.Lifetimes[resourceIndex].Used)
+                allocationOrder.push_back(resourceIndex);
+        }
+        std::ranges::stable_sort(allocationOrder, {}, [&](const std::uint32_t resourceIndex)
+                                 { return result.Lifetimes[resourceIndex].FirstPass; });
+        for (const auto resourceIndex : allocationOrder)
+        {
+            const auto& resource = m_Resources[resourceIndex];
+            const auto& lifetime = result.Lifetimes[resourceIndex];
+            std::optional<std::uint32_t> selected;
+            for (std::uint32_t physicalIndex = 0; physicalIndex < result.TransientAllocations.size(); ++physicalIndex)
+            {
+                auto& allocation = result.TransientAllocations[physicalIndex];
+                if (physicalLifetimes[physicalIndex].LastPass < lifetime.FirstPass &&
+                    allocation.Kind == resource.Kind && allocation.CompatibilityKey == resource.CompatibilityKey)
+                {
+                    selected = physicalIndex;
+                    allocation.SizeBytes = std::max(allocation.SizeBytes, resource.SizeBytes);
+                    break;
+                }
+            }
+            if (!selected)
+            {
+                selected = static_cast<std::uint32_t>(result.TransientAllocations.size());
+                result.TransientAllocations.push_back({resource.Kind, resource.CompatibilityKey, resource.SizeBytes});
+                physicalLifetimes.push_back({});
+            }
+            result.PhysicalResources[resourceIndex] = *selected;
+            physicalLifetimes[*selected].LastPass = lifetime.LastPass;
+        }
+
+        const auto requiredState =
+            [&](const FrameGraphPassDescription& pass, const FrameGraphResource resource, const bool write)
+        {
+            if (!write)
+                return pass.Kind == FrameGraphPassKind::Transfer  ? FrameGraphResourceState::CopySource
+                       : pass.Kind == FrameGraphPassKind::Compute ? FrameGraphResourceState::StorageRead
+                                                                  : FrameGraphResourceState::ShaderRead;
+            if (pass.Kind == FrameGraphPassKind::Upload || pass.Kind == FrameGraphPassKind::Transfer)
+                return FrameGraphResourceState::CopyDestination;
+            if (pass.Kind == FrameGraphPassKind::Compute)
+                return FrameGraphResourceState::StorageWrite;
+            if (pass.Kind == FrameGraphPassKind::Present)
+                return FrameGraphResourceState::Present;
+            return m_Resources[resource.Value].Kind == FrameGraphResourceKind::Texture
+                       ? FrameGraphResourceState::ColorAttachment
+                       : FrameGraphResourceState::StorageWrite;
+        };
+        std::vector<FrameGraphResourceState> states(m_Resources.size(), FrameGraphResourceState::Undefined);
+        std::vector<FrameGraphResourceState> physicalStates(result.TransientAllocations.size(),
+                                                            FrameGraphResourceState::Undefined);
+        for (std::uint32_t index = 0; index < m_Resources.size(); ++index)
+        {
+            if (m_Resources[index].Imported)
+                states[index] = FrameGraphResourceState::External;
+        }
+        for (const auto passHandle : result.Order)
+        {
+            const auto& pass = m_Passes[passHandle.Value];
+            CompiledFrameGraph::PassExecution execution;
+            execution.Pass = passHandle;
+            const auto transition = [&](const FrameGraphResource resource, const FrameGraphResourceState after)
+            {
+                auto& before = m_Resources[resource.Value].Imported
+                                   ? states[resource.Value]
+                                   : physicalStates[result.PhysicalResources[resource.Value]];
+                if (before != after)
+                    execution.Transitions.push_back({resource, before, after});
+                before = after;
+            };
+            for (const auto resource : pass.Reads)
+                transition(resource, requiredState(pass, resource, false));
+            for (const auto resource : pass.Writes)
+                transition(resource, requiredState(pass, resource, true));
+            result.Execution.push_back(std::move(execution));
+        }
         return result;
+    }
+
+    void FrameGraph::Execute(const CompiledFrameGraph& compiled, FrameGraphExecutionContext& context) const
+    {
+        if (compiled.Execution.size() != compiled.Order.size())
+            throw std::invalid_argument("Compiled frame graph does not contain an executable pass schedule.");
+        for (const auto& execution : compiled.Execution)
+        {
+            if (!execution.Pass || execution.Pass.Value >= m_Passes.size())
+                throw std::invalid_argument("Compiled frame graph references an unknown pass.");
+            for (const auto& transition : execution.Transitions)
+                context.Transition(transition);
+            context.Execute(execution.Pass, m_Passes[execution.Pass.Value]);
+        }
     }
 
     void FrameGraph::Clear() noexcept
@@ -141,28 +244,32 @@ namespace Keire::RenderBackend
     StaticSceneFrameGraph BuildStaticSceneFrameGraph()
     {
         StaticSceneFrameGraph result;
-        const auto uploads = result.Graph.AddResource({"Uploaded resources", FrameGraphResourceKind::Buffer});
-        const auto shadows = result.Graph.AddResource({"Directional shadows", FrameGraphResourceKind::Texture});
-        const auto lightTiles = result.Graph.AddResource({"Forward+ tile lists", FrameGraphResourceKind::Buffer});
-        const auto opaque = result.Graph.AddResource({"HDR opaque scene", FrameGraphResourceKind::Texture});
-        const auto sky = result.Graph.AddResource({"HDR scene and sky", FrameGraphResourceKind::Texture});
-        const auto transparent =
-            result.Graph.AddResource({"HDR scene and transparency", FrameGraphResourceKind::Texture});
-        const auto toneMapped = result.Graph.AddResource({"Tone-mapped scene", FrameGraphResourceKind::Texture});
-        const auto overlays = result.Graph.AddResource({"Scene overlays", FrameGraphResourceKind::Texture});
-        const auto readback = result.Graph.AddResource({"Readback", FrameGraphResourceKind::Buffer});
+        const auto uploads = result.Graph.AddResource({"Uploaded resources", FrameGraphResourceKind::Buffer, true});
+        const auto shadows = result.Graph.AddResource({"Directional shadows", FrameGraphResourceKind::Texture, true});
+        const auto lightTiles = result.Graph.AddResource({"Forward+ tile lists", FrameGraphResourceKind::Buffer, true});
+        result.HdrScene = result.Graph.AddResource({"HDR scene color", FrameGraphResourceKind::Texture, false, 4});
+        const auto skyComplete = result.Graph.AddResource({"Sky complete", FrameGraphResourceKind::Buffer, true});
+        const auto transparencyComplete =
+            result.Graph.AddResource({"Transparency complete", FrameGraphResourceKind::Buffer, true});
+        const auto toneMapped = result.Graph.AddResource({"Tone-mapped scene", FrameGraphResourceKind::Texture, true});
+        const auto overlays = result.Graph.AddResource({"Scene overlays", FrameGraphResourceKind::Texture, true});
+        const auto readback = result.Graph.AddResource({"Readback", FrameGraphResourceKind::Buffer, true});
         const auto presentation = result.Graph.AddResource({"Presentation", FrameGraphResourceKind::Texture, true});
 
-        (void)result.Graph.AddPass({"Resource uploads", {}, {uploads}});
-        (void)result.Graph.AddPass({"Directional shadow maps", {uploads}, {shadows}});
-        (void)result.Graph.AddPass({"Forward+ light culling", {uploads}, {lightTiles}});
-        (void)result.Graph.AddPass({"Opaque and mask", {uploads, shadows, lightTiles}, {opaque}});
-        (void)result.Graph.AddPass({"Sky", {opaque}, {sky}});
-        (void)result.Graph.AddPass({"Transparency", {sky, lightTiles}, {transparent}});
-        (void)result.Graph.AddPass({"ACES tone map", {transparent}, {toneMapped}});
-        (void)result.Graph.AddPass({"Editor overlays", {toneMapped}, {overlays}});
-        (void)result.Graph.AddPass({"Readback", {overlays}, {readback}});
-        (void)result.Graph.AddPass({"Presentation", {overlays}, {presentation}});
+        result.ResourceUploads = result.Graph.AddPass({"Resource uploads", {}, {uploads}, FrameGraphPassKind::Upload});
+        result.DirectionalShadows =
+            result.Graph.AddPass({"Directional shadow maps", {uploads}, {shadows}, FrameGraphPassKind::Graphics});
+        result.ForwardPlusCulling =
+            result.Graph.AddPass({"Forward+ light culling", {uploads}, {lightTiles}, FrameGraphPassKind::Compute});
+        result.Opaque = result.Graph.AddPass({"Opaque and mask", {uploads, shadows, lightTiles}, {result.HdrScene}});
+        result.Sky = result.Graph.AddPass({"Sky", {result.HdrScene}, {skyComplete}});
+        result.Transparency =
+            result.Graph.AddPass({"Transparency", {result.HdrScene, skyComplete, lightTiles}, {transparencyComplete}});
+        result.ToneMap = result.Graph.AddPass({"ACES tone map", {result.HdrScene, transparencyComplete}, {toneMapped}});
+        result.Overlays = result.Graph.AddPass({"Editor overlays", {toneMapped}, {overlays}});
+        result.Readback = result.Graph.AddPass({"Readback", {overlays}, {readback}, FrameGraphPassKind::Transfer});
+        result.Presentation =
+            result.Graph.AddPass({"Presentation", {overlays}, {presentation}, FrameGraphPassKind::Present});
         result.Compiled = result.Graph.Compile();
         return result;
     }

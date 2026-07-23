@@ -1,0 +1,475 @@
+Exit code: 0
+Wall time: 0.1 seconds
+Output:
+diff --git a/Coral.Managed/Coral.Managed-Static.csproj b/Coral.Managed/Coral.Managed-Static.csproj
+index 872e1d3..657c5d5 100644
+--- a/Coral.Managed/Coral.Managed-Static.csproj
++++ b/Coral.Managed/Coral.Managed-Static.csproj
+@@ -2,7 +2,7 @@
+ 	<PropertyGroup>
+ 		<OutputType>Library</OutputType>
+ 		<AssemblyName>Coral.Managed</AssemblyName>
+-		<TargetFramework>net9.0</TargetFramework>
++		<TargetFramework>net10.0</TargetFramework>
+ 
+ 		<ImplicitUsings>enable</ImplicitUsings>
+ 		<Nullable>enable</Nullable>
+diff --git a/Coral.Managed/premake5.lua b/Coral.Managed/premake5.lua
+index 40b41ef..956d7ff 100644
+--- a/Coral.Managed/premake5.lua
++++ b/Coral.Managed/premake5.lua
+@@ -6,7 +6,7 @@ project "Coral.Managed"
+ 
+     filter { "action:vs* or system:windows" }
+         language "C#"
+-        dotnetframework "net9.0"
++        dotnetframework "net10.0"
+         kind "SharedLib"
+         clr "Unsafe"
+         targetdir("../Build/%{cfg.buildcfg}")
+diff --git a/Coral.Native/Include/Coral/HostInstance.hpp b/Coral.Native/Include/Coral/HostInstance.hpp
+index 66583be..ef28aef 100644
+--- a/Coral.Native/Include/Coral/HostInstance.hpp
++++ b/Coral.Native/Include/Coral/HostInstance.hpp
+@@ -6,6 +6,7 @@
+ #include "ManagedObject.hpp"
+ 
+ #include <functional>
++#include <memory>
+ 
+ namespace Coral {
+ 
+@@ -35,6 +36,12 @@ namespace Coral {
+ 	class HostInstance
+ 	{
+ 	public:
++		HostInstance();
++		~HostInstance();
++
++		HostInstance(const HostInstance&) = delete;
++		HostInstance& operator=(const HostInstance&) = delete;
++
+ 		CoralInitStatus Initialize(HostSettings InSettings);
+ 		void Shutdown();
+ 
+@@ -46,7 +53,7 @@ namespace Coral {
+ 		AssemblyLoadContext CreateAssemblyLoadContext(std::string_view InName, std::string_view InDllPath);
+ 
+ 	private:
+-		bool LoadHostFXR() const;
++		bool LoadHostFXR();
+ 		bool InitializeCoralManaged();
+ 		void LoadCoralFunctions();
+ 
+@@ -59,9 +66,12 @@ namespace Coral {
+ 		}
+ 
+ 	private:
++		struct CoreCLRFunctions;
+ 		HostSettings m_Settings;
+ 		std::filesystem::path m_CoralManagedAssemblyPath;
+ 		void* m_HostFXRContext = nullptr;
++		void* m_HostFXRLibrary = nullptr;
++		std::unique_ptr<CoreCLRFunctions> m_CoreCLRFunctions;
+ 		bool m_Initialized = false;
+ 
+ 		friend class AssemblyLoadContext;
+diff --git a/Coral.Native/Source/Coral/HostInstance.cpp b/Coral.Native/Source/Coral/HostInstance.cpp
+index 4ca5101..e8dda11 100644
+--- a/Coral.Native/Source/Coral/HostInstance.cpp
++++ b/Coral.Native/Source/Coral/HostInstance.cpp
+@@ -6,15 +6,13 @@
+ #include "HostFXRErrorCodes.hpp"
+ #include "CoralManagedFunctions.hpp"
+ 
+-#ifdef CORAL_WINDOWS
+-	#include <ShlObj_core.h>
+-#else
++#ifndef CORAL_WINDOWS
+ 	#include <dlfcn.h>
+ #endif
+ 
+ namespace Coral {
+ 
+-	struct CoreCLRFunctions
++	struct HostInstance::CoreCLRFunctions
+ 	{
+ 		hostfxr_set_error_writer_fn SetHostFXRErrorWriter = nullptr;
+ 		hostfxr_set_runtime_property_value_fn SetRuntimePropertyValue = nullptr;
+@@ -23,12 +21,12 @@ namespace Coral {
+ 		hostfxr_close_fn CloseHostFXR = nullptr;
+ 		load_assembly_and_get_function_pointer_fn GetManagedFunctionPtr = nullptr;
+ 	};
+-	static CoreCLRFunctions s_CoreCLRFunctions;
+-
+ 	static MessageCallbackFn MessageCallback = nullptr;
+ 	static MessageLevel MessageFilter;
+ 	static ExceptionCallbackFn ExceptionCallback = nullptr;
+ 
++	static std::filesystem::path Utf8Path(std::string_view InPath);
++
+ 	static void DefaultMessageCallback(std::string_view InMessage, MessageLevel InLevel)
+ 	{
+ 		const char* level = "";
+@@ -53,6 +51,16 @@ namespace Coral {
+ 		std::cout << "[Coral](" << level << "): " << InMessage << std::endl;
+ 	}
+ 
++	HostInstance::HostInstance()
++		: m_CoreCLRFunctions(std::make_unique<CoreCLRFunctions>())
++	{
++	}
++
++	HostInstance::~HostInstance()
++	{
++		Shutdown();
++	}
++
+ 	CoralInitStatus HostInstance::Initialize(HostSettings InSettings)
+ 	{
+ 		CORAL_VERIFY(!m_Initialized);
+@@ -70,13 +78,13 @@ namespace Coral {
+ 		MessageCallback = m_Settings.MessageCallback;
+ 		MessageFilter = m_Settings.MessageFilter;
+ 
+-		s_CoreCLRFunctions.SetHostFXRErrorWriter([](const UCChar* InMessage)
++		m_CoreCLRFunctions->SetHostFXRErrorWriter([](const UCChar* InMessage)
+ 		{
+ 			auto message = StringHelper::ConvertWideToUtf8(InMessage);
+ 			MessageCallback(message, MessageLevel::Error);
+ 		});
+ 
+-		m_CoralManagedAssemblyPath = std::filesystem::path(m_Settings.CoralDirectory) / "Coral.Managed.dll";
++		m_CoralManagedAssemblyPath = Utf8Path(m_Settings.CoralDirectory) / "Coral.Managed.dll";
+ 
+ 		if (!std::filesystem::exists(m_CoralManagedAssemblyPath))
+ 		{
+@@ -89,12 +97,27 @@ namespace Coral {
+ 			return CoralInitStatus::CoralManagedInitError;
+ 		}
+ 
++		m_Initialized = true;
+ 		return CoralInitStatus::Success;
+ 	}
+ 
+ 	void HostInstance::Shutdown()
+ 	{
+-		s_CoreCLRFunctions.CloseHostFXR(m_HostFXRContext);
++		if (m_HostFXRContext != nullptr && m_CoreCLRFunctions->CloseHostFXR != nullptr)
++		{
++			m_CoreCLRFunctions->CloseHostFXR(m_HostFXRContext);
++			m_HostFXRContext = nullptr;
++		}
++#ifdef CORAL_WINDOWS
++		if (m_HostFXRLibrary != nullptr)
++			FreeLibrary(static_cast<HMODULE>(m_HostFXRLibrary));
++#else
++		if (m_HostFXRLibrary != nullptr)
++			dlclose(m_HostFXRLibrary);
++#endif
++		m_HostFXRLibrary = nullptr;
++		*m_CoreCLRFunctions = {};
++		m_Initialized = false;
+ 	}
+ 	
+ 	AssemblyLoadContext HostInstance::CreateAssemblyLoadContext(std::string_view InName)
+@@ -142,113 +165,77 @@ namespace Coral {
+ 	}
+ #endif
+ 
++	static std::filesystem::path Utf8Path(std::string_view InPath)
++	{
++#if defined(__cpp_lib_char8_t)
++		return std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(InPath.data()), InPath.size()));
++#else
++		return std::filesystem::u8path(InPath.begin(), InPath.end());
++#endif
++	}
++
+ 	static std::filesystem::path GetHostFXRPath()
+ 	{
++		size_t size = 0;
++		get_hostfxr_parameters parameters { sizeof(get_hostfxr_parameters), nullptr, nullptr };
++		(void)get_hostfxr_path(nullptr, &size, &parameters);
++		if (size == 0)
++			return {};
++		std::vector<char_t> path(size);
++		if (get_hostfxr_path(path.data(), &size, &parameters) != 0)
++			return {};
+ #ifdef CORAL_WINDOWS
+-		std::filesystem::path basePath = "";
+-		
+-		// Find the Program Files folder
+-		TCHAR pf[MAX_PATH];
+-		SHGetSpecialFolderPath(
+-		nullptr,
+-		pf,
+-		CSIDL_PROGRAM_FILES,
+-		FALSE);
+-
+-		basePath = pf;
+-		basePath /= "dotnet/host/fxr/";
+-
+-		auto searchPaths = std::array
+-		{
+-			basePath
+-		};
+-#elif defined(CORAL_APPLE)
+-		auto searchPaths = std::array
+-		{
+-			std::filesystem::path("/usr/local/share/dotnet/host/fxr/"),
+-			std::filesystem::path("/usr/share/dotnet/host/fxr/")
+-		};
++		return std::filesystem::path(path.data());
+ #else
+-		auto searchPaths = std::array
+-		{
+-			std::filesystem::path("/usr/local/lib/dotnet/host/fxr/"),
+-			std::filesystem::path("/usr/local/lib64/dotnet/host/fxr/"),
+-			std::filesystem::path("/usr/local/share/dotnet/host/fxr/"),
+-
+-			std::filesystem::path("/usr/lib/dotnet/host/fxr/"),
+-			std::filesystem::path("/usr/lib64/dotnet/host/fxr/"),
+-			std::filesystem::path("/usr/share/dotnet/host/fxr/")
+-		};
++		return Utf8Path(path.data());
+ #endif
+-
+-		for (const auto& path : searchPaths)
+-		{
+-			if (!std::filesystem::exists(path))
+-				continue;
+-
+-			for (const auto& dir : std::filesystem::recursive_directory_iterator(path))
+-			{
+-				if (!dir.is_directory())
+-					continue;
+-
+-				auto dirPath = dir.path().filename();
+-				char version = dirPath.string()[0];
+-
+-				if (version != '9')
+-					continue;
+-
+-				auto res = dir / std::filesystem::path(CORAL_HOSTFXR_NAME);
+-				CORAL_VERIFY(std::filesystem::exists(res));
+-				return res;
+-			}
+-		}
+-
+-		return "";
+ 	}
+ 
+-	bool HostInstance::LoadHostFXR() const
++	static std::string NativePathToUtf8(const std::filesystem::path& InPath)
+ 	{
+-		// Retrieve the file path to the CoreCLR library
+-		auto hostfxrPath = GetHostFXRPath();
++#if defined(__cpp_lib_char8_t)
++		const auto value = InPath.u8string();
++		return { reinterpret_cast<const char*>(value.data()), value.size() };
++#else
++		return InPath.u8string();
++#endif
++	}
+ 
++	bool HostInstance::LoadHostFXR()
++	{
++		if (m_HostFXRLibrary != nullptr)
++			return true;
++		const auto hostfxrPath = GetHostFXRPath();
+ 		if (hostfxrPath.empty())
+-		{
+ 			return false;
+-		}
+-
+-		// Load the CoreCLR library
+-		void* libraryHandle = nullptr;
+ 
+ #ifdef CORAL_WINDOWS
+-	#ifdef CORAL_WIDE_CHARS
+-		libraryHandle = LoadLibraryW(hostfxrPath.c_str());
+-	#else
+-		libraryHandle = LoadLibraryA(hostfxrPath.string().c_str());
+-	#endif
++		m_HostFXRLibrary = LoadLibraryW(hostfxrPath.c_str());
+ #else
+-		libraryHandle = dlopen(hostfxrPath.string().data(), RTLD_NOW | RTLD_GLOBAL);
++		const auto utf8Path = NativePathToUtf8(hostfxrPath);
++		m_HostFXRLibrary = dlopen(utf8Path.c_str(), RTLD_NOW | RTLD_LOCAL);
+ #endif
+-
+-		if (libraryHandle == nullptr)
+-		{
++		if (m_HostFXRLibrary == nullptr)
+ 			return false;
+-		}
+-
+-		// Load CoreCLR functions
+-		s_CoreCLRFunctions.SetHostFXRErrorWriter = LoadFunctionPtr<hostfxr_set_error_writer_fn>(libraryHandle, "hostfxr_set_error_writer");
+-		s_CoreCLRFunctions.SetRuntimePropertyValue = LoadFunctionPtr<hostfxr_set_runtime_property_value_fn>(libraryHandle, "hostfxr_set_runtime_property_value");
+-		s_CoreCLRFunctions.InitHostFXRForRuntimeConfig = LoadFunctionPtr<hostfxr_initialize_for_runtime_config_fn>(libraryHandle, "hostfxr_initialize_for_runtime_config");
+-		s_CoreCLRFunctions.GetRuntimeDelegate = LoadFunctionPtr<hostfxr_get_runtime_delegate_fn>(libraryHandle, "hostfxr_get_runtime_delegate");
+-		s_CoreCLRFunctions.CloseHostFXR = LoadFunctionPtr<hostfxr_close_fn>(libraryHandle, "hostfxr_close");
+ 
++		m_CoreCLRFunctions->SetHostFXRErrorWriter =
++			LoadFunctionPtr<hostfxr_set_error_writer_fn>(m_HostFXRLibrary, "hostfxr_set_error_writer");
++		m_CoreCLRFunctions->SetRuntimePropertyValue =
++			LoadFunctionPtr<hostfxr_set_runtime_property_value_fn>(m_HostFXRLibrary, "hostfxr_set_runtime_property_value");
++		m_CoreCLRFunctions->InitHostFXRForRuntimeConfig =
++			LoadFunctionPtr<hostfxr_initialize_for_runtime_config_fn>(m_HostFXRLibrary, "hostfxr_initialize_for_runtime_config");
++		m_CoreCLRFunctions->GetRuntimeDelegate =
++			LoadFunctionPtr<hostfxr_get_runtime_delegate_fn>(m_HostFXRLibrary, "hostfxr_get_runtime_delegate");
++		m_CoreCLRFunctions->CloseHostFXR =
++			LoadFunctionPtr<hostfxr_close_fn>(m_HostFXRLibrary, "hostfxr_close");
+ 		return true;
+ 	}
+-	
++
+ 	bool HostInstance::InitializeCoralManaged()
+ 	{
+ 		// Fetch load_assembly_and_get_function_pointer_fn from CoreCLR
+ 		{
+-			auto runtimeConfigPath = std::filesystem::path(m_Settings.CoralDirectory) / "Coral.Managed.runtimeconfig.json";
++			auto runtimeConfigPath = Utf8Path(m_Settings.CoralDirectory) / "Coral.Managed.runtimeconfig.json";
+ 
+ 			if (!std::filesystem::exists(runtimeConfigPath))
+ 			{
+@@ -256,14 +243,14 @@ namespace Coral {
+ 				return false;
+ 			}
+ 
+-			int status = s_CoreCLRFunctions.InitHostFXRForRuntimeConfig(runtimeConfigPath.c_str(), nullptr, &m_HostFXRContext);
++			int status = m_CoreCLRFunctions->InitHostFXRForRuntimeConfig(runtimeConfigPath.c_str(), nullptr, &m_HostFXRContext);
+ 			CORAL_VERIFY(status == StatusCode::Success || status == StatusCode::Success_HostAlreadyInitialized || status == StatusCode::Success_DifferentRuntimeProperties);
+ 			CORAL_VERIFY(m_HostFXRContext != nullptr);
+ 
+-			std::filesystem::path coralDirectoryPath = m_Settings.CoralDirectory;
+-			s_CoreCLRFunctions.SetRuntimePropertyValue(m_HostFXRContext, CORAL_STR("APP_CONTEXT_BASE_DIRECTORY"), coralDirectoryPath.c_str());
++			std::filesystem::path coralDirectoryPath = Utf8Path(m_Settings.CoralDirectory);
++			m_CoreCLRFunctions->SetRuntimePropertyValue(m_HostFXRContext, CORAL_STR("APP_CONTEXT_BASE_DIRECTORY"), coralDirectoryPath.c_str());
+ 
+-			status = s_CoreCLRFunctions.GetRuntimeDelegate(m_HostFXRContext, hdt_load_assembly_and_get_function_pointer, (void**) &s_CoreCLRFunctions.GetManagedFunctionPtr);
++			status = m_CoreCLRFunctions->GetRuntimeDelegate(m_HostFXRContext, hdt_load_assembly_and_get_function_pointer, (void**) &m_CoreCLRFunctions->GetManagedFunctionPtr);
+ 			CORAL_VERIFY(status == StatusCode::Success);
+ 		}
+ 
+@@ -369,7 +356,7 @@ namespace Coral {
+ 	{
+ 		void* funcPtr = nullptr;
+ 
+-		int status = s_CoreCLRFunctions.GetManagedFunctionPtr(InAssemblyPath.c_str(), InTypeName, InMethodName, InDelegateType, nullptr, &funcPtr);
++		int status = m_CoreCLRFunctions->GetManagedFunctionPtr(InAssemblyPath.c_str(), InTypeName, InMethodName, InDelegateType, nullptr, &funcPtr);
+ 		if(status != StatusCode::Success || !funcPtr) {
+ 			std::cerr << "Failed to retrieve managed function pointer `" << InTypeName << "`::`" << InMethodName << "` from `" << InAssemblyPath << "`" << std::endl;
+ 			CORAL_VERIFY(false);
+diff --git a/Coral.Native/Source/CoralPCH.hpp b/Coral.Native/Source/CoralPCH.hpp
+index 84ab462..c7946d5 100644
+--- a/Coral.Native/Source/CoralPCH.hpp
++++ b/Coral.Native/Source/CoralPCH.hpp
+@@ -25,6 +25,6 @@
+ #include <utility>
+ 
+ // HostFXR / CoreCLR
+-//#include <nethost.h>
++#include <nethost.h>
+ #include <coreclr_delegates.h>
+ #include <hostfxr.h>
+diff --git a/cmake/CMakeLists.txt b/cmake/CMakeLists.txt
+index fa432a9..21d778e 100644
+--- a/cmake/CMakeLists.txt
++++ b/cmake/CMakeLists.txt
+@@ -19,8 +19,8 @@ execute_process(
+ if(NOT DOTNET_SDKVER)
+ 	message(FATAL_ERROR "Failed to check .NET version!")
+ endif()
+-if(DOTNET_SDKVER VERSION_LESS "9.0.0")
+-    message(FATAL_ERROR "No suitable .NET SDK found, .NET 9+ is required.")
++if(DOTNET_SDKVER VERSION_LESS "10.0.0")
++    message(FATAL_ERROR "No suitable .NET SDK found, .NET 10+ is required.")
+ endif()
+ message(STATUS "Found a suitable .NET SDK, version ${DOTNET_SDKVER}")
+ 
+@@ -31,7 +31,7 @@ execute_process(
+     ERROR_QUIET
+ )
+ if(NOT DOTNET_RUNTIMES)
+-	message(FATAL_ERROR "No .NET runtimes found, .NET 9+ is required.")
++	message(FATAL_ERROR "No .NET runtimes found, .NET 10+ is required.")
+ endif()
+ set(DOTNET_RTVER "")
+ string(REPLACE "\r\n" "\n" DOTNET_RUNTIMES "${DOTNET_RUNTIMES}")
+@@ -43,7 +43,7 @@ foreach(line IN LISTS DOTNET_RTLINES)
+     if(len GREATER 1)
+         list(GET parts 0 name)
+         list(GET parts 1 ver)
+-        if(name STREQUAL "Microsoft.NETCore.App" AND ver VERSION_GREATER "9.0.0")
++        if(name STREQUAL "Microsoft.NETCore.App" AND NOT ver VERSION_LESS "10.0.0")
+             if(DOTNET_RTVER STREQUAL "" OR ver VERSION_GREATER DOTNET_RTVER)
+                 set(DOTNET_RTVER "${ver}")
+             endif()
+@@ -51,7 +51,7 @@ foreach(line IN LISTS DOTNET_RTLINES)
+     endif()
+ endforeach()
+ if(NOT DOTNET_RTVER)
+-	message(FATAL_ERROR "No suitable .NET runtimes found, .NET 9+ is required.")
++	message(FATAL_ERROR "No suitable .NET runtimes found, .NET 10+ is required.")
+ endif()
+ message(STATUS "Found a suitable .NET runtime, version ${DOTNET_RTVER}")
+ 
+@@ -89,6 +89,8 @@ target_sources(Coral.Native PRIVATE ${CORAL_SRC})
+ target_include_directories(Coral.Native PUBLIC ${CORAL_ROOT}/Coral.Native/Include)
+ target_include_directories(Coral.Native PRIVATE ${CORAL_ROOT}/Coral.Native/Source)
+ target_include_directories(Coral.Native PRIVATE ${CORAL_ROOT}/NetCore)
++include(${CMAKE_CURRENT_LIST_DIR}/Dotnet.cmake)
++LinkDotnetNetHost(${DOTNET_EXE} Coral.Native)
+ 
+ if(CORAL_EXAMPLE)
+ 	set(EXAMPLE_ROOT ${CORAL_ROOT}/Example)
+@@ -147,4 +149,4 @@ if(CORAL_TESTING)
+ 
+ 	file(GLOB TESTING_SRC ${TESTING_ROOT}/Testing.Native/Source/*.cpp)
+ 	target_sources(Testing.Native PRIVATE ${TESTING_SRC})
+-endif()
+\ No newline at end of file
++endif()
+diff --git a/cmake/Dotnet.cmake b/cmake/Dotnet.cmake
+index 28dd6e1..1ab7ecd 100644
+--- a/cmake/Dotnet.cmake
++++ b/cmake/Dotnet.cmake
+@@ -8,7 +8,7 @@ function(LinkDotnetNetHost DOTNET TARGET)
+ 	file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/dotnet-runtimes.txt RUNTIMES)
+ 	foreach(LINE ${RUNTIMES})
+ 		string(REGEX MATCH "[0-9]+\.[0-9]+\.[0-9]+" VERSION "${LINE}")
+-		if(${VERSION} VERSION_GREATER "9.0.0")
++		if(NOT ${VERSION} VERSION_LESS "10.0.0")
+ 			message(STATUS "Found .NET runtime version ${VERSION}")
+ 			set(RUNTIME_VERSION ${VERSION})
+ 			break()
+@@ -16,7 +16,7 @@ function(LinkDotnetNetHost DOTNET TARGET)
+ 	endforeach()
+ 
+ 	if(NOT RUNTIME_VERSION)
+-		message(FATAL_ERROR "No suitable .NET runtimes found, .NET 9+ is required.")
++		message(FATAL_ERROR "No suitable .NET runtimes found, .NET 10+ is required.")
+ 	endif()
+ 
+ 	execute_process(
+@@ -28,7 +28,7 @@ function(LinkDotnetNetHost DOTNET TARGET)
+ 	file(STRINGS ${CMAKE_CURRENT_BINARY_DIR}/dotnet-sdks.txt SDKS)
+ 	foreach(LINE ${SDKS})
+ 		string(REGEX MATCH "[0-9]+\.[0-9]+\.[0-9]+" SDK_VERSION "${LINE}")
+-		if(${SDK_VERSION} VERSION_GREATER "9.0.0")
++		if(NOT ${SDK_VERSION} VERSION_LESS "10.0.0")
+ 			string(REGEX MATCH "[[](.+)[]]" _ "${LINE}")
+ 			set(SDK_PATH "${CMAKE_MATCH_1}")
+ 			break()
+@@ -36,7 +36,7 @@ function(LinkDotnetNetHost DOTNET TARGET)
+ 	endforeach()
+ 
+ 	if(NOT SDK_PATH)
+-		message(FATAL_ERROR "No suitable .NET SDKs found, .NET 9+ is required.")
++		message(FATAL_ERROR "No suitable .NET SDKs found, .NET 10+ is required.")
+ 	endif()
+ 
+ 	message(STATUS "Using .NET SDK, ${SDK_VERSION} from ${SDK_PATH}")

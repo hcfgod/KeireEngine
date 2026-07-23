@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -163,7 +164,9 @@ namespace Keire
         ComponentRegistry& operator=(const ComponentRegistry&) = delete;
 
         void Register(ComponentRegistration registration);
+        void ReplaceBatch(std::span<const ComponentTypeId> removals, std::vector<ComponentRegistration> registrations);
         [[nodiscard]] bool Contains(ComponentTypeId type) const noexcept;
+        [[nodiscard]] std::uint64_t Revision() const noexcept;
         [[nodiscard]] std::optional<ComponentRegistration> Find(ComponentTypeId type) const;
         [[nodiscard]] std::vector<ComponentRegistration> Registrations() const;
         [[nodiscard]] static Ref<ComponentRegistry> CreateDefault();

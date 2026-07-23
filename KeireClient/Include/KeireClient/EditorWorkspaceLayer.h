@@ -158,6 +158,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ReportHierarchyError(std::string message) noexcept override;
     void DrawConsole(Keire::UiFrame& ui);
     void DrawDiagnostics(Keire::UiFrame& ui);
+    void DrawPrefabOverrides(Keire::UiFrame& ui);
+    void DrawBuildSettings(Keire::UiFrame& ui);
+    void DrawProfiler(Keire::UiFrame& ui);
     void DrawProject(Keire::UiFrame& ui);
     [[nodiscard]] const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept override;
@@ -178,6 +181,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void CreateAssetBrowserShader() override;
     void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                         std::string_view baseName) override;
+    void ExtractAssetBrowserMaterials(Keire::AssetId model) override;
     void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation, Keire::Detail::AssetWorkerMutation reverse,
                             std::string name, bool revealResult) override;
     void OpenAssetBrowserInputActions(Keire::AssetId asset) override;
@@ -224,6 +228,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void HandleExternalAssetDrop(const Keire::WindowFileDropEvent& event);
     void DrawExternalAssetImport(Keire::UiFrame& ui);
     void CookAssets();
+    void UpdateManagedBuild();
     void CreateInputActions(Keire::InputActionAssetDefinition definition, std::string_view baseName);
     void CreateUnlitShader();
     [[nodiscard]] bool CreateMaterial(std::string_view name = "Material");
@@ -274,6 +279,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::UiPanelRegistration m_Game;
     Keire::UiPanelRegistration m_ThemeEditor;
     Keire::UiPanelRegistration m_InputDebugger;
+    Keire::UiPanelRegistration m_PrefabOverrides;
+    Keire::UiPanelRegistration m_BuildSettings;
+    Keire::UiPanelRegistration m_Profiler;
     std::unique_ptr<KeireEditor::AssetBrowserPanel> m_AssetBrowserPanel;
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
@@ -308,6 +316,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AssetId m_SelectedAsset;
     std::filesystem::path m_ExecutablePath;
     Keire::AssetId m_PendingStartupScene;
+    Keire::ManagedBuildOperationId m_LastManagedReload;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;
@@ -347,4 +356,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_Smoke = false;
     bool m_InitializeProject = false;
     int m_GameAspect = 0;
+    int m_BuildConfiguration = 0;
+    int m_BuildPlatform = 0;
+    bool m_BuildSymbols = true;
 };

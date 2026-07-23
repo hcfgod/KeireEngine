@@ -5,7 +5,9 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/BuildInfo.h"
 #include "Keire/Rendering/RenderSystem.h"
+#include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
+#include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <SDL3/SDL.h>
@@ -263,13 +265,28 @@ namespace Keire
             if (specification.Template == ProjectTemplate::Starter)
             {
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
-                databaseSpecification.Importers = {CreateInputActionAssetImporter(), CreateSceneAssetImporter(),
-                                                   CreateShaderAssetImporter(),      CreateMaterialAssetImporter(),
-                                                   CreateMeshAssetImporter(),        CreateTexture2DAssetImporter()};
+                databaseSpecification.Importers = {
+                    CreateInputActionAssetImporter(), CreateSceneAssetImporter(),
+                    CreatePrefabAssetImporter(),      CreateManagedAssemblyAssetImporter(),
+                    CreateShaderAssetImporter(),      CreateMaterialAssetImporter(),
+                    CreateMeshAssetImporter(),        CreateTexture2DAssetImporter()};
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
                 const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",
                                                                 CreateInputActionAssetImporter(), inputBytes);
+
+                ManagedAssemblyDefinition gameplayAssembly;
+                gameplayAssembly.Name = "Gameplay";
+                gameplayAssembly.RootNamespace = "Game";
+                gameplayAssembly.SourceRoots = {"Assets/Scripts/Runtime"};
+                const auto assemblyBytes = ManagedAssemblyAsset::Encode(gameplayAssembly);
+                (void)database->CreateAsset("Scripts/Gameplay.keireasm", CreateManagedAssemblyAssetImporter(),
+                                            assemblyBytes);
+                std::filesystem::create_directories(root / "Assets/Scripts/Runtime");
+                Detail::WriteTextFileAtomically(
+                    root / "Assets/Scripts/Runtime/GameRoot.cs",
+                    "using Keire;\n\nnamespace Game;\n\npublic sealed class GameRoot : Behaviour\n{\n"
+                    "    protected override void Start() => Log.Info(\"Gameplay assembly loaded.\");\n}\n");
 
                 constexpr std::string_view hlsl = R"(struct VertexInput
 {

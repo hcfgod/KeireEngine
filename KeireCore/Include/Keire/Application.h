@@ -2,13 +2,18 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/Audio/AudioSystem.h"
+#include "Keire/Diagnostics/Profiler.h"
 #include "Keire/Event.h"
 #include "Keire/Input/Input.h"
 #include "Keire/Layer.h"
 #include "Keire/Log.h"
+#include "Keire/Navigation/NavigationSystem.h"
+#include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneSystem.h"
+#include "Keire/Scripting/ScriptSystem.h"
 #include "Keire/Time.h"
 #include "Keire/Ui.h"
 #include "Keire/Undo.h"
@@ -23,7 +28,12 @@ namespace Keire
     {
         WindowSpecification MainWindow;
         EventBusSpecification Events;
+        ProfilerSpecification Profiling;
         AssetSystemSpecification Assets;
+        ScriptSystemSpecification Scripting;
+        PhysicsSystemSpecification Physics;
+        AudioSystemSpecification Audio;
+        NavigationSystemSpecification Navigation;
         ProjectSystemSpecification Projects;
         SceneSystemSpecification Scenes;
         InputSystemSpecification Input;
@@ -61,7 +71,12 @@ namespace Keire
         [[nodiscard]] const LayerStack& Layers() const noexcept;
 
         [[nodiscard]] Ref<EventBus> Events() const noexcept;
+        [[nodiscard]] Ref<Profiler> GetProfiler() const noexcept;
         [[nodiscard]] Ref<AssetSystem> Assets() const noexcept;
+        [[nodiscard]] Ref<ScriptSystem> Scripts() const noexcept;
+        [[nodiscard]] Ref<PhysicsSystem> Physics() const noexcept;
+        [[nodiscard]] Ref<AudioSystem> Audio() const noexcept;
+        [[nodiscard]] Ref<NavigationSystem> Navigation() const noexcept;
         [[nodiscard]] Ref<Project> GetProject() const noexcept;
         [[nodiscard]] Ref<SceneSystem> Scenes() const noexcept;
         [[nodiscard]] Ref<InputSystem> Input() const noexcept;

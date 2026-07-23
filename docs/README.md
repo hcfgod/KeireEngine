@@ -8,6 +8,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Getting Started](GettingStarted.md) | Clone, bootstrap, generate, build, run, clean, and diagnose a workstation | New contributors and integrators |
 | [Architecture](Architecture.md) | System boundaries, ownership, implementation strategy, and release shape | Engine maintainers |
 | [Runtime Lifecycle](RuntimeLifecycle.md) | Startup, frame order, threading, layer mutation, events, time, UI, and shutdown | Runtime and layer authors |
+| [Gameplay Foundations](GameplayFoundations.md) | Prefabs, managed builds, physics, audio graphs, navigation, profiling, and current adapter scope | Gameplay and subsystem authors |
 | [Undo And Redo](UndoRedo.md) | Contexts, commands, transactions, limits, merging, threading, and editor routing | Runtime, editor, and tooling authors |
 | [UI Workspace](UiWorkspace.md) | Panel registration, factory docking, layouts, themes, persistence, and recovery | Editor and tooling authors |
 | [Asset Runtime](AssetRuntime.md) | Handles, fallbacks, async loading, mounts, integrity, reloads, and threading | Runtime and subsystem authors |

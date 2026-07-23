@@ -30,6 +30,15 @@ cbuffer ObjectData : register(b0, space1)
     float4x4 NormalMatrix;
 };
 
+struct InstanceData
+{
+    float4x4 Model;
+    float4x4 NormalMatrix;
+    float4 Tint;
+};
+
+StructuredBuffer<InstanceData> Instances : register(t0, space0);
+
 struct LocalLightData
 {
     float4 PositionRange;
@@ -85,6 +94,15 @@ Texture2DArray<float> DirectionalShadowTexture : register(t7, space2);
 SamplerState DirectionalShadowSampler : register(s7, space2);
 Texture2DArray<float> LocalShadowTexture : register(t8, space2);
 SamplerState LocalShadowSampler : register(s8, space2);
+StructuredBuffer<LocalLightData> ForwardPlusLights : register(t9, space2);
+StructuredBuffer<uint4> ForwardPlusTiles : register(t10, space2);
+StructuredBuffer<uint4> ForwardPlusLightIndices : register(t11, space2);
+
+uint ForwardPlusLightIndex(const uint index)
+{
+    const uint4 indices = ForwardPlusLightIndices[index >> 2U];
+    return indices[index & 3U];
+}
 
 float3 SafeNormal(const float3 value, const float3 fallback)
 {
@@ -98,23 +116,24 @@ float3 OrthogonalTangent(const float3 normal)
     return SafeNormal(cross(axis, normal), float3(1.0F, 0.0F, 0.0F));
 }
 
-VertexOutput VSMain(VertexInput input)
+VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
 {
     VertexOutput output;
-    const float4 worldPosition = mul(Model, float4(input.Position, 1.0F));
+    const InstanceData instance = Instances[instanceId];
+    const float4 worldPosition = mul(instance.Model, float4(input.Position, 1.0F));
     const float4 viewPosition = mul(View, worldPosition);
     output.Position = mul(Projection, viewPosition);
-    output.Normal = SafeNormal(mul((float3x3)NormalMatrix, input.Normal), float3(0.0F, 0.0F, 1.0F));
-    float3 tangent = mul((float3x3)Model, input.Tangent.xyz);
+    output.Normal = SafeNormal(mul((float3x3)instance.NormalMatrix, input.Normal), float3(0.0F, 0.0F, 1.0F));
+    float3 tangent = mul((float3x3)instance.Model, input.Tangent.xyz);
     tangent -= output.Normal * dot(output.Normal, tangent);
     output.Tangent = SafeNormal(tangent, OrthogonalTangent(output.Normal));
-    const float modelHandedness = determinant((float3x3)Model) < 0.0F ? -1.0F : 1.0F;
+    const float modelHandedness = determinant((float3x3)instance.Model) < 0.0F ? -1.0F : 1.0F;
     const float tangentHandedness = abs(input.Tangent.w) > 0.0001F ? input.Tangent.w : 1.0F;
     output.Bitangent = SafeNormal(cross(output.Normal, output.Tangent) * tangentHandedness * modelHandedness,
                                   cross(output.Normal, OrthogonalTangent(output.Normal)));
     output.ViewDirection = normalize(mul(-viewPosition.xyz, (float3x3)View));
     output.UV0 = input.UV0;
-    output.Color = input.Color;
+    output.Color = input.Color * instance.Tint;
     output.WorldPosition = worldPosition.xyz;
     output.ViewDepth = viewPosition.z;
     return output;
@@ -296,13 +315,21 @@ float4 PSMain(VertexOutput input) : SV_Target0
                                            DirectionalColorIntensity.rgb * DirectionalColorIntensity.a,
                                            baseColor.rgb, metallic, roughness);
     direct *= EvaluateDirectionalShadow(input.WorldPosition, input.ViewDepth);
-    const uint localLightCount = min((uint)max(LocalLightCounts.x, 0.0F), 62U);
-    for (uint lightIndex = 0U; lightIndex < localLightCount; ++lightIndex)
+    uint2 tile = 0U.xx;
+    if (LocalLightCounts.x > 0.5F)
     {
-        const float3 toLight = LocalLights[lightIndex].PositionRange.xyz - input.WorldPosition;
+        const uint tileColumns = max((uint)LocalLightCounts.y, 1U);
+        const uint tileIndex = (uint(input.Position.y) >> 4U) * tileColumns + (uint(input.Position.x) >> 4U);
+        tile = ForwardPlusTiles[tileIndex].xy;
+    }
+    for (uint tileLightIndex = 0U; tileLightIndex < tile.y; ++tileLightIndex)
+    {
+        const uint lightIndex = ForwardPlusLightIndex(tile.x + tileLightIndex);
+        const LocalLightData light = ForwardPlusLights[lightIndex];
+        const float3 toLight = light.PositionRange.xyz - input.WorldPosition;
         const float distanceSquared = dot(toLight, toLight);
         const float distance = sqrt(max(distanceSquared, 1.0e-8F));
-        const float range = max(LocalLights[lightIndex].PositionRange.w, 0.0001F);
+        const float range = max(light.PositionRange.w, 0.0001F);
         if (distance >= range)
             continue;
         const float3 localDirection = toLight / distance;
@@ -310,18 +337,18 @@ float4 PSMain(VertexOutput input) : SV_Target0
         const float rangeFade = saturate(1.0F - normalizedDistance * normalizedDistance * normalizedDistance *
                                                     normalizedDistance);
         float attenuation = rangeFade * rangeFade / max(distanceSquared, 0.01F);
-        if (LocalLights[lightIndex].Parameters.y > 0.5F)
+        if (light.Parameters.y > 0.5F)
         {
             const float3 spotDirection =
-                SafeNormal(LocalLights[lightIndex].DirectionOuter.xyz, float3(0.0F, 0.0F, 1.0F));
+                SafeNormal(light.DirectionOuter.xyz, float3(0.0F, 0.0F, 1.0F));
             const float coneCosine = dot(spotDirection, -localDirection);
-            const float outerCosine = LocalLights[lightIndex].DirectionOuter.w;
-            const float innerCosine = max(LocalLights[lightIndex].Parameters.x, outerCosine + 0.0001F);
+            const float outerCosine = light.DirectionOuter.w;
+            const float innerCosine = max(light.Parameters.x, outerCosine + 0.0001F);
             attenuation *= smoothstep(outerCosine, innerCosine, coneCosine);
         }
         const float3 radiance =
-            LocalLights[lightIndex].ColorIntensity.rgb * LocalLights[lightIndex].ColorIntensity.a * attenuation *
-            EvaluateLocalShadow(lightIndex, input.WorldPosition);
+            light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation *
+            (lightIndex < 62U ? EvaluateLocalShadow(lightIndex, input.WorldPosition) : 1.0F);
         direct += EvaluateDirectLighting(normal, viewDirection, localDirection, radiance, baseColor.rgb, metallic,
                                          roughness);
     }

@@ -168,16 +168,21 @@ function Copy-WindowsTrackedTree {
 
     New-Item -ItemType Directory -Force $Destination | Out-Null
     $prefix = $RelativeSource.TrimEnd('/', '\') + "/"
+    $copied = 0
     foreach ($trackedFile in $trackedFiles) {
         if (-not $trackedFile.StartsWith($prefix, [StringComparison]::Ordinal)) {
             throw "Tracked package path escaped '$RelativeSource': $trackedFile"
         }
 
+        $source = Join-Path $RepositoryRoot $trackedFile
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { continue }
         $relativePath = $trackedFile.Substring($prefix.Length).Replace('/', [IO.Path]::DirectorySeparatorChar)
         $target = Join-Path $Destination $relativePath
         New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $RepositoryRoot $trackedFile) -Destination $target
+        Copy-Item -LiteralPath $source -Destination $target
+        ++$copied
     }
+    if ($copied -eq 0) { throw "No present tracked files were found for package source '$RelativeSource'." }
 }
 
 function Test-WindowsGeneratedPackagePath {
@@ -228,14 +233,15 @@ function Assert-WindowsPackageArchiveGeneratedDataFree {
 function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
     $required = @(
-        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll", "bin\Managed\Keire.Managed.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h", "include\$Namespace\Undo.h",
         "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial",
         "third-party\licenses\spdlog-LICENSE.txt",
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
-        "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt", "third-party\licenses\assimp-LICENSE.txt", "third-party\licenses\assimp-zlib-LICENSE.txt", "third-party\licenses\stb-LICENSE.txt",
-        "lib\assimp.lib", "lib\zlibstatic.lib",
+        "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt", "third-party\licenses\assimp-LICENSE.txt", "third-party\licenses\assimp-zlib-LICENSE.txt", "third-party\licenses\stb-LICENSE.txt", "third-party\licenses\Jolt-LICENSE.txt", "third-party\licenses\Recast-LICENSE.txt", "third-party\licenses\miniaudio-LICENSE.txt",
+        "lib\assimp.lib", "lib\zlibstatic.lib", "lib\Jolt.lib", "lib\Recast.lib", "lib\Detour.lib", "lib\DetourCrowd.lib", "lib\DetourTileCache.lib", "lib\miniaudio.lib", "lib\Coral.Native.lib", "lib\nethost.lib",
+        "third-party\licenses\Coral-LICENSE.txt", "third-party\licenses\dotnet-LICENSE.txt", "third-party\licenses\dotnet-ThirdPartyNotices.txt",
         "third-party\SDL3\include\SDL3\SDL.h",
         "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake",
         "third-party\SDL3\licenses\SDL3\LICENSE.txt",
@@ -253,8 +259,11 @@ function Assert-WindowsPackageStage {
         throw "Package contains private spdlog headers."
     }
     if ((Test-Path (Join-Path $Stage "third-party\assimp")) -or
-        (Test-Path (Join-Path $Stage "third-party\stb"))) {
-        throw "Package contains private asset importer headers."
+        (Test-Path (Join-Path $Stage "third-party\stb")) -or
+        (Test-Path (Join-Path $Stage "third-party\SDL3\include\Jolt")) -or
+        (Test-Path (Join-Path $Stage "third-party\SDL3\include\recastnavigation")) -or
+        (Test-Path (Join-Path $Stage "third-party\SDL3\include\miniaudio"))) {
+        throw "Package contains private implementation headers."
     }
     if (-not (Get-ChildItem (Join-Path $Stage "lib\cmake") -Filter "*Config.cmake" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw "Package is missing its CMake package configuration."

@@ -7,6 +7,7 @@
 #include "KeireInternal/WindowInternal.h"
 
 #include <cstring>
+#include <future>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
@@ -64,6 +65,9 @@ namespace Keire::RenderBackend
             if (!SDL_GPUTextureSupportsFormat(Device, ColorFormat, SDL_GPU_TEXTURETYPE_2D, colorUsage))
                 ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 
+            if (!SDL_GPUTextureSupportsFormat(Device, SceneColorFormat, SDL_GPU_TEXTURETYPE_2D, colorUsage))
+                throw std::runtime_error("The active GPU does not support RGBA16F sampled color attachments.");
+
             constexpr SDL_GPUTextureFormat depthCandidates[] = {
                 SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREFORMAT_D24_UNORM, SDL_GPU_TEXTUREFORMAT_D16_UNORM};
             for (const auto candidate : depthCandidates)
@@ -87,11 +91,12 @@ namespace Keire::RenderBackend
             }
             if (DepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID || ShadowDepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
                 throw std::runtime_error("The active GPU exposes no compatible scene and sampled shadow depth format.");
-            KEIRE_CORE_INFO("Selected GPU attachment formats (color={}, depth={}, shadowDepth={}).",
-                            static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(DepthFormat),
-                            static_cast<std::uint32_t>(ShadowDepthFormat));
+            KEIRE_CORE_INFO("Selected GPU attachment formats (output={}, scene={}, depth={}, shadowDepth={}).",
+                            static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(SceneColorFormat),
+                            static_cast<std::uint32_t>(DepthFormat), static_cast<std::uint32_t>(ShadowDepthFormat));
 
             CreateGeometryResources();
+            StartRenderThread();
         }
         catch (...)
         {
@@ -101,6 +106,67 @@ namespace Keire::RenderBackend
     }
 
     RenderSharedState::~RenderSharedState() { Close(); }
+
+    void RenderSharedState::StartRenderThread()
+    {
+        if (Specification.Mode != RenderMode::Rendered || RenderThread.joinable())
+            return;
+        RenderThread = std::jthread(
+            [this]
+            {
+                RenderThreadId = std::this_thread::get_id();
+                for (;;)
+                {
+                    std::function<void()> work;
+                    {
+                        std::unique_lock lock(RenderQueueMutex);
+                        RenderQueueReady.wait(lock, [&] { return StopRenderQueue || !RenderQueue.empty(); });
+                        if (StopRenderQueue && RenderQueue.empty())
+                            break;
+                        work = std::move(RenderQueue.front());
+                        RenderQueue.pop_front();
+                    }
+                    RenderQueueSpace.notify_one();
+                    work();
+                }
+            });
+    }
+
+    void RenderSharedState::StopRenderThread() noexcept
+    {
+        if (!RenderThread.joinable())
+            return;
+        {
+            std::scoped_lock lock(RenderQueueMutex);
+            StopRenderQueue = true;
+        }
+        RenderQueueReady.notify_all();
+        RenderThread.join();
+        RenderThreadId = {};
+    }
+
+    void RenderSharedState::DispatchRender(std::function<void()> work)
+    {
+        if (!RenderThread.joinable())
+        {
+            work();
+            return;
+        }
+        auto task = std::make_shared<std::packaged_task<void()>>(std::move(work));
+        auto completion = task->get_future();
+        {
+            std::unique_lock lock(RenderQueueMutex);
+            constexpr std::size_t capacity = 2;
+            RenderQueueSpace.wait(lock, [&] { return StopRenderQueue || RenderQueue.size() < capacity; });
+            if (StopRenderQueue)
+                throw std::logic_error("Renderer submission queue is closed.");
+            RenderQueue.push_back([task] { (*task)(); });
+            Statistics.RendererQueueHighWaterMark =
+                std::max(Statistics.RendererQueueHighWaterMark, static_cast<std::uint32_t>(RenderQueue.size()));
+        }
+        RenderQueueReady.notify_one();
+        completion.get();
+    }
 
     void RenderSharedState::RequireOwner(const char* operation) const
     {
@@ -142,10 +208,15 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUTexture(Device, resources.DirectionalShadow);
         if (resources.Depth)
             SDL_ReleaseGPUTexture(Device, resources.Depth);
-        if (resources.MultisampleColor)
-            SDL_ReleaseGPUTexture(Device, resources.MultisampleColor);
+        if (resources.MultisampleHdrColor)
+            SDL_ReleaseGPUTexture(Device, resources.MultisampleHdrColor);
+        for (auto* texture : resources.TransientTextures)
+            if (texture)
+                SDL_ReleaseGPUTexture(Device, texture);
         if (resources.SampledColor)
             SDL_ReleaseGPUTexture(Device, resources.SampledColor);
+        if (resources.ExchangeColor)
+            SDL_ReleaseGPUTexture(Device, resources.ExchangeColor);
         resources = {};
     }
 
@@ -255,6 +326,42 @@ namespace Keire::RenderBackend
         return shader;
     }
 
+    SDL_GPUShader* RenderSharedState::CreateToneMapShader(const bool vertex) const
+    {
+        SDL_GPUShaderCreateInfo information{};
+        information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        information.num_samplers = vertex ? 0U : 1U;
+        const auto formats = SDL_GetGPUShaderFormats(Device);
+        if (formats & SDL_GPU_SHADERFORMAT_DXIL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_DXIL;
+            information.code = vertex ? Detail::BuiltinToneMapVertexDxil : Detail::BuiltinToneMapFragmentDxil;
+            information.code_size =
+                vertex ? Detail::BuiltinToneMapVertexDxilSize : Detail::BuiltinToneMapFragmentDxilSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_MSL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_MSL;
+            information.code = vertex ? Detail::BuiltinToneMapVertexMsl : Detail::BuiltinToneMapFragmentMsl;
+            information.code_size =
+                vertex ? Detail::BuiltinToneMapVertexMslSize : Detail::BuiltinToneMapFragmentMslSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_SPIRV;
+            information.entrypoint = vertex ? "VSMain" : "PSMain";
+            information.code = vertex ? Detail::BuiltinToneMapVertexSpirV : Detail::BuiltinToneMapFragmentSpirV;
+            information.code_size =
+                vertex ? Detail::BuiltinToneMapVertexSpirVSize : Detail::BuiltinToneMapFragmentSpirVSize;
+        }
+        else
+            throw std::runtime_error("The active SDL_GPU backend exposes no supported tone-map shader format.");
+        SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+        if (!shader)
+            throw std::runtime_error("SDL_CreateGPUShader(tone map) failed: " + LastSdlError());
+        return shader;
+    }
+
     SDL_GPUBuffer* RenderSharedState::UploadBuffer(const std::span<const std::byte> bytes,
                                                    const SDL_GPUBufferUsageFlags usage)
     {
@@ -284,6 +391,16 @@ namespace Keire::RenderBackend
             std::memcpy(mapped, bytes.data(), bytes.size());
             SDL_UnmapGPUTransferBuffer(Device, transfer);
 
+            SDL_GPUTransferBufferLocation source{transfer, 0};
+            SDL_GPUBufferRegion destination{buffer, 0, byteSize};
+            if (FrameUploadPass)
+            {
+                SDL_UploadToGPUBuffer(FrameUploadPass, &source, &destination, false);
+                FrameUploadTransfers.push_back(transfer);
+                transfer = nullptr;
+                return buffer;
+            }
+
             SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
             if (!commands)
                 throw std::runtime_error("SDL_AcquireGPUCommandBuffer(upload) failed: " + LastSdlError());
@@ -293,13 +410,12 @@ namespace Keire::RenderBackend
                 (void)SDL_CancelGPUCommandBuffer(commands);
                 throw std::runtime_error("SDL_BeginGPUCopyPass failed: " + LastSdlError());
             }
-            SDL_GPUTransferBufferLocation source{transfer, 0};
-            SDL_GPUBufferRegion destination{buffer, 0, byteSize};
             SDL_UploadToGPUBuffer(copy, &source, &destination, false);
             SDL_EndGPUCopyPass(copy);
             if (!SDL_SubmitGPUCommandBuffer(commands))
                 throw std::runtime_error("SDL_SubmitGPUCommandBuffer(upload) failed: " + LastSdlError());
             SDL_ReleaseGPUTransferBuffer(Device, transfer);
+            transfer = nullptr;
             return buffer;
         }
         catch (...)
