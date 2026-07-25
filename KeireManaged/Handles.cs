@@ -31,7 +31,61 @@ public readonly record struct Entity(ulong World, EntityId Id)
         set => RuntimeBridge.Current.SetEntityActive(this, value);
     }
 
+    public Entity Parent
+    {
+        get => RuntimeBridge.Current.GetEntityParent(this);
+        set => RuntimeBridge.Current.SetEntityParent(this, value);
+    }
+
+    public IReadOnlyList<Entity> Children => RuntimeBridge.Current.GetEntityChildren(this);
+    public TransformHandle Transform => new(this);
     public ComponentHandle GetComponent(ComponentTypeId type) => RuntimeBridge.Current.GetComponent(this, type);
+    public ComponentHandle GetComponent<T>() => GetComponent(ComponentType.Of<T>());
+    public bool TryGetComponent<T>(out ComponentHandle component)
+    {
+        component = GetComponent<T>();
+        return component.IsValid;
+    }
+    public bool HasComponent<T>() => RuntimeBridge.Current.ComponentExists(GetComponent<T>());
+    public ComponentHandle AddComponent<T>() => RuntimeBridge.Current.AddComponent(this, ComponentType.Of<T>());
+    public bool RemoveComponent<T>() => RuntimeBridge.Current.RemoveComponent(this, ComponentType.Of<T>());
+    public Entity Instantiate() => RuntimeBridge.Current.CloneEntity(this);
+    public void Destroy() => RuntimeBridge.Current.DestroyEntity(this);
+}
+
+public readonly record struct TransformHandle(Entity Entity)
+{
+    public Vector3 LocalPosition
+    {
+        get => NativeRuntime.GetLocalPosition(Entity);
+        set => NativeRuntime.SetLocalPosition(Entity, value);
+    }
+
+    public Quaternion LocalRotation
+    {
+        get => NativeRuntime.GetLocalRotation(Entity);
+        set => NativeRuntime.SetLocalRotation(Entity, value);
+    }
+
+    public Vector3 LocalScale
+    {
+        get => RuntimeBridge.Current.GetLocalScale(Entity);
+        set => RuntimeBridge.Current.SetLocalScale(Entity, value);
+    }
+}
+
+public static class ComponentType
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, ComponentTypeId> Types = new();
+
+    public static ComponentTypeId Of<T>() => Types.GetOrAdd(typeof(T), static type =>
+    {
+        var id = type.GetCustomAttributes(typeof(StableComponentIdAttribute), false)
+            .Cast<StableComponentIdAttribute>().SingleOrDefault() ??
+            throw new InvalidOperationException(
+                $"Managed component '{type.FullName}' does not declare StableComponentId.");
+        return new ComponentTypeId(id.High, id.Low);
+    });
 }
 
 public readonly record struct ComponentHandle(Entity Entity, ComponentTypeId Type)

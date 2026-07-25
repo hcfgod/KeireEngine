@@ -67,6 +67,7 @@ namespace Keire
         Delete,
         F2,
         A,
+        B,
         Backspace,
         C,
         D,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/ECS/Component.h"
 #include "Keire/Ref.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -15,12 +16,59 @@
 
 namespace Keire
 {
-    class ComponentRegistry;
+    enum class ManagedLogLevel : std::uint8_t
+    {
+        Trace,
+        Debug,
+        Information,
+        Warning,
+        Error,
+        Critical
+    };
+
+    class KEIRE_API IScriptRuntimeServices
+    {
+      public:
+        virtual ~IScriptRuntimeServices() = default;
+
+        virtual void WriteManagedLog(ManagedLogLevel level, std::string_view message) noexcept = 0;
+        [[nodiscard]] virtual float ManagedDeltaTime() const noexcept = 0;
+        [[nodiscard]] virtual Vector2 ReadManagedInput(std::string_view action) noexcept = 0;
+        virtual void SetManagedCursorVisible(bool) noexcept {}
+        virtual void SetManagedCursorLocked(bool) noexcept {}
+        [[nodiscard]] virtual bool IsManagedCursorVisible() const noexcept { return true; }
+        [[nodiscard]] virtual bool IsManagedCursorLocked() const noexcept { return false; }
+    };
 
     enum class ScriptMode : std::uint8_t
     {
         Disabled,
         Enabled
+    };
+
+    enum class ManagedReloadPolicy : std::uint8_t
+    {
+        Disabled,
+        PreserveState
+    };
+
+    enum class ManagedExceptionPolicy : std::uint8_t
+    {
+        DisableInstance,
+        Propagate
+    };
+
+    enum class ManagedSdkSelection : std::uint8_t
+    {
+        Bundled,
+        SystemPath,
+        Custom
+    };
+
+    struct ManagedSdkConfiguration
+    {
+        ManagedSdkSelection Selection = ManagedSdkSelection::Bundled;
+        std::filesystem::path CustomExecutable;
     };
 
     struct ScriptSystemSpecification
@@ -31,8 +79,13 @@ namespace Keire
         std::filesystem::path RuntimeHostDirectory;
         std::filesystem::path RuntimeRootDirectory;
         std::filesystem::path ManagedApiAssembly;
+        ManagedSdkSelection SdkSelection = ManagedSdkSelection::Bundled;
         std::filesystem::path DotnetExecutable;
         std::size_t MaximumDiagnostics = 4096;
+        ManagedReloadPolicy ReloadPolicy = ManagedReloadPolicy::PreserveState;
+        ManagedExceptionPolicy ExceptionPolicy = ManagedExceptionPolicy::DisableInstance;
+        std::uint32_t ManagedApiVersion = 1;
+        IScriptRuntimeServices* RuntimeServices = nullptr;
     };
 
     enum class ManagedBuildState : std::uint8_t
@@ -89,6 +142,10 @@ namespace Keire
         ManagedBuildState State = ManagedBuildState::Idle;
         std::vector<ManagedBuildDiagnostic> Diagnostics;
         std::filesystem::path ActiveAssemblyDirectory;
+        std::filesystem::path ManagedApiAssembly;
+        std::uint64_t Generation = 0;
+        std::chrono::milliseconds Elapsed{};
+        std::vector<std::string> ChangedAssemblies;
     };
 
     struct ManagedIdeWorkspace
@@ -111,6 +168,8 @@ namespace Keire
     {
         std::string StableFieldId;
         std::string Value;
+        std::string Name;
+        std::string TypeName;
         auto operator<=>(const ManagedSerializedField&) const = default;
     };
 
@@ -119,12 +178,14 @@ namespace Keire
         std::uint64_t Instance = 0;
         std::string StableTypeId;
         std::vector<ManagedSerializedField> Fields;
+        std::uint32_t StateVersion = 1;
         auto operator<=>(const ManagedBehaviourState&) const = default;
     };
 
     struct ManagedReloadRequest
     {
         std::vector<std::filesystem::path> Assemblies;
+        std::filesystem::path ManagedApiAssembly;
         std::vector<ManagedBehaviourState> State;
     };
 
@@ -135,6 +196,14 @@ namespace Keire
         std::vector<std::string> AvailableTypes;
         std::vector<ManagedBehaviourState> RetainedState;
         std::string Diagnostic;
+    };
+
+    struct ManagedBehaviourTypeDescriptor
+    {
+        std::string FullName;
+        std::string DisplayName;
+        ComponentTypeId ComponentType;
+        std::int32_t ExecutionOrder = 0;
     };
 
     enum class ManagedBehaviourCallback : std::uint8_t
@@ -165,6 +234,17 @@ namespace Keire
         std::uint64_t m_Value = 0;
     };
 
+    struct ManagedRuntimeDiagnostic
+    {
+        ManagedBehaviourInstanceId Instance;
+        ManagedDiagnosticSeverity Severity = ManagedDiagnosticSeverity::Error;
+        ManagedBehaviourCallback Callback = ManagedBehaviourCallback::Update;
+        std::uint64_t Generation = 0;
+        std::string TypeName;
+        AssetId Entity;
+        std::string Message;
+    };
+
     class KEIRE_API ScriptSystem final : public RefCounted
     {
       public:
@@ -177,17 +257,24 @@ namespace Keire
         void CancelBuild(ManagedBuildOperationId operation);
         [[nodiscard]] bool WaitForBuild(ManagedBuildOperationId operation, std::chrono::milliseconds timeout) const;
         [[nodiscard]] ManagedBuildStatus BuildStatus() const;
+        [[nodiscard]] ManagedSdkConfiguration SdkConfiguration() const;
+        void ConfigureManagedSdk(ManagedSdkSelection selection, std::filesystem::path customExecutable = {});
         [[nodiscard]] bool RuntimeHostAvailable() const noexcept;
         [[nodiscard]] bool PrepareReload(ManagedReloadRequest request);
         void CommitReload();
         void CancelReload();
         [[nodiscard]] ManagedReloadStatus ReloadStatus() const;
+        [[nodiscard]] std::vector<ManagedBehaviourTypeDescriptor> BehaviourTypes() const;
         [[nodiscard]] ManagedBehaviourInstanceId CreateBehaviour(std::string typeName, std::uint64_t world,
                                                                  AssetId entity);
         void InvokeBehaviour(ManagedBehaviourInstanceId instance, ManagedBehaviourCallback callback,
                              float deltaSeconds = 0.0F);
         [[nodiscard]] bool DestroyBehaviour(ManagedBehaviourInstanceId instance);
+        [[nodiscard]] std::vector<ManagedRuntimeDiagnostic> RuntimeDiagnostics() const;
+        [[nodiscard]] bool RetryBehaviour(ManagedBehaviourInstanceId instance);
+        [[nodiscard]] bool SetBehaviourEnabled(ManagedBehaviourInstanceId instance, bool enabled);
         void InstallManagedComponents(Ref<ComponentRegistry> registry);
+        void SetRuntimeServices(IScriptRuntimeServices* services);
         void Close();
 
       private:

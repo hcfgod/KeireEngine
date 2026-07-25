@@ -1321,7 +1321,8 @@ namespace Keire
         runtime->RequireOwner("EnableMap");
         if (std::ranges::none_of(m_Impl->State->Definition.ActionMaps, [&](const auto& map) { return map.Id == id; }))
             return false;
-        return m_Impl->State->EnabledMaps.insert(id).second;
+        m_Impl->State->EnabledMaps.insert(id);
+        return true;
     }
     bool InputActionContext::EnableMap(const std::string_view name)
     {
@@ -1354,6 +1355,14 @@ namespace Keire
         if (!m_Impl->State->CaptureBypassMaps.insert(map).second)
             throw std::logic_error("Input action map already has an active UI capture override.");
         return InputCaptureOverride(m_Impl->State, map);
+    }
+    InputCaptureOverride InputActionContext::OverrideUiCapture(const std::string_view map)
+    {
+        const auto found =
+            std::ranges::find(m_Impl->State->Definition.ActionMaps, map, &InputActionMapDefinition::Name);
+        if (found == m_Impl->State->Definition.ActionMaps.end())
+            throw std::invalid_argument("Input capture override requires a known action map.");
+        return OverrideUiCapture(found->Id);
     }
     InputActionSubscription InputActionContext::Subscribe(AssetId action,
                                                           std::function<void(const InputActionEvent&)> callback)

@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include <cctype>
+
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
@@ -93,6 +95,63 @@ void EditorWorkspaceLayer::RecordInspectorUndo(const std::string_view name, std:
     RecordSceneUndo(name, std::move(mergeKey));
 }
 
+void EditorWorkspaceLayer::AddScriptToEntity(const Keire::EntityId entity, const Keire::AssetId script)
+{
+    if (!m_AssetDatabase)
+        throw std::logic_error("The asset database is unavailable.");
+    const auto record = m_AssetDatabase->Find(script);
+    if (!record)
+        throw std::invalid_argument("Only C# script assets can be attached to GameObjects.");
+    auto sourcePath = record->RelativePath;
+    auto extension = sourcePath.extension().string();
+    std::ranges::transform(extension, extension.begin(),
+                           [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+    if (extension == ".keiremeta")
+    {
+        sourcePath = sourcePath.stem();
+        extension = sourcePath.extension().string();
+        std::ranges::transform(extension, extension.begin(), [](const unsigned char character)
+                               { return static_cast<char>(std::tolower(character)); });
+    }
+    if (extension != ".cs")
+        return;
+    const auto scripts = Owner().Scripts();
+    if (!scripts || !scripts->RuntimeHostAvailable())
+        throw std::logic_error("The managed scripting runtime is unavailable.");
+
+    const auto scriptName = sourcePath.stem().string();
+    const auto types = scripts->BehaviourTypes();
+    const auto matches = std::ranges::count(types, scriptName, &Keire::ManagedBehaviourTypeDescriptor::DisplayName);
+    if (matches == 0)
+    {
+        const auto build = scripts->BuildStatus();
+        if (!m_ResolvingPendingScriptAttachments)
+        {
+            const auto attachment = std::pair{entity, script};
+            if (std::ranges::find(m_PendingScriptAttachments, attachment) == m_PendingScriptAttachments.end())
+                m_PendingScriptAttachments.push_back(attachment);
+            const bool building = build.State == Keire::ManagedBuildState::Generating ||
+                                  build.State == Keire::ManagedBuildState::Compiling ||
+                                  build.State == Keire::ManagedBuildState::Publishing;
+            if (!building)
+                m_ManagedBuildDebounceSeconds = 0.0;
+            m_SceneDocument->SetStatus("Queued " + scriptName + " for attachment after managed compilation.");
+            return;
+        }
+        throw std::invalid_argument("The script must contain one public Behaviour whose type name matches the file "
+                                    "name and declares StableComponentId.");
+    }
+    if (matches != 1)
+        throw std::invalid_argument("More than one loaded Behaviour matches this script file name.");
+    const auto type = std::ranges::find(types, scriptName, &Keire::ManagedBehaviourTypeDescriptor::DisplayName);
+
+    RecordSceneUndo("Add " + scriptName);
+    const auto component = m_SceneDocument->AddComponent(entity, type->ComponentType);
+    if (!component)
+        throw std::logic_error("The script is already attached or its component requirements are not satisfied.");
+    m_SceneDocument->SetStatus("Attached " + scriptName + " to the selected GameObject.");
+}
+
 void EditorWorkspaceLayer::CommitInspectorMaterial() { CommitMaterialDraft(); }
 
 void EditorWorkspaceLayer::OpenInspectorInputActions(const Keire::AssetId asset) { OpenInputActions(asset); }
@@ -147,4 +206,19 @@ void EditorWorkspaceLayer::RevealProjectSettingsAsset(const Keire::AssetId asset
     m_SelectedAsset = asset;
     m_AssetBrowserPanel->RevealAsset(asset);
     m_AssetBrowserPanel->Registration().SetVisible(true);
+}
+
+KeireEditor::ManagedSdkPreference EditorWorkspaceLayer::ProjectManagedSdk() const
+{
+    const auto scripts = Owner().Scripts();
+    if (!scripts)
+        return {};
+    const auto configuration = scripts->SdkConfiguration();
+    return {configuration.Selection, configuration.CustomExecutable};
+}
+
+void EditorWorkspaceLayer::SetProjectManagedSdk(KeireEditor::ManagedSdkPreference preference)
+{
+    if (const auto scripts = Owner().Scripts())
+        scripts->ConfigureManagedSdk(preference.Selection, std::move(preference.CustomExecutable));
 }

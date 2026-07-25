@@ -7,11 +7,29 @@
 #include <cctype>
 #include <cstddef>
 #include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
 namespace KeireEditor
 {
+    namespace
+    {
+        [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(const std::span<const std::byte> bytes)
+        {
+            const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            std::istringstream stream(text);
+            std::vector<Keire::AssetId> result;
+            std::string line;
+            while (std::getline(stream, line))
+            {
+                if (!line.empty())
+                    result.push_back(Keire::AssetId::Parse(line));
+            }
+            return result;
+        }
+    } // namespace
+
     void HierarchyPanel::Draw(Keire::UiFrame& ui)
     {
         auto panel = ui.BeginPanel(m_Registration);
@@ -249,6 +267,19 @@ namespace KeireEditor
                         moveEntity(child, object.Parent, nextSibling(object.Id, object.Parent));
                     else
                         moveEntity(child, object.Id, {});
+                }
+                payload.clear();
+                if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
+                {
+                    try
+                    {
+                        for (const auto script : DecodeAssetPayload(payload))
+                            m_Controller.AddScriptToEntity(Keire::EntityId(object.Id), script);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        m_Controller.ReportHierarchyError(error.what());
+                    }
                 }
             }
             if (node)

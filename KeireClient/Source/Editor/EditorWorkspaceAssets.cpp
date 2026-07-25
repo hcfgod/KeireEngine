@@ -940,7 +940,8 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
         if (rootNamespace.empty())
             throw std::runtime_error("Create scripts inside a source root declared by a .keireasm asset.");
 
-        const std::string source = "using Keire;\n\nnamespace " + rootNamespace + ";\n\npublic sealed class " +
+        const std::string source = "using Keire;\n\nnamespace " + rootNamespace + ";\n\n[StableComponentId(\"" +
+                                   Keire::AssetId::Generate().ToString() + "\")]\npublic sealed class " +
                                    std::string(name) +
                                    " : Behaviour\n{\n    protected override void Start()\n    {\n    }\n\n"
                                    "    protected override void Update()\n    {\n    }\n}\n";
@@ -1206,7 +1207,7 @@ void EditorWorkspaceLayer::OpenPrefabForEditing(const Keire::AssetId asset)
         return Keire::PrefabAsset::Decode(ReadBytes(projectRoot / "Assets" / dependency->RelativePath));
     };
     const auto composed = Keire::ComposePrefab(asset, resolver);
-    auto editingScene = Keire::CreateRef<Keire::Scene>(asset, composed);
+    auto editingScene = Keire::CreateRef<Keire::Scene>(asset, composed, Owner().Scenes()->Components());
     editingScene->MarkSaved();
     Keire::Ref<Keire::UndoContext> history;
     if (const auto undo = Owner().Undo())

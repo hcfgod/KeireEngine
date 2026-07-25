@@ -43,7 +43,8 @@ namespace KeireEditor
             const auto origin = change.Origin == ScenePlayChangeOrigin::Editor  ? " [Editor]"
                                 : change.Origin == ScenePlayChangeOrigin::Mixed ? " [Mixed]"
                                                                                 : " [Runtime]";
-            const auto label = "    " + change.Label + ": " + change.Before + " -> " + change.After + origin;
+            const auto label = "    " + change.Label + ": " + change.Before + " -> " + change.After + origin +
+                               "##play-change-" + std::to_string(change.Id);
             if (ui.Checkbox(label, selected) && !change.Locked)
                 changes.SetSelected(change.Id, selected);
             if (change.Locked && !change.LockReason.empty())

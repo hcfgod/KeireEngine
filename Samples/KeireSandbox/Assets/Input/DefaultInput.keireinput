@@ -39,6 +39,21 @@
           "processors": [],
           "type": "Button",
           "valueType": "Boolean"
+        },
+        {
+          "id": "39f6fb51-741e-49fd-8d2b-80d402957104",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {
+                "pressPoint": 0.5
+              }
+            }
+          ],
+          "name": "Escape",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
         }
       ],
       "bindings": [
@@ -197,9 +212,27 @@
           "part": "",
           "path": "<Gamepad>/rightTrigger",
           "processors": []
+        },
+        {
+          "action": "39f6fb51-741e-49fd-8d2b-80d402957104",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "35d42e32-02f8-49f5-b222-9d0ad78a7211",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {}
+            }
+          ],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/escape",
+          "processors": []
         }
       ],
-      "capturePolicy": "RespectUiCapture",
+      "capturePolicy": "AlwaysReceive",
       "id": "a6b6db76-6436-4aa4-b96a-a72a0f987101",
       "name": "Player"
     },

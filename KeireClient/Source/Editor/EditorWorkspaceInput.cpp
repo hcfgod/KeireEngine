@@ -1,6 +1,8 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/SceneDocument.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +10,119 @@
 #include <sstream>
 #include <stdexcept>
 #include <utility>
+
+void EditorWorkspaceLayer::WriteManagedLog(const Keire::ManagedLogLevel level, const std::string_view message) noexcept
+{
+    Keire::LogLevel nativeLevel = Keire::LogLevel::Info;
+    Keire::UiColor color = m_Theme.Text;
+    switch (level)
+    {
+    case Keire::ManagedLogLevel::Trace:
+        nativeLevel = Keire::LogLevel::Trace;
+        color = m_Theme.MutedText;
+        break;
+    case Keire::ManagedLogLevel::Debug:
+        nativeLevel = Keire::LogLevel::Debug;
+        color = m_Theme.MutedText;
+        break;
+    case Keire::ManagedLogLevel::Information:
+        nativeLevel = Keire::LogLevel::Info;
+        color = m_Theme.Text;
+        break;
+    case Keire::ManagedLogLevel::Warning:
+        nativeLevel = Keire::LogLevel::Warn;
+        color = m_Theme.Warning;
+        break;
+    case Keire::ManagedLogLevel::Error:
+        nativeLevel = Keire::LogLevel::Error;
+        color = m_Theme.Error;
+        break;
+    case Keire::ManagedLogLevel::Critical:
+        nativeLevel = Keire::LogLevel::Critical;
+        color = m_Theme.Error;
+        break;
+    }
+    AddConsoleMessage("Script", std::string(message), color, nativeLevel);
+}
+
+float EditorWorkspaceLayer::ManagedDeltaTime() const noexcept
+{
+    return static_cast<float>(Owner().GetTime().DeltaTime().Seconds());
+}
+
+Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view action) noexcept
+{
+    try
+    {
+        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession())
+            return {};
+        if (!m_GameplayInputContext->EnableMap("Player"))
+            return {};
+        if (!m_ManagedInputCaptureOverride)
+            m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture("Player"));
+        if (action == "Look" && m_SuppressManagedLookFrames > 0)
+        {
+            --m_SuppressManagedLookFrames;
+            return {};
+        }
+        const auto handle = m_GameplayInputContext->FindAction("Player", action);
+        if (!handle)
+            return {};
+        const auto value = handle.Value().AsAxis2D();
+        return {value.X, value.Y};
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
+void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
+{
+    try
+    {
+        const auto windows = Owner().Windows();
+        const auto window = Owner().MainWindow();
+        if (!windows || !window)
+            return;
+
+        const auto mode = m_ManagedCursorLocked
+                              ? Keire::CursorMode::RelativeLocked
+                              : (m_ManagedCursorVisible ? Keire::CursorMode::Normal : Keire::CursorMode::Hidden);
+        if (mode == Keire::CursorMode::RelativeLocked &&
+            windows->GetCursorMode(window->Id()) != Keire::CursorMode::RelativeLocked)
+        {
+            const auto viewport = m_SceneViewportPanel->ViewportRect();
+            if (viewport.Size().Width > 0.0F && viewport.Size().Height > 0.0F)
+            {
+                windows->WarpCursor(window->Id(),
+                                    {static_cast<std::int32_t>((viewport.Minimum.X + viewport.Maximum.X) * 0.5F),
+                                     static_cast<std::int32_t>((viewport.Minimum.Y + viewport.Maximum.Y) * 0.5F)});
+                m_SuppressManagedLookFrames = 2;
+            }
+        }
+        windows->SetCursorMode(window->Id(), mode);
+    }
+    catch (...)
+    {
+    }
+}
+
+void EditorWorkspaceLayer::SetManagedCursorVisible(const bool visible) noexcept
+{
+    m_ManagedCursorVisible = visible;
+    ApplyManagedCursorMode();
+}
+
+void EditorWorkspaceLayer::SetManagedCursorLocked(const bool locked) noexcept
+{
+    m_ManagedCursorLocked = locked;
+    ApplyManagedCursorMode();
+}
+
+bool EditorWorkspaceLayer::IsManagedCursorVisible() const noexcept { return m_ManagedCursorVisible; }
+
+bool EditorWorkspaceLayer::IsManagedCursorLocked() const noexcept { return m_ManagedCursorLocked; }
 
 void EditorWorkspaceLayer::BeginInputTest()
 {

@@ -24,6 +24,24 @@ project(ProjectConfig.CLIENT_TARGET)
 
     dependson { AssetWorkerTarget, KeireManagedProject }
 
+    filter "system:windows"
+        prebuildcommands
+        {
+            '"../Build/Dependencies/dotnet-sdk/dotnet.exe" build "../KeireManaged/Keire.Managed.csproj" ' ..
+                '--nologo --configuration Release --output "../Build/Managed" ' ..
+                '--property:BaseIntermediateOutputPath="../Build/Intermediates/Managed/"'
+        }
+
+    filter { "system:linux or macosx" }
+        prebuildcommands
+        {
+            '"../Build/Dependencies/dotnet-sdk/dotnet" build "../KeireManaged/Keire.Managed.csproj" ' ..
+                '--nologo --configuration Release --output "../Build/Managed" ' ..
+                '--property:BaseIntermediateOutputPath="../Build/Intermediates/Managed/"'
+        }
+
+    filter {}
+
     postbuildcommands
     {
         '{MKDIR} "%{cfg.targetdir}/Managed"',

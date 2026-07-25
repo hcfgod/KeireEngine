@@ -843,6 +843,9 @@ namespace Keire
         case UiKey::A:
             chord = ImGuiKey_A;
             break;
+        case UiKey::B:
+            chord = ImGuiKey_B;
+            break;
         case UiKey::Backspace:
             chord = ImGuiKey_Backspace;
             break;
@@ -1428,6 +1431,9 @@ namespace Keire
             break;
         case UiKey::A:
             imguiKey = ImGuiKey_A;
+            break;
+        case UiKey::B:
+            imguiKey = ImGuiKey_B;
             break;
         case UiKey::Backspace:
             imguiKey = ImGuiKey_Backspace;

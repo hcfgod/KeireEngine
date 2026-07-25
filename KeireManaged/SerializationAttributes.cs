@@ -3,6 +3,12 @@ namespace Keire;
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
 public sealed class SerializeFieldAttribute : Attribute;
 
+[AttributeUsage(AttributeTargets.Field)]
+public sealed class HotReloadStateAttribute : Attribute;
+
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct)]
+public sealed class SerializableTypeAttribute : Attribute;
+
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
 public sealed class HideInInspectorAttribute : Attribute;
 
@@ -18,6 +24,15 @@ public sealed class TooltipAttribute(string text) : Attribute
 {
     public string Text { get; } = text ?? throw new ArgumentNullException(nameof(text));
 }
+
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
+public sealed class InspectorGroupAttribute(string name) : Attribute
+{
+    public string Name { get; } = name ?? throw new ArgumentNullException(nameof(name));
+}
+
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
+public sealed class ReadOnlyInInspectorAttribute : Attribute;
 
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = true)]
 public sealed class FormerlySerializedAsAttribute(string name) : Attribute

@@ -1,6 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/AssetOperationService.h"
+#include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
@@ -358,30 +359,8 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
                 }
             }
             ui.SameLine();
-            if (ui.Button("Build Managed"))
-            {
-                try
-                {
-                    Keire::ManagedBuildRequest request;
-                    const auto projectRoot = Owner().GetProject()->Root();
-                    for (const auto& record : m_AssetDatabase->Records())
-                    {
-                        if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
-                            continue;
-                        const auto assembly = Keire::ManagedAssemblyAsset::Decode(
-                            ReadBytes(projectRoot / "Assets" / record.RelativePath));
-                        request.Assemblies.push_back({record.Id, assembly->Definition()});
-                    }
-                    if (request.Assemblies.empty())
-                        throw std::runtime_error("The project contains no .keireasm assembly definitions.");
-                    request.Configuration = m_BuildConfiguration == 0 ? "Debug" : "Release";
-                    (void)scripts->StartBuild(std::move(request));
-                }
-                catch (const std::exception& error)
-                {
-                    ReportError("Managed Build", error.what());
-                }
-            }
+            if (ui.Button("Build Scripts"))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildScripts);
         }
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!scripts || !managedBusy); disabled)
@@ -401,12 +380,93 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
     }
 }
 
-void EditorWorkspaceLayer::UpdateManagedBuild()
+void EditorWorkspaceLayer::StartManagedBuild()
+{
+    const auto scripts = Owner().Scripts();
+    if (!scripts || !m_AssetDatabase)
+        return;
+    const auto sdk = ProjectManagedSdk();
+    scripts->ConfigureManagedSdk(sdk.Selection, sdk.CustomExecutable);
+    Keire::ManagedBuildRequest request;
+    const auto projectRoot = Owner().GetProject()->Root();
+    for (const auto& record : m_AssetDatabase->Records())
+    {
+        if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
+            continue;
+        const auto assembly =
+            Keire::ManagedAssemblyAsset::Decode(ReadBytes(projectRoot / "Assets" / record.RelativePath));
+        request.Assemblies.push_back({record.Id, assembly->Definition()});
+    }
+    if (request.Assemblies.empty())
+        throw std::runtime_error("The project contains no .keireasm assembly definitions.");
+    request.Configuration = m_BuildConfiguration == 0 ? "Debug" : "Release";
+    (void)scripts->StartBuild(std::move(request));
+}
+
+void EditorWorkspaceLayer::UpdateManagedBuild(const Keire::Time& time)
 {
     const auto scripts = Owner().Scripts();
     if (!scripts)
         return;
+    if (m_ManagedBuildDebounceSeconds >= 0.0)
+    {
+        m_ManagedBuildDebounceSeconds -= time.UnscaledDeltaTime().Seconds();
+        if (m_ManagedBuildDebounceSeconds <= 0.0)
+        {
+            m_ManagedBuildDebounceSeconds = -1.0;
+            try
+            {
+                StartManagedBuild();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Managed Build", error.what());
+            }
+        }
+    }
     const auto status = scripts->BuildStatus();
+    const bool terminal = status.State == Keire::ManagedBuildState::Succeeded ||
+                          status.State == Keire::ManagedBuildState::Failed ||
+                          status.State == Keire::ManagedBuildState::Cancelled;
+    if (terminal && status.Operation && status.Operation != m_LastManagedBuildReport)
+    {
+        m_LastManagedBuildReport = status.Operation;
+        for (const auto& diagnostic : status.Diagnostics)
+        {
+            std::string message;
+            if (!diagnostic.Source.empty())
+            {
+                message = diagnostic.Source.generic_string();
+                if (diagnostic.Line > 0)
+                    message += ':' + std::to_string(diagnostic.Line);
+                if (diagnostic.Column > 0)
+                    message += ':' + std::to_string(diagnostic.Column);
+                message += ": ";
+            }
+            if (!diagnostic.Code.empty())
+                message += diagnostic.Code + ": ";
+            message += diagnostic.Message;
+            if (diagnostic.Severity == Keire::ManagedDiagnosticSeverity::Error)
+                AddConsoleMessage("Managed Build", std::move(message), m_Theme.Error, Keire::LogLevel::Error);
+            else if (diagnostic.Severity == Keire::ManagedDiagnosticSeverity::Warning)
+                AddConsoleMessage("Managed Build", std::move(message), m_Theme.Warning, Keire::LogLevel::Warn);
+            else
+                AddConsoleMessage("Managed Build", std::move(message), m_Theme.MutedText);
+        }
+        if (status.State == Keire::ManagedBuildState::Succeeded)
+        {
+            AddConsoleMessage("Managed Build", "Scripts built in " + std::to_string(status.Elapsed.count()) + " ms.",
+                              m_Theme.Success);
+        }
+        else if (status.State == Keire::ManagedBuildState::Cancelled)
+        {
+            AddConsoleMessage("Managed Build", "Script build cancelled.", m_Theme.Warning, Keire::LogLevel::Warn);
+        }
+        else if (status.Diagnostics.empty())
+        {
+            ReportError("Managed Build", "Script build failed without a compiler diagnostic.");
+        }
+    }
     if (status.State != Keire::ManagedBuildState::Succeeded || !status.Operation ||
         status.Operation == m_LastManagedReload)
     {
@@ -416,6 +476,7 @@ void EditorWorkspaceLayer::UpdateManagedBuild()
     try
     {
         Keire::ManagedReloadRequest reload;
+        reload.ManagedApiAssembly = status.ManagedApiAssembly;
         for (const auto& entry : std::filesystem::directory_iterator(status.ActiveAssemblyDirectory))
         {
             if (entry.is_regular_file() && entry.path().extension() == ".dll" &&
@@ -430,8 +491,45 @@ void EditorWorkspaceLayer::UpdateManagedBuild()
         if (!scripts->PrepareReload(std::move(reload)))
             throw std::runtime_error(scripts->ReloadStatus().Diagnostic);
         scripts->CommitReload();
-        scripts->InstallManagedComponents(Owner().Scenes()->Components());
+        const auto sharedComponents = Owner().Scenes()->Components();
+        scripts->InstallManagedComponents(sharedComponents);
+        if (const auto activeScene = m_SceneDocument->ActiveScene();
+            activeScene && activeScene->Components() != sharedComponents)
+        {
+            scripts->InstallManagedComponents(activeScene->Components());
+        }
+        if (!m_SceneDocument->PlaySession())
+        {
+            if (const auto editingScene = m_SceneDocument->EditingScene())
+            {
+                const bool dirty = editingScene->Dirty();
+                auto replacement = Keire::CreateRef<Keire::Scene>(editingScene->Asset(), editingScene->Snapshot(),
+                                                                  editingScene->Components());
+                if (dirty)
+                    replacement->MarkDirty();
+                else
+                    replacement->MarkSaved();
+                m_SceneDocument->ReplaceEditingScene(std::move(replacement));
+            }
+        }
         AddConsoleMessage("Managed", "Gameplay assemblies reloaded at a scene safe boundary.", m_Theme.Success);
+        if (!m_PendingScriptAttachments.empty())
+        {
+            auto attachments = std::exchange(m_PendingScriptAttachments, {});
+            m_ResolvingPendingScriptAttachments = true;
+            for (const auto& [entity, script] : attachments)
+            {
+                try
+                {
+                    AddScriptToEntity(entity, script);
+                }
+                catch (const std::exception& error)
+                {
+                    ReportError("Scripts", error.what());
+                }
+            }
+            m_ResolvingPendingScriptAttachments = false;
+        }
     }
     catch (const std::exception& error)
     {

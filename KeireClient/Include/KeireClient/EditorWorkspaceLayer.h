@@ -55,7 +55,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::IInputActionsController,
                                    private KeireEditor::IProjectSettingsController,
                                    private KeireEditor::IAssetBrowserController,
-                                   private KeireEditor::IViewportAssetDropCommands
+                                   private KeireEditor::IViewportAssetDropCommands,
+                                   private Keire::IScriptRuntimeServices
 {
   public:
     explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, std::filesystem::path executable = {});
@@ -209,6 +210,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept override;
     void ActivateInspectorHistory() noexcept override;
     void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
+    void AddScriptToEntity(Keire::EntityId entity, Keire::AssetId script) override;
     void CommitInspectorMaterial() override;
     void OpenInspectorInputActions(Keire::AssetId asset) override;
     void ImportInspectorAssets() override;
@@ -219,6 +221,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ReportInspectorAssetError(std::string message) noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> ProjectSettingsAssetRecords() const noexcept override;
     void RevealProjectSettingsAsset(Keire::AssetId asset) override;
+    [[nodiscard]] KeireEditor::ManagedSdkPreference ProjectManagedSdk() const override;
+    void SetProjectManagedSdk(KeireEditor::ManagedSdkPreference preference) override;
     void OpenDroppedScene(Keire::AssetId asset) override;
     void OpenDroppedInputActions(Keire::AssetId asset) override;
     void InstantiateDroppedPrefab(Keire::AssetId asset) override;
@@ -239,7 +243,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void HandleExternalAssetDrop(const Keire::WindowFileDropEvent& event);
     void DrawExternalAssetImport(Keire::UiFrame& ui);
     void CookAssets();
-    void UpdateManagedBuild();
+    void StartManagedBuild();
+    void UpdateManagedBuild(const Keire::Time& time);
     void CreateInputActions(Keire::InputActionAssetDefinition definition, std::string_view baseName);
     [[nodiscard]] bool CreateCSharpScript(std::string_view name);
     [[nodiscard]] bool CreateManagedAssembly(std::string_view name);
@@ -263,6 +268,13 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RedoInputEdit();
     void BeginInputTest();
     void EndInputTest() noexcept;
+    void WriteManagedLog(Keire::ManagedLogLevel level, std::string_view message) noexcept override;
+    [[nodiscard]] float ManagedDeltaTime() const noexcept override;
+    [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
+    void SetManagedCursorVisible(bool visible) noexcept override;
+    void SetManagedCursorLocked(bool locked) noexcept override;
+    [[nodiscard]] bool IsManagedCursorVisible() const noexcept override;
+    [[nodiscard]] bool IsManagedCursorLocked() const noexcept override;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
                            Keire::LogLevel level = Keire::LogLevel::Info) noexcept;
     void ReportError(std::string category, std::string message) noexcept;
@@ -290,6 +302,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void BeginPlayMode();
     void RequestStopPlayMode();
     void FinishPlayMode(bool apply);
+    void ApplyManagedCursorMode() noexcept;
     void DrawPlayChanges(Keire::UiFrame& ui);
     void FinalizePendingPlayEditorMutation();
     void UndoSceneEdit();
@@ -362,7 +375,13 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::vector<PendingAssetMutation> m_PendingAssetMutations;
     std::vector<PendingPrefabCreation> m_PendingPrefabCreations;
     Keire::ManagedBuildOperationId m_LastManagedReload;
+    Keire::ManagedBuildOperationId m_LastManagedBuildReport;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
+    Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
+    std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
+    bool m_ManagedCursorVisible = true;
+    bool m_ManagedCursorLocked = false;
+    std::uint32_t m_SuppressManagedLookFrames = 0;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;
     Keire::InputUserId m_EditorInputUser;
@@ -389,6 +408,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::UiColor m_NoticeColor;
     std::uint32_t m_FrameCount = 0;
     double m_AssetPollSeconds = 0.0;
+    double m_ManagedBuildDebounceSeconds = -1.0;
+    std::vector<std::pair<Keire::EntityId, Keire::AssetId>> m_PendingScriptAttachments;
+    bool m_ResolvingPendingScriptAttachments = false;
     bool m_ThemeDirty = false;
     bool m_InputTesting = false;
     bool m_InputForwardToConsole = false;

@@ -1,5 +1,39 @@
 # Changelog
 
+- Added managed cursor visibility and relative-lock APIs, and isolated Play Mode input from editor input contexts.
+- Added Escape cursor release and runtime-owned Player-map lookup so gameplay input is independent of editor documents.
+- Rebind scene component placeholders after managed assemblies load so scripts present in startup scenes execute in Play.
+- Route the Scene viewport through the runtime primary camera during Play and suspend editor-camera navigation.
+- Make input-map enabling idempotent so gameplay actions remain readable after their first enabled frame.
+- Give managed component instances unique world handles and make Play viewport Escape release the gameplay cursor.
+- Correct first-person look direction and focus/capture the gameplay viewport without leaving editor controls hovered.
+- Correct the first-person controller forward/backward movement direction.
+- Make Escape toggle FPS cursor capture and smooth target camera rotation to remove raw mouse jitter.
+
+- Added .NET 10/C# 14 managed assembly schema v2, immutable incremental build generations, automatic debounced script
+  compilation, transactional field-preserving Play Mode reload, per-Behaviour exception quarantine, managed component
+  state persistence, lifetime-bound simulation-thread async continuations, and expanded Entity/component/transform APIs.
+- Added Unity-style managed script attachment through searchable Add Component entries and `.cs` asset drops on the
+  Inspector or Hierarchy, including generated stable component IDs and undo-aware scene mutations.
+- Managed builds now default to the engine-bundled .NET 10 SDK, with persisted Bundled, System PATH, and Custom SDK
+  choices in Project Settings; script drops also recognize metadata-backed C# asset records.
+- Source-checkout editor launches now prefer the newest managed API artifact and reject stale managed state contracts
+  before reload, preventing repeated Coral member-lookup failures during script serialization.
+- Loaded managed Behaviours now appear under Scripts in Add Component, and supported public or `[SerializeField]`
+  fields use the standard Inspector property, undo, scene, and prefab-override pipeline.
+- Added Unity-style managed `Debug.Log`, warning, error, exception, and assertion output routed to the editor Console,
+  plus an attachable serialized `FirstPersonCamera` sample driven by the default Move and Look input actions.
+- Managed generation IDs now resume from persisted state across editor launches, preventing failed or cancelled startup
+  builds from deleting the last-good gameplay DLL directory and emptying script entries from Add Component.
+- Added Build > Build Scripts, the Ctrl+Shift+B shortcut, startup script compilation, and one-shot managed compiler
+  diagnostics in the editor Console; the Build Settings button now routes through the same command.
+- Source-checkout KeireClient builds now run the incremental Keire.Managed build explicitly before native compilation,
+  preventing Visual Studio utility-project up-to-date checks from leaving the editor and gameplay compiler on stale APIs.
+- Build Scripts now publishes a generation-local Keire.Managed assembly before compiling gameplay and reloads that
+  immutable API/gameplay pair, eliminating stale API references in source checkouts and packaged editors.
+- Play Mode now grants managed gameplay a lifetime-scoped UI-capture override for the Player input map, and Play Mode
+  change rows use stable hidden checkbox IDs instead of conflicting when labels repeat.
+
 - Interactive prefab and trash operations now preempt queued or running low-priority catalog refreshes, and project
   open no longer starts an eager full-project import solely because source timestamps are newer than the catalog.
 

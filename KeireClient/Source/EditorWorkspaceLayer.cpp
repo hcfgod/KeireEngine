@@ -654,6 +654,29 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
         KeireEditor::EditorCommand::CookAssets, [this] { CookAssets(); },
         [this] { return m_AssetDatabase && m_AssetOperations && !m_AssetOperations->Busy(); });
     m_CommandRouter->Bind(
+        KeireEditor::EditorCommand::BuildScripts,
+        [this]
+        {
+            try
+            {
+                StartManagedBuild();
+                AddConsoleMessage("Managed Build", "Script build started.", m_Theme.Accent);
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Managed Build", error.what());
+            }
+        },
+        [this]
+        {
+            const auto scripts = Owner().Scripts();
+            if (!scripts || !m_AssetDatabase)
+                return false;
+            const auto state = scripts->BuildStatus().State;
+            return state != Keire::ManagedBuildState::Generating && state != Keire::ManagedBuildState::Compiling &&
+                   state != Keire::ManagedBuildState::Publishing;
+        });
+    m_CommandRouter->Bind(
         KeireEditor::EditorCommand::CancelAssetOperation,
         [this]
         {
@@ -846,10 +869,22 @@ void EditorWorkspaceLayer::OnAttach()
             SetAssetError(std::string("Asset database initialization failed: ") + error.what());
         }
     }
+    if (const auto scripts = Owner().Scripts())
+        scripts->SetRuntimeServices(this);
+    if (Owner().Scripts() && m_AssetDatabase)
+        m_ManagedBuildDebounceSeconds = 0.0;
 }
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
+    try
+    {
+        if (const auto scripts = Owner().Scripts())
+            scripts->SetRuntimeServices(nullptr);
+    }
+    catch (...)
+    {
+    }
     CommitMaterialDraft();
     CancelMaterialCatalogRefresh();
     const auto projectRoot = Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{};
@@ -869,6 +904,11 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     if (m_ProjectSettingsDocument)
         m_ProjectSettingsDocument->Close();
     EndInputTest();
+    m_ManagedInputCaptureOverride.reset();
+    m_GameplayInputContext.Reset();
+    m_ManagedCursorLocked = false;
+    m_ManagedCursorVisible = true;
+    ApplyManagedCursorMode();
     m_SceneDocument->EndPlay();
     m_GameRenderView.Reset();
     m_InputActionsPanel->ResetTransientState();
@@ -930,7 +970,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         }
     }
     CompleteSaveSceneAs();
-    UpdateManagedBuild();
+    UpdateManagedBuild(time);
     if (!m_AssetDatabase)
         return;
     UpdateAssetOperations();
@@ -1005,6 +1045,16 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         const auto changed = m_AssetDatabase->PollChangedAssets();
         if (!changed.empty())
         {
+            for (const auto id : changed)
+            {
+                const auto record = m_AssetDatabase->Find(id);
+                if (record &&
+                    (record->RelativePath.extension() == ".cs" || record->RelativePath.extension() == ".keireasm"))
+                {
+                    m_ManagedBuildDebounceSeconds = 0.4;
+                    break;
+                }
+            }
             ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             if (const auto assets = Owner().Assets())
             {
@@ -1032,6 +1082,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         else if (m_AssetBrowserPanel)
             m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     }
+    if (ui.Shortcut({.Key = Keire::UiKey::B, .Shift = true, .Primary = true, .Global = true}))
+        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildScripts);
     if (ui.Shortcut({.Key = Keire::UiKey::Z, .Shift = true, .Primary = true, .Global = true}))
         (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
     else if (ui.Shortcut({.Key = Keire::UiKey::Z, .Primary = true, .Global = true}))

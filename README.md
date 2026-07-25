@@ -164,6 +164,15 @@ stable-ID script component registrations at an explicit boundary while failed lo
 caller-supplied migration payload. Managed components then receive the same Awake/enable/start/fixed/update/disable/destroy scene
 lifecycle as native components. Cooked games carry RID-specific hostfxr/CoreCLR files and load published gameplay DLLs
 without requiring a system .NET installation. The .NET 10 SDK is required only for project compilation and cook.
+Managed Behaviours can write retained editor Console entries through `Debug.Log`, `Debug.Warn`, `Debug.Error`,
+`Debug.LogException`, and `Debug.Assert`. The sample `FirstPersonCamera` Behaviour uses the project `Player/Move` and
+`Player/Look` input actions and exposes movement, look, pitch, and smoothing settings in the Inspector.
+During Play Mode, gameplay temporarily overrides editor UI capture for the `Player` action map and releases that
+override on exit, allowing the focused Game view to receive keyboard and mouse controls without leaking them afterward.
+Use **Build > Build Scripts** or `Ctrl+Shift+B` to compile gameplay assemblies immediately. The editor also schedules
+an initial script build when opening a project and writes compiler diagnostics to the Console.
+Source checkouts compile `Keire.Managed` into the same immutable script generation before gameplay assemblies; packaged
+editors copy their bundled API into that generation. Reload therefore never combines new scripts with a stale API DLL.
 
 Headless audio owns the same pinned miniaudio 0.11.25 engine as device-backed runtime audio. It provides bounded
 resident voices, priority virtualization, listener/source spatial state, doppler and attenuation, snapshot

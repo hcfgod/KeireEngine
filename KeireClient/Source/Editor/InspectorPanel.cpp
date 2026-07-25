@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -18,12 +19,40 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <variant>
 #include <vector>
 namespace
 {
+    [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(const std::span<const std::byte> bytes)
+    {
+        const std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        std::istringstream stream(text);
+        std::vector<Keire::AssetId> result;
+        std::string line;
+        while (std::getline(stream, line))
+        {
+            if (!line.empty())
+                result.push_back(Keire::AssetId::Parse(line));
+        }
+        return result;
+    }
+
+    [[nodiscard]] bool ContainsCaseInsensitive(const std::string_view value, const std::string_view query)
+    {
+        if (query.empty())
+            return true;
+        const auto found = std::ranges::search(value, query,
+                                               [](const char left, const char right)
+                                               {
+                                                   return std::tolower(static_cast<unsigned char>(left)) ==
+                                                          std::tolower(static_cast<unsigned char>(right));
+                                               });
+        return !found.empty();
+    }
+
     [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
     {
         std::ifstream input(path, std::ios::binary);
@@ -781,14 +810,35 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             ui.Spacing();
             if (auto add = ui.BeginCombo("Add Component", "Search components..."); add)
             {
+                (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", m_ComponentSearch);
                 for (const auto& registration : scene->Components()->Registrations())
                 {
+                    if (!ContainsCaseInsensitive(registration.Name, m_ComponentSearch) &&
+                        !ContainsCaseInsensitive(registration.Category, m_ComponentSearch))
+                        continue;
                     const bool canAdd = registration.Removable &&
                                         (registration.AllowMultiple || !entity.HasComponent(registration.Type));
                     if (ui.MenuItem(registration.Category + "/" + registration.Name, false, canAdd))
                     {
                         m_Controller.RecordInspectorUndo();
                         (void)sceneDocument.AddComponent(entity.Id(), registration.Type);
+                    }
+                }
+            }
+            ui.TextColored(theme.MutedText, "Drop a C# script here to attach it");
+            if (auto target = ui.BeginDragTarget(); target)
+            {
+                std::vector<std::byte> payload;
+                if (ui.AcceptDragPayload("KEIRE_ASSETS", payload))
+                {
+                    try
+                    {
+                        for (const auto script : DecodeAssetPayload(payload))
+                            m_Controller.AddScriptToEntity(entity.Id(), script);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        m_Controller.ReportInspectorAssetError(error.what());
                     }
                 }
             }

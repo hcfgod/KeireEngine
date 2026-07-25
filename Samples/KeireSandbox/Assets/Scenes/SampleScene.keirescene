@@ -46,6 +46,18 @@
           "enabled": true,
           "type": "4b454952-4543-414d-4552-410000000001",
           "version": 1
+        },
+        {
+          "data": {
+            "_lookSensitivity": 5.0,
+            "_maximumPitch": 90.0,
+            "_movementSharpness": 14.0,
+            "_movementSpeed": 4.0,
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":4.0},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":5.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":90.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0}],\"version\":1}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000030",
+          "version": 1
         }
       ],
       "id": "a1b2c3d4-1000-4000-8000-000000000001",

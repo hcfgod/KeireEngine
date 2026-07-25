@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdexcept>
+
 #include "Keire/Core.h"
 
 #include <cstdint>
@@ -62,6 +64,10 @@ namespace KeireEditor
         virtual void MarkHierarchyEntity(Keire::AssetId entity) = 0;
         virtual void RequestHierarchyRename(Keire::AssetId entity, std::string name) = 0;
         virtual void UnpackHierarchyPrefab(Keire::AssetId entity, bool completely) = 0;
+        virtual void AddScriptToEntity(Keire::EntityId, Keire::AssetId)
+        {
+            throw std::logic_error("This hierarchy does not support managed script attachment.");
+        }
         virtual void ReportHierarchyError(std::string message) noexcept = 0;
     };
 
@@ -82,6 +88,10 @@ namespace KeireEditor
         virtual void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept = 0;
         virtual void ActivateInspectorHistory() noexcept = 0;
         virtual void RecordInspectorUndo(std::string_view name = "Edit Scene", std::string mergeKey = {}) = 0;
+        virtual void AddScriptToEntity(Keire::EntityId, Keire::AssetId)
+        {
+            throw std::logic_error("This inspector does not support managed script attachment.");
+        }
         virtual void CommitInspectorMaterial() = 0;
         virtual void OpenInspectorInputActions(Keire::AssetId asset) = 0;
         virtual void ImportInspectorAssets() = 0;
@@ -110,6 +120,12 @@ namespace KeireEditor
         virtual void ReportInputActionsError(std::string message) noexcept = 0;
     };
 
+    struct ManagedSdkPreference
+    {
+        Keire::ManagedSdkSelection Selection = Keire::ManagedSdkSelection::Bundled;
+        std::filesystem::path CustomExecutable;
+    };
+
     class IProjectSettingsController
     {
       public:
@@ -117,6 +133,8 @@ namespace KeireEditor
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord>
         ProjectSettingsAssetRecords() const noexcept = 0;
         virtual void RevealProjectSettingsAsset(Keire::AssetId asset) = 0;
+        [[nodiscard]] virtual ManagedSdkPreference ProjectManagedSdk() const = 0;
+        virtual void SetProjectManagedSdk(ManagedSdkPreference preference) = 0;
     };
 
     class SceneViewportPanel final
@@ -218,6 +236,7 @@ namespace KeireEditor
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::unordered_map<std::string, bool> m_ComponentExpansion;
+        std::string m_ComponentSearch;
         std::uint64_t m_EditSerial = 0;
         Keire::AssetId m_LockedEntity;
         bool m_Locked = false;
@@ -261,5 +280,7 @@ namespace KeireEditor
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::string m_Error;
+        std::string m_CustomSdkPath;
+        bool m_SdkInitialized = false;
     };
 } // namespace KeireEditor

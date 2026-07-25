@@ -69,6 +69,27 @@ namespace Keire
             const auto value = path.generic_u8string();
             return {reinterpret_cast<const char*>(value.data()), value.size()};
         }
+
+        [[nodiscard]] bool IsExactPackageVersion(const std::string_view value)
+        {
+            return !value.empty() &&
+                   std::ranges::all_of(value,
+                                       [](const unsigned char character)
+                                       {
+                                           return std::isalnum(character) || character == '.' || character == '-' ||
+                                                  character == '+';
+                                       }) &&
+                   std::ranges::any_of(value, [](const unsigned char character) { return std::isdigit(character); });
+        }
+
+        [[nodiscard]] bool IsPackageIdentifier(const std::string_view value)
+        {
+            return !value.empty() && value.front() != '.' && value.front() != '-' && value.back() != '.' &&
+                   value.back() != '-' &&
+                   std::ranges::all_of(
+                       value, [](const unsigned char character)
+                       { return std::isalnum(character) || character == '.' || character == '-' || character == '_'; });
+        }
     } // namespace
 
     ManagedAssemblyAsset::ManagedAssemblyAsset(ManagedAssemblyDefinition definition)
@@ -101,6 +122,14 @@ namespace Keire
             definition.SourceRoots.emplace_back(root.get<std::string>());
         for (const auto& reference : document.value("references", Json::array()))
             definition.References.push_back(AssetId::Parse(reference.get<std::string>()));
+        if (definition.SchemaVersion >= 2)
+        {
+            for (const auto& package : document.value("packages", Json::array()))
+                definition.Packages.push_back(
+                    {package.at("name").get<std::string>(), package.at("version").get<std::string>()});
+            definition.DefineSymbols = document.value("defineSymbols", std::vector<std::string>{});
+            definition.AllowUnsafe = document.value("allowUnsafe", false);
+        }
         Validate(definition);
         return CreateRef<ManagedAssemblyAsset>(std::move(definition));
     }
@@ -118,6 +147,14 @@ namespace Keire
             document["sourceRoots"].push_back(PathText(root));
         for (const auto reference : definition.References)
             document["references"].push_back(reference.ToString());
+        if (definition.SchemaVersion >= 2)
+        {
+            document["packages"] = Json::array();
+            for (const auto& package : definition.Packages)
+                document["packages"].push_back({{"name", package.Name}, {"version", package.Version}});
+            document["defineSymbols"] = definition.DefineSymbols;
+            document["allowUnsafe"] = definition.AllowUnsafe;
+        }
         const auto text = document.dump(2) + '\n';
         std::vector<std::byte> bytes(text.size());
         std::memcpy(bytes.data(), text.data(), text.size());
@@ -126,12 +163,17 @@ namespace Keire
 
     void ManagedAssemblyAsset::Validate(const ManagedAssemblyDefinition& definition)
     {
-        if (definition.SchemaVersion != 1)
-            throw std::invalid_argument("Managed assembly definition must use canonical schema version 1.");
+        if (definition.SchemaVersion != 1 && definition.SchemaVersion != ManagedAssemblySchemaVersion)
+            throw std::invalid_argument("Managed assembly definition uses an unsupported schema version.");
         if (!IsIdentifier(definition.Name, false) || !IsIdentifier(definition.RootNamespace, true))
             throw std::invalid_argument("Managed assembly name or root namespace is not a valid C# identifier.");
-        if (definition.SourceRoots.empty() || definition.SourceRoots.size() > 64 || definition.References.size() > 256)
+        if (definition.SourceRoots.empty() || definition.SourceRoots.size() > 64 ||
+            definition.References.size() > 256 || definition.Packages.size() > 256 ||
+            definition.DefineSymbols.size() > 256)
             throw std::invalid_argument("Managed assembly source-root or reference count is invalid.");
+        if (definition.SchemaVersion == 1 &&
+            (!definition.Packages.empty() || !definition.DefineSymbols.empty() || definition.AllowUnsafe))
+            throw std::invalid_argument("Managed assembly schema version 1 cannot contain schema version 2 settings.");
 
         std::set<std::string, std::less<>> roots;
         for (const auto& root : definition.SourceRoots)
@@ -149,6 +191,21 @@ namespace Keire
         std::ranges::sort(references);
         if (std::adjacent_find(references.begin(), references.end()) != references.end())
             throw std::invalid_argument("Managed assembly references must be unique.");
+
+        std::set<std::string, std::less<>> packages;
+        for (const auto& package : definition.Packages)
+        {
+            if (!IsPackageIdentifier(package.Name) || !IsExactPackageVersion(package.Version) ||
+                !packages.insert(package.Name).second)
+                throw std::invalid_argument(
+                    "Managed packages must have unique identifiers and exact non-floating versions.");
+        }
+        std::set<std::string, std::less<>> symbols;
+        for (const auto& symbol : definition.DefineSymbols)
+        {
+            if (!IsIdentifier(symbol, false) || !symbols.insert(symbol).second)
+                throw std::invalid_argument("Managed assembly define symbols must be unique C# identifiers.");
+        }
     }
 
     void ValidateManagedAssemblyGraph(const std::span<const ManagedAssemblyGraphEntry> assemblies)
@@ -176,6 +233,12 @@ namespace Keire
             {
                 if (!definitions.contains(reference))
                     throw std::invalid_argument("Managed assembly references an unavailable assembly definition.");
+                const auto source = definitions.at(asset)->Classification;
+                const auto target = definitions.at(reference)->Classification;
+                if ((source == ManagedAssemblyClassification::Runtime &&
+                     target != ManagedAssemblyClassification::Runtime) ||
+                    (source == ManagedAssemblyClassification::Editor && target == ManagedAssemblyClassification::Tests))
+                    throw std::invalid_argument("Managed assembly reference violates runtime/editor/test isolation.");
                 self(self, reference);
             }
             state[asset] = 2;
@@ -198,7 +261,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ManagedAssembly";
-        result.Version = 1;
+        result.Version = 2;
         result.Type = ManagedAssemblyAsset::StaticType();
         result.Extensions = {".keireasm"};
         result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)

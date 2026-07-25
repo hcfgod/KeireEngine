@@ -28,6 +28,7 @@ namespace KeireEditor
         SaveProjectSettings,
         ImportAssets,
         CookAssets,
+        BuildScripts,
         CancelAssetOperation,
         Exit,
         Undo,

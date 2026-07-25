@@ -4,6 +4,7 @@
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
 
+#include <compare>
 #include <filesystem>
 #include <span>
 #include <string>
@@ -11,6 +12,8 @@
 
 namespace Keire
 {
+    inline constexpr std::uint32_t ManagedAssemblySchemaVersion = 2;
+
     enum class ManagedAssemblyClassification : std::uint8_t
     {
         Runtime,
@@ -18,14 +21,24 @@ namespace Keire
         Tests
     };
 
+    struct ManagedPackageReference
+    {
+        std::string Name;
+        std::string Version;
+        auto operator<=>(const ManagedPackageReference&) const = default;
+    };
+
     struct ManagedAssemblyDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = ManagedAssemblySchemaVersion;
         std::string Name;
         std::string RootNamespace;
         ManagedAssemblyClassification Classification = ManagedAssemblyClassification::Runtime;
         std::vector<std::filesystem::path> SourceRoots;
         std::vector<AssetId> References;
+        std::vector<ManagedPackageReference> Packages;
+        std::vector<std::string> DefineSymbols;
+        bool AllowUnsafe = false;
     };
 
     struct ManagedAssemblyGraphEntry

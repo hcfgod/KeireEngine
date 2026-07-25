@@ -268,6 +268,7 @@ namespace Keire
         void DisableAll() noexcept;
         [[nodiscard]] bool MapEnabled(AssetId id) const noexcept;
         [[nodiscard]] InputCaptureOverride OverrideUiCapture(AssetId map);
+        [[nodiscard]] InputCaptureOverride OverrideUiCapture(std::string_view map);
         [[nodiscard]] InputActionSubscription Subscribe(AssetId action,
                                                         std::function<void(const InputActionEvent&)> callback);
         void SaveBindingOverrides(std::string_view profile) const;

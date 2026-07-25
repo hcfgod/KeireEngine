@@ -44,6 +44,7 @@ TEST_CASE("Managed assembly definitions round trip and expose dependencies")
     CHECK(decoded->Definition().RootNamespace == "KeireGame.Runtime");
     CHECK(decoded->Definition().SourceRoots == definition.SourceRoots);
     CHECK(decoded->Definition().References == definition.References);
+    CHECK(decoded->Definition().SchemaVersion == Keire::ManagedAssemblySchemaVersion);
 
     const auto importer = Keire::CreateManagedAssemblyAssetImporter();
     const auto output = importer.ContextualImport({}, Keire::ManagedAssemblyAsset::Encode(definition));
@@ -88,7 +89,8 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     CHECK(projectText.find("Assets/Scripts/Gameplay") != std::string::npos);
     CHECK(projectText.find("<RootNamespace>Game</RootNamespace>") != std::string::npos);
     CHECK(projectText.find("<Reference Include=\"Keire.Managed\">") != std::string::npos);
-    CHECK(projectText.find("<TargetFramework>net8.0</TargetFramework>") != std::string::npos);
+    CHECK(projectText.find("<TargetFramework>net10.0</TargetFramework>") != std::string::npos);
+    CHECK(projectText.find("<LangVersion>14.0</LangVersion>") != std::string::npos);
     CHECK(projectText.find("Library/ScriptAssemblies/References/Keire.Managed.dll") != std::string::npos);
     CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.dll"));
     CHECK(projectText.find(root.generic_string()) == std::string::npos);
@@ -337,4 +339,29 @@ TEST_CASE("Managed assembly graphs are acyclic and complete")
     graph[1].Definition.References = {TestAsset(1)};
     CHECK_THROWS_WITH_AS(Keire::ValidateManagedAssemblyGraph(graph), "Managed assembly references contain a cycle.",
                          std::invalid_argument);
+}
+
+TEST_CASE("Managed assembly schema one remains readable and assembly classifications are isolated")
+{
+    const std::string legacy =
+        R"({"schemaVersion":1,"name":"Legacy","rootNamespace":"Legacy","classification":"runtime",)"
+        R"("sourceRoots":["Scripts"],"references":[]})";
+    const auto bytes = std::as_bytes(std::span(legacy.data(), legacy.size()));
+    const auto decoded = Keire::ManagedAssemblyAsset::Decode(bytes);
+    CHECK(decoded->Definition().SchemaVersion == 1);
+
+    Keire::ManagedAssemblyDefinition runtime;
+    runtime.Name = "Runtime";
+    runtime.RootNamespace = "Game.Runtime";
+    runtime.SourceRoots = {"Scripts/Runtime"};
+    runtime.References = {TestAsset(202)};
+    Keire::ManagedAssemblyDefinition editor;
+    editor.Name = "Editor";
+    editor.RootNamespace = "Game.Editor";
+    editor.Classification = Keire::ManagedAssemblyClassification::Editor;
+    editor.SourceRoots = {"Scripts/Editor"};
+    const std::array graph{Keire::ManagedAssemblyGraphEntry{TestAsset(201), runtime},
+                           Keire::ManagedAssemblyGraphEntry{TestAsset(202), editor}};
+    CHECK_THROWS_WITH_AS(Keire::ValidateManagedAssemblyGraph(graph),
+                         "Managed assembly reference violates runtime/editor/test isolation.", std::invalid_argument);
 }

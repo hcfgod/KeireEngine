@@ -49,6 +49,12 @@ thumbnail worker.
 Managed IDE generation consumes the same validated `.keireasm` graph and C# project generator as managed builds.
 Persistent solution/project files are conveniences derived from canonical assembly assets and source roots; they do
 not become build authority or expose runtime-host implementation state.
+Each collectible managed load context receives its own Coral internal-call table. Calls cross an application-owned
+`IScriptRuntimeServices` boundary, retain only value handles, validate the currently executing script generation, and
+route gameplay logging, frame time, input actions, and transform access back to owner-thread engine services.
+Managed build generations contain both the engine API and gameplay outputs. Source checkouts incrementally compile the
+API project into generation-local storage, while packaged editors copy their bundled API; candidate reloads consume
+that immutable pair transactionally rather than resolving a process-global API artifact.
 
 ## Public Binary Boundary
 

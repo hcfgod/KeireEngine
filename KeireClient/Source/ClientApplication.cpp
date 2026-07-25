@@ -23,6 +23,43 @@ namespace
         Keire::ApplicationCommandLineOption{"--smoke-project", "Open a project, render several frames, and exit."},
     };
 
+    [[nodiscard]] std::filesystem::path ResolveManagedApiAssembly(const std::filesystem::path& executable,
+                                                                  const std::filesystem::path& project)
+    {
+        auto selected = executable.parent_path() / "Managed" / "Keire.Managed.dll";
+        std::error_code error;
+        auto selectedWriteTime = std::filesystem::is_regular_file(selected, error)
+                                     ? std::filesystem::last_write_time(selected, error)
+                                     : std::filesystem::file_time_type::min();
+        const auto considerAncestors = [&](std::filesystem::path root)
+        {
+            if (root.empty())
+                return;
+            root = std::filesystem::absolute(root, error).lexically_normal();
+            for (std::size_t depth = 0; depth < 8 && !root.empty(); ++depth)
+            {
+                const auto candidate = root / "Build" / "Managed" / "Keire.Managed.dll";
+                error.clear();
+                if (std::filesystem::is_regular_file(candidate, error))
+                {
+                    const auto writeTime = std::filesystem::last_write_time(candidate, error);
+                    if (!error && writeTime > selectedWriteTime)
+                    {
+                        selected = candidate;
+                        selectedWriteTime = writeTime;
+                    }
+                }
+                const auto parent = root.parent_path();
+                if (parent == root)
+                    break;
+                root = parent;
+            }
+        };
+        considerAncestors(std::filesystem::current_path(error));
+        considerAncestors(project);
+        return selected;
+    }
+
     struct CommandLine
     {
         std::filesystem::path ExecutablePath;
@@ -330,7 +367,7 @@ namespace Keire
             specification.Scripting.RuntimeRootDirectory =
                 commandLine.ExecutablePath.parent_path() / "Managed" / "Dotnet";
             specification.Scripting.ManagedApiAssembly =
-                commandLine.ExecutablePath.parent_path() / "Managed" / "Keire.Managed.dll";
+                ResolveManagedApiAssembly(commandLine.ExecutablePath, commandLine.ProjectPath);
             specification.Physics.Mode = PhysicsMode::Enabled;
             specification.Audio.Mode = AudioMode::Enabled;
             specification.Navigation.Mode = NavigationMode::Enabled;

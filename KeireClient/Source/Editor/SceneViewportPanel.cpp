@@ -185,12 +185,24 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     {
         size = PrepareRenderSurface(m_RenderView, available, m_Controller.SceneViewportDisplayScale());
     }
+    const bool playActive = document.PlaySession() && document.PlaySession()->State() != Keire::ScenePlayState::Stopped;
     const float aspect = size.Width / std::max(size.Height, 1.0F);
-    camera.View = m_Camera->ViewMatrix();
-    camera.Projection = m_Camera->ProjectionMatrix(aspect);
+    const auto gameCamera = playActive ? SelectGameCamera(renderScene) : std::nullopt;
+    if (gameCamera)
+    {
+        camera.View = Keire::Math::Inverse(gameCamera->Transform->WorldMatrix());
+        camera.Projection = gameCamera->Camera->ProjectionMatrix(aspect);
+        camera.NearPlane = gameCamera->Camera->NearPlane();
+        camera.FarPlane = gameCamera->Camera->FarPlane();
+    }
+    else
+    {
+        camera.View = m_Camera->ViewMatrix();
+        camera.Projection = m_Camera->ProjectionMatrix(aspect);
+    }
     if (hasScene && m_RenderView)
     {
-        if (const auto sceneCamera = SelectGameCamera(renderScene))
+        if (const auto sceneCamera = gameCamera ? gameCamera : SelectGameCamera(renderScene))
             camera.ClearColor = sceneCamera->Camera->ClearColor();
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
@@ -199,7 +211,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (const auto sceneCamera = SelectGameCamera(renderScene))
             environment.SkyVisible =
                 environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-        renderer->Submit({renderScene, m_RenderView, true, environment});
+        renderer->Submit({renderScene, m_RenderView, !playActive, environment});
         ui.Image(m_RenderView->Surface(), size);
         imageState = ui.LastItemState();
         imageRect = ui.LastItemRect();
@@ -357,7 +369,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                                 (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
     if (renderScene)
     {
-        const bool allowManipulation = !m_Controller.SceneViewportPlayReviewActive();
+        const bool allowManipulation = !playActive && !m_Controller.SceneViewportPlayReviewActive();
         const auto resolveMeshBounds = [assetSystem](const Keire::AssetId mesh) -> std::optional<Keire::MeshBounds>
         {
             const auto assets = assetSystem;
@@ -429,7 +441,16 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             }
         }
     }
-    UpdateCamera(ui, imageState);
+    if (playActive)
+    {
+        m_Camera->SetNavigationMode(Keire::Detail::EditorCameraNavigationMode::None);
+        m_BoxSelecting = false;
+        m_BoxSelectionBase.clear();
+    }
+    else
+    {
+        UpdateCamera(ui, imageState);
+    }
 }
 
 void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState)

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "sdkSelection": "bundled",
+  "customSdkExecutable": "",
+  "automaticCompilation": true,
+  "debounceMilliseconds": 400,
+  "playModeReload": "preserveState",
+  "exceptionPolicy": "disableInstance",
+  "allowUnsafe": false,
+  "warningsAsErrors": true,
+  "defineSymbols": []
+}

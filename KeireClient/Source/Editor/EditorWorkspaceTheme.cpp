@@ -117,6 +117,16 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             if (ui.MenuItem("Project Settings..."))
                 m_ProjectSettingsPanel->Registration().SetVisible(true);
         }
+        if (auto build = ui.BeginMenu("Build"); build)
+        {
+            if (ui.MenuItem("Build Scripts    Ctrl+Shift+B", false,
+                            m_CommandRouter->Available(KeireEditor::EditorCommand::BuildScripts)))
+            {
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildScripts);
+            }
+            if (ui.MenuItem("Build Settings..."))
+                m_BuildSettings.SetVisible(true);
+        }
         if (auto entity = ui.BeginMenu("Entity", static_cast<bool>(scene)); entity)
         {
             if (ui.MenuItem("Create Empty"))

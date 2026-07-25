@@ -225,7 +225,7 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
     const auto source = m_AssetDatabase->Specification().ProjectRoot /
                         m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
     const auto definition = Keire::SceneAsset::Decode(ReadBytes(source))->Definition();
-    auto scene = Keire::CreateRef<Keire::Scene>(asset, definition);
+    auto scene = Keire::CreateRef<Keire::Scene>(asset, definition, Owner().Scenes()->Components());
     scene->MarkSaved();
     Keire::Ref<Keire::UndoContext> context;
     if (const auto undo = Owner().Undo())
@@ -529,6 +529,14 @@ void EditorWorkspaceLayer::BeginPlayMode()
 {
     if (!m_SceneDocument->EditingScene() || m_SceneDocument->PlaySession())
         return;
+    m_ManagedInputCaptureOverride.reset();
+    m_GameplayInputContext.Reset();
+    if (const auto input = Owner().Input(); input && m_EditorInputUser)
+    {
+        const auto project = Owner().GetProject();
+        if (project && project->Descriptor().DefaultInput)
+            m_GameplayInputContext = input->CreateActionContext(project->Descriptor().DefaultInput, m_EditorInputUser);
+    }
     m_PlayEditorTouchedEntities.clear();
     m_PlayChangeTracker = std::make_unique<KeireEditor::ScenePlayChangeTracker>();
     m_PendingPlayEditorBefore.reset();
@@ -539,7 +547,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     m_SceneDocument->BeginPlay(std::move(playUndo));
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
-    m_Game.RequestFocus();
+    m_SceneViewportPanel->Registration().RequestFocus();
 }
 
 void EditorWorkspaceLayer::RequestStopPlayMode()
@@ -581,6 +589,11 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         if (apply && m_PlayChanges && m_PlayChanges->HasSelectedChanges())
             applied = m_PlayChanges->BuildAppliedDefinition();
         m_SceneDocument->EndPlay();
+        m_ManagedInputCaptureOverride.reset();
+        m_GameplayInputContext.Reset();
+        m_ManagedCursorLocked = false;
+        m_ManagedCursorVisible = true;
+        ApplyManagedCursorMode();
         if (applied)
         {
             RecordSceneUndo("Apply Play Mode Changes");

@@ -31,6 +31,58 @@ namespace KeireEditor
 
         ui.TextColored(theme.Accent, "PROJECT SETTINGS");
         ui.Separator();
+        ui.Text("Scripting");
+        ui.TextColored(theme.MutedText, "Select the .NET 10 SDK used to compile project scripts.");
+        try
+        {
+            auto sdk = m_Controller.ProjectManagedSdk();
+            if (!m_SdkInitialized)
+            {
+                m_CustomSdkPath = sdk.CustomExecutable.string();
+                m_SdkInitialized = true;
+            }
+            if (ui.Button("Bundled SDK"))
+            {
+                sdk.Selection = Keire::ManagedSdkSelection::Bundled;
+                m_Controller.SetProjectManagedSdk(sdk);
+            }
+            ui.SameLine();
+            if (ui.Button("System PATH"))
+            {
+                sdk.Selection = Keire::ManagedSdkSelection::SystemPath;
+                m_Controller.SetProjectManagedSdk(sdk);
+            }
+            ui.SameLine();
+            if (ui.Button("Custom SDK"))
+            {
+                sdk.Selection = Keire::ManagedSdkSelection::Custom;
+                sdk.CustomExecutable = m_CustomSdkPath;
+                m_Controller.SetProjectManagedSdk(sdk);
+            }
+            if (sdk.Selection == Keire::ManagedSdkSelection::Custom)
+            {
+                if (ui.InputText("dotnet executable", m_CustomSdkPath))
+                {
+                    sdk.CustomExecutable = m_CustomSdkPath;
+                    m_Controller.SetProjectManagedSdk(sdk);
+                }
+                ui.TextColored(theme.MutedText, "Choose the dotnet executable beside the SDK directory.");
+            }
+            const auto selection = sdk.Selection == Keire::ManagedSdkSelection::Bundled ? "Active: bundled engine SDK"
+                                   : sdk.Selection == Keire::ManagedSdkSelection::SystemPath
+                                       ? "Active: DOTNET_ROOT / PATH"
+                                       : "Active: custom executable";
+            ui.TextColored(theme.MutedText, selection);
+            m_Error.clear();
+        }
+        catch (const std::exception& error)
+        {
+            m_Error = error.what();
+        }
+        if (!m_Error.empty())
+            ui.TextColored(theme.Warning, m_Error);
+        ui.Spacing();
+        ui.Separator();
         ui.Text("Rendering / Environment");
         ui.TextColored(theme.MutedText, "These values are project-owned and light both the Scene and Game views.");
         ui.Spacing();
