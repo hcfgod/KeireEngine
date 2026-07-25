@@ -120,7 +120,7 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
         catch (...)
         {
         }
-        m_Camera->SetCapturing(false);
+        m_Camera->SetNavigationMode(Keire::Detail::EditorCameraNavigationMode::None);
     }
     m_RenderView.Reset();
     m_CameraPreviewView.Reset();
@@ -448,7 +448,8 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
                                  {bounds.Maximum[0], bounds.Maximum[1], bounds.Maximum[2]}};
     };
     const auto pointer = ui.PointerState();
-    const bool navigationRegion = imageState.Hovered || m_Camera->Capturing();
+    const bool viewportHovered = imageState.Hovered;
+    const bool navigationRegion = viewportHovered || m_Camera->Capturing();
     bool changed = false;
 
     std::vector<Keire::EntityId> selectedIds;
@@ -513,29 +514,38 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
         }
     }
 
-    if (imageState.Hovered && pointer.RightPressed && !ui.AltDown() && !m_Camera->Capturing())
+    if (viewportHovered && !m_Camera->Capturing())
     {
-        m_Controller.SceneViewportWindows()->SetCursorMode(m_Controller.SceneViewportWindow(),
-                                                           Keire::CursorMode::RelativeLocked);
-        m_Camera->SetCapturing(true);
+        const auto navigation = Keire::Detail::ResolveEditorCameraNavigation(
+            ui.AltDown(), {pointer.LeftPressed, pointer.MiddlePressed, pointer.RightPressed});
+        if (navigation != Keire::Detail::EditorCameraNavigationMode::None)
+        {
+            m_Controller.SceneViewportWindows()->SetCursorMode(m_Controller.SceneViewportWindow(),
+                                                               Keire::CursorMode::Normal);
+            m_Camera->SetNavigationMode(navigation);
+        }
     }
-    else if (m_Camera->Capturing() && (!pointer.RightDown || !ui.WindowFocused()))
+    else if (m_Camera->Capturing() &&
+             !Keire::Detail::EditorCameraNavigationHeld(m_Camera->NavigationMode(),
+                                                        {pointer.LeftDown, pointer.MiddleDown, pointer.RightDown}))
     {
         m_Controller.SceneViewportWindows()->SetCursorMode(m_Controller.SceneViewportWindow(),
                                                            Keire::CursorMode::Normal);
-        m_Camera->SetCapturing(false);
+        m_Camera->SetNavigationMode(Keire::Detail::EditorCameraNavigationMode::None);
         if (!m_ProjectRoot.empty())
             (void)m_Camera->Save(m_ProjectRoot / "Library/Editor/SceneCamera.state");
     }
 
     Keire::Detail::EditorCameraInput input;
-    input.PointerDelta = {pointer.Delta.X, pointer.Delta.Y};
+    input.PointerDelta =
+        m_SuppressWarpPointerDelta ? Keire::Vector2{} : Keire::Vector2{pointer.Delta.X, pointer.Delta.Y};
+    m_SuppressWarpPointerDelta = false;
     input.Wheel = navigationRegion ? pointer.Wheel : 0.0F;
     input.DeltaSeconds = static_cast<float>(m_Controller.SceneViewportTime().UnscaledDeltaTime().Seconds());
-    input.Orbit = navigationRegion && ui.AltDown() && pointer.LeftDown;
-    input.Pan = navigationRegion && pointer.MiddleDown;
-    input.Zoom = navigationRegion && ui.AltDown() && pointer.RightDown;
-    input.Fly = m_Camera->Capturing();
+    input.Orbit = m_Camera->NavigationMode() == Keire::Detail::EditorCameraNavigationMode::Orbit;
+    input.Pan = m_Camera->NavigationMode() == Keire::Detail::EditorCameraNavigationMode::Pan;
+    input.Zoom = m_Camera->NavigationMode() == Keire::Detail::EditorCameraNavigationMode::Zoom;
+    input.Fly = m_Camera->NavigationMode() == Keire::Detail::EditorCameraNavigationMode::Fly;
     input.Fast = ui.ShiftDown();
     if (m_Camera->Capturing() || imageState.Hovered)
     {
@@ -547,6 +557,19 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
             input.MoveUp = (ui.KeyDown(Keire::UiKey::E) ? 1.0F : 0.0F) - (ui.KeyDown(Keire::UiKey::Q) ? 1.0F : 0.0F);
     }
     changed = m_Camera->Update(input) || changed;
+    if (m_Camera->Capturing())
+    {
+        const auto wrapped = Keire::Detail::ResolveEditorCameraPointerWrap(
+            {pointer.Position.X, pointer.Position.Y}, {m_ViewportRect.Minimum.X, m_ViewportRect.Minimum.Y},
+            {m_ViewportRect.Maximum.X, m_ViewportRect.Maximum.Y});
+        if (wrapped.Wrapped)
+        {
+            m_Controller.SceneViewportWindows()->WarpCursor(
+                m_Controller.SceneViewportWindow(), {static_cast<std::int32_t>(std::lround(wrapped.Position.X)),
+                                                     static_cast<std::int32_t>(std::lround(wrapped.Position.Y))});
+            m_SuppressWarpPointerDelta = true;
+        }
+    }
 
     if (changed)
     {

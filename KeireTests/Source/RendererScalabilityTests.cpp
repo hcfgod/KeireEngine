@@ -39,4 +39,6 @@ TEST_CASE("blended and incompatible draws preserve deterministic submission orde
     CHECK(batches[0].Count == 2);
     CHECK(batches[1].Count == 1);
     CHECK(batches[2].Count == 1);
+    CHECK(batches[1].First == 2);
+    CHECK(batches[1].GpuFirstInstance() == 0);
 }

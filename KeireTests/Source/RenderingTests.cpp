@@ -141,6 +141,45 @@ TEST_CASE("editor camera navigation matches scene-view gesture semantics")
     CHECK(camera.State().Focus != beforeWalk);
 }
 
+TEST_CASE("editor camera navigation capture is independent of panel focus")
+{
+    using Keire::Detail::EditorCameraNavigationHeld;
+    using Keire::Detail::EditorCameraNavigationMode;
+    using Keire::Detail::ResolveEditorCameraNavigation;
+
+    CHECK(ResolveEditorCameraNavigation(true, {.Left = true}) == EditorCameraNavigationMode::Orbit);
+    CHECK(ResolveEditorCameraNavigation(false, {.Middle = true}) == EditorCameraNavigationMode::Pan);
+    CHECK(ResolveEditorCameraNavigation(true, {.Right = true}) == EditorCameraNavigationMode::Zoom);
+    CHECK(ResolveEditorCameraNavigation(false, {.Right = true}) == EditorCameraNavigationMode::Fly);
+    CHECK(ResolveEditorCameraNavigation(false, {}) == EditorCameraNavigationMode::None);
+
+    CHECK(EditorCameraNavigationHeld(EditorCameraNavigationMode::Orbit, {.Left = true}));
+    CHECK(EditorCameraNavigationHeld(EditorCameraNavigationMode::Pan, {.Middle = true}));
+    CHECK(EditorCameraNavigationHeld(EditorCameraNavigationMode::Zoom, {.Right = true}));
+    CHECK(EditorCameraNavigationHeld(EditorCameraNavigationMode::Fly, {.Right = true}));
+    CHECK_FALSE(EditorCameraNavigationHeld(EditorCameraNavigationMode::Fly, {}));
+}
+
+TEST_CASE("editor camera pointer wrapping moves only the cursor to the opposite viewport edge")
+{
+    const Keire::Vector2 minimum{100.0F, 50.0F};
+    const Keire::Vector2 maximum{500.0F, 350.0F};
+
+    const auto right = Keire::Detail::ResolveEditorCameraPointerWrap({500.0F, 200.0F}, minimum, maximum);
+    REQUIRE(right.Wrapped);
+    CHECK(right.Position.X == doctest::Approx(102.0F));
+    CHECK(right.Position.Y == doctest::Approx(200.0F));
+
+    const auto top = Keire::Detail::ResolveEditorCameraPointerWrap({250.0F, 49.0F}, minimum, maximum);
+    REQUIRE(top.Wrapped);
+    CHECK(top.Position.X == doctest::Approx(250.0F));
+    CHECK(top.Position.Y == doctest::Approx(348.0F));
+
+    const auto center = Keire::Detail::ResolveEditorCameraPointerWrap({250.0F, 200.0F}, minimum, maximum);
+    CHECK_FALSE(center.Wrapped);
+    CHECK(center.Position == (Keire::Vector2{250.0F, 200.0F}));
+}
+
 TEST_CASE("editor camera framing projection and orientation are deterministic")
 {
     Keire::Detail::EditorCameraController camera;

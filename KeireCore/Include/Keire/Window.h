@@ -357,6 +357,7 @@ namespace Keire
         [[nodiscard]] Ref<SystemTray> CreateSystemTray(SystemTraySpecification specification);
         void SetCursorMode(WindowId window, CursorMode mode);
         [[nodiscard]] CursorMode GetCursorMode(WindowId window) const;
+        void WarpCursor(WindowId window, WindowPosition position);
         void Shutdown();
         [[nodiscard]] bool IsActive() const noexcept;
 

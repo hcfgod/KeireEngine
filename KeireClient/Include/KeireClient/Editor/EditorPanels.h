@@ -151,6 +151,7 @@ namespace KeireEditor
         bool m_BoxSelecting = false;
         bool m_BoxSelectionAdditive = false;
         bool m_CameraPreviewVisible = true;
+        bool m_SuppressWarpPointerDelta = false;
     };
 
     class HierarchyPanel final

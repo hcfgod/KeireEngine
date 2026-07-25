@@ -19,6 +19,36 @@ namespace Keire::Detail
         PositiveZ
     };
 
+    enum class EditorCameraNavigationMode : std::uint8_t
+    {
+        None,
+        Orbit,
+        Pan,
+        Zoom,
+        Fly
+    };
+
+    struct EditorCameraPointerButtons
+    {
+        bool Left = false;
+        bool Middle = false;
+        bool Right = false;
+    };
+
+    [[nodiscard]] EditorCameraNavigationMode ResolveEditorCameraNavigation(bool alt,
+                                                                           EditorCameraPointerButtons pressed) noexcept;
+    [[nodiscard]] bool EditorCameraNavigationHeld(EditorCameraNavigationMode mode,
+                                                  EditorCameraPointerButtons down) noexcept;
+
+    struct EditorCameraPointerWrap
+    {
+        Vector2 Position;
+        bool Wrapped = false;
+    };
+
+    [[nodiscard]] EditorCameraPointerWrap ResolveEditorCameraPointerWrap(Vector2 position, Vector2 minimum,
+                                                                         Vector2 maximum) noexcept;
+
     struct EditorCameraState
     {
         Vector3 Focus{0.0F, 0.5F, 0.0F};

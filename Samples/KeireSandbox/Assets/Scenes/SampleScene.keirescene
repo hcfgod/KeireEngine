@@ -108,13 +108,13 @@
           "data": {
             "position": [
               0.0,
-              0.4000000059604645,
-              -1.0643851171405303e-27
+              0.0,
+              0.0
             ],
             "rotation": [
               0.0,
-              5.048709793414476e-28,
-              3.7865323450608567e-28,
+              0.0,
+              0.0,
               1.0
             ],
             "scale": [
@@ -302,5 +302,7 @@
     }
   ],
   "name": "SampleScene",
-  "schemaVersion": 2
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "schemaVersion": 3
 }

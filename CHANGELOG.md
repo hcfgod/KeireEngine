@@ -4,6 +4,12 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Scene camera orbit, pan, zoom, and fly navigation now wrap the visible cursor across opposite Scene viewport edges
+  in window-local coordinates without applying the warp delta to camera movement, and remain active even when another
+  editor panel has focus.
+- Fixed imported meshes using another draw's transform on GPU backends where `first_instance` does not offset
+  `SV_InstanceID`; visible geometry and shadow rendering now apply the same per-entity scale.
+
 - Added gameplay-production foundations: scene schema v3 and nested prefab/variant composition, transactional prefab
   authoring helpers, application-owned profiling/scripting/physics/audio/navigation services, `.keireasm` assembly
   graphs with cancellable last-good managed builds, Jolt-backed rigid bodies and deterministic convex/triangle

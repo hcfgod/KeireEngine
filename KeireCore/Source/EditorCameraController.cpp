@@ -38,6 +38,71 @@ namespace Keire::Detail
         }
     } // namespace
 
+    EditorCameraNavigationMode ResolveEditorCameraNavigation(const bool alt,
+                                                             const EditorCameraPointerButtons pressed) noexcept
+    {
+        if (alt && pressed.Left)
+            return EditorCameraNavigationMode::Orbit;
+        if (pressed.Middle)
+            return EditorCameraNavigationMode::Pan;
+        if (pressed.Right)
+            return alt ? EditorCameraNavigationMode::Zoom : EditorCameraNavigationMode::Fly;
+        return EditorCameraNavigationMode::None;
+    }
+
+    bool EditorCameraNavigationHeld(const EditorCameraNavigationMode mode,
+                                    const EditorCameraPointerButtons down) noexcept
+    {
+        switch (mode)
+        {
+        case EditorCameraNavigationMode::Orbit:
+            return down.Left;
+        case EditorCameraNavigationMode::Pan:
+            return down.Middle;
+        case EditorCameraNavigationMode::Zoom:
+        case EditorCameraNavigationMode::Fly:
+            return down.Right;
+        case EditorCameraNavigationMode::None:
+            return false;
+        }
+        return false;
+    }
+
+    EditorCameraPointerWrap ResolveEditorCameraPointerWrap(const Vector2 position, const Vector2 minimum,
+                                                           const Vector2 maximum) noexcept
+    {
+        constexpr float edgeThreshold = 1.0F;
+        constexpr float oppositeEdgeInset = 2.0F;
+        EditorCameraPointerWrap result{position};
+        if (maximum.X - minimum.X > oppositeEdgeInset * 2.0F)
+        {
+            if (position.X <= minimum.X + edgeThreshold)
+            {
+                result.Position.X = maximum.X - oppositeEdgeInset;
+                result.Wrapped = true;
+            }
+            else if (position.X >= maximum.X - edgeThreshold)
+            {
+                result.Position.X = minimum.X + oppositeEdgeInset;
+                result.Wrapped = true;
+            }
+        }
+        if (maximum.Y - minimum.Y > oppositeEdgeInset * 2.0F)
+        {
+            if (position.Y <= minimum.Y + edgeThreshold)
+            {
+                result.Position.Y = maximum.Y - oppositeEdgeInset;
+                result.Wrapped = true;
+            }
+            else if (position.Y >= maximum.Y - edgeThreshold)
+            {
+                result.Position.Y = minimum.Y + oppositeEdgeInset;
+                result.Wrapped = true;
+            }
+        }
+        return result;
+    }
+
     EditorCameraController::EditorCameraController(EditorCameraState state) { SetState(state); }
 
     void EditorCameraController::Validate(const EditorCameraState& state)

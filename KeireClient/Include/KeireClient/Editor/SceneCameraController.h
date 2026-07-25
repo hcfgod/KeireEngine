@@ -42,8 +42,18 @@ namespace KeireEditor
         [[nodiscard]] bool LockedTo(std::span<const Keire::EntityId> selection) const noexcept;
         void SetLockedEntity(Keire::EntityId entity) noexcept;
         void SetLockedEntities(std::span<const Keire::EntityId> entities) noexcept;
-        [[nodiscard]] bool Capturing() const noexcept { return m_Capturing; }
-        void SetCapturing(bool capturing) noexcept { m_Capturing = capturing; }
+        [[nodiscard]] bool Capturing() const noexcept
+        {
+            return m_NavigationMode != Keire::Detail::EditorCameraNavigationMode::None;
+        }
+        [[nodiscard]] Keire::Detail::EditorCameraNavigationMode NavigationMode() const noexcept
+        {
+            return m_NavigationMode;
+        }
+        void SetNavigationMode(const Keire::Detail::EditorCameraNavigationMode mode) noexcept
+        {
+            m_NavigationMode = mode;
+        }
         void MarkDirty() noexcept { m_Dirty = true; }
 
         [[nodiscard]] bool Load(const std::filesystem::path& path) noexcept;
@@ -54,7 +64,7 @@ namespace KeireEditor
         std::vector<Keire::EntityId> m_LockedEntities;
         std::vector<Keire::EntityId> m_LastFocusShortcutSelection;
         double m_LastFocusShortcutSeconds = -1.0;
-        bool m_Capturing = false;
+        Keire::Detail::EditorCameraNavigationMode m_NavigationMode = Keire::Detail::EditorCameraNavigationMode::None;
         bool m_Dirty = false;
     };
 } // namespace KeireEditor

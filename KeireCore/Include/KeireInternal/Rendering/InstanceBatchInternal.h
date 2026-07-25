@@ -26,6 +26,12 @@ namespace Keire::RenderBackend
     {
         std::uint32_t First = 0;
         std::uint32_t Count = 0;
+
+        [[nodiscard]] constexpr std::uint32_t GpuFirstInstance() const noexcept
+        {
+            // SDL does not portably apply first_instance to shader instance-ID built-ins.
+            return 0;
+        }
     };
 
     [[nodiscard]] std::vector<InstanceBatch> BuildInstanceBatches(std::span<const InstanceBatchKey> keys);

@@ -170,6 +170,7 @@ TEST_CASE("WindowSystem preserves requested cursor modes across focus changes")
     }
     CHECK(system->GetCursorMode(window->Id()) == Keire::CursorMode::Hidden);
     system->SetCursorMode(window->Id(), Keire::CursorMode::Normal);
+    CHECK_NOTHROW(system->WarpCursor(window->Id(), {0, 0}));
     window->Close();
     window.Reset();
     system->Shutdown();

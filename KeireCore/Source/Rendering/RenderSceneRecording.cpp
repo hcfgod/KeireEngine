@@ -289,24 +289,6 @@ namespace Keire::RenderBackend
                                                            std::max(light.ShadowBias * 0.01F, 0.0001F)};
         }
 
-        SDL_GPUBuffer* instanceBuffer = nullptr;
-        if (std::ranges::any_of(prepared,
-                                [&](const PreparedDraw& draw)
-                                {
-                                    const auto* material =
-                                        draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
-                                    return material && material->UsesInstancing;
-                                }))
-        {
-            std::vector<GpuInstanceUniform> instances;
-            instances.reserve(prepared.size());
-            for (const auto& draw : prepared)
-                instances.push_back({draw.Item->World, Transpose(Math::Inverse(draw.Item->World)), draw.Item->Tint});
-            instanceBuffer =
-                UploadBuffer(std::as_bytes(std::span(instances)), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
-            FrameTransientBuffers.push_back(instanceBuffer);
-        }
-
         std::vector<InstanceBatchKey> instanceKeys;
         instanceKeys.reserve(prepared.size());
         for (const auto& draw : prepared)
@@ -328,6 +310,21 @@ namespace Keire::RenderBackend
             SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             const auto instanceCount = batch.Count;
+            SDL_GPUBuffer* instanceBuffer = nullptr;
+            if (material && material->UsesInstancing)
+            {
+                std::vector<GpuInstanceUniform> instances;
+                instances.reserve(instanceCount);
+                for (std::uint32_t instance = 0; instance < instanceCount; ++instance)
+                {
+                    const auto& instanceDraw = prepared[drawIndex + instance];
+                    instances.push_back({instanceDraw.Item->World, Transpose(Math::Inverse(instanceDraw.Item->World)),
+                                         instanceDraw.Item->Tint});
+                }
+                instanceBuffer =
+                    UploadBuffer(std::as_bytes(std::span(instances)), SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                FrameTransientBuffers.push_back(instanceBuffer);
+            }
             if (material)
             {
                 SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
@@ -423,7 +420,7 @@ namespace Keire::RenderBackend
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
             }
             SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, instanceCount, draw.Submesh.FirstIndex, 0,
-                                         static_cast<std::uint32_t>(drawIndex));
+                                         batch.GpuFirstInstance());
             ++Statistics.DrawCalls;
             Statistics.Triangles += draw.Submesh.IndexCount / 3 * instanceCount;
             Statistics.InstanceBatches += instanceCount > 1 ? 1U : 0U;

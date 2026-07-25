@@ -1063,6 +1063,15 @@ namespace Keire
             return found == m_Windows.end() ? CursorMode::Normal : found->second.Cursor;
         }
 
+        void WarpCursor(const WindowId id, const WindowPosition position)
+        {
+            RequireOwner("WarpCursor");
+            SDL_Window* native = NativeFor(id);
+            if (!native)
+                throw std::invalid_argument("Cannot warp the cursor for an unknown or closed window.");
+            SDL_WarpMouseInWindow(native, static_cast<float>(position.X), static_cast<float>(position.Y));
+        }
+
         void SetClipboardText(const std::string_view text)
         {
             RequireOwner("SetClipboardText");
@@ -1341,6 +1350,11 @@ namespace Keire
     }
 
     CursorMode WindowSystem::GetCursorMode(const WindowId window) const { return m_Impl->GetCursorMode(window); }
+
+    void WindowSystem::WarpCursor(const WindowId window, const WindowPosition position)
+    {
+        m_Impl->WarpCursor(window, position);
+    }
 
     void WindowSystem::Shutdown()
     {
