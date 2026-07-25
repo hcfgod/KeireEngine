@@ -266,11 +266,15 @@ namespace Keire
             if (specification.Template == ProjectTemplate::Starter)
             {
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
-                databaseSpecification.Importers = {
-                    CreateInputActionAssetImporter(), CreateSceneAssetImporter(),
-                    CreatePrefabAssetImporter(),      CreateManagedAssemblyAssetImporter(),
-                    CreateShaderAssetImporter(),      CreateMaterialAssetImporter(),
-                    CreateMeshAssetImporter(),        CreateTexture2DAssetImporter()};
+                databaseSpecification.Importers = {CreateTextAssetImporter(),
+                                                   CreateInputActionAssetImporter(),
+                                                   CreateSceneAssetImporter(),
+                                                   CreatePrefabAssetImporter(),
+                                                   CreateManagedAssemblyAssetImporter(),
+                                                   CreateShaderAssetImporter(),
+                                                   CreateMaterialAssetImporter(),
+                                                   CreateMeshAssetImporter(),
+                                                   CreateTexture2DAssetImporter()};
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
                 const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",

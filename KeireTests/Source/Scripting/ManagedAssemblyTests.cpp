@@ -89,11 +89,73 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     CHECK(projectText.find("Assets/Scripts/Gameplay") != std::string::npos);
     CHECK(projectText.find("<RootNamespace>Game</RootNamespace>") != std::string::npos);
     CHECK(projectText.find("<Reference Include=\"Keire.Managed\">") != std::string::npos);
-    CHECK(projectText.find("<TargetFramework>net10.0</TargetFramework>") != std::string::npos);
-    CHECK(projectText.find("<LangVersion>14.0</LangVersion>") != std::string::npos);
+    CHECK(projectText.find("<TargetFramework>net8.0</TargetFramework>") != std::string::npos);
+    CHECK(projectText.find("<LangVersion>12.0</LangVersion>") != std::string::npos);
+    CHECK(projectText.find(
+              "<WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414</WarningsNotAsErrors>") !=
+          std::string::npos);
     CHECK(projectText.find("Library/ScriptAssemblies/References/Keire.Managed.dll") != std::string::npos);
     CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.dll"));
     CHECK(projectText.find(root.generic_string()) == std::string::npos);
+}
+
+TEST_CASE("Managed IDE workspace references the engine API project in source checkouts")
+{
+    const auto root = std::filesystem::temp_directory_path() / ("Keire-ManagedIdeSource-" + TestAsset(92).ToString());
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup() { std::filesystem::remove_all(Root); }
+    } cleanup{root};
+    const auto projectRoot = root / "Game";
+    const auto managedApiProject = root / "KeireManaged/Keire.Managed.csproj";
+    std::filesystem::create_directories(projectRoot / "Assets/Scripts/Gameplay");
+    std::filesystem::create_directories(projectRoot / "Library/Managed");
+    std::filesystem::create_directories(managedApiProject.parent_path());
+    std::ofstream(managedApiProject) << "<Project Sdk=\"Microsoft.NET.Sdk\" />\n";
+    std::ofstream(projectRoot / "Library/Managed/Keire.Managed.dll", std::ios::binary) << "managed-api";
+
+    Keire::ScriptSystemSpecification specification;
+    specification.Mode = Keire::ScriptMode::Enabled;
+    specification.ProjectRoot = projectRoot;
+    specification.AssemblyDirectory = "Library/ScriptAssemblies";
+    specification.ManagedApiAssembly = projectRoot / "Library/Managed/Keire.Managed.dll";
+    auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
+
+    Keire::ManagedAssemblyDefinition gameplay;
+    gameplay.Name = "Gameplay";
+    gameplay.RootNamespace = "Game";
+    gameplay.SourceRoots = {"Assets/Scripts/Gameplay"};
+    Keire::ManagedBuildRequest request;
+    request.Assemblies.push_back({TestAsset(93), gameplay});
+    const auto workspace = scripts->GenerateIdeWorkspace(request, "Source Game");
+
+    const auto project = ReadBytes(workspace.Projects.front());
+    const std::string projectText(reinterpret_cast<const char*>(project.data()), project.size());
+    CHECK(
+        projectText.find(
+            "<ProjectReference Include=\"Library/ScriptAssemblies/References/Keire.Managed.VisualStudio.csproj\" />") !=
+        std::string::npos);
+    CHECK(projectText.find("<Reference Include=\"Keire.Managed\">") == std::string::npos);
+    CHECK(projectText.find("<TargetFramework>net8.0</TargetFramework>") != std::string::npos);
+    CHECK(projectText.find("<LangVersion>12.0</LangVersion>") != std::string::npos);
+
+    const auto solution = ReadBytes(workspace.Solution);
+    const std::string solutionText(reinterpret_cast<const char*>(solution.data()), solution.size());
+    CHECK(solutionText.find(
+              "\"Keire.Managed\", \"Library/ScriptAssemblies/References/Keire.Managed.VisualStudio.csproj\"") !=
+          std::string::npos);
+    CHECK(solutionText.find("{4B454952-4D41-4E41-4745-440000000001}.Debug|Any CPU.Build.0") != std::string::npos);
+
+    const auto designTimeProject =
+        projectRoot / "Library/ScriptAssemblies/References/Keire.Managed.VisualStudio.csproj";
+    REQUIRE(std::filesystem::is_regular_file(designTimeProject));
+    const auto designTimeProjectBytes = ReadBytes(designTimeProject);
+    const std::string designTimeProjectText(reinterpret_cast<const char*>(designTimeProjectBytes.data()),
+                                            designTimeProjectBytes.size());
+    CHECK(designTimeProjectText.find("<TargetFramework>net8.0</TargetFramework>") != std::string::npos);
+    CHECK(designTimeProjectText.find("<LangVersion>12.0</LangVersion>") != std::string::npos);
+    CHECK(designTimeProjectText.find("KeireManaged/**/*.cs") != std::string::npos);
 }
 
 TEST_CASE("Managed builds publish only successful replacements")

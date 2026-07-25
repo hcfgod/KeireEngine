@@ -313,4 +313,16 @@ namespace Keire
         return importer ? std::optional<AssetImporterRegistration>(*importer) : std::nullopt;
     }
 
+    AssetImporterRegistration CreateTextAssetImporter()
+    {
+        AssetImporterRegistration result;
+        result.Name = "Keire.Text";
+        result.Version = 1;
+        result.Type = TextAsset::StaticType();
+        result.Extensions = {".cs"};
+        result.Import = [](const std::span<const std::byte> bytes)
+        { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+        return result;
+    }
+
 } // namespace Keire

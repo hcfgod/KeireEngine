@@ -12,6 +12,7 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -65,10 +66,15 @@ namespace
     {
         (void)Keire::Project::Open(projectRoot);
         Keire::AssetDatabaseSpecification specification{.ProjectRoot = projectRoot};
-        specification.Importers = {Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
-                                   Keire::CreatePrefabAssetImporter(),      Keire::CreateManagedAssemblyAssetImporter(),
-                                   Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
-                                   Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
+        specification.Importers = {Keire::CreateTextAssetImporter(),
+                                   Keire::CreateInputActionAssetImporter(),
+                                   Keire::CreateSceneAssetImporter(),
+                                   Keire::CreatePrefabAssetImporter(),
+                                   Keire::CreateManagedAssemblyAssetImporter(),
+                                   Keire::CreateShaderAssetImporter(),
+                                   Keire::CreateMaterialAssetImporter(),
+                                   Keire::CreateMeshAssetImporter(),
+                                   Keire::CreateTexture2DAssetImporter()};
         return Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     }
 
@@ -191,18 +197,29 @@ namespace
                             destination, Keire::Detail::ReadTextFile(auxiliary.PayloadPath, 64U * 1024U * 1024U));
                         publishedAuxiliary.push_back(destination);
                     }
-                    const std::array item{
-                        Keire::ExternalAssetImportItem{.SourcePath = request.CreatePayloadPath,
-                                                       .RelativeDestination = request.CreateRelativePath,
-                                                       .Settings = request.CreateSettings,
-                                                       .Conflict = Keire::ExternalAssetConflictPolicy::UniqueName}};
-                    auto external = database->ImportExternal(item, {}, progress);
-                    if (external.Entries.size() != 1 || !external.Entries.front().Id)
-                        throw std::runtime_error("Asset creation did not publish exactly one asset.");
-                    result.CreatedAsset = external.Entries.front().Id;
-                    result.Import = std::move(external.Import);
-                    result.ExternalEntries = std::move(external.Entries);
-                    result.Receipt = external.Receipt;
+                    const auto importer = database->FindImporterForPath(request.CreateRelativePath);
+                    if (request.CreateAuxiliarySources.empty() && importer && importer->Name == "Keire.Text")
+                    {
+                        const auto source = Keire::Detail::ReadTextFile(request.CreatePayloadPath, 64U * 1024U * 1024U);
+                        result.CreatedAsset = database->CreateAsset(
+                            request.CreateRelativePath, *importer,
+                            std::as_bytes(std::span(source.data(), source.size())), request.CreateSettings);
+                    }
+                    else
+                    {
+                        const std::array item{
+                            Keire::ExternalAssetImportItem{.SourcePath = request.CreatePayloadPath,
+                                                           .RelativeDestination = request.CreateRelativePath,
+                                                           .Settings = request.CreateSettings,
+                                                           .Conflict = Keire::ExternalAssetConflictPolicy::UniqueName}};
+                        auto external = database->ImportExternal(item, {}, progress);
+                        if (external.Entries.size() != 1 || !external.Entries.front().Id)
+                            throw std::runtime_error("Asset creation did not publish exactly one asset.");
+                        result.CreatedAsset = external.Entries.front().Id;
+                        result.Import = std::move(external.Import);
+                        result.ExternalEntries = std::move(external.Entries);
+                        result.Receipt = external.Receipt;
+                    }
                     std::filesystem::remove(journal);
                 }
                 catch (...)

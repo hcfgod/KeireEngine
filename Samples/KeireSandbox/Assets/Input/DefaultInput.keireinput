@@ -54,6 +54,14 @@
           "processors": [],
           "type": "Button",
           "valueType": "Boolean"
+        },
+        {
+          "id": "9379e855-1cd1-4665-8584-a49568a4f65e",
+          "interactions": [],
+          "name": "Reload",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
         }
       ],
       "bindings": [
@@ -229,6 +237,17 @@
           "name": "",
           "part": "",
           "path": "<Keyboard>/escape",
+          "processors": []
+        },
+        {
+          "action": "9379e855-1cd1-4665-8584-a49568a4f65e",
+          "composite": "",
+          "groups": [],
+          "id": "8d4e24c1-b5c3-49c2-a9a3-2520398aa686",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/space",
           "processors": []
         }
       ],

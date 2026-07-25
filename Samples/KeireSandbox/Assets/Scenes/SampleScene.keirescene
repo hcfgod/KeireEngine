@@ -49,11 +49,14 @@
         },
         {
           "data": {
-            "_lookSensitivity": 5.0,
-            "_maximumPitch": 90.0,
-            "_movementSharpness": 14.0,
-            "_movementSpeed": 4.0,
-            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":4.0},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":5.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":90.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0}],\"version\":1}"
+            "_invertHorizontal": false,
+            "_invertVertical": false,
+            "_lookSensitivity": 0.0,
+            "_lookSharpness": 0.0,
+            "_maximumPitch": 0.0,
+            "_movementSharpness": 0.0,
+            "_movementSpeed": 0.0,
+            "managedState": "{\"version\":1,\"fields\":[]}"
           },
           "enabled": true,
           "type": "73616e64-626f-4078-8000-000000000030",
@@ -107,6 +110,14 @@
           "enabled": true,
           "type": "4b454952-454d-4553-4852-454e44455201",
           "version": 2
+        },
+        {
+          "data": {
+            "managedState": "{\"version\":1,\"fields\":[]}"
+          },
+          "enabled": true,
+          "type": "f2354706-543d-4ac6-87e1-6d0c37bee1c8",
+          "version": 1
         }
       ],
       "id": "a1b2c3d4-1000-4000-8000-000000000003",
@@ -124,10 +135,10 @@
               1.5814927816390991
             ],
             "rotation": [
-              0.8806512951850891,
-              0.11315173655748367,
-              -0.3761037588119507,
-              0.26494553685188293
+              0.8806511759757996,
+              0.11315172165632248,
+              -0.3761036992073059,
+              0.26494550704956055
             ],
             "scale": [
               1.0,

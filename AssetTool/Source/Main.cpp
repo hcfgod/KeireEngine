@@ -301,11 +301,15 @@ namespace
 
             const auto project = Keire::Project::Open(commandLine.Project);
             Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
-            databaseSpecification.Importers = {
-                Keire::CreateInputActionAssetImporter(), Keire::CreateSceneAssetImporter(),
-                Keire::CreatePrefabAssetImporter(),      Keire::CreateManagedAssemblyAssetImporter(),
-                Keire::CreateShaderAssetImporter(),      Keire::CreateMaterialAssetImporter(),
-                Keire::CreateMeshAssetImporter(),        Keire::CreateTexture2DAssetImporter()};
+            databaseSpecification.Importers = {Keire::CreateTextAssetImporter(),
+                                               Keire::CreateInputActionAssetImporter(),
+                                               Keire::CreateSceneAssetImporter(),
+                                               Keire::CreatePrefabAssetImporter(),
+                                               Keire::CreateManagedAssemblyAssetImporter(),
+                                               Keire::CreateShaderAssetImporter(),
+                                               Keire::CreateMaterialAssetImporter(),
+                                               Keire::CreateMeshAssetImporter(),
+                                               Keire::CreateTexture2DAssetImporter()};
             auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             if (commandLine.Command == "scan")
             {

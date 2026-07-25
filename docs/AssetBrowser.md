@@ -35,9 +35,11 @@ captured transactionally.
 
 The Create toolbar and blank-area context menu share commands for Folder, Scene, Material, C# Script, Managed Assembly,
 Prefab from Selection, Unlit Shader, and Input Actions templates. Named creation asks for a base name before the
-source/metadata transaction. C# scripts must be created beneath a source root declared by a `.keireasm`; managed
-assembly creation publishes the definition and starter script together. New content is created in the displayed
-folder, appears immediately, and is selected. Single-asset create, move, and rename operations
+source/metadata transaction. C# scripts are created beneath a source root declared by a `.keireasm`; when the displayed
+folder is outside one, the editor redirects creation to the nearest or default runtime source root. Managed assembly
+creation publishes the definition and starter script together. New content appears immediately and is selected.
+Standalone C# scripts use the single-record text-asset transaction and defer compilation to the managed build
+coordinator instead of recooking the asset catalog. Single-asset create, move, and rename operations
 update the live source index without rescanning or hashing unrelated assets; required material catalog persistence runs
 in the background. Import diagnostics are shown per asset without hiding a newly created source file; strict cooking
 remains fail-fast.
@@ -69,9 +71,17 @@ to the operating-system file association.
 
 Opening a C# script first regenerates SDK-style `<Assembly>.csproj` files and a project-root Visual Studio solution from
 the live `.keireasm` graph. The projects share the same source roots, project references, .NET target, namespaces, and
-`Keire.Managed.dll` reference used by the managed build. When the configured editor is `devenv.exe`, the solution opens
-with the requested script through Visual Studio's `/Edit` workflow. Build Settings also exposes **Regenerate C#
-Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
+engine API used by the managed build. Source checkouts include `Keire.Managed.csproj` in the solution and reference it
+through a generated .NET 8 design-time facade so Visual Studio 2022 has complete engine semantic information and source
+navigation. The generated root gameplay projects also target .NET 8/C# 12 for Visual Studio 2022 design-time
+compatibility, while Kéire's separate internal compilation projects remain on .NET 10/C# 14. Packaged editors use a
+stable project-local `Keire.Managed.dll` reference. When the configured editor is `devenv.exe`, the solution opens with
+the requested script through Visual Studio's `/Edit` workflow. Build Settings also exposes **Regenerate C# Project**.
+Generated root `.sln` and `.csproj` files are ignored by newly created projects.
+
+Managed builds keep strict warnings-as-errors behavior for correctness and analyzer diagnostics, but common unused local
+and field diagnostics (`CS0168`, `CS0169`, `CS0219`, and `CS0414`) remain non-blocking warnings. They are reported in the
+Console without preventing assembly publication or hot reload.
 
 List and Grid labels omit source extensions. A delayed hover card supplies the complete filename, extension, type,
 project-relative path, size, stable ID, importer, and latest import result so visually identical stems remain

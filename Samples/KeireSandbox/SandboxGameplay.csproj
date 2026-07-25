@@ -2,8 +2,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Deterministic>true</Deterministic>
+    <DebugType>portable</DebugType>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);CS0649</NoWarn>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>SandboxGameplay</AssemblyName>
     <RootNamespace>KeireSandbox</RootNamespace>
@@ -12,9 +19,6 @@
     <Compile Include="Assets/Scripts/Runtime/**/*.cs" LinkBase="Assets/Scripts/Runtime" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="Keire.Managed">
-      <HintPath>Library/ScriptAssemblies/References/Keire.Managed.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
+    <ProjectReference Include="Library/ScriptAssemblies/References/Keire.Managed.VisualStudio.csproj" />
   </ItemGroup>
 </Project>

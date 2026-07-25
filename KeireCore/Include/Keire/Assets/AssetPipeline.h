@@ -395,5 +395,6 @@ namespace Keire
                                                           AssetOperationProgressCallback progress);
     };
 
+    [[nodiscard]] KEIRE_API AssetImporterRegistration CreateTextAssetImporter();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateInputActionAssetImporter();
 } // namespace Keire

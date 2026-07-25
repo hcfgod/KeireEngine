@@ -179,6 +179,25 @@ TEST_CASE("C sharp source files use the text asset fallback")
     REQUIRE(record);
     CHECK(record->Type == Keire::TextAsset::StaticType());
     CHECK(record->Importer == "Keire.Text");
+
+    Keire::AssetDatabaseSpecification registeredSpecification{.ProjectRoot = project.Root};
+    registeredSpecification.Importers.push_back(Keire::CreateTextAssetImporter());
+    auto registeredDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(registeredSpecification));
+    const auto importer = registeredDatabase->FindImporterForPath("source.cs");
+    REQUIRE(importer);
+    CHECK(importer->Name == "Keire.Text");
+    CHECK(importer->Type == Keire::TextAsset::StaticType());
+    const std::string source = "public sealed class CreatedScript {}\n";
+    const auto sourceBytes = std::as_bytes(std::span(source.data(), source.size()));
+    CHECK(importer->Import(sourceBytes) == std::vector<std::byte>(sourceBytes.begin(), sourceBytes.end()));
+
+    const auto created = registeredDatabase->CreateAsset("Scripts/CreatedScript.cs", *importer, sourceBytes);
+    const auto createdRecord = registeredDatabase->Find(created);
+    REQUIRE(createdRecord);
+    CHECK(createdRecord->RelativePath == std::filesystem::path("Scripts/CreatedScript.cs"));
+    CHECK(createdRecord->Importer == "Keire.Text");
+    CHECK(std::filesystem::is_regular_file(project.Root / "Assets/Scripts/CreatedScript.cs.keiremeta"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Library/AssetCache/Runtime/catalog.json"));
 }
 
 TEST_CASE("Asset source replacement preserves identity and rolls back invalid content")

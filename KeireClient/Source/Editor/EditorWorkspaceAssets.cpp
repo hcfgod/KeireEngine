@@ -914,13 +914,13 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
         if (m_AssetOperations->Busy())
             throw std::runtime_error("Wait for the active asset operation before creating a script.");
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        const auto destination = directory / (std::string(name) + ".cs");
-        if (m_AssetDatabase->Find(destination))
-            throw std::runtime_error("A script with that name already exists in this folder.");
-
+        auto destinationDirectory = directory;
         const auto projectRelativeParent = std::filesystem::path("Assets") / directory;
         std::string rootNamespace;
         std::size_t matchedLength = 0;
+        std::filesystem::path fallbackRoot;
+        std::string fallbackNamespace;
+        bool fallbackIsDescendant = false;
         const auto projectRoot = Owner().GetProject()->Root();
         for (const auto& record : m_AssetDatabase->Records())
         {
@@ -930,15 +930,40 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
                 Keire::ManagedAssemblyAsset::Decode(ReadBytes(projectRoot / "Assets" / record.RelativePath));
             for (const auto& root : assembly->Definition().SourceRoots)
             {
+                const auto assetsRelativeRoot = root.lexically_normal().lexically_relative("Assets");
+                if (assetsRelativeRoot.empty() || assetsRelativeRoot.is_absolute() ||
+                    assetsRelativeRoot.generic_string().starts_with(".."))
+                    continue;
                 if (SameOrChild(root, projectRelativeParent) && root.generic_string().size() >= matchedLength)
                 {
                     rootNamespace = assembly->Definition().RootNamespace;
                     matchedLength = root.generic_string().size();
                 }
+                const bool descendant = SameOrChild(projectRelativeParent, root);
+                const bool runtime =
+                    assembly->Definition().Classification == Keire::ManagedAssemblyClassification::Runtime;
+                if ((descendant || runtime) &&
+                    (fallbackNamespace.empty() || (descendant && !fallbackIsDescendant) ||
+                     (descendant == fallbackIsDescendant && root.generic_string() < fallbackRoot.generic_string())))
+                {
+                    fallbackRoot = assetsRelativeRoot;
+                    fallbackNamespace = assembly->Definition().RootNamespace;
+                    fallbackIsDescendant = descendant;
+                }
             }
         }
         if (rootNamespace.empty())
-            throw std::runtime_error("Create scripts inside a source root declared by a .keireasm asset.");
+        {
+            if (fallbackNamespace.empty())
+                throw std::runtime_error("Create a runtime .keireasm asset before creating a C# script.");
+            destinationDirectory = fallbackRoot;
+            rootNamespace = fallbackNamespace;
+        }
+
+        const auto destination = destinationDirectory / (std::string(name) + ".cs");
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A script with that name already exists in " +
+                                     destinationDirectory.generic_string() + ".");
 
         const std::string source = "using Keire;\n\nnamespace " + rootNamespace + ";\n\n[StableComponentId(\"" +
                                    Keire::AssetId::Generate().ToString() + "\")]\npublic sealed class " +

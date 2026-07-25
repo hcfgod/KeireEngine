@@ -9,6 +9,19 @@
 - Correct first-person look direction and focus/capture the gameplay viewport without leaving editor controls hovered.
 - Correct the first-person controller forward/backward movement direction.
 - Make Escape toggle FPS cursor capture and smooth target camera rotation to remove raw mouse jitter.
+- Redirect C# script creation from non-assembly folders into the nearest/default runtime `.keireasm` source root.
+- Register `.cs` source assets with the editor, worker, and command-line databases so script creation publishes through
+  the normal transactional text-asset pipeline.
+- Create standalone C# scripts through the single-record asset transaction instead of running a full project import and
+  catalog cook before returning.
+- Generate source-checkout C# workspaces with `Keire.Managed.csproj` in the solution and direct gameplay project
+  references, restoring Visual Studio semantic coloring, completion, and engine API navigation.
+- Route that source-checkout reference through a generated .NET 8/C# 12 design-time facade so Visual Studio 2022 can
+  load engine API symbols while Kéire runtime compilation remains on .NET 10/C# 14.
+- Generate root gameplay workspace projects as .NET 8/C# 12 for Visual Studio 2022 design-time evaluation while keeping
+  the separate internal gameplay compilation projects on .NET 10/C# 14.
+- Keep common unused C# local and field diagnostics as visible warnings instead of promoting them to build-blocking
+  errors, while retaining strict warnings-as-errors behavior for other managed diagnostics.
 
 - Added .NET 10/C# 14 managed assembly schema v2, immutable incremental build generations, automatic debounced script
   compilation, transactional field-preserving Play Mode reload, per-Behaviour exception quarantine, managed component

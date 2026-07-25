@@ -7,10 +7,10 @@ namespace KeireSandbox;
 public sealed class FirstPersonCamera : Behaviour
 {
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000031")]
-    private float _movementSpeed = 6.0f;
+    private float _movementSpeed = 12.0f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000032")]
-    private float _lookSensitivity = 0.12f;
+    private float _lookSensitivity = 2.12f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000033")]
     private float _maximumPitch = 89.0f;

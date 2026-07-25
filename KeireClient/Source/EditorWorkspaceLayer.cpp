@@ -765,12 +765,16 @@ void EditorWorkspaceLayer::OnAttach()
             m_ProjectSettingsDocument->Open(project->Root(), renderEnvironment, std::move(projectSettingsUndo));
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
-            databaseSpecification.Importers = {
-                Keire::CreateInputActionAssetImporter(),   Keire::CreateSceneAssetImporter(),
-                Keire::CreatePrefabAssetImporter(),        Keire::CreateManagedAssemblyAssetImporter(),
-                Keire::CreateShaderAssetImporter(),        Keire::CreateMaterialAssetImporter(),
-                Keire::CreateMeshAssetImporter(),          Keire::CreateTexture2DAssetImporter(),
-                Keire::CreateAnimationGraphAssetImporter()};
+            databaseSpecification.Importers = {Keire::CreateTextAssetImporter(),
+                                               Keire::CreateInputActionAssetImporter(),
+                                               Keire::CreateSceneAssetImporter(),
+                                               Keire::CreatePrefabAssetImporter(),
+                                               Keire::CreateManagedAssemblyAssetImporter(),
+                                               Keire::CreateShaderAssetImporter(),
+                                               Keire::CreateMaterialAssetImporter(),
+                                               Keire::CreateMeshAssetImporter(),
+                                               Keire::CreateTexture2DAssetImporter(),
+                                               Keire::CreateAnimationGraphAssetImporter()};
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
