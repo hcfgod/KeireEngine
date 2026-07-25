@@ -50,6 +50,50 @@ TEST_CASE("Managed assembly definitions round trip and expose dependencies")
     CHECK(output.AssetDependencies == definition.References);
 }
 
+TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
+{
+    const auto root = std::filesystem::temp_directory_path() / ("Keire-ManagedIde-" + TestAsset(90).ToString());
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup() { std::filesystem::remove_all(Root); }
+    } cleanup{root};
+    std::filesystem::create_directories(root / "Assets/Scripts/Gameplay");
+
+    Keire::ScriptSystemSpecification specification;
+    specification.Mode = Keire::ScriptMode::Enabled;
+    specification.ProjectRoot = root;
+    specification.AssemblyDirectory = "Library/ScriptAssemblies";
+    std::filesystem::create_directories(root / "Library/Managed");
+    std::ofstream(root / "Library/Managed/Keire.Managed.dll", std::ios::binary) << "managed-api";
+    specification.ManagedApiAssembly = root / "Library/Managed/Keire.Managed.dll";
+    auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
+
+    Keire::ManagedAssemblyDefinition gameplay;
+    gameplay.Name = "Gameplay";
+    gameplay.RootNamespace = "Game";
+    gameplay.SourceRoots = {"Assets/Scripts/Gameplay"};
+    Keire::ManagedBuildRequest request;
+    request.Assemblies.push_back({TestAsset(91), gameplay});
+    const auto workspace = scripts->GenerateIdeWorkspace(request, "My Game");
+
+    CHECK(workspace.Solution == root / "My_Game.sln");
+    REQUIRE(workspace.Projects.size() == 1);
+    CHECK(workspace.Projects.front() == root / "Gameplay.csproj");
+    CHECK(std::filesystem::is_regular_file(workspace.Solution));
+    CHECK(std::filesystem::is_regular_file(workspace.Projects.front()));
+    const auto project = ReadBytes(workspace.Projects.front());
+    const std::string projectText(reinterpret_cast<const char*>(project.data()), project.size());
+    CHECK(projectText.starts_with("<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
+    CHECK(projectText.find("Assets/Scripts/Gameplay") != std::string::npos);
+    CHECK(projectText.find("<RootNamespace>Game</RootNamespace>") != std::string::npos);
+    CHECK(projectText.find("<Reference Include=\"Keire.Managed\">") != std::string::npos);
+    CHECK(projectText.find("<TargetFramework>net8.0</TargetFramework>") != std::string::npos);
+    CHECK(projectText.find("Library/ScriptAssemblies/References/Keire.Managed.dll") != std::string::npos);
+    CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.dll"));
+    CHECK(projectText.find(root.generic_string()) == std::string::npos);
+}
+
 TEST_CASE("Managed builds publish only successful replacements")
 {
     const auto dotnet = std::filesystem::absolute("Library/DotnetSdk10/sdk/dotnet.exe");

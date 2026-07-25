@@ -362,6 +362,154 @@ namespace KeireEditor
             return result;
         }
 
+        [[nodiscard]] std::vector<std::byte> MakePrefabPreview(const ThumbnailRequest& request,
+                                                               const std::uint32_t width, const std::uint32_t height)
+        {
+            if (request.PreviewMeshes.empty())
+                return MakeIcon(width, height, {34, 42, 55}, {89, 174, 236}, 'P', request.Missing);
+            struct WorldVertex final
+            {
+                Keire::Vector3 Position;
+                Keire::Vector3 Normal;
+            };
+            struct PreviewVertex final
+            {
+                float X = 0.0F;
+                float Y = 0.0F;
+                float Depth = 0.0F;
+                float Light = 0.0F;
+            };
+            std::vector<WorldVertex> vertices;
+            std::vector<std::uint32_t> indices;
+            for (const auto& instance : request.PreviewMeshes)
+            {
+                if (!instance.Mesh)
+                    continue;
+                const auto base = static_cast<std::uint32_t>(vertices.size());
+                vertices.reserve(vertices.size() + instance.Mesh->Vertices().size());
+                for (const auto& vertex : instance.Mesh->Vertices())
+                {
+                    auto normal = Keire::Math::TransformDirection(instance.Transform, vertex.Normal);
+                    const float normalLength =
+                        std::sqrt(normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+                    if (normalLength > 0.000001F)
+                    {
+                        normal.X /= normalLength;
+                        normal.Y /= normalLength;
+                        normal.Z /= normalLength;
+                    }
+                    vertices.push_back({Keire::Math::TransformPoint(instance.Transform, vertex.Position), normal});
+                }
+                indices.reserve(indices.size() + instance.Mesh->Indices().size());
+                for (const auto index : instance.Mesh->Indices())
+                    indices.push_back(base + index);
+            }
+            if (vertices.empty())
+                return MakeIcon(width, height, {34, 42, 55}, {89, 174, 236}, 'P', request.Missing);
+
+            Keire::Vector3 minimum = vertices.front().Position;
+            Keire::Vector3 maximum = minimum;
+            for (const auto& vertex : vertices)
+            {
+                minimum.X = std::min(minimum.X, vertex.Position.X);
+                minimum.Y = std::min(minimum.Y, vertex.Position.Y);
+                minimum.Z = std::min(minimum.Z, vertex.Position.Z);
+                maximum.X = std::max(maximum.X, vertex.Position.X);
+                maximum.Y = std::max(maximum.Y, vertex.Position.Y);
+                maximum.Z = std::max(maximum.Z, vertex.Position.Z);
+            }
+            const Keire::Vector3 center{(minimum.X + maximum.X) * 0.5F, (minimum.Y + maximum.Y) * 0.5F,
+                                        (minimum.Z + maximum.Z) * 0.5F};
+            const float extent =
+                std::max({maximum.X - minimum.X, maximum.Y - minimum.Y, maximum.Z - minimum.Z, 0.0001F});
+            std::vector<PreviewVertex> projected;
+            projected.reserve(vertices.size());
+            float minimumX = std::numeric_limits<float>::max();
+            float minimumY = std::numeric_limits<float>::max();
+            float maximumX = std::numeric_limits<float>::lowest();
+            float maximumY = std::numeric_limits<float>::lowest();
+            for (const auto& vertex : vertices)
+            {
+                const float x = (vertex.Position.X - center.X) / extent;
+                const float y = (vertex.Position.Y - center.Y) / extent;
+                const float z = (vertex.Position.Z - center.Z) / extent;
+                const float viewX = (x - z) * 0.70710678F;
+                const float viewY = y * 0.8660254F - (x + z) * 0.25F;
+                const float depth = (x + z) * 0.6123724F + y * 0.5F;
+                const float diffuse = std::clamp(
+                    vertex.Normal.X * -0.36F + vertex.Normal.Y * 0.78F + vertex.Normal.Z * -0.51F, -1.0F, 1.0F);
+                projected.push_back({viewX, viewY, depth, 0.24F + std::max(diffuse, 0.0F) * 0.76F});
+                minimumX = std::min(minimumX, viewX);
+                minimumY = std::min(minimumY, viewY);
+                maximumX = std::max(maximumX, viewX);
+                maximumY = std::max(maximumY, viewY);
+            }
+            const float projectedWidth = std::max(maximumX - minimumX, 0.0001F);
+            const float projectedHeight = std::max(maximumY - minimumY, 0.0001F);
+            const float scale = std::min(width * 0.82F / projectedWidth, height * 0.82F / projectedHeight);
+            for (auto& vertex : projected)
+            {
+                vertex.X = width * 0.5F + (vertex.X - (minimumX + maximumX) * 0.5F) * scale;
+                vertex.Y = height * 0.52F - (vertex.Y - (minimumY + maximumY) * 0.5F) * scale;
+            }
+
+            std::vector<std::byte> result(static_cast<std::size_t>(width) * height * 4);
+            FillPreviewBackground(result, width, height);
+            std::vector<float> depthBuffer(static_cast<std::size_t>(width) * height,
+                                           std::numeric_limits<float>::infinity());
+            constexpr std::size_t maximumPreviewTriangles = 50000;
+            const std::size_t triangleStride =
+                std::max<std::size_t>(1, (indices.size() / 3 + maximumPreviewTriangles - 1) / maximumPreviewTriangles);
+            for (std::size_t index = 0; index + 2 < indices.size(); index += 3 * triangleStride)
+            {
+                if (indices[index] >= projected.size() || indices[index + 1] >= projected.size() ||
+                    indices[index + 2] >= projected.size())
+                    continue;
+                const auto first = projected[indices[index]];
+                const auto second = projected[indices[index + 1]];
+                const auto third = projected[indices[index + 2]];
+                const float area =
+                    (second.X - first.X) * (third.Y - first.Y) - (second.Y - first.Y) * (third.X - first.X);
+                if (std::abs(area) < 0.0001F)
+                    continue;
+                const int left = std::max(0, static_cast<int>(std::floor(std::min({first.X, second.X, third.X}))));
+                const int right = std::min(static_cast<int>(width) - 1,
+                                           static_cast<int>(std::ceil(std::max({first.X, second.X, third.X}))));
+                const int top = std::max(0, static_cast<int>(std::floor(std::min({first.Y, second.Y, third.Y}))));
+                const int bottom = std::min(static_cast<int>(height) - 1,
+                                            static_cast<int>(std::ceil(std::max({first.Y, second.Y, third.Y}))));
+                for (int y = top; y <= bottom; ++y)
+                    for (int x = left; x <= right; ++x)
+                    {
+                        const float sampleX = x + 0.5F;
+                        const float sampleY = y + 0.5F;
+                        const float firstWeight =
+                            ((second.X - sampleX) * (third.Y - sampleY) - (second.Y - sampleY) * (third.X - sampleX)) /
+                            area;
+                        const float secondWeight =
+                            ((third.X - sampleX) * (first.Y - sampleY) - (third.Y - sampleY) * (first.X - sampleX)) /
+                            area;
+                        const float thirdWeight = 1.0F - firstWeight - secondWeight;
+                        if (firstWeight < -0.0001F || secondWeight < -0.0001F || thirdWeight < -0.0001F)
+                            continue;
+                        const float depth =
+                            first.Depth * firstWeight + second.Depth * secondWeight + third.Depth * thirdWeight;
+                        const auto pixel = static_cast<std::size_t>(y) * width + static_cast<std::size_t>(x);
+                        if (depth >= depthBuffer[pixel])
+                            continue;
+                        depthBuffer[pixel] = depth;
+                        const float light = std::clamp(first.Light * firstWeight + second.Light * secondWeight +
+                                                           third.Light * thirdWeight,
+                                                       0.0F, 1.0F);
+                        PutPixel(result, width, static_cast<std::uint32_t>(x), static_cast<std::uint32_t>(y),
+                                 static_cast<std::uint8_t>(36.0F + light * 87.0F),
+                                 static_cast<std::uint8_t>(68.0F + light * 133.0F),
+                                 static_cast<std::uint8_t>(91.0F + light * 151.0F));
+                    }
+            }
+            return result;
+        }
+
         [[nodiscard]] std::vector<std::byte> MakeScenePreview(const ThumbnailRequest& request,
                                                               const std::uint32_t width, const std::uint32_t height)
         {
@@ -587,6 +735,7 @@ namespace KeireEditor
         RegisterProvider(".gltf", 5, MakeMeshPreview);
         RegisterProvider(".glb", 5, MakeMeshPreview);
         RegisterProvider(".keirescene", 3, MakeScenePreview);
+        RegisterProvider(".keireprefab", 1, MakePrefabPreview);
         RegisterProvider(".keireshader", 3, MakeShaderPreview);
         RegisterProvider(".hlsl", 3, MakeShaderPreview);
         RegisterProvider(".keireinput", 3, MakeInputPreview);

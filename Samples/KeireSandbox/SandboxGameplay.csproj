@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>SandboxGameplay</AssemblyName>
+    <RootNamespace>KeireSandbox</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Assets/Scripts/Runtime/**/*.cs" LinkBase="Assets/Scripts/Runtime" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Keire.Managed">
+      <HintPath>Library/ScriptAssemblies/References/Keire.Managed.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

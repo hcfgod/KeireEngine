@@ -169,6 +169,54 @@ TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
     CHECK_THROWS((void)database->Refresh());
 }
 
+TEST_CASE("C sharp source files use the text asset fallback")
+{
+    TemporaryAssetProject project;
+    project.Write("Scripts/PlayerController.cs", "public sealed class PlayerController {}\n");
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto record = database->Find("Scripts/PlayerController.cs");
+    REQUIRE(record);
+    CHECK(record->Type == Keire::TextAsset::StaticType());
+    CHECK(record->Importer == "Keire.Text");
+}
+
+TEST_CASE("Asset source replacement preserves identity and rolls back invalid content")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.Replace";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000012");
+    importer.Extensions = {".replace"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    {
+        if (!bytes.empty() && bytes.front() == std::byte{'!'})
+            throw std::invalid_argument("invalid replacement");
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const std::string original = "original";
+    const auto id =
+        database->CreateAsset("Stable.replace", importer, std::as_bytes(std::span(original.data(), original.size())));
+    const auto before = database->Find(id);
+    REQUIRE(before);
+
+    const std::string replacement = "replacement";
+    database->ReplaceAssetSource(id, std::as_bytes(std::span(replacement.data(), replacement.size())));
+    const auto replaced = database->Find(id);
+    REQUIRE(replaced);
+    CHECK(replaced->Id == id);
+    CHECK(replaced->SourceDigest != before->SourceDigest);
+
+    const std::string invalid = "!invalid";
+    CHECK_THROWS(database->ReplaceAssetSource(id, std::as_bytes(std::span(invalid.data(), invalid.size()))));
+    const auto restored = database->Find(id);
+    REQUIRE(restored);
+    CHECK(restored->Id == id);
+    CHECK(restored->SourceDigest == replaced->SourceDigest);
+}
+
 TEST_CASE("Successful compatible imports upgrade metadata without losing project fields")
 {
     TemporaryAssetProject project;
@@ -737,6 +785,18 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
     CHECK(std::filesystem::is_directory(project.Root / "Assets/Organized Copy"));
     CHECK_THROWS_AS(database->MoveFolder("Organized", "Organized/Nested"), std::invalid_argument);
     CHECK_THROWS_AS(database->MoveAsset(duplicateId, "Greeting.txt"), std::runtime_error);
+
+    const auto collisionId = database->Duplicate(original->Id, "Collision.txt");
+    const auto collisionTrash = database->TrashAsset(collisionId);
+    project.Write("Collision.txt", "replacement");
+    (void)database->Refresh();
+    const auto replacement = database->Find("Collision.txt");
+    REQUIRE(replacement);
+    CHECK(replacement->Id != collisionId);
+    database->RestoreTrash(collisionTrash.Id);
+    CHECK(database->Find("Collision.txt")->Id == replacement->Id);
+    CHECK(std::ranges::none_of(database->TrashRecords(),
+                               [&](const Keire::AssetTrashRecord& record) { return record.Id == collisionTrash.Id; }));
 
     auto changeDatabase = Keire::CreateRef<Keire::AssetDatabase>(
         Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .ChangeDebounce = std::chrono::milliseconds(0)});

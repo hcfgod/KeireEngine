@@ -35,13 +35,13 @@ namespace KeireEditor
 
     void AssetOperationService::QueueImport(const AssetOperationPriority priority, AssetOperationContext context)
     {
-        if (priority == AssetOperationPriority::MaterialRefresh)
+        if (priority == AssetOperationPriority::AutomaticRefresh || priority == AssetOperationPriority::MaterialRefresh)
         {
             const auto queued =
                 std::ranges::find_if(m_Queue,
-                                     [](const PendingOperation& item)
+                                     [priority](const PendingOperation& item)
                                      {
-                                         return item.Priority == AssetOperationPriority::MaterialRefresh &&
+                                         return item.Priority == priority &&
                                                 item.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll;
                                      });
             if (queued != m_Queue.end())
@@ -185,6 +185,36 @@ namespace KeireEditor
         }
         if (m_Running->Process.Poll())
             FinishCurrent();
+    }
+
+    bool AssetOperationService::PreemptBackgroundImports()
+    {
+        const auto queuedBefore = m_Queue.size();
+        std::erase_if(m_Queue,
+                      [](const PendingOperation& operation)
+                      {
+                          return (operation.Priority == AssetOperationPriority::AutomaticRefresh ||
+                                  operation.Priority == AssetOperationPriority::MaterialRefresh) &&
+                                 operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll;
+                      });
+        bool preempted = m_Queue.size() != queuedBefore;
+        if (m_Running &&
+            (m_Running->Pending.Priority == AssetOperationPriority::AutomaticRefresh ||
+             m_Running->Pending.Priority == AssetOperationPriority::MaterialRefresh) &&
+            m_Running->Pending.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll)
+        {
+            CancelCurrent();
+            constexpr auto interactivePreemptionTimeout = std::chrono::milliseconds(25);
+            if (!m_Running->Process.WaitFor(interactivePreemptionTimeout))
+                m_Running->Process.Terminate();
+            FinishCurrent();
+            auto& completion = m_Completions.back();
+            completion.Result.Success = false;
+            completion.Result.Cancelled = true;
+            completion.Result.Diagnostic = "Background asset refresh yielded to an interactive editor action.";
+            preempted = true;
+        }
+        return preempted;
     }
 
     void AssetOperationService::StartNext()

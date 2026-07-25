@@ -29,13 +29,27 @@ Both the thumbnail and extension-free label are drag handles. Folder targets ret
 dispatch by asset type. Scenes open through the normal dirty-document guard, Input Actions open in their editor, and a
 Material dropped over a visible Mesh Renderer is assigned to the ray-picked entity as an undoable scene edit.
 The current built-in material path also previews its optional `Tint` property through the Mesh Renderer tint.
+Dragging a GameObject from the Hierarchy over a Project folder, breadcrumb, or blank content area creates a prefab in
+that exact folder. The GameObject name supplies a sanitized unique asset name, and the complete selected hierarchy is
+captured transactionally.
 
-The Create toolbar and blank-area context menu share commands for Folder, Scene, Material, Unlit Shader, and Input
-Actions templates. Material creation asks for its base name before the source/metadata transaction. New content is
-created in the displayed folder, appears immediately, and is selected. Single-asset create, move, and rename operations
+The Create toolbar and blank-area context menu share commands for Folder, Scene, Material, C# Script, Managed Assembly,
+Prefab from Selection, Unlit Shader, and Input Actions templates. Named creation asks for a base name before the
+source/metadata transaction. C# scripts must be created beneath a source root declared by a `.keireasm`; managed
+assembly creation publishes the definition and starter script together. New content is created in the displayed
+folder, appears immediately, and is selected. Single-asset create, move, and rename operations
 update the live source index without rescanning or hashing unrelated assets; required material catalog persistence runs
 in the background. Import diagnostics are shown per asset without hiding a newly created source file; strict cooking
 remains fail-fast.
+
+Prefab assets open in an isolated Prefab Mode while preserving the active scene document and its undo history. The
+Prefab Overrides panel provides explicit Save, Save and Close, and Discard and Close boundaries. Scene instances expose
+Apply to Prefab, Revert All Overrides, one-level Unpack, and Unpack Completely. Apply preserves scene-owned root
+placement and records the source update plus scene instance metadata as one undoable command. A prefab context menu can
+create a variant; variants regenerate their override layer against the composed base. Direct editing of a root prefab
+that owns nested instances is rejected rather than flattening nested ownership; create and edit a variant instead.
+Prefab thumbnails compose base variants and nested prefabs, resolve visible Mesh Renderers, and render their combined
+world-transformed geometry through the bounded thumbnail worker rather than displaying a generic prefab icon.
 
 View mode and thumbnail size are project-local preferences under `Library/Editor`. Generated data never enters source
 control. Asset mutations use the database's confined transactional operations; rename retains the `.keiremeta` identity,
@@ -48,6 +62,16 @@ destination has become occupied. Permanent deletion is deliberately separate fro
 
 Reveal resolves the project root to an absolute canonical path. Windows selects files with Explorer and opens folders
 directly; macOS uses Finder reveal, and Unix opens the containing directory for files.
+
+Scene and Input Actions assets retain their internal guarded editors. Other source-oriented assets open in an external
+editor on double-click. Project-panel preferences can store an explicit editor executable; leaving it empty delegates
+to the operating-system file association.
+
+Opening a C# script first regenerates SDK-style `<Assembly>.csproj` files and a project-root Visual Studio solution from
+the live `.keireasm` graph. The projects share the same source roots, project references, .NET target, namespaces, and
+`Keire.Managed.dll` reference used by the managed build. When the configured editor is `devenv.exe`, the solution opens
+with the requested script through Visual Studio's `/Edit` workflow. Build Settings also exposes **Regenerate C#
+Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
 
 List and Grid labels omit source extensions. A delayed hover card supplies the complete filename, extension, type,
 project-relative path, size, stable ID, importer, and latest import result so visually identical stems remain

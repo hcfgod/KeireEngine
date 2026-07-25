@@ -21,6 +21,7 @@ namespace KeireEditor
         ExplicitAction,
         UndoRedo,
         Cook,
+        AutomaticRefresh,
         MaterialRefresh
     };
 
@@ -30,6 +31,7 @@ namespace KeireEditor
         Reveal,
         OpenScene,
         OpenInputActions,
+        OpenExternal,
         AdoptSceneCopy
     };
 
@@ -101,6 +103,7 @@ namespace KeireEditor
         void QueueCook(Keire::AssetBuildProfile profile, std::filesystem::path output);
         void QueueReceipt(Keire::ExternalAssetImportReceiptId receipt, bool redo);
         void Update();
+        [[nodiscard]] bool PreemptBackgroundImports();
         void CancelCurrent();
         void Shutdown() noexcept;
 

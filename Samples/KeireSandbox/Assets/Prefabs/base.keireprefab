@@ -1,0 +1,59 @@
+{
+  "basePrefab": null,
+  "entities": [
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.10000000149011612,
+              0.10000000149011612,
+              0.10000000149011612
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "material": "e843c376-73b4-47e5-905a-3776564d5e4f",
+            "mesh": "c506e2a8-62f9-44f0-8831-b66755cc9b9b",
+            "receiveShadows": true,
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 2
+        }
+      ],
+      "id": "c675308e-c12d-47bc-baa6-38993de26b44",
+      "name": "base",
+      "parent": null
+    }
+  ],
+  "name": "base",
+  "prefabInstances": [],
+  "prefabOverrides": [],
+  "prefabSchemaVersion": 1,
+  "schemaVersion": 3
+}

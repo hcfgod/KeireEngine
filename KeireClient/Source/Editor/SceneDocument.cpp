@@ -262,8 +262,8 @@ namespace KeireEditor
     {
         if (!scene)
             throw std::invalid_argument("SceneDocument::ReplaceEditingScene requires a scene.");
-        if (m_Scene && m_Scene != scene)
-            m_Scene->Close();
+        // Viewport and panel callbacks can retain a scene Ref until the current UI frame completes. Releasing the
+        // document's ownership lets the old scene close when its final alias is gone instead of invalidating it here.
         m_Scene = std::move(scene);
         if (preserveSelection)
             SynchronizeSelection();

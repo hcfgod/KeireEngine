@@ -320,6 +320,7 @@ namespace Keire
                                           const AssetImporterRegistration& importer,
                                           std::span<const std::byte> sourceBytes,
                                           const AssetImportSettings& settings = {});
+        void ReplaceAssetSource(AssetId id, std::span<const std::byte> sourceBytes);
         [[nodiscard]] AssetId ExtractMaterial(AssetId model, AssetId generatedMaterial,
                                               const std::filesystem::path& relativePath);
         [[nodiscard]] std::vector<AssetId> ExtractMaterials(AssetId model,

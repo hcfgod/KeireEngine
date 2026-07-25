@@ -429,6 +429,7 @@ namespace Keire
         [[nodiscard]] UiTableScope BeginTable(std::string_view id, std::size_t columns, UiTableOptions options = {});
         [[nodiscard]] UiDragSourceScope BeginDragSource();
         [[nodiscard]] UiDragTargetScope BeginDragTarget();
+        [[nodiscard]] UiDragTargetScope BeginDragTarget(UiItemRect area, std::string_view id);
         [[nodiscard]] UiPanelScope BeginPanel(UiPanelRegistration& panel, UiWindowOptions options = {});
         void OpenPopup(std::string_view id);
         void CloseCurrentPopup();
@@ -486,6 +487,7 @@ namespace Keire
         void DrawTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color, float thickness = 1.0F);
         void DrawFilledTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color);
         void DrawOverlayText(UiPosition position, UiColor color, std::string_view text);
+        [[nodiscard]] UiItemRect ContentRect() const;
         [[nodiscard]] UiSize ContentAvailable() const;
         [[nodiscard]] bool WindowFocused() const;
         [[nodiscard]] UiPointerState PointerState() const;

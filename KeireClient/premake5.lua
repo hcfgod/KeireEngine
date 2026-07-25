@@ -22,6 +22,12 @@ project(ProjectConfig.CLIENT_TARGET)
 
     LinkKeireCore()
 
-    dependson { AssetWorkerTarget }
+    dependson { AssetWorkerTarget, KeireManagedProject }
+
+    postbuildcommands
+    {
+        '{MKDIR} "%{cfg.targetdir}/Managed"',
+        '{COPYFILE} "../Build/Managed/Keire.Managed.dll" "%{cfg.targetdir}/Managed/Keire.Managed.dll"'
+    }
 
     LinkSDL3()

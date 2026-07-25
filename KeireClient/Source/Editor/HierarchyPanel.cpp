@@ -50,7 +50,18 @@ namespace KeireEditor
                 m_Controller.RequestHierarchyRename(selected->Id, selected->Name);
             }
         }
-        const auto objects = scene->Objects();
+        const auto hierarchy = scene->Snapshot();
+        const auto& objects = hierarchy.Objects;
+        const auto prefabInstanceFor = [&](const Keire::AssetId object)
+        {
+            return std::ranges::find_if(hierarchy.PrefabInstances,
+                                        [&](const Keire::PrefabInstanceDefinition& instance)
+                                        {
+                                            return std::ranges::any_of(instance.Objects,
+                                                                       [&](const Keire::PrefabObjectMapping& mapping)
+                                                                       { return mapping.Instance == object; });
+                                        });
+        };
         std::vector<Keire::AssetId> hierarchyOrder;
         hierarchyOrder.reserve(objects.size());
         for (const auto& object : objects)
@@ -91,7 +102,9 @@ namespace KeireEditor
             for (const auto* object : matches)
             {
                 auto id = ui.PushId(object->Id.ToString());
-                if (ui.Selectable(object->Name, document.IsSelected(object->Id)))
+                const bool prefabObject = prefabInstanceFor(object->Id) != hierarchy.PrefabInstances.end();
+                const auto label = prefabObject ? "[Prefab] " + object->Name : object->Name;
+                if (ui.Selectable(label, document.IsSelected(object->Id)))
                     select(object->Id, matchOrder);
             }
             return;
@@ -131,7 +144,10 @@ namespace KeireEditor
         const auto drawEntity = [&](const auto& self, const Keire::SceneObjectDefinition& object) -> void
         {
             auto id = ui.PushId(object.Id.ToString());
-            const auto label = (object.Active ? std::string{} : std::string("[inactive] ")) + object.Name + "##tree";
+            const auto prefabInstance = prefabInstanceFor(object.Id);
+            const bool prefabObject = prefabInstance != hierarchy.PrefabInstances.end();
+            const auto label = (object.Active ? std::string{} : std::string("[inactive] ")) +
+                               (prefabObject ? std::string("[Prefab] ") : std::string{}) + object.Name + "##tree";
             auto node = ui.BeginTreeNode(label, document.IsSelected(object.Id));
             const auto state = ui.LastItemState();
             const auto row = ui.LastItemRect();
@@ -185,6 +201,14 @@ namespace KeireEditor
                 {
                     m_Controller.RecordHierarchyUndo();
                     m_Controller.RequestHierarchyRename(object.Id, object.Name);
+                }
+                if (prefabObject)
+                {
+                    ui.Separator();
+                    if (ui.MenuItem("Unpack Prefab"))
+                        m_Controller.UnpackHierarchyPrefab(object.Id, false);
+                    if (ui.MenuItem("Unpack Prefab Completely"))
+                        m_Controller.UnpackHierarchyPrefab(object.Id, true);
                 }
                 if (ui.MenuItem("Delete"))
                 {

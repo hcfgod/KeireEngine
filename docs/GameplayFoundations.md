@@ -23,6 +23,11 @@ canonical scene, and reports missing targets or cycles without mutating either s
 Scene schema v3 persists prefab object mappings and overrides. Readers migrate v1/v2 documents to v3; writers always
 emit v3. Editor authoring helpers implement create-from-selection, variant creation, transactional instantiation, and
 one-level or complete unpacking over `SceneDefinition` values, which makes undo/redo boundaries explicit.
+The Project panel exposes create-from-selection, prefab source opening, and drag-to-Scene instantiation. Instance
+override inspection, apply-to-source, revert, one-level unpack, and complete unpack remain explicit operations. Prefab
+sources open in an isolated document with Save/Discard boundaries. Root prefab updates replace their canonical template;
+variants regenerate typed overrides against the composed base. Scene-owned root placement is excluded from source apply.
+Nested ownership is never flattened: root prefabs containing nested instances require a variant for composed edits.
 
 ## Managed assemblies
 
@@ -33,9 +38,16 @@ references. The graph validator rejects duplicate names, missing references, and
 supported math/asset references, serialization and migration attributes, collision/trigger/animation/reload hooks,
 and the Time, Input, Physics, Navigation, Animator, Audio, Prefab, Debug, and Log façades. Starter projects receive a
 runtime `Gameplay.keireasm` definition and an initial `GameRoot.cs` script.
+The Project panel creates managed assembly definitions with a transactional starter source and creates C# Behaviour
+scripts only beneath declared source roots. Script and assembly sources open in a configured external editor or the
+operating-system default application.
+Before a C# source opens, the editor regenerates a project-root Visual Studio solution and one SDK-style project per
+`.keireasm`. Visual Studio receives the solution plus `/Edit <script>`, matching Unity's solution-context workflow
+instead of opening an isolated source file. The generated projects are authoring artifacts; managed builds continue to
+regenerate and compile from the canonical assembly definitions.
 
-`ScriptSystem::StartBuild` generates SDK-style `net10.0` projects under a staging directory, references the staged
-`Keire.Managed.dll`, runs a verified .NET 10 SDK on a cancellable worker, parses source/line/column diagnostics, and
+`ScriptSystem::StartBuild` generates SDK-style `net8.0` gameplay projects under a staging directory, references the
+staged `Keire.Managed.dll`, runs the verified .NET 10 SDK on a cancellable worker, parses source/line/column diagnostics, and
 atomically publishes `Library/ScriptAssemblies/Active` only after a successful build. A failed or cancelled build
 leaves the previous active directory untouched.
 

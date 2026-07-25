@@ -9,6 +9,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
@@ -251,6 +252,8 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
 
 void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
 {
+    if (m_PrefabEditingStage)
+        throw std::runtime_error("Save or discard the active prefab stage before opening a scene.");
     if (asset == m_SceneDocument->Asset())
         return;
     if (m_PendingSceneAction != PendingSceneAction::None || (m_SceneTransitions && m_SceneTransitions->Pending()))
@@ -278,6 +281,11 @@ void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
 
 void EditorWorkspaceLayer::SaveScene()
 {
+    if (m_PrefabEditingStage)
+    {
+        SavePrefabEditingStage();
+        return;
+    }
     if (!m_SceneDocument->EditingScene() || !m_AssetDatabase || !m_SceneDocument->Asset())
         return;
     try
@@ -383,6 +391,11 @@ void EditorWorkspaceLayer::RequestCloseScene()
 
 void EditorWorkspaceLayer::CloseScene()
 {
+    if (m_PrefabEditingStage)
+    {
+        SetAssetError("Save or discard the active prefab stage before closing the scene.");
+        return;
+    }
     if (const auto scenes = Owner().Scenes(); scenes && m_SceneDocument->Asset())
         (void)scenes->Unload(m_SceneDocument->Asset());
     m_InspectorPanel->ClearSceneState();
@@ -852,6 +865,31 @@ void EditorWorkspaceLayer::OpenDroppedInputActions(const Keire::AssetId asset)
     m_InputActionsPanel->Registration().SetVisible(true);
 }
 
+void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset)
+{
+    const auto scene = ActiveScene();
+    if (!scene || !m_AssetDatabase || !Owner().GetProject())
+        throw std::runtime_error("Open a scene before dropping a prefab.");
+    const auto projectRoot = Owner().GetProject()->Root();
+    const auto composed = Keire::ComposePrefab(asset,
+                                               [&](const Keire::AssetId prefab)
+                                               {
+                                                   const auto record = m_AssetDatabase->Find(prefab);
+                                                   if (!record || record->Type != Keire::PrefabAsset::StaticType())
+                                                       return Keire::Ref<Keire::PrefabAsset>{};
+                                                   return Keire::PrefabAsset::Decode(
+                                                       ReadBytes(projectRoot / "Assets" / record->RelativePath));
+                                               });
+    RecordSceneUndo("Instantiate Prefab");
+    auto replacement = scene->Snapshot();
+    const auto instance = KeireEditor::InstantiatePrefab(replacement, asset, composed);
+    auto rebuilt = Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
+    rebuilt->MarkDirty();
+    m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
+    m_SceneDocument->Select(instance.Root);
+    m_SceneDocument->SetStatus("Instantiated prefab in the active scene.");
+}
+
 void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset)
 {
     const auto scene = ActiveScene();
@@ -978,6 +1016,34 @@ KeireEditor::SceneDocument& EditorWorkspaceLayer::HierarchyDocument() noexcept {
 void EditorWorkspaceLayer::ReportHierarchyError(std::string message) noexcept
 {
     ReportError("Hierarchy", std::move(message));
+}
+
+void EditorWorkspaceLayer::UnpackHierarchyPrefab(const Keire::AssetId entity, const bool completely)
+{
+    if (m_SceneDocument->PlaySession())
+        throw std::runtime_error("Exit Play mode before unpacking a prefab.");
+    const auto scene = m_SceneDocument->EditingScene();
+    if (!scene)
+        throw std::runtime_error("Open a scene before unpacking a prefab.");
+    auto replacement = scene->Snapshot();
+    const auto instance = std::ranges::find_if(replacement.PrefabInstances,
+                                               [&](const Keire::PrefabInstanceDefinition& candidate)
+                                               {
+                                                   return std::ranges::any_of(
+                                                       candidate.Objects, [&](const Keire::PrefabObjectMapping& mapping)
+                                                       { return mapping.Instance == entity; });
+                                               });
+    if (instance == replacement.PrefabInstances.end())
+        throw std::invalid_argument("The selected GameObject is not part of a prefab instance.");
+    const auto root = instance->Root;
+    RecordSceneUndo(completely ? "Unpack Prefab Completely" : "Unpack Prefab");
+    if (!KeireEditor::UnpackPrefab(replacement, root, completely))
+        throw std::runtime_error("The prefab instance changed before it could be unpacked.");
+    auto rebuilt = Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
+    rebuilt->MarkDirty();
+    m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
+    m_SceneDocument->Select(root);
+    m_SceneDocument->SetStatus(completely ? "Prefab instance hierarchy unpacked." : "Prefab instance unpacked.");
 }
 
 Keire::UiColor EditorWorkspaceLayer::HierarchyAccent() const noexcept { return m_Theme.Accent; }

@@ -1,12 +1,47 @@
 # Changelog
 
+- Interactive prefab and trash operations now preempt queued or running low-priority catalog refreshes, and project
+  open no longer starts an eager full-project import solely because source timestamps are newer than the catalog.
+
+- Prefab thumbnails now resolve built-in cube and error meshes directly instead of waiting for catalog entries that
+  intentionally do not exist.
+
+- Identity-preserving asset and folder moves now update source records directly without launching or following with a
+  full-project import, removing prefab move/delete stalls caused by unrelated large mesh imports.
+
+- The asset trash popup now uses an on-open snapshot instead of locking and reparsing manifests every frame, and trash
+  mutations queue behind active asset work rather than failing or freezing the editor.
+
+- GameObject-to-prefab drops now queue behind active asset work, development prefab thumbnails resolve directly from
+  source before catalog publication, and the complete asset grid accepts drops into its current folder.
+
+- Prefab deletion now updates the asset index without rescanning the project, folder drops cover complete cards and
+  rows, and deleting prefab scene instances removes stale mappings before later unpack or save operations.
+
+- Generated managed projects now target the Visual Studio-compatible .NET 8 baseline and stage `Keire.Managed.dll`
+  locally for reliable engine API IntelliSense. Prefab creation publishes immediately to the development asset system,
+  project trash mutations avoid full worker imports, restore collisions discard stale trash, and complete folder cards
+  accept asset and GameObject drops.
+
 All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic version tags.
 
 ## Unreleased
 
+- Added Project-panel C# script, managed assembly, prefab-from-selection, and prefab-variant creation; source assets open
+  through a persisted external-editor choice with system-default fallback. Prefabs instantiate transactionally when
+  dragged into the Scene viewport and open in an isolated Prefab Mode with explicit Save/Discard boundaries.
+  Apply-to-source preserves scene root placement, rebases variants, rejects nested ownership flattening, and records
+  source plus scene metadata as one undoable operation. Stable-ID source replacement validates before publication and
+  rolls back source and metadata on failure.
+- Hierarchy GameObjects can now be dropped onto Project folders, breadcrumbs, or blank content to create uniquely named
+  prefab assets. Prefab thumbnails compose variants and nested instances and render all visible world-transformed mesh
+  geometry. C# source opening regenerates SDK-style assembly projects and a Visual Studio solution from `.keireasm`
+  definitions, then opens `devenv.exe` with the solution and requested script.
 - Scene camera orbit, pan, zoom, and fly navigation now wrap the visible cursor across opposite Scene viewport edges
   in window-local coordinates without applying the warp delta to camera movement, and remain active even when another
   editor panel has focus.
+- Directional shadow maps now apply constant and slope-scaled raster depth bias, preventing large ground receivers from
+  producing dense self-shadowing patterns while retaining model-cast shadows.
 - Fixed imported meshes using another draw's transform on GPU backends where `first_instance` does not offset
   `SV_InstanceID`; visible geometry and shadow rendering now apply the same per-entity scale.
 

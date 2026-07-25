@@ -109,9 +109,9 @@ namespace Keire
 
         [[nodiscard]] AssetTypeId InferType(const std::filesystem::path& path)
         {
-            static const std::unordered_set<std::string> TextExtensions{".txt",  ".md",   ".json", ".xml",  ".yaml",
-                                                                        ".yml",  ".csv",  ".ini",  ".toml", ".lua",
-                                                                        ".glsl", ".hlsl", ".vert", ".frag", ".comp"};
+            static const std::unordered_set<std::string> TextExtensions{
+                ".txt",  ".md",  ".json", ".xml",  ".yaml", ".yml",  ".csv",  ".ini",
+                ".toml", ".lua", ".glsl", ".hlsl", ".vert", ".frag", ".comp", ".cs"};
             return TextExtensions.contains(LowerExtension(path)) ? TextAsset::StaticType() : BinaryAsset::StaticType();
         }
 
@@ -989,6 +989,22 @@ namespace Keire
             std::ranges::sort(Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
             Observed.insert_or_assign(id, signature);
             PendingChanges.erase(id);
+        }
+
+        void RemoveRecords(const std::span<const AssetId> identities)
+        {
+            std::scoped_lock lock(Mutex);
+            const auto contains = [&](const AssetId id)
+            { return std::ranges::find(identities, id) != identities.end(); };
+            std::erase_if(Records, [&](const AssetSourceRecord& record) { return contains(record.Id); });
+            for (const auto id : identities)
+            {
+                Observed.erase(id);
+                PendingChanges.erase(id);
+                ImportStatuses.erase(id);
+                ValidatedImports.erase(id);
+                CookInputs.erase(id);
+            }
         }
 
         AssetDatabaseSpecification Specification;

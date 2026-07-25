@@ -96,14 +96,14 @@ TEST_CASE("Prefab composition resolves variants, nesting, mappings, and cycles d
     outer.Template.Objects.push_back(Object(instanceRoot, "Instance"));
     outer.Template.PrefabInstances.push_back({variantId, instanceRoot, {{sourceRoot, instanceRoot}}, {}});
 
-    std::unordered_map<Keire::AssetId, Keire::Ref<Keire::PrefabAsset>> assets;
+    std::unordered_map<Keire::AssetId, Keire::Ref<const Keire::PrefabAsset>> assets;
     assets.emplace(baseId, Keire::CreateRef<Keire::PrefabAsset>(base));
     assets.emplace(variantId, Keire::CreateRef<Keire::PrefabAsset>(variant));
     assets.emplace(outerId, Keire::CreateRef<Keire::PrefabAsset>(outer));
     const auto resolver = [&](const Keire::AssetId id)
     {
         const auto found = assets.find(id);
-        return found == assets.end() ? Keire::Ref<Keire::PrefabAsset>{} : found->second;
+        return found == assets.end() ? Keire::Ref<const Keire::PrefabAsset>{} : found->second;
     };
 
     const auto composed = Keire::ComposePrefab(outerId, resolver);

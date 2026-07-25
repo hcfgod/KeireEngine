@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire
@@ -90,6 +91,12 @@ namespace Keire
         std::filesystem::path ActiveAssemblyDirectory;
     };
 
+    struct ManagedIdeWorkspace
+    {
+        std::filesystem::path Solution;
+        std::vector<std::filesystem::path> Projects;
+    };
+
     enum class ManagedReloadState : std::uint8_t
     {
         Idle,
@@ -165,6 +172,8 @@ namespace Keire
         ~ScriptSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] ManagedBuildOperationId StartBuild(ManagedBuildRequest request);
+        [[nodiscard]] ManagedIdeWorkspace GenerateIdeWorkspace(const ManagedBuildRequest& request,
+                                                               std::string_view solutionName);
         void CancelBuild(ManagedBuildOperationId operation);
         [[nodiscard]] bool WaitForBuild(ManagedBuildOperationId operation, std::chrono::milliseconds timeout) const;
         [[nodiscard]] ManagedBuildStatus BuildStatus() const;

@@ -14,6 +14,12 @@
 
 namespace KeireEditor
 {
+    struct ThumbnailMeshInstance
+    {
+        Keire::Ref<const Keire::MeshAsset> Mesh;
+        Keire::Matrix4 Transform;
+    };
+
     struct ThumbnailRequest
     {
         Keire::AssetId Asset;
@@ -21,6 +27,7 @@ namespace KeireEditor
         Keire::Ref<const Keire::Asset> PreviewAsset;
         Keire::Ref<const Keire::ShaderAsset> PreviewShader;
         Keire::Ref<const Keire::Texture2DAsset> PreviewTexture;
+        std::vector<ThumbnailMeshInstance> PreviewMeshes;
         std::filesystem::path RelativePath;
         std::string Digest;
         bool Missing = false;

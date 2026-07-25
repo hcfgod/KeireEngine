@@ -37,7 +37,7 @@ namespace Keire
         std::size_t m_ResidentBytes = 0;
     };
 
-    using PrefabResolver = std::function<Ref<PrefabAsset>(AssetId)>;
+    using PrefabResolver = std::function<Ref<const PrefabAsset>(AssetId)>;
 
     [[nodiscard]] KEIRE_API SceneDefinition ComposePrefab(AssetId prefab, const PrefabResolver& resolver);
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreatePrefabAssetDecoder();

@@ -254,7 +254,8 @@ namespace Keire
             std::filesystem::create_directories(root / "Assets");
             std::filesystem::create_directories(root / "ProjectSettings");
             std::filesystem::create_directories(root / "Library");
-            Detail::WriteTextFileAtomically(root / ".gitignore", "/Library/\n/Logs/\n/Temp/\n/Build/\n");
+            Detail::WriteTextFileAtomically(root / ".gitignore",
+                                            "/Library/\n/Logs/\n/Temp/\n/Build/\n/*.csproj\n/*.sln\n");
             SaveRenderEnvironmentSettings(root, {});
 
             ProjectDescriptor descriptor;

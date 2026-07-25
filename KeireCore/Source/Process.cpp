@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <stdexcept>
 #include <system_error>
@@ -656,6 +657,78 @@ namespace Keire::Detail
         throw std::runtime_error("Could not find companion executable '" + std::string(companionTarget) +
                                  "'. Checked '" + PathToUtf8(candidates[0]) + "' and '" + PathToUtf8(candidates[1]) +
                                  "'.");
+    }
+
+    bool OpenInExternalEditor(const std::filesystem::path& path, const std::filesystem::path& preferredEditor,
+                              const std::filesystem::path& workingDirectory, std::string& diagnostic) noexcept
+    {
+        try
+        {
+            const auto source = std::filesystem::weakly_canonical(path);
+            const auto working = std::filesystem::weakly_canonical(workingDirectory);
+            if (!std::filesystem::is_regular_file(source) || !std::filesystem::is_directory(working))
+            {
+                diagnostic = "Source file or working directory does not exist.";
+                return false;
+            }
+            const auto sourceText = PathToUtf8(source);
+            std::vector<std::string> arguments{sourceText};
+            auto extension = source.extension().string();
+            for (char& character : extension)
+                character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+            std::filesystem::path managedSolution;
+            if (extension == ".cs" || extension == ".keireasm")
+            {
+                auto solutionName = working.filename().string();
+                for (char& character : solutionName)
+                    if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_' && character != '-')
+                        character = '_';
+                const auto candidate = working / (solutionName + ".sln");
+                if (std::filesystem::is_regular_file(candidate))
+                    managedSolution = candidate;
+            }
+            if (!preferredEditor.empty())
+            {
+                auto editorName = preferredEditor.stem().string();
+                for (char& character : editorName)
+                {
+                    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+                }
+                if (editorName == "devenv" && !managedSolution.empty())
+                {
+                    arguments = extension == ".cs"
+                                    ? std::vector<std::string>{PathToUtf8(managedSolution), "/Edit", sourceText}
+                                    : std::vector<std::string>{PathToUtf8(managedSolution)};
+                }
+                return LaunchDetachedProcess(std::filesystem::weakly_canonical(preferredEditor), arguments, working,
+                                             diagnostic);
+            }
+#if defined(_WIN32)
+            const auto target = managedSolution.empty() ? source : managedSolution;
+            const auto result = reinterpret_cast<std::intptr_t>(ShellExecuteW(
+                nullptr, L"open", target.wstring().c_str(), nullptr, working.wstring().c_str(), SW_SHOWNORMAL));
+            if (result <= 32)
+            {
+                diagnostic = managedSolution.empty()
+                                 ? "Windows could not open the source with its associated application."
+                                 : "Windows could not open the generated Visual Studio solution.";
+                return false;
+            }
+            return true;
+#elif defined(__APPLE__)
+            const std::filesystem::path executable = "/usr/bin/open";
+#else
+            const std::filesystem::path executable = "/usr/bin/xdg-open";
+#endif
+#if !defined(_WIN32)
+            return LaunchDetachedProcess(executable, arguments, working, diagnostic);
+#endif
+        }
+        catch (const std::exception& error)
+        {
+            diagnostic = error.what();
+            return false;
+        }
     }
 
     bool RevealInFileManager(const std::filesystem::path& path, std::string& diagnostic) noexcept

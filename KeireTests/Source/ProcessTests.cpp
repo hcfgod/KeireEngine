@@ -68,6 +68,14 @@ TEST_CASE("companion executable resolution supports build, package, and Unicode 
     std::filesystem::remove_all(root, ignored);
 }
 
+TEST_CASE("external editor launch rejects unavailable sources without starting a process")
+{
+    std::string diagnostic;
+    CHECK_FALSE(
+        Keire::Detail::OpenInExternalEditor("missing-script.cs", {}, std::filesystem::current_path(), diagnostic));
+    CHECK_FALSE(diagnostic.empty());
+}
+
 TEST_CASE("Child process termination is bounded and idempotent")
 {
     const std::array arguments{std::string("--child-process-hang")};

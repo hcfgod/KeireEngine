@@ -61,6 +61,7 @@ namespace KeireEditor
         virtual void RecordHierarchyUndo() = 0;
         virtual void MarkHierarchyEntity(Keire::AssetId entity) = 0;
         virtual void RequestHierarchyRename(Keire::AssetId entity, std::string name) = 0;
+        virtual void UnpackHierarchyPrefab(Keire::AssetId entity, bool completely) = 0;
         virtual void ReportHierarchyError(std::string message) noexcept = 0;
     };
 

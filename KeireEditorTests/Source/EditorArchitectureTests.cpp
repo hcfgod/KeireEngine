@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
@@ -258,6 +259,30 @@ TEST_CASE("scene document owns selection and deterministic close state")
     CHECK_FALSE(document.Asset());
     CHECK_FALSE(document.RecoveryAvailable());
     CHECK_FALSE(scene->IsOpen());
+}
+
+TEST_CASE("created prefabs connect existing scene objects and can be unpacked")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Prefab connection"));
+    const auto root = scene->CreateEntity("Root");
+    const auto child = scene->CreateEntity("Child", root);
+    auto definition = scene->Snapshot();
+    const std::array roots{root.Id().Value()};
+    const auto prefab = KeireEditor::CreatePrefabFromSelection(definition, roots, "Connected");
+    const auto prefabAsset = Keire::AssetId::Generate();
+
+    const auto instance =
+        KeireEditor::ConnectPrefabInstance(definition, prefabAsset, prefab.Template, root.Id().Value());
+    CHECK(instance.Prefab == prefabAsset);
+    CHECK(instance.Root == root.Id().Value());
+    CHECK(instance.Objects.size() == 2);
+    CHECK(std::ranges::all_of(instance.Objects, [](const Keire::PrefabObjectMapping& mapping)
+                              { return mapping.Source == mapping.Instance; }));
+    CHECK(KeireEditor::UnpackPrefab(definition, instance.Root));
+    CHECK(definition.PrefabInstances.empty());
+    CHECK(std::ranges::any_of(definition.Objects, [&](const Keire::SceneObjectDefinition& object)
+                              { return object.Id == child.Id().Value(); }));
 }
 
 TEST_CASE("scene rectangle selection returns every active projected entity in the marquee")
@@ -619,7 +644,7 @@ TEST_CASE("scene document owns asynchronous operations and replacement lifecycle
     document.ReplaceEditingScene(replacement);
     CHECK(document.EditingScene() == replacement);
     CHECK(document.Selection() == selected);
-    CHECK_FALSE(scene->IsOpen());
+    CHECK(scene->IsOpen());
 
     document.BeginPlay();
     CHECK(document.PlaySession());
@@ -936,6 +961,7 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
       public:
         void OpenDroppedScene(const Keire::AssetId asset) override { Scene = asset; }
         void OpenDroppedInputActions(const Keire::AssetId asset) override { Input = asset; }
+        void InstantiateDroppedPrefab(const Keire::AssetId asset) override { Prefab = asset; }
         void CreateDroppedMeshEntity(const Keire::AssetId asset) override { Mesh = asset; }
         void AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset) override
         {
@@ -945,6 +971,7 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
 
         Keire::AssetId Scene;
         Keire::AssetId Input;
+        Keire::AssetId Prefab;
         Keire::AssetId Mesh;
         Keire::AssetId Material;
         Keire::EntityId Target;
@@ -956,6 +983,8 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
     CHECK(commands.Scene == asset);
     router.Route(Keire::InputActionAsset::StaticType(), asset, {}, commands);
     CHECK(commands.Input == asset);
+    router.Route(Keire::PrefabAsset::StaticType(), asset, {}, commands);
+    CHECK(commands.Prefab == asset);
     router.Route(Keire::MeshAsset::StaticType(), asset, {}, commands);
     CHECK(commands.Mesh == asset);
     router.Route(Keire::MaterialAsset::StaticType(), asset, target, commands);
@@ -1175,6 +1204,23 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     REQUIRE(meshResult.Pixels.size() == 96U * 96U * 4U);
     CHECK(std::ranges::any_of(meshResult.Pixels,
                               [](const std::byte value) { return std::to_integer<unsigned>(value) > 210U; }));
+
+    const auto prefabId = Keire::AssetId::Parse("00000000-0000-0000-0000-000000000074").value();
+    KeireEditor::ThumbnailRequest prefabRequest{
+        .Asset = prefabId,
+        .Type = Keire::PrefabAsset::StaticType(),
+        .RelativePath = "Preview.keireprefab",
+        .Digest = "prefab-preview",
+    };
+    prefabRequest.PreviewMeshes.push_back(
+        KeireEditor::ThumbnailMeshInstance{.Mesh = Keire::MeshAsset::Cube(), .Transform = Keire::Matrix4{}});
+
+    REQUIRE(thumbnails.Request(std::move(prefabRequest)));
+    const auto prefabResult = await();
+    REQUIRE(prefabResult.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::ranges::any_of(prefabResult.Pixels,
+                              [](const std::byte value) { return std::to_integer<unsigned>(value) > 180U; }));
+
     thumbnails.CancelAll();
     std::filesystem::remove_all(root, error);
 }

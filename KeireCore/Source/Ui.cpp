@@ -669,6 +669,19 @@ namespace Keire
         return UiDragTargetScope(*this, visible);
     }
 
+    UiDragTargetScope UiFrame::BeginDragTarget(const UiItemRect area, const std::string_view id)
+    {
+        m_Impl->RequireActive("BeginDragTarget");
+        if (id.empty() || area.Maximum.X < area.Minimum.X || area.Maximum.Y < area.Minimum.Y)
+            throw std::invalid_argument("Custom drag targets require an ID and valid bounds.");
+        const std::string safeId(id);
+        const ImRect bounds(ImVec2(area.Minimum.X, area.Minimum.Y), ImVec2(area.Maximum.X, area.Maximum.Y));
+        const bool visible = ImGui::BeginDragDropTargetCustom(bounds, ImGui::GetID(safeId.c_str()));
+        if (visible)
+            m_Impl->OpenScope(UiScope::Kind::DragTarget);
+        return UiDragTargetScope(*this, visible);
+    }
+
     UiPanelScope UiFrame::BeginPanel(UiPanelRegistration& panel, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginPanel");
@@ -1360,6 +1373,15 @@ namespace Keire
         m_Impl->RequireActive("ContentAvailable");
         const auto available = ImGui::GetContentRegionAvail();
         return {available.x, available.y};
+    }
+
+    UiItemRect UiFrame::ContentRect() const
+    {
+        m_Impl->RequireActive("ContentRect");
+        const auto position = ImGui::GetWindowPos();
+        const auto minimum = ImGui::GetWindowContentRegionMin();
+        const auto maximum = ImGui::GetWindowContentRegionMax();
+        return {{position.x + minimum.x, position.y + minimum.y}, {position.x + maximum.x, position.y + maximum.y}};
     }
 
     bool UiFrame::WindowFocused() const

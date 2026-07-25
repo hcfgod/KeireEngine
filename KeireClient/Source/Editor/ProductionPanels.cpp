@@ -117,6 +117,45 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
 {
     if (auto panel = ui.BeginPanel(m_PrefabOverrides); panel)
     {
+        if (m_PrefabEditingStage)
+        {
+            ui.Text("Prefab Mode");
+            ui.Text(m_PrefabEditingStage->RelativePath.generic_string());
+            ui.TextColored(m_Theme.MutedText,
+                           "This isolated stage does not modify the open scene. Save publishes the prefab source; "
+                           "Discard restores the previous scene document.");
+            if (ui.Button("Save Prefab"))
+            {
+                try
+                {
+                    SavePrefabEditingStage();
+                }
+                catch (const std::exception& error)
+                {
+                    ReportError("Prefab", error.what());
+                }
+            }
+            ui.SameLine();
+            if (ui.Button("Save and Close"))
+            {
+                try
+                {
+                    SavePrefabEditingStage();
+                    ClosePrefabEditingStage();
+                }
+                catch (const std::exception& error)
+                {
+                    ReportError("Prefab", error.what());
+                }
+            }
+            ui.SameLine();
+            if (ui.Button("Discard and Close"))
+                ClosePrefabEditingStage();
+            ui.Separator();
+            ui.Text("Edit prefab objects in the Scene viewport and Inspector.");
+            return;
+        }
+
         const auto scene = m_SceneDocument ? m_SceneDocument->EditingScene() : Keire::Ref<Keire::Scene>{};
         if (!scene || !m_SceneDocument->Selection())
         {
@@ -165,6 +204,18 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
 
         ui.Separator();
         const auto instanceRoot = instance->Root;
+        if (ui.Button("Apply to Prefab"))
+        {
+            try
+            {
+                ApplySelectedPrefabOverrides();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Prefab", error.what());
+            }
+        }
+        ui.SameLine();
         if (ui.Button("Revert All Overrides"))
         {
             try
@@ -240,8 +291,9 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                 ReportError("Prefab", error.what());
             }
         }
-        ui.TextColored(m_Theme.MutedText,
-                       "Apply writes remain explicit: use prefab edit mode to modify the source asset.");
+        ui.TextColored(
+            m_Theme.MutedText,
+            "Root placement is scene-owned. Nested roots require a variant so source ownership is preserved.");
     }
 }
 
@@ -294,6 +346,18 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
         if (auto disabled = ui.BeginDisabled(!scripts || managedBusy || !m_AssetDatabase || !Owner().GetProject());
             disabled)
         {
+            if (ui.Button("Regenerate C# Project"))
+            {
+                try
+                {
+                    GenerateManagedIdeWorkspace();
+                }
+                catch (const std::exception& error)
+                {
+                    ReportError("Scripts", error.what());
+                }
+            }
+            ui.SameLine();
             if (ui.Button("Build Managed"))
             {
                 try

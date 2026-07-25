@@ -31,3 +31,9 @@ TEST_CASE("directional cascade centers snap to stable shadow texels")
     CHECK(snapped.Y / texel == doctest::Approx(std::round(-5.678F / texel)));
     CHECK_THROWS_AS((void)Keire::RenderBackend::StabilizeShadowCenter({}, 0.0F, 2048), std::invalid_argument);
 }
+
+TEST_CASE("directional shadow raster bias offsets flat and sloped self-shadowing")
+{
+    CHECK(Keire::RenderBackend::DirectionalShadowDepthBiasConstant > 0.0F);
+    CHECK(Keire::RenderBackend::DirectionalShadowDepthBiasSlope > 0.0F);
+}

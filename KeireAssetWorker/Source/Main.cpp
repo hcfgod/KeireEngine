@@ -222,6 +222,8 @@ namespace
             case Keire::Detail::AssetWorkerOperationKind::Mutate:
             {
                 const auto& mutation = request.Mutation;
+                const bool requiresImport = mutation.Kind == Keire::Detail::AssetWorkerMutationKind::DuplicateAsset ||
+                                            mutation.Kind == Keire::Detail::AssetWorkerMutationKind::DuplicateFolder;
                 switch (mutation.Kind)
                 {
                 case Keire::Detail::AssetWorkerMutationKind::CreateFolder:
@@ -261,7 +263,8 @@ namespace
                     database->PermanentlyDeleteTrash(mutation.Trash);
                     break;
                 }
-                result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                if (requiresImport)
+                    result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
                 break;
             }
             case Keire::Detail::AssetWorkerOperationKind::Cook:

@@ -2,6 +2,7 @@
 
 #include "Keire/Core.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
+#include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
@@ -155,6 +156,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RecordHierarchyUndo() override;
     void MarkHierarchyEntity(Keire::AssetId entity) override;
     void RequestHierarchyRename(Keire::AssetId entity, std::string name) override;
+    void UnpackHierarchyPrefab(Keire::AssetId entity, bool completely) override;
     void ReportHierarchyError(std::string message) noexcept override;
     void DrawConsole(Keire::UiFrame& ui);
     void DrawDiagnostics(Keire::UiFrame& ui);
@@ -178,6 +180,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ImportAssetBrowserAssets() override;
     void RequestAssetBrowserCreateScene() override;
     bool CreateAssetBrowserMaterial(std::string_view name) override;
+    bool CreateAssetBrowserScript(std::string_view name) override;
+    bool CreateAssetBrowserManagedAssembly(std::string_view name) override;
+    bool CreateAssetBrowserPrefab(std::string_view name) override;
+    bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) override;
+    void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) override;
     void CreateAssetBrowserShader() override;
     void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                         std::string_view baseName) override;
@@ -185,7 +192,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void MutateAssetBrowser(Keire::Detail::AssetWorkerMutation mutation, Keire::Detail::AssetWorkerMutation reverse,
                             std::string name, bool revealResult) override;
     void OpenAssetBrowserInputActions(Keire::AssetId asset) override;
+    void OpenAssetBrowserPrefab(Keire::AssetId asset) override;
     void OpenAssetBrowserScene(Keire::AssetId asset) override;
+    void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) override;
     void CopyAssetBrowserText(std::string_view value) override;
     [[nodiscard]] KeireEditor::SceneDocument& InspectorSceneDocument() noexcept override;
     [[nodiscard]] KeireEditor::InputActionsDocument& InspectorInputDocument() noexcept override;
@@ -212,9 +221,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RevealProjectSettingsAsset(Keire::AssetId asset) override;
     void OpenDroppedScene(Keire::AssetId asset) override;
     void OpenDroppedInputActions(Keire::AssetId asset) override;
+    void InstantiateDroppedPrefab(Keire::AssetId asset) override;
     void CreateDroppedMeshEntity(Keire::AssetId asset) override;
     void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
-    void ImportAssets();
+    void
+    ImportAssets(KeireEditor::AssetOperationPriority priority = KeireEditor::AssetOperationPriority::ExplicitAction);
     void UpdateAssetOperations();
     void QueueAssetMutation(std::shared_ptr<KeireEditor::AssetMutationUndoState> state,
                             KeireEditor::AssetMutationPhase phase);
@@ -230,6 +241,19 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void CookAssets();
     void UpdateManagedBuild();
     void CreateInputActions(Keire::InputActionAssetDefinition definition, std::string_view baseName);
+    [[nodiscard]] bool CreateCSharpScript(std::string_view name);
+    [[nodiscard]] bool CreateManagedAssembly(std::string_view name);
+    [[nodiscard]] bool CreatePrefabFromSelection(std::string_view name);
+    [[nodiscard]] bool CreatePrefabVariant(Keire::AssetId basePrefab, std::string_view name);
+    void CreatePrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder);
+    [[nodiscard]] Keire::AssetId CreatePrefabAsset(const std::filesystem::path& destination,
+                                                   const Keire::PrefabDefinition& definition);
+    void GenerateManagedIdeWorkspace();
+    void OpenPrefabForEditing(Keire::AssetId asset);
+    void SavePrefabEditingStage();
+    void ClosePrefabEditingStage();
+    void ApplySelectedPrefabOverrides();
+    void ReplacePrefabSource(Keire::AssetId asset, const Keire::PrefabDefinition& definition);
     void CreateUnlitShader();
     [[nodiscard]] bool CreateMaterial(std::string_view name = "Material");
     void OpenInputActions(Keire::AssetId asset);
@@ -282,10 +306,19 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::UiPanelRegistration m_PrefabOverrides;
     Keire::UiPanelRegistration m_BuildSettings;
     Keire::UiPanelRegistration m_Profiler;
+    struct PrefabEditingStage
+    {
+        Keire::AssetId Asset;
+        Keire::PrefabDefinition Source;
+        Keire::SceneDefinition Baseline;
+        std::filesystem::path RelativePath;
+    };
     std::unique_ptr<KeireEditor::AssetBrowserPanel> m_AssetBrowserPanel;
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
     std::unique_ptr<KeireEditor::SceneDocument> m_SceneDocument;
+    std::unique_ptr<KeireEditor::SceneDocument> m_PrefabReturnDocument;
+    std::optional<PrefabEditingStage> m_PrefabEditingStage;
     std::unique_ptr<KeireEditor::InputActionsDocument> m_InputActionsDocument;
     std::unique_ptr<KeireEditor::ProjectSettingsDocument> m_ProjectSettingsDocument;
     std::unique_ptr<KeireEditor::MaterialDocument> m_MaterialDocument;
@@ -316,6 +349,18 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AssetId m_SelectedAsset;
     std::filesystem::path m_ExecutablePath;
     Keire::AssetId m_PendingStartupScene;
+    struct PendingPrefabCreation
+    {
+        Keire::AssetId Object;
+        std::filesystem::path Folder;
+    };
+    struct PendingAssetMutation
+    {
+        std::shared_ptr<KeireEditor::AssetMutationUndoState> State;
+        KeireEditor::AssetMutationPhase Phase;
+    };
+    std::vector<PendingAssetMutation> m_PendingAssetMutations;
+    std::vector<PendingPrefabCreation> m_PendingPrefabCreations;
     Keire::ManagedBuildOperationId m_LastManagedReload;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;

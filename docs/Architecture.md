@@ -35,6 +35,21 @@ than retaining process-global history. Commands own forward/inverse behavior and
 transactions preserve all-or-nothing semantics. Contexts close during layer teardown, and the service closes before
 scene and asset services so no history callback can observe a partially destroyed document service.
 
+Prefab source editing swaps in a dedicated `SceneDocument` and retains the active scene document, including its undo
+context, until Prefab Mode closes. Stable-ID source replacement validates imported bytes before atomic publication and
+rolls back source plus metadata on failure. Apply-to-source computes a canonical source-ID view of the selected instance,
+preserves scene-owned root placement, and records the source replacement and scene metadata update in one scene undo
+command. Variant saves regenerate overrides against the composed base; unsupported nested-owner flattening fails before
+publication.
+Hierarchy-to-Project drops cross the Asset Browser controller as an object ID plus destination folder and reuse the
+same prefab extraction transaction as named creation. Prefab thumbnails compose source assets on the UI owner thread,
+resolve asynchronous mesh handles, then transfer immutable mesh references and world matrices to the bounded CPU
+thumbnail worker.
+
+Managed IDE generation consumes the same validated `.keireasm` graph and C# project generator as managed builds.
+Persistent solution/project files are conveniences derived from canonical assembly assets and source roots; they do
+not become build authority or expose runtime-host implementation state.
+
 ## Public Binary Boundary
 
 Public classes and free functions with KeireCore-owned out-of-line symbols use `KEIRE_API`. Exception types that cross the managed-client boundary are annotated as well so their type identity remains consistent in a same-toolchain shared-library build. Header-only value types, templates, IDs, and aggregates do not own exportable symbols and remain unannotated. `GetApplicationCommandLineDescription` and `CreateApplication` are the deliberate reverse boundary: the managed executable defines them for KeireCore, so they must not be marked as library imports. Script regressions keep this policy explicit as the API grows.

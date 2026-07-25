@@ -33,6 +33,11 @@ namespace KeireEditor
         virtual void ImportAssetBrowserAssets() = 0;
         virtual void RequestAssetBrowserCreateScene() = 0;
         virtual bool CreateAssetBrowserMaterial(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserScript(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserManagedAssembly(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserPrefab(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) = 0;
+        virtual void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) = 0;
         virtual void CreateAssetBrowserShader() = 0;
         virtual void CreateAssetBrowserInputActions(Keire::InputActionAssetDefinition definition,
                                                     std::string_view baseName) = 0;
@@ -41,7 +46,9 @@ namespace KeireEditor
                                         Keire::Detail::AssetWorkerMutation reverse, std::string name,
                                         bool revealResult = false) = 0;
         virtual void OpenAssetBrowserInputActions(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserPrefab(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserScene(Keire::AssetId asset) = 0;
+        virtual void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) = 0;
         virtual void CopyAssetBrowserText(std::string_view value) = 0;
     };
 
@@ -65,6 +72,7 @@ namespace KeireEditor
         void Attach(Keire::UiWorkspace& workspace);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept;
         void RevealAsset(Keire::AssetId asset);
+        void OpenAsset(Keire::AssetId asset);
         void RequestCreateMaterial();
         void Draw(Keire::UiFrame& ui);
         void Close() noexcept;

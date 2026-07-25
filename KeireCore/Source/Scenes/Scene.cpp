@@ -541,6 +541,32 @@ namespace Keire
                 for (const auto candidate : m_Impl->Order)
                     if (m_Impl->DescendsFrom(candidate, id))
                         removed.push_back(candidate);
+                const auto removes = [&](const AssetId object)
+                { return std::ranges::find(removed, EntityId(object)) != removed.end(); };
+                std::erase_if(m_Impl->PrefabInstances,
+                              [&](PrefabInstanceDefinition& instance)
+                              {
+                                  if (removes(instance.Root))
+                                      return true;
+                                  std::vector<AssetId> removedSources;
+                                  std::erase_if(instance.Objects,
+                                                [&](const PrefabObjectMapping& mapping)
+                                                {
+                                                    if (!removes(mapping.Instance))
+                                                        return false;
+                                                    removedSources.push_back(mapping.Source);
+                                                    return true;
+                                                });
+                                  std::erase_if(instance.Overrides,
+                                                [&](const PrefabOverrideDefinition& overrideValue)
+                                                {
+                                                    return std::ranges::find(removedSources, overrideValue.Object) !=
+                                                           removedSources.end();
+                                                });
+                                  return instance.Objects.empty();
+                              });
+                std::erase_if(m_Impl->PrefabOverrides, [&](const PrefabOverrideDefinition& overrideValue)
+                              { return removes(overrideValue.Object); });
                 std::ranges::reverse(removed);
                 for (const auto current : removed)
                 {

@@ -72,6 +72,10 @@ namespace Keire::Detail
                                              std::string& diagnostic) noexcept;
     [[nodiscard]] std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,
                                                                    std::string_view companionTarget);
+    [[nodiscard]] bool OpenInExternalEditor(const std::filesystem::path& path,
+                                            const std::filesystem::path& preferredEditor,
+                                            const std::filesystem::path& workingDirectory,
+                                            std::string& diagnostic) noexcept;
     [[nodiscard]] bool RevealInFileManager(const std::filesystem::path& path, std::string& diagnostic) noexcept;
 } // namespace Keire::Detail
 #include <chrono>

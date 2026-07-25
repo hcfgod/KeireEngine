@@ -95,3 +95,57 @@ TEST_CASE("Prefab revert reconstructs inherited state and removes structural ove
     CHECK_THROWS_AS((void)KeireEditor::RevertPrefabInstance(scene, instance.Root, invalid), std::invalid_argument);
     CHECK(Keire::SceneAsset::Encode(scene) == before);
 }
+
+TEST_CASE("Prefab variant editing regenerates overrides against its composed base")
+{
+    const auto baseId = Keire::AssetId::Parse("52000000-0000-4000-8000-000000000001");
+    const auto root = Keire::AssetId::Parse("52000000-0000-4000-8000-000000000002");
+    auto composedBase = Keire::SceneAsset::EmptyDefinition("Base");
+    composedBase.Objects.push_back(Object(root, "Base Root"));
+
+    Keire::PrefabDefinition variant;
+    variant.BasePrefab = baseId;
+    variant.Template = Keire::SceneAsset::EmptyDefinition("Variant");
+    auto edited = composedBase;
+    edited.Objects.front().Name = "Edited Variant Root";
+
+    const auto updated = KeireEditor::UpdatePrefabFromEditingScene(variant, edited, &composedBase);
+    REQUIRE(updated.Template.PrefabOverrides.size() == 1);
+    CHECK(updated.Template.PrefabOverrides.front().Kind == Keire::PrefabOverrideKind::RenameObject);
+    CHECK(updated.Template.PrefabOverrides.front().Object == root);
+    CHECK(updated.Template.PrefabOverrides.front().Name == "Edited Variant Root");
+}
+
+TEST_CASE("Prefab instance apply preserves scene-owned root placement")
+{
+    const auto prefab = Keire::AssetId::Parse("53000000-0000-4000-8000-000000000001");
+    const auto sourceRoot = Keire::AssetId::Parse("53000000-0000-4000-8000-000000000002");
+    const auto instanceRoot = Keire::AssetId::Parse("53000000-0000-4000-8000-000000000003");
+    Keire::PrefabDefinition source;
+    source.Template = Keire::SceneAsset::EmptyDefinition("Source");
+    source.Template.Objects.push_back(Object(sourceRoot, "Source Root"));
+
+    auto instanceObject = Object(instanceRoot, "Applied Name");
+    instanceObject.Transform.Position.X = 42.0F;
+    auto scene = Keire::SceneAsset::EmptyDefinition("Scene");
+    scene.Objects.push_back(instanceObject);
+    scene.PrefabInstances.push_back({prefab, instanceRoot, {{sourceRoot, instanceRoot}}, {}});
+
+    const auto updated = KeireEditor::ApplyPrefabInstanceToSource(scene, instanceRoot, source, source.Template);
+    REQUIRE(updated.Prefab.Template.Objects.size() == 1);
+    CHECK(updated.Prefab.Template.Objects.front().Name == "Applied Name");
+    CHECK(updated.Prefab.Template.Objects.front().Transform == source.Template.Objects.front().Transform);
+    REQUIRE(updated.Scene.PrefabInstances.size() == 1);
+    CHECK(updated.Scene.PrefabInstances.front().Overrides.empty());
+}
+
+TEST_CASE("Direct nested prefab source editing rejects ownership flattening")
+{
+    const auto nested = Keire::AssetId::Parse("54000000-0000-4000-8000-000000000001");
+    const auto root = Keire::AssetId::Parse("54000000-0000-4000-8000-000000000002");
+    Keire::PrefabDefinition source;
+    source.Template = Keire::SceneAsset::EmptyDefinition("Nested Owner");
+    source.Template.Objects.push_back(Object(root, "Nested Root"));
+    source.Template.PrefabInstances.push_back({nested, root, {{root, root}}, {}});
+    CHECK_THROWS_AS((void)KeireEditor::UpdatePrefabFromEditingScene(source, source.Template), std::invalid_argument);
+}

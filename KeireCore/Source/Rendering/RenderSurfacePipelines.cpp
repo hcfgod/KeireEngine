@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "Keire/Log.h"
+#include "KeireInternal/Rendering/DirectionalShadowInternal.h"
 
 #include <algorithm>
 #include <array>
@@ -544,7 +545,10 @@ namespace Keire::RenderBackend
             information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
             information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
             information.rasterizer_state.enable_depth_clip = true;
-            information.rasterizer_state.enable_depth_bias = false;
+            information.rasterizer_state.depth_bias_constant_factor = DirectionalShadowDepthBiasConstant;
+            information.rasterizer_state.depth_bias_clamp = 0.0F;
+            information.rasterizer_state.depth_bias_slope_factor = DirectionalShadowDepthBiasSlope;
+            information.rasterizer_state.enable_depth_bias = true;
             information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
             information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
             information.depth_stencil_state.enable_depth_test = true;

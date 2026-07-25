@@ -13,6 +13,8 @@ namespace KeireEditor
             commands.OpenDroppedScene(asset);
         else if (type == Keire::InputActionAsset::StaticType())
             commands.OpenDroppedInputActions(asset);
+        else if (type == Keire::PrefabAsset::StaticType())
+            commands.InstantiateDroppedPrefab(asset);
         else if (type == Keire::MeshAsset::StaticType())
             commands.CreateDroppedMeshEntity(asset);
         else if (type == Keire::MaterialAsset::StaticType())

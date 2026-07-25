@@ -767,12 +767,12 @@ void EditorWorkspaceLayer::OnAttach()
             if (requiresSynchronousImport)
             {
                 m_PendingStartupScene = project->Descriptor().StartupScene;
-                ImportAssets();
+                ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             }
             else if (AssetSourcesAreNewerThanCatalog(project->AssetsDirectory(), catalog))
             {
-                QueueMaterialCatalogRefresh();
-                m_AssetStatus = "Opened the cached catalog; source refresh is running in the background.";
+                m_AssetStatus =
+                    "Opened the cached catalog. Source changes are pending; use Refresh and Import when ready.";
             }
             else
                 m_AssetStatus = "Opened the current development catalog without rebuilding it.";
@@ -893,6 +893,10 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     }
     m_InputActionsDocument->Close();
     m_SceneDocument->Close();
+    if (m_PrefabReturnDocument)
+        m_PrefabReturnDocument->Close();
+    m_PrefabReturnDocument.reset();
+    m_PrefabEditingStage.reset();
     m_AssetBrowserPanel->Close();
     m_AssetDatabase.Reset();
 }
@@ -930,6 +934,32 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
     if (!m_AssetDatabase)
         return;
     UpdateAssetOperations();
+    if (!m_PendingAssetMutations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
+    {
+        auto pending = std::move(m_PendingAssetMutations.front());
+        m_PendingAssetMutations.erase(m_PendingAssetMutations.begin());
+        try
+        {
+            QueueAssetMutation(std::move(pending.State), pending.Phase);
+        }
+        catch (const std::exception& error)
+        {
+            SetAssetError(std::string("Queued asset trash operation failed: ") + error.what());
+        }
+    }
+    if (!m_PendingPrefabCreations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
+    {
+        auto pending = std::move(m_PendingPrefabCreations.front());
+        m_PendingPrefabCreations.erase(m_PendingPrefabCreations.begin());
+        try
+        {
+            CreatePrefabFromObject(pending.Object, pending.Folder);
+        }
+        catch (const std::exception& error)
+        {
+            SetAssetError(std::string("Queued prefab creation failed: ") + error.what());
+        }
+    }
     if (m_MaterialDocument->Dirty() && m_SelectedAsset != m_MaterialDocument->Asset())
         CommitMaterialDraft();
     UpdateMaterialCatalogRefresh(time);
@@ -975,7 +1005,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         const auto changed = m_AssetDatabase->PollChangedAssets();
         if (!changed.empty())
         {
-            ImportAssets();
+            ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             if (const auto assets = Owner().Assets())
             {
                 for (const auto id : changed)
