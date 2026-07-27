@@ -22,6 +22,8 @@ namespace Keire
 
         [[nodiscard]] explicit operator bool() const noexcept;
         [[nodiscard]] EntityId Id() const noexcept { return m_Id; }
+        [[nodiscard]] std::uint64_t World() const noexcept;
+        [[nodiscard]] Entity Resolve(EntityId id) const noexcept;
         [[nodiscard]] std::string Name() const;
         void SetName(std::string name);
         [[nodiscard]] bool ActiveSelf() const;
@@ -36,6 +38,8 @@ namespace Keire
         [[nodiscard]] std::vector<Ref<Component>> GetComponents(ComponentTypeId type = {}) const;
         [[nodiscard]] bool HasComponent(ComponentTypeId type) const noexcept;
         [[nodiscard]] bool RemoveComponent(ComponentTypeId type);
+        [[nodiscard]] Entity Clone();
+        [[nodiscard]] bool Destroy();
 
         template <std::derived_from<Component> T> [[nodiscard]] Ref<T> AddComponent()
         {

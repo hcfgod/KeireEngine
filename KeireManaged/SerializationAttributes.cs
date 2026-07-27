@@ -74,3 +74,22 @@ public sealed class StableComponentIdAttribute : Attribute
     public readonly ulong High;
     public readonly ulong Low;
 }
+
+[AttributeUsage(AttributeTargets.Class, Inherited = false)]
+public sealed class StableAssetTypeIdAttribute(string id) : Attribute
+{
+    public Guid Id { get; } = Guid.Parse(id);
+}
+
+[AttributeUsage(AttributeTargets.Class, Inherited = false)]
+public sealed class CreateAssetMenuAttribute(string menuName, string fileName = "") : Attribute
+{
+    public string MenuName { get; } = menuName ?? throw new ArgumentNullException(nameof(menuName));
+    public string FileName { get; } = fileName ?? string.Empty;
+}
+
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
+public sealed class HeaderAttribute(string text) : Attribute
+{
+    public string Text { get; } = text ?? throw new ArgumentNullException(nameof(text));
+}

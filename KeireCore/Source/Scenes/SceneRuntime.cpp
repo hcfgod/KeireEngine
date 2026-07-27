@@ -1,5 +1,7 @@
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Scenes/ScenePresentationRuntime.h"
 
+#include <cmath>
 #include <exception>
 #include <stdexcept>
 #include <thread>
@@ -10,10 +12,13 @@ namespace Keire
     class SceneRuntimeSession::Impl final
     {
       public:
-        explicit Impl(Ref<Scene> scene) : Edit(std::move(scene)), OwnerThread(std::this_thread::get_id())
+        Impl(Ref<Scene> scene, Ref<AssetSystem> assets, Ref<AudioSystem> audio)
+            : Edit(std::move(scene)), OwnerThread(std::this_thread::get_id())
         {
             if (!Edit || !Edit->IsOpen())
                 throw std::invalid_argument("SceneRuntimeSession requires an open edit scene.");
+            if (assets)
+                Presentation = CreateRef<ScenePresentationRuntime>(std::move(assets), std::move(audio));
         }
 
         void RequireOwner(const char* operation) const
@@ -46,10 +51,14 @@ namespace Keire
         std::thread::id OwnerThread;
         ScenePlayState PlayState = ScenePlayState::Stopped;
         SceneRuntimeDiagnostic Failure;
+        Ref<ScenePresentationRuntime> Presentation;
+        float PresentationWidth = 1920.0F;
+        float PresentationHeight = 1080.0F;
+        RuntimeUiInsets SafeArea;
     };
 
-    SceneRuntimeSession::SceneRuntimeSession(Ref<Scene> editScene)
-        : m_Impl(std::make_unique<Impl>(std::move(editScene)))
+    SceneRuntimeSession::SceneRuntimeSession(Ref<Scene> editScene, Ref<AssetSystem> assets, Ref<AudioSystem> audio)
+        : m_Impl(std::make_unique<Impl>(std::move(editScene), std::move(assets), std::move(audio)))
     {
     }
 
@@ -59,6 +68,20 @@ namespace Keire
     Ref<Scene> SceneRuntimeSession::EditScene() const noexcept { return m_Impl->Edit; }
     Ref<Scene> SceneRuntimeSession::RuntimeScene() const noexcept { return m_Impl->Runtime; }
     SceneRuntimeDiagnostic SceneRuntimeSession::Diagnostic() const { return m_Impl->Failure; }
+    Ref<ScenePresentationRuntime> SceneRuntimeSession::Presentation() const noexcept { return m_Impl->Presentation; }
+
+    void SceneRuntimeSession::SetPresentationViewport(const float width, const float height,
+                                                      const RuntimeUiInsets safeArea)
+    {
+        m_Impl->RequireOwner("SetPresentationViewport");
+        if (!std::isfinite(width) || !std::isfinite(height) || width <= 0.0F || height <= 0.0F)
+            throw std::invalid_argument("Scene presentation viewport dimensions must be finite and positive.");
+        m_Impl->PresentationWidth = width;
+        m_Impl->PresentationHeight = height;
+        m_Impl->SafeArea = safeArea;
+        if (m_Impl->Presentation && m_Impl->Runtime)
+            m_Impl->Presentation->Synchronize(m_Impl->Runtime, width, height, true, safeArea);
+    }
 
     void SceneRuntimeSession::Play()
     {
@@ -70,6 +93,9 @@ namespace Keire
         m_Impl->Runtime->MarkSaved();
         m_Impl->PlayState = ScenePlayState::Playing;
         m_Impl->Invoke("Awake/OnEnable", [&] { m_Impl->Runtime->BeginPlay(); });
+        if (m_Impl->Presentation)
+            m_Impl->Presentation->Synchronize(m_Impl->Runtime, m_Impl->PresentationWidth, m_Impl->PresentationHeight,
+                                              true, m_Impl->SafeArea);
     }
 
     void SceneRuntimeSession::Pause(const bool paused)
@@ -105,7 +131,12 @@ namespace Keire
     {
         m_Impl->RequireOwner("Update");
         if (m_Impl->PlayState == ScenePlayState::Playing)
+        {
             m_Impl->Invoke("Update", [&] { m_Impl->Runtime->Update(deltaSeconds); });
+            if (m_Impl->Presentation && m_Impl->PlayState != ScenePlayState::Faulted)
+                m_Impl->Presentation->Synchronize(m_Impl->Runtime, m_Impl->PresentationWidth,
+                                                  m_Impl->PresentationHeight, true, m_Impl->SafeArea);
+        }
     }
 
     void SceneRuntimeSession::ReplaceRuntime(SceneDefinition definition)
@@ -117,9 +148,14 @@ namespace Keire
         replacement->MarkSaved();
         m_Impl->Runtime->EndPlay();
         m_Impl->Runtime->Close();
+        if (m_Impl->Presentation)
+            m_Impl->Presentation->Clear();
         m_Impl->Runtime = std::move(replacement);
         m_Impl->Failure = {};
         m_Impl->Invoke("Awake/OnEnable", [&] { m_Impl->Runtime->BeginPlay(); });
+        if (m_Impl->Presentation)
+            m_Impl->Presentation->Synchronize(m_Impl->Runtime, m_Impl->PresentationWidth, m_Impl->PresentationHeight,
+                                              true, m_Impl->SafeArea);
     }
 
     void SceneRuntimeSession::Stop() noexcept
@@ -128,6 +164,8 @@ namespace Keire
             return;
         if (m_Impl->Runtime)
         {
+            if (m_Impl->Presentation)
+                m_Impl->Presentation->Clear();
             m_Impl->Runtime->EndPlay();
             m_Impl->Runtime->Close();
             m_Impl->Runtime.Reset();

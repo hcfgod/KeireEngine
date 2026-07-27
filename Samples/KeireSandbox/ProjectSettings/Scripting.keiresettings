@@ -3,7 +3,7 @@
   "sdkSelection": "bundled",
   "customSdkExecutable": "",
   "automaticCompilation": true,
-  "debounceMilliseconds": 400,
+  "debounceMilliseconds": 100,
   "playModeReload": "preserveState",
   "exceptionPolicy": "disableInstance",
   "allowUnsafe": false,

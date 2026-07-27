@@ -772,18 +772,22 @@ namespace KeireEditor
                         if (action != map->Actions.end() && action->Type != Keire::InputActionType::PassThrough)
                             drawBehaviors("BINDING INTERACTIONS", binding->Interactions, true);
                         drawBehaviors("BINDING PROCESSORS", binding->Processors, false);
-                        if (binding->Composite.empty() && ui.Button("Listen"))
+                        if (binding->Composite.empty() && !m_Rebind && ui.Button("Listen"))
                         {
                             try
                             {
                                 if (!inputContext)
                                     throw std::runtime_error("The runtime input context is not ready.");
-                                m_Rebind =
-                                    m_Controller.InputSystem()->BeginInteractiveRebind(inputContext, binding->Id);
+                                const auto input = m_Controller.InputSystem();
+                                if (!input)
+                                    throw std::runtime_error("The input system is not available.");
+                                m_RebindContext = input->CreateActionContext(inputDocument, inputContext->User());
+                                m_Rebind = input->BeginInteractiveRebind(m_RebindContext, binding->Id);
                                 m_Message = "Listening for a control...";
                             }
                             catch (const std::exception& error)
                             {
+                                m_RebindContext.Reset();
                                 m_Message = error.what();
                                 m_Controller.ReportInputActionsError(m_Message);
                             }
@@ -826,7 +830,10 @@ namespace KeireEditor
                                     m_Rebind->Apply(conflicts.empty() ? Keire::RebindConflictResolution::KeepBoth
                                                                       : Keire::RebindConflictResolution::Replace);
                                     if (m_Rebind->Status() == Keire::RebindStatus::Completed)
+                                    {
                                         m_Rebind.Reset();
+                                        m_RebindContext.Reset();
+                                    }
                                 }
                                 ui.SameLine();
                                 if (!conflicts.empty() && ui.Button("Keep Both"))
@@ -840,17 +847,24 @@ namespace KeireEditor
                                         target->Path = candidatePath;
                                     m_Rebind->Apply(Keire::RebindConflictResolution::KeepBoth);
                                     if (m_Rebind->Status() == Keire::RebindStatus::Completed)
+                                    {
                                         m_Rebind.Reset();
+                                        m_RebindContext.Reset();
+                                    }
                                 }
                                 ui.SameLine();
                                 if (ui.Button("Cancel"))
                                 {
                                     m_Rebind->Cancel();
                                     m_Rebind.Reset();
+                                    m_RebindContext.Reset();
                                 }
                             }
                             else
+                            {
                                 m_Rebind.Reset();
+                                m_RebindContext.Reset();
+                            }
                         }
                     }
                 }
@@ -879,5 +893,9 @@ namespace KeireEditor
             document.ReplaceDefinition(std::move(inputDocument));
     }
 
-    void InputActionsPanel::ResetTransientState() noexcept { m_Rebind.Reset(); }
+    void InputActionsPanel::ResetTransientState() noexcept
+    {
+        m_Rebind.Reset();
+        m_RebindContext.Reset();
+    }
 } // namespace KeireEditor

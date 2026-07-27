@@ -14,7 +14,7 @@ namespace KeireEditor
                            const std::uint64_t frame, const Keire::LogLevel level)
     {
         constexpr std::size_t maximumMessages = 500;
-        m_Messages.push_back({std::move(category), std::move(message), color, frame, level});
+        m_Messages.push_back({std::move(category), std::move(message), color, frame, level, m_NextSerial++});
         while (m_Messages.size() > maximumMessages)
             m_Messages.pop_front();
     }
@@ -52,6 +52,7 @@ namespace KeireEditor
             {
                 m_Messages.clear();
                 m_PausedSnapshot.clear();
+                m_SelectedSerial = 0;
             }
             if (m_Messages.empty())
             {
@@ -73,8 +74,27 @@ namespace KeireEditor
                         continue;
                     if (m_Collapse && entry.Category == previousCategory && entry.Text == previousText)
                         continue;
-                    ui.TextColored(entry.Color,
-                                   "[" + std::to_string(entry.Frame) + "] [" + entry.Category + "] " + entry.Text);
+                    const auto formatted =
+                        "[" + std::to_string(entry.Frame) + "] [" + entry.Category + "] " + entry.Text;
+                    auto id = ui.PushId(std::to_string(entry.Serial));
+                    if (ui.Selectable(formatted, m_SelectedSerial == entry.Serial))
+                        m_SelectedSerial = entry.Serial;
+                    const auto copy = [&]
+                    {
+                        try
+                        {
+                            if (m_CopyText)
+                                m_CopyText(formatted);
+                        }
+                        catch (...)
+                        {
+                        }
+                    };
+                    if (ui.LastItemState().DoubleClicked)
+                        copy();
+                    if (auto context = ui.BeginItemContextMenu("ConsoleEntry"); context)
+                        if (ui.MenuItem("Copy"))
+                            copy();
                     previousCategory = entry.Category;
                     previousText = entry.Text;
                 }

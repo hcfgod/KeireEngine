@@ -271,10 +271,17 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void WriteManagedLog(Keire::ManagedLogLevel level, std::string_view message) noexcept override;
     [[nodiscard]] float ManagedDeltaTime() const noexcept override;
     [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
+    [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
+    RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept override;
     void SetManagedCursorVisible(bool visible) noexcept override;
     void SetManagedCursorLocked(bool locked) noexcept override;
     [[nodiscard]] bool IsManagedCursorVisible() const noexcept override;
     [[nodiscard]] bool IsManagedCursorLocked() const noexcept override;
+    [[nodiscard]] bool PlayManagedAudio(Keire::AssetId entity, Keire::AssetId clip, float gain) noexcept override;
+    [[nodiscard]] bool StopManagedAudio(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
+    [[nodiscard]] bool ConsumeManagedUiClick(Keire::AssetId entity) noexcept override;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
                            Keire::LogLevel level = Keire::LogLevel::Info) noexcept;
     void ReportError(std::string category, std::string message) noexcept;
@@ -303,6 +310,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestStopPlayMode();
     void FinishPlayMode(bool apply);
     void ApplyManagedCursorMode() noexcept;
+    void ResetManagedPhysicsWorld() noexcept;
+    void RebuildManagedPhysicsWorld();
     void DrawPlayChanges(Keire::UiFrame& ui);
     void FinalizePendingPlayEditorMutation();
     void UndoSceneEdit();
@@ -378,6 +387,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::ManagedBuildOperationId m_LastManagedBuildReport;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
+    Keire::Ref<Keire::PhysicsWorld> m_ManagedPhysicsWorld;
+    Keire::Ref<Keire::Scene> m_ManagedPhysicsScene;
+    std::vector<std::pair<Keire::PhysicsBodyId, Keire::AssetId>> m_ManagedPhysicsEntities;
+    std::size_t m_ManagedPhysicsObjectCount = 0;
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;
@@ -400,6 +413,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     };
     std::deque<InputHistoryEntry> m_InputHistory;
     Keire::Ref<Keire::RenderView> m_GameRenderView;
+    Keire::Ref<Keire::ScenePresentationRuntime> m_GameEditPresentation;
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
     PendingSceneAction m_PendingSceneAction = PendingSceneAction::None;

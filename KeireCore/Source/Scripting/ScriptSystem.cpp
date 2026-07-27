@@ -281,6 +281,55 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] std::string ManagedApiSourceFingerprint(const std::filesystem::path& project)
+        {
+            const auto sourceRoot = project.parent_path();
+            std::vector<std::filesystem::path> sources{project};
+            std::error_code error;
+            for (std::filesystem::recursive_directory_iterator
+                     iterator(sourceRoot, std::filesystem::directory_options::skip_permission_denied, error),
+                 end;
+                 iterator != end;)
+            {
+                if (error)
+                {
+                    error.clear();
+                    iterator.increment(error);
+                    continue;
+                }
+                const auto& entry = *iterator;
+                if (entry.is_directory(error) && (entry.path().filename() == "bin" || entry.path().filename() == "obj"))
+                {
+                    iterator.disable_recursion_pending();
+                }
+                else if (entry.is_regular_file(error) && entry.path().extension() == ".cs")
+                {
+                    sources.push_back(entry.path());
+                }
+                error.clear();
+                iterator.increment(error);
+            }
+            std::ranges::sort(sources);
+            std::string fingerprint;
+            for (const auto& source : sources)
+            {
+                error.clear();
+                const auto relative = std::filesystem::relative(source, sourceRoot, error);
+                if (error)
+                    throw std::filesystem::filesystem_error("Could not fingerprint managed API source.", source, error);
+                const auto size = std::filesystem::file_size(source, error);
+                if (error)
+                    throw std::filesystem::filesystem_error("Could not read managed API source size.", source, error);
+                const auto writeTime = std::filesystem::last_write_time(source, error);
+                if (error)
+                    throw std::filesystem::filesystem_error("Could not read managed API source timestamp.", source,
+                                                            error);
+                fingerprint += PathText(relative) + "|" + std::to_string(size) + "|" +
+                               std::to_string(writeTime.time_since_epoch().count()) + "\n";
+            }
+            return fingerprint;
+        }
+
         [[nodiscard]] std::string
         GenerateProject(const ManagedAssemblyGraphEntry& assembly, const std::map<AssetId, std::string>& names,
                         const std::filesystem::path& projectRoot, const std::filesystem::path& projectDirectory,
@@ -952,10 +1001,11 @@ namespace Keire
             if (!CurrentRuntime)
                 return {};
             const AssetId id(high, low);
-            const auto found = std::ranges::find_if(
-                CurrentRuntime->Instances, [world, id](const auto& entry)
-                { return entry.second.World == world && entry.second.Entity == id && entry.second.NativeEntity; });
-            return found == CurrentRuntime->Instances.end() ? Entity{} : found->second.NativeEntity;
+            const auto found =
+                std::ranges::find_if(CurrentRuntime->Instances, [world](const auto& entry)
+                                     { return entry.second.World == world && entry.second.NativeEntity; });
+            return found == CurrentRuntime->Instances.end() ? Entity{}
+                                                            : found->second.NativeEntity.Resolve(EntityId(id));
         }
 
         static void RuntimeWriteLog(const std::uint8_t level, const Coral::String message) noexcept
@@ -997,6 +1047,21 @@ namespace Keire
             }
             catch (...)
             {
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeInputState(const Coral::String action) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                return static_cast<std::uint8_t>(CurrentRuntime->Specification.RuntimeServices->ReadManagedInputState(
+                    static_cast<std::string>(action)));
+            }
+            catch (...)
+            {
+                return 0;
             }
         }
 
@@ -1073,6 +1138,218 @@ namespace Keire
                 catch (...)
                 {
                 }
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeEntityExists(const std::uint64_t world, const std::uint64_t high,
+                                                              const std::uint64_t low) noexcept
+        {
+            return ResolveRuntimeEntity(world, high, low) ? 1 : 0;
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeGetEntityActive(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            return entity && entity.ActiveSelf() ? 1 : 0;
+        }
+
+        static void RuntimeSetEntityActive(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                           const std::uint8_t active) noexcept
+        {
+            try
+            {
+                if (auto entity = ResolveRuntimeEntity(world, high, low))
+                    entity.SetActive(active != 0);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        [[nodiscard]] static Vector3 RuntimeGetLocalScale(const std::uint64_t world, const std::uint64_t high,
+                                                          const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->LocalScale() : Vector3{1.0F, 1.0F, 1.0F};
+        }
+
+        static void RuntimeSetLocalScale(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                         const Vector3 value) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            if (const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{})
+            {
+                try
+                {
+                    transform->SetLocalScale(value);
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+
+        [[nodiscard]] static Vector3 RuntimeGetWorldPosition(const std::uint64_t world, const std::uint64_t high,
+                                                             const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            return transform ? transform->WorldPosition() : Vector3{};
+        }
+
+        static void RuntimeCloneEntity(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                       std::uint64_t* resultHigh, std::uint64_t* resultLow) noexcept
+        {
+            if (!resultHigh || !resultLow)
+                return;
+            *resultHigh = 0;
+            *resultLow = 0;
+            try
+            {
+                if (auto entity = ResolveRuntimeEntity(world, high, low))
+                {
+                    const auto clone = entity.Clone();
+                    *resultHigh = clone.Id().Value().High();
+                    *resultLow = clone.Id().Value().Low();
+                }
+            }
+            catch (...)
+            {
+            }
+        }
+
+        static void RuntimeDestroyEntity(const std::uint64_t world, const std::uint64_t high,
+                                         const std::uint64_t low) noexcept
+        {
+            try
+            {
+                if (auto entity = ResolveRuntimeEntity(world, high, low))
+                    (void)entity.Destroy();
+            }
+            catch (...)
+            {
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimePlayAudio(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                           const std::uint64_t entityLow, const std::uint64_t clipHigh,
+                                                           const std::uint64_t clipLow, const float gain) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->PlayManagedAudio(
+                                     entity.Id().Value(), AssetId(clipHigh, clipLow), gain)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeStopAudio(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                           const std::uint64_t entityLow) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->StopManagedAudio(entity.Id().Value())
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetUiText(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                           const std::uint64_t entityLow,
+                                                           const Coral::String text) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->SetManagedUiText(
+                                     entity.Id().Value(), static_cast<std::string>(text))
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeConsumeUiClick(const std::uint64_t world,
+                                                                const std::uint64_t entityHigh,
+                                                                const std::uint64_t entityLow) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity &&
+                               CurrentRuntime->Specification.RuntimeServices->ConsumeManagedUiClick(entity.Id().Value())
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        struct RuntimeRaycastResult
+        {
+            std::uint64_t EntityHigh = 0;
+            std::uint64_t EntityLow = 0;
+            Vector3 Point;
+            Vector3 Normal;
+            float Distance = 0.0F;
+        };
+
+        [[nodiscard]] static std::uint8_t RuntimeRaycast(const std::uint64_t world, const Vector3 origin,
+                                                         const Vector3 direction, const float maximumDistance,
+                                                         const std::uint32_t mask, const std::uint64_t ignoredHigh,
+                                                         const std::uint64_t ignoredLow,
+                                                         RuntimeRaycastResult* result) noexcept
+        {
+            if (!result || !CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto hit = CurrentRuntime->Specification.RuntimeServices->RaycastManaged(
+                    {.World = world,
+                     .Origin = origin,
+                     .Direction = direction,
+                     .MaximumDistance = maximumDistance,
+                     .Mask = mask,
+                     .IgnoredEntity = AssetId(ignoredHigh, ignoredLow),
+                     .IncludeTriggers = false});
+                if (!hit)
+                    return 0;
+                result->EntityHigh = hit->Entity.High();
+                result->EntityLow = hit->Entity.Low();
+                result->Point = hit->Point;
+                result->Normal = hit->Normal;
+                result->Distance = hit->Distance;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
             }
         }
 
@@ -1226,50 +1503,70 @@ namespace Keire
                           "MSBuildProjectExtensionsPath>\n"
                           "  </PropertyGroup>\n</Project>\n");
 
-                auto generationManagedApi = ManagedApi;
-                const auto managedApiProject = FindManagedApiProject();
                 const auto managedApiOutput = staging / "ManagedApi";
+                std::filesystem::create_directories(managedApiOutput);
+                auto generationManagedApi = managedApiOutput / "Keire.Managed.dll";
+                const auto managedApiProject = FindManagedApiProject();
                 if (!managedApiProject.empty())
                 {
-                    std::filesystem::create_directories(managedApiOutput);
-                    const auto managedApiIntermediate = OutputRoot / "Intermediate" / "ManagedApi";
-                    const std::vector<std::string> managedApiArguments{
-                        "build",
-                        PathText(managedApiProject),
-                        "--configuration",
-                        "Release",
-                        "--nologo",
-                        "--output",
-                        PathText(managedApiOutput),
-                        "--property:BaseIntermediateOutputPath=" + PathText(managedApiIntermediate) + "/"};
-                    auto managedApiProcess = Detail::ChildProcess::Start(Dotnet, managedApiArguments, staging);
-                    while (!managedApiProcess.Poll())
+                    const auto fingerprint = ManagedApiSourceFingerprint(managedApiProject);
+                    const auto cacheDirectory = OutputRoot / "ManagedApiCache";
+                    const auto cachedAssembly = cacheDirectory / "Keire.Managed.dll";
+                    const auto cachedFingerprint = cacheDirectory / "source.fingerprint";
+                    bool cacheHit = false;
+                    if (std::filesystem::is_regular_file(cachedAssembly) &&
+                        std::filesystem::is_regular_file(cachedFingerprint))
                     {
-                        if (cancellation.stop_requested())
+                        cacheHit = Detail::ReadTextFile(cachedFingerprint, 1024U * 1024U) == fingerprint;
+                    }
+                    if (cacheHit)
+                    {
+                        std::filesystem::copy_file(cachedAssembly, generationManagedApi,
+                                                   std::filesystem::copy_options::overwrite_existing);
+                    }
+                    else
+                    {
+                        const auto managedApiIntermediate = OutputRoot / "Intermediate" / "ManagedApi";
+                        const std::vector<std::string> managedApiArguments{
+                            "build",
+                            PathText(managedApiProject),
+                            "--configuration",
+                            "Release",
+                            "--nologo",
+                            "--output",
+                            PathText(managedApiOutput),
+                            "--property:BaseIntermediateOutputPath=" + PathText(managedApiIntermediate) + "/"};
+                        auto managedApiProcess = Detail::ChildProcess::Start(Dotnet, managedApiArguments, staging);
+                        while (!managedApiProcess.Poll())
                         {
-                            managedApiProcess.Terminate();
-                            throw ManagedBuildState::Cancelled;
+                            if (cancellation.stop_requested())
+                            {
+                                managedApiProcess.Terminate();
+                                throw ManagedBuildState::Cancelled;
+                            }
+                            std::this_thread::sleep_for(std::chrono::milliseconds(10));
                         }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                        const auto managedApiBuildOutput = managedApiProcess.TakeOutput();
+                        if (managedApiProcess.ExitCode().value_or(1) != 0)
+                        {
+                            throw std::runtime_error(managedApiBuildOutput.empty()
+                                                         ? "Keire.Managed compilation failed without output."
+                                                         : managedApiBuildOutput);
+                        }
+                        if (!std::filesystem::is_regular_file(generationManagedApi))
+                            throw std::runtime_error("Keire.Managed compilation published no API assembly.");
+                        std::filesystem::create_directories(cacheDirectory);
+                        const auto assemblyBytes = Detail::ReadTextFile(generationManagedApi, 64U * 1024U * 1024U);
+                        Detail::WriteFileAtomically(cachedAssembly, std::as_bytes(std::span(assemblyBytes)));
+                        Detail::WriteTextFileAtomically(cachedFingerprint, fingerprint);
                     }
-                    const auto managedApiBuildOutput = managedApiProcess.TakeOutput();
-                    if (managedApiProcess.ExitCode().value_or(1) != 0)
-                    {
-                        throw std::runtime_error(managedApiBuildOutput.empty()
-                                                     ? "Keire.Managed compilation failed without output."
-                                                     : managedApiBuildOutput);
-                    }
-                    generationManagedApi = managedApiOutput / "Keire.Managed.dll";
-                    if (!std::filesystem::is_regular_file(generationManagedApi))
-                        throw std::runtime_error("Keire.Managed compilation published no API assembly.");
                 }
-                else if (!generationManagedApi.empty())
+                else
                 {
-                    std::filesystem::create_directories(managedApiOutput);
-                    const auto immutableManagedApi = managedApiOutput / generationManagedApi.filename();
-                    std::filesystem::copy_file(generationManagedApi, immutableManagedApi,
+                    if (ManagedApi.empty() || !std::filesystem::is_regular_file(ManagedApi))
+                        throw std::runtime_error("The managed build has no valid Keire.Managed API assembly.");
+                    std::filesystem::copy_file(ManagedApi, generationManagedApi,
                                                std::filesystem::copy_options::overwrite_existing);
-                    generationManagedApi = immutableManagedApi;
                 }
 
                 std::map<AssetId, std::string> names;
@@ -1422,10 +1719,10 @@ namespace Keire
                         return;
                     const auto owner = Owner();
                     const auto id = implementation.NextInstance++;
-                    auto object = implementation.CreateObject(*type, id, owner.Id().Value());
+                    auto object = implementation.CreateObject(*type, owner.World(), owner.Id().Value());
                     const auto [instance, inserted] = implementation.Instances.emplace(
-                        id,
-                        BehaviourInstance{m_ManagedType, Type(), id, owner.Id().Value(), std::move(object), m_State});
+                        id, BehaviourInstance{m_ManagedType, Type(), owner.World(), owner.Id().Value(),
+                                              std::move(object), m_State});
                     (void)inserted;
                     instance->second.NativeEntity = owner;
                     m_Instance = ManagedBehaviourInstanceId(id);
@@ -1762,6 +2059,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeDeltaTime));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "InputAxis2DIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeInputAxis2D));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "InputStateIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeInputState));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetCursorVisibleIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetCursorVisible));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetCursorLockedIcall",
@@ -1778,6 +2077,32 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetLocalRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetLocalRotation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "EntityExistsIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeEntityExists));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityActiveIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityActive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityActiveIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetEntityActive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetLocalScaleIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetLocalScale));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalScaleIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetLocalScale));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldPositionIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetWorldPosition));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "CloneEntityIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeCloneEntity));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "DestroyEntityIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeDestroyEntity));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "RaycastIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeRaycast));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PlayAudioIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePlayAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "StopAudioIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeStopAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetUiTextIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetUiText));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeConsumeUiClick));
                 managedApi.UploadInternalCalls();
                 behaviourType = &managedApi.GetLocalType("Keire.Behaviour");
                 if (!*behaviourType)

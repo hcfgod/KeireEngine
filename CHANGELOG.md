@@ -1,5 +1,11 @@
 # Changelog
 
+- Added shared managed scene world identities, action edge-state APIs, scene-safe clone/destroy calls, collider-backed
+  managed raycasts, and serializable Collider/Rigid Body components.
+- Added managed ScriptableObject foundations and a production-oriented weapon framework with physical magazines,
+  chambered rounds, tube-fed shells, rifle/pistol/shotgun fire modes, deterministic ballistics, penetration,
+  ricochet, layered damage contracts, recoil springs, and a sandbox loadout. Removed the legacy `Testing` script.
+
 - Added managed cursor visibility and relative-lock APIs, and isolated Play Mode input from editor input contexts.
 - Added Escape cursor release and runtime-owned Player-map lookup so gameplay input is independent of editor documents.
 - Rebind scene component placeholders after managed assemblies load so scripts present in startup scenes execute in Play.
@@ -22,6 +28,16 @@
   the separate internal gameplay compilation projects on .NET 10/C# 14.
 - Keep common unused C# local and field diagnostics as visible warnings instead of promoting them to build-blocking
   errors, while retaining strict warnings-as-errors behavior for other managed diagnostics.
+- Input Actions Listen now captures against the live in-memory document through a transient context, supporting any
+  keyboard, mouse, or gamepad control for new and unsaved bindings.
+- Script-only saves now use shorter source/debounce windows, skip asset catalog imports, and reuse the validated managed
+  API assembly, substantially reducing save-to-reload latency.
+- Console entries are selectable and support complete-entry clipboard copy through double-click or a context menu.
+- Managed API reuse now uses a persistent source fingerprint and validated cache, preventing stale prebuilt engine
+  assemblies from removing current `Cursor`, `Debug`, and `Input` APIs while retaining fast gameplay-only rebuilds.
+- Input Actions hides Listen while an interactive capture is active, preventing duplicate-operation errors.
+- Correct the Sandbox weapon test's inverted empty-magazine predicate, derive its fire/reload capability flags from
+  current ammo state, and transfer only the available magazine space from reserve ammo during reload.
 
 - Added .NET 10/C# 14 managed assembly schema v2, immutable incremental build generations, automatic debounced script
   compilation, transactional field-preserving Play Mode reload, per-Behaviour exception quarantine, managed component
@@ -73,6 +89,12 @@
 All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic version tags.
 
 ## Unreleased
+
+- Added scene-authored retained runtime UI and audio presentation in editor Play Mode and cooked runtimes, including
+  managed audio playback, managed text updates, button click consumption, audio clip importing, and generation-safe
+  teardown.
+- Fixed Ninja managed-build quoting, current scene-schema regression checks, input override persistence coverage, and
+  clamped weapon equip timing in the managed production harness.
 
 - Added Project-panel C# script, managed assembly, prefab-from-selection, and prefab-variant creation; source assets open
   through a persisted external-editor choice with system-default fallback. Prefabs instantiate transactionally when

@@ -1590,6 +1590,23 @@ namespace Keire
         m_Impl->State->Contexts.push_back(state);
         return CreateRef<InputActionContext>(std::make_unique<InputActionContext::Impl>(std::move(state)));
     }
+    Ref<InputActionContext> InputSystem::CreateActionContext(InputActionAssetDefinition definition,
+                                                             const InputUserId user)
+    {
+        m_Impl->State->RequireOwner("CreateActionContext");
+        if (!m_Impl->State->Users.contains(user))
+            throw std::invalid_argument("Input action context requires a known input user.");
+        auto state = CreateRef<Detail::InputContextState>();
+        state->Runtime = m_Impl->State;
+        state->User = user;
+        state->Definition = std::move(definition);
+        state->AssetRevision = state->AssetHandle.Revision();
+        for (const auto& map : state->Definition.ActionMaps)
+            for (const auto& action : map.Actions)
+                state->Actions.emplace(action.Id, Detail::ActionRuntime{});
+        m_Impl->State->Contexts.push_back(state);
+        return CreateRef<InputActionContext>(std::make_unique<InputActionContext::Impl>(std::move(state)));
+    }
     Ref<InteractiveRebindOperation> InputSystem::BeginInteractiveRebind(const Ref<InputActionContext>& context,
                                                                         const AssetId binding,
                                                                         InteractiveRebindOptions options)

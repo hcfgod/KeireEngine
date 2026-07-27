@@ -354,13 +354,14 @@ namespace KeireEditor
             m_RecoverySeconds += seconds;
     }
 
-    void SceneDocument::BeginPlay(Keire::Ref<Keire::UndoContext> playUndo)
+    void SceneDocument::BeginPlay(Keire::Ref<Keire::UndoContext> playUndo, Keire::Ref<Keire::AssetSystem> assets,
+                                  Keire::Ref<Keire::AudioSystem> audio)
     {
         if (!m_Scene)
             throw std::logic_error("SceneDocument cannot enter Play without an editing scene.");
         if (m_PlaySession && m_PlaySession->State() != Keire::ScenePlayState::Stopped)
             throw std::logic_error("SceneDocument is already in Play.");
-        m_PlaySession = Keire::CreateRef<Keire::SceneRuntimeSession>(m_Scene);
+        m_PlaySession = Keire::CreateRef<Keire::SceneRuntimeSession>(m_Scene, std::move(assets), std::move(audio));
         m_PlayUndo = std::move(playUndo);
         m_PlaySession->Play();
         SynchronizeSelection();

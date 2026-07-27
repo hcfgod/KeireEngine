@@ -6,10 +6,13 @@
 
 #include <chrono>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire
@@ -103,9 +106,13 @@ namespace Keire
     {
         std::uint32_t SampleRate = 48000;
         std::uint32_t Channels = 1;
+        std::uint64_t Frames = 0;
         std::vector<float> Samples;
+        std::vector<std::byte> EncodedSource;
         bool Streaming = false;
     };
+
+    [[nodiscard]] KEIRE_API std::shared_ptr<const AudioClipData> LoadAudioClipData(const std::filesystem::path& path);
 
     struct AudioVoiceSpecification
     {
@@ -157,6 +164,12 @@ namespace Keire
         std::uint64_t Underruns = 0;
     };
 
+    struct AudioBusInfo
+    {
+        std::string Name;
+        float Gain = 1.0F;
+    };
+
     class KEIRE_API AudioSystem final : public RefCounted
     {
       public:
@@ -171,6 +184,10 @@ namespace Keire
         [[nodiscard]] AudioVoiceId Play(AudioVoiceSpecification specification);
         [[nodiscard]] bool Stop(AudioVoiceId voice);
         [[nodiscard]] bool SetVoice(AudioVoiceId voice, AudioVoiceSpecification specification);
+        [[nodiscard]] std::size_t StopAll(std::string_view bus = {});
+        void SetBusGain(std::string bus, float gain);
+        [[nodiscard]] float BusGain(std::string_view bus) const;
+        [[nodiscard]] std::vector<AudioBusInfo> Buses() const;
         void SetListener(const AudioListenerState& listener);
         void SubmitSnapshot(const AudioMixerSnapshot& snapshot);
         void Update(std::chrono::duration<float> elapsed);

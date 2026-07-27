@@ -224,7 +224,8 @@ Assert-True ($processSource.Contains('"/select," + utf8Path') -and $processSourc
 $hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp") -Raw
 Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('Show Hub') -and $hubSource.Contains('m_Tray->IsAvailable()')) "Project Hub tray backgrounding"
 $sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
-Assert-True ($sampleScene.Contains('"schemaVersion": 2') -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Schema-v2 component sample scene"
+$sampleSceneDocument = $sampleScene | ConvertFrom-Json
+Assert-True ([int]$sampleSceneDocument.schemaVersion -ge 2 -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Current-schema component sample scene"
 $monsterMeshes = @(Get-ChildItem (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets") -Filter "base.fbx" -File -Recurse)
 Assert-Equal $monsterMeshes.Count 1 "Organized monster source count"
 $duplicateMeshContent = @(Get-ChildItem (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets") -Filter "*.fbx" -File -Recurse | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash } | Group-Object | Where-Object Count -gt 1)

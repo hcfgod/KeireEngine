@@ -152,12 +152,13 @@ namespace
         return selected;
     }
 
-    class RuntimeLayer final : public Keire::Layer
+    class RuntimeLayer final : public Keire::Layer, public Keire::IScriptRuntimeServices
     {
       public:
-        RuntimeLayer(const Keire::AssetId startupScene, const Keire::RenderEnvironmentSettings rendering,
-                     const std::uint32_t frames)
-            : Layer("Runtime"), m_StartupScene(startupScene), m_Rendering(rendering), m_MaximumFrames(frames)
+        RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
+                     const Keire::RenderEnvironmentSettings rendering, const std::uint32_t frames)
+            : Layer("Runtime"), m_StartupScene(startupScene), m_DefaultInput(defaultInput), m_Rendering(rendering),
+              m_MaximumFrames(frames)
         {
         }
 
@@ -171,10 +172,30 @@ namespace
             surface.Width = std::max(pixels.Width, 1U);
             surface.Height = std::max(pixels.Height, 1U);
             m_View = Owner().Renderer()->CreateView(surface);
+            m_Presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(Owner().Assets(), Owner().Audio());
+            if (const auto scripts = Owner().Scripts())
+                scripts->SetRuntimeServices(this);
+            if (m_DefaultInput)
+            {
+                if (const auto input = Owner().Input())
+                {
+                    m_InputUser = input->CreateUser("Player");
+                    for (const auto& device : input->Devices())
+                    {
+                        if (device.Connected)
+                            (void)input->PairDevice(m_InputUser, device.Id);
+                    }
+                    m_InputContext = input->CreateActionContext(m_DefaultInput, m_InputUser);
+                }
+            }
         }
 
         void OnDetach() noexcept override
         {
+            if (const auto scripts = Owner().Scripts())
+                scripts->SetRuntimeServices(nullptr);
+            if (m_Presentation)
+                m_Presentation->Clear();
             if (m_Playing && m_Scene)
                 m_Scene->EndPlay();
         }
@@ -187,6 +208,7 @@ namespace
 
         void OnUpdate(const Keire::Time& time) override
         {
+            m_DeltaTime = static_cast<float>(time.DeltaTime().Seconds());
             if (!m_Scene)
             {
                 if (m_Load->State() == Keire::SceneLoadState::Failed)
@@ -204,6 +226,8 @@ namespace
             const auto pixels = Owner().MainWindow()->PixelSize();
             const auto width = std::max(pixels.Width, 1U);
             const auto height = std::max(pixels.Height, 1U);
+            if (m_Presentation)
+                m_Presentation->Synchronize(m_Scene, static_cast<float>(width), static_cast<float>(height), true);
             m_View->Surface()->RequestSize(width, height);
             Keire::RenderCamera camera;
             camera.View = Keire::Math::Inverse(selected->Transform->WorldMatrix());
@@ -224,17 +248,169 @@ namespace
         void OnUi(Keire::UiFrame& ui) override
         {
             if (m_View)
+            {
                 ui.Image(m_View->Surface(), ui.ContentAvailable());
+                const auto rectangle = ui.LastItemRect();
+                if (m_Presentation)
+                {
+                    m_Presentation->Draw(ui, rectangle.Minimum.X, rectangle.Minimum.Y);
+                    const auto pointer = ui.PointerState();
+                    const float localX = pointer.Position.X - rectangle.Minimum.X;
+                    const float localY = pointer.Position.Y - rectangle.Minimum.Y;
+                    m_Presentation->PointerMove(localX, localY);
+                    if (rectangle.Contains(pointer.Position))
+                    {
+                        if (pointer.LeftPressed)
+                            m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
+                        if (pointer.RightPressed)
+                            m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary,
+                                                          true);
+                    }
+                    if (pointer.LeftReleased)
+                        m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
+                    if (pointer.RightReleased)
+                        m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, false);
+                }
+            }
+        }
+
+        void WriteManagedLog(const Keire::ManagedLogLevel level, const std::string_view message) noexcept override
+        {
+            const auto logger = Keire::Log::GetClientLogger();
+            if (logger)
+            {
+                const auto native = static_cast<Keire::LogLevel>(std::min(
+                    static_cast<std::uint8_t>(level), static_cast<std::uint8_t>(Keire::ManagedLogLevel::Critical)));
+                logger.Write(native, message);
+            }
+        }
+
+        [[nodiscard]] float ManagedDeltaTime() const noexcept override { return m_DeltaTime; }
+
+        [[nodiscard]] Keire::Vector2 ReadManagedInput(const std::string_view action) noexcept override
+        {
+            try
+            {
+                if (!m_InputContext || !m_InputContext->EnableMap("Player"))
+                    return {};
+                const auto handle = m_InputContext->FindAction("Player", action);
+                if (!handle)
+                    return {};
+                const auto value = handle.Value().AsAxis2D();
+                return {value.X, value.Y};
+            }
+            catch (...)
+            {
+                return {};
+            }
+        }
+
+        [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(const std::string_view action) noexcept override
+        {
+            try
+            {
+                if (!m_InputContext || !m_InputContext->EnableMap("Player"))
+                    return Keire::ManagedInputState::None;
+                const auto handle = m_InputContext->FindAction("Player", action);
+                if (!handle)
+                    return Keire::ManagedInputState::None;
+                auto state = Keire::ManagedInputState::None;
+                if (handle.Value().Magnitude() >= 0.5F)
+                    state = state | Keire::ManagedInputState::Held;
+                if (handle.WasStartedThisFrame() || handle.WasPerformedThisFrame())
+                    state = state | Keire::ManagedInputState::Pressed;
+                if (handle.WasCanceledThisFrame())
+                    state = state | Keire::ManagedInputState::Released;
+                return state;
+            }
+            catch (...)
+            {
+                return Keire::ManagedInputState::None;
+            }
+        }
+
+        [[nodiscard]] bool PlayManagedAudio(const Keire::AssetId entity, const Keire::AssetId clip,
+                                            const float gain) noexcept override
+        {
+            try
+            {
+                auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+                if (!target || !m_Presentation || !clip || !std::isfinite(gain) || gain < 0.0F)
+                    return false;
+                auto source = target.GetComponent<Keire::AudioSourceComponent>();
+                if (!source)
+                    source = target.AddComponent<Keire::AudioSourceComponent>();
+                source->SetClip(clip);
+                source->SetGain(gain);
+                source->SetPlayOnAwake(true);
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool StopManagedAudio(const Keire::AssetId entity) noexcept override
+        {
+            try
+            {
+                const auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+                if (!target || !m_Presentation)
+                    return false;
+                if (const auto source = target.GetComponent<Keire::AudioSourceComponent>())
+                    source->SetPlayOnAwake(false);
+                return m_Presentation->Stop(target.Id());
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept override
+        {
+            try
+            {
+                const auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+                const auto component =
+                    target ? target.GetComponent<Keire::UiTextComponent>() : Keire::Ref<Keire::UiTextComponent>{};
+                if (!component)
+                    return false;
+                component->SetText(std::string(text));
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool ConsumeManagedUiClick(const Keire::AssetId entity) noexcept override
+        {
+            try
+            {
+                return m_Presentation && m_Presentation->ConsumeClick(Keire::EntityId(entity));
+            }
+            catch (...)
+            {
+                return false;
+            }
         }
 
       private:
         Keire::AssetId m_StartupScene;
+        Keire::AssetId m_DefaultInput;
         Keire::RenderEnvironmentSettings m_Rendering;
         std::uint32_t m_MaximumFrames = 0;
         std::uint32_t m_RenderedFrames = 0;
         Keire::Ref<Keire::SceneLoadOperation> m_Load;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::ScenePresentationRuntime> m_Presentation;
+        Keire::InputUserId m_InputUser;
+        Keire::Ref<Keire::InputActionContext> m_InputContext;
+        float m_DeltaTime = 0.0F;
         bool m_Playing = false;
     };
 
@@ -272,7 +448,8 @@ namespace
                 Scripts()->CommitReload();
                 Scripts()->InstallManagedComponents(Scenes()->Components());
             }
-            (void)PushLayer(std::make_unique<RuntimeLayer>(m_Manifest.StartupScene, m_Manifest.Rendering, m_Frames));
+            (void)PushLayer(std::make_unique<RuntimeLayer>(m_Manifest.StartupScene, m_Manifest.DefaultInput,
+                                                           m_Manifest.Rendering, m_Frames));
         }
 
       private:
@@ -303,7 +480,7 @@ namespace Keire
         specification.Render.Mode = RenderMode::Rendered;
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.Workspace.Enabled = false;
-        specification.Input.Mode = InputMode::Disabled;
+        specification.Input.Mode = manifest.DefaultInput ? InputMode::Enabled : InputMode::Disabled;
         if (manifest.Scripting)
         {
             specification.Scripting.Mode = ScriptMode::Enabled;

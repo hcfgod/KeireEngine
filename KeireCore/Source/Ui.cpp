@@ -1364,11 +1364,29 @@ namespace Keire
                                                       ToImGuiColor(color));
     }
 
-    void UiFrame::DrawOverlayText(const UiPosition position, const UiColor color, const std::string_view text)
+    UiSize UiFrame::MeasureText(const std::string_view text, const float fontSize) const
+    {
+        m_Impl->RequireActive("MeasureText");
+        const auto size = fontSize > 0.0F ? fontSize : ImGui::GetFontSize();
+        const auto measured = ImGui::GetFont()->CalcTextSizeA(size, std::numeric_limits<float>::max(), 0.0F,
+                                                              text.data(), text.data() + text.size());
+        return {measured.x, measured.y};
+    }
+
+    void UiFrame::DrawOverlayText(const UiPosition position, const UiColor color, const std::string_view text,
+                                  const float fontSize, const std::optional<UiItemRect> clip)
     {
         m_Impl->RequireActive("DrawOverlayText");
-        ImGui::GetWindowDrawList()->AddText({position.X, position.Y}, ToImGuiColor(color), text.data(),
-                                            text.data() + text.size());
+        const auto size = fontSize > 0.0F ? fontSize : ImGui::GetFontSize();
+        ImVec4 clipRectangle;
+        const ImVec4* clipPointer = nullptr;
+        if (clip)
+        {
+            clipRectangle = {clip->Minimum.X, clip->Minimum.Y, clip->Maximum.X, clip->Maximum.Y};
+            clipPointer = &clipRectangle;
+        }
+        ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), size, {position.X, position.Y}, ToImGuiColor(color),
+                                            text.data(), text.data() + text.size(), 0.0F, clipPointer);
     }
 
     UiSize UiFrame::ContentAvailable() const

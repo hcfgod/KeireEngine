@@ -62,6 +62,62 @@
           "processors": [],
           "type": "Button",
           "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000201",
+          "interactions": [],
+          "name": "Aim",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000202",
+          "interactions": [],
+          "name": "FireMode",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000203",
+          "interactions": [],
+          "name": "NextWeapon",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000204",
+          "interactions": [],
+          "name": "PreviousWeapon",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000205",
+          "interactions": [],
+          "name": "Weapon1",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000206",
+          "interactions": [],
+          "name": "Weapon2",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000207",
+          "interactions": [],
+          "name": "Weapon3",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
         }
       ],
       "bindings": [
@@ -247,7 +303,98 @@
           "interactions": [],
           "name": "",
           "part": "",
-          "path": "<Keyboard>/space",
+          "path": "<Keyboard>/r",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000201",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000211",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/rightButton",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000202",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000212",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/b",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000203",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000213",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/wheelUp",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000204",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000214",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/wheelDown",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000205",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000215",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/1",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000206",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000216",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/2",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000207",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000217",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/3",
           "processors": []
         }
       ],

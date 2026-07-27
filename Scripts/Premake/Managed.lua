@@ -6,7 +6,7 @@ local managedIntermediate = path.join(repositoryRoot, "Build/Intermediates/Manag
 KeireManagedProject = ProjectConfig.PROJECT_NAMESPACE .. "Managed"
 
 project(KeireManagedProject)
-    location "../../KeireManaged"
+    location "../../Build/Projects/KeireManaged"
     kind "Utility"
 
     files

@@ -322,6 +322,8 @@ namespace Keire
         [[nodiscard]] bool SetControlScheme(InputUserId user, std::string scheme, bool locked = true);
         [[nodiscard]] bool ClearControlSchemeLock(InputUserId user);
         [[nodiscard]] Ref<InputActionContext> CreateActionContext(AssetId asset, InputUserId user);
+        [[nodiscard]] Ref<InputActionContext> CreateActionContext(InputActionAssetDefinition definition,
+                                                                  InputUserId user);
         [[nodiscard]] Ref<InteractiveRebindOperation> BeginInteractiveRebind(const Ref<InputActionContext>& context,
                                                                              AssetId binding,
                                                                              InteractiveRebindOptions options = {});

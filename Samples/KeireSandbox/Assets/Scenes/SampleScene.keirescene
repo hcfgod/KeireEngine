@@ -49,6 +49,14 @@
         },
         {
           "data": {
+            "managedState": "{\"version\":1,\"fields\":[]}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000040",
+          "version": 1
+        },
+        {
+          "data": {
             "_invertHorizontal": false,
             "_invertVertical": false,
             "_lookSensitivity": 0.0,
@@ -113,10 +121,35 @@
         },
         {
           "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "halfExtent": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "height": 1.0,
+            "layer": 1,
+            "mask": 4294967295,
+            "radius": 0.5,
+            "shape": 0,
+            "trigger": false
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4f4c-4c49-444552000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "_hitZoneMultiplier": 0.0,
+            "_maximumHealth": 0.0,
             "managedState": "{\"version\":1,\"fields\":[]}"
           },
           "enabled": true,
-          "type": "f2354706-543d-4ac6-87e1-6d0c37bee1c8",
+          "type": "73616e64-626f-4078-8000-000000000041",
           "version": 1
         }
       ],
@@ -268,6 +301,29 @@
           "enabled": true,
           "type": "4b454952-454d-4553-4852-454e44455201",
           "version": 2
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "halfExtent": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "height": 1.0,
+            "layer": 1,
+            "mask": 4294967295,
+            "radius": 0.5,
+            "shape": 0,
+            "trigger": false
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4f4c-4c49-444552000001",
+          "version": 1
         }
       ],
       "id": "e3fbe155-f210-4d98-93e5-e32eadd53d5e",
@@ -322,6 +378,558 @@
       "id": "c675308e-c12d-47bc-baa6-38993de26b44",
       "name": "base",
       "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "accessibilityScale": 1.0,
+            "match": 0.5,
+            "pixelPerfect": false,
+            "referenceResolution": [
+              1920.0,
+              1080.0
+            ],
+            "respectSafeArea": true,
+            "scaleMode": 1,
+            "sortingOrder": 0
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4943-414e-564153000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              1.0,
+              1.0
+            ],
+            "anchorMinimum": [
+              0.0,
+              0.0
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              0.0,
+              0.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        }
+      ],
+      "id": "c87ed874-ece2-4223-b00d-b53fb7a33c0f",
+      "name": "Canvas",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              1.0,
+              1.0
+            ],
+            "anchorMinimum": [
+              0.0,
+              0.0
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              0.0,
+              0.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "fillAmount": 1.0,
+            "imageType": 1,
+            "pixelsPerUnit": 100.0,
+            "preserveAspect": false,
+            "raycastTarget": true,
+            "sprite": null,
+            "tint": [
+              0.02500000037252903,
+              0.04500000178813934,
+              0.07500000298023224,
+              0.9599999785423279
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4949-4d41-474500000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "cellSize": [
+              160.0,
+              48.0
+            ],
+            "controlChildHeight": false,
+            "controlChildWidth": false,
+            "direction": 1,
+            "forceExpandHeight": false,
+            "forceExpandWidth": false,
+            "padding": [
+              36.0,
+              36.0,
+              36.0,
+              36.0
+            ],
+            "spacing": 18.0
+          },
+          "enabled": true,
+          "type": "4b454952-4555-494c-4159-4f5554000001",
+          "version": 1
+        }
+      ],
+      "id": "7c75c151-0f8c-49de-9d86-6f6d8c02c689",
+      "name": "Modern Panel",
+      "parent": "c87ed874-ece2-4223-b00d-b53fb7a33c0f"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              0.5,
+              0.5
+            ],
+            "anchorMinimum": [
+              0.5,
+              0.5
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              320.0,
+              96.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "color": [
+              0.8600000143051147,
+              0.9399999976158142,
+              1.0,
+              1.0
+            ],
+            "font": null,
+            "fontSize": 34.0,
+            "raycastTarget": false,
+            "richText": true,
+            "text": "MISSION CONTROL",
+            "wrap": true
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4954-4558-540000000001",
+          "version": 1
+        }
+      ],
+      "id": "e7c65904-e1fa-470e-92a2-67d240edc190",
+      "name": "Title",
+      "parent": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              0.5,
+              0.5
+            ],
+            "anchorMinimum": [
+              0.5,
+              0.5
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              320.0,
+              96.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "color": [
+              0.33000001311302185,
+              0.7799999713897705,
+              0.949999988079071,
+              1.0
+            ],
+            "font": null,
+            "fontSize": 16.0,
+            "raycastTarget": false,
+            "richText": true,
+            "text": "SYSTEMS READY",
+            "wrap": true
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4954-4558-540000000001",
+          "version": 1
+        }
+      ],
+      "id": "c78e5405-06e6-4018-828b-c893b0a48c77",
+      "name": "Subtitle",
+      "parent": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              0.5,
+              0.5
+            ],
+            "anchorMinimum": [
+              0.5,
+              0.5
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              250.0,
+              42.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "fillAmount": 1.0,
+            "imageType": 1,
+            "pixelsPerUnit": 100.0,
+            "preserveAspect": false,
+            "raycastTarget": true,
+            "sprite": null,
+            "tint": [
+              1.0,
+              1.0,
+              1.0,
+              0.9599999785423279
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4949-4d41-474500000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "action": "",
+            "disabledColor": [
+              0.20000000298023224,
+              0.23000000417232513,
+              0.2800000011920929,
+              0.550000011920929
+            ],
+            "hoverColor": [
+              0.11999999731779099,
+              0.6000000238418579,
+              0.9200000166893005,
+              1.0
+            ],
+            "interactable": true,
+            "normalColor": [
+              0.07999999821186066,
+              0.44999998807907104,
+              0.7200000286102295,
+              1.0
+            ],
+            "pressedColor": [
+              0.05000000074505806,
+              0.3199999928474426,
+              0.5600000023841858,
+              1.0
+            ],
+            "transition": 1,
+            "transitionDuration": 0.11999999731779099
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4942-5554-544f4e000001",
+          "version": 1
+        }
+      ],
+      "id": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
+      "name": "Primary Action",
+      "parent": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "anchorMaximum": [
+              1.0,
+              1.0
+            ],
+            "anchorMinimum": [
+              0.0,
+              0.0
+            ],
+            "anchoredPosition": [
+              0.0,
+              0.0
+            ],
+            "pivot": [
+              0.5,
+              0.5
+            ],
+            "rotation": 0.0,
+            "scale": [
+              1.0,
+              1.0
+            ],
+            "sizeDelta": [
+              0.0,
+              0.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4952-4543-545452410001",
+          "version": 1
+        },
+        {
+          "data": {
+            "alignment": 4,
+            "color": [
+              0.9399999976158142,
+              0.9700000286102295,
+              1.0,
+              1.0
+            ],
+            "font": null,
+            "fontSize": 24.0,
+            "raycastTarget": false,
+            "richText": true,
+            "text": "CONTINUE",
+            "wrap": true
+          },
+          "enabled": true,
+          "type": "4b454952-4555-4954-4558-540000000001",
+          "version": 1
+        }
+      ],
+      "id": "e4617127-881d-4ed6-b0c3-bc4bba434ec1",
+      "name": "Label",
+      "parent": "5b6268d8-d84d-4cfc-8112-3be82be767cd"
     }
   ],
   "name": "SampleScene",

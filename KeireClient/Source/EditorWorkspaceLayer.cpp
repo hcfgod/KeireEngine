@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include <chrono>
+
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -410,7 +412,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                                            std::filesystem::path executable)
     : Layer("EditorWorkspaceLayer"), m_AssetBrowserPanel(std::make_unique<KeireEditor::AssetBrowserPanel>(
                                          static_cast<KeireEditor::IAssetBrowserController&>(*this))),
-      m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>()),
+      m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>([this](const std::string_view text)
+                                                                 { Owner().Windows()->SetClipboardText(text); })),
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
       m_SceneDocument(std::make_unique<KeireEditor::SceneDocument>()),
       m_InputActionsDocument(std::make_unique<KeireEditor::InputActionsDocument>()),
@@ -748,6 +751,7 @@ void EditorWorkspaceLayer::OnAttach()
             if (!project)
                 throw std::runtime_error("Editor workspace requires an active project.");
             databaseSpecification.ProjectRoot = project->Root();
+            databaseSpecification.ChangeDebounce = std::chrono::milliseconds(75);
             m_AssetBrowserPanel->SetProjectRoot(project->Root());
             Keire::RenderEnvironmentSettings renderEnvironment;
             try
@@ -774,6 +778,7 @@ void EditorWorkspaceLayer::OnAttach()
                                                Keire::CreateMaterialAssetImporter(),
                                                Keire::CreateMeshAssetImporter(),
                                                Keire::CreateTexture2DAssetImporter(),
+                                               Keire::CreateAudioClipAssetImporter(),
                                                Keire::CreateAnimationGraphAssetImporter()};
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
@@ -914,6 +919,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_ManagedCursorVisible = true;
     ApplyManagedCursorMode();
     m_SceneDocument->EndPlay();
+    m_GameEditPresentation.Reset();
     m_GameRenderView.Reset();
     m_InputActionsPanel->ResetTransientState();
     m_InputContext.Reset();
@@ -947,6 +953,8 @@ void EditorWorkspaceLayer::OnDetach() noexcept
 
 void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
 {
+    if (m_ManagedPhysicsWorld)
+        m_ManagedPhysicsWorld->Step(static_cast<float>(time.FixedDeltaTime().Seconds()));
     if (m_SceneDocument->PlaySession())
         m_SceneDocument->PlaySession()->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
 }
@@ -1041,7 +1049,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
     if ((m_ExternalAssetImport && m_ExternalAssetImport->Pending()) || (m_AssetOperations && m_AssetOperations->Busy()))
         return;
     m_AssetPollSeconds += time.UnscaledDeltaTime().Seconds();
-    if (m_AssetPollSeconds < 0.25)
+    if (m_AssetPollSeconds < 0.1)
         return;
     m_AssetPollSeconds = 0.0;
     try
@@ -1049,17 +1057,24 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         const auto changed = m_AssetDatabase->PollChangedAssets();
         if (!changed.empty())
         {
+            bool requiresAssetImport = false;
             for (const auto id : changed)
             {
                 const auto record = m_AssetDatabase->Find(id);
-                if (record &&
-                    (record->RelativePath.extension() == ".cs" || record->RelativePath.extension() == ".keireasm"))
+                const auto previous = std::ranges::find(m_AssetRecords, id, &Keire::AssetSourceRecord::Id);
+                const auto path = record                             ? record->RelativePath
+                                  : previous != m_AssetRecords.end() ? previous->RelativePath
+                                                                     : std::filesystem::path{};
+                if (path.extension() == ".cs" || path.extension() == ".keireasm")
                 {
-                    m_ManagedBuildDebounceSeconds = 0.4;
-                    break;
+                    m_ManagedBuildDebounceSeconds = 0.1;
                 }
+                if (path.extension() != ".cs")
+                    requiresAssetImport = true;
             }
-            ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+            m_AssetRecords = m_AssetDatabase->Records();
+            if (requiresAssetImport)
+                ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             if (const auto assets = Owner().Assets())
             {
                 for (const auto id : changed)

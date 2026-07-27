@@ -1,4 +1,5 @@
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Audio/AudioAssets.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
@@ -74,7 +75,8 @@ namespace
                                    Keire::CreateShaderAssetImporter(),
                                    Keire::CreateMaterialAssetImporter(),
                                    Keire::CreateMeshAssetImporter(),
-                                   Keire::CreateTexture2DAssetImporter()};
+                                   Keire::CreateTexture2DAssetImporter(),
+                                   Keire::CreateAudioClipAssetImporter()};
         return Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     }
 

@@ -487,7 +487,9 @@ namespace Keire
         void DrawFilledRectangle(UiItemRect rectangle, UiColor color, float rounding = 0.0F);
         void DrawTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color, float thickness = 1.0F);
         void DrawFilledTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color);
-        void DrawOverlayText(UiPosition position, UiColor color, std::string_view text);
+        [[nodiscard]] UiSize MeasureText(std::string_view text, float fontSize = 0.0F) const;
+        void DrawOverlayText(UiPosition position, UiColor color, std::string_view text, float fontSize = 0.0F,
+                             std::optional<UiItemRect> clip = {});
         [[nodiscard]] UiItemRect ContentRect() const;
         [[nodiscard]] UiSize ContentAvailable() const;
         [[nodiscard]] bool WindowFocused() const;

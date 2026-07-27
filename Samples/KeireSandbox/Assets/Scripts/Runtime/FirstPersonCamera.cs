@@ -98,7 +98,8 @@ public sealed class FirstPersonCamera : Behaviour
         _pitch += (_targetPitch - _pitch) * lookBlend;
 
         var transform = Entity.Transform;
-        transform.LocalRotation = CreateRotation(_pitch, _yaw);
+        Vector3 recoil = WeaponController.CameraRecoil;
+        transform.LocalRotation = CreateRotation(_pitch + recoil.X, _yaw + recoil.Y);
 
         Vector2 move = Input.Axis2D("Move");
         float magnitude = MathF.Sqrt((move.X * move.X) + (move.Y * move.Y));

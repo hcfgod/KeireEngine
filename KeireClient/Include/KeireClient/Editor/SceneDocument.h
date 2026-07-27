@@ -83,7 +83,8 @@ namespace KeireEditor
         void DiscardRecovery() noexcept;
         void AdvanceRecovery(double seconds) noexcept;
         void ResetRecoveryTimer() noexcept { m_RecoverySeconds = 0.0; }
-        void BeginPlay(Keire::Ref<Keire::UndoContext> playUndo = {});
+        void BeginPlay(Keire::Ref<Keire::UndoContext> playUndo = {}, Keire::Ref<Keire::AssetSystem> assets = {},
+                       Keire::Ref<Keire::AudioSystem> audio = {});
         void EndPlay() noexcept;
         void SetRecoveryAvailable(bool available) noexcept { m_RecoveryAvailable = available; }
         void Close() noexcept;

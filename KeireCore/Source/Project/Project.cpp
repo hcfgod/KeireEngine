@@ -3,6 +3,7 @@
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Audio/AudioAssets.h"
 #include "Keire/BuildInfo.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
@@ -274,7 +275,8 @@ namespace Keire
                                                    CreateShaderAssetImporter(),
                                                    CreateMaterialAssetImporter(),
                                                    CreateMeshAssetImporter(),
-                                                   CreateTexture2DAssetImporter()};
+                                                   CreateTexture2DAssetImporter(),
+                                                   CreateAudioClipAssetImporter()};
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
                 const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",

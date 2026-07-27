@@ -114,6 +114,19 @@ Schema v1 loads migrate inline transforms, while unknown v2 component records re
 callbacks, Step advances one fixed tick, and Stop destroys the clone. Component callback exceptions fault the session
 and preserve the edit scene. Detailed contracts live in [ECS And Components](ECSAndComponents.md).
 
+Managed entities use an opaque identity derived from the owning `SceneState`, shared by every Behaviour in that
+runtime scene. Internal calls resolve an entity through any live Behaviour anchor in the same world and then through
+the scene's stable entity table; stale worlds and destroyed entities therefore become inert without exposing native
+pointers. Managed physics queries are routed through the application-owned runtime-services boundary and map
+`PhysicsBodyId` values back to stable entity IDs. Collider and Rigid Body components remain serializable scene data,
+while the Play adapter owns the isolated physics world and tears it down before the runtime scene closes.
+
+Weapon simulation is data-driven and split between deterministic command/state logic, a bounded ballistic projectile
+pool, collision/damage adapters, and presentation springs. Physical magazine instances and loose-shell inventories are
+runtime state; reserve counts are derived views rather than independently serialized values. Stable shot IDs include
+shooter, weapon instance, sequence, and simulation tick so a future authority layer can reuse the same commands
+without moving networking into the weapon implementation.
+
 `SceneDocument::ActiveScene` is the editor authoring target: it resolves to the clone during Play and the edit scene
 otherwise. Play edits have an isolated undo context. A snapshot-derived change set compares entity identity, hierarchy,
 component presence/enabled state, and registered property bags before Stop; selected changes produce one validated
@@ -217,6 +230,17 @@ Configuration examples, application-facing workflows, storage details, and troub
 [UI Workspace Guide](UiWorkspace.md).
 
 ## Asset Runtime And Pipeline
+
+## Scene Presentation Runtime
+
+`ScenePresentationRuntime` is the per-Play-session boundary for retained runtime UI and scene audio. It maps stable
+scene entity IDs to generation-safe UI nodes and audio voices, synchronizes component changes after managed `Update`,
+and clears every node, event, asset handle, and voice during scene replacement or Play Mode teardown. Editor Play Mode
+and cooked runtime use the same synchronization and input path.
+
+The retained tree owns layout, focus, hit testing, clipping, batching metadata, and bounded events. `UiFrame` currently
+adapts its draw commands to the SDL_GPU-backed application UI pass; managed code reaches the presentation runtime only
+through Coral internal calls and `IScriptRuntimeServices`, never through native pointers.
 
 Editor material authoring is split between `MaterialDocument`, which owns the selected asset/path, draft and committed
 source snapshots, shader-driven state, dirty lifecycle, and validation, and `MaterialInspectorPanel`, which maps that

@@ -8,6 +8,9 @@ continuous gesture into one undo command, and performs the atomic save. Console 
 snapshot, search state, and registration; Diagnostics receives immutable frame/window/capture snapshots. These panels
 do not reach through workspace friendship.
 
+Console entries are individually selectable. Double-clicking an entry or choosing **Copy** from its context menu writes
+the complete frame, category, and message text through the workspace-provided clipboard callback.
+
 KeireClient is a composition of dockable tools built exclusively on Kéire's public UI façade. Dear ImGui and SDL remain
 inside KeireCore. `SceneDocument` and `InputActionsDocument` own their respective authoring state and undo contexts;
 closing a document deterministically clears its selections, operations, and dirty/recovery state. Scene View,

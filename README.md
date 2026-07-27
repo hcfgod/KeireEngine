@@ -174,6 +174,18 @@ an initial script build when opening a project and writes compiler diagnostics t
 Source checkouts compile `Keire.Managed` into the same immutable script generation before gameplay assemblies; packaged
 editors copy their bundled API into that generation. Reload therefore never combines new scripts with a stale API DLL.
 
+Managed gameplay now receives one shared opaque world identity per runtime scene instead of a Behaviour-instance ID.
+`Input.Held`, `Input.Pressed`, and `Input.Released` expose action phases, scene-safe entity cloning and deferred
+destruction use validated handles, and managed raycasts resolve collider-backed hits to ordinary scene entities.
+The default component registry includes Collider and Rigid Body authoring components.
+
+`ScriptableObject` provides Unity-style transient runtime data instances, stable managed asset-type metadata, typed
+`AssetReference<T>` access, validation callbacks, cloning, and asynchronous load syntax. The sandbox weapon framework
+uses physical magazine instances, chambered rounds, tube-fed loose shells, deterministic fire modes and shot IDs,
+fixed-step ballistic projectiles, penetration and ricochet energy, layered damage contracts, and a spring-driven
+first-person recoil rig. The sample camera carries a rifle, pistol, and shotgun loadout; use Fire, Aim, Reload,
+Fire Mode, Next/Previous Weapon, or weapon slots 1-3 through the project Input Actions asset.
+
 Headless audio owns the same pinned miniaudio 0.11.25 engine as device-backed runtime audio. It provides bounded
 resident voices, priority virtualization, listener/source spatial state, doppler and attenuation, snapshot
 interpolation, immutable DSP graphs, meters, and deterministic offline interleaved-PCM rendering without physical
@@ -191,6 +203,23 @@ navigation scripts, and base/variant prefab assets; `AssetTool cook` compiles an
 the runtime manifest.
 
 ## Windowing And Configuration
+
+## Runtime UI And Audio
+
+Create a Canvas, Text, Button, Audio Source, or Audio Listener from the Hierarchy context menu. Canvas children are
+serialized with the scene and rendered during Play Mode and in cooked runtime builds. Audio clips support WAV, Ogg
+Vorbis, and FLAC imports; assign the resulting asset to an Audio Source and enable Play On Awake, or start it from C#:
+
+```csharp
+Audio.Play(Entity, clip.Id);
+RuntimeUi.SetText(ammoLabel, $"{roundsInMagazine} / {reserveRounds}");
+if (RuntimeUi.WasClicked(resumeButton))
+    ResumeGame();
+```
+
+Runtime UI uses retained scene components, reference-resolution scaling, safe-area layout, clipping, pointer hit
+testing, focus, and bounded event queues. Managed calls validate the active world and entity generation before
+mutating authored UI or audio components.
 
 `Keire/Window.h` exposes SDL-free `WindowSystem`, `Window`, opaque `WindowId`, logical/pixel extents, and a typed ordered event variant. One system is active per process and any number of windows may be created. SDL video initialization, window creation, mutation, polling, and shutdown are creating-thread-affine; releasing the final `Ref<Window>` from a worker is safe because native destruction is deferred to the owner thread. Shutdown destroys all native windows and makes surviving handles inert.
 

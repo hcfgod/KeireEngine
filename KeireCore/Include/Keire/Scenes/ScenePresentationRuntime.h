@@ -1,0 +1,59 @@
+#pragma once
+
+#include "Keire/Api.h"
+#include "Keire/Audio/AudioSystem.h"
+#include "Keire/ECS/Component.h"
+#include "Keire/Ref.h"
+#include "Keire/Ui/RuntimeUi.h"
+
+#include <cstddef>
+#include <memory>
+
+namespace Keire
+{
+    class AssetSystem;
+    class Scene;
+    class UiFrame;
+
+    struct ScenePresentationRuntimeStatistics
+    {
+        RuntimeUiStatistics Ui;
+        AudioSystemStatistics Audio;
+        std::size_t TrackedUiEntities = 0;
+        std::size_t TrackedAudioSources = 0;
+        std::size_t ActiveAudioSources = 0;
+        std::size_t PendingAudioAssets = 0;
+    };
+
+    class KEIRE_API ScenePresentationRuntime final : public RefCounted
+    {
+      public:
+        ScenePresentationRuntime(Ref<AssetSystem> assets, Ref<AudioSystem> audio,
+                                 std::size_t maximumUiElements = 16'384);
+        ~ScenePresentationRuntime() override;
+
+        ScenePresentationRuntime(const ScenePresentationRuntime&) = delete;
+        ScenePresentationRuntime& operator=(const ScenePresentationRuntime&) = delete;
+
+        void Synchronize(Ref<Scene> scene, float viewportWidth, float viewportHeight, bool playing,
+                         RuntimeUiInsets safeArea = {});
+        void Clear() noexcept;
+
+        [[nodiscard]] bool Play(EntityId source);
+        [[nodiscard]] bool Stop(EntityId source);
+        [[nodiscard]] bool SetFocus(EntityId entity);
+        [[nodiscard]] bool ConsumeClick(EntityId entity);
+        void PointerMove(float x, float y);
+        void PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
+        void Navigate(RuntimeUiNavigation navigation);
+        [[nodiscard]] bool PollUiEvent(RuntimeUiEvent& event);
+
+        [[nodiscard]] Ref<RuntimeUiTree> Ui() const noexcept;
+        [[nodiscard]] ScenePresentationRuntimeStatistics Statistics() const;
+        void Draw(UiFrame& ui, float offsetX = 0.0F, float offsetY = 0.0F) const;
+
+      private:
+        class Impl;
+        std::unique_ptr<Impl> m_Impl;
+    };
+} // namespace Keire

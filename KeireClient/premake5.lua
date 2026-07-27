@@ -27,9 +27,10 @@ project(ProjectConfig.CLIENT_TARGET)
     filter "system:windows"
         prebuildcommands
         {
-            '"../Build/Dependencies/dotnet-sdk/dotnet.exe" build "../KeireManaged/Keire.Managed.csproj" ' ..
-                '--nologo --configuration Release --output "../Build/Managed" ' ..
-                '--property:BaseIntermediateOutputPath="../Build/Intermediates/Managed/"'
+            'if not exist "%{cfg.objdir}" mkdir "%{cfg.objdir}"',
+            'powershell -NoProfile -ExecutionPolicy Bypass -File ' ..
+                (_ACTION == "ninja" and "Scripts/Windows/build-managed.ps1"
+                    or "../Scripts/Windows/build-managed.ps1")
         }
 
     filter { "system:linux or macosx" }

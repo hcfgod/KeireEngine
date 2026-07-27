@@ -1,10 +1,14 @@
 #include "Keire/ECS/Component.h"
 
 #include "Keire/ECS/Components/AnimatorComponent.h"
+#include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/CameraComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/RigidBodyComponent.h"
+#include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
@@ -277,6 +281,16 @@ namespace Keire
         result->Register(CreateSpotLightComponentRegistration());
         result->Register(CreateMeshRendererComponentRegistration());
         result->Register(CreateAnimatorComponentRegistration());
+        result->Register(CreateColliderComponentRegistration());
+        result->Register(CreateRigidBodyComponentRegistration());
+        result->Register(CreateAudioSourceComponentRegistration());
+        result->Register(CreateAudioListenerComponentRegistration());
+        result->Register(CreateCanvasComponentRegistration());
+        result->Register(CreateRectTransformComponentRegistration());
+        result->Register(CreateUiTextComponentRegistration());
+        result->Register(CreateUiImageComponentRegistration());
+        result->Register(CreateUiButtonComponentRegistration());
+        result->Register(CreateUiLayoutComponentRegistration());
         return result;
     }
 } // namespace Keire

@@ -86,6 +86,9 @@ namespace
             REQUIRE(input->ClearControlSchemeLock(user));
             REQUIRE(input->RemoveUser(second));
             m_Context = input->CreateActionContext(m_Asset, user);
+            m_RebindContext = input->CreateActionContext(Keire::InputActionAsset::DefaultDefinition(), user);
+            CHECK(m_RebindContext->User() == user);
+            CHECK_FALSE(m_RebindContext->Asset());
         }
 
         void OnUpdate(const Keire::Time&) override
@@ -129,7 +132,7 @@ namespace
             {
                 m_Result->SawCancel = true;
                 const auto binding = Keire::AssetId::Parse("e3afdb73-a3ec-43a7-96bb-871fe3007209");
-                m_Rebind = Owner().Input()->BeginInteractiveRebind(m_Context, binding);
+                m_Rebind = Owner().Input()->BeginInteractiveRebind(m_RebindContext, binding);
                 PushKey(true, SDL_SCANCODE_A);
                 return;
             }
@@ -138,9 +141,9 @@ namespace
                 CHECK(m_Rebind->CandidatePath() == "<Keyboard>/a");
                 m_Rebind->Apply(Keire::RebindConflictResolution::KeepBoth);
                 m_Result->Rebound = m_Rebind->Status() == Keire::RebindStatus::Completed;
-                m_Context->SaveBindingOverrides("TestProfile");
-                m_Context->ClearBindingOverrides();
-                m_Result->ReloadedOverrides = m_Context->LoadBindingOverrides("TestProfile");
+                m_RebindContext->SaveBindingOverrides("TestProfile");
+                m_RebindContext->ClearBindingOverrides();
+                m_Result->ReloadedOverrides = m_RebindContext->LoadBindingOverrides("TestProfile");
                 PushKey(false, SDL_SCANCODE_A);
                 m_AwaitingRebindRelease = true;
                 return;
@@ -168,6 +171,7 @@ namespace
         Keire::AssetId m_Asset;
         std::shared_ptr<InputProbeResult> m_Result;
         Keire::Ref<Keire::InputActionContext> m_Context;
+        Keire::Ref<Keire::InputActionContext> m_RebindContext;
         Keire::InputActionHandle m_Move;
         Keire::InputActionSubscription m_Subscription;
         Keire::InputCaptureOverride m_CaptureOverride;

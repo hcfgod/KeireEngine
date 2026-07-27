@@ -4,6 +4,12 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
+#include "Keire/ECS/Components/RigidBodyComponent.h"
+#include "Keire/ECS/Components/RuntimeUiComponents.h"
+#include "Keire/ECS/Components/TransformComponent.h"
+
 #include <algorithm>
 #include <cmath>
 #include <ranges>
@@ -75,6 +81,206 @@ Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view act
     {
         return {};
     }
+}
+
+Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::string_view action) noexcept
+{
+    try
+    {
+        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession())
+            return Keire::ManagedInputState::None;
+        if (!m_GameplayInputContext->EnableMap("Player"))
+            return Keire::ManagedInputState::None;
+        if (!m_ManagedInputCaptureOverride)
+            m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture("Player"));
+        const auto handle = m_GameplayInputContext->FindAction("Player", action);
+        if (!handle)
+            return Keire::ManagedInputState::None;
+        auto state = Keire::ManagedInputState::None;
+        if (handle.Value().Magnitude() >= 0.5F)
+            state = state | Keire::ManagedInputState::Held;
+        if (handle.WasStartedThisFrame() || handle.WasPerformedThisFrame())
+            state = state | Keire::ManagedInputState::Pressed;
+        if (handle.WasCanceledThisFrame())
+            state = state | Keire::ManagedInputState::Released;
+        return state;
+    }
+    catch (...)
+    {
+        return Keire::ManagedInputState::None;
+    }
+}
+
+bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::AssetId entity, const Keire::AssetId clip,
+                                            const float gain) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto scene = session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+        const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+        if (!sourceEntity || !presentation || !clip || !std::isfinite(gain) || gain < 0.0F)
+            return false;
+        auto source = sourceEntity.GetComponent<Keire::AudioSourceComponent>();
+        if (!source)
+            source = sourceEntity.AddComponent<Keire::AudioSourceComponent>();
+        source->SetClip(clip);
+        source->SetGain(gain);
+        source->SetPlayOnAwake(true);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::StopManagedAudio(const Keire::AssetId entity) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto scene = session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+        const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        const auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+        if (!sourceEntity || !presentation)
+            return false;
+        if (const auto source = sourceEntity.GetComponent<Keire::AudioSourceComponent>())
+            source->SetPlayOnAwake(false);
+        return presentation->Stop(sourceEntity.Id());
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept
+{
+    try
+    {
+        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+        const auto component =
+            target ? target.GetComponent<Keire::UiTextComponent>() : Keire::Ref<Keire::UiTextComponent>{};
+        if (!component)
+            return false;
+        component->SetText(std::string(text));
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::ConsumeManagedUiClick(const Keire::AssetId entity) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        return presentation && presentation->ConsumeClick(Keire::EntityId(entity));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+void EditorWorkspaceLayer::ResetManagedPhysicsWorld() noexcept
+{
+    if (m_ManagedPhysicsWorld)
+        m_ManagedPhysicsWorld->Close();
+    m_ManagedPhysicsWorld.Reset();
+    m_ManagedPhysicsScene.Reset();
+    m_ManagedPhysicsEntities.clear();
+    m_ManagedPhysicsObjectCount = 0;
+}
+
+void EditorWorkspaceLayer::RebuildManagedPhysicsWorld()
+{
+    ResetManagedPhysicsWorld();
+    const auto physics = Owner().Physics();
+    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+    if (!physics || !scene || !scene->IsOpen())
+        return;
+
+    m_ManagedPhysicsWorld = physics->CreateWorld();
+    m_ManagedPhysicsScene = scene;
+    m_ManagedPhysicsObjectCount = scene->ObjectCount();
+    for (const auto& entity : scene->Query<Keire::ColliderComponent>())
+    {
+        const auto collider = entity.GetComponent<Keire::ColliderComponent>();
+        const auto transform = entity.GetComponent<Keire::TransformComponent>();
+        if (!collider || !transform)
+            continue;
+        const auto rigidBody = entity.GetComponent<Keire::RigidBodyComponent>();
+        const auto scale = transform->LocalScale();
+        const Keire::Vector3 absoluteScale{std::abs(scale.X), std::abs(scale.Y), std::abs(scale.Z)};
+        Keire::PhysicsBodyDefinition definition;
+        definition.Motion = rigidBody ? rigidBody->Motion() : Keire::PhysicsMotionType::Static;
+        definition.Shape = collider->Shape();
+        const auto worldPosition = transform->WorldPosition();
+        const auto colliderCenter = collider->Center();
+        definition.Position = {
+            worldPosition.X + colliderCenter.X,
+            worldPosition.Y + colliderCenter.Y,
+            worldPosition.Z + colliderCenter.Z,
+        };
+        definition.Rotation = transform->LocalRotation();
+        definition.LinearVelocity = rigidBody ? rigidBody->LinearVelocity() : Keire::Vector3{};
+        definition.HalfExtent = {collider->HalfExtent().X * absoluteScale.X, collider->HalfExtent().Y * absoluteScale.Y,
+                                 collider->HalfExtent().Z * absoluteScale.Z};
+        definition.Radius = collider->Radius() * std::max({absoluteScale.X, absoluteScale.Y, absoluteScale.Z});
+        definition.Height = collider->Height() * absoluteScale.Y;
+        definition.Mass = rigidBody ? rigidBody->Mass() : 1.0F;
+        definition.Layer = collider->Layer();
+        definition.Mask = collider->Mask();
+        definition.Trigger = collider->Trigger();
+        definition.Continuous = rigidBody && rigidBody->Continuous();
+        const auto body = m_ManagedPhysicsWorld->CreateBody(definition);
+        m_ManagedPhysicsEntities.emplace_back(body, entity.Id().Value());
+    }
+}
+
+std::optional<Keire::ManagedRaycastHit>
+EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept
+{
+    try
+    {
+        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
+        if (!scene || !m_SceneDocument->PlaySession())
+            return std::nullopt;
+        if (!m_ManagedPhysicsWorld || m_ManagedPhysicsScene != scene ||
+            m_ManagedPhysicsObjectCount != scene->ObjectCount())
+        {
+            RebuildManagedPhysicsWorld();
+        }
+        if (!m_ManagedPhysicsWorld)
+            return std::nullopt;
+        const auto hits = m_ManagedPhysicsWorld->RayCast({.Origin = query.Origin,
+                                                          .Direction = query.Direction,
+                                                          .MaximumDistance = query.MaximumDistance,
+                                                          .Mask = query.Mask,
+                                                          .IncludeTriggers = query.IncludeTriggers});
+        for (const auto& hit : hits)
+        {
+            const auto mapping = std::ranges::find(m_ManagedPhysicsEntities, hit.Body,
+                                                   &decltype(m_ManagedPhysicsEntities)::value_type::first);
+            if (mapping == m_ManagedPhysicsEntities.end() || mapping->second == query.IgnoredEntity)
+                continue;
+            return Keire::ManagedRaycastHit{mapping->second, hit.Position, hit.Normal, hit.Distance};
+        }
+    }
+    catch (...)
+    {
+    }
+    return std::nullopt;
 }
 
 void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept

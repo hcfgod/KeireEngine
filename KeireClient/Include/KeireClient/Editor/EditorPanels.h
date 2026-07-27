@@ -162,6 +162,7 @@ namespace KeireEditor
         std::unique_ptr<SceneCameraController> m_Camera;
         Keire::Ref<Keire::RenderView> m_RenderView;
         Keire::Ref<Keire::RenderView> m_CameraPreviewView;
+        Keire::Ref<Keire::ScenePresentationRuntime> m_EditPresentation;
         Keire::UiItemRect m_ViewportRect;
         Keire::RenderCamera m_LastCamera;
         std::filesystem::path m_ProjectRoot;
@@ -259,6 +260,7 @@ namespace KeireEditor
       private:
         IInputActionsController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
+        Keire::Ref<Keire::InputActionContext> m_RebindContext;
         Keire::Ref<Keire::InteractiveRebindOperation> m_Rebind;
         std::string m_Search;
         std::string m_Message;

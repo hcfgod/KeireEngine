@@ -11,6 +11,9 @@
 #include <string>
 #include <vector>
 
+#include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/RuntimeUiComponents.h"
+
 namespace KeireEditor
 {
     namespace
@@ -38,6 +41,63 @@ namespace KeireEditor
 
         auto& document = m_Controller.HierarchyDocument();
         const auto scene = m_Controller.ActiveHierarchyScene();
+        const auto createText = [&](const Keire::EntityId parent, std::string name, std::string text)
+        {
+            const auto entity =
+                document.CreateEntity(std::move(name), parent, Keire::RectTransformComponent::StaticType());
+            (void)document.AddComponent(entity, Keire::UiTextComponent::StaticType());
+            document.SetComponentProperty(entity, Keire::UiTextComponent::StaticType(), "text", std::move(text));
+            return entity;
+        };
+        const auto createButton = [&](const Keire::EntityId parent, std::string name)
+        {
+            const auto button =
+                document.CreateEntity(std::move(name), parent, Keire::RectTransformComponent::StaticType());
+            (void)document.AddComponent(button, Keire::UiImageComponent::StaticType());
+            (void)document.AddComponent(button, Keire::UiButtonComponent::StaticType());
+            const auto label = createText(button, "Label", "CONTINUE");
+            document.SetComponentProperty(label, Keire::RectTransformComponent::StaticType(), "anchorMinimum",
+                                          Keire::Vector2{0.0F, 0.0F});
+            document.SetComponentProperty(label, Keire::RectTransformComponent::StaticType(), "anchorMaximum",
+                                          Keire::Vector2{1.0F, 1.0F});
+            document.SetComponentProperty(label, Keire::RectTransformComponent::StaticType(), "sizeDelta",
+                                          Keire::Vector2{});
+            return button;
+        };
+        const auto createModernCanvas = [&](const Keire::EntityId parent)
+        {
+            const auto canvas = document.CreateEntity("Canvas", parent, Keire::CanvasComponent::StaticType());
+            (void)document.AddComponent(canvas, Keire::RectTransformComponent::StaticType());
+            document.SetComponentProperty(canvas, Keire::RectTransformComponent::StaticType(), "anchorMinimum",
+                                          Keire::Vector2{0.0F, 0.0F});
+            document.SetComponentProperty(canvas, Keire::RectTransformComponent::StaticType(), "anchorMaximum",
+                                          Keire::Vector2{1.0F, 1.0F});
+            document.SetComponentProperty(canvas, Keire::RectTransformComponent::StaticType(), "sizeDelta",
+                                          Keire::Vector2{});
+
+            const auto panel =
+                document.CreateEntity("Modern Panel", canvas, Keire::RectTransformComponent::StaticType());
+            (void)document.AddComponent(panel, Keire::UiImageComponent::StaticType());
+            (void)document.AddComponent(panel, Keire::UiLayoutComponent::StaticType());
+            document.SetComponentProperty(panel, Keire::RectTransformComponent::StaticType(), "sizeDelta",
+                                          Keire::Vector2{560.0F, 360.0F});
+            document.SetComponentProperty(panel, Keire::UiImageComponent::StaticType(), "tint",
+                                          Keire::Color{0.025F, 0.045F, 0.075F, 0.96F});
+            document.SetComponentProperty(panel, Keire::UiLayoutComponent::StaticType(), "spacing", 18.0);
+            document.SetComponentProperty(panel, Keire::UiLayoutComponent::StaticType(), "padding",
+                                          Keire::Vector4{36.0F, 36.0F, 36.0F, 36.0F});
+
+            const auto title = createText(panel, "Title", "MISSION CONTROL");
+            document.SetComponentProperty(title, Keire::UiTextComponent::StaticType(), "fontSize", 34.0);
+            document.SetComponentProperty(title, Keire::UiTextComponent::StaticType(), "color",
+                                          Keire::Color{0.86F, 0.94F, 1.0F, 1.0F});
+            const auto subtitle = createText(panel, "Subtitle", "SYSTEMS READY");
+            document.SetComponentProperty(subtitle, Keire::UiTextComponent::StaticType(), "fontSize", 16.0);
+            document.SetComponentProperty(subtitle, Keire::UiTextComponent::StaticType(), "color",
+                                          Keire::Color{0.33F, 0.78F, 0.95F, 1.0F});
+            (void)createButton(panel, "Primary Action");
+            return canvas;
+        };
         if (ui.WindowFocused())
             m_Controller.ActivateHierarchyHistory();
         if (ui.IconButton("HierarchyCreate", Keire::UiIcon::Create, false, {28.0F, 24.0F}))
@@ -181,6 +241,27 @@ namespace KeireEditor
                     document.Select(document.CreateEntity("GameObject", Keire::EntityId(object.Id)).Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
+                if (ui.MenuItem("UI Text Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(createText(Keire::EntityId(object.Id), "Text", "Text").Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("UI Button Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(createButton(Keire::EntityId(object.Id), "Button").Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("Audio Source Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(document
+                                        .CreateEntity("Audio Source", Keire::EntityId(object.Id),
+                                                      Keire::AudioSourceComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
                 if (ui.MenuItem("Directional Light Child"))
                 {
                     m_Controller.RecordHierarchyUndo();
@@ -310,6 +391,38 @@ namespace KeireEditor
             {
                 m_Controller.RecordHierarchyUndo();
                 document.Select(document.CreateEntity().Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Modern Canvas"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createModernCanvas({}).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Text"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createText({}, "Text", "Text").Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Button"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createButton({}, "Button").Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("Audio / Source"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(
+                    document.CreateEntity("Audio Source", {}, Keire::AudioSourceComponent::StaticType()).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("Audio / Listener"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(
+                    document.CreateEntity("Audio Listener", {}, Keire::AudioListenerComponent::StaticType()).Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
             }
             if (ui.MenuItem("Directional Light"))

@@ -17,7 +17,7 @@ public readonly record struct ComponentTypeId(ulong High, ulong Low)
 
 public readonly record struct Entity(ulong World, EntityId Id)
 {
-    public bool IsValid => World != 0 && Id.IsValid && RuntimeBridge.Current.EntityExists(this);
+    public bool IsValid => World != 0 && Id.IsValid && NativeRuntime.EntityExists(this);
 
     public string Name
     {
@@ -27,8 +27,8 @@ public readonly record struct Entity(ulong World, EntityId Id)
 
     public bool Active
     {
-        get => RuntimeBridge.Current.GetEntityActive(this);
-        set => RuntimeBridge.Current.SetEntityActive(this, value);
+        get => NativeRuntime.GetEntityActive(this);
+        set => NativeRuntime.SetEntityActive(this, value);
     }
 
     public Entity Parent
@@ -49,8 +49,8 @@ public readonly record struct Entity(ulong World, EntityId Id)
     public bool HasComponent<T>() => RuntimeBridge.Current.ComponentExists(GetComponent<T>());
     public ComponentHandle AddComponent<T>() => RuntimeBridge.Current.AddComponent(this, ComponentType.Of<T>());
     public bool RemoveComponent<T>() => RuntimeBridge.Current.RemoveComponent(this, ComponentType.Of<T>());
-    public Entity Instantiate() => RuntimeBridge.Current.CloneEntity(this);
-    public void Destroy() => RuntimeBridge.Current.DestroyEntity(this);
+    public Entity Instantiate() => NativeRuntime.CloneEntity(this);
+    public void Destroy() => NativeRuntime.DestroyEntity(this);
 }
 
 public readonly record struct TransformHandle(Entity Entity)
@@ -69,9 +69,14 @@ public readonly record struct TransformHandle(Entity Entity)
 
     public Vector3 LocalScale
     {
-        get => RuntimeBridge.Current.GetLocalScale(Entity);
-        set => RuntimeBridge.Current.SetLocalScale(Entity, value);
+        get => NativeRuntime.GetLocalScale(Entity);
+        set => NativeRuntime.SetLocalScale(Entity, value);
     }
+
+    public Vector3 Position => NativeRuntime.GetWorldPosition(Entity);
+    public Vector3 Forward => LocalRotation * Vector3.Forward;
+    public Vector3 Right => LocalRotation * Vector3.Right;
+    public Vector3 Up => LocalRotation * Vector3.Up;
 }
 
 public static class ComponentType
@@ -96,4 +101,5 @@ public readonly record struct ComponentHandle(Entity Entity, ComponentTypeId Typ
 public readonly record struct AssetReference<T>(AssetId Id) where T : class
 {
     public bool IsValid => Id.IsValid;
+    public T? Value => Assets.TryLoad(this, out T? value) ? value : null;
 }

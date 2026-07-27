@@ -2,6 +2,7 @@
 
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Audio/AudioAssets.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -164,6 +165,7 @@ namespace Keire
                 addDecoder(CreateMaterialAssetDecoder());
                 addDecoder(CreateMeshAssetDecoder());
                 addDecoder(CreateTexture2DAssetDecoder());
+                addDecoder(CreateAudioClipAssetDecoder());
                 addDecoder(CreateSkeletonAssetDecoder());
                 addDecoder(CreateSkinnedMeshAssetDecoder());
                 addDecoder(CreateAnimationClipAssetDecoder());

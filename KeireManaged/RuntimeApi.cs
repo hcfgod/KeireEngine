@@ -113,15 +113,33 @@ public static class Time
 public static class Input
 {
     public static Vector2 Axis2D(string action) => NativeRuntime.ReadInputAxis2D(action);
-    public static bool Button(string action) => Math.Abs(Axis(action)) >= 0.5f;
+    public static bool Held(string action) => (NativeRuntime.ReadInputState(action) & 1) != 0;
+    public static bool Pressed(string action) => (NativeRuntime.ReadInputState(action) & 2) != 0;
+    public static bool Released(string action) => (NativeRuntime.ReadInputState(action) & 4) != 0;
+    public static bool Button(string action) => Held(action);
     public static float Axis(string action) => Axis2D(action).X;
 }
 
 public static class Physics
 {
-    public static IReadOnlyList<RaycastHit> Raycast(Vector3 origin, Vector3 direction, float maximumDistance = 1000.0f,
+    public static bool TryRaycast(Entity context, Vector3 origin, Vector3 direction, out RaycastHit hit,
+                                  float maximumDistance = 1000.0f, uint mask = uint.MaxValue,
+                                  Entity ignoredEntity = default)
+    {
+        if (maximumDistance <= 0.0f)
+            throw new ArgumentOutOfRangeException(nameof(maximumDistance));
+        Vector3 normalized = direction.Normalized;
+        if (normalized.LengthSquared <= 0.0f)
+            throw new ArgumentException("Raycast direction cannot be zero.", nameof(direction));
+        return NativeRuntime.TryRaycast(context, origin, normalized, maximumDistance, mask, ignoredEntity, out hit);
+    }
+
+    public static IReadOnlyList<RaycastHit> Raycast(Entity context, Vector3 origin, Vector3 direction,
+                                                    float maximumDistance = 1000.0f,
                                                     uint mask = uint.MaxValue) =>
-        RuntimeBridge.Current.Raycast(origin, direction, maximumDistance, mask);
+        TryRaycast(context, origin, direction, out RaycastHit hit, maximumDistance, mask)
+            ? new[] { hit }
+            : Array.Empty<RaycastHit>();
 }
 
 public static class Navigation
@@ -140,8 +158,9 @@ public static class Animator
 
 public static class Audio
 {
-    public static void Play(Entity entity, AssetId clip, float volume = 1.0f) => RuntimeBridge.Current.PlayAudio(entity, clip, volume);
-    public static void Stop(Entity entity) => RuntimeBridge.Current.StopAudio(entity);
+    public static bool Play(Entity entity, AssetId clip, float volume = 1.0f) =>
+        NativeRuntime.PlayAudio(entity, clip, volume);
+    public static bool Stop(Entity entity) => NativeRuntime.StopAudio(entity);
 }
 
 public static class Prefab

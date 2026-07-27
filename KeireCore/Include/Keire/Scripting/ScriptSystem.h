@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -26,6 +27,39 @@ namespace Keire
         Critical
     };
 
+    enum class ManagedInputState : std::uint8_t
+    {
+        None = 0,
+        Held = 1U << 0U,
+        Pressed = 1U << 1U,
+        Released = 1U << 2U
+    };
+
+    [[nodiscard]] constexpr ManagedInputState operator|(const ManagedInputState left,
+                                                        const ManagedInputState right) noexcept
+    {
+        return static_cast<ManagedInputState>(static_cast<std::uint8_t>(left) | static_cast<std::uint8_t>(right));
+    }
+
+    struct ManagedRaycastQuery
+    {
+        std::uint64_t World = 0;
+        Vector3 Origin;
+        Vector3 Direction{0.0F, 0.0F, -1.0F};
+        float MaximumDistance = 1000.0F;
+        std::uint32_t Mask = ~0U;
+        AssetId IgnoredEntity;
+        bool IncludeTriggers = false;
+    };
+
+    struct ManagedRaycastHit
+    {
+        AssetId Entity;
+        Vector3 Point;
+        Vector3 Normal;
+        float Distance = 0.0F;
+    };
+
     class KEIRE_API IScriptRuntimeServices
     {
       public:
@@ -34,10 +68,22 @@ namespace Keire
         virtual void WriteManagedLog(ManagedLogLevel level, std::string_view message) noexcept = 0;
         [[nodiscard]] virtual float ManagedDeltaTime() const noexcept = 0;
         [[nodiscard]] virtual Vector2 ReadManagedInput(std::string_view action) noexcept = 0;
+        [[nodiscard]] virtual ManagedInputState ReadManagedInputState(std::string_view) noexcept
+        {
+            return ManagedInputState::None;
+        }
+        [[nodiscard]] virtual std::optional<ManagedRaycastHit> RaycastManaged(const ManagedRaycastQuery&) noexcept
+        {
+            return std::nullopt;
+        }
         virtual void SetManagedCursorVisible(bool) noexcept {}
         virtual void SetManagedCursorLocked(bool) noexcept {}
         [[nodiscard]] virtual bool IsManagedCursorVisible() const noexcept { return true; }
         [[nodiscard]] virtual bool IsManagedCursorLocked() const noexcept { return false; }
+        [[nodiscard]] virtual bool PlayManagedAudio(AssetId, AssetId, float) noexcept { return false; }
+        [[nodiscard]] virtual bool StopManagedAudio(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedUiText(AssetId, std::string_view) noexcept { return false; }
+        [[nodiscard]] virtual bool ConsumeManagedUiClick(AssetId) noexcept { return false; }
     };
 
     enum class ScriptMode : std::uint8_t

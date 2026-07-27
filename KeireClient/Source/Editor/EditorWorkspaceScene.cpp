@@ -529,6 +529,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
 {
     if (!m_SceneDocument->EditingScene() || m_SceneDocument->PlaySession())
         return;
+    ResetManagedPhysicsWorld();
     m_ManagedInputCaptureOverride.reset();
     m_GameplayInputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
@@ -544,7 +545,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     Keire::Ref<Keire::UndoContext> playUndo;
     if (const auto undo = Owner().Undo())
         playUndo = undo->CreateContext({.Name = "Play Mode"});
-    m_SceneDocument->BeginPlay(std::move(playUndo));
+    m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio());
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
     m_SceneViewportPanel->Registration().RequestFocus();
@@ -583,6 +584,7 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
 {
     if (!m_SceneDocument->PlaySession())
         return;
+    ResetManagedPhysicsWorld();
     try
     {
         std::optional<Keire::SceneDefinition> applied;
@@ -1019,6 +1021,59 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
         Owner().Renderer()->Submit({scene, m_GameRenderView, false, environment});
         ui.Image(m_GameRenderView->Surface(), size);
+        const auto imageRect = ui.LastItemRect();
+
+        Keire::Ref<Keire::ScenePresentationRuntime> presentation;
+        const auto playSession = m_SceneDocument->PlaySession();
+        const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
+        if (playActive)
+        {
+            playSession->SetPresentationViewport(size.Width, size.Height);
+            presentation = playSession->Presentation();
+        }
+        else
+        {
+            if (!m_GameEditPresentation)
+            {
+                if (const auto assets = SceneViewportAssetSystem())
+                {
+                    m_GameEditPresentation =
+                        Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+                }
+            }
+            if (m_GameEditPresentation)
+            {
+                m_GameEditPresentation->Synchronize(scene, size.Width, size.Height, false);
+                presentation = m_GameEditPresentation;
+            }
+        }
+
+        if (presentation)
+        {
+            presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
+            if (playActive)
+            {
+                const auto pointer = ui.PointerState();
+                const float localX = pointer.Position.X - imageRect.Minimum.X;
+                const float localY = pointer.Position.Y - imageRect.Minimum.Y;
+                presentation->PointerMove(localX, localY);
+                if (imageRect.Contains(pointer.Position))
+                {
+                    if (pointer.LeftPressed)
+                        presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
+                    if (pointer.RightPressed)
+                        presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, true);
+                    if (pointer.MiddlePressed)
+                        presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Middle, true);
+                }
+                if (pointer.LeftReleased)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
+                if (pointer.RightReleased)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, false);
+                if (pointer.MiddleReleased)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Middle, false);
+            }
+        }
     }
 }
 

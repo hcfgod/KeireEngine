@@ -12,10 +12,13 @@ classification.
 
 ## Automatic builds
 
-The editor watches declared `.cs` and `.keireasm` sources and starts a generation-aware build 400 ms after the newest
-change. A newer change cancels an obsolete build. Successful output is published to an immutable
-`Library/ScriptAssemblies/Generations/<generation>` directory and recorded in `active-generation.json`; failed builds
-never replace the last-good generation. MSBuild intermediates remain under `Library/ScriptAssemblies/Intermediate`.
+The editor watches declared `.cs` and `.keireasm` sources and starts a generation-aware build about 100 ms after the
+newest stable change. Standalone `.cs` changes bypass asset catalog import, and each generation copies the validated
+engine API assembly from a source-fingerprinted cache. Engine API sources compile once when their project, size, or
+timestamp fingerprint changes; gameplay-only saves reuse the validated result. A newer change cancels an obsolete
+build. Successful output is published to an immutable `Library/ScriptAssemblies/Generations/<generation>` directory and
+recorded in `active-generation.json`; failed builds never replace the last-good generation. MSBuild intermediates
+remain under `Library/ScriptAssemblies/Intermediate`.
 
 ## Serialization and reload
 

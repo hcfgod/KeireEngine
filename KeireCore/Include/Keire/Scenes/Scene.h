@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Keire/Scenes/ScenePresentationRuntime.h"
+
 #include "Keire/Api.h"
 #include "Keire/ECS/Entity.h"
 #include "Keire/Ref.h"
@@ -109,7 +111,7 @@ namespace Keire
     class KEIRE_API SceneRuntimeSession final : public RefCounted
     {
       public:
-        explicit SceneRuntimeSession(Ref<Scene> editScene);
+        explicit SceneRuntimeSession(Ref<Scene> editScene, Ref<AssetSystem> assets = {}, Ref<AudioSystem> audio = {});
         ~SceneRuntimeSession() override;
 
         SceneRuntimeSession(const SceneRuntimeSession&) = delete;
@@ -119,6 +121,8 @@ namespace Keire
         [[nodiscard]] Ref<Scene> EditScene() const noexcept;
         [[nodiscard]] Ref<Scene> RuntimeScene() const noexcept;
         [[nodiscard]] SceneRuntimeDiagnostic Diagnostic() const;
+        [[nodiscard]] Ref<ScenePresentationRuntime> Presentation() const noexcept;
+        void SetPresentationViewport(float width, float height, RuntimeUiInsets safeArea = {});
         void Play();
         void Pause(bool paused = true);
         void TogglePause();

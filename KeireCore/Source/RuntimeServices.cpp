@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <map>
@@ -79,6 +80,72 @@ namespace Keire
         }
     } // namespace
 
+    std::shared_ptr<const AudioClipData> LoadAudioClipData(const std::filesystem::path& path)
+    {
+        std::ifstream stream(path, std::ios::binary | std::ios::ate);
+        if (!stream)
+            throw std::runtime_error("Audio clip could not be opened: " + path.string());
+        const auto length = stream.tellg();
+        if (length <= 0 || length > static_cast<std::streamoff>(768ULL * 1024ULL * 1024ULL))
+            throw std::runtime_error("Audio clip is empty or exceeds the 768 MiB import limit.");
+        std::vector<std::byte> bytes(static_cast<std::size_t>(length));
+        stream.seekg(0);
+        stream.read(reinterpret_cast<char*>(bytes.data()), length);
+        if (!stream)
+            throw std::runtime_error("Audio clip could not be read completely: " + path.string());
+
+        ma_decoder decoder{};
+        auto configuration = ma_decoder_config_init(ma_format_f32, 0, 0);
+        if (ma_decoder_init_memory(bytes.data(), bytes.size(), &configuration, &decoder) != MA_SUCCESS)
+            throw std::runtime_error("Audio clip format is unsupported or corrupt: " + path.string());
+        const auto close = [&decoder] { ma_decoder_uninit(&decoder); };
+        ma_format format = ma_format_unknown;
+        ma_uint32 channels = 0;
+        ma_uint32 sampleRate = 0;
+        if (ma_decoder_get_data_format(&decoder, &format, &channels, &sampleRate, nullptr, 0) != MA_SUCCESS ||
+            format != ma_format_f32 || channels == 0 || channels > 8 || sampleRate < 8000 || sampleRate > 384000)
+        {
+            close();
+            throw std::runtime_error("Audio clip exposes an unsupported channel or sample-rate layout.");
+        }
+        ma_uint64 frames = 0;
+        if (ma_decoder_get_length_in_pcm_frames(&decoder, &frames) != MA_SUCCESS || frames == 0 ||
+            frames > 384000ULL * 60ULL * 60ULL * 4ULL)
+        {
+            close();
+            throw std::runtime_error("Audio clip duration is unavailable or exceeds four hours.");
+        }
+        auto clip = std::make_shared<AudioClipData>();
+        clip->SampleRate = sampleRate;
+        clip->Channels = channels;
+        clip->Frames = frames;
+        if (frames > std::numeric_limits<std::size_t>::max() / channels)
+        {
+            close();
+            throw std::runtime_error("Audio clip dimensions exceed the current platform.");
+        }
+        const auto sampleCount = static_cast<std::size_t>(frames) * channels;
+        if (sampleCount > std::numeric_limits<std::size_t>::max() / sizeof(float))
+        {
+            close();
+            throw std::runtime_error("Audio clip decoded size exceeds the current platform.");
+        }
+        if (sampleCount * sizeof(float) > 64ULL * 1024ULL * 1024ULL)
+        {
+            close();
+            clip->Streaming = true;
+            clip->EncodedSource = std::move(bytes);
+            return clip;
+        }
+        clip->Samples.resize(sampleCount);
+        ma_uint64 decoded = 0;
+        const auto result = ma_decoder_read_pcm_frames(&decoder, clip->Samples.data(), frames, &decoded);
+        close();
+        if ((result != MA_SUCCESS && result != MA_AT_END) || decoded != frames)
+            throw std::runtime_error("Audio clip decoding did not produce the expected frame count.");
+        return clip;
+    }
+
     class AudioSystem::Impl final
     {
       public:
@@ -87,8 +154,10 @@ namespace Keire
             struct Native final
             {
                 ma_audio_buffer Buffer{};
+                ma_decoder Decoder{};
                 ma_sound Sound{};
                 bool BufferOpen = false;
+                bool DecoderOpen = false;
                 bool SoundOpen = false;
             };
             AudioVoiceId Id;
@@ -154,6 +223,11 @@ namespace Keire
             {
                 ma_audio_buffer_uninit(&voice.Device->Buffer);
                 voice.Device->BufferOpen = false;
+            }
+            if (voice.Device->DecoderOpen)
+            {
+                ma_decoder_uninit(&voice.Device->Decoder);
+                voice.Device->DecoderOpen = false;
             }
         }
 
@@ -492,18 +566,35 @@ namespace Keire
         auto& voice = iterator->second;
         try
         {
-            if (m_Impl->Mode == AudioMode::Enabled && !voice.Specification.Clip->Samples.empty())
+            if (m_Impl->Mode == AudioMode::Enabled)
             {
                 voice.Device = std::make_unique<AudioSystem::Impl::Voice::Native>();
-                const auto frames = voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels;
-                const auto bufferConfig =
-                    ma_audio_buffer_config_init(ma_format_f32, voice.Specification.Clip->Channels, frames,
-                                                voice.Specification.Clip->Samples.data(), nullptr);
-                if (ma_audio_buffer_init(&bufferConfig, &voice.Device->Buffer) != MA_SUCCESS)
-                    throw std::runtime_error("miniaudio voice buffer initialization failed.");
-                voice.Device->BufferOpen = true;
-                if (ma_sound_init_from_data_source(&m_Impl->Engine, &voice.Device->Buffer, 0, nullptr,
-                                                   &voice.Device->Sound) != MA_SUCCESS)
+                ma_result soundResult = MA_ERROR;
+                if (voice.Specification.Clip->Streaming)
+                {
+                    auto decoderConfig = ma_decoder_config_init(ma_format_f32, voice.Specification.Clip->Channels,
+                                                                voice.Specification.Clip->SampleRate);
+                    if (ma_decoder_init_memory(voice.Specification.Clip->EncodedSource.data(),
+                                               voice.Specification.Clip->EncodedSource.size(), &decoderConfig,
+                                               &voice.Device->Decoder) != MA_SUCCESS)
+                        throw std::runtime_error("miniaudio streaming decoder initialization failed.");
+                    voice.Device->DecoderOpen = true;
+                    soundResult = ma_sound_init_from_data_source(&m_Impl->Engine, &voice.Device->Decoder, 0, nullptr,
+                                                                 &voice.Device->Sound);
+                }
+                else
+                {
+                    const auto frames = voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels;
+                    const auto bufferConfig =
+                        ma_audio_buffer_config_init(ma_format_f32, voice.Specification.Clip->Channels, frames,
+                                                    voice.Specification.Clip->Samples.data(), nullptr);
+                    if (ma_audio_buffer_init(&bufferConfig, &voice.Device->Buffer) != MA_SUCCESS)
+                        throw std::runtime_error("miniaudio voice buffer initialization failed.");
+                    voice.Device->BufferOpen = true;
+                    soundResult = ma_sound_init_from_data_source(&m_Impl->Engine, &voice.Device->Buffer, 0, nullptr,
+                                                                 &voice.Device->Sound);
+                }
+                if (soundResult != MA_SUCCESS)
                     throw std::runtime_error("miniaudio voice initialization failed.");
                 voice.Device->SoundOpen = true;
                 m_Impl->ApplyDeviceProperties(voice);
@@ -550,6 +641,55 @@ namespace Keire
         m_Impl->ApplyDeviceProperties(found->second);
         m_Impl->UpdateVirtualization();
         return true;
+    }
+
+    std::size_t AudioSystem::StopAll(const std::string_view bus)
+    {
+        m_Impl->RequireOwner("StopAll");
+        std::scoped_lock lock(m_Impl->Mutex);
+        std::size_t stopped = 0;
+        for (auto iterator = m_Impl->Voices.begin(); iterator != m_Impl->Voices.end();)
+        {
+            if (!bus.empty() && iterator->second.Specification.Bus != bus)
+            {
+                ++iterator;
+                continue;
+            }
+            m_Impl->DestroyVoice(iterator->second);
+            iterator = m_Impl->Voices.erase(iterator);
+            ++stopped;
+        }
+        return stopped;
+    }
+
+    void AudioSystem::SetBusGain(std::string bus, const float gain)
+    {
+        m_Impl->RequireOwner("SetBusGain");
+        if (bus.empty() || bus.size() > 128 || !std::isfinite(gain) || gain < 0.0F || gain > 16.0F)
+            throw std::invalid_argument("Audio bus name or gain is invalid.");
+        std::scoped_lock lock(m_Impl->Mutex);
+        m_Impl->BusGains.insert_or_assign(std::move(bus), gain);
+        m_Impl->UpdateVirtualization();
+    }
+
+    float AudioSystem::BusGain(const std::string_view bus) const
+    {
+        m_Impl->RequireOwner("BusGain");
+        if (bus.empty())
+            throw std::invalid_argument("Audio bus name is empty.");
+        std::scoped_lock lock(m_Impl->Mutex);
+        return m_Impl->BusGain(std::string(bus));
+    }
+
+    std::vector<AudioBusInfo> AudioSystem::Buses() const
+    {
+        m_Impl->RequireOwner("Buses");
+        std::scoped_lock lock(m_Impl->Mutex);
+        std::vector<AudioBusInfo> result;
+        result.reserve(m_Impl->BusGains.size());
+        for (const auto& [name, gain] : m_Impl->BusGains)
+            result.push_back({name, gain});
+        return result;
     }
 
     void AudioSystem::SetListener(const AudioListenerState& listener)
@@ -666,7 +806,26 @@ namespace Keire
         {
             (void)id;
             const auto& clip = *voice.Specification.Clip;
-            const auto clipFrames = clip.Samples.size() / clip.Channels;
+            std::vector<float> streamedSamples;
+            const std::vector<float>* samples = &clip.Samples;
+            if (clip.Streaming)
+            {
+                if (clip.Frames > std::numeric_limits<std::size_t>::max() / clip.Channels)
+                    throw std::runtime_error("Streaming audio clip dimensions exceed the current platform.");
+                streamedSamples.resize(static_cast<std::size_t>(clip.Frames) * clip.Channels);
+                ma_decoder decoder{};
+                auto decoderConfig = ma_decoder_config_init(ma_format_f32, clip.Channels, clip.SampleRate);
+                if (ma_decoder_init_memory(clip.EncodedSource.data(), clip.EncodedSource.size(), &decoderConfig,
+                                           &decoder) != MA_SUCCESS)
+                    throw std::runtime_error("Offline streaming audio decoder initialization failed.");
+                ma_uint64 decoded = 0;
+                const auto status = ma_decoder_read_pcm_frames(&decoder, streamedSamples.data(), clip.Frames, &decoded);
+                ma_decoder_uninit(&decoder);
+                if ((status != MA_SUCCESS && status != MA_AT_END) || decoded != clip.Frames)
+                    throw std::runtime_error("Offline streaming audio decode was incomplete.");
+                samples = &streamedSamples;
+            }
+            const auto clipFrames = samples->size() / clip.Channels;
             if (clipFrames == 0)
                 continue;
             float leftGain = voice.Specification.Gain * m_Impl->BusGain(voice.Specification.Bus);
@@ -716,8 +875,8 @@ namespace Keire
                     const auto sample = [&](const std::uint32_t channel)
                     {
                         const auto selected = std::min(channel, clip.Channels - 1U);
-                        const auto first = clip.Samples[sourceFrame * clip.Channels + selected];
-                        const auto second = clip.Samples[nextFrame * clip.Channels + selected];
+                        const auto first = (*samples)[sourceFrame * clip.Channels + selected];
+                        const auto second = (*samples)[nextFrame * clip.Channels + selected];
                         return first + (second - first) * alpha;
                     };
                     const auto left = sample(0);
@@ -736,7 +895,9 @@ namespace Keire
                       {
                           auto& voice = item.second;
                           const auto frames =
-                              voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels;
+                              voice.Specification.Clip->Frames == 0
+                                  ? voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels
+                                  : voice.Specification.Clip->Frames;
                           if (!voice.Specification.Loop && voice.Frame >= static_cast<double>(frames))
                           {
                               implementation->DestroyVoice(voice);

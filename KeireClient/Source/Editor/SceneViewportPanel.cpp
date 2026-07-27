@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -101,6 +102,9 @@ void KeireEditor::SceneViewportPanel::Initialize(const std::filesystem::path& pr
         m_Gizmos->Load(projectRoot);
         (void)m_Camera->Load(projectRoot / "Library/Editor/SceneCamera.state");
     }
+    if (const auto assets = m_Controller.SceneViewportAssetSystem())
+        m_EditPresentation =
+            Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
 }
 
 void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& projectRoot) noexcept
@@ -122,6 +126,9 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
         }
         m_Camera->SetNavigationMode(Keire::Detail::EditorCameraNavigationMode::None);
     }
+    if (m_EditPresentation)
+        m_EditPresentation->Clear();
+    m_EditPresentation.Reset();
     m_RenderView.Reset();
     m_CameraPreviewView.Reset();
 }
@@ -215,6 +222,26 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         ui.Image(m_RenderView->Surface(), size);
         imageState = ui.LastItemState();
         imageRect = ui.LastItemRect();
+        Keire::Ref<Keire::ScenePresentationRuntime> presentation;
+        if (playActive)
+        {
+            const auto session = document.PlaySession();
+            session->SetPresentationViewport(size.Width, size.Height);
+            presentation = session->Presentation();
+        }
+        else
+        {
+            if (!m_EditPresentation && assetSystem)
+                m_EditPresentation =
+                    Keire::CreateRef<Keire::ScenePresentationRuntime>(assetSystem, Keire::Ref<Keire::AudioSystem>{});
+            if (m_EditPresentation)
+            {
+                m_EditPresentation->Synchronize(renderScene, size.Width, size.Height, false);
+                presentation = m_EditPresentation;
+            }
+        }
+        if (presentation)
+            presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
     }
     m_ViewportRect = imageRect;
     m_LastCamera = camera;
@@ -364,9 +391,9 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
          {statusPosition.X + static_cast<float>(viewportStatus.size()) * 7.0F + 5.0F, statusPosition.Y + 18.0F}},
         {0.03F, 0.04F, 0.06F, 0.72F}, 4.0F);
     ui.DrawOverlayText(statusPosition, theme.MutedText, viewportStatus);
-    const bool pointerBlocked = toolbarRect.Contains(ui.PointerState().Position) ||
-                                orientationRect.Contains(ui.PointerState().Position) ||
-                                (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
+    const bool pointerBlocked =
+        toolbarRect.Contains(ui.PointerState().Position) || orientationRect.Contains(ui.PointerState().Position) ||
+        (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position)) || playActive;
     if (renderScene)
     {
         const bool allowManipulation = !playActive && !m_Controller.SceneViewportPlayReviewActive();

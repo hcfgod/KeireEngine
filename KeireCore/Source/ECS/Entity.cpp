@@ -17,6 +17,18 @@ namespace Keire
         return state && state->Contains(m_Id);
     }
 
+    std::uint64_t Entity::World() const noexcept
+    {
+        const auto state = m_State.Lock();
+        return state ? static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(state.Get())) : 0;
+    }
+
+    Entity Entity::Resolve(const EntityId id) const noexcept
+    {
+        const auto state = m_State.Lock();
+        return state ? state->Find(id) : Entity{};
+    }
+
     std::string Entity::Name() const
     {
         const auto state = m_State.Lock();
@@ -104,5 +116,19 @@ namespace Keire
     {
         const auto state = m_State.Lock();
         return state && state->RemoveComponent(m_Id, type);
+    }
+
+    Entity Entity::Clone()
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::Clone cannot duplicate a stale entity.");
+        return state->Duplicate(m_Id);
+    }
+
+    bool Entity::Destroy()
+    {
+        const auto state = m_State.Lock();
+        return state && state->Destroy(m_Id);
     }
 } // namespace Keire

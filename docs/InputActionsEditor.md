@@ -21,10 +21,11 @@ the same `AssetDatabase` path as `KeireAssetTool`, and requests runtime hot relo
 history and reloads the source. The undo stack is bounded to 128 full-document snapshots so malformed partial commands
 cannot leak into saved data.
 
-Listen uses the reusable runtime rebind API. A progress indicator shows the timeout, the candidate path is prominent,
-and conflicts offer Replace, Keep Both, or Cancel. Replace removes conflicting source bindings in the selected map;
-Keep Both preserves them. The live monitor shows the selected action phase/value plus connected-device and paired-user
-counts.
+Listen creates a transient runtime context from the current in-memory document, so existing, new, and unsaved bindings
+can capture any keyboard key, mouse control, or gamepad control without modifying gameplay input. A progress indicator
+shows the timeout, the candidate path is prominent, and conflicts offer Replace, Keep Both, or Cancel. Replace removes
+conflicting source bindings in the selected map; Keep Both preserves them. The live monitor shows the selected action
+phase/value plus connected-device and paired-user counts.
 
 The Project panel advertises `.keireinput` sources as typed input assets and supports asset drag payloads through the
 Kéire UI facade. Switching away from a dirty input document is blocked until it is explicitly saved or reverted, so a
