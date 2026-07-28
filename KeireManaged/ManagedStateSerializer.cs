@@ -74,6 +74,7 @@ internal static class ManagedStateSerializer
     }
 
     private static readonly JsonSerializerOptions Options = CreateOptions();
+    internal static JsonSerializerOptions SerializerOptions => Options;
 
     private static JsonSerializerOptions CreateOptions()
     {
@@ -111,22 +112,23 @@ internal static class ManagedStateSerializer
     {
         ArgumentNullException.ThrowIfNull(behaviour);
         var document = Read(previousState);
-        var retained = document.Fields.ToDictionary(FieldIdentity, StringComparer.Ordinal);
+        var retained = document.Fields.ToList();
         var allFields = SerializableFields(behaviour.GetType(), true).ToArray();
         if (!includeReloadOnly)
         {
             foreach (var reloadOnly in allFields.Where(field =>
                          field.IsDefined(typeof(HotReloadStateAttribute), true) &&
                          !field.IsPublic && !field.IsDefined(typeof(SerializeFieldAttribute), true)))
-                retained.Remove(FieldIdentity(Describe(reloadOnly)));
+                RemoveCapturedFields(retained, Describe(reloadOnly));
         }
         foreach (var field in allFields.Where(field => IsSerializable(field, includeReloadOnly)))
         {
             var descriptor = Describe(field);
             descriptor.Value = JsonSerializer.SerializeToElement(field.GetValue(behaviour), field.FieldType, Options);
-            retained[FieldIdentity(descriptor)] = descriptor;
+            RemoveCapturedFields(retained, descriptor);
+            retained.Add(descriptor);
         }
-        document.Fields = retained.Values.OrderBy(field => field.StableId, StringComparer.Ordinal)
+        document.Fields = retained.OrderBy(field => field.StableId, StringComparer.Ordinal)
             .ThenBy(field => field.Name, StringComparer.Ordinal).ToList();
         return JsonSerializer.Serialize(document, Options);
     }
@@ -202,8 +204,18 @@ internal static class ManagedStateSerializer
         Aliases = field.GetCustomAttributes<FormerlySerializedAsAttribute>().Select(attribute => attribute.Name).ToArray()
     };
 
-    private static string FieldIdentity(StateField field) =>
-        string.IsNullOrEmpty(field.StableId) ? $"name:{field.Name}" : $"id:{field.StableId}";
+    private static void RemoveCapturedFields(List<StateField> fields, StateField target)
+    {
+        var names = target.Aliases.Append(target.Name).ToHashSet(StringComparer.Ordinal);
+        fields.RemoveAll(field =>
+        {
+            if (!string.IsNullOrEmpty(target.StableId) && !string.IsNullOrEmpty(field.StableId) &&
+                string.Equals(field.StableId, target.StableId, StringComparison.OrdinalIgnoreCase))
+                return true;
+            return string.IsNullOrEmpty(field.StableId) &&
+                   (names.Contains(field.Name) || field.Aliases.Any(names.Contains));
+        });
+    }
 
     private static StateField? Find(IEnumerable<StateField> fields, StateField target, out bool fallback)
     {

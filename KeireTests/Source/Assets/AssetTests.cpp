@@ -3,9 +3,11 @@
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Log.h"
+#include "Keire/Scripting/ManagedDataAsset.h"
 #include "KeireTests/TestSupport.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
+#include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -111,6 +113,15 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     request.CreateRelativePath = "Scenes/Created.keirescene";
     request.CreatePayloadPath = operation / "source.keirescene";
     request.CreateSettings = {{"quality", std::int64_t{2}}};
+    Keire::ExternalAssetImportItem externalItem;
+    externalItem.SourcePath = project.Root / "Source/Character.fbx";
+    externalItem.RelativeDestination = "Models/Character.fbx";
+    externalItem.Conflict = Keire::ExternalAssetConflictPolicy::UniqueName;
+    externalItem.Settings = {{"maximumInfluences", std::string("8")},
+                             {"rigProfile", std::string("humanoid")},
+                             {"rigSource", std::string("generate")},
+                             {"skinningMethod", std::string("linearBlend")}};
+    request.ExternalItems.push_back(externalItem);
     request.CreateAuxiliarySources = {{"Shaders/Created.hlsl", operation / "auxiliary-0.hlsl"}};
     request.ExtractModel = id;
     request.ExtractDirectory = "Materials/Extracted";
@@ -122,6 +133,8 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     request.CookOutput = project.Root / "Build/Cooked";
     request.BuildProfile.Name = "Test";
     request.BuildProfile.Roots = {id};
+    request.BuildProfile.ManagedTypeDiscoveryComplete = true;
+    request.BuildProfile.ManagedTypeCatalog = R"({"schemaVersion":1,"types":[]})";
     const auto requestPath = operation / "request.json";
     Keire::Detail::WriteAssetWorkerRequest(requestPath, request);
     const auto restored = Keire::Detail::ReadAssetWorkerRequest(requestPath);
@@ -132,6 +145,11 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restored.CreateRelativePath == request.CreateRelativePath);
     CHECK(restored.CreatePayloadPath == request.CreatePayloadPath);
     CHECK(restored.CreateSettings == request.CreateSettings);
+    REQUIRE(restored.ExternalItems.size() == 1);
+    CHECK(restored.ExternalItems.front().SourcePath == externalItem.SourcePath);
+    CHECK(restored.ExternalItems.front().RelativeDestination == externalItem.RelativeDestination);
+    CHECK(restored.ExternalItems.front().Conflict == externalItem.Conflict);
+    CHECK(restored.ExternalItems.front().Settings == externalItem.Settings);
     CHECK(restored.ExtractModel == request.ExtractModel);
     CHECK(restored.ExtractDirectory == request.ExtractDirectory);
     REQUIRE(restored.CreateAuxiliarySources.size() == 1);
@@ -143,6 +161,8 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restored.Mutation.Source == request.Mutation.Source);
     CHECK(restored.Mutation.Destination == request.Mutation.Destination);
     CHECK(restored.BuildProfile.Roots == request.BuildProfile.Roots);
+    CHECK(restored.BuildProfile.ManagedTypeDiscoveryComplete);
+    CHECK(restored.BuildProfile.ManagedTypeCatalog == request.BuildProfile.ManagedTypeCatalog);
 }
 
 TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
@@ -388,9 +408,47 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
         unsupported << "unsupported";
     }
     Keire::ExternalAssetImportItem folderItem{droppedFolder, "Folder"};
-    CHECK_THROWS_WITH_AS((void)database->ImportExternal(std::span(&folderItem, 1)),
-                         doctest::Contains("No importer supports a dropped directory entry"), std::invalid_argument);
-    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Supported.opt"));
+    const auto folderImport = database->ImportExternal(std::span(&folderItem, 1));
+    REQUIRE(folderImport.Entries.size() == 1);
+    CHECK(folderImport.Entries.front().RelativeDestination == std::filesystem::path("Folder/Supported.opt"));
+    CHECK(std::filesystem::is_regular_file(project.Root / "Assets/Folder/Supported.opt"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Folder/Unsupported.unknown"));
+}
+
+TEST_CASE("Development catalog publication preserves packs that are still in use")
+{
+    TemporaryAssetProject project;
+    project.Write("Live.live", "generation one");
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.LivePack";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000013");
+    importer.Extensions = {".live"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    const auto first = database->ImportAll();
+    const auto firstCatalog = Keire::Detail::LoadCatalog(first.CatalogPath);
+    REQUIRE(firstCatalog.Entries.size() == 1);
+    const auto firstPack = firstCatalog.Entries.front().PackPath;
+    REQUIRE(std::filesystem::is_regular_file(firstPack));
+    std::ifstream livePack(firstPack, std::ios::binary);
+    REQUIRE(livePack);
+
+    project.Write("Live.live", "generation two");
+    const auto second = database->ImportAll();
+    CHECK(second.Imported == 1);
+    const auto secondCatalog = Keire::Detail::LoadCatalog(second.CatalogPath);
+    REQUIRE(secondCatalog.Entries.size() == 1);
+    CHECK(secondCatalog.Entries.front().PackPath != firstPack);
+    CHECK(std::filesystem::is_regular_file(secondCatalog.Entries.front().PackPath));
+    CHECK(std::filesystem::is_regular_file(firstPack));
+
+    std::array<char, Keire::Detail::PackMagic.size()> magic{};
+    livePack.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+    CHECK(livePack.good());
+    CHECK(magic == Keire::Detail::PackMagic);
 }
 
 TEST_CASE("Asset database serializes catalog operations and reports cancellable progress")
@@ -722,6 +780,53 @@ TEST_CASE("Development catalogs tolerate missing references while strict cooking
                          doctest::Contains("dependency is missing"), std::runtime_error);
 }
 
+TEST_CASE("Strict cooking requires discovered managed types and retains the previous output on rejection")
+{
+    TemporaryAssetProject project;
+    const auto importer = Keire::CreateManagedDataAssetImporter();
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+
+    Keire::ManagedAssetTypeDescriptor descriptor;
+    descriptor.StableTypeId = Keire::ManagedTypeId::Parse("f2000000-0000-4000-8000-000000000001");
+    descriptor.FullName = "Example.CookSettings";
+    descriptor.DisplayName = "Cook Settings";
+    descriptor.Properties = {{.StableFieldId = Keire::AssetId::Parse("f2000000-0000-4000-8000-000000000002"),
+                              .Name = "Quality",
+                              .DisplayName = "Quality",
+                              .ManagedTypeName = "System.Int32",
+                              .Kind = Keire::ManagedAssetPropertyKind::Integer}};
+
+    Keire::ManagedDataDefinition definition;
+    definition.ManagedType = descriptor.StableTypeId;
+    definition.ManagedTypeName = descriptor.FullName;
+    definition.Fields = {{.StableFieldId = descriptor.Properties.front().StableFieldId,
+                          .Name = "Quality",
+                          .ManagedTypeName = "System.Int32",
+                          .Value = "3"}};
+    const auto source = Keire::ManagedDataAsset::Encode(definition);
+    (void)database->CreateAsset("CookSettings.keiredata", importer, source);
+
+    const auto output = project.Root / "StrictManagedCook";
+    std::filesystem::create_directories(output);
+    {
+        std::ofstream sentinel(output / "last-good.txt", std::ios::binary | std::ios::trunc);
+        sentinel << "last good";
+    }
+    Keire::AssetBuildProfile strict;
+    strict.Strict = true;
+    CHECK_THROWS_WITH_AS((void)Keire::AssetCooker::Cook(*database, strict, output),
+                         doctest::Contains("requires managed runtime compilation"), std::runtime_error);
+    CHECK(ReadAll(output / "last-good.txt") == std::vector<char>{'l', 'a', 's', 't', ' ', 'g', 'o', 'o', 'd'});
+
+    strict.ManagedTypeDiscoveryComplete = true;
+    const std::array descriptors{descriptor};
+    strict.ManagedTypeCatalog = Keire::EncodeManagedAssetTypeCatalog(descriptors);
+    const auto cooked = Keire::AssetCooker::Cook(*database, strict, output);
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(cooked.CatalogPath));
+    CHECK_FALSE(std::filesystem::exists(output / "last-good.txt"));
+}
+
 TEST_CASE("Asset database preserves metadata identities and produces validated deterministic packs")
 {
     TemporaryAssetProject project;
@@ -818,19 +923,37 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
                                [&](const Keire::AssetTrashRecord& record) { return record.Id == collisionTrash.Id; }));
 
     auto changeDatabase = Keire::CreateRef<Keire::AssetDatabase>(
-        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .ChangeDebounce = std::chrono::milliseconds(0)});
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root,
+                                          .ChangeDebounce = std::chrono::milliseconds(0),
+                                          .ChangeMonitorInterval = std::chrono::milliseconds(1)});
+    const auto waitForChange = [&](const Keire::AssetId expected)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        do
+        {
+            const auto changed = changeDatabase->PollChangedAssets();
+            if (std::ranges::find(changed, expected) != changed.end())
+                return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (std::chrono::steady_clock::now() < deadline);
+        return false;
+    };
     project.Write("Greeting.txt", "updated assets");
-    const auto changed = changeDatabase->PollChangedAssets();
-    CHECK(std::ranges::find(changed, original->Id) != changed.end());
+    CHECK(waitForChange(original->Id));
     CHECK(changeDatabase->ImportAll().Imported > 0);
     {
         std::ofstream metadata(project.Root / "Assets/Greeting.txt.keiremeta", std::ios::app);
         metadata << ' ';
     }
-    const auto metadataChanged = changeDatabase->PollChangedAssets();
-    CHECK(std::ranges::find(metadataChanged, original->Id) != metadataChanged.end());
+    CHECK(waitForChange(original->Id));
     const auto metadataImport = changeDatabase->ImportAll();
     CHECK(metadataImport.Imported == 1);
+
+    const auto idleStarted = std::chrono::steady_clock::now();
+    for (std::size_t iteration = 0; iteration < 100; ++iteration)
+        CHECK(changeDatabase->PollChangedAssets().empty());
+    CHECK(std::chrono::steady_clock::now() - idleStarted < std::chrono::milliseconds(50));
+    CHECK(changeDatabase->ChangeMonitorStatistics().PublishedScans > 0);
 }
 
 TEST_CASE("Mesh bounds are persisted in catalog metadata and queried without loading the asset")

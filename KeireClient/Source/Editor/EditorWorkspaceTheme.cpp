@@ -277,6 +277,10 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_DiagnosticsPanel->Registration());
             DrawPanelMenuItem(ui, m_ThemeEditor);
             DrawPanelMenuItem(ui, m_InputActionsPanel->Registration());
+            DrawPanelMenuItem(ui, m_AnimatorControllerPanel->Registration());
+            DrawPanelMenuItem(ui, m_RiggingStudioPanel->Registration());
+            DrawPanelMenuItem(ui, m_AudioMixerPanel->Registration());
+            DrawPanelMenuItem(ui, m_VfxEffectPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
             DrawPanelMenuItem(ui, m_PrefabOverrides);

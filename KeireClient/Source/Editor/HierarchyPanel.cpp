@@ -9,6 +9,8 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Keire/ECS/Components/AudioComponents.h"
@@ -128,18 +130,17 @@ namespace KeireEditor
                 m_Controller.RequestHierarchyRename(selected->Id, selected->Name);
             }
         }
-        const auto hierarchy = scene->Snapshot();
+        const auto hierarchy = scene->HierarchySnapshot();
         const auto& objects = hierarchy.Objects;
-        const auto prefabInstanceFor = [&](const Keire::AssetId object)
-        {
-            return std::ranges::find_if(hierarchy.PrefabInstances,
-                                        [&](const Keire::PrefabInstanceDefinition& instance)
-                                        {
-                                            return std::ranges::any_of(instance.Objects,
-                                                                       [&](const Keire::PrefabObjectMapping& mapping)
-                                                                       { return mapping.Instance == object; });
-                                        });
-        };
+        std::unordered_set<Keire::AssetId> prefabObjects;
+        for (const auto& instance : hierarchy.PrefabInstances)
+            for (const auto& mapping : instance.Objects)
+                prefabObjects.insert(mapping.Instance);
+        std::unordered_map<Keire::AssetId, std::vector<const Keire::SceneObjectDefinition*>> children;
+        children.reserve(objects.size());
+        for (const auto& object : objects)
+            children[object.Parent].push_back(std::addressof(object));
+        const auto isPrefabObject = [&](const Keire::AssetId object) { return prefabObjects.contains(object); };
         std::vector<Keire::AssetId> hierarchyOrder;
         hierarchyOrder.reserve(objects.size());
         for (const auto& object : objects)
@@ -180,25 +181,28 @@ namespace KeireEditor
             for (const auto* object : matches)
             {
                 auto id = ui.PushId(object->Id.ToString());
-                const bool prefabObject = prefabInstanceFor(object->Id) != hierarchy.PrefabInstances.end();
+                const bool prefabObject = isPrefabObject(object->Id);
                 const auto label = prefabObject ? "[Prefab] " + object->Name : object->Name;
                 if (ui.Selectable(label, document.IsSelected(object->Id)))
                     select(object->Id, matchOrder);
             }
             return;
         }
-        const auto nextSibling = [&objects](const Keire::AssetId id, const Keire::AssetId parent)
+        const auto nextSibling = [&children](const Keire::AssetId id, const Keire::AssetId parent)
         {
             bool found = false;
-            for (const auto& candidate : objects)
+            const auto siblings = children.find(parent);
+            if (siblings == children.end())
+                return Keire::AssetId{};
+            for (const auto* candidate : siblings->second)
             {
-                if (candidate.Id == id)
+                if (candidate->Id == id)
                 {
                     found = true;
                     continue;
                 }
-                if (found && candidate.Parent == parent)
-                    return candidate.Id;
+                if (found)
+                    return candidate->Id;
             }
             return Keire::AssetId{};
         };
@@ -222,8 +226,7 @@ namespace KeireEditor
         const auto drawEntity = [&](const auto& self, const Keire::SceneObjectDefinition& object) -> void
         {
             auto id = ui.PushId(object.Id.ToString());
-            const auto prefabInstance = prefabInstanceFor(object.Id);
-            const bool prefabObject = prefabInstance != hierarchy.PrefabInstances.end();
+            const bool prefabObject = isPrefabObject(object.Id);
             const auto label = (object.Active ? std::string{} : std::string("[inactive] ")) +
                                (prefabObject ? std::string("[Prefab] ") : std::string{}) + object.Name + "##tree";
             auto node = ui.BeginTreeNode(label, document.IsSelected(object.Id));
@@ -364,13 +367,16 @@ namespace KeireEditor
                 }
             }
             if (node)
-                for (const auto& child : objects)
-                    if (child.Parent == object.Id)
-                        self(self, child);
+            {
+                const auto found = children.find(object.Id);
+                if (found != children.end())
+                    for (const auto* child : found->second)
+                        self(self, *child);
+            }
         };
-        for (const auto& object : objects)
-            if (!object.Parent)
-                drawEntity(drawEntity, object);
+        if (const auto roots = children.find({}); roots != children.end())
+            for (const auto* object : roots->second)
+                drawEntity(drawEntity, *object);
         const auto remaining = ui.ContentAvailable();
         (void)ui.InvisibleButton("HierarchyRootDrop",
                                  {std::max(remaining.Width, 1.0F), std::max(remaining.Height, 24.0F)});

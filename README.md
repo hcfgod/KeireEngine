@@ -227,21 +227,62 @@ fixed-step ballistic projectiles, penetration and ricochet energy, layered damag
 first-person recoil rig. The sample camera carries a rifle, pistol, and shotgun loadout; use Fire, Aim, Reload,
 Fire Mode, Next/Previous Weapon, or weapon slots 1-3 through the project Input Actions asset.
 
+Concrete managed data types declare `[StableAssetTypeId]` and `[CreateAssetMenu]`; serialized members declare
+`[StableFieldId]`. After a successful managed build, their deterministic entries appear under **Create > Managed
+Data**. `.keiredata` sources retain typed asset references and dependency closure, expose reflection-driven Inspector
+editing with undo/save/reload, and hot-apply as project assets even while Play Mode uses an isolated scene clone.
+Malformed or missing managed types keep their raw serialized state visible, while strict cooking compiles and
+discovers runtime types before rejecting incompatible data.
+
 Headless audio owns the same pinned miniaudio 0.11.25 engine as device-backed runtime audio. It provides bounded
 resident voices, priority virtualization, listener/source spatial state, doppler and attenuation, snapshot
 interpolation, immutable DSP graphs, meters, and deterministic offline interleaved-PCM rendering without physical
-hardware. Invalid graph replacement remains transactional.
+hardware. Invalid graph replacement remains transactional. `.keiremixer` assets define a stable Master-rooted bus
+hierarchy, ordered effect racks, pre/post-fader sends, snapshots, sidechain ducking, and convolution dependencies.
+Create mixers and Audio Reverb Zones from the normal Project and component menus. Double-click a mixer to open its
+dockable bus, routing, effects, sends, snapshots, and ducking editor; preview controls remain disabled until the live
+device DSP path can route through the selected stable bus. Project settings select the default mixer that becomes a
+cook root. The current live device path still routes through the compatible string bus; mixer graph execution,
+selected-bus audition, and reverb-zone evaluation remain the next Audio runtime slice.
+
+Physics Play sessions and cooked runtimes create their scene-owned Jolt world eagerly. Fixed simulation runs gameplay
+`FixedUpdate`, pushes authored and kinematic state, steps Jolt, pulls dynamic transforms, then dispatches ordered
+Enter/Stay/Exit contacts. Collider masks use the project’s named 32-layer collision matrix for simulation and queries.
+The Scene view draws selected collider wireframes and box/sphere/capsule resize handles with undo. Physics Materials,
+mesh-collider dependencies, joint and kinematic capsule character-controller components, narrow-phase ray/overlap
+queries, and opt-in bounded debug snapshots use first-party public types. Joint constraints and collision-resolving
+character sweeps are still follow-up runtime work; the current controller slice supplies bounded movement commands and
+ground-state filtering.
 
 `BakeNavigationMesh` rasterizes explicit triangle geometry with pinned Recast 1.6.0, emits deterministic Detour tile
 data plus an inspection graph, and integrates with revisioned synchronous/asynchronous queries and crowd agents.
 Published meshes, async cancellation/stale rejection, dynamic obstacle invalidation, and deterministic dependency
 hashes remain middleware-free public contracts.
 
-FBX/glTF/GLB import emits stable skeleton, skinned-mesh, and animation-clip subassets with normalized bounded
-influences. Animation graph assets, animator sampling, transitions, root motion, events, and skin palettes are exposed
-through first-party types. The sample project includes a `.keireasm` gameplay assembly, reload-aware third-person and
-navigation scripts, and base/variant prefab assets; `AssetTool cook` compiles and publishes those DLLs before writing
-the runtime manifest.
+FBX/glTF/GLB import emits stable skeleton, semantic rig, skinned-mesh, and animation-clip subassets with normalized
+four/eight-influence weights. Embedded Mixamo, Blender, Unreal, humanoid, biped, and quadruped naming is mapped
+deterministically; models without a rig can generate one from a non-destructive import preset. Open **Window > Rigging
+Studio** to change the rig source/profile/skinning method, inspect semantic mappings and generated subassets, and bake
+retargeted `.keireanim` clips. See [Animation and Rigging](docs/AnimationRigging.md) for the complete workflow.
+
+Animation graph assets, animator sampling, transitions, root motion, events, skin palettes, two-bone IK, and FABRIK are
+exposed through first-party types. Create an **Animator Controller** from the Project panel, double-click it to open the
+dockable state-machine editor, then drag imported animation clips onto the graph. Parameters, layers, entry states,
+transitions, conditions, blend trees, avatar masks, node layout, validation, and undo/redo are authored without editing
+JSON. Managed scripts can set or query typed parameters and layer weights and submit named IK goals through `Animator`.
+The sample project includes a
+`.keireasm` gameplay assembly, reload-aware third-person and navigation scripts, and base/variant prefab assets;
+`AssetTool cook` compiles and publishes those DLLs before writing the runtime manifest.
+
+`.keirevfx` assets use a bounded modular emitter stack for rate/burst spawning, point/box/sphere/cone/mesh/volume
+shapes, initialization, forces, size curves, color gradients, collision, and sprite/mesh output. A scene-owned
+`VfxWorld` supplies generation-safe handles, fixed global/effect budgets, pooled steady-state simulation, revision-aware
+reload, diagnostics, and immutable debug/render snapshots. The deterministic CPU path is active on every backend;
+GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
+Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed; textured
+sprites, ribbons, decals, and GPU simulation are later VFX slices. Double-click a VFX asset to author its ordered
+modules, curves, and gradients in a dockable typed document; live scene preview remains explicitly unavailable until
+the editor owns a transient preview-world boundary.
 
 ## Windowing And Configuration
 
@@ -271,8 +312,10 @@ mutating authored UI or audio components.
 
 Selecting an audio asset shows codec, channel, sample-rate, duration, frame-count, and streaming metadata in Inspector,
 with Preview, Stop, and Reimport controls. Project thumbnails display a waveform for resident and streaming clips.
-Audio Source exposes clip, output bus, gain, pitch, priority, looping, spatialization, attenuation distances, and
-Play On Awake through the normal component Inspector, scene serialization, undo, and prefab-override workflow.
+Audio Source schema 2 exposes clip, mixer, stable bus identity with the legacy bus-name fallback, gain, pitch, priority,
+looping, spatialization, min/max distance, a reusable attenuation curve, and Play On Awake through the normal component
+Inspector, scene serialization, undo, and prefab-override workflow. Existing schema-1 sources migrate without changing
+their audible legacy attenuation.
 
 `Keire/Window.h` exposes SDL-free `WindowSystem`, `Window`, opaque `WindowId`, logical/pixel extents, and a typed ordered event variant. One system is active per process and any number of windows may be created. SDL video initialization, window creation, mutation, polling, and shutdown are creating-thread-affine; releasing the final `Ref<Window>` from a worker is safe because native destruction is deferred to the owner thread. Shutdown destroys all native windows and makes surviving handles inert.
 
@@ -404,6 +447,8 @@ Asset APIs are organized beneath `Keire/Assets` (for example, `#include "Keire/A
 Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicitly with `KeireAssetTool convert-mesh
 --input <model>`. PNG, JPEG, TGA, BMP, and Radiance HDR textures import as validated assets with deterministic mip
 generation and sampler settings stored in source metadata. Environment textures support equirectangular panoramas and
+model-folder drops preserve supported models and textures while ignoring unrelated exporter/readme files. Live imports
+publish immutable content-addressed packs, so active Scene/Game loads do not block catalog replacement on Windows.
 horizontal/vertical cubemap cross or strip atlases. Assimp and stb remain private implementation dependencies; their
 headers are not required by engine or SDK consumers.
 
@@ -561,5 +606,30 @@ included where available; Dist packages are stripped.
 - Do not bypass a checksum failure. Verify the lock entry against the upstream release.
 - Windows MSVC builds require the Desktop development with C++ workload for the requested Visual Studio major version.
 - Apple's ASan runtime does not support leak detection; the macOS scripts disable that check.
+
+## Production Performance Validation
+
+The editor profiler exposes a sortable CPU-hotspot view, chronological per-thread lanes, copyable counters, and a
+Perfetto-compatible JSON trace through `Copy Perfetto Trace`. Renderer pass values are labeled as CPU measurements
+unless the active backend explicitly reports GPU timestamp support. Managed scripting counters include callback calls,
+skips, native/managed interop calls, cumulative callback time, and the maximum callback duration. A copyable managed
+callback table aggregates active instances by Behaviour type and lifecycle method at the profiler's throttled refresh
+rate. Default-open profiler tables use compact row budgets; `Show all` remains available for deep inspection.
+
+Development asset discovery runs on a database-owned monitor. `PollChangedAssets()` only consumes an immutable
+published snapshot and never walks the project tree on the application frame. `ChangeMonitorInterval` controls
+background reconciliation while `ChangeDebounce` controls publication.
+
+Run the repeatable Debug, Release, sanitizer, and regression matrix with:
+
+```powershell
+./Scripts/Windows/validate-production.ps1
+```
+
+```sh
+bash Scripts/Unix/validate-production.sh
+```
+
+Add `-IncludePackage` on Windows or `--include-package` on Unix to package the SDK and validate both consumers.
 
 See [Architecture](docs/Architecture.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [Changelog](CHANGELOG.md).

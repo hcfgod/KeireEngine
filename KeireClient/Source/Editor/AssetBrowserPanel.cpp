@@ -48,6 +48,18 @@ namespace KeireEditor
                 return "Shader";
             if (extension == ".keirematerial")
                 return "Material";
+            if (extension == ".keireanimgraph")
+                return "Animator Controller";
+            if (extension == ".keireanim")
+                return "Animation Clip";
+            if (extension == ".keiremixer")
+                return "Audio Mixer";
+            if (extension == ".keirephysicsmaterial")
+                return "Physics Material";
+            if (extension == ".keirevfx")
+                return "VFX Effect";
+            if (extension == ".keiredata")
+                return "Managed Data";
             if (extension == ".keireprefab")
                 return "Prefab";
             if (extension == ".keireasm")
@@ -113,8 +125,13 @@ namespace KeireEditor
         {
             None,
             Material,
+            AnimationGraph,
             Script,
             ManagedAssembly,
+            ManagedData,
+            AudioMixer,
+            PhysicsMaterial,
+            VfxEffect,
             Prefab,
             PrefabVariant
         };
@@ -163,6 +180,12 @@ namespace KeireEditor
             OpenNamedCreatePopup = true;
         }
 
+        void RequestManagedDataCreate(const Keire::ManagedAssetTypeDescriptor& descriptor)
+        {
+            PendingManagedType = descriptor.StableTypeId;
+            RequestNamedCreate(NamedCreateKind::ManagedData, descriptor.DefaultFileName);
+        }
+
         void InvalidateThumbnail(const Keire::AssetId asset)
         {
             Images.erase(asset);
@@ -188,6 +211,8 @@ namespace KeireEditor
             RenamingFolder.clear();
             RenameBuffer.clear();
             CreateNameBuffer.clear();
+            PendingManagedType = {};
+            PendingCreateKind = NamedCreateKind::None;
             ExternalEditorBuffer.clear();
             ExternalEditor.clear();
             CurrentFolder.clear();
@@ -319,6 +344,12 @@ namespace KeireEditor
             {
                 if (record.RelativePath.extension() == ".keireinput")
                     editor.OpenAssetBrowserInputActions(record.Id);
+                else if (record.RelativePath.extension() == ".keireanimgraph")
+                    editor.OpenAssetBrowserAnimationGraph(record.Id);
+                else if (record.RelativePath.extension() == ".keiremixer")
+                    editor.OpenAssetBrowserAudioMixer(record.Id);
+                else if (record.RelativePath.extension() == ".keirevfx")
+                    editor.OpenAssetBrowserVfxEffect(record.Id);
                 else if (record.RelativePath.extension() == ".keirescene")
                     editor.OpenAssetBrowserScene(record.Id);
                 else if (record.RelativePath.extension() == ".keireprefab")
@@ -367,10 +398,28 @@ namespace KeireEditor
                 editor.RequestAssetBrowserCreateScene();
             if (ui.MenuItem("Material"))
                 RequestCreateMaterial();
+            if (ui.MenuItem("Animator Controller"))
+                RequestNamedCreate(NamedCreateKind::AnimationGraph, "NewAnimatorController");
             if (ui.MenuItem("C# Script"))
                 RequestNamedCreate(NamedCreateKind::Script, "NewBehaviour");
             if (ui.MenuItem("Managed Assembly"))
                 RequestNamedCreate(NamedCreateKind::ManagedAssembly, "Gameplay");
+            if (ui.MenuItem("Audio Mixer"))
+                RequestNamedCreate(NamedCreateKind::AudioMixer, "MainMixer");
+            if (ui.MenuItem("Physics Material"))
+                RequestNamedCreate(NamedCreateKind::PhysicsMaterial, "PhysicsMaterial");
+            if (ui.MenuItem("VFX Effect"))
+                RequestNamedCreate(NamedCreateKind::VfxEffect, "VfxEffect");
+            const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
+            if (std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); }))
+            {
+                if (auto managedData = ui.BeginMenu("Managed Data"); managedData)
+                {
+                    for (const auto& type : managedTypes)
+                        if (!type.MenuPath.empty() && ui.MenuItem(type.MenuPath))
+                            RequestManagedDataCreate(type);
+                }
+            }
             if (ui.MenuItem("Prefab from Selection"))
                 RequestNamedCreate(NamedCreateKind::Prefab, "NewPrefab");
             if (ui.MenuItem("Unlit Shader"))
@@ -711,12 +760,17 @@ namespace KeireEditor
             }
             if (auto create = ui.BeginPopupModal("Create Asset"); create)
             {
-                const std::string_view type = PendingCreateKind == NamedCreateKind::Material ? "material"
-                                              : PendingCreateKind == NamedCreateKind::Script ? "C# script"
-                                              : PendingCreateKind == NamedCreateKind::ManagedAssembly
-                                                  ? "managed assembly"
-                                              : PendingCreateKind == NamedCreateKind::Prefab ? "prefab"
-                                                                                             : "prefab variant";
+                const std::string_view type =
+                    PendingCreateKind == NamedCreateKind::Material          ? "material"
+                    : PendingCreateKind == NamedCreateKind::AnimationGraph  ? "Animator Controller"
+                    : PendingCreateKind == NamedCreateKind::Script          ? "C# script"
+                    : PendingCreateKind == NamedCreateKind::ManagedAssembly ? "managed assembly"
+                    : PendingCreateKind == NamedCreateKind::ManagedData     ? "managed data asset"
+                    : PendingCreateKind == NamedCreateKind::AudioMixer      ? "audio mixer"
+                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial ? "physics material"
+                    : PendingCreateKind == NamedCreateKind::VfxEffect       ? "VFX effect"
+                    : PendingCreateKind == NamedCreateKind::Prefab          ? "prefab"
+                                                                            : "prefab variant";
                 ui.Text("Choose a name for the new " + std::string(type));
                 (void)ui.InputText("Name", CreateNameBuffer);
                 if (ui.Button("Create"))
@@ -729,16 +783,27 @@ namespace KeireEditor
                         const bool created =
                             PendingCreateKind == NamedCreateKind::Material
                                 ? editor.CreateAssetBrowserMaterial(CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::AnimationGraph
+                                ? editor.CreateAssetBrowserAnimationGraph(CreateNameBuffer)
                             : PendingCreateKind == NamedCreateKind::Script
                                 ? editor.CreateAssetBrowserScript(CreateNameBuffer)
                             : PendingCreateKind == NamedCreateKind::ManagedAssembly
                                 ? editor.CreateAssetBrowserManagedAssembly(CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::ManagedData
+                                ? editor.CreateAssetBrowserManagedData(PendingManagedType, CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::AudioMixer
+                                ? editor.CreateAssetBrowserAudioMixer(CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::PhysicsMaterial
+                                ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::VfxEffect
+                                ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
                             : PendingCreateKind == NamedCreateKind::Prefab
                                 ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
                                 : editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer);
                         if (created)
                         {
                             PendingCreateKind = NamedCreateKind::None;
+                            PendingManagedType = {};
                             PendingVariantBase = {};
                             CreateNameBuffer.clear();
                             ui.CloseCurrentPopup();
@@ -753,6 +818,7 @@ namespace KeireEditor
                 if (ui.Button("Cancel"))
                 {
                     PendingCreateKind = NamedCreateKind::None;
+                    PendingManagedType = {};
                     PendingVariantBase = {};
                     CreateNameBuffer.clear();
                     ui.CloseCurrentPopup();
@@ -1692,6 +1758,7 @@ namespace KeireEditor
         std::string TrashError;
         std::filesystem::path ExternalEditor;
         NamedCreateKind PendingCreateKind = NamedCreateKind::None;
+        Keire::ManagedTypeId PendingManagedType;
         ViewMode Mode = ViewMode::Grid;
         ClipboardMode ClipboardModeValue = ClipboardMode::Empty;
         float ThumbnailSize = 88.0F;

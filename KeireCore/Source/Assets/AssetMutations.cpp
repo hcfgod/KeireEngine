@@ -144,6 +144,86 @@ namespace Keire
         }
     }
 
+    void AssetDatabase::SetImportSettings(const AssetId id, const AssetImportSettings& requestedSettings)
+    {
+        std::scoped_lock operation(*m_Impl->OperationMutex);
+        const auto existing = Find(id);
+        if (!existing)
+            throw std::invalid_argument("Import settings require a live source asset.");
+        const auto importer = m_Impl->Importers.find(existing->Importer);
+        if (importer == m_Impl->Importers.end() || importer->second.Type != existing->Type ||
+            importer->second.Version != existing->ImporterVersion)
+        {
+            throw std::runtime_error("Import settings require the source asset's registered importer.");
+        }
+
+        const auto settings = m_Impl->NormalizeSettings(importer->second, requestedSettings);
+        if (settings == existing->ImportSettings)
+            return;
+        const auto source = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
+        const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
+        const auto originalMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+        try
+        {
+            UpdateMetadataImportSettings(metadata, settings);
+            auto replacement = ReadMetadata(m_Impl->SourceRoot, source, m_Impl->Specification.MaximumSourceBytes, true,
+                                            &importer->second);
+            if (replacement.Id != id)
+                throw std::runtime_error("Import settings changed the stable asset identity.");
+            m_Impl->PublishRecord(replacement, m_Impl->ReadSignature(source, metadata));
+        }
+        catch (...)
+        {
+            const auto failure = std::current_exception();
+            try
+            {
+                Detail::WriteFileAtomically(metadata, originalMetadata);
+                m_Impl->PublishRecord(*existing, m_Impl->ReadSignature(source, metadata));
+            }
+            catch (...)
+            {
+            }
+            std::rethrow_exception(failure);
+        }
+    }
+
+    void AssetDatabase::RequestReimport(const AssetId id)
+    {
+        std::scoped_lock operation(*m_Impl->OperationMutex);
+        const auto existing = Find(id);
+        if (!existing)
+            throw std::invalid_argument("Reimport requires a live source asset.");
+        const auto importer = m_Impl->Importers.find(existing->Importer);
+        if (importer == m_Impl->Importers.end() || importer->second.Type != existing->Type)
+            throw std::runtime_error("Reimport requires the source asset's registered importer.");
+
+        const auto source = ConfinedPath(m_Impl->SourceRoot, existing->RelativePath);
+        const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
+        const auto originalMetadata = ReadSource(metadata, 16U * 1024U * 1024U);
+        try
+        {
+            IncrementMetadataImportRevision(metadata);
+            auto replacement = ReadMetadata(m_Impl->SourceRoot, source, m_Impl->Specification.MaximumSourceBytes, true,
+                                            &importer->second);
+            if (replacement.Id != id)
+                throw std::runtime_error("Reimport invalidation changed the stable asset identity.");
+            m_Impl->PublishRecord(replacement, m_Impl->ReadSignature(source, metadata));
+        }
+        catch (...)
+        {
+            const auto failure = std::current_exception();
+            try
+            {
+                Detail::WriteFileAtomically(metadata, originalMetadata);
+                m_Impl->PublishRecord(*existing, m_Impl->ReadSignature(source, metadata));
+            }
+            catch (...)
+            {
+            }
+            std::rethrow_exception(failure);
+        }
+    }
+
     AssetId AssetDatabase::ExtractMaterial(const AssetId model, const AssetId generatedMaterial,
                                            const std::filesystem::path& relativePath)
     {

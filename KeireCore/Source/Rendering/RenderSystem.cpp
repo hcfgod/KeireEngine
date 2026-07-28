@@ -67,6 +67,11 @@ namespace Keire
         const auto owner = m_Impl->State->Owner.lock();
         return owner && owner->Open && m_Impl->State->Resources.SampledColor;
     }
+    bool RenderSurface::SampledDepthAvailable() const noexcept
+    {
+        const auto owner = m_Impl->State->Owner.lock();
+        return owner && owner->Open && m_Impl->State->Resources.SampledDepth;
+    }
 
     void RenderSurface::RequestSize(const std::uint32_t width, const std::uint32_t height)
     {
@@ -164,6 +169,18 @@ namespace Keire
 
     void RenderSystem::Submit(SceneRenderRequest request) { m_Impl->State->Submit(std::move(request)); }
     RenderMode RenderSystem::Mode() const noexcept { return m_Impl->State->Specification.Mode; }
+    RenderCapabilities RenderSystem::Capabilities() const noexcept
+    {
+        const bool rendered = m_Impl->State->Specification.Mode == RenderMode::Rendered && m_Impl->State->Device;
+        return {.CpuVfxSimulation = true,
+                .GpuVfxSimulation = false,
+                .TransparentPass = rendered,
+                .DynamicSpritePackets = rendered,
+                .TexturedSpritePackets = false,
+                .DynamicMeshPackets = rendered,
+                .SampledResolvedDepth = rendered && m_Impl->State->ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_INVALID,
+                .GpuDepthCollision = false};
+    }
     RenderStatistics RenderSystem::Statistics() const noexcept { return m_Impl->State->Statistics; }
     bool RenderSystem::IsOpen() const noexcept { return m_Impl->State->Open; }
     void RenderSystem::Close() noexcept { m_Impl->State->Close(); }

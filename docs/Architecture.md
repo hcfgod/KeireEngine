@@ -7,6 +7,10 @@ and package manifests use one private atomic-publication service. It creates sam
 data and containing directories where supported, publishes with bounded transient retry, and removes abandoned
 transaction files during recovery. Callers do not implement private rename/write protocols.
 
+Development and cooked asset payloads are immutable content-addressed packs. A publication installs packs before
+atomically switching the small catalog, so open or queued reads retain valid generation paths across an editor reimport.
+Retired packs use delayed best-effort collection rather than participating in the success boundary.
+
 ## Ownership
 
 `KeireCore` is a static C++20 library and owns reusable application behavior, including projects, scenes,
@@ -399,3 +403,115 @@ intentionally stripped. Export annotations describe same-toolchain shared-librar
 compiler-independent C++ ABI.
 
 A KeireCore prebuild step refreshes version and source-control identity under `Build/Generated` immediately before compilation, including tracked and untracked dirty state. The generator C-escapes configured strings and only rewrites the header when its content changes. The compiler supplies configuration, compiler, platform, and architecture identity. Packaging regenerates identity and verifies the staged binary's commit prefix and dirty marker against its manifest. The resulting `Keire::BuildInfo` describes the binary itself rather than the machine inspecting it.
+
+## Performance Observation And Background Work
+
+The application-frame profiler stores one bounded full frame plus a ring of lightweight summaries. Spans carry stable
+thread identifiers and monotonic microsecond timestamps, allowing the editor to present hotspot and chronological
+thread-lane views without instrumenting editor code through private APIs. `LatestChromeTrace()` emits a
+Perfetto/Chrome-trace-compatible snapshot. Renderer timings remain explicitly CPU-side until SDL_GPU exposes portable
+timestamp queries; `GpuTimingSupported` prevents recording or displaying synthetic GPU measurements. Managed callback
+timing uses fixed per-instance accumulators on the owner thread. The editor performs bounded type/lifecycle aggregation
+only at its throttled presentation refresh and limits default-open row submission to reduce profiler observer overhead.
+
+Development `AssetDatabase` instances own a stoppable monitor thread. The monitor performs metadata/signature
+reconciliation away from the application thread and publishes a complete immutable candidate tagged with the source
+revision. The owner thread discards stale candidates, debounces changed identities, and atomically updates its record
+snapshot. Explicit asset mutations advance the revision and wake reconciliation, preventing an older background scan
+from overwriting a newer editor transaction.
+
+Forward+ retains its deterministic CPU fallback while caching the projected grid and GPU storage uploads by viewport,
+camera, and local-light content. The capability flag keeps a future GPU-compute implementation ABI-compatible without
+claiming support on backends that cannot provide it. The editor hierarchy builds prefab membership and parent-child
+adjacency once per snapshot, preserving scene order while avoiding recursive full-scene searches.
+
+## Animator Controller Authoring
+
+Animation graph execution remains owned by `KeireCore`: stable local IDs identify parameters, layers, states,
+transitions, conditions, and blend-tree children, while `AnimatorInstance` owns typed runtime values and immutable debug
+snapshots. The editor owns only an `AnimatorControllerDocument` draft and panel selection state. Drafts may be
+temporarily incomplete, but Save canonicalizes and validates the complete graph before atomically replacing the source;
+failed validation therefore cannot replace the last-good imported asset.
+
+## Skeletal Deformation And Rig Authoring
+
+`SkeletonAsset`, `RigDefinitionAsset`, `SkinnedMeshAsset`, and `AnimationClipAsset` are independent immutable assets.
+Stable generated-subasset IDs let a model reimport replace payloads without invalidating controller, prefab, or scene
+references. Model import either preserves embedded skinning, generates a deterministic profile, or disables rigging.
+Embedded skeletons pass through deterministic semantic inference so authored Mixamo, Blender, Unreal, humanoid, biped,
+and quadruped names participate in the same retargeting and IK contracts. Unknown bones remain ordered, retained, and
+unclassified rather than being discarded.
+
+The scene runtime samples animation into local bone transforms, applies named IK goals, computes the palette, and then
+submits deformation. Linear-blend skinning uses the SDL_GPU compute cache when available. Dual-quaternion skinning and
+unsupported compute paths use the deterministic CPU implementation; both paths produce an engine-owned transient
+deformed stream reused by scene, depth, and shadow recording. No native pointer or graphics allocation crosses the
+managed boundary.
+
+`RiggingStudioPanel` owns only draft import settings and retarget selection. `AssetDatabase::SetImportSettings` commits
+validated metadata atomically, `RequestReimport` advances the source generation, and the isolated asset worker publishes
+the complete model/subasset transaction. Retargeting matches stable semantic roles rather than source bone names and
+writes a standalone `.keireanim` source. Strict cooking decodes every rig, clip, and skinned mesh and validates declared
+dependency types, mesh/influence cardinality, and influence bone bounds before publication.
+
+Runtime IK goals are persistent named `AnimatorComponent` state. They are resolved after graph sampling and before
+palette generation at the scene-safe animation boundary. Managed calls carry world/entity generations and value data;
+the bridge validates animator existence, goal space, solver limits, and stale scene state before mutating the component.
+
+Controller node positions are optional schema-v2 authoring metadata and never affect runtime evaluation. Project-panel
+clip drops resolve through typed asset records before creating states. Undo commands retain complete graph values but
+are scoped to the open asset identity, preventing stale document commands from mutating a newly opened controller.
+Managed Animator reads consume the component's immutable runtime debug snapshot, while writes remain queued
+generation-safe commands applied by the scene presentation runtime.
+
+## Shared Asset Documents
+
+`AssetDocumentHost<T>` owns typed draft/baseline state, bounded undo/redo, validation, preview, atomic persistence,
+discard, and revision-aware reload conflict handling. The host never owns runtime objects: system-specific documents
+translate validated definitions into development-asset previews and cancel transient preview state when they close.
+Stable local IDs, rather than display names, identify authored graph nodes and connections. `Curve1D`,
+`ColorGradient`, stable-node canvases, and selection-aware scene handles are shared value/editor primitives; ImGui and
+backend implementation types remain inside KeireClient.
+
+Builtin importer and decoder construction is centralized in `BuiltinAssetRegistry`. The editor, isolated worker,
+AssetTool, runtime catalog, and tests request the same registrations, preventing an authored extension from importing
+in one process but failing in another.
+
+## Physics Runtime And Authoring
+
+`SceneRuntimeSession` eagerly creates one `PhysicsWorld` for each Play or cooked scene. Its fixed boundary is gameplay
+`FixedUpdate`, incremental body/controller synchronization, Jolt stepping, dynamic Transform pullback, then stable
+contact dispatch. Body identities are generation-safe and never expose Jolt types. Layer/mask filtering is applied by
+the configured 32-slot collision matrix in body broad-phase filters and query paths.
+
+The editor writes collider handle changes through `SceneDocument`, so a drag is one undoable authoring operation.
+`PhysicsDebugSnapshot` copies bounded body, contact, and query-ring state only when capture is enabled; the shipping
+default records nothing. Physics Material and collision-mesh references remain ordinary asset dependencies.
+
+## Managed Data Assets
+
+`.keiredata` stores the authoritative stable managed type ID, a diagnostic type name, stable-field values, and sorted
+dependencies. Script generation preparation discovers concrete runtime `ScriptableObject` types and validates their
+property graphs before publishing descriptors. The application-owned `AssetSystem` performs real cancellable loads,
+while `ScriptSystem` hydrates objects in generation order and transactionally retains the previous script/asset
+generation on failure. Asset-only reload copies supported serialized state into the active object so cached managed
+references retain identity.
+
+Strict cooking builds and loads runtime managed assemblies before decoding the managed type catalog and validating
+managed-data semantics. Scene Behaviour and managed-data references participate in the normal cook graph, so closure
+is scene to managed data to referenced managed/native assets. Test assemblies are excluded from runtime discovery.
+
+## Audio Mixer And VFX Assets
+
+`AudioMixerAsset` is an immutable authored definition with stable bus/effect/send/snapshot/ducking IDs and explicit
+AudioClip dependencies for convolution. Audio Source schema 2 forwards legacy string buses while carrying a mixer,
+stable local bus ID, and `Curve1D`. Meter publication is owner-thread bounded and immutable to editor consumers. The
+editor's mixer panel owns a typed `AudioMixerDocument`; preview-through-bus stays unavailable until it can exercise the
+same device DSP graph as runtime, so opening or closing the document cannot create hidden scene state.
+
+`VfxWorld` owns fixed-capacity effect and particle storage. Activation is transactional, handles include generations,
+and revision-aware replacement preserves bounded lifecycle behavior. The CPU path publishes immutable sprite/mesh
+render packets into the transparent pass and records explicit diagnostics when GPU depth or scene-physics requests
+select CPU simulation. Renderer capability flags and sampleable resolved depth are truthful prerequisites for the
+later portable compute/indirect slice. `VfxEffectDocument` exposes the ordered module stack, curves, and gradients
+without exposing ImGui; its panel deliberately has no live preview until an isolated transient `VfxWorld` is available.

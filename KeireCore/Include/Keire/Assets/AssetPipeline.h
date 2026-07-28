@@ -156,8 +156,16 @@ namespace Keire
         std::filesystem::path SourceDirectory = "Assets";
         std::filesystem::path CacheDirectory = "Library/AssetCache";
         std::chrono::milliseconds ChangeDebounce = std::chrono::milliseconds(250);
+        std::chrono::milliseconds ChangeMonitorInterval = std::chrono::milliseconds(100);
         std::size_t MaximumSourceBytes = 1024U * 1024U * 1024U;
         std::vector<AssetImporterRegistration> Importers;
+    };
+
+    struct AssetChangeMonitorStatistics
+    {
+        std::uint64_t PublishedScans = 0;
+        std::uint64_t FailedScans = 0;
+        bool ScanPending = false;
     };
 
     enum class AssetImportState : std::uint8_t
@@ -302,6 +310,7 @@ namespace Keire
         [[nodiscard]] std::optional<AssetSourceRecord> Find(AssetId id) const;
         [[nodiscard]] std::optional<AssetSourceRecord> Find(const std::filesystem::path& relativePath) const;
         [[nodiscard]] std::vector<AssetId> PollChangedAssets();
+        [[nodiscard]] AssetChangeMonitorStatistics ChangeMonitorStatistics() const noexcept;
         [[nodiscard]] AssetImportResult ImportAll();
         [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy);
         [[nodiscard]] AssetImportResult ImportAll(AssetImportPolicy policy, std::stop_token cancellation,
@@ -321,6 +330,8 @@ namespace Keire
                                           std::span<const std::byte> sourceBytes,
                                           const AssetImportSettings& settings = {});
         void ReplaceAssetSource(AssetId id, std::span<const std::byte> sourceBytes);
+        void SetImportSettings(AssetId id, const AssetImportSettings& settings);
+        void RequestReimport(AssetId id);
         [[nodiscard]] AssetId ExtractMaterial(AssetId model, AssetId generatedMaterial,
                                               const std::filesystem::path& relativePath);
         [[nodiscard]] std::vector<AssetId> ExtractMaterials(AssetId model,
@@ -365,6 +376,10 @@ namespace Keire
         std::size_t StreamPageBytes = 256U * 1024U;
         bool Strict = false;
         std::vector<AssetId> Roots;
+        // Strict cooks use the catalog produced by the already-compiled runtime managed generation. Keeping the
+        // payload opaque here avoids making the generic asset pipeline depend on scripting metadata types.
+        bool ManagedTypeDiscoveryComplete = false;
+        std::string ManagedTypeCatalog;
     };
 
     struct AssetCookResult

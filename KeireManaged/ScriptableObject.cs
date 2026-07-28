@@ -1,10 +1,20 @@
-using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 
 namespace Keire;
 
 public abstract class ScriptableObject
 {
     private Guid _runtimeInstanceId = Guid.NewGuid();
+    private object _lifecycleGate = new();
+    private LifecycleState _lifecycleState;
+
+    private enum LifecycleState
+    {
+        Disabled,
+        Enabling,
+        Enabled,
+        Disabling
+    }
 
     public Guid RuntimeInstanceId => _runtimeInstanceId;
     public string Name { get; set; } = string.Empty;
@@ -16,68 +26,108 @@ public abstract class ScriptableObject
     public static T CreateInstance<T>() where T : ScriptableObject, new()
     {
         var value = new T();
-        value.OnEnable();
-        value.OnValidate();
+        bool enabled = false;
+        try
+        {
+            enabled = value.Enable();
+            value.OnValidate();
+        }
+        catch (Exception exception)
+        {
+            RollBackActivation(value, enabled, exception);
+        }
         return value;
     }
 
     public static T Instantiate<T>(T source) where T : ScriptableObject
     {
         ArgumentNullException.ThrowIfNull(source);
-        var clone = (T)source.MemberwiseClone();
-        clone._runtimeInstanceId = Guid.NewGuid();
-        clone.OnEnable();
+        var clone = ManagedObjectSerializer.Clone(source);
+        clone.Enable();
         return clone;
     }
 
     internal void Validate() => OnValidate();
-    internal void Disable() => OnDisable();
-}
 
-public static class Assets
-{
-    private static readonly ConcurrentDictionary<AssetId, ScriptableObject> Loaded = new();
+    internal void RuntimeHydrateManagedData(string document) =>
+        ManagedDataHydrator.Restore(this, document);
 
-    public static void Register<T>(AssetId id, T asset) where T : ScriptableObject
+    internal bool RuntimeRegisterManagedAsset(ulong generation, ulong high, ulong low) =>
+        NativeRuntime.RegisterManagedAsset(generation, high, low, this);
+
+    internal bool RuntimeReloadManagedAsset(ulong generation, ulong high, ulong low) =>
+        NativeRuntime.ReloadManagedAsset(generation, high, low, this);
+
+    internal bool RuntimeCompleteManagedAssetLoad(ulong generation, ulong high, ulong low) =>
+        NativeRuntime.CompleteManagedAssetLoad(generation, high, low, this);
+
+    internal bool Enable()
     {
-        if (!id.IsValid)
-            throw new ArgumentException("Asset ID must be valid.", nameof(id));
-        ArgumentNullException.ThrowIfNull(asset);
-        asset.Validate();
-        Loaded[id] = asset;
-    }
-
-    public static T Load<T>(AssetReference<T> reference) where T : ScriptableObject
-    {
-        if (TryLoad(reference, out T? value))
-            return value!;
-        throw new InvalidOperationException($"Managed asset {reference.Id} is not loaded as {typeof(T).FullName}.");
-    }
-
-    public static bool TryLoad<T>(AssetReference<T> reference, out T? value) where T : class
-    {
-        if (reference.Id.IsValid && Loaded.TryGetValue(reference.Id, out ScriptableObject? asset) && asset is T typed)
+        lock (_lifecycleGate)
         {
-            value = typed;
-            return true;
+            if (_lifecycleState == LifecycleState.Enabled)
+                return false;
+            if (_lifecycleState != LifecycleState.Disabled)
+                throw new InvalidOperationException("A ScriptableObject lifecycle callback cannot be re-entered.");
+            _lifecycleState = LifecycleState.Enabling;
+            try
+            {
+                OnEnable();
+                _lifecycleState = LifecycleState.Enabled;
+                return true;
+            }
+            catch
+            {
+                _lifecycleState = LifecycleState.Disabled;
+                throw;
+            }
         }
-        value = null;
-        return false;
     }
 
-    public static ValueTask<T> LoadAsync<T>(AssetReference<T> reference,
-                                            CancellationToken cancellation = default)
-        where T : ScriptableObject
+    internal bool Disable()
     {
-        cancellation.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(Load(reference));
+        lock (_lifecycleGate)
+        {
+            if (_lifecycleState == LifecycleState.Disabled)
+                return false;
+            if (_lifecycleState != LifecycleState.Enabled)
+                throw new InvalidOperationException("A ScriptableObject lifecycle callback cannot be re-entered.");
+            _lifecycleState = LifecycleState.Disabling;
+            try
+            {
+                OnDisable();
+                _lifecycleState = LifecycleState.Disabled;
+                return true;
+            }
+            catch
+            {
+                _lifecycleState = LifecycleState.Enabled;
+                throw;
+            }
+        }
     }
 
-    public static bool Unload(AssetId id)
+    internal void InitializeCloneRuntimeState()
     {
-        if (!Loaded.TryRemove(id, out ScriptableObject? asset))
-            return false;
-        asset.Disable();
-        return true;
+        _runtimeInstanceId = Guid.NewGuid();
+        _lifecycleGate = new object();
+        _lifecycleState = LifecycleState.Disabled;
+    }
+
+    private static void RollBackActivation(ScriptableObject value, bool enabled, Exception exception)
+    {
+        if (enabled)
+        {
+            try
+            {
+                value.Disable();
+            }
+            catch (Exception rollbackException)
+            {
+                throw new AggregateException("ScriptableObject activation rollback failed.", exception,
+                                             rollbackException);
+            }
+        }
+        ExceptionDispatchInfo.Capture(exception).Throw();
     }
 }

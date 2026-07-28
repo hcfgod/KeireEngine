@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/Math/Curves.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 
@@ -77,7 +78,9 @@ namespace Keire
         Color,
         Asset,
         Entity,
-        Event
+        Event,
+        Curve,
+        Gradient
     };
 
     struct ComponentEventListener
@@ -97,8 +100,9 @@ namespace Keire
         [[nodiscard]] bool operator==(const ComponentEventValue&) const = default;
     };
 
-    using ComponentPropertyValue = std::variant<bool, std::int64_t, double, std::string, Vector2, Vector3, Vector4,
-                                                Quaternion, Color, AssetId, EntityId, ComponentEventValue>;
+    using ComponentPropertyValue =
+        std::variant<bool, std::int64_t, double, std::string, Vector2, Vector3, Vector4, Quaternion, Color, AssetId,
+                     EntityId, ComponentEventValue, Curve1D, ColorGradient>;
     using ComponentPropertyBag = std::map<std::string, ComponentPropertyValue, std::less<>>;
 
     struct ComponentProperty
@@ -123,6 +127,31 @@ namespace Keire
         std::vector<std::string> ParameterTypes;
     };
 
+    struct AnimationEventMessage
+    {
+        std::string Name;
+        float NormalizedTime = 0.0F;
+        std::int32_t Integer = 0;
+        float Scalar = 0.0F;
+        std::string Text;
+    };
+
+    enum class PhysicsContactPhase : std::uint8_t
+    {
+        Enter,
+        Stay,
+        Exit
+    };
+
+    struct PhysicsContactMessage
+    {
+        EntityId Other;
+        Vector3 Point;
+        Vector3 Normal;
+        float Impulse = 0.0F;
+        bool Trigger = false;
+    };
+
     class KEIRE_API Component : public RefCounted
     {
       public:
@@ -142,6 +171,14 @@ namespace Keire
         virtual void Start() {}
         virtual void FixedUpdate(float) {}
         virtual void Update(float) {}
+        virtual void LateUpdate() {}
+        virtual void OnAnimationEvent(const AnimationEventMessage&) {}
+        virtual void OnCollisionEnter(const PhysicsContactMessage&) {}
+        virtual void OnCollisionStay(const PhysicsContactMessage&) {}
+        virtual void OnCollisionExit(const PhysicsContactMessage&) {}
+        virtual void OnTriggerEnter(const PhysicsContactMessage&) {}
+        virtual void OnTriggerStay(const PhysicsContactMessage&) {}
+        virtual void OnTriggerExit(const PhysicsContactMessage&) {}
         virtual void OnDisable() {}
         virtual void OnDestroy() {}
 
@@ -157,6 +194,9 @@ namespace Keire
         void InvokeStart();
         void InvokeFixedUpdate(float deltaSeconds);
         void InvokeUpdate(float deltaSeconds);
+        void InvokeLateUpdate();
+        void InvokeAnimationEvent(const AnimationEventMessage& event);
+        void InvokePhysicsContact(PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void InvokeDisable();
         void InvokeDestroy();
         void ApplyEnabled(bool enabled) noexcept;

@@ -179,6 +179,7 @@ namespace Keire
             AssetDiagnostic Diagnostic;
             bool Reload = false;
             bool CountedInQueue = true;
+            std::function<Ref<Asset>(Ref<Asset>, Ref<Asset>)> ApplyReload;
         };
 
         struct StreamJob
@@ -292,6 +293,7 @@ namespace Keire
                 {
                     assetJob->State->SetLoading(assetJob->Reload);
                     Completion completion{assetJob->State, {}, {}, assetJob->Reload, true};
+                    completion.ApplyReload = assetJob->Decoder.ApplyReload;
                     try
                     {
                         completion.Value = LoadValue(*assetJob);
@@ -759,6 +761,7 @@ namespace Keire
             throw std::invalid_argument("A development asset publication requires an ID and asset value.");
 
         Ref<Detail::AssetHandleState> state;
+        std::function<Ref<Asset>(Ref<Asset>, Ref<Asset>)> applyReload;
         bool reload = false;
         {
             std::scoped_lock lock(m_Impl->Mutex);
@@ -786,9 +789,16 @@ namespace Keire
                 if (current != AssetState::Ready && current != AssetState::Failed)
                     return false;
                 reload = true;
+                applyReload = decoder->second.ApplyReload;
             }
         }
 
+        if (reload && applyReload && !state->UsingFallback())
+        {
+            asset = applyReload(state->Current(), std::move(asset));
+            if (!asset || asset->Type() != state->Type())
+                throw std::runtime_error("Asset reload transaction returned an empty or mismatched asset.");
+        }
         state->Commit(std::move(asset));
         {
             std::scoped_lock lock(m_Impl->Mutex);
@@ -898,6 +908,25 @@ namespace Keire
         }
         for (auto& completion : completions)
         {
+            if (completion.Value && completion.Reload && completion.ApplyReload && !completion.State->UsingFallback())
+            {
+                try
+                {
+                    completion.Value = completion.ApplyReload(completion.State->Current(), std::move(completion.Value));
+                    if (!completion.Value || completion.Value->Type() != completion.State->Type())
+                        throw std::runtime_error("Asset reload transaction returned an empty or mismatched asset.");
+                }
+                catch (const std::exception& error)
+                {
+                    completion.Value.Reset();
+                    completion.Diagnostic = {"reload", error.what()};
+                }
+                catch (...)
+                {
+                    completion.Value.Reset();
+                    completion.Diagnostic = {"reload", "The asset reload transaction reported an unknown failure."};
+                }
+            }
             if (completion.Value)
             {
                 completion.State->Commit(std::move(completion.Value));
@@ -988,6 +1017,13 @@ namespace Keire
                 result.ResidentBytes += value->ResidentBytes();
         }
         return result;
+    }
+
+    std::optional<AssetTypeId> AssetSystem::TryGetType(const AssetId id) const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->Resolved.find(id);
+        return found == m_Impl->Resolved.end() ? std::nullopt : std::optional(found->second.Entry.Type);
     }
 
     std::optional<AssetDerivedMetadata> AssetSystem::TryGetMetadata(const AssetId id) const

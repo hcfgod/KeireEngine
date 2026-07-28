@@ -3,6 +3,7 @@
 #include <cctype>
 
 #include "Keire/Audio/AudioAssets.h"
+#include "Keire/Scripting/ManagedDataAsset.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
@@ -87,6 +88,24 @@ Keire::AssetId EditorWorkspaceLayer::InspectorSelectedAsset() const noexcept { r
 
 std::string_view EditorWorkspaceLayer::InspectorAssetStatus() const noexcept { return m_AssetStatus; }
 
+std::vector<Keire::ManagedAssetTypeDescriptor> EditorWorkspaceLayer::InspectorManagedAssetTypes() const
+{
+    const auto scripts = Owner().Scripts();
+    return scripts && scripts->RuntimeHostAvailable() ? scripts->ManagedAssetTypes()
+                                                      : std::vector<Keire::ManagedAssetTypeDescriptor>{};
+}
+
+Keire::Ref<Keire::UndoContext> EditorWorkspaceLayer::InspectorManagedDataHistory() const noexcept
+{
+    return m_ManagedDataUndoContext;
+}
+
+bool EditorWorkspaceLayer::InspectorPlayModeActive() const noexcept
+{
+    const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+    return play && play->State() != Keire::ScenePlayState::Stopped;
+}
+
 void EditorWorkspaceLayer::SetInspectorSelectedAsset(const Keire::AssetId asset) noexcept
 {
     if (asset != m_SelectedAsset)
@@ -105,12 +124,12 @@ void EditorWorkspaceLayer::PreviewInspectorAudio(const Keire::AssetId asset)
     const auto clip = handle.Get();
     if (!clip)
         throw std::runtime_error("The selected audio clip could not be loaded.");
-    Keire::AudioVoiceSpecification specification;
-    specification.Clip = clip->Clip();
-    specification.Bus = "EditorPreview";
-    specification.Spatial = false;
-    specification.Priority = 255;
-    m_InspectorAudioPreviewVoice = audio->Play(std::move(specification));
+    Keire::AudioPlaybackRequest request;
+    request.Clip = clip->Clip();
+    request.Bus = "EditorPreview";
+    request.Spatial = false;
+    request.Priority = 255;
+    m_InspectorAudioPreviewVoice = audio->Play(std::move(request));
 }
 
 void EditorWorkspaceLayer::StopInspectorAudioPreview() noexcept
@@ -130,6 +149,11 @@ void EditorWorkspaceLayer::StopInspectorAudioPreview() noexcept
 }
 
 void EditorWorkspaceLayer::ActivateInspectorHistory() noexcept { m_ActiveUndoContext = m_SceneDocument->History(); }
+
+void EditorWorkspaceLayer::ActivateInspectorManagedDataHistory() noexcept
+{
+    m_ActiveUndoContext = m_ManagedDataUndoContext;
+}
 
 void EditorWorkspaceLayer::RecordInspectorUndo(const std::string_view name, std::string mergeKey)
 {
@@ -199,6 +223,38 @@ void EditorWorkspaceLayer::OpenInspectorInputActions(const Keire::AssetId asset)
 
 void EditorWorkspaceLayer::ImportInspectorAssets() { ImportAssets(); }
 
+void EditorWorkspaceLayer::PreviewInspectorManagedData(const Keire::AssetId asset,
+                                                       const Keire::ManagedDataDefinition& definition)
+{
+    Keire::ManagedDataAsset::Validate(definition);
+    const auto assets = Owner().Assets();
+    if (!assets || !assets->PublishDevelopmentAsset(asset, Keire::CreateRef<Keire::ManagedDataAsset>(definition)))
+        throw std::runtime_error("The managed data preview could not be published.");
+    SetInspectorAssetStatus("Previewing managed data changes live.");
+}
+
+void EditorWorkspaceLayer::PersistInspectorManagedData(const Keire::AssetId asset,
+                                                       const std::span<const std::byte> bytes)
+{
+    if (!m_AssetDatabase)
+        throw std::logic_error("The asset database is unavailable.");
+    const auto record = m_AssetDatabase->Find(asset);
+    if (!record || record->Type != Keire::ManagedDataAsset::StaticType())
+        throw std::invalid_argument("Cannot save an unknown managed data asset.");
+    const auto decoded = Keire::ManagedDataAsset::Decode(bytes);
+    const auto sourceRoot =
+        m_AssetDatabase->Specification().ProjectRoot / m_AssetDatabase->Specification().SourceDirectory;
+    const std::string contents =
+        bytes.empty() ? std::string{} : std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    Keire::Detail::WriteTextFileAtomically(sourceRoot / record->RelativePath, contents);
+    const auto assets = Owner().Assets();
+    const bool published = assets && assets->PublishDevelopmentAsset(
+                                         asset, Keire::CreateRef<Keire::ManagedDataAsset>(decoded->Definition()));
+    ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+    SetInspectorAssetStatus(published ? "Saved managed data and hot-applied the new revision."
+                                      : "Saved managed data; the imported revision will apply after refresh.");
+}
+
 void EditorWorkspaceLayer::RenameInspectorAsset(const Keire::AssetId asset, const std::string_view name)
 {
     if (!m_AssetOperations)
@@ -262,4 +318,11 @@ void EditorWorkspaceLayer::SetProjectManagedSdk(KeireEditor::ManagedSdkPreferenc
 {
     if (const auto scripts = Owner().Scripts())
         scripts->ConfigureManagedSdk(preference.Selection, std::move(preference.CustomExecutable));
+}
+
+void EditorWorkspaceLayer::ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings)
+{
+    Keire::ValidateProjectAuthoringSettings(settings);
+    if (const auto physics = Owner().Physics())
+        physics->ConfigureCollisionMatrix(settings.PhysicsCollisionMatrix);
 }

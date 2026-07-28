@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -56,10 +58,27 @@ namespace Keire
         [[nodiscard]] bool operator==(const SkinVertexInfluence&) const noexcept = default;
     };
 
+    enum class SkinningMethod : std::uint8_t
+    {
+        LinearBlend,
+        DualQuaternion
+    };
+
+    struct SkinVertexInfluence8
+    {
+        std::array<std::uint16_t, 8> Bones{};
+        std::array<float, 8> Weights{};
+        std::uint8_t Count = 0;
+
+        [[nodiscard]] bool operator==(const SkinVertexInfluence8&) const noexcept = default;
+    };
+
     class KEIRE_API SkinnedMeshAsset final : public Asset
     {
       public:
         SkinnedMeshAsset(AssetId mesh = {}, AssetId skeleton = {}, std::vector<SkinVertexInfluence> influences = {});
+        SkinnedMeshAsset(AssetId mesh, AssetId skeleton, std::vector<SkinVertexInfluence8> influences,
+                         SkinningMethod method);
         [[nodiscard]] static constexpr AssetTypeId StaticType() noexcept
         {
             return AssetTypeId(AssetId(0x4b45495245534b49ULL, 0x4e4d455348000001ULL));
@@ -69,14 +88,22 @@ namespace Keire
         [[nodiscard]] AssetId Mesh() const noexcept { return m_Mesh; }
         [[nodiscard]] AssetId Skeleton() const noexcept { return m_Skeleton; }
         [[nodiscard]] std::span<const SkinVertexInfluence> Influences() const noexcept { return m_Influences; }
+        [[nodiscard]] std::span<const SkinVertexInfluence8> Influences8() const noexcept { return m_Influences8; }
+        [[nodiscard]] SkinningMethod Method() const noexcept { return m_Method; }
+        [[nodiscard]] std::uint8_t MaximumInfluences() const noexcept { return m_MaximumInfluences; }
         [[nodiscard]] static Ref<SkinnedMeshAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(AssetId mesh, AssetId skeleton,
                                                            std::span<const SkinVertexInfluence> influences);
+        [[nodiscard]] static std::vector<std::byte>
+        Encode(AssetId mesh, AssetId skeleton, std::span<const SkinVertexInfluence8> influences, SkinningMethod method);
 
       private:
         AssetId m_Mesh;
         AssetId m_Skeleton;
         std::vector<SkinVertexInfluence> m_Influences;
+        std::vector<SkinVertexInfluence8> m_Influences8;
+        SkinningMethod m_Method = SkinningMethod::LinearBlend;
+        std::uint8_t m_MaximumInfluences = 4;
     };
 
     struct AnimationKeyframe
@@ -135,11 +162,32 @@ namespace Keire
         NotEqual
     };
 
+    enum class AnimationParameterType : std::uint8_t
+    {
+        Float,
+        Integer,
+        Boolean,
+        Trigger
+    };
+
+    struct AnimationParameterDefinition
+    {
+        std::string Id;
+        std::string Name;
+        AnimationParameterType Type = AnimationParameterType::Float;
+        float FloatDefault = 0.0F;
+        std::int32_t IntegerDefault = 0;
+        bool BooleanDefault = false;
+    };
+
     struct AnimationTransitionCondition
     {
         std::string Parameter;
         AnimationConditionComparison Comparison = AnimationConditionComparison::Greater;
         float Value = 0.0F;
+        std::string ParameterId;
+        std::int32_t IntegerValue = 0;
+        bool BooleanValue = true;
     };
 
     struct AnimationTransition
@@ -149,6 +197,33 @@ namespace Keire
         bool HasExitTime = false;
         float ExitTime = 1.0F;
         std::vector<AnimationTransitionCondition> Conditions;
+        std::string Id;
+        std::string DestinationId;
+    };
+
+    enum class AnimationMotionType : std::uint8_t
+    {
+        Clip,
+        BlendTree1D,
+        BlendTree2D
+    };
+
+    struct AnimationBlendTreeChild
+    {
+        std::string Id;
+        AssetId Clip;
+        float Threshold = 0.0F;
+        Vector2 Position;
+        float Speed = 1.0F;
+    };
+
+    struct AnimationMotionDefinition
+    {
+        AnimationMotionType Type = AnimationMotionType::Clip;
+        AssetId Clip;
+        std::string ParameterX;
+        std::string ParameterY;
+        std::vector<AnimationBlendTreeChild> Children;
     };
 
     struct AnimationStateDefinition
@@ -158,14 +233,36 @@ namespace Keire
         float Speed = 1.0F;
         bool Loop = true;
         std::vector<AnimationTransition> Transitions;
+        std::string Id;
+        AnimationMotionDefinition Motion;
+        Vector2 EditorPosition;
+    };
+
+    enum class AnimationLayerMode : std::uint8_t
+    {
+        Override,
+        Additive
+    };
+
+    struct AnimationLayerDefinition
+    {
+        std::string Id;
+        std::string Name;
+        AnimationLayerMode Mode = AnimationLayerMode::Override;
+        float DefaultWeight = 1.0F;
+        AssetId AvatarMask;
+        std::string EntryStateId;
+        std::vector<AnimationStateDefinition> States;
     };
 
     struct AnimationGraphDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         std::string EntryState;
         std::vector<std::string> Parameters;
         std::vector<AnimationStateDefinition> States;
+        std::vector<AnimationParameterDefinition> ParameterDefinitions;
+        std::vector<AnimationLayerDefinition> Layers;
     };
 
     class KEIRE_API AnimationGraphAsset final : public Asset
@@ -186,40 +283,171 @@ namespace Keire
         AnimationGraphDefinition m_Definition;
     };
 
+    struct AvatarMaskBoneWeight
+    {
+        std::string Bone;
+        float Weight = 1.0F;
+    };
+
+    class KEIRE_API AvatarMaskAsset final : public Asset
+    {
+      public:
+        AvatarMaskAsset(AssetId skeleton = {}, std::vector<AvatarMaskBoneWeight> bones = {});
+        [[nodiscard]] static constexpr AssetTypeId StaticType() noexcept
+        {
+            return AssetTypeId(AssetId(0x4b45495245415641ULL, 0x5441524d41534b01ULL));
+        }
+        [[nodiscard]] AssetTypeId Type() const noexcept override { return StaticType(); }
+        [[nodiscard]] std::size_t ResidentBytes() const noexcept override;
+        [[nodiscard]] AssetId Skeleton() const noexcept { return m_Skeleton; }
+        [[nodiscard]] std::span<const AvatarMaskBoneWeight> Bones() const noexcept { return m_Bones; }
+        [[nodiscard]] float Weight(std::string_view bone) const noexcept;
+        [[nodiscard]] static Ref<AvatarMaskAsset> Decode(std::span<const std::byte> bytes);
+        [[nodiscard]] static std::vector<std::byte> Encode(AssetId skeleton,
+                                                           std::span<const AvatarMaskBoneWeight> bones);
+
+      private:
+        AssetId m_Skeleton;
+        std::vector<AvatarMaskBoneWeight> m_Bones;
+    };
+
     struct AnimatorSample
     {
         std::string State;
         float NormalizedTime = 0.0F;
         std::vector<BoneTransform> LocalPose;
         Vector3 RootMotion;
+        Quaternion RootRotation;
         std::vector<AnimationEvent> Events;
+    };
+
+    struct AnimatorBlendWeight
+    {
+        std::string ChildId;
+        AssetId Clip;
+        float Weight = 0.0F;
+    };
+
+    struct AnimatorParameterDebugValue
+    {
+        std::string Id;
+        std::string Name;
+        AnimationParameterType Type = AnimationParameterType::Float;
+        float FloatValue = 0.0F;
+        std::int32_t IntegerValue = 0;
+        bool BooleanValue = false;
+    };
+
+    struct AnimatorLayerDebugState
+    {
+        std::string Id;
+        std::string Name;
+        std::string StateId;
+        std::string State;
+        float NormalizedTime = 0.0F;
+        float Weight = 1.0F;
+        bool InTransition = false;
+        std::string SourceStateId;
+        std::string DestinationStateId;
+        float TransitionProgress = 0.0F;
+        std::vector<AnimatorBlendWeight> BlendWeights;
+    };
+
+    struct AnimatorDebugSnapshot
+    {
+        std::uint64_t Revision = 0;
+        std::vector<AnimatorParameterDebugValue> Parameters;
+        std::vector<AnimatorLayerDebugState> Layers;
+        Vector3 RootMotion;
+        Quaternion RootRotation;
+        std::vector<AnimationEvent> RecentEvents;
     };
 
     class KEIRE_API AnimatorInstance final
     {
       public:
-        using ClipResolver = std::function<Ref<AnimationClipAsset>(AssetId)>;
-        AnimatorInstance(Ref<SkeletonAsset> skeleton, Ref<AnimationGraphAsset> graph, ClipResolver resolver);
+        using ClipResolver = std::function<Ref<const AnimationClipAsset>(AssetId)>;
+        using AvatarMaskResolver = std::function<Ref<const AvatarMaskAsset>(AssetId)>;
+        AnimatorInstance(Ref<const SkeletonAsset> skeleton, Ref<const AnimationGraphAsset> graph, ClipResolver resolver,
+                         AvatarMaskResolver maskResolver = {});
         void SetFloat(std::string parameter, float value);
         [[nodiscard]] float Float(std::string_view parameter) const;
+        void SetInteger(std::string parameter, std::int32_t value);
+        [[nodiscard]] std::int32_t Integer(std::string_view parameter) const;
+        void SetBool(std::string parameter, bool value);
+        [[nodiscard]] bool Bool(std::string_view parameter) const;
+        void SetTrigger(std::string parameter);
+        void ResetTrigger(std::string parameter);
+        [[nodiscard]] bool Trigger(std::string_view parameter) const;
+        void SetLayerWeight(std::string layer, float value);
+        [[nodiscard]] float LayerWeight(std::string_view layer) const;
+        [[nodiscard]] std::shared_ptr<const AnimatorDebugSnapshot> DebugSnapshot() const noexcept
+        {
+            return m_DebugSnapshot;
+        }
         [[nodiscard]] AnimatorSample Update(float deltaSeconds);
+        [[nodiscard]] bool Reload(Ref<const AnimationGraphAsset> graph);
         void Reset();
 
       private:
-        Ref<SkeletonAsset> m_Skeleton;
-        Ref<AnimationGraphAsset> m_Graph;
+        struct RuntimeParameter
+        {
+            AnimationParameterType Type = AnimationParameterType::Float;
+            std::string Id;
+            float FloatValue = 0.0F;
+            std::int32_t IntegerValue = 0;
+            bool BooleanValue = false;
+        };
+
+        struct RuntimeTransition
+        {
+            std::string SourceStateId;
+            std::string DestinationStateId;
+            float SourceTime = 0.0F;
+            float DestinationTime = 0.0F;
+            float Elapsed = 0.0F;
+            float Duration = 0.0F;
+            std::string Id;
+        };
+
+        struct RuntimeLayer
+        {
+            std::string Id;
+            std::string StateId;
+            float Time = 0.0F;
+            float Weight = 1.0F;
+            float NormalizedTime = 0.0F;
+            std::vector<AnimatorBlendWeight> BlendWeights;
+            std::optional<RuntimeTransition> Transition;
+        };
+
+        void PublishDebugSnapshot(Vector3 rootMotion = {}, Quaternion rootRotation = {},
+                                  std::span<const AnimationEvent> events = {});
+
+        Ref<const SkeletonAsset> m_Skeleton;
+        Ref<const AnimationGraphAsset> m_Graph;
         ClipResolver m_Resolver;
-        std::map<std::string, float, std::less<>> m_Parameters;
+        AvatarMaskResolver m_MaskResolver;
+        std::map<std::string, RuntimeParameter, std::less<>> m_Parameters;
+        std::vector<RuntimeLayer> m_Layers;
         std::string m_State;
         float m_Time = 0.0F;
         BoneTransform m_PreviousRoot;
+        bool m_HasPreviousRootRotation = false;
+        std::uint64_t m_DebugRevision = 0;
+        std::vector<AnimationEvent> m_RecentEvents;
+        std::shared_ptr<const AnimatorDebugSnapshot> m_DebugSnapshot;
     };
 
     KEIRE_API void ValidateSkeleton(std::span<const SkeletonBone> bones);
     KEIRE_API void ValidateAnimationGraph(const AnimationGraphDefinition& definition);
+    KEIRE_API void ValidateAvatarMask(AssetId skeleton, std::span<const AvatarMaskBoneWeight> bones);
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateSkeletonAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateSkinnedMeshAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAnimationClipAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAnimationGraphAssetDecoder();
+    [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAvatarMaskAssetDecoder();
+    [[nodiscard]] KEIRE_API AssetImporterRegistration CreateAnimationClipAssetImporter();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateAnimationGraphAssetImporter();
+    [[nodiscard]] KEIRE_API AssetImporterRegistration CreateAvatarMaskAssetImporter();
 } // namespace Keire

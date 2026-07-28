@@ -24,10 +24,13 @@ project(ProjectConfig.CLIENT_TARGET)
 
     dependson { AssetWorkerTarget, KeireManagedProject }
 
+    local clientCommandPrefix = _ACTION == "ninja" and "KeireClient/" or ""
+
     filter "system:windows"
         prebuildcommands
         {
-            'if not exist "%{cfg.objdir}" mkdir "%{cfg.objdir}"',
+            'if not exist "' .. clientCommandPrefix .. '%{cfg.objdir}" mkdir "' ..
+                clientCommandPrefix .. '%{cfg.objdir}"',
             'powershell -NoProfile -ExecutionPolicy Bypass -File ' ..
                 (_ACTION == "ninja" and "Scripts/Windows/build-managed.ps1"
                     or "../Scripts/Windows/build-managed.ps1")
@@ -45,8 +48,9 @@ project(ProjectConfig.CLIENT_TARGET)
 
     postbuildcommands
     {
-        '{MKDIR} "%{cfg.targetdir}/Managed"',
-        '{COPYFILE} "../Build/Managed/Keire.Managed.dll" "%{cfg.targetdir}/Managed/Keire.Managed.dll"'
+        '{MKDIR} "' .. clientCommandPrefix .. '%{cfg.targetdir}/Managed"',
+        '{COPYFILE} "' .. clientCommandPrefix .. '../Build/Managed/Keire.Managed.dll" "' ..
+            clientCommandPrefix .. '%{cfg.targetdir}/Managed/Keire.Managed.dll"'
     }
 
     LinkSDL3()

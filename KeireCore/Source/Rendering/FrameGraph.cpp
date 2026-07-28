@@ -248,6 +248,7 @@ namespace Keire::RenderBackend
         const auto shadows = result.Graph.AddResource({"Directional shadows", FrameGraphResourceKind::Texture, true});
         const auto lightTiles = result.Graph.AddResource({"Forward+ tile lists", FrameGraphResourceKind::Buffer, true});
         result.HdrScene = result.Graph.AddResource({"HDR scene color", FrameGraphResourceKind::Texture, false, 4});
+        result.SampledDepth = result.Graph.AddResource({"Sampled scene depth", FrameGraphResourceKind::Texture, true});
         const auto skyComplete = result.Graph.AddResource({"Sky complete", FrameGraphResourceKind::Buffer, true});
         const auto transparencyComplete =
             result.Graph.AddResource({"Transparency complete", FrameGraphResourceKind::Buffer, true});
@@ -262,9 +263,11 @@ namespace Keire::RenderBackend
         result.ForwardPlusCulling =
             result.Graph.AddPass({"Forward+ light culling", {uploads}, {lightTiles}, FrameGraphPassKind::Compute});
         result.Opaque = result.Graph.AddPass({"Opaque and mask", {uploads, shadows, lightTiles}, {result.HdrScene}});
+        result.ResolveDepth =
+            result.Graph.AddPass({"Sampled scene depth", {uploads, result.HdrScene}, {result.SampledDepth}});
         result.Sky = result.Graph.AddPass({"Sky", {result.HdrScene}, {skyComplete}});
-        result.Transparency =
-            result.Graph.AddPass({"Transparency", {result.HdrScene, skyComplete, lightTiles}, {transparencyComplete}});
+        result.Transparency = result.Graph.AddPass(
+            {"Transparency", {result.HdrScene, result.SampledDepth, skyComplete, lightTiles}, {transparencyComplete}});
         result.ToneMap = result.Graph.AddPass({"ACES tone map", {result.HdrScene, transparencyComplete}, {toneMapped}});
         result.Overlays = result.Graph.AddPass({"Editor overlays", {toneMapped}, {overlays}});
         result.Readback = result.Graph.AddPass({"Readback", {overlays}, {readback}, FrameGraphPassKind::Transfer});

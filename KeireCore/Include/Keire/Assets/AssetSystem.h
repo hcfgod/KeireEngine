@@ -32,6 +32,9 @@ namespace Keire
         AssetTypeId Type;
         Ref<Asset> Fallback;
         std::function<Ref<Asset>(std::span<const std::byte>)> Decode;
+        // Optional owner-thread transaction used when a loaded asset can preserve object identity across reloads.
+        // The callback must leave current unchanged on failure and return the object that should remain published.
+        std::function<Ref<Asset>(Ref<Asset> current, Ref<Asset> replacement)> ApplyReload;
     };
 
     struct AssetMountSpecification
@@ -134,6 +137,7 @@ namespace Keire
         [[nodiscard]] std::size_t PumpCompletions();
         [[nodiscard]] std::size_t EvictUnused();
         [[nodiscard]] AssetSystemStatistics Statistics() const;
+        [[nodiscard]] std::optional<AssetTypeId> TryGetType(AssetId id) const;
         [[nodiscard]] std::optional<AssetDerivedMetadata> TryGetMetadata(AssetId id) const;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;

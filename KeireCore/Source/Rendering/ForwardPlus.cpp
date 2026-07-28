@@ -20,8 +20,17 @@ namespace Keire::RenderBackend
         result.Columns = (width + ForwardPlusTileGrid::TileSize - 1U) / ForwardPlusTileGrid::TileSize;
         result.Rows = (height + ForwardPlusTileGrid::TileSize - 1U) / ForwardPlusTileGrid::TileSize;
         const auto tileCount = static_cast<std::size_t>(result.Columns) * result.Rows;
-        std::vector<std::vector<std::uint32_t>> tiles(tileCount);
-        std::vector<bool> overflowed(tileCount);
+        struct ProjectedLight
+        {
+            std::uint32_t Index = 0;
+            std::uint32_t MinimumX = 0;
+            std::uint32_t MaximumX = 0;
+            std::uint32_t MinimumY = 0;
+            std::uint32_t MaximumY = 0;
+        };
+
+        std::vector<ProjectedLight> projectedLights;
+        projectedLights.reserve(lights.size());
         const float projectionX = std::abs(projection.Elements[0]);
         const float projectionY = std::abs(projection.Elements[5]);
 
@@ -50,27 +59,85 @@ namespace Keire::RenderBackend
             if (centerX + radiusX < 0.0F || centerY + radiusY < 0.0F || centerX - radiusX >= width ||
                 centerY - radiusY >= height)
                 continue;
-            for (auto y = minimumY; y <= maximumY; ++y)
+            projectedLights.push_back({lightIndex, minimumX, maximumX, minimumY, maximumY});
+        }
+
+        if (projectedLights.empty())
+        {
+            result.Offsets.assign(tileCount, 0);
+            result.Counts.assign(tileCount, 0);
+            return result;
+        }
+        if (projectedLights.size() == 1)
+        {
+            const auto& light = projectedLights.front();
+            const auto coveredColumns = static_cast<std::size_t>(light.MaximumX - light.MinimumX + 1U);
+            const auto coveredRows = static_cast<std::size_t>(light.MaximumY - light.MinimumY + 1U);
+            result.Offsets.resize(tileCount);
+            result.Counts.assign(tileCount, 0);
+            result.LightIndices.assign(coveredColumns * coveredRows, light.Index);
+            std::uint32_t lightIndexOffset = 0;
+            for (std::uint32_t y = 0; y < result.Rows; ++y)
             {
-                for (auto x = minimumX; x <= maximumX; ++x)
+                for (std::uint32_t x = 0; x < result.Columns; ++x)
                 {
                     const auto tileIndex = static_cast<std::size_t>(y) * result.Columns + x;
-                    if (tiles[tileIndex].size() < ForwardPlusTileGrid::MaximumLightsPerTile)
-                        tiles[tileIndex].push_back(lightIndex);
+                    result.Offsets[tileIndex] = lightIndexOffset;
+                    if (x < light.MinimumX || x > light.MaximumX || y < light.MinimumY || y > light.MaximumY)
+                        continue;
+                    result.Counts[tileIndex] = 1;
+                    ++lightIndexOffset;
+                }
+            }
+            return result;
+        }
+
+        result.Counts.assign(tileCount, 0);
+        std::vector<bool> overflowed(tileCount);
+        for (const auto& light : projectedLights)
+        {
+            for (auto y = light.MinimumY; y <= light.MaximumY; ++y)
+            {
+                for (auto x = light.MinimumX; x <= light.MaximumX; ++x)
+                {
+                    const auto tileIndex = static_cast<std::size_t>(y) * result.Columns + x;
+                    if (result.Counts[tileIndex] < ForwardPlusTileGrid::MaximumLightsPerTile)
+                        ++result.Counts[tileIndex];
                     else
                         overflowed[tileIndex] = true;
                 }
             }
         }
 
-        result.Offsets.reserve(tileCount);
-        result.Counts.reserve(tileCount);
+        result.Offsets.resize(tileCount);
+        std::size_t lightIndexCount = 0;
         for (std::size_t tileIndex = 0; tileIndex < tileCount; ++tileIndex)
         {
-            result.Offsets.push_back(static_cast<std::uint32_t>(result.LightIndices.size()));
-            result.Counts.push_back(static_cast<std::uint16_t>(tiles[tileIndex].size()));
-            result.LightIndices.insert(result.LightIndices.end(), tiles[tileIndex].begin(), tiles[tileIndex].end());
+            if (lightIndexCount > std::numeric_limits<std::uint32_t>::max())
+                throw std::length_error("Forward+ light index storage exceeds the supported range.");
+            result.Offsets[tileIndex] = static_cast<std::uint32_t>(lightIndexCount);
+            lightIndexCount += result.Counts[tileIndex];
             result.OverflowedTiles += overflowed[tileIndex] ? 1U : 0U;
+        }
+        if (lightIndexCount > std::numeric_limits<std::uint32_t>::max())
+            throw std::length_error("Forward+ light index storage exceeds the supported range.");
+
+        result.LightIndices.resize(lightIndexCount);
+        std::vector<std::uint16_t> writeOffsets(tileCount, 0);
+        for (const auto& light : projectedLights)
+        {
+            for (auto y = light.MinimumY; y <= light.MaximumY; ++y)
+            {
+                for (auto x = light.MinimumX; x <= light.MaximumX; ++x)
+                {
+                    const auto tileIndex = static_cast<std::size_t>(y) * result.Columns + x;
+                    auto& writeOffset = writeOffsets[tileIndex];
+                    if (writeOffset >= result.Counts[tileIndex])
+                        continue;
+                    result.LightIndices[result.Offsets[tileIndex] + writeOffset] = light.Index;
+                    ++writeOffset;
+                }
+            }
         }
         return result;
     }

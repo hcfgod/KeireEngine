@@ -74,6 +74,8 @@
           "data": {
             "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":14447222651353186851,\"Low\":12685995010641050639}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}}],\"version\":1}",
             "uiButton": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
+            "uiClosed": [],
+            "uiOpened": [],
             "uiPanel": "c87ed874-ece2-4223-b00d-b53fb7a33c0f"
           },
           "enabled": true,
@@ -136,6 +138,7 @@
               0.0,
               0.0
             ],
+            "collisionMesh": null,
             "halfExtent": [
               0.5,
               0.5,
@@ -144,23 +147,14 @@
             "height": 1.0,
             "layer": 1,
             "mask": 4294967295,
+            "physicsMaterial": null,
             "radius": 0.5,
             "shape": 0,
             "trigger": false
           },
           "enabled": true,
           "type": "4b454952-4543-4f4c-4c49-444552000001",
-          "version": 1
-        },
-        {
-          "data": {
-            "_hitZoneMultiplier": 0.0,
-            "_maximumHealth": 0.0,
-            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_maximumHealth\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.0},{\"Aliases\":[],\"Name\":\"_hitZoneMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.0}],\"version\":1}"
-          },
-          "enabled": true,
-          "type": "73616e64-626f-4078-8000-000000000041",
-          "version": 1
+          "version": 2
         }
       ],
       "id": "a1b2c3d4-1000-4000-8000-000000000003",
@@ -319,6 +313,7 @@
               0.0,
               0.0
             ],
+            "collisionMesh": null,
             "halfExtent": [
               0.5,
               0.5,
@@ -327,13 +322,14 @@
             "height": 1.0,
             "layer": 1,
             "mask": 4294967295,
+            "physicsMaterial": null,
             "radius": 0.5,
             "shape": 0,
             "trigger": false
           },
           "enabled": true,
           "type": "4b454952-4543-4f4c-4c49-444552000001",
-          "version": 1
+          "version": 2
         }
       ],
       "id": "e3fbe155-f210-4d98-93e5-e32eadd53d5e",
@@ -347,7 +343,7 @@
           "data": {
             "position": [
               0.0,
-              0.0,
+              6.628147602081299,
               0.0
             ],
             "rotation": [
@@ -383,10 +379,51 @@
           "enabled": true,
           "type": "4b454952-454d-4553-4852-454e44455201",
           "version": 2
+        },
+        {
+          "data": {
+            "center": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "collisionMesh": null,
+            "halfExtent": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "height": 1.0,
+            "layer": 1,
+            "mask": 4294967295,
+            "physicsMaterial": null,
+            "radius": 0.5,
+            "shape": 0,
+            "trigger": false
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4f4c-4c49-444552000001",
+          "version": 2
+        },
+        {
+          "data": {
+            "continuous": true,
+            "linearVelocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "mass": 153.85000610351563,
+            "motion": 1,
+            "useGravity": true
+          },
+          "enabled": true,
+          "type": "4b454952-4552-4947-4944-424f44590001",
+          "version": 1
         }
       ],
       "id": "c675308e-c12d-47bc-baa6-38993de26b44",
-      "name": "base",
+      "name": "Monster",
       "parent": null
     },
     {
@@ -470,7 +507,7 @@
       "parent": null
     },
     {
-      "active": true,
+      "active": false,
       "components": [
         {
           "data": {

@@ -283,11 +283,22 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         stream << "using Keire; namespace Game; "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
                   "[ExecutionOrder(-50)] public sealed class Player : Behaviour { "
-                  "[SerializeField] public float Speed = 7.5f; "
+                  "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\")] "
+                  "public float Speed = 7.5f; "
+                  "[SerializeField] public float ConsumedSpeed = -1.0f; "
                   "protected override void Awake() { Speed += 1.0f; } "
-                  "protected override void FixedUpdate() { Speed += 0.5f; } "
+                  "protected override void FixedUpdate() { ConsumedSpeed = Speed; } "
                   "protected override void OnBeforeReload() { Speed += 1.0f; } "
-                  "protected override void OnAfterReload() { Speed += 1.0f; } }\n";
+                  "protected override void OnAfterReload() { Speed += 1.0f; } } "
+                  "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
+                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
+                  "public sealed class PlayerTuning : ScriptableObject { "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000191\"), Range(0.0, 100.0)] "
+                  "public float Speed = 7.5f; "
+                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\")] "
+                  "public AssetReference<PlayerTuning> Parent; } "
+                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000193\")] "
+                  "public sealed class InvalidTuning : ScriptableObject { public float MissingStableId = 1.0f; }\n";
     }
 
     Keire::ScriptSystemSpecification specification;
@@ -324,21 +335,98 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     scripts->CommitReload();
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
     CHECK(scripts->ReloadStatus().Generation == 1);
+    const auto managedAssetTypes = scripts->ManagedAssetTypes();
+    const auto playerTuning = std::ranges::find(managedAssetTypes, std::string("Game.PlayerTuning"),
+                                                &Keire::ManagedAssetTypeDescriptor::FullName);
+    REQUIRE(playerTuning != managedAssetTypes.end());
+    CHECK(playerTuning->MenuPath == "Gameplay/Player Tuning");
+    CHECK(playerTuning->Properties.size() == 2);
+    CHECK(playerTuning->Properties[0].Kind == Keire::ManagedAssetPropertyKind::Scalar);
+    CHECK(playerTuning->Properties[0].Minimum == 0.0);
+    CHECK(playerTuning->Properties[0].Maximum == 100.0);
+    CHECK(playerTuning->Properties[1].Kind == Keire::ManagedAssetPropertyKind::AssetReference);
+    REQUIRE(playerTuning->Properties[1].ExpectedAssetType);
+    CHECK(*playerTuning->Properties[1].ExpectedAssetType == Keire::ManagedDataAsset::StaticType());
+    REQUIRE(playerTuning->Properties[1].ExpectedManagedType);
+    CHECK(playerTuning->Properties[1].ExpectedManagedType->Value() ==
+          Keire::AssetId::Parse("73616e64-626f-4078-8000-000000000190"));
+    const auto assetDiagnostics = scripts->ManagedAssetTypeDiagnostics();
+    CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
+                              { return diagnostic.TypeName == "Game.InvalidTuning"; }));
     const auto componentType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000099");
     auto registry = Keire::ComponentRegistry::CreateDefault();
     const auto registryRevision = registry->Revision();
     scripts->InstallManagedComponents(registry);
     CHECK(registry->Contains(componentType));
     CHECK(registry->Revision() == registryRevision + 1);
+    const auto registration = registry->Find(componentType);
+    REQUIRE(registration);
+
+    const std::string duplicateState =
+        R"({"Version":1,"Fields":[{"StableId":"","Name":"Speed","Type":"System.Single","Aliases":[],"Value":3.0},)"
+        R"({"StableId":"73616e64-626f-4078-8000-000000000098","Name":"Speed","Type":"System.Single",)"
+        R"("Aliases":[],"Value":11.0}]})";
+    const auto duplicateComponent = registration->Factory();
+    REQUIRE(duplicateComponent);
+    registration->Deserialize(*duplicateComponent, {{"managedState", duplicateState}}, registration->SchemaVersion);
+    const auto duplicateProjection = registration->Serialize(*duplicateComponent);
+    REQUIRE(duplicateProjection.contains("Speed"));
+    CHECK(std::get<double>(duplicateProjection.at("Speed")) == doctest::Approx(11.0));
+
+    const std::string legacyState =
+        R"({"Version":1,"Fields":[{"StableId":"","Name":"Speed","Type":"System.Single","Aliases":[],"Value":5.0},)"
+        R"({"StableId":"","Name":"LegacyOnly","Type":"System.Int32","Aliases":[],"Value":41}]})";
     auto sceneDefinition = Keire::SceneAsset::EmptyDefinition("Managed Lifecycle");
-    auto scene = Keire::CreateRef<Keire::Scene>(TestAsset(103), std::move(sceneDefinition), registry);
-    auto scriptedEntity = scene->CreateEntity("Player");
-    REQUIRE(scriptedEntity.AddComponent(componentType));
-    CHECK_NOTHROW(scene->BeginPlay());
-    CHECK_NOTHROW(scene->FixedUpdate(1.0F / 60.0F));
-    CHECK_NOTHROW(scene->Update(1.0F / 60.0F));
-    CHECK_NOTHROW(scene->EndPlay());
-    scene->Close();
+    auto editingScene = Keire::CreateRef<Keire::Scene>(TestAsset(103), std::move(sceneDefinition), registry);
+    auto scriptedEntity = editingScene->CreateEntity("Player");
+    const auto editingComponent = scriptedEntity.AddComponent(componentType);
+    REQUIRE(editingComponent);
+    registration->Deserialize(*editingComponent, {{"managedState", legacyState}}, registration->SchemaVersion);
+    const auto editingValuesBeforePlay = registration->Serialize(*editingComponent);
+    REQUIRE(editingValuesBeforePlay.contains("managedState"));
+    const auto editingStateBeforePlay = std::get<std::string>(editingValuesBeforePlay.at("managedState"));
+    editingScene->MarkSaved();
+
+    auto play = Keire::CreateRef<Keire::SceneRuntimeSession>(editingScene);
+    CHECK_NOTHROW(play->Play());
+    INFO(play->Diagnostic().Message);
+    REQUIRE(play->State() == Keire::ScenePlayState::Playing);
+    REQUIRE(play->RuntimeScene());
+    const auto runtimeEntity = play->RuntimeScene()->FindEntity(scriptedEntity.Id());
+    REQUIRE(runtimeEntity);
+    const auto runtimeComponent = runtimeEntity.GetComponent(componentType);
+    REQUIRE(runtimeComponent);
+
+    auto runtimeValues = registration->Serialize(*runtimeComponent);
+    REQUIRE(runtimeValues.contains("managedState"));
+    const auto& canonicalState = std::get<std::string>(runtimeValues.at("managedState"));
+    const std::string stableSpeed = R"("StableId":"73616e64-626f-4078-8000-000000000098","Name":"Speed")";
+    const std::string legacySpeed = R"("StableId":"","Name":"Speed")";
+    const std::string retainedUnknown = R"("Name":"LegacyOnly","Type":"System.Int32","Aliases":[],"Value":41)";
+    const auto stableSpeedPosition = canonicalState.find(stableSpeed);
+    REQUIRE(stableSpeedPosition != std::string::npos);
+    CHECK(canonicalState.find(stableSpeed, stableSpeedPosition + stableSpeed.size()) == std::string::npos);
+    CHECK(canonicalState.find(legacySpeed) == std::string::npos);
+    CHECK(canonicalState.find(retainedUnknown) != std::string::npos);
+
+    runtimeValues.insert_or_assign("Speed", 12.25);
+    registration->Deserialize(*runtimeComponent, runtimeValues, registration->SchemaVersion);
+    CHECK_NOTHROW(play->FixedUpdate(1.0F / 60.0F));
+    const auto consumedValues = registration->Serialize(*runtimeComponent);
+    REQUIRE(consumedValues.contains("Speed"));
+    REQUIRE(consumedValues.contains("ConsumedSpeed"));
+    CHECK(std::get<double>(consumedValues.at("Speed")) == doctest::Approx(12.25));
+    CHECK(std::get<double>(consumedValues.at("ConsumedSpeed")) == doctest::Approx(12.25));
+
+    const auto editingValues = registration->Serialize(*editingComponent);
+    REQUIRE(editingValues.contains("managedState"));
+    REQUIRE(editingValues.contains("Speed"));
+    CHECK(std::get<std::string>(editingValues.at("managedState")) == editingStateBeforePlay);
+    CHECK(std::get<double>(editingValues.at("Speed")) == doctest::Approx(5.0));
+    CHECK_FALSE(editingScene->Dirty());
+    play->Stop();
+    CHECK(std::get<double>(registration->Serialize(*editingComponent).at("Speed")) == doctest::Approx(5.0));
+    editingScene->Close();
 
     const auto instance =
         scripts->CreateBehaviour("Game.Player", 7, Keire::AssetId::Parse("00000000-0000-0000-0000-000000000042"));
@@ -346,6 +434,20 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Awake));
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Enable));
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Start));
+    const auto callbackMetrics = scripts->Metrics();
+    CHECK(callbackMetrics.CallbackInvocations >= 3);
+    CHECK(callbackMetrics.ManagedInteropCalls >= 3);
+    CHECK(callbackMetrics.CallbackMilliseconds >= 0.0);
+    const auto callbackBreakdown = scripts->CallbackMetrics();
+    CHECK_FALSE(callbackBreakdown.Truncated);
+    const auto awakeMetric = std::ranges::find_if(
+        callbackBreakdown.Entries, [](const Keire::ManagedCallbackMetric& metric)
+        { return metric.TypeName == "Game.Player" && metric.Callback == Keire::ManagedBehaviourCallback::Awake; });
+    REQUIRE(awakeMetric != callbackBreakdown.Entries.end());
+    CHECK(awakeMetric->InstanceCount == 1);
+    CHECK(awakeMetric->Invocations == 1);
+    CHECK(awakeMetric->SkippedInvocations == 0);
+    CHECK(awakeMetric->Milliseconds >= 0.0);
 
     request.Assemblies = {host / "Missing.dll"};
     CHECK_FALSE(scripts->PrepareReload(request));

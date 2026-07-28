@@ -8,8 +8,10 @@ submeshes deterministic, preserve Assimp slot indices and names, and group names
 into contiguous LOD ranges with monotonically decreasing default thresholds.
 
 Asset cache objects, metadata, catalogs, and cooked build profiles publish through the shared atomic-file boundary.
-It uses a same-volume temporary, durable flushes where supported, retains the previous target on failure, and retries
-only transient sharing failures.
+Cooked payloads use deterministic content-addressed pack names. Publication installs new immutable packs first and
+atomically switches the catalog last, so a running editor may finish reads from an older pack without blocking import.
+Recently retired packs remain available for in-flight work and are reclaimed after a grace period; locked cleanup is
+best-effort and never changes a successful import into a failure.
 
 Importer registrations may declare UI-independent Boolean, Integer, Scalar, and Choice options. Normalized values are
 stored in `.keiremeta`, participate in its digest, and arrive in `AssetImportContext`; editor UI is generated from the
@@ -20,8 +22,9 @@ color/sRGB textures, normal slots accept normal/linear textures, and metallic, r
 slots accept data/linear textures. The Material Inspector filters incompatible choices before writing the material;
 strict import and cooking retain the same validation as a defense against hand-edited or stale source files.
 
-`AssetDatabase::ImportExternal` confines destinations to the project's source root, rejects symlinks and unsupported
-files, rejects external `.keiremeta` identities, validates the complete batch in
+`AssetDatabase::ImportExternal` confines destinations to the project's source root, rejects symlinks and explicit
+unsupported files, skips unsupported companion files in dropped directories, rejects external `.keiremeta` identities,
+and validates the complete batch in
 `Library/AssetImport/<transaction>/staging`, and publishes source plus metadata transactionally. Directory imports
 preserve their relative layout. A persistent `staged`/`publishing`/`committed` journal restores replaced content or
 removes new files after an interrupted publication before records are exposed at startup. Batch failure rolls back
@@ -75,9 +78,10 @@ Snapshot queries use only the record-store lock and never wait for the operation
 thumbnail lookup, and editor selection remain responsive while a scene save triggers background catalog work.
 
 `ImportAll()` hashes sources with SHA-256 and stores immutable raw objects below `Library/AssetCache/Objects`. Existing
-objects are cache hits. It then publishes the development runtime directory transactionally under
-`Library/AssetCache/Runtime`. `PollChangedAssets()` uses file signatures and a 250 ms default stability window; hashing
-and import happen only after a stable change. The editor remounts the published catalog and requests last-good reloads
+objects are cache hits. It then publishes content-addressed runtime packs under `Library/AssetCache/Runtime` and
+atomically replaces only the catalog and small metadata documents. `PollChangedAssets()` uses file signatures and a
+250 ms default stability window; hashing and import happen only after a stable change. The editor remounts the published
+catalog and requests last-good reloads
 for changed IDs. Interactive material authoring first publishes an immutable development asset revision directly to
 loaded handles, then coalesces source persistence and catalog rebuilding at the edit boundary on a background task.
 This preview path is unavailable in cooked mode and does not replace import/cook validation.
@@ -111,19 +115,19 @@ exchanges atomic documents below `Library/AssetOperations`. Successful work publ
 `Library/AssetCache/Runtime/source-index.json`, which the editor validates and reloads without scanning or hashing the
 project again. Operation documents and captured worker logs remain available for diagnostics; the worker is packaged
 with the editor but is not a supported SDK or importer plug-in API.
-Independent editor/tool database instances serialize mutations with a project-scoped, OS-released file lock. Catalog
-directory replacement writes a versioned journal before moving the last-good directory, and database startup repairs
-an interrupted `prepared`, `backedUp`, or `published` state before exposing records. Asset protocol paths remain UTF-8
-and native path suffixes are appended without locale-dependent narrowing.
+Independent editor/tool database instances serialize mutations with a project-scoped, OS-released file lock. Database
+startup remains compatible with the legacy directory-swap journal and repairs an interrupted `prepared`, `backedUp`, or
+`published` state before exposing records. New publications never rename a live runtime directory. Asset protocol paths
+remain UTF-8 and native path suffixes are appended without locale-dependent narrowing.
 
 ## Deterministic Cooking
 
 `AssetCooker::Cook()` walks optional stable-ID roots transitively, sorts the selected entries by stable ID, compresses
 each payload with pinned Zstandard and the selected
-versioned `AssetBuildProfile`, target platform, and shards packs at a 2 GiB default limit. Catalog entries contain relative pack paths,
-bounded offsets/sizes, type, SHA-256, and dependency IDs. Output is assembled in a sibling temporary directory, then
-published with a recoverable directory swap. The accompanying `build-profile.json` records schema, profile name,
-compression algorithm/level, shard limit, and strictness.
+versioned `AssetBuildProfile`, target platform, and shards packs at a 2 GiB default limit. Catalog entries contain
+relative content-addressed pack paths, bounded offsets/sizes, type, SHA-256, and dependency IDs. Output is assembled in
+a sibling temporary directory, immutable packs are installed, and the catalog is switched atomically. The accompanying
+`build-profile.json` records schema, profile name, compression algorithm/level, shard limit, and strictness.
 
 `AssetCooker::Validate()` independently checks schema, identity uniqueness, dependency closure/cycles, pack headers,
 ranges, decompression sizes, and SHA-256. Distribution tooling should validate immediately after cooking and ship only

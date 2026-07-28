@@ -1,7 +1,9 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClient/Editor/ManagedDataInspectorPanel.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -266,6 +268,14 @@ namespace
                 return false;
             value = {color.Red, color.Green, color.Blue, color.Alpha};
             return true;
+        }
+        bool EditCurve(const std::string_view label, Keire::Curve1D& value) override
+        {
+            return Track(KeireEditor::AuthoringValueEditors::Curve(m_Ui, label, value));
+        }
+        bool EditGradient(const std::string_view label, Keire::ColorGradient& value) override
+        {
+            return Track(KeireEditor::AuthoringValueEditors::Gradient(m_Ui, label, value));
         }
         bool EditAsset(const std::string_view label, Keire::AssetId& value,
                        const std::optional<Keire::AssetTypeId> expectedType) override
@@ -1032,8 +1042,21 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         }
                     }
                     std::string activeGroup;
+                    Keire::ComponentPropertyBag values;
+                    bool serialized = false;
+                    try
+                    {
+                        values = registration->Serialize(*component);
+                        serialized = true;
+                    }
+                    catch (const std::exception& error)
+                    {
+                        ui.TextColored(theme.Error, error.what());
+                    }
                     for (const auto& property : registration->Properties)
                     {
+                        if (!serialized)
+                            break;
                         if (!property.Group.empty() && property.Group != activeGroup)
                         {
                             activeGroup = property.Group;
@@ -1041,7 +1064,6 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         }
                         try
                         {
-                            const auto values = registration->Serialize(*component);
                             const auto found = values.find(property.Key);
                             if (found == values.end())
                                 throw std::invalid_argument("The component omitted a declared property.");
@@ -1141,11 +1163,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
 }
 
 KeireEditor::AssetInspectorPanel::AssetInspectorPanel(IInspectorController& controller)
-    : m_Controller(controller), m_AssetPicker(std::make_unique<AssetPicker>())
+    : m_Controller(controller), m_AssetPicker(std::make_unique<AssetPicker>()),
+      m_ManagedDataInspector(std::make_unique<ManagedDataInspectorPanel>(controller))
 {
 }
 
 KeireEditor::AssetInspectorPanel::~AssetInspectorPanel() = default;
+
+void KeireEditor::AssetInspectorPanel::ClearState() noexcept
+{
+    m_EditingAsset = {};
+    m_AssetName.clear();
+    m_ManagedDataInspector->Clear();
+}
 
 void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
 {
@@ -1245,6 +1275,10 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
             m_Controller.ImportInspectorAssets();
         if (!assetStatus.empty())
             ui.TextColored(theme.MutedText, assetStatus);
+    }
+    else if (record->Type == Keire::ManagedDataAsset::StaticType())
+    {
+        m_ManagedDataInspector->Draw(ui, *record);
     }
     else if (record->RelativePath.extension() == ".keireshader")
     {

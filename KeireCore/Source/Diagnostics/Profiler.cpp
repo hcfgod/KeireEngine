@@ -6,6 +6,7 @@
 #include <cmath>
 #include <functional>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -19,6 +20,63 @@ namespace Keire
         [[nodiscard]] double Microseconds(const Clock::time_point value) noexcept
         {
             return std::chrono::duration<double, std::micro>(value.time_since_epoch()).count();
+        }
+
+        [[nodiscard]] std::string EscapeJson(const std::string_view value)
+        {
+            std::string result;
+            result.reserve(value.size());
+            for (const char character : value)
+            {
+                switch (character)
+                {
+                case '\\':
+                    result += "\\\\";
+                    break;
+                case '"':
+                    result += "\\\"";
+                    break;
+                case '\n':
+                    result += "\\n";
+                    break;
+                case '\r':
+                    result += "\\r";
+                    break;
+                case '\t':
+                    result += "\\t";
+                    break;
+                default:
+                    result.push_back(character);
+                    break;
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::string_view CategoryName(const ProfileCategory category) noexcept
+        {
+            switch (category)
+            {
+            case ProfileCategory::Application:
+                return "Application";
+            case ProfileCategory::Assets:
+                return "Assets";
+            case ProfileCategory::Scripting:
+                return "Scripting";
+            case ProfileCategory::Physics:
+                return "Physics";
+            case ProfileCategory::Animation:
+                return "Animation";
+            case ProfileCategory::Audio:
+                return "Audio";
+            case ProfileCategory::Navigation:
+                return "Navigation";
+            case ProfileCategory::Rendering:
+                return "Rendering";
+            case ProfileCategory::User:
+                return "User";
+            }
+            return "Unknown";
         }
     } // namespace
 
@@ -110,6 +168,10 @@ namespace Keire
         double physicsMicroseconds = 0.0;
         double renderingMicroseconds = 0.0;
         double audioMicroseconds = 0.0;
+        double assetsMicroseconds = 0.0;
+        double animationMicroseconds = 0.0;
+        double navigationMicroseconds = 0.0;
+        double userMicroseconds = 0.0;
         for (std::size_t index = 0; index < m_Impl->SpanCount; ++index)
         {
             const auto& span = m_Impl->Spans[index];
@@ -118,11 +180,17 @@ namespace Keire
             case ProfileCategory::Application:
                 applicationMicroseconds += span.DurationMicroseconds;
                 break;
+            case ProfileCategory::Assets:
+                assetsMicroseconds += span.DurationMicroseconds;
+                break;
             case ProfileCategory::Scripting:
                 scriptingMicroseconds += span.DurationMicroseconds;
                 break;
             case ProfileCategory::Physics:
                 physicsMicroseconds += span.DurationMicroseconds;
+                break;
+            case ProfileCategory::Animation:
+                animationMicroseconds += span.DurationMicroseconds;
                 break;
             case ProfileCategory::Rendering:
                 renderingMicroseconds += span.DurationMicroseconds;
@@ -130,7 +198,11 @@ namespace Keire
             case ProfileCategory::Audio:
                 audioMicroseconds += span.DurationMicroseconds;
                 break;
-            default:
+            case ProfileCategory::Navigation:
+                navigationMicroseconds += span.DurationMicroseconds;
+                break;
+            case ProfileCategory::User:
+                userMicroseconds += span.DurationMicroseconds;
                 break;
             }
         }
@@ -139,19 +211,28 @@ namespace Keire
         m_Impl->Latest.PhysicsMicroseconds = physicsMicroseconds;
         m_Impl->Latest.RenderingMicroseconds = renderingMicroseconds;
         m_Impl->Latest.AudioMicroseconds = audioMicroseconds;
-        m_Impl->Summaries[m_Impl->SummaryWrite] = {sequence,
-                                                   startMicroseconds,
-                                                   durationMicroseconds,
-                                                   m_Impl->SpanCount,
-                                                   m_Impl->CounterCount,
-                                                   m_Impl->DroppedSpans,
-                                                   m_Impl->DroppedCounters,
-                                                   applicationMicroseconds,
-                                                   scriptingMicroseconds,
-                                                   physicsMicroseconds,
-                                                   renderingMicroseconds,
-                                                   audioMicroseconds,
-                                                   m_Impl->Truncated};
+        m_Impl->Latest.AssetsMicroseconds = assetsMicroseconds;
+        m_Impl->Latest.AnimationMicroseconds = animationMicroseconds;
+        m_Impl->Latest.NavigationMicroseconds = navigationMicroseconds;
+        m_Impl->Latest.UserMicroseconds = userMicroseconds;
+        auto& summary = m_Impl->Summaries[m_Impl->SummaryWrite];
+        summary = {sequence,
+                   startMicroseconds,
+                   durationMicroseconds,
+                   m_Impl->SpanCount,
+                   m_Impl->CounterCount,
+                   m_Impl->DroppedSpans,
+                   m_Impl->DroppedCounters,
+                   applicationMicroseconds,
+                   scriptingMicroseconds,
+                   physicsMicroseconds,
+                   renderingMicroseconds,
+                   audioMicroseconds,
+                   m_Impl->Truncated};
+        summary.AssetsMicroseconds = assetsMicroseconds;
+        summary.AnimationMicroseconds = animationMicroseconds;
+        summary.NavigationMicroseconds = navigationMicroseconds;
+        summary.UserMicroseconds = userMicroseconds;
         m_Impl->SummaryWrite = (m_Impl->SummaryWrite + 1) % m_Impl->Summaries.size();
         m_Impl->SummaryCount = std::min(m_Impl->SummaryCount + 1, m_Impl->Summaries.size());
         m_Impl->Recording = false;
@@ -240,6 +321,34 @@ namespace Keire
     {
         std::scoped_lock lock(m_Impl->Mutex);
         return m_Impl->Latest;
+    }
+
+    std::string Profiler::LatestChromeTrace() const
+    {
+        const auto frame = LatestFrame();
+        std::ostringstream trace;
+        trace << "{\"displayTimeUnit\":\"ms\",\"traceEvents\":[";
+        bool first = true;
+        for (const auto& span : frame.Spans)
+        {
+            if (!first)
+                trace << ',';
+            first = false;
+            trace << "{\"name\":\"" << EscapeJson(span.Name) << "\",\"cat\":\"" << CategoryName(span.Category)
+                  << "\",\"ph\":\"X\",\"ts\":" << span.StartMicroseconds << ",\"dur\":" << span.DurationMicroseconds
+                  << ",\"pid\":1,\"tid\":" << span.Thread << '}';
+        }
+        for (const auto& counter : frame.Counters)
+        {
+            if (!first)
+                trace << ',';
+            first = false;
+            trace << "{\"name\":\"" << EscapeJson(counter.Name) << "\",\"cat\":\"" << CategoryName(counter.Category)
+                  << "\",\"ph\":\"C\",\"ts\":" << frame.StartMicroseconds
+                  << ",\"pid\":1,\"tid\":0,\"args\":{\"value\":" << counter.Value << "}}";
+        }
+        trace << "]}";
+        return trace.str();
     }
 
     ProfileFrameSummary Profiler::LatestSummary() const

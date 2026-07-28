@@ -117,6 +117,20 @@ namespace KeireEditor
                     value, [&](Keire::ComponentEventValue& typed)
                     { return editor.EditEvent(property.DisplayName, typed, property.EventArgumentCount); });
             });
+        Register(
+            Keire::ComponentPropertyKind::Curve,
+            [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
+            {
+                return DrawValue<Keire::Curve1D>(value, [&](Keire::Curve1D& typed)
+                                                 { return editor.EditCurve(property.DisplayName, typed); });
+            });
+        Register(
+            Keire::ComponentPropertyKind::Gradient,
+            [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
+            {
+                return DrawValue<Keire::ColorGradient>(value, [&](Keire::ColorGradient& typed)
+                                                       { return editor.EditGradient(property.DisplayName, typed); });
+            });
     }
 
     void PropertyDrawerRegistry::Register(const Keire::ComponentPropertyKind kind, Drawer drawer)

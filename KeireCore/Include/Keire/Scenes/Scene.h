@@ -4,6 +4,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/ECS/Entity.h"
+#include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Ref.h"
 #include "Keire/Scenes/SceneAsset.h"
 
@@ -17,6 +18,7 @@
 namespace Keire
 {
     class Scene;
+    class VfxWorld;
 
     namespace Detail
     {
@@ -38,6 +40,12 @@ namespace Keire
         AssetId m_Id;
     };
 
+    struct SceneHierarchySnapshot
+    {
+        std::vector<SceneObjectDefinition> Objects;
+        std::vector<PrefabInstanceDefinition> PrefabInstances;
+    };
+
     class KEIRE_API Scene final : public RefCounted
     {
       public:
@@ -56,6 +64,7 @@ namespace Keire
         void MarkSaved() noexcept;
         [[nodiscard]] std::size_t ObjectCount() const noexcept;
         [[nodiscard]] std::vector<SceneObjectDefinition> Objects() const;
+        [[nodiscard]] SceneHierarchySnapshot HierarchySnapshot() const;
         [[nodiscard]] SceneDefinition Snapshot() const;
         [[nodiscard]] SceneObjectHandle Find(AssetId id) const noexcept;
         [[nodiscard]] SceneObjectHandle CreateObject(std::string name = "GameObject", AssetId parent = {});
@@ -84,6 +93,9 @@ namespace Keire
         void BeginPlay();
         void FixedUpdate(float deltaSeconds);
         void Update(float deltaSeconds);
+        void LateUpdate();
+        void DispatchAnimationEvent(EntityId entity, const AnimationEventMessage& event);
+        void DispatchPhysicsContact(EntityId entity, PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void EndPlay() noexcept;
         void Close() noexcept;
 
@@ -108,10 +120,17 @@ namespace Keire
         std::string Message;
     };
 
+    struct ScenePhysicsQueryHit
+    {
+        EntityId Entity;
+        PhysicsQueryHit Hit;
+    };
+
     class KEIRE_API SceneRuntimeSession final : public RefCounted
     {
       public:
-        explicit SceneRuntimeSession(Ref<Scene> editScene, Ref<AssetSystem> assets = {}, Ref<AudioSystem> audio = {});
+        explicit SceneRuntimeSession(Ref<Scene> editScene, Ref<AssetSystem> assets = {}, Ref<AudioSystem> audio = {},
+                                     Ref<PhysicsSystem> physics = {});
         ~SceneRuntimeSession() override;
 
         SceneRuntimeSession(const SceneRuntimeSession&) = delete;
@@ -122,6 +141,10 @@ namespace Keire
         [[nodiscard]] Ref<Scene> RuntimeScene() const noexcept;
         [[nodiscard]] SceneRuntimeDiagnostic Diagnostic() const;
         [[nodiscard]] Ref<ScenePresentationRuntime> Presentation() const noexcept;
+        [[nodiscard]] Ref<PhysicsWorld> Physics() const noexcept;
+        [[nodiscard]] Ref<VfxWorld> Vfx() const noexcept;
+        [[nodiscard]] std::vector<ScenePhysicsQueryHit> RayCast(const PhysicsRayQuery& query,
+                                                                EntityId ignoredEntity = {}) const;
         void SetPresentationViewport(float width, float height, RuntimeUiInsets safeArea = {});
         void Play();
         void Pause(bool paused = true);

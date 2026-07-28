@@ -89,7 +89,16 @@ function ApplyCommonProjectSettings(repositoryRoot)
     local usesMsvcCommandLine = os.host() == "windows" and
         ((_ACTION and _ACTION:match("^vs")) or (_ACTION == "ninja" and (selectedToolset == "default" or selectedToolset == "msc")))
     if usesMsvcCommandLine then
-        buildoptions { "/utf-8", "/permissive-", "/Zc:__cplusplus", "/Zc:preprocessor", "/MP" }
+        buildoptions
+        {
+            "/utf-8",
+            "/permissive-",
+            "/Zc:__cplusplus",
+            "/Zc:preprocessor",
+            "/MP",
+            "/external:anglebrackets",
+            "/external:W0"
+        }
     end
 
     filter { "toolset:gcc or clang" }

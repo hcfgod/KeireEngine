@@ -99,6 +99,7 @@ public sealed class UiButton : UiElement
     private static readonly List<Entity> DispatchKeys = [];
     private static readonly List<UiButton> DispatchTargets = [];
     private static bool s_dispatching;
+    private static double s_lastDispatchElapsed = double.NaN;
 
     private Action? _clicked;
 
@@ -144,6 +145,10 @@ public sealed class UiButton : UiElement
     {
         if (s_dispatching || NativeBindings.Count == 0)
             return;
+        double elapsed = NativeRuntime.ElapsedTime;
+        if (elapsed == s_lastDispatchElapsed)
+            return;
+        s_lastDispatchElapsed = elapsed;
 
         s_dispatching = true;
         try

@@ -1,6 +1,8 @@
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 
+#include "Keire/Animation/RiggingSystem.h"
+
 #include <assimp/GltfMaterial.h>
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
@@ -1118,12 +1120,24 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 4;
+        result.Version = 5;
         result.Type = MeshAsset::StaticType();
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
         result.ContextualImport = [](const AssetImportContext& context,
                                      const std::span<const std::byte> bytes) -> AssetImportOutput
         {
+            const auto stringSetting = [&context](const std::string_view key, const std::string_view fallback)
+            {
+                const auto setting = context.ImportSettings.find(key);
+                if (setting == context.ImportSettings.end())
+                    return std::string(fallback);
+                const auto* value = std::get_if<std::string>(&setting->second);
+                return value ? *value : std::string(fallback);
+            };
+            const auto rigSource = stringSetting("rigSource", "embedded");
+            const auto requestedRigProfile = stringSetting("rigProfile", "humanoid");
+            const auto requestedSkinning = stringSetting("skinningMethod", "linearBlend");
+            const auto requestedInfluences = stringSetting("maximumInfluences", "4") == "8" ? 8 : 4;
             if (context.SourcePath.extension() == ".keiremesh")
             {
                 const auto mesh = MeshAsset::Decode(bytes);
@@ -1152,7 +1166,9 @@ namespace Keire
             bool hasSkinning = false;
             for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
                 hasSkinning = hasSkinning || (scene->mMeshes[meshIndex] && scene->mMeshes[meshIndex]->mNumBones != 0);
-            const bool animated = hasSkinning || scene->mNumAnimations != 0;
+            const bool useEmbeddedSkinning = hasSkinning && rigSource == "embedded";
+            const bool generateRig = rigSource == "generate";
+            const bool animated = useEmbeddedSkinning || generateRig;
             if (!animated)
             {
                 scene = importer.ApplyPostProcessing(aiProcess_PreTransformVertices);
@@ -1433,11 +1449,11 @@ namespace Keire
             AssetId skinnedMeshId;
             std::vector<SkeletonBone> skeletonBones;
             std::unordered_map<std::string, std::uint16_t> boneIndices;
-            std::vector<SkinVertexInfluence> skinInfluences;
-            if (animated)
+            std::vector<SkinVertexInfluence8> skinInfluences8;
+            SkinningMethod skinningMethod =
+                requestedSkinning == "dualQuaternion" ? SkinningMethod::DualQuaternion : SkinningMethod::LinearBlend;
+            if (useEmbeddedSkinning)
             {
-                if (!hasSkinning)
-                    throw std::invalid_argument("Animation import requires at least one skinned mesh.");
                 if (!context.ResolveSubAssetId)
                     throw std::logic_error("Animated mesh importing requires generated-subasset identities.");
                 std::unordered_map<std::string, aiMatrix4x4> inverseBindPoses;
@@ -1497,6 +1513,15 @@ namespace Keire
                 skeletonId = context.ResolveSubAssetId("skeleton/default");
                 output.SubAssets.push_back({skeletonId, SkeletonAsset::StaticType(), "skeleton/default", "Skeleton",
                                             SkeletonAsset::Encode(skeletonBones)});
+                const SkeletonAsset embeddedSkeleton(skeletonBones);
+                const auto profile = requestedRigProfile == "quadruped" ? RigProfileType::Quadruped
+                                     : requestedRigProfile == "biped"   ? RigProfileType::Biped
+                                                                        : RigProfileType::Humanoid;
+                const auto embeddedRig = InferRigDefinition(embeddedSkeleton, profile, skinningMethod,
+                                                            static_cast<std::uint8_t>(requestedInfluences));
+                const auto rigId = context.ResolveSubAssetId("rig/default");
+                output.SubAssets.push_back({rigId, RigDefinitionAsset::StaticType(), "rig/default", "Rig",
+                                            RigDefinitionAsset::Encode(embeddedRig)});
 
                 for (unsigned int animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
                 {
@@ -1641,7 +1666,7 @@ namespace Keire
                                             {uv.x, uv.y},
                                             mesh->mColors[0] ? Color{color.r, color.g, color.b, color.a} : Color{}});
                     }
-                    if (animated)
+                    if (useEmbeddedSkinning)
                     {
                         std::vector<std::vector<std::pair<std::uint16_t, float>>> weights(mesh->mNumVertices);
                         for (unsigned int meshBoneIndex = 0; meshBoneIndex < mesh->mNumBones; ++meshBoneIndex)
@@ -1669,8 +1694,10 @@ namespace Keire
                                                       return first.second > second.second;
                                                   return first.first < second.first;
                                               });
-                            SkinVertexInfluence influence;
-                            const auto count = std::min<std::size_t>(4, vertexWeights.size());
+                            SkinVertexInfluence8 influence;
+                            const auto count = std::min<std::size_t>(static_cast<std::size_t>(requestedInfluences),
+                                                                     vertexWeights.size());
+                            influence.Count = static_cast<std::uint8_t>(count);
                             float sum = 0.0F;
                             for (std::size_t influenceIndex = 0; influenceIndex < count; ++influenceIndex)
                             {
@@ -1682,13 +1709,14 @@ namespace Keire
                             {
                                 influence.Bones[0] = 0;
                                 influence.Weights[0] = 1.0F;
+                                influence.Count = 1;
                             }
                             else
                             {
-                                for (auto& weight : influence.Weights)
-                                    weight /= sum;
+                                for (std::size_t influenceIndex = 0; influenceIndex < count; ++influenceIndex)
+                                    influence.Weights[influenceIndex] /= sum;
                             }
-                            skinInfluences.push_back(influence);
+                            skinInfluences8.push_back(influence);
                         }
                     }
                     for (unsigned int faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex)
@@ -1714,22 +1742,94 @@ namespace Keire
             }
             GenerateTangents(vertices, indices);
             const auto bounds = CalculateBounds(vertices);
+            if (generateRig)
+            {
+                if (!context.ResolveSubAssetId)
+                    throw std::logic_error("Auto-rig importing requires generated-subasset identities.");
+                AutoRigRequest request;
+                if (requestedRigProfile == "quadruped")
+                    request.Profile = RigProfileType::Quadruped;
+                else if (requestedRigProfile == "biped")
+                    request.Profile = RigProfileType::Biped;
+                else
+                    request.Profile = RigProfileType::Humanoid;
+                request.Skinning = requestedSkinning == "dualQuaternion" ? SkinningMethod::DualQuaternion
+                                                                         : SkinningMethod::LinearBlend;
+                request.MaximumInfluences = requestedInfluences == 8 ? 8 : 4;
+                MeshAsset rigMesh(vertices, indices, submeshes, materialSlots, lods, bounds);
+                auto generated = GenerateRig(rigMesh, request);
+                skeletonId = context.ResolveSubAssetId("skeleton/default");
+                skinnedMeshId = context.ResolveSubAssetId("skinned-mesh/default");
+                const auto rigId = context.ResolveSubAssetId("rig/default");
+                skeletonBones = std::move(generated.Skeleton);
+                skinInfluences8 = std::move(generated.Influences);
+                skinningMethod = generated.Rig.Skinning;
+                output.SubAssets.push_back({skeletonId, SkeletonAsset::StaticType(), "skeleton/default", "Skeleton",
+                                            SkeletonAsset::Encode(skeletonBones)});
+                output.SubAssets.push_back({rigId, RigDefinitionAsset::StaticType(), "rig/default", "Rig",
+                                            RigDefinitionAsset::Encode(generated.Rig)});
+                for (const auto& diagnostic : generated.Diagnostics)
+                {
+                    output.Diagnostics.push_back(
+                        {diagnostic.Severity == RigDiagnosticSeverity::Error     ? AssetDiagnosticSeverity::Error
+                         : diagnostic.Severity == RigDiagnosticSeverity::Warning ? AssetDiagnosticSeverity::Warning
+                                                                                 : AssetDiagnosticSeverity::Information,
+                         context.RelativePath, 0, 0, diagnostic.Code + ": " + diagnostic.Message});
+                }
+            }
             output.Bytes = MeshAsset::Encode(vertices, indices, submeshes, materialSlots, lods);
             if (animated)
             {
-                if (skinInfluences.size() != vertices.size())
+                if (skinInfluences8.size() != vertices.size())
                     throw std::logic_error("Skinned mesh import did not produce one influence set per vertex.");
-                output.SubAssets.push_back({skinnedMeshId,
-                                            SkinnedMeshAsset::StaticType(),
-                                            "skinned-mesh/default",
-                                            "Skinned Mesh",
-                                            SkinnedMeshAsset::Encode(context.Asset, skeletonId, skinInfluences),
-                                            {context.Asset, skeletonId}});
+                output.SubAssets.push_back(
+                    {skinnedMeshId,
+                     SkinnedMeshAsset::StaticType(),
+                     "skinned-mesh/default",
+                     "Skinned Mesh",
+                     SkinnedMeshAsset::Encode(context.Asset, skeletonId, skinInfluences8, skinningMethod),
+                     {context.Asset, skeletonId}});
             }
             output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
                                                       {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
             return output;
         };
+        result.ImportOptions = {{"rigSource",
+                                 "Rig Source",
+                                 "Rig",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("embedded"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"embedded", "generate", "none"}},
+                                {"rigProfile",
+                                 "Avatar Profile",
+                                 "Rig",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("humanoid"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"humanoid", "biped", "quadruped"}},
+                                {"maximumInfluences",
+                                 "Maximum Influences",
+                                 "Rig",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("4"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"4", "8"}},
+                                {"skinningMethod",
+                                 "Skinning Method",
+                                 "Rig",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("linearBlend"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"linearBlend", "dualQuaternion"}}};
         return result;
     }
 

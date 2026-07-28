@@ -1,5 +1,76 @@
 # Changelog
 
+- Fixed model and other external imports failing after successful cooking when the running Windows editor held the
+  active runtime pack open. Development and cooked publications now install deterministic content-addressed immutable
+  packs and atomically switch the catalog without renaming the live cache directory.
+- Dropped model folders now import supported models and textures while skipping unrelated unsupported companion files;
+  external identity metadata and symlinks remain rejected.
+- Added a backend-owned skeletal skin cache with cross-platform SDL_GPU compute deformation, shadow/depth reuse,
+  built-in-material fallback output, deterministic CPU linear-blend and dual-quaternion fallback, and focused
+  deformation tests.
+- Added versioned `.keirerig` semantic profiles, deterministic humanoid/biped/quadruped generation, marker overrides,
+  four/eight-influence weight solving, baked semantic retargeting, and two-bone/FABRIK runtime solvers.
+- Upgraded skinned-mesh assets to schema v2 with schema-v1 compatibility, explicit LBS/DQS mode, and durable
+  per-vertex four/eight-influence data.
+- Added explicit non-destructive model Rig Source/Profile/Influence/Skinning import controls that publish generated
+  rig, skeleton, and skinned-mesh subassets while retaining embedded-rig and no-rig workflows.
+- Added deterministic semantic inference for embedded Mixamo, Blender, Unreal, humanoid, biped, and quadruped
+  skeletons, preserving unknown bones while publishing a retargetable rig subasset.
+- Added a dockable Rigging Studio for atomic model reimport, semantic-map inspection, generated-asset navigation, and
+  standalone `.keireanim` retarget baking.
+- Added named runtime two-bone and FABRIK Animator IK, managed `Animator` bindings, standalone animation-clip import,
+  and strict cooked-asset dependency/influence validation.
+- Upgraded embedded model skinning to retain the selected four/eight influence limit and LBS/DQS method instead of
+  truncating every imported vertex to the legacy four-weight schema.
+- Added shared typed asset-document hosting with validation, atomic persistence, bounded undo/redo, revision-aware
+  reload, live preview rollback, stable-ID graph authoring primitives, deterministic curves/gradients, and reusable
+  scene shape handles.
+- Added `.keiremixer` Audio Mixer assets with stable buses, effects, sends, snapshots, ducking rules, convolution
+  dependencies, bounded meter snapshots, Audio Source schema-v2 migration, attenuation curves, reverb-zone authoring,
+  default-mixer project settings, Project-window creation, and a dockable typed bus/routing/effect editor.
+- Added scene-owned Jolt runtime synchronization, narrow-phase queries and deterministic contact phases, 32 named
+  collision layers/matrix settings, physics materials, collider shape handles, character-controller and joint
+  components, bounded debug snapshots/query traces, and cooked-runtime settings parity.
+- Added `.keiredata` managed data assets with managed type discovery, deterministic Create menus, typed reflection
+  inspectors, stable-field migration, deep supported-value cloning, identity-preserving hot reload, real cancellable
+  async loads, transitive cook dependencies, and strict post-compilation semantic validation.
+- Added `.keirevfx` modular CPU effects, generation-safe scene-owned pooling, deterministic rate/burst emission,
+  shapes, forces, lifetime curves, color gradients, collision fallback diagnostics, bounded debug/render snapshots,
+  transparent render packets, resolved-depth preservation, capability reporting, Project-window creation, and a
+  dockable typed module editor.
+- Hardened the new authoring slices with lifetime-safe document undo commands, eager physics before managed Play
+  callbacks, transactional managed Audio Source edits, identity-preserving managed-data reload, empty Animator
+  fallbacks, nullable/character managed values, validated curve interpolation, and back-to-front transparent ordering.
+
+- Added a dockable Animator Controller workflow with Project-window creation/opening, atomic validated saves,
+  undo/redo, typed parameters, layers, clip drag-and-drop, state/transition authoring, blend-tree editing, persistent
+  graph layout, and managed runtime parameter/layer queries.
+
+- Fixed Play Mode Inspector edits for managed fields with legacy name-only state so live Behaviours receive new values
+  immediately while state capture canonicalizes their stable field identities.
+
+- Moved development asset change discovery to a nonblocking database-owned monitor, cached unchanged Forward+ data,
+  added managed callback/interop metrics, O(N) hierarchy traversal, Perfetto trace export, thread timelines, explicit
+  GPU timing capabilities, and focused performance regression coverage.
+
+- Replaced the editor's 100 ms full asset metadata rescan with a signature-only idle poll, preserved case-only rename
+  detection, deferred metadata parsing to real changes, and throttled visible Profiler presentation refreshes to 10 Hz.
+
+- Added bounded per-Behaviour lifecycle timing to managed scripting diagnostics and compact default row budgets to the
+  Profiler's callback, hotspot, and counter tables.
+
+- Added a sparse one-light Forward+ path, deduplicated managed native UI click draining per frame, and expanded
+  retained Profiler history/export data to every CPU category for tail-spike attribution.
+
+- Stabilized live Profiler tree identities and replaced the Hierarchy panel's full scene serialization with a
+  component-free hierarchy snapshot.
+
+- Removed Forward+ per-tile heap allocations, serialized Inspector components once per draw, and split core editor
+  panels into independent Hierarchy, Inspector, and Project profiler spans.
+
+- Cached scene lifecycle execution order, skipped empty physics worlds and idle render surfaces, suppressed empty
+  managed fixed/late callbacks, and removed per-frame Profiler report construction and full-rate history analysis.
+
 - Improved editor frame pacing with mailbox presentation, removed duplicate Play Mode UI/audio synchronization,
   eliminated native profiling-scope and render-preparation hot-path allocations, and added detailed frame-stage,
   swapchain-wait, command-recording, UI-recording, and GPU-submission diagnostics.
@@ -105,6 +176,9 @@
 All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic version tags.
 
 ## Unreleased
+
+- Fixed external model imports with explicit rig settings borrowing a destroyed JSON document, and report crashed
+  asset workers without attempting to parse a missing result file.
 
 - Preserve managed Inspector assignments when entering Play Mode by reading legacy lowercase state documents and
   publishing new component state with canonical casing; restored UI Button references now register click events.

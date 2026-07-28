@@ -1,3 +1,4 @@
+#include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Project/Project.h"
@@ -67,16 +68,7 @@ namespace
     {
         (void)Keire::Project::Open(projectRoot);
         Keire::AssetDatabaseSpecification specification{.ProjectRoot = projectRoot};
-        specification.Importers = {Keire::CreateTextAssetImporter(),
-                                   Keire::CreateInputActionAssetImporter(),
-                                   Keire::CreateSceneAssetImporter(),
-                                   Keire::CreatePrefabAssetImporter(),
-                                   Keire::CreateManagedAssemblyAssetImporter(),
-                                   Keire::CreateShaderAssetImporter(),
-                                   Keire::CreateMaterialAssetImporter(),
-                                   Keire::CreateMeshAssetImporter(),
-                                   Keire::CreateTexture2DAssetImporter(),
-                                   Keire::CreateAudioClipAssetImporter()};
+        specification.Importers = Keire::CreateBuiltinAssetImporters();
         return Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     }
 

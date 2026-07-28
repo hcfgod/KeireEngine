@@ -61,6 +61,7 @@ namespace KeireEditor
         bool ShowIcons = true;
         bool ShowCameraFrustums = true;
         bool ShowLightDirections = true;
+        bool EditColliders = false;
     };
 
     struct SceneGizmoResult
@@ -98,6 +99,7 @@ namespace KeireEditor
         void SetSnapping(bool enabled) noexcept { m_Settings.Snapping = enabled; }
         void SetShowCameraFrustums(bool enabled) noexcept { m_Settings.ShowCameraFrustums = enabled; }
         void SetShowLightDirections(bool enabled) noexcept { m_Settings.ShowLightDirections = enabled; }
+        void SetColliderEditing(bool enabled) noexcept { m_Settings.EditColliders = enabled; }
 
         [[nodiscard]] SceneTool ActiveTool() const noexcept { return m_Tool; }
         [[nodiscard]] const SceneToolSettings& Settings() const noexcept { return m_Settings; }
@@ -117,8 +119,34 @@ namespace KeireEditor
             std::vector<SceneTransformTarget> Targets;
         };
 
+        enum class ColliderHandle : std::uint8_t
+        {
+            None,
+            BoxX,
+            BoxY,
+            BoxZ,
+            SphereRadius,
+            CapsuleRadius,
+            CapsuleHeight
+        };
+
+        struct ColliderDragState
+        {
+            Keire::Ref<Keire::ColliderComponent> Collider;
+            ColliderHandle Handle = ColliderHandle::None;
+            Keire::UiPosition StartPointer;
+            Keire::UiPosition ScreenAxis;
+            float ScreenPixelsPerUnit = 1.0F;
+            Keire::Vector3 InitialCenter;
+            Keire::Vector3 InitialHalfExtent{0.5F, 0.5F, 0.5F};
+            float InitialRadius = 0.5F;
+            float InitialHeight = 1.0F;
+            bool UndoRecorded = false;
+        };
+
         SceneToolSettings m_Settings;
         DragState m_Drag;
+        ColliderDragState m_ColliderDrag;
         SceneTool m_Tool = SceneTool::Translate;
     };
 } // namespace KeireEditor

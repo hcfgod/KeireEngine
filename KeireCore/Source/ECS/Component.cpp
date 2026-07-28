@@ -3,14 +3,17 @@
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/CameraComponent.h"
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
+#include "Keire/ECS/Components/JointComponents.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "KeireInternal/SceneState.h"
 
@@ -133,6 +136,52 @@ namespace Keire
     {
         if (m_Impl->LifecycleActive && !m_Impl->Destroyed)
             Update(deltaSeconds);
+    }
+
+    void Component::InvokeLateUpdate()
+    {
+        if (m_Impl->LifecycleActive && !m_Impl->Destroyed)
+            LateUpdate();
+    }
+
+    void Component::InvokeAnimationEvent(const AnimationEventMessage& event)
+    {
+        if (m_Impl->LifecycleActive && !m_Impl->Destroyed)
+            OnAnimationEvent(event);
+    }
+
+    void Component::InvokePhysicsContact(const PhysicsContactPhase phase, const PhysicsContactMessage& contact)
+    {
+        if (!m_Impl->LifecycleActive || m_Impl->Destroyed)
+            return;
+        if (contact.Trigger)
+        {
+            switch (phase)
+            {
+            case PhysicsContactPhase::Enter:
+                OnTriggerEnter(contact);
+                break;
+            case PhysicsContactPhase::Stay:
+                OnTriggerStay(contact);
+                break;
+            case PhysicsContactPhase::Exit:
+                OnTriggerExit(contact);
+                break;
+            }
+            return;
+        }
+        switch (phase)
+        {
+        case PhysicsContactPhase::Enter:
+            OnCollisionEnter(contact);
+            break;
+        case PhysicsContactPhase::Stay:
+            OnCollisionStay(contact);
+            break;
+        case PhysicsContactPhase::Exit:
+            OnCollisionExit(contact);
+            break;
+        }
     }
 
     void Component::InvokeDisable()
@@ -283,8 +332,15 @@ namespace Keire
         result->Register(CreateAnimatorComponentRegistration());
         result->Register(CreateColliderComponentRegistration());
         result->Register(CreateRigidBodyComponentRegistration());
+        result->Register(CreateCharacterControllerComponentRegistration());
+        result->Register(CreateFixedJointComponentRegistration());
+        result->Register(CreateHingeJointComponentRegistration());
+        result->Register(CreateDistanceJointComponentRegistration());
+        result->Register(CreateSpringJointComponentRegistration());
         result->Register(CreateAudioSourceComponentRegistration());
+        result->Register(CreateAudioReverbZoneComponentRegistration());
         result->Register(CreateAudioListenerComponentRegistration());
+        result->Register(CreateVfxEmitterComponentRegistration());
         result->Register(CreateCanvasComponentRegistration());
         result->Register(CreateRectTransformComponentRegistration());
         result->Register(CreateUiTextComponentRegistration());

@@ -1,12 +1,15 @@
 #include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/BuildInfo.h"
 #include "Keire/Log.h"
 #include "Keire/Project/Project.h"
+#include "Keire/Project/ProjectAuthoringSettings.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
+#include "Keire/Scripting/ManagedDataAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
 
 #include "KeireInternal/FileSystem.h"
@@ -129,9 +132,18 @@ namespace
         return result;
     }
 
-    [[nodiscard]] bool BuildManagedAssemblies(const Keire::AssetDatabase& database, const Keire::Project& project,
-                                              const std::filesystem::path& output, const std::string& profile,
-                                              const std::filesystem::path& executable)
+    struct ManagedCookBuild final
+    {
+        bool Scripting = false;
+        std::filesystem::path AssemblyDirectory;
+        std::vector<std::string> AssemblyNames;
+        std::vector<Keire::ManagedAssetTypeDescriptor> AssetTypes;
+    };
+
+    [[nodiscard]] ManagedCookBuild BuildManagedAssemblies(const Keire::AssetDatabase& database,
+                                                          const Keire::Project& project, const std::string& profile,
+                                                          const std::filesystem::path& executable,
+                                                          const bool discoverManagedTypes)
     {
         Keire::ManagedBuildRequest request;
         for (const auto& record : database.Records())
@@ -145,11 +157,12 @@ namespace
             request.Assemblies.push_back({record.Id, assembly->Definition()});
         }
         if (request.Assemblies.empty())
-            return false;
-        std::vector<std::string> assemblyNames;
-        assemblyNames.reserve(request.Assemblies.size());
+            return {};
+        ManagedCookBuild result;
+        result.Scripting = true;
+        result.AssemblyNames.reserve(request.Assemblies.size());
         for (const auto& assembly : request.Assemblies)
-            assemblyNames.push_back(assembly.Definition.Name);
+            result.AssemblyNames.push_back(assembly.Definition.Name);
 
         Keire::ScriptSystemSpecification specification;
         specification.Mode = Keire::ScriptMode::Enabled;
@@ -181,32 +194,87 @@ namespace
                                                            : status.Diagnostics.front().Message;
             throw std::runtime_error("Managed gameplay build failed: " + detail);
         }
+        result.AssemblyDirectory = status.ActiveAssemblyDirectory;
+        if (discoverManagedTypes)
+        {
+            Keire::ManagedReloadRequest reload;
+            reload.ManagedApiAssembly = status.ManagedApiAssembly;
+            for (const auto& name : result.AssemblyNames)
+            {
+                const auto assembly = status.ActiveAssemblyDirectory / (name + ".dll");
+                if (!std::filesystem::is_regular_file(assembly))
+                    throw std::runtime_error("Managed gameplay build did not publish " + name + ".dll.");
+                reload.Assemblies.push_back(assembly);
+            }
+            std::ranges::sort(reload.Assemblies);
+            if (!scripts->PrepareReload(std::move(reload)))
+                throw std::runtime_error("Managed gameplay type discovery failed: " +
+                                         scripts->ReloadStatus().Diagnostic);
+            scripts->CommitReload();
+            const auto diagnostics = scripts->ManagedAssetTypeDiagnostics();
+            if (!diagnostics.empty())
+            {
+                throw std::runtime_error("Managed gameplay type discovery rejected '" + diagnostics.front().TypeName +
+                                         "': " + diagnostics.front().Message);
+            }
+            result.AssetTypes = scripts->ManagedAssetTypes();
+        }
+        scripts->Close();
+        return result;
+    }
 
+    void CopyManagedAssemblies(const ManagedCookBuild& build, const std::filesystem::path& output)
+    {
+        if (!build.Scripting)
+            return;
         const auto destination = output / "ManagedAssemblies";
-        const auto staging = output / ".managed-staging";
-        std::error_code error;
-        std::filesystem::remove_all(staging, error);
-        if (error)
-            throw std::filesystem::filesystem_error("Could not clear managed assembly staging.", staging, error);
-        std::filesystem::create_directories(staging);
-        for (const auto& entry : std::filesystem::directory_iterator(status.ActiveAssemblyDirectory))
+        std::filesystem::create_directories(destination);
+        std::size_t copied = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(build.AssemblyDirectory))
         {
             const auto filename = entry.path().filename().string();
             const bool requested = std::ranges::any_of(
-                assemblyNames, [&](const std::string& name)
+                build.AssemblyNames, [&](const std::string& name)
                 { return filename == name + ".dll" || filename == name + ".pdb" || filename == name + ".deps.json"; });
-            if (entry.is_regular_file() && requested)
-                std::filesystem::copy_file(entry.path(), staging / entry.path().filename(),
-                                           std::filesystem::copy_options::overwrite_existing);
+            if (!entry.is_regular_file() || !requested)
+                continue;
+            std::filesystem::copy_file(entry.path(), destination / entry.path().filename(),
+                                       std::filesystem::copy_options::overwrite_existing);
+            ++copied;
         }
-        if (std::filesystem::is_empty(staging))
+        if (copied == 0)
             throw std::runtime_error("Managed gameplay build published no runtime assemblies.");
-        std::filesystem::remove_all(destination, error);
+    }
+
+    void PublishCookOutput(const std::filesystem::path& requestedStaging,
+                           const std::filesystem::path& requestedDestination)
+    {
+        const auto staging = std::filesystem::absolute(requestedStaging).lexically_normal();
+        const auto destination = std::filesystem::absolute(requestedDestination).lexically_normal();
+        if (staging.parent_path() != destination.parent_path() || staging == destination)
+            throw std::invalid_argument("Cook publication staging must be a distinct sibling of its destination.");
+        const auto backup =
+            Keire::Detail::PathWithSuffix(destination, ".previous-" + Keire::AssetId::Generate().ToString());
+        std::error_code error;
+        std::filesystem::remove_all(backup, error);
         if (error)
-            throw std::filesystem::filesystem_error("Could not replace managed assembly output.", destination, error);
-        std::filesystem::rename(staging, destination);
-        scripts->Close();
-        return true;
+            throw std::filesystem::filesystem_error("Could not prepare cooked output backup.", backup, error);
+        const bool hadDestination = std::filesystem::exists(destination);
+        if (hadDestination)
+            Keire::Detail::RenamePathWithRetry(destination, backup);
+        try
+        {
+            Keire::Detail::RenamePathWithRetry(staging, destination);
+        }
+        catch (...)
+        {
+            if (hadDestination && !std::filesystem::exists(destination))
+                Keire::Detail::RenamePathWithRetry(backup, destination);
+            throw;
+        }
+        std::filesystem::remove_all(backup, error);
+        if (error)
+            throw std::filesystem::filesystem_error("Could not remove previous cooked output.", backup, error);
     }
 
     void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output, const bool scripting)
@@ -215,12 +283,22 @@ namespace
         if (!descriptor.StartupScene)
             throw std::runtime_error("Runtime cooking requires a configured startup scene.");
         const auto rendering = Keire::LoadRenderEnvironmentSettings(project.Root());
+        const auto authoring = Keire::LoadProjectAuthoringSettings(project.Root());
         const auto& build = Keire::GetBuildInfo();
+        nlohmann::json physicsLayerNames = nlohmann::json::array();
+        nlohmann::json physicsCollisionMatrix = nlohmann::json::array();
+        for (std::size_t index = 0; index < Keire::PhysicsCollisionLayerCount; ++index)
+        {
+            physicsLayerNames.push_back(authoring.PhysicsLayerNames[index]);
+            physicsCollisionMatrix.push_back(authoring.PhysicsCollisionMatrix[index]);
+        }
         nlohmann::json manifest{
-            {"schemaVersion", 2},
+            {"schemaVersion", 3},
             {"startupScene", descriptor.StartupScene.ToString()},
             {"defaultInput",
              descriptor.DefaultInput ? nlohmann::json(descriptor.DefaultInput.ToString()) : nlohmann::json(nullptr)},
+            {"defaultMixer",
+             authoring.DefaultMixer ? nlohmann::json(authoring.DefaultMixer.ToString()) : nlohmann::json(nullptr)},
             {"buildIdentity",
              {{"engineVersion", build.Version},
               {"configuration", build.Configuration},
@@ -229,6 +307,8 @@ namespace
             {"managedAssemblyRoots",
              scripting ? nlohmann::json::array({"ManagedAssemblies"}) : nlohmann::json::array()},
             {"subsystems", {{"scripting", scripting}, {"physics", true}, {"audio", true}, {"navigation", true}}},
+            {"physics",
+             {{"layerNames", std::move(physicsLayerNames)}, {"collisionMatrix", std::move(physicsCollisionMatrix)}}},
             {"streaming", {{"pageBytes", 262144}, {"maximumConcurrentReads", 8}}},
             {"rendering",
              {{"ambientColor",
@@ -301,15 +381,7 @@ namespace
 
             const auto project = Keire::Project::Open(commandLine.Project);
             Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
-            databaseSpecification.Importers = {Keire::CreateTextAssetImporter(),
-                                               Keire::CreateInputActionAssetImporter(),
-                                               Keire::CreateSceneAssetImporter(),
-                                               Keire::CreatePrefabAssetImporter(),
-                                               Keire::CreateManagedAssemblyAssetImporter(),
-                                               Keire::CreateShaderAssetImporter(),
-                                               Keire::CreateMaterialAssetImporter(),
-                                               Keire::CreateMeshAssetImporter(),
-                                               Keire::CreateTexture2DAssetImporter()};
+            databaseSpecification.Importers = Keire::CreateBuiltinAssetImporters();
             auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             if (commandLine.Command == "scan")
             {
@@ -327,15 +399,48 @@ namespace
                 commandLine.Profile.Roots = {project->Descriptor().StartupScene};
                 if (project->Descriptor().DefaultInput)
                     commandLine.Profile.Roots.push_back(project->Descriptor().DefaultInput);
+                const auto authoring = Keire::LoadProjectAuthoringSettings(project->Root());
+                if (authoring.DefaultMixer)
+                    commandLine.Profile.Roots.push_back(authoring.DefaultMixer);
                 auto output = commandLine.Output;
                 if (output.is_relative())
                     output = commandLine.Project / output;
-                const auto result = Keire::AssetCooker::Cook(*database, commandLine.Profile, output);
-                Keire::AssetCooker::Validate(result.CatalogPath);
-                const auto scripting = BuildManagedAssemblies(
-                    *database, *project, result.CatalogPath.parent_path(), commandLine.Profile.Name,
-                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])));
-                WriteRuntimeManifest(*project, result.CatalogPath.parent_path(), scripting);
+                output = std::filesystem::absolute(output).lexically_normal();
+                const bool containsManagedData =
+                    std::ranges::any_of(database->Records(), [](const Keire::AssetSourceRecord& record)
+                                        { return record.Type == Keire::ManagedDataAsset::StaticType(); });
+                const auto managed =
+                    BuildManagedAssemblies(*database, *project, commandLine.Profile.Name,
+                                           std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])),
+                                           commandLine.Profile.Strict && containsManagedData);
+                if (commandLine.Profile.Strict && containsManagedData)
+                {
+                    commandLine.Profile.ManagedTypeDiscoveryComplete = true;
+                    commandLine.Profile.ManagedTypeCatalog = Keire::EncodeManagedAssetTypeCatalog(managed.AssetTypes);
+                }
+
+                const auto staging =
+                    Keire::Detail::PathWithSuffix(output, ".runtime-staging-" + Keire::AssetId::Generate().ToString());
+                std::error_code cleanupError;
+                std::filesystem::remove_all(staging, cleanupError);
+                if (cleanupError)
+                    throw std::filesystem::filesystem_error("Could not prepare runtime cook staging.", staging,
+                                                            cleanupError);
+                Keire::AssetCookResult result;
+                try
+                {
+                    result = Keire::AssetCooker::Cook(*database, commandLine.Profile, staging);
+                    Keire::AssetCooker::Validate(result.CatalogPath);
+                    CopyManagedAssemblies(managed, staging);
+                    WriteRuntimeManifest(*project, staging, managed.Scripting);
+                    PublishCookOutput(staging, output);
+                }
+                catch (...)
+                {
+                    std::filesystem::remove_all(staging, cleanupError);
+                    throw;
+                }
+                result.CatalogPath = output / "catalog.json";
                 std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
                           << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
             }

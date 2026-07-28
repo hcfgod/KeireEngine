@@ -150,28 +150,31 @@ bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::ManagedAudioPlayback& p
         auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(playback.Entity)) : Keire::Entity{};
         if (!sourceEntity || !presentation || !playback.Clip)
             return false;
+        Keire::AudioSourceComponentState candidate{
+            .Clip = playback.Clip,
+            .Mixer = playback.Mixer,
+            .BusId = playback.BusId,
+            .Bus = playback.Bus,
+            .Gain = playback.Gain,
+            .Pitch = playback.Pitch,
+            .Priority = playback.Priority,
+            .MinimumDistance = playback.MinimumDistance,
+            .MaximumDistance = playback.MaximumDistance,
+            .Attenuation = playback.Attenuation,
+            .Loop = playback.Loop,
+            .Spatial = playback.Spatial,
+            .PlayOnAwake = true,
+        };
+        Keire::AudioSourceComponent::ValidateState(candidate);
+
         auto source = sourceEntity.GetComponent<Keire::AudioSourceComponent>();
         if (!source)
             source = sourceEntity.AddComponent<Keire::AudioSourceComponent>();
+        source->ApplyState(std::move(candidate));
+
+        // Commit the component before replacing its voice. A newly added source may not be tracked until the next
+        // presentation synchronization, so PlayOnAwake remains the reliable deferred-play fallback.
         (void)presentation->Stop(sourceEntity.Id());
-        source->SetClip(playback.Clip);
-        source->SetBus(playback.Bus);
-        source->SetGain(playback.Gain);
-        source->SetPitch(playback.Pitch);
-        source->SetPriority(playback.Priority);
-        source->SetLoop(playback.Loop);
-        source->SetSpatial(playback.Spatial);
-        if (playback.MaximumDistance > source->MinimumDistance())
-        {
-            source->SetMaximumDistance(playback.MaximumDistance);
-            source->SetMinimumDistance(playback.MinimumDistance);
-        }
-        else
-        {
-            source->SetMinimumDistance(playback.MinimumDistance);
-            source->SetMaximumDistance(playback.MaximumDistance);
-        }
-        source->SetPlayOnAwake(true);
         (void)presentation->Play(sourceEntity.Id());
         return true;
     }
@@ -236,89 +239,24 @@ bool EditorWorkspaceLayer::ConsumeManagedUiClick(const Keire::AssetId entity) no
     }
 }
 
-void EditorWorkspaceLayer::ResetManagedPhysicsWorld() noexcept
-{
-    if (m_ManagedPhysicsWorld)
-        m_ManagedPhysicsWorld->Close();
-    m_ManagedPhysicsWorld.Reset();
-    m_ManagedPhysicsScene.Reset();
-    m_ManagedPhysicsEntities.clear();
-    m_ManagedPhysicsObjectCount = 0;
-}
-
-void EditorWorkspaceLayer::RebuildManagedPhysicsWorld()
-{
-    ResetManagedPhysicsWorld();
-    const auto physics = Owner().Physics();
-    const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-    if (!physics || !scene || !scene->IsOpen())
-        return;
-
-    m_ManagedPhysicsWorld = physics->CreateWorld();
-    m_ManagedPhysicsScene = scene;
-    m_ManagedPhysicsObjectCount = scene->ObjectCount();
-    for (const auto& entity : scene->Query<Keire::ColliderComponent>())
-    {
-        const auto collider = entity.GetComponent<Keire::ColliderComponent>();
-        const auto transform = entity.GetComponent<Keire::TransformComponent>();
-        if (!collider || !transform)
-            continue;
-        const auto rigidBody = entity.GetComponent<Keire::RigidBodyComponent>();
-        const auto scale = transform->LocalScale();
-        const Keire::Vector3 absoluteScale{std::abs(scale.X), std::abs(scale.Y), std::abs(scale.Z)};
-        Keire::PhysicsBodyDefinition definition;
-        definition.Motion = rigidBody ? rigidBody->Motion() : Keire::PhysicsMotionType::Static;
-        definition.Shape = collider->Shape();
-        const auto worldPosition = transform->WorldPosition();
-        const auto colliderCenter = collider->Center();
-        definition.Position = {
-            worldPosition.X + colliderCenter.X,
-            worldPosition.Y + colliderCenter.Y,
-            worldPosition.Z + colliderCenter.Z,
-        };
-        definition.Rotation = transform->LocalRotation();
-        definition.LinearVelocity = rigidBody ? rigidBody->LinearVelocity() : Keire::Vector3{};
-        definition.HalfExtent = {collider->HalfExtent().X * absoluteScale.X, collider->HalfExtent().Y * absoluteScale.Y,
-                                 collider->HalfExtent().Z * absoluteScale.Z};
-        definition.Radius = collider->Radius() * std::max({absoluteScale.X, absoluteScale.Y, absoluteScale.Z});
-        definition.Height = collider->Height() * absoluteScale.Y;
-        definition.Mass = rigidBody ? rigidBody->Mass() : 1.0F;
-        definition.Layer = collider->Layer();
-        definition.Mask = collider->Mask();
-        definition.Trigger = collider->Trigger();
-        definition.Continuous = rigidBody && rigidBody->Continuous();
-        const auto body = m_ManagedPhysicsWorld->CreateBody(definition);
-        m_ManagedPhysicsEntities.emplace_back(body, entity.Id().Value());
-    }
-}
-
 std::optional<Keire::ManagedRaycastHit>
 EditorWorkspaceLayer::RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept
 {
     try
     {
-        const auto scene = m_SceneDocument ? m_SceneDocument->ActiveScene() : Keire::Ref<Keire::Scene>{};
-        if (!scene || !m_SceneDocument->PlaySession())
+        const auto play = m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        if (!play)
             return std::nullopt;
-        if (!m_ManagedPhysicsWorld || m_ManagedPhysicsScene != scene ||
-            m_ManagedPhysicsObjectCount != scene->ObjectCount())
+        const auto hits = play->RayCast({.Origin = query.Origin,
+                                         .Direction = query.Direction,
+                                         .MaximumDistance = query.MaximumDistance,
+                                         .Mask = query.Mask,
+                                         .IncludeTriggers = query.IncludeTriggers},
+                                        Keire::EntityId(query.IgnoredEntity));
+        if (!hits.empty())
         {
-            RebuildManagedPhysicsWorld();
-        }
-        if (!m_ManagedPhysicsWorld)
-            return std::nullopt;
-        const auto hits = m_ManagedPhysicsWorld->RayCast({.Origin = query.Origin,
-                                                          .Direction = query.Direction,
-                                                          .MaximumDistance = query.MaximumDistance,
-                                                          .Mask = query.Mask,
-                                                          .IncludeTriggers = query.IncludeTriggers});
-        for (const auto& hit : hits)
-        {
-            const auto mapping = std::ranges::find(m_ManagedPhysicsEntities, hit.Body,
-                                                   &decltype(m_ManagedPhysicsEntities)::value_type::first);
-            if (mapping == m_ManagedPhysicsEntities.end() || mapping->second == query.IgnoredEntity)
-                continue;
-            return Keire::ManagedRaycastHit{mapping->second, hit.Position, hit.Normal, hit.Distance};
+            const auto& hit = hits.front();
+            return Keire::ManagedRaycastHit{hit.Entity.Value(), hit.Hit.Position, hit.Hit.Normal, hit.Hit.Distance};
         }
     }
     catch (...)

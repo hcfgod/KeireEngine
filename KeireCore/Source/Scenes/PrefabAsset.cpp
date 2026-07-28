@@ -52,6 +52,31 @@ namespace Keire
                         }
                         return listeners;
                     }
+                    else if constexpr (std::same_as<T, Curve1D>)
+                    {
+                        Json keys = Json::array();
+                        for (const auto& key : current.Keys())
+                        {
+                            keys.push_back({{"time", key.Time},
+                                            {"value", key.Value},
+                                            {"inTangent", key.InTangent},
+                                            {"outTangent", key.OutTangent},
+                                            {"interpolation", static_cast<std::uint8_t>(key.Interpolation)}});
+                        }
+                        return keys;
+                    }
+                    else if constexpr (std::same_as<T, ColorGradient>)
+                    {
+                        Json keys = Json::array();
+                        for (const auto& key : current.Keys())
+                        {
+                            keys.push_back(
+                                {{"time", key.Time},
+                                 {"color", {key.Value.Red, key.Value.Green, key.Value.Blue, key.Value.Alpha}}});
+                        }
+                        return Json{{"interpolation", static_cast<std::uint8_t>(current.Interpolation())},
+                                    {"keys", std::move(keys)}};
+                    }
                     else
                         return Json(current);
                 },

@@ -4,6 +4,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/Ref.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
+#include "Keire/Scripting/ManagedDataAsset.h"
 
 #include <chrono>
 #include <compare>
@@ -72,6 +73,9 @@ namespace Keire
         bool Spatial = true;
         float MinimumDistance = 1.0F;
         float MaximumDistance = 100.0F;
+        AssetId Mixer;
+        AssetId BusId;
+        Curve1D Attenuation = Curve1D::Constant(1.0F);
     };
 
     class KEIRE_API IScriptRuntimeServices
@@ -154,6 +158,8 @@ namespace Keire
         ManagedReloadPolicy ReloadPolicy = ManagedReloadPolicy::PreserveState;
         ManagedExceptionPolicy ExceptionPolicy = ManagedExceptionPolicy::DisableInstance;
         std::uint32_t ManagedApiVersion = 1;
+        std::size_t MaximumManagedDataAssets = 4096;
+        std::size_t MaximumManagedDataLoads = 64;
         IScriptRuntimeServices* RuntimeServices = nullptr;
     };
 
@@ -267,12 +273,50 @@ namespace Keire
         std::string Diagnostic;
     };
 
+    enum class ManagedBehaviourCallback : std::uint8_t
+    {
+        Awake,
+        Enable,
+        Start,
+        FixedUpdate,
+        Update,
+        LateUpdate,
+        AnimationEvent,
+        PhysicsContact,
+        Disable,
+        Destroy,
+        BeforeReload,
+        AfterReload
+    };
+
+    struct ManagedCallbackMetric
+    {
+        std::string TypeName;
+        ManagedBehaviourCallback Callback = ManagedBehaviourCallback::Update;
+        std::size_t InstanceCount = 0;
+        std::uint64_t Invocations = 0;
+        std::uint64_t SkippedInvocations = 0;
+        double Milliseconds = 0.0;
+        double MaximumMilliseconds = 0.0;
+    };
+
+    struct ManagedCallbackMetrics
+    {
+        std::vector<ManagedCallbackMetric> Entries;
+        bool Truncated = false;
+    };
+
     struct ManagedRuntimeMetrics
     {
         std::uint64_t Generation = 0;
         std::size_t ActiveInstances = 0;
         std::size_t FaultedInstances = 0;
         std::size_t Diagnostics = 0;
+        std::uint64_t CallbackInvocations = 0;
+        std::uint64_t SkippedCallbacks = 0;
+        std::uint64_t ManagedInteropCalls = 0;
+        double CallbackMilliseconds = 0.0;
+        double MaximumCallbackMilliseconds = 0.0;
     };
 
     struct ManagedBehaviourTypeDescriptor
@@ -283,18 +327,11 @@ namespace Keire
         std::int32_t ExecutionOrder = 0;
     };
 
-    enum class ManagedBehaviourCallback : std::uint8_t
+    struct ManagedAssetTypeDiagnostic
     {
-        Awake,
-        Enable,
-        Start,
-        FixedUpdate,
-        Update,
-        LateUpdate,
-        Disable,
-        Destroy,
-        BeforeReload,
-        AfterReload
+        std::string TypeName;
+        std::string Message;
+        auto operator<=>(const ManagedAssetTypeDiagnostic&) const = default;
     };
 
     class KEIRE_API ManagedBehaviourInstanceId final
@@ -342,6 +379,8 @@ namespace Keire
         void CancelReload();
         [[nodiscard]] ManagedReloadStatus ReloadStatus() const;
         [[nodiscard]] std::vector<ManagedBehaviourTypeDescriptor> BehaviourTypes() const;
+        [[nodiscard]] std::vector<ManagedAssetTypeDescriptor> ManagedAssetTypes() const;
+        [[nodiscard]] std::vector<ManagedAssetTypeDiagnostic> ManagedAssetTypeDiagnostics() const;
         [[nodiscard]] ManagedBehaviourInstanceId CreateBehaviour(std::string typeName, std::uint64_t world,
                                                                  AssetId entity);
         void InvokeBehaviour(ManagedBehaviourInstanceId instance, ManagedBehaviourCallback callback,
@@ -349,9 +388,12 @@ namespace Keire
         [[nodiscard]] bool DestroyBehaviour(ManagedBehaviourInstanceId instance);
         [[nodiscard]] std::vector<ManagedRuntimeDiagnostic> RuntimeDiagnostics() const;
         [[nodiscard]] ManagedRuntimeMetrics Metrics() const;
+        [[nodiscard]] ManagedCallbackMetrics CallbackMetrics() const;
         [[nodiscard]] bool RetryBehaviour(ManagedBehaviourInstanceId instance);
         [[nodiscard]] bool SetBehaviourEnabled(ManagedBehaviourInstanceId instance, bool enabled);
         void InstallManagedComponents(Ref<ComponentRegistry> registry);
+        void SetAssetSystem(Ref<AssetSystem> assets);
+        void PumpManagedAssets();
         void SetRuntimeServices(IScriptRuntimeServices* services);
         void Close();
 

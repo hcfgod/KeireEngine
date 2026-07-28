@@ -34,7 +34,9 @@ namespace
         std::filesystem::path ContentRoot;
         Keire::AssetId StartupScene;
         Keire::AssetId DefaultInput;
+        Keire::AssetId DefaultMixer;
         Keire::RenderEnvironmentSettings Rendering;
+        std::array<std::uint32_t, Keire::PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
         std::vector<std::filesystem::path> ManagedAssemblyRoots;
         bool Scripting = false;
         bool Physics = false;
@@ -82,17 +84,19 @@ namespace
         if (!stream || !source.is_object())
             throw Keire::CommandLineError("Cooked content has no valid runtime-manifest.json.");
         const auto schema = source.value("schemaVersion", 0U);
-        if (schema < 2)
+        if (schema < 3)
             throw Keire::CommandLineError(
                 "Cooked runtime manifest schema is obsolete; recook the project with this Kéire version.");
-        if (schema > 2)
+        if (schema > 3)
             throw Keire::CommandLineError(
-                "Cooked runtime manifest requires a newer Kéire runtime (supported schema: 2).");
+                "Cooked runtime manifest requires a newer Kéire runtime (supported schema: 3).");
         RuntimeManifest result;
         result.ContentRoot = std::filesystem::absolute(content).lexically_normal();
         result.StartupScene = Keire::AssetId::Parse(source.at("startupScene").get<std::string>());
         if (source.contains("defaultInput") && !source.at("defaultInput").is_null())
             result.DefaultInput = Keire::AssetId::Parse(source.at("defaultInput").get<std::string>());
+        if (source.contains("defaultMixer") && !source.at("defaultMixer").is_null())
+            result.DefaultMixer = Keire::AssetId::Parse(source.at("defaultMixer").get<std::string>());
         const auto& rendering = source.at("rendering");
         const auto& ambient = rendering.at("ambientColor");
         if (!ambient.is_array() || ambient.size() != 4)
@@ -106,6 +110,30 @@ namespace
         result.Physics = subsystems.at("physics").get<bool>();
         result.Audio = subsystems.at("audio").get<bool>();
         result.Navigation = subsystems.at("navigation").get<bool>();
+        const auto& physics = source.at("physics");
+        const auto& layerNames = physics.at("layerNames");
+        const auto& collisionMatrix = physics.at("collisionMatrix");
+        if (!layerNames.is_array() || layerNames.size() != Keire::PhysicsCollisionLayerCount ||
+            !collisionMatrix.is_array() || collisionMatrix.size() != Keire::PhysicsCollisionLayerCount)
+        {
+            throw Keire::CommandLineError("Runtime physics settings must define exactly 32 collision layers.");
+        }
+        auto physicsSettings = Keire::DefaultProjectAuthoringSettings();
+        physicsSettings.DefaultMixer = result.DefaultMixer;
+        for (std::size_t index = 0; index < Keire::PhysicsCollisionLayerCount; ++index)
+        {
+            physicsSettings.PhysicsLayerNames[index] = layerNames[index].get<std::string>();
+            physicsSettings.PhysicsCollisionMatrix[index] = collisionMatrix[index].get<std::uint32_t>();
+        }
+        try
+        {
+            Keire::ValidateProjectAuthoringSettings(physicsSettings);
+        }
+        catch (const std::exception& error)
+        {
+            throw Keire::CommandLineError(std::string("Runtime physics settings are invalid: ") + error.what());
+        }
+        result.PhysicsCollisionMatrix = physicsSettings.PhysicsCollisionMatrix;
         for (const auto& root : source.at("managedAssemblyRoots"))
         {
             const auto path = std::filesystem::path(root.get<std::string>()).lexically_normal();
@@ -172,7 +200,6 @@ namespace
             surface.Width = std::max(pixels.Width, 1U);
             surface.Height = std::max(pixels.Height, 1U);
             m_View = Owner().Renderer()->CreateView(surface);
-            m_Presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(Owner().Assets(), Owner().Audio());
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(this);
             if (m_DefaultInput)
@@ -196,38 +223,46 @@ namespace
                 scripts->SetRuntimeServices(nullptr);
             if (m_Presentation)
                 m_Presentation->Clear();
-            if (m_Playing && m_Scene)
-                m_Scene->EndPlay();
+            if (m_Runtime)
+                m_Runtime->Stop();
+            m_Runtime.Reset();
+            m_Presentation.Reset();
+            m_Scene.Reset();
         }
 
         void OnFixedUpdate(const Keire::Time& time) override
         {
-            if (m_Playing && m_Scene)
-                m_Scene->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
+            if (m_Runtime)
+                m_Runtime->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
         }
 
         void OnUpdate(const Keire::Time& time) override
         {
             m_DeltaTime = static_cast<float>(time.DeltaTime().Seconds());
-            if (!m_Scene)
+            if (!m_Runtime)
             {
                 if (m_Load->State() == Keire::SceneLoadState::Failed)
                     throw std::runtime_error("Startup scene load failed: " + m_Load->Diagnostic().Message);
                 if (m_Load->State() != Keire::SceneLoadState::Ready)
                     return;
-                m_Scene = m_Load->Result();
-                m_Scene->BeginPlay();
-                m_Playing = true;
+                m_Runtime = Keire::CreateRef<Keire::SceneRuntimeSession>(m_Load->Result(), Owner().Assets(),
+                                                                         Owner().Audio(), Owner().Physics());
+                m_Runtime->Play();
+                if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
+                    throw std::runtime_error("Startup scene Play failed: " + m_Runtime->Diagnostic().Message);
+                m_Scene = m_Runtime->RuntimeScene();
+                m_Presentation = m_Runtime->Presentation();
             }
-            m_Scene->Update(static_cast<float>(time.DeltaTime().Seconds()));
-            const auto selected = SelectCamera(m_Scene);
-            if (!selected)
-                throw std::runtime_error("The startup scene has no active camera.");
             const auto pixels = Owner().MainWindow()->PixelSize();
             const auto width = std::max(pixels.Width, 1U);
             const auto height = std::max(pixels.Height, 1U);
-            if (m_Presentation)
-                m_Presentation->Synchronize(m_Scene, static_cast<float>(width), static_cast<float>(height), true);
+            m_Runtime->SetPresentationViewport(static_cast<float>(width), static_cast<float>(height));
+            m_Runtime->Update(static_cast<float>(time.DeltaTime().Seconds()));
+            if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
+                throw std::runtime_error("Startup scene runtime failed: " + m_Runtime->Diagnostic().Message);
+            const auto selected = SelectCamera(m_Scene);
+            if (!selected)
+                throw std::runtime_error("The startup scene has no active camera.");
             m_View->Surface()->RequestSize(width, height);
             Keire::RenderCamera camera;
             camera.View = Keire::Math::Inverse(selected->Transform->WorldMatrix());
@@ -240,7 +275,10 @@ namespace
             auto environment = m_Rendering;
             environment.SkyVisible =
                 environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            Keire::SceneRenderRequest renderRequest{m_Scene, m_View, false, environment};
+            if (const auto vfx = m_Runtime->Vfx())
+                renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+            Owner().Renderer()->Submit(std::move(renderRequest));
             if (m_MaximumFrames != 0 && ++m_RenderedFrames >= m_MaximumFrames)
                 Owner().RequestExit();
         }
@@ -329,20 +367,70 @@ namespace
             }
         }
 
-        [[nodiscard]] bool PlayManagedAudio(const Keire::AssetId entity, const Keire::AssetId clip,
-                                            const float gain) noexcept override
+        [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
+        RaycastManaged(const Keire::ManagedRaycastQuery& query) noexcept override
         {
             try
             {
-                auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
-                if (!target || !m_Presentation || !clip || !std::isfinite(gain) || gain < 0.0F)
+                if (!m_Runtime)
+                    return std::nullopt;
+                Keire::PhysicsRayQuery native;
+                native.Origin = query.Origin;
+                native.Direction = query.Direction;
+                native.MaximumDistance = query.MaximumDistance;
+                native.Mask = query.Mask;
+                native.IncludeTriggers = query.IncludeTriggers;
+                const auto hits = m_Runtime->RayCast(native, Keire::EntityId(query.IgnoredEntity));
+                if (hits.empty())
+                    return std::nullopt;
+                const auto& hit = hits.front();
+                return Keire::ManagedRaycastHit{hit.Entity.Value(), hit.Hit.Position, hit.Hit.Normal, hit.Hit.Distance};
+            }
+            catch (...)
+            {
+                return std::nullopt;
+            }
+        }
+
+        [[nodiscard]] bool PlayManagedAudio(const Keire::AssetId entity, const Keire::AssetId clip,
+                                            const float gain) noexcept override
+        {
+            return PlayManagedAudio({.Entity = entity, .Clip = clip, .Gain = gain});
+        }
+
+        [[nodiscard]] bool PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept override
+        {
+            try
+            {
+                auto target = m_Scene ? m_Scene->FindEntity(Keire::EntityId(playback.Entity)) : Keire::Entity{};
+                if (!target || !m_Presentation || !playback.Clip)
                     return false;
+                Keire::AudioSourceComponentState candidate{
+                    .Clip = playback.Clip,
+                    .Mixer = playback.Mixer,
+                    .BusId = playback.BusId,
+                    .Bus = playback.Bus,
+                    .Gain = playback.Gain,
+                    .Pitch = playback.Pitch,
+                    .Priority = playback.Priority,
+                    .MinimumDistance = playback.MinimumDistance,
+                    .MaximumDistance = playback.MaximumDistance,
+                    .Attenuation = playback.Attenuation,
+                    .Loop = playback.Loop,
+                    .Spatial = playback.Spatial,
+                    .PlayOnAwake = true,
+                };
+                Keire::AudioSourceComponent::ValidateState(candidate);
+
                 auto source = target.GetComponent<Keire::AudioSourceComponent>();
                 if (!source)
                     source = target.AddComponent<Keire::AudioSourceComponent>();
-                source->SetClip(clip);
-                source->SetGain(gain);
-                source->SetPlayOnAwake(true);
+                source->ApplyState(std::move(candidate));
+
+                // Commit the component before replacing its voice. A newly added source may not be tracked until the
+                // next presentation synchronization, so PlayOnAwake remains the reliable deferred-play fallback.
+                (void)m_Presentation->Stop(target.Id());
+                (void)m_Presentation->Play(target.Id());
                 return true;
             }
             catch (...)
@@ -405,13 +493,13 @@ namespace
         std::uint32_t m_MaximumFrames = 0;
         std::uint32_t m_RenderedFrames = 0;
         Keire::Ref<Keire::SceneLoadOperation> m_Load;
+        Keire::Ref<Keire::SceneRuntimeSession> m_Runtime;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         Keire::Ref<Keire::ScenePresentationRuntime> m_Presentation;
         Keire::InputUserId m_InputUser;
         Keire::Ref<Keire::InputActionContext> m_InputContext;
         float m_DeltaTime = 0.0F;
-        bool m_Playing = false;
     };
 
     class RuntimeApplication final : public Keire::Application
@@ -497,7 +585,10 @@ namespace Keire
                 "Managed" / "Keire.Managed.dll";
         }
         if (manifest.Physics || manifest.Navigation)
+        {
             specification.Physics.Mode = PhysicsMode::Enabled;
+            specification.Physics.CollisionMatrix = manifest.PhysicsCollisionMatrix;
+        }
         if (manifest.Audio)
             specification.Audio.Mode = commandLine.Frames == 0 ? AudioMode::Enabled : AudioMode::Headless;
         if (manifest.Navigation)

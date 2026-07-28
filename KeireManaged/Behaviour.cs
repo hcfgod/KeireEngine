@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 
 namespace Keire;
 
@@ -68,6 +69,13 @@ public abstract class Behaviour
     [NonSerialized, HideInInspector]
     public string RuntimeStateWarnings = string.Empty;
 
+    [NonSerialized, HideInInspector]
+    public uint RuntimeCallbackMask;
+
+    private const uint FixedUpdateCallback = 1U << 0;
+    private const uint UpdateCallback = 1U << 1;
+    private const uint LateUpdateCallback = 1U << 2;
+
     protected virtual void Awake() { }
     protected virtual void OnEnable() { }
     protected virtual void Start() { }
@@ -91,7 +99,29 @@ public abstract class Behaviour
     {
         Entity = entity;
         _synchronizationContext = new BehaviourSynchronizationContext();
+        RuntimeCallbackMask = DetectRuntimeCallbacks();
         BehaviourRegistry.Register(this);
+    }
+
+    private uint DetectRuntimeCallbacks()
+    {
+        var result = 0U;
+        for (var type = GetType(); type is not null && type != typeof(Behaviour); type = type.BaseType)
+        {
+            foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.NonPublic |
+                                                   BindingFlags.DeclaredOnly))
+            {
+                if (method.GetParameters().Length != 0)
+                    continue;
+                if (method.Name == nameof(FixedUpdate))
+                    result |= FixedUpdateCallback;
+                else if (method.Name == nameof(Update))
+                    result |= UpdateCallback;
+                else if (method.Name == nameof(LateUpdate))
+                    result |= LateUpdateCallback;
+            }
+        }
+        return result;
     }
 
     private void InvokeWithContext(Action callback, bool pump = false)
@@ -113,6 +143,7 @@ public abstract class Behaviour
     // Coral enters through these non-virtual methods so gameplay callbacks retain their protected override surface.
     public void RuntimeAttach(ulong world, ulong entityHigh, ulong entityLow) =>
         Attach(new Entity(world, new EntityId(entityHigh, entityLow)));
+    public uint RuntimeGetCallbackMask() => RuntimeCallbackMask;
     public void RuntimeAwake() => InvokeWithContext(Awake);
     public void RuntimeEnable()
     {
@@ -125,9 +156,37 @@ public abstract class Behaviour
     public void RuntimeUpdate(float deltaSeconds)
     {
         UiButton.DispatchNativeClicks();
-        InvokeWithContext(Update, true);
+        if ((RuntimeCallbackMask & UpdateCallback) != 0)
+            InvokeWithContext(Update, true);
     }
     public void RuntimeLateUpdate() => InvokeWithContext(LateUpdate, true);
+    public void RuntimeAnimationEvent(string name, float normalizedTime, int integer, float scalar, string text) =>
+        InvokeWithContext(() => OnAnimationEvent(new AnimationEvent(name, normalizedTime, integer, scalar, text)),
+            true);
+    public void RuntimePhysicsContact(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point,
+                                      Vector3 normal, float impulse)
+    {
+        var contact = new CollisionContact(new Entity(Entity.World, new EntityId(otherHigh, otherLow)), point, normal,
+                                           impulse, trigger != 0);
+        InvokeWithContext(() =>
+        {
+            if (trigger != 0)
+            {
+                if (phase == 0)
+                    OnTriggerEnter(contact);
+                else if (phase == 1)
+                    OnTriggerStay(contact);
+                else
+                    OnTriggerExit(contact);
+            }
+            else if (phase == 0)
+                OnCollisionEnter(contact);
+            else if (phase == 1)
+                OnCollisionStay(contact);
+            else
+                OnCollisionExit(contact);
+        }, true);
+    }
     public void RuntimeDisable()
     {
         _synchronizationContext.Cancel();

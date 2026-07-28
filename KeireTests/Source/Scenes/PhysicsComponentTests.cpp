@@ -28,6 +28,10 @@ TEST_CASE("collider registration round trips production query settings")
     collider.SetLayer(8);
     collider.SetMask(0x00FF00FFU);
     collider.SetTrigger(true);
+    const auto collisionMesh = Keire::AssetId::Parse("0f9b5088-1332-4c50-b4fb-8aa574633f21");
+    const auto physicsMaterial = Keire::AssetId::Parse("ce4ad487-8d66-4dd2-895f-bec0c60be731");
+    collider.SetCollisionMesh(collisionMesh);
+    collider.SetPhysicsMaterial(physicsMaterial);
 
     const auto values = registration->Serialize(*source);
     const auto target = registration->Factory();
@@ -40,4 +44,33 @@ TEST_CASE("collider registration round trips production query settings")
     CHECK(restored.Layer() == 8);
     CHECK(restored.Mask() == 0x00FF00FFU);
     CHECK(restored.Trigger());
+    CHECK(restored.CollisionMesh() == collisionMesh);
+    CHECK(restored.PhysicsMaterial() == physicsMaterial);
+    CHECK(registration->SchemaVersion == 2);
+
+    auto legacy = values;
+    legacy.erase("collisionMesh");
+    legacy.erase("physicsMaterial");
+    REQUIRE(registration->Migrate);
+    const auto migrated = registration->Migrate(legacy, 1);
+    const auto migratedTarget = registration->Factory();
+    registration->Deserialize(*migratedTarget, migrated, registration->SchemaVersion);
+    const auto& migratedCollider = dynamic_cast<const Keire::ColliderComponent&>(*migratedTarget);
+    CHECK_FALSE(migratedCollider.CollisionMesh());
+    CHECK_FALSE(migratedCollider.PhysicsMaterial());
+    CHECK_THROWS_AS(collider.SetLayer(3), std::invalid_argument);
+}
+
+TEST_CASE("rigid body registration retains gravity authoring")
+{
+    const auto registry = Keire::ComponentRegistry::CreateDefault();
+    const auto registration = registry->Find(Keire::RigidBodyComponent::StaticType());
+    REQUIRE(registration.has_value());
+    const auto source = registration->Factory();
+    auto& body = dynamic_cast<Keire::RigidBodyComponent&>(*source);
+    body.SetUseGravity(false);
+
+    const auto target = registration->Factory();
+    registration->Deserialize(*target, registration->Serialize(*source), registration->SchemaVersion);
+    CHECK_FALSE(dynamic_cast<const Keire::RigidBodyComponent&>(*target).UseGravity());
 }

@@ -2,11 +2,16 @@
 
 #include <chrono>
 
+#include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
+#include "KeireClient/Editor/AnimatorControllerDocument.h"
+#include "KeireClient/Editor/AnimatorControllerPanel.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
+#include "KeireClient/Editor/AudioMixerDocument.h"
+#include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
@@ -23,6 +28,8 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
+#include "KeireClient/Editor/VfxEffectDocument.h"
+#include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
@@ -417,6 +424,22 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
       m_SceneDocument(std::make_unique<KeireEditor::SceneDocument>()),
       m_InputActionsDocument(std::make_unique<KeireEditor::InputActionsDocument>()),
+      m_AnimatorControllerDocument(std::make_unique<KeireEditor::AnimatorControllerDocument>()),
+      m_AudioMixerDocument(
+          std::make_unique<KeireEditor::AudioMixerDocument>(KeireEditor::AudioMixerDocumentSpecification{
+              .Preview = [this](const Keire::AssetId asset, const Keire::AudioMixerDefinition& definition)
+              { PreviewAudioMixer(asset, definition); },
+              .StopPreview = [this](const Keire::AssetId) { StopAudioMixerPreview(); },
+              .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
+              { PersistAudioMixer(asset, bytes); },
+          })),
+      m_VfxEffectDocument(std::make_unique<KeireEditor::VfxEffectDocument>(KeireEditor::VfxEffectDocumentSpecification{
+          .Preview = [this](const Keire::AssetId asset, const Keire::VfxEffectDefinition& definition)
+          { PreviewVfxEffect(asset, definition); },
+          .StopPreview = [this](const Keire::AssetId) { StopVfxEffectPreview(); },
+          .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
+          { PersistVfxEffect(asset, bytes); },
+      })),
       m_ProjectSettingsDocument(std::make_unique<KeireEditor::ProjectSettingsDocument>()),
       m_MaterialDocument(std::make_unique<KeireEditor::MaterialDocument>()),
       m_CommandRouter(std::make_unique<KeireEditor::EditorCommandRouter>()),
@@ -428,6 +451,14 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           std::make_unique<KeireEditor::InspectorPanel>(static_cast<KeireEditor::IInspectorController&>(*this))),
       m_InputActionsPanel(
           std::make_unique<KeireEditor::InputActionsPanel>(static_cast<KeireEditor::IInputActionsController&>(*this))),
+      m_AnimatorControllerPanel(std::make_unique<KeireEditor::AnimatorControllerPanel>(
+          static_cast<KeireEditor::IAnimatorControllerPanelController&>(*this))),
+      m_RiggingStudioPanel(std::make_unique<KeireEditor::RiggingStudioPanel>(
+          static_cast<KeireEditor::IRiggingStudioController&>(*this))),
+      m_AudioMixerPanel(
+          std::make_unique<KeireEditor::AudioMixerPanel>(static_cast<KeireEditor::IAudioMixerPanelController&>(*this))),
+      m_VfxEffectPanel(
+          std::make_unique<KeireEditor::VfxEffectPanel>(static_cast<KeireEditor::IVfxEffectPanelController&>(*this))),
       m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
           *m_ProjectSettingsDocument, static_cast<KeireEditor::IProjectSettingsController&>(*this))),
       m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
@@ -726,13 +757,20 @@ void EditorWorkspaceLayer::OnAttach()
     m_DiagnosticsPanel->Attach(workspace);
     m_ThemeEditor = workspace.RegisterPanel({"editor.theme", "Theme Editor", false});
     m_InputActionsPanel->Attach(workspace);
+    m_AnimatorControllerPanel->Attach(workspace);
+    m_RiggingStudioPanel->Attach(workspace);
+    m_AudioMixerPanel->Attach(workspace);
+    m_VfxEffectPanel->Attach(workspace);
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
     m_ProjectSettingsPanel->Attach(workspace);
     m_PrefabOverrides = workspace.RegisterPanel({"editor.prefab-overrides", "Prefab Overrides", false});
     m_BuildSettings = workspace.RegisterPanel({"editor.build-settings", "Build Settings", false});
     m_Profiler = workspace.RegisterPanel({"editor.profiler", "Profiler", false});
     if (const auto undo = Owner().Undo())
+    {
         m_ThemeUndoContext = undo->CreateContext({.Name = "Theme Authoring"});
+        m_ManagedDataUndoContext = undo->CreateContext({.Name = "Managed Data Authoring"});
+    }
     if (const auto renderer = Owner().Renderer(); renderer && renderer->Mode() != Keire::RenderMode::Disabled)
     {
         Keire::RenderSurfaceSpecification gameSurface;
@@ -750,6 +788,18 @@ void EditorWorkspaceLayer::OnAttach()
             const auto project = Owner().GetProject();
             if (!project)
                 throw std::runtime_error("Editor workspace requires an active project.");
+            auto authoringSettings = Keire::DefaultProjectAuthoringSettings();
+            try
+            {
+                authoringSettings = Keire::LoadProjectAuthoringSettings(project->Root());
+                if (const auto physics = Owner().Physics())
+                    physics->ConfigureCollisionMatrix(authoringSettings.PhysicsCollisionMatrix);
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Physics",
+                            std::string("Invalid project authoring settings; using defaults: ") + error.what());
+            }
             databaseSpecification.ProjectRoot = project->Root();
             databaseSpecification.ChangeDebounce = std::chrono::milliseconds(75);
             m_AssetBrowserPanel->SetProjectRoot(project->Root());
@@ -766,20 +816,11 @@ void EditorWorkspaceLayer::OnAttach()
             Keire::Ref<Keire::UndoContext> projectSettingsUndo;
             if (const auto undo = Owner().Undo())
                 projectSettingsUndo = undo->CreateContext({.Name = "Project Settings"});
-            m_ProjectSettingsDocument->Open(project->Root(), renderEnvironment, std::move(projectSettingsUndo));
+            m_ProjectSettingsDocument->Open(project->Root(), renderEnvironment, std::move(authoringSettings),
+                                            std::move(projectSettingsUndo));
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
-            databaseSpecification.Importers = {Keire::CreateTextAssetImporter(),
-                                               Keire::CreateInputActionAssetImporter(),
-                                               Keire::CreateSceneAssetImporter(),
-                                               Keire::CreatePrefabAssetImporter(),
-                                               Keire::CreateManagedAssemblyAssetImporter(),
-                                               Keire::CreateShaderAssetImporter(),
-                                               Keire::CreateMaterialAssetImporter(),
-                                               Keire::CreateMeshAssetImporter(),
-                                               Keire::CreateTexture2DAssetImporter(),
-                                               Keire::CreateAudioClipAssetImporter(),
-                                               Keire::CreateAnimationGraphAssetImporter()};
+            databaseSpecification.Importers = Keire::CreateBuiltinAssetImporters();
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
@@ -919,19 +960,29 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_ManagedCursorVisible = true;
     ApplyManagedCursorMode();
     StopInspectorAudioPreview();
+    m_InspectorPanel->ClearSceneState();
     m_SceneDocument->EndPlay();
     m_GameEditPresentation.Reset();
     m_GameRenderView.Reset();
     m_InputActionsPanel->ResetTransientState();
+    m_AudioMixerPanel->StopTransientPreview();
+    m_VfxEffectPanel->StopTransientPreview();
     m_InputContext.Reset();
     if (m_InputActionsDocument->UndoContext())
         m_InputActionsDocument->UndoContext()->Close();
+    if (m_AudioMixerDocument->UndoContext())
+        m_AudioMixerDocument->UndoContext()->Close();
+    if (m_VfxEffectDocument->UndoContext())
+        m_VfxEffectDocument->UndoContext()->Close();
     if (m_SceneDocument->UndoContext())
         m_SceneDocument->UndoContext()->Close();
     if (m_ThemeUndoContext)
         m_ThemeUndoContext->Close();
+    if (m_ManagedDataUndoContext)
+        m_ManagedDataUndoContext->Close();
     m_ActiveUndoContext.Reset();
     m_ThemeUndoContext.Reset();
+    m_ManagedDataUndoContext.Reset();
     if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
     {
         try
@@ -943,6 +994,8 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         }
     }
     m_InputActionsDocument->Close();
+    m_AudioMixerDocument->Close();
+    m_VfxEffectDocument->Close();
     m_SceneDocument->Close();
     if (m_PrefabReturnDocument)
         m_PrefabReturnDocument->Close();
@@ -954,25 +1007,30 @@ void EditorWorkspaceLayer::OnDetach() noexcept
 
 void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
 {
-    if (m_ManagedPhysicsWorld)
-        m_ManagedPhysicsWorld->Step(static_cast<float>(time.FixedDeltaTime().Seconds()));
     if (m_SceneDocument->PlaySession())
+    {
+        Keire::ProfileScope playFixed(Owner().GetProfiler(), Keire::ProfileCategory::Physics, "Play fixed + physics");
         m_SceneDocument->PlaySession()->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
+    }
 }
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
-    ProcessSceneTransition();
-    FinalizePendingPlayEditorMutation();
-    if (m_PendingPlayTransition != PendingPlayTransition::None)
     {
-        const auto transition = std::exchange(m_PendingPlayTransition, PendingPlayTransition::None);
-        FinishPlayMode(transition == PendingPlayTransition::Apply);
+        Keire::ProfileScope transitions(Owner().GetProfiler(), Keire::ProfileCategory::Application, "Transitions");
+        ProcessSceneTransition();
+        FinalizePendingPlayEditorMutation();
+        if (m_PendingPlayTransition != PendingPlayTransition::None)
+        {
+            const auto transition = std::exchange(m_PendingPlayTransition, PendingPlayTransition::None);
+            FinishPlayMode(transition == PendingPlayTransition::Apply);
+        }
     }
     if (m_Smoke && ++m_FrameCount >= 8)
         Owner().RequestExit();
     if (m_SceneDocument->PlaySession())
     {
+        Keire::ProfileScope playUpdate(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Play update");
         m_SceneDocument->PlaySession()->Update(static_cast<float>(time.DeltaTime().Seconds()));
         if (m_SceneDocument->PlaySession()->State() == Keire::ScenePlayState::Faulted && !m_PlayFaultReported)
         {
@@ -983,9 +1041,13 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         }
     }
     CompleteSaveSceneAs();
-    UpdateManagedBuild(time);
+    {
+        Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");
+        UpdateManagedBuild(time);
+    }
     if (!m_AssetDatabase)
         return;
+    Keire::ProfileScope assetWork(Owner().GetProfiler(), Keire::ProfileCategory::Assets, "Asset work");
     UpdateAssetOperations();
     if (!m_PendingAssetMutations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
     {
@@ -1099,6 +1161,10 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             m_ActiveUndoContext = m_SceneDocument->UndoContext();
         else if (m_InputActionsDocument->UndoContext() && m_InputActionsDocument->UndoContext()->IsOpen())
             m_ActiveUndoContext = m_InputActionsDocument->UndoContext();
+        else if (m_AudioMixerDocument->UndoContext() && m_AudioMixerDocument->UndoContext()->IsOpen())
+            m_ActiveUndoContext = m_AudioMixerDocument->UndoContext();
+        else if (m_VfxEffectDocument->UndoContext() && m_VfxEffectDocument->UndoContext()->IsOpen())
+            m_ActiveUndoContext = m_VfxEffectDocument->UndoContext();
         else if (m_AssetBrowserPanel)
             m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     }
@@ -1121,7 +1187,44 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         SaveSceneAs();
     else if (ui.Shortcut({.Key = Keire::UiKey::S, .Primary = true, .Global = true}))
     {
-        if (m_InputActionsDocument->Dirty() && m_InputActionsPanel->Registration().Visible())
+        if (m_VfxEffectDocument->Dirty() && m_VfxEffectPanel->Registration().Visible() &&
+            m_ActiveUndoContext == m_VfxEffectDocument->UndoContext())
+        {
+            try
+            {
+                SaveVfxEffect();
+            }
+            catch (const std::exception& error)
+            {
+                m_VfxEffectPanel->SetMessage(error.what());
+                ReportError("VFX", error.what());
+            }
+        }
+        else if (m_AudioMixerDocument->Dirty() && m_AudioMixerPanel->Registration().Visible())
+        {
+            try
+            {
+                SaveAudioMixer();
+            }
+            catch (const std::exception& error)
+            {
+                m_AudioMixerPanel->SetMessage(error.what());
+                ReportError("Audio", error.what());
+            }
+        }
+        else if (m_AnimatorControllerDocument->Dirty() && m_AnimatorControllerPanel->Registration().Visible())
+        {
+            try
+            {
+                SaveAnimationGraph();
+            }
+            catch (const std::exception& error)
+            {
+                m_AnimatorControllerPanel->SetMessage(error.what());
+                ReportError("Animation", error.what());
+            }
+        }
+        else if (m_InputActionsDocument->Dirty() && m_InputActionsPanel->Registration().Visible())
         {
             try
             {
@@ -1133,17 +1236,33 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
                 ReportError("Input", error.what());
             }
         }
+        else if (m_VfxEffectDocument->Dirty() && m_VfxEffectPanel->Registration().Visible())
+        {
+            try
+            {
+                SaveVfxEffect();
+            }
+            catch (const std::exception& error)
+            {
+                m_VfxEffectPanel->SetMessage(error.what());
+                ReportError("VFX", error.what());
+            }
+        }
         else
             (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveScene);
     }
+    const auto profiler = Owner().GetProfiler();
     auto& workspace = Owner().GetUiWorkspace();
-    DrawMainMenu(ui, workspace);
-    DrawMainToolbar(ui);
-    DrawMainStatusBar(ui);
-    OpenPendingDialog(ui);
-    DrawNotices(ui, workspace);
-    DrawDialogs(ui, workspace);
-    DrawExternalAssetImport(ui);
+    {
+        Keire::ProfileScope chrome(profiler, Keire::ProfileCategory::User, "Editor UI / Chrome");
+        DrawMainMenu(ui, workspace);
+        DrawMainToolbar(ui);
+        DrawMainStatusBar(ui);
+        OpenPendingDialog(ui);
+        DrawNotices(ui, workspace);
+        DrawDialogs(ui, workspace);
+        DrawExternalAssetImport(ui);
+    }
 
     const bool playActive =
         m_SceneDocument->PlaySession() && m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped;
@@ -1165,25 +1284,53 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             }
         }
     }
-    m_SceneViewportPanel->Draw(ui);
-    if (!playActive)
-        DrawPerformanceOverlay(ui, m_SceneViewportPanel->ViewportRect(), "SCENE");
-    DrawGame(ui);
-    m_HierarchyPanel->Draw(ui);
-    m_InspectorPanel->Draw(ui);
-    DrawProject(ui);
-    if (m_AssetBrowserPanel && m_AssetBrowserPanel->Focused())
-        m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
-    DrawConsole(ui);
-    DrawDiagnostics(ui);
-    DrawThemeEditor(ui, workspace);
-    m_InputActionsPanel->Draw(ui);
-    DrawInputDebugger(ui);
-    m_ProjectSettingsPanel->Draw(ui, m_Theme);
-    DrawPrefabOverrides(ui);
-    DrawBuildSettings(ui);
-    DrawProfiler(ui);
-    DrawPlayChanges(ui);
+    {
+        Keire::ProfileScope sceneViewport(profiler, Keire::ProfileCategory::User, "Editor UI / Scene viewport");
+        m_SceneViewportPanel->Draw(ui);
+        if (!playActive)
+            DrawPerformanceOverlay(ui, m_SceneViewportPanel->ViewportRect(), "SCENE");
+    }
+    {
+        Keire::ProfileScope gameViewport(profiler, Keire::ProfileCategory::User, "Editor UI / Game viewport");
+        DrawGame(ui);
+    }
+    {
+        Keire::ProfileScope hierarchy(profiler, Keire::ProfileCategory::User, "Editor UI / Hierarchy");
+        m_HierarchyPanel->Draw(ui);
+    }
+    {
+        Keire::ProfileScope inspector(profiler, Keire::ProfileCategory::User, "Editor UI / Inspector");
+        m_InspectorPanel->Draw(ui);
+    }
+    {
+        Keire::ProfileScope project(profiler, Keire::ProfileCategory::User, "Editor UI / Project");
+        DrawProject(ui);
+        if (m_AssetBrowserPanel && m_AssetBrowserPanel->Focused())
+            m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
+    }
+    {
+        Keire::ProfileScope diagnostics(profiler, Keire::ProfileCategory::User, "Editor UI / Diagnostics");
+        DrawConsole(ui);
+        DrawDiagnostics(ui);
+    }
+    {
+        Keire::ProfileScope tools(profiler, Keire::ProfileCategory::User, "Editor UI / Tools");
+        DrawThemeEditor(ui, workspace);
+        m_InputActionsPanel->Draw(ui);
+        m_AnimatorControllerPanel->Draw(ui);
+        m_RiggingStudioPanel->Draw(ui);
+        m_AudioMixerPanel->Draw(ui);
+        m_VfxEffectPanel->Draw(ui);
+        DrawInputDebugger(ui);
+        m_ProjectSettingsPanel->Draw(ui, m_Theme);
+    }
+    {
+        Keire::ProfileScope production(profiler, Keire::ProfileCategory::User, "Editor UI / Production");
+        DrawPrefabOverrides(ui);
+        DrawBuildSettings(ui);
+        DrawProfiler(ui);
+        DrawPlayChanges(ui);
+    }
 }
 
 void EditorWorkspaceLayer::AddConsoleMessage(std::string category, std::string message, const Keire::UiColor color,

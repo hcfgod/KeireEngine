@@ -54,6 +54,31 @@ namespace Keire
                         }
                         return listeners;
                     }
+                    else if constexpr (std::same_as<T, Curve1D>)
+                    {
+                        Json keys = Json::array();
+                        for (const auto& key : current.Keys())
+                        {
+                            keys.push_back({{"time", key.Time},
+                                            {"value", key.Value},
+                                            {"inTangent", key.InTangent},
+                                            {"outTangent", key.OutTangent},
+                                            {"interpolation", static_cast<std::uint8_t>(key.Interpolation)}});
+                        }
+                        return keys;
+                    }
+                    else if constexpr (std::same_as<T, ColorGradient>)
+                    {
+                        Json keys = Json::array();
+                        for (const auto& key : current.Keys())
+                        {
+                            keys.push_back(
+                                {{"time", key.Time},
+                                 {"color", {key.Value.Red, key.Value.Green, key.Value.Blue, key.Value.Alpha}}});
+                        }
+                        return Json{{"interpolation", static_cast<std::uint8_t>(current.Interpolation())},
+                                    {"keys", std::move(keys)}};
+                    }
                     else
                         return Json(current);
                 },
@@ -121,6 +146,50 @@ namespace Keire
                     result.Listeners.push_back(std::move(listener));
                 }
                 return result;
+            }
+            case ComponentPropertyKind::Curve:
+            {
+                if (!value.is_array())
+                    throw std::runtime_error("Component curve property must be an array.");
+                std::vector<CurveKey> keys;
+                keys.reserve(value.size());
+                for (const auto& serialized : value)
+                {
+                    if (!serialized.is_object())
+                        throw std::runtime_error("Component curve key must be an object.");
+                    const auto interpolation = serialized.value("interpolation", std::uint8_t{1});
+                    if (interpolation > static_cast<std::uint8_t>(CurveInterpolation::Cubic))
+                        throw std::runtime_error("Component curve interpolation is invalid.");
+                    keys.push_back({serialized.at("time").get<float>(), serialized.at("value").get<float>(),
+                                    serialized.value("inTangent", 0.0F), serialized.value("outTangent", 0.0F),
+                                    static_cast<CurveInterpolation>(interpolation)});
+                }
+                return Curve1D(std::move(keys));
+            }
+            case ComponentPropertyKind::Gradient:
+            {
+                if (!value.is_object())
+                    throw std::runtime_error("Component gradient property must be an object.");
+                const auto interpolation = value.value("interpolation", std::uint8_t{1});
+                if (interpolation > static_cast<std::uint8_t>(GradientInterpolation::Linear))
+                    throw std::runtime_error("Component gradient interpolation is invalid.");
+                const auto& serializedKeys = value.at("keys");
+                if (!serializedKeys.is_array())
+                    throw std::runtime_error("Component gradient keys must be an array.");
+                std::vector<ColorGradientKey> keys;
+                keys.reserve(serializedKeys.size());
+                for (const auto& serialized : serializedKeys)
+                {
+                    if (!serialized.is_object())
+                        throw std::runtime_error("Component gradient key must be an object.");
+                    const auto& color = serialized.at("color");
+                    if (!color.is_array() || color.size() != 4)
+                        throw std::runtime_error("Component gradient color must contain four channels.");
+                    keys.push_back(
+                        {serialized.at("time").get<float>(),
+                         {color[0].get<float>(), color[1].get<float>(), color[2].get<float>(), color[3].get<float>()}});
+                }
+                return ColorGradient(std::move(keys), static_cast<GradientInterpolation>(interpolation));
             }
             }
             throw std::invalid_argument("Unsupported component property kind.");
@@ -308,6 +377,7 @@ namespace Keire
             void IndexComponent(const EntityId owner, const Ref<Component>& component)
             {
                 ComponentPools[component->Type()][owner].push_back(component);
+                LifecycleComponentsDirty = true;
             }
 
             void UnindexComponent(const EntityId owner, const Ref<Component>& component)
@@ -323,21 +393,26 @@ namespace Keire
                     pool->second.erase(entity);
                 if (pool->second.empty())
                     ComponentPools.erase(pool);
+                LifecycleComponentsDirty = true;
             }
 
-            [[nodiscard]] std::vector<Ref<Component>> LifecycleComponents() const
+            [[nodiscard]] const std::vector<Ref<Component>>& LifecycleComponents() const
             {
-                std::vector<Ref<Component>> result;
+                if (!LifecycleComponentsDirty)
+                    return CachedLifecycleComponents;
+                CachedLifecycleComponents.clear();
                 for (const auto id : HierarchyOrder())
                     if (const auto* record = Find(id))
-                        result.insert(result.end(), record->Components.begin(), record->Components.end());
-                std::ranges::stable_sort(result,
+                        CachedLifecycleComponents.insert(CachedLifecycleComponents.end(), record->Components.begin(),
+                                                         record->Components.end());
+                std::ranges::stable_sort(CachedLifecycleComponents,
                                          [&](const auto& left, const auto& right)
                                          {
                                              return ComponentsRegistry->Find(left->Type())->ExecutionOrder <
                                                     ComponentsRegistry->Find(right->Type())->ExecutionOrder;
                                          });
-                return result;
+                LifecycleComponentsDirty = false;
+                return CachedLifecycleComponents;
             }
 
             template <typename Callback> void Traverse(Callback&& callback)
@@ -368,7 +443,9 @@ namespace Keire
             std::vector<EntityId> Order;
             WeakRef<SceneState> Self;
             std::vector<std::function<void()>> Deferred;
+            mutable std::vector<Ref<Component>> CachedLifecycleComponents;
             std::size_t TraversalDepth = 0;
+            mutable bool LifecycleComponentsDirty = true;
             bool Open = true;
             bool Dirty = false;
             bool Playing = false;
@@ -475,6 +552,19 @@ namespace Keire
                 object.Components.insert(object.Components.end(), record->MissingComponents.begin(),
                                          record->MissingComponents.end());
                 result.Objects.push_back(std::move(object));
+            }
+            return result;
+        }
+
+        SceneHierarchySnapshot SceneState::HierarchySnapshot() const
+        {
+            RequireOwner("HierarchySnapshot");
+            SceneHierarchySnapshot result{.PrefabInstances = m_Impl->PrefabInstances};
+            result.Objects.reserve(m_Impl->Entities.size());
+            for (const auto id : m_Impl->HierarchyOrder())
+            {
+                const auto* record = m_Impl->Find(id);
+                result.Objects.emplace_back(id.Value(), record->Parent.Value(), record->Name, record->Active);
             }
             return result;
         }
@@ -747,6 +837,7 @@ namespace Keire
             const auto previousWorld = WorldMatrix(id);
             const auto previousParent = record->Parent;
             record->Parent = parent;
+            m_Impl->LifecycleComponentsDirty = true;
             m_Impl->MarkWorldDirty(id);
             if (preserveWorldTransform)
             {
@@ -791,6 +882,7 @@ namespace Keire
 
             SetParent(id, parent, preserveWorldTransform);
             m_Impl->Order.swap(reordered);
+            m_Impl->LifecycleComponentsDirty = true;
             m_Impl->Dirty = true;
         }
 
@@ -947,7 +1039,7 @@ namespace Keire
             m_Impl->Traverse(
                 [&]
                 {
-                    const auto components = m_Impl->LifecycleComponents();
+                    const auto& components = m_Impl->LifecycleComponents();
                     for (const auto& component : components)
                         component->InvokeAwake();
                     for (const auto& component : components)
@@ -989,6 +1081,61 @@ namespace Keire
                             component->InvokeStart();
                         component->InvokeUpdate(deltaSeconds);
                     }
+                });
+            FlushDeferred();
+        }
+
+        void SceneState::LateUpdate()
+        {
+            RequireOwner("LateUpdate");
+            if (!m_Impl->Playing)
+                return;
+            m_Impl->Traverse(
+                [&]
+                {
+                    for (const auto& component : m_Impl->LifecycleComponents())
+                        component->InvokeLateUpdate();
+                });
+            FlushDeferred();
+        }
+
+        void SceneState::DispatchAnimationEvent(const EntityId entity, const AnimationEventMessage& event)
+        {
+            RequireOwner("DispatchAnimationEvent");
+            if (!m_Impl->Playing || !entity || event.Name.empty() || event.Name.size() > 256 ||
+                event.Text.size() > 4096 || !std::isfinite(event.NormalizedTime) || !std::isfinite(event.Scalar))
+            {
+                throw std::invalid_argument("Animation event dispatch arguments are invalid.");
+            }
+            auto* record = m_Impl->Find(entity);
+            if (!record || !ActiveInHierarchy(entity))
+                return;
+            m_Impl->Traverse(
+                [&]
+                {
+                    for (const auto& component : record->Components)
+                        component->InvokeAnimationEvent(event);
+                });
+            FlushDeferred();
+        }
+
+        void SceneState::DispatchPhysicsContact(const EntityId entity, const PhysicsContactPhase phase,
+                                                const PhysicsContactMessage& contact)
+        {
+            RequireOwner("DispatchPhysicsContact");
+            if (!m_Impl->Playing || !entity || !contact.Other || !Math::IsFinite(contact.Point) ||
+                !Math::IsFinite(contact.Normal) || !std::isfinite(contact.Impulse) || contact.Impulse < 0.0F)
+            {
+                throw std::invalid_argument("Physics contact dispatch arguments are invalid.");
+            }
+            auto* record = m_Impl->Find(entity);
+            if (!record || !ActiveInHierarchy(entity))
+                return;
+            m_Impl->Traverse(
+                [&]
+                {
+                    for (const auto& component : record->Components)
+                        component->InvokePhysicsContact(phase, contact);
                 });
             FlushDeferred();
         }
@@ -1096,6 +1243,7 @@ namespace Keire
     void Scene::MarkSaved() noexcept { m_Impl->State->MarkSaved(); }
     std::size_t Scene::ObjectCount() const noexcept { return m_Impl->State->Count(); }
     std::vector<SceneObjectDefinition> Scene::Objects() const { return m_Impl->State->Snapshot().Objects; }
+    SceneHierarchySnapshot Scene::HierarchySnapshot() const { return m_Impl->State->HierarchySnapshot(); }
     SceneDefinition Scene::Snapshot() const { return m_Impl->State->Snapshot(); }
 
     SceneObjectHandle Scene::Find(const AssetId id) const noexcept
@@ -1168,6 +1316,16 @@ namespace Keire
     void Scene::BeginPlay() { m_Impl->State->BeginPlay(); }
     void Scene::FixedUpdate(const float deltaSeconds) { m_Impl->State->FixedUpdate(deltaSeconds); }
     void Scene::Update(const float deltaSeconds) { m_Impl->State->Update(deltaSeconds); }
+    void Scene::LateUpdate() { m_Impl->State->LateUpdate(); }
+    void Scene::DispatchAnimationEvent(const EntityId entity, const AnimationEventMessage& event)
+    {
+        m_Impl->State->DispatchAnimationEvent(entity, event);
+    }
+    void Scene::DispatchPhysicsContact(const EntityId entity, const PhysicsContactPhase phase,
+                                       const PhysicsContactMessage& contact)
+    {
+        m_Impl->State->DispatchPhysicsContact(entity, phase, contact);
+    }
     void Scene::EndPlay() noexcept { m_Impl->State->EndPlay(); }
     void Scene::Close() noexcept { m_Impl->State->Close(); }
 

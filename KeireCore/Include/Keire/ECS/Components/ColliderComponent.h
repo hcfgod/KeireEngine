@@ -23,6 +23,8 @@ namespace Keire
         [[nodiscard]] std::uint32_t Layer() const noexcept { return m_Layer; }
         [[nodiscard]] std::uint32_t Mask() const noexcept { return m_Mask; }
         [[nodiscard]] bool Trigger() const noexcept { return m_Trigger; }
+        [[nodiscard]] AssetId CollisionMesh() const noexcept { return m_CollisionMesh; }
+        [[nodiscard]] AssetId PhysicsMaterial() const noexcept { return m_PhysicsMaterial; }
 
         void SetShape(ColliderShape value);
         void SetCenter(Vector3 value);
@@ -32,6 +34,8 @@ namespace Keire
         void SetLayer(std::uint32_t value);
         void SetMask(std::uint32_t value);
         void SetTrigger(bool value);
+        void SetCollisionMesh(AssetId value);
+        void SetPhysicsMaterial(AssetId value);
 
       private:
         friend ComponentRegistration CreateColliderComponentRegistration();
@@ -43,6 +47,8 @@ namespace Keire
         std::uint32_t m_Layer = 1;
         std::uint32_t m_Mask = ~0U;
         bool m_Trigger = false;
+        AssetId m_CollisionMesh;
+        AssetId m_PhysicsMaterial;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateColliderComponentRegistration();

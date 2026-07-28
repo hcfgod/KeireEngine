@@ -280,19 +280,31 @@ namespace KeireEditor
         completion.Context = running.Pending.Context;
         completion.SourceIndexPath = running.Pending.Request.SourceIndexPath;
         completion.WorkerOutput = running.Process.TakeOutput();
+        const auto exitCode = running.Process.ExitCode().value_or(127);
         try
         {
             Keire::Detail::WriteTextFileAtomically(running.Directory / "worker.log", completion.WorkerOutput);
-            completion.Result = Keire::Detail::ReadAssetWorkerResult(running.ResultPath);
-            if (running.Process.ExitCode().value_or(127) != 0)
+            if (!std::filesystem::is_regular_file(running.ResultPath))
+            {
                 completion.Result.Success = false;
-            if (!completion.Result.Success && completion.Result.Diagnostic.empty())
                 completion.Result.Diagnostic =
-                    "Asset worker exited with code " + std::to_string(running.Process.ExitCode().value_or(127)) + ".";
+                    "Asset worker terminated unexpectedly with exit code " + std::to_string(exitCode) +
+                    " before writing its result document. See worker.log in the operation directory.";
+            }
+            else
+            {
+                completion.Result = Keire::Detail::ReadAssetWorkerResult(running.ResultPath);
+                if (exitCode != 0)
+                    completion.Result.Success = false;
+                if (!completion.Result.Success && completion.Result.Diagnostic.empty())
+                    completion.Result.Diagnostic = "Asset worker exited with code " + std::to_string(exitCode) + ".";
+            }
         }
         catch (const std::exception& error)
         {
-            completion.Result.Diagnostic = error.what();
+            completion.Result.Success = false;
+            completion.Result.Diagnostic = "Asset worker result could not be read after exit code " +
+                                           std::to_string(exitCode) + ": " + error.what();
         }
         m_Completions.push_back(std::move(completion));
         m_Progress.reset();

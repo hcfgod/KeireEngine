@@ -144,10 +144,12 @@ namespace Keire::RenderBackend
         FrameGraph Graph;
         CompiledFrameGraph Compiled;
         FrameGraphResource HdrScene;
+        FrameGraphResource SampledDepth;
         FrameGraphPass ResourceUploads;
         FrameGraphPass DirectionalShadows;
         FrameGraphPass ForwardPlusCulling;
         FrameGraphPass Opaque;
+        FrameGraphPass ResolveDepth;
         FrameGraphPass Sky;
         FrameGraphPass Transparency;
         FrameGraphPass ToneMap;

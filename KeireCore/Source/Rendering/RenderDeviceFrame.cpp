@@ -83,6 +83,9 @@ namespace Keire::RenderBackend
             {
                 if (SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D_ARRAY,
                                                  SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+                                                     SDL_GPU_TEXTUREUSAGE_SAMPLER) &&
+                    SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D,
+                                                 SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
                                                      SDL_GPU_TEXTUREUSAGE_SAMPLER))
                 {
                     ShadowDepthFormat = candidate;
@@ -208,6 +211,8 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUTexture(Device, resources.DirectionalShadow);
         if (resources.Depth)
             SDL_ReleaseGPUTexture(Device, resources.Depth);
+        if (resources.SampledDepth)
+            SDL_ReleaseGPUTexture(Device, resources.SampledDepth);
         if (resources.MultisampleHdrColor)
             SDL_ReleaseGPUTexture(Device, resources.MultisampleHdrColor);
         for (auto* texture : resources.TransientTextures)
@@ -362,6 +367,25 @@ namespace Keire::RenderBackend
         return shader;
     }
 
+    void RenderSharedState::EnsureFrameUploadContext()
+    {
+        if (FrameUploadPass)
+            return;
+        if (FrameUploadCommands)
+            throw std::logic_error("The frame upload command buffer is active without a copy pass.");
+
+        FrameUploadCommands = SDL_AcquireGPUCommandBuffer(Device);
+        if (!FrameUploadCommands)
+            throw std::runtime_error("SDL_AcquireGPUCommandBuffer(frame uploads) failed: " + LastSdlError());
+        FrameUploadPass = SDL_BeginGPUCopyPass(FrameUploadCommands);
+        if (!FrameUploadPass)
+        {
+            (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
+            FrameUploadCommands = nullptr;
+            throw std::runtime_error("SDL_BeginGPUCopyPass(frame uploads) failed: " + LastSdlError());
+        }
+    }
+
     SDL_GPUBuffer* RenderSharedState::UploadBuffer(const std::span<const std::byte> bytes,
                                                    const SDL_GPUBufferUsageFlags usage)
     {
@@ -393,6 +417,8 @@ namespace Keire::RenderBackend
 
             SDL_GPUTransferBufferLocation source{transfer, 0};
             SDL_GPUBufferRegion destination{buffer, 0, byteSize};
+            if (FrameActive && !FrameUploadPass)
+                EnsureFrameUploadContext();
             if (FrameUploadPass)
             {
                 SDL_UploadToGPUBuffer(FrameUploadPass, &source, &destination, false);
@@ -523,6 +549,25 @@ namespace Keire::RenderBackend
             }
             SDL_UnmapGPUTransferBuffer(Device, transfer);
 
+            if (FrameActive)
+            {
+                EnsureFrameUploadContext();
+                offset = 0;
+                for (std::size_t index = 0; index < mips.size(); ++index)
+                {
+                    const auto& mip = mips[index];
+                    SDL_GPUTextureTransferInfo source{transfer, static_cast<std::uint32_t>(offset), mip.Width,
+                                                      mip.Height};
+                    SDL_GPUTextureRegion destination{
+                        result.Texture, static_cast<std::uint32_t>(index), 0, 0, 0, 0, mip.Width, mip.Height, 1};
+                    SDL_UploadToGPUTexture(FrameUploadPass, &source, &destination, false);
+                    offset += mip.Pixels.size();
+                }
+                FrameUploadTransfers.push_back(transfer);
+                transfer = nullptr;
+                return result;
+            }
+
             SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
             if (!commands)
                 throw std::runtime_error("SDL_AcquireGPUCommandBuffer(texture) failed: " + LastSdlError());
@@ -572,7 +617,8 @@ namespace Keire::RenderBackend
         try
         {
             result.Vertices = UploadVertexBuffer(vertices);
-            result.AssetVertices = UploadBuffer(std::as_bytes(mesh.Vertices()), SDL_GPU_BUFFERUSAGE_VERTEX);
+            result.AssetVertices = UploadBuffer(std::as_bytes(mesh.Vertices()),
+                                                SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
             result.Indices = UploadBuffer(std::as_bytes(mesh.Indices()), SDL_GPU_BUFFERUSAGE_INDEX);
             result.IndexCount = static_cast<std::uint32_t>(mesh.Indices().size());
             result.Submeshes.assign(mesh.Submeshes().begin(), mesh.Submeshes().end());

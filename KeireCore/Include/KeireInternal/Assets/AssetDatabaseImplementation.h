@@ -14,14 +14,17 @@
 #include <zstd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <fstream>
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <thread>
 #include <unordered_map>
@@ -317,6 +320,26 @@ namespace Keire
             }
         }
 
+        void UpdateMetadataImportSettings(const std::filesystem::path& path, const AssetImportSettings& settings)
+        {
+            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            const auto encoded = EncodeImportSettings(settings);
+            if (!metadata.contains("importSettings") || metadata["importSettings"] != encoded)
+            {
+                metadata["importSettings"] = encoded;
+                WriteJsonAtomically(path, metadata);
+            }
+        }
+
+        void IncrementMetadataImportRevision(const std::filesystem::path& path)
+        {
+            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            const auto current = metadata.value("importRevision", std::uint64_t{0});
+            metadata["importRevision"] =
+                current == std::numeric_limits<std::uint64_t>::max() ? std::uint64_t{1} : current + 1;
+            WriteJsonAtomically(path, metadata);
+        }
+
         [[nodiscard]] AssetSourceRecord ReadMetadata(const std::filesystem::path& sourceRoot,
                                                      const std::filesystem::path& source,
                                                      const std::size_t maximumSourceBytes, const bool digestSource,
@@ -435,8 +458,7 @@ namespace Keire
                     throw std::runtime_error("Published asset catalog is missing during recovery: " +
                                              Detail::PathToUtf8(destination));
                 std::filesystem::remove_all(backup, error);
-                if (error)
-                    throw std::runtime_error("Could not retire the previous asset catalog: " + error.message());
+                error.clear();
             }
             else if (state == "prepared" || state == "backedUp")
             {
@@ -474,38 +496,103 @@ namespace Keire
             const auto destination = std::filesystem::absolute(requestedDestination).lexically_normal();
             RecoverDirectoryPublication(destination);
             const auto backup = Detail::PathWithSuffix(destination, ".bak");
-            const auto journalPath = DirectoryPublicationJournal(destination);
             std::error_code error;
             std::filesystem::remove_all(backup, error);
-            const bool hadDestination = std::filesystem::exists(destination);
-            Json journal{{"schemaVersion", 1},
-                         {"state", "prepared"},
-                         {"temporary", Detail::PathToUtf8(temporary)},
-                         {"destination", Detail::PathToUtf8(destination)},
-                         {"backup", Detail::PathToUtf8(backup)},
-                         {"hadDestination", hadDestination}};
-            WriteJsonAtomically(journalPath, journal);
-            if (hadDestination)
-                Detail::RenamePathWithRetry(destination, backup);
-            journal["state"] = "backedUp";
-            WriteJsonAtomically(journalPath, journal);
-            try
+            error.clear();
+            if (!std::filesystem::is_directory(temporary, error) || error)
+                throw std::runtime_error("Prepared asset catalog directory is missing: " +
+                                         Detail::PathToUtf8(temporary));
+            if (std::filesystem::exists(destination, error))
             {
-                Detail::RenamePathWithRetry(temporary, destination);
-                journal["state"] = "published";
-                WriteJsonAtomically(journalPath, journal);
+                if (error || std::filesystem::is_symlink(destination, error) ||
+                    !std::filesystem::is_directory(destination, error))
+                    throw std::runtime_error("Asset catalog destination is not a regular directory: " +
+                                             Detail::PathToUtf8(destination));
             }
-            catch (...)
+            else
             {
-                RecoverDirectoryPublication(destination);
-                throw;
+                if (error)
+                    throw std::runtime_error("Could not inspect the asset catalog destination: " + error.message());
+                std::filesystem::create_directories(destination);
             }
-            std::filesystem::remove_all(backup, error);
-            if (error)
-                throw std::runtime_error("Could not remove the previous asset catalog: " + error.message());
-            std::filesystem::remove(journalPath, error);
-            if (error)
-                throw std::runtime_error("Could not clean an asset catalog publication journal: " + error.message());
+
+            const auto preparedCatalogPath = temporary / "catalog.json";
+            const auto preparedCatalog = Detail::LoadCatalog(preparedCatalogPath);
+            std::unordered_set<std::filesystem::path> activePacks;
+            for (const auto& entry : preparedCatalog.Entries)
+            {
+                const auto relative = entry.PackPath.lexically_relative(temporary).lexically_normal();
+                if (relative.empty() || relative.is_absolute() ||
+                    relative.native().starts_with(std::filesystem::path("..").native()))
+                    throw std::runtime_error("Prepared asset pack escapes its publication directory.");
+                activePacks.insert(relative);
+            }
+
+            for (const auto& relative : activePacks)
+            {
+                const auto source = temporary / relative;
+                const auto target = destination / relative;
+                if (!std::filesystem::is_regular_file(source, error) || error ||
+                    std::filesystem::is_symlink(source, error))
+                    throw std::runtime_error("Prepared asset pack is missing or invalid: " +
+                                             Detail::PathToUtf8(source));
+                std::filesystem::create_directories(target.parent_path());
+                if (std::filesystem::exists(target, error))
+                {
+                    if (error || !std::filesystem::is_regular_file(target, error) ||
+                        std::filesystem::file_size(source, error) != std::filesystem::file_size(target, error) || error)
+                        throw std::runtime_error("Content-addressed asset pack collision: " +
+                                                 Detail::PathToUtf8(target));
+                    continue;
+                }
+                if (error)
+                    throw std::runtime_error("Could not inspect the asset pack destination: " + error.message());
+                Detail::RenamePathWithRetry(source, target);
+            }
+
+            std::vector<std::filesystem::path> auxiliaryFiles;
+            for (std::filesystem::recursive_directory_iterator iterator(temporary), end; iterator != end; ++iterator)
+            {
+                if (iterator->is_symlink())
+                    throw std::runtime_error("Prepared asset catalogs may not contain symbolic links.");
+                if (!iterator->is_regular_file())
+                    continue;
+                const auto relative = iterator->path().lexically_relative(temporary).lexically_normal();
+                if (relative == std::filesystem::path("catalog.json") || activePacks.contains(relative))
+                    continue;
+                auxiliaryFiles.push_back(relative);
+            }
+            for (const auto& relative : auxiliaryFiles)
+            {
+                const auto source = temporary / relative;
+                const auto target = destination / relative;
+                WriteFileAtomically(target, ReadSource(source, 64U * 1024U * 1024U));
+            }
+
+            WriteFileAtomically(destination / "catalog.json", ReadSource(preparedCatalogPath, 64U * 1024U * 1024U));
+
+            constexpr auto retirementGrace = std::chrono::minutes(10);
+            std::vector<std::filesystem::path> retiredPacks;
+            const auto now = std::filesystem::file_time_type::clock::now();
+            for (std::filesystem::recursive_directory_iterator iterator(destination, error), end;
+                 !error && iterator != end; iterator.increment(error))
+            {
+                if (!iterator->is_regular_file(error) || iterator->path().extension() != ".keirepak")
+                    continue;
+                const auto relative = iterator->path().lexically_relative(destination).lexically_normal();
+                if (activePacks.contains(relative))
+                    continue;
+                const auto modified = iterator->last_write_time(error);
+                if (!error && now - modified >= retirementGrace)
+                    retiredPacks.push_back(iterator->path());
+                error.clear();
+            }
+            for (const auto& retired : retiredPacks)
+            {
+                std::filesystem::remove(retired, error);
+                error.clear();
+            }
+            std::filesystem::remove_all(temporary, error);
         }
 
         void ValidateDependencies(const std::span<const Detail::CatalogEntry> entries)
@@ -561,7 +648,8 @@ namespace Keire
       public:
         explicit Impl(AssetDatabaseSpecification value) : Specification(std::move(value))
         {
-            if (Specification.MaximumSourceBytes == 0 || Specification.ChangeDebounce.count() < 0)
+            if (Specification.MaximumSourceBytes == 0 || Specification.ChangeDebounce.count() < 0 ||
+                Specification.ChangeMonitorInterval.count() <= 0)
                 throw std::invalid_argument("Asset database limits must be non-zero and non-negative.");
             Specification.ProjectRoot = std::filesystem::absolute(Specification.ProjectRoot).lexically_normal();
             SourceRoot = ConfinedPath(Specification.ProjectRoot, Specification.SourceDirectory);
@@ -973,6 +1061,73 @@ namespace Keire
                     std::filesystem::last_write_time(metadata), std::filesystem::file_size(metadata)};
         }
 
+        struct MonitoredScan final
+        {
+            ScanResult Result;
+            std::uint64_t SourceRevision = 0;
+        };
+
+        void StartChangeMonitor()
+        {
+            std::scoped_lock lock(ChangeMonitorMutex);
+            if (ChangeMonitor.joinable())
+                return;
+            ChangeMonitor = std::jthread(
+                [this](const std::stop_token stop)
+                {
+                    std::unique_lock monitorLock(ChangeMonitorMutex);
+                    while (!stop.stop_requested())
+                    {
+                        (void)ChangeMonitorCondition.wait_for(monitorLock, stop, Specification.ChangeMonitorInterval,
+                                                              [this] { return ChangeMonitorRequested; });
+                        if (stop.stop_requested())
+                            break;
+                        ChangeMonitorRequested = false;
+                        monitorLock.unlock();
+
+                        const auto revision = SourceRevision.load(std::memory_order_acquire);
+                        try
+                        {
+                            ScanResult scanned;
+                            {
+                                // Directory iterators retain native directory handles on Windows. Serialize the
+                                // reconciliation walk with asset transactions so moves, trash operations, and
+                                // atomic publications never race an open monitor iterator.
+                                std::scoped_lock operation(*OperationMutex);
+                                scanned = Scan(false);
+                            }
+                            monitorLock.lock();
+                            if (revision == SourceRevision.load(std::memory_order_acquire))
+                            {
+                                PublishedChangeScan = MonitoredScan{std::move(scanned), revision};
+                                PublishedScans.fetch_add(1, std::memory_order_relaxed);
+                            }
+                            monitorLock.unlock();
+                        }
+                        catch (...)
+                        {
+                            FailedScans.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        monitorLock.lock();
+                    }
+                });
+        }
+
+        void RequestChangeMonitorScan() noexcept
+        {
+            {
+                std::scoped_lock lock(ChangeMonitorMutex);
+                ChangeMonitorRequested = true;
+            }
+            ChangeMonitorCondition.notify_one();
+        }
+
+        [[nodiscard]] std::optional<MonitoredScan> TakeChangeMonitorScan()
+        {
+            std::scoped_lock lock(ChangeMonitorMutex);
+            return std::exchange(PublishedChangeScan, std::nullopt);
+        }
+
         void PublishRecord(AssetSourceRecord record, const FileSignature& signature)
         {
             std::scoped_lock lock(Mutex);
@@ -989,6 +1144,8 @@ namespace Keire
             std::ranges::sort(Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
             Observed.insert_or_assign(id, signature);
             PendingChanges.erase(id);
+            SourceRevision.fetch_add(1, std::memory_order_release);
+            RequestChangeMonitorScan();
         }
 
         void RemoveRecords(const std::span<const AssetId> identities)
@@ -1005,6 +1162,8 @@ namespace Keire
                 ValidatedImports.erase(id);
                 CookInputs.erase(id);
             }
+            SourceRevision.fetch_add(1, std::memory_order_release);
+            RequestChangeMonitorScan();
         }
 
         AssetDatabaseSpecification Specification;
@@ -1020,6 +1179,14 @@ namespace Keire
         std::unordered_map<AssetId, PreparedImport> CookInputs;
         std::unique_ptr<Detail::InterprocessMutex> OperationMutex;
         mutable std::mutex Mutex;
+        std::atomic<std::uint64_t> SourceRevision{1};
+        std::atomic<std::uint64_t> PublishedScans{0};
+        std::atomic<std::uint64_t> FailedScans{0};
+        mutable std::mutex ChangeMonitorMutex;
+        std::condition_variable_any ChangeMonitorCondition;
+        std::optional<MonitoredScan> PublishedChangeScan;
+        bool ChangeMonitorRequested = false;
+        std::jthread ChangeMonitor;
     };
 
 } // namespace Keire

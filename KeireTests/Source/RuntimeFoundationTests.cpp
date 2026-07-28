@@ -70,6 +70,10 @@ TEST_CASE("Profiler records bounded cross-thread spans and counters")
     CHECK(summary.CounterCount == frame.Counters.size());
     CHECK(summary.DroppedSpans == 1);
     CHECK(summary.DroppedCounters == 1);
+    const auto trace = profiler->LatestChromeTrace();
+    CHECK(trace.find("\"ph\":\"X\"") != std::string::npos);
+    CHECK(trace.find("\"name\":\"Worker\"") != std::string::npos);
+    CHECK(trace.find("\"ph\":\"C\"") != std::string::npos);
 
     profiler->Close();
     CHECK_FALSE(profiler->IsOpen());
@@ -86,6 +90,8 @@ TEST_CASE("Profiler retains bounded frame summaries in chronological order")
     for (std::uint64_t frame = 1; frame <= 3; ++frame)
     {
         profiler->BeginFrame();
+        profiler->RecordSpan(Keire::ProfileCategory::Assets, "Asset work", 0.0, static_cast<double>(frame));
+        profiler->RecordSpan(Keire::ProfileCategory::User, "Editor UI", 0.0, static_cast<double>(frame * 2));
         profiler->SetCounter(Keire::ProfileCategory::Application, "Frame", static_cast<double>(frame));
         profiler->EndFrame();
     }
@@ -95,6 +101,8 @@ TEST_CASE("Profiler retains bounded frame summaries in chronological order")
     CHECK(summaries[0].Sequence == 2);
     CHECK(summaries[1].Sequence == 3);
     CHECK(summaries[1].DurationMicroseconds >= 0.0);
+    CHECK(summaries[1].AssetsMicroseconds == doctest::Approx(3.0));
+    CHECK(summaries[1].UserMicroseconds == doctest::Approx(6.0));
     CHECK(profiler->RecentSummaries(1).front().Sequence == 3);
 }
 

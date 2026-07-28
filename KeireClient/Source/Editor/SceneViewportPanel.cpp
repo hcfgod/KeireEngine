@@ -218,7 +218,11 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (const auto sceneCamera = SelectGameCamera(renderScene))
             environment.SkyVisible =
                 environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-        renderer->Submit({renderScene, m_RenderView, !playActive, environment});
+        Keire::SceneRenderRequest renderRequest{renderScene, m_RenderView, !playActive, environment};
+        if (playActive)
+            if (const auto vfx = document.PlaySession()->Vfx())
+                renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+        renderer->Submit(std::move(renderRequest));
         ui.Image(m_RenderView->Surface(), size);
         imageState = ui.LastItemState();
         imageRect = ui.LastItemRect();
@@ -387,7 +391,11 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             auto environment = m_Controller.SceneViewportSettings();
             environment.SkyVisible =
                 environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-            renderer->Submit({renderScene, m_CameraPreviewView, false, environment});
+            Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
+            if (playActive)
+                if (const auto vfx = document.PlaySession()->Vfx())
+                    renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+            renderer->Submit(std::move(renderRequest));
             ui.DrawFilledRectangle(cameraPreviewRect, {0.025F, 0.03F, 0.045F, 0.96F}, 5.0F);
             ui.DrawImage(m_CameraPreviewView->Surface(), cameraPreviewRect);
             ui.DrawRectangle(cameraPreviewRect, theme.Border, 1.0F, 5.0F);

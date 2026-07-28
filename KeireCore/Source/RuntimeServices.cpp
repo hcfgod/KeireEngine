@@ -62,6 +62,7 @@ namespace Keire
 
         void ValidateVoiceSpecification(const AudioVoiceSpecification& specification)
         {
+            const auto attenuationKeys = specification.Attenuation.Keys();
             if (!specification.Clip || specification.Bus.empty() || specification.Bus.size() > 128 ||
                 specification.Clip->SampleRate < 8000 || specification.Clip->SampleRate > 384000 ||
                 specification.Clip->Channels == 0 || specification.Clip->Channels > 8 ||
@@ -73,7 +74,10 @@ namespace Keire
                 !Math::IsFinite(specification.Position) || !Math::IsFinite(specification.Velocity) ||
                 !std::isfinite(specification.MinimumDistance) || !std::isfinite(specification.MaximumDistance) ||
                 specification.MinimumDistance < 0.0F ||
-                specification.MaximumDistance <= specification.MinimumDistance ||
+                specification.MaximumDistance <= specification.MinimumDistance || attenuationKeys.empty() ||
+                attenuationKeys.front().Time < 0.0F || attenuationKeys.back().Time > 1.0F ||
+                !std::ranges::all_of(attenuationKeys,
+                                     [](const CurveKey& key) { return key.Value >= 0.0F && key.Value <= 1.0F; }) ||
                 !std::isfinite(specification.Occlusion) || specification.Occlusion < 0.0F ||
                 specification.Occlusion > 1.0F)
                 throw std::invalid_argument("Audio voice specification is invalid.");
@@ -168,7 +172,8 @@ namespace Keire
         };
 
         explicit Impl(const AudioSystemSpecification specification)
-            : Owner(std::this_thread::get_id()), Mode(specification.Mode), MaximumVoices(specification.MaximumVoices)
+            : Owner(std::this_thread::get_id()), Mode(specification.Mode), MaximumVoices(specification.MaximumVoices),
+              MaximumMeterReadings(specification.MaximumMeterReadings)
         {
             auto config = ma_engine_config_init();
             config.noDevice = specification.Mode == AudioMode::Headless ? MA_TRUE : MA_FALSE;
@@ -284,6 +289,7 @@ namespace Keire
         std::thread::id Owner;
         AudioMode Mode;
         std::uint32_t MaximumVoices;
+        std::uint32_t MaximumMeterReadings;
         ma_engine Engine{};
         bool EngineOpen = false;
         mutable std::mutex Mutex;
@@ -300,6 +306,7 @@ namespace Keire
         std::uint64_t NextVoice = 1;
         std::uint64_t RenderedFrames = 0;
         std::uint64_t Underruns = 0;
+        AudioMeterSnapshot Meters;
     };
 
     void ValidateAudioGraph(const AudioGraphSnapshot& snapshot)
@@ -350,7 +357,8 @@ namespace Keire
     AudioSystem::AudioSystem(const AudioSystemSpecification specification)
     {
         if (specification.Mode == AudioMode::Disabled || specification.MaximumVoices == 0 ||
-            specification.MaximumVoices > 65536)
+            specification.MaximumVoices > 65536 || specification.MaximumMeterReadings == 0 ||
+            specification.MaximumMeterReadings > 4096)
             throw std::invalid_argument("AudioSystem specification is invalid.");
         m_Impl = std::make_unique<Impl>(specification);
     }
@@ -843,12 +851,18 @@ namespace Keire
                                                     ? 0.0F
                                                     : voice.Specification.MinimumDistance /
                                                           std::max(distance, voice.Specification.MinimumDistance));
+                const auto normalizedDistance =
+                    std::clamp((distance - voice.Specification.MinimumDistance) /
+                                   (voice.Specification.MaximumDistance - voice.Specification.MinimumDistance),
+                               0.0F, 1.0F);
+                const auto curveAttenuation =
+                    std::clamp(voice.Specification.Attenuation.Evaluate(normalizedDistance), 0.0F, 1.0F);
                 const auto direction = distance > 1.0e-6F
                                            ? Vector3{delta.X / distance, delta.Y / distance, delta.Z / distance}
                                            : Vector3{};
                 const auto pan = std::clamp(Dot(direction, right), -1.0F, 1.0F);
-                leftGain *= attenuation * std::sqrt(0.5F * (1.0F - pan));
-                rightGain *= attenuation * std::sqrt(0.5F * (1.0F + pan));
+                leftGain *= attenuation * curveAttenuation * std::sqrt(0.5F * (1.0F - pan));
+                rightGain *= attenuation * curveAttenuation * std::sqrt(0.5F * (1.0F + pan));
                 constexpr float SpeedOfSound = 343.0F;
                 const auto listenerRadial = Dot(m_Impl->Listener.Velocity, direction);
                 const auto sourceRadial = Dot(voice.Specification.Velocity, direction);
@@ -934,6 +948,33 @@ namespace Keire
         return result;
     }
 
+    void AudioSystem::SubmitMeterSnapshot(AudioMeterSnapshot snapshot)
+    {
+        m_Impl->RequireOwner("SubmitMeterSnapshot");
+        if (snapshot.Revision == 0 || snapshot.Readings.size() > m_Impl->MaximumMeterReadings)
+            throw std::invalid_argument("Audio meter snapshot header is invalid.");
+        std::ranges::sort(snapshot.Readings, {}, &AudioMeterReading::Bus);
+        AssetId previous;
+        for (const auto& reading : snapshot.Readings)
+        {
+            if (!reading.Bus || reading.Bus == previous || !std::isfinite(reading.Peak) || reading.Peak < 0.0F ||
+                reading.Peak > 64.0F || !std::isfinite(reading.Rms) || reading.Rms < 0.0F || reading.Rms > reading.Peak)
+                throw std::invalid_argument("Audio meter snapshot contains an invalid or duplicate reading.");
+            previous = reading.Bus;
+        }
+        std::scoped_lock lock(m_Impl->Mutex);
+        if (snapshot.Revision <= m_Impl->Meters.Revision)
+            throw std::invalid_argument("Audio meter snapshot revision is stale.");
+        m_Impl->Meters = std::move(snapshot);
+    }
+
+    AudioMeterSnapshot AudioSystem::LatestMeterSnapshot() const
+    {
+        m_Impl->RequireOwner("LatestMeterSnapshot");
+        std::scoped_lock lock(m_Impl->Mutex);
+        return m_Impl->Meters;
+    }
+
     void AudioSystem::Close()
     {
         m_Impl->State.Close();
@@ -945,6 +986,7 @@ namespace Keire
             m_Impl->DestroyVoice(voice);
         }
         m_Impl->Voices.clear();
+        m_Impl->Meters = {};
         if (std::exchange(m_Impl->EngineOpen, false))
             ma_engine_uninit(&m_Impl->Engine);
     }

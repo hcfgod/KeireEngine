@@ -56,8 +56,7 @@ namespace Keire
                     if (!iterator->is_regular_file(error))
                         continue;
                     if (!m_Impl->InferImporter(iterator->path()))
-                        throw std::invalid_argument("No importer supports a dropped directory entry: " +
-                                                    Detail::PathToUtf8(iterator->path()));
+                        continue;
                     const auto relative = std::filesystem::relative(iterator->path(), source, error);
                     if (error)
                         throw std::runtime_error("Could not resolve a dropped directory entry.");

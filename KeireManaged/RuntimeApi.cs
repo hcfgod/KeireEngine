@@ -149,11 +149,67 @@ public static class Navigation
         RuntimeBridge.Current.FindPathAsync(start, end, areaMask, cancellation);
 }
 
+public enum AnimatorIkSpace : byte
+{
+    Model,
+    World
+}
+
 public static class Animator
 {
-    public static void SetFloat(Entity entity, string parameter, float value) => RuntimeBridge.Current.SetAnimatorFloat(entity, parameter, value);
-    public static void SetBool(Entity entity, string parameter, bool value) => RuntimeBridge.Current.SetAnimatorBool(entity, parameter, value);
-    public static void SetTrigger(Entity entity, string parameter) => RuntimeBridge.Current.SetAnimatorTrigger(entity, parameter);
+    public static void SetFloat(Entity entity, string parameter, float value) =>
+        NativeRuntime.SetAnimatorFloat(entity, parameter, value);
+    public static void SetInteger(Entity entity, string parameter, int value) =>
+        NativeRuntime.SetAnimatorInteger(entity, parameter, value);
+    public static void SetBool(Entity entity, string parameter, bool value) =>
+        NativeRuntime.SetAnimatorBoolean(entity, parameter, value);
+    public static void SetTrigger(Entity entity, string parameter) =>
+        NativeRuntime.SetAnimatorTrigger(entity, parameter, true);
+    public static void ResetTrigger(Entity entity, string parameter) =>
+        NativeRuntime.SetAnimatorTrigger(entity, parameter, false);
+    public static void SetLayerWeight(Entity entity, string layer, float value) =>
+        NativeRuntime.SetAnimatorLayerWeight(entity, layer, value);
+    public static void SetTwoBoneIK(Entity entity, string goal, string rootBone, string middleBone, string endBone,
+                                    Vector3 target, Vector3 pole, float weight = 1.0f,
+                                    AnimatorIkSpace space = AnimatorIkSpace.World) =>
+        NativeRuntime.SetAnimatorTwoBoneIk(entity, goal, rootBone, middleBone, endBone, target, pole, weight, space);
+    public static void SetFabrikIK(Entity entity, string goal, IReadOnlyList<string> bones, Vector3 target,
+                                   float weight = 1.0f, uint maximumIterations = 12, float tolerance = 0.001f,
+                                   AnimatorIkSpace space = AnimatorIkSpace.World) =>
+        NativeRuntime.SetAnimatorFabrikIk(entity, goal, bones, target, weight, maximumIterations, tolerance, space);
+    public static bool ClearIK(Entity entity, string goal) => NativeRuntime.ClearAnimatorIk(entity, goal);
+
+    public static float GetFloat(Entity entity, string parameter) =>
+        TryGetFloat(entity, parameter, out float value)
+            ? value
+            : throw new InvalidOperationException($"Animator float parameter '{parameter}' is unavailable.");
+
+    public static bool TryGetFloat(Entity entity, string parameter, out float value) =>
+        NativeRuntime.TryGetAnimatorFloat(entity, parameter, out value);
+
+    public static int GetInteger(Entity entity, string parameter) =>
+        TryGetInteger(entity, parameter, out int value)
+            ? value
+            : throw new InvalidOperationException($"Animator integer parameter '{parameter}' is unavailable.");
+
+    public static bool TryGetInteger(Entity entity, string parameter, out int value) =>
+        NativeRuntime.TryGetAnimatorInteger(entity, parameter, out value);
+
+    public static bool GetBool(Entity entity, string parameter) =>
+        TryGetBool(entity, parameter, out bool value)
+            ? value
+            : throw new InvalidOperationException($"Animator boolean parameter '{parameter}' is unavailable.");
+
+    public static bool TryGetBool(Entity entity, string parameter, out bool value) =>
+        NativeRuntime.TryGetAnimatorBoolean(entity, parameter, out value);
+
+    public static float GetLayerWeight(Entity entity, string layer) =>
+        TryGetLayerWeight(entity, layer, out float value)
+            ? value
+            : throw new InvalidOperationException($"Animator layer '{layer}' is unavailable.");
+
+    public static bool TryGetLayerWeight(Entity entity, string layer, out float value) =>
+        NativeRuntime.TryGetAnimatorLayerWeight(entity, layer, out value);
 }
 
 [StableAssetTypeId("4b454952-4541-5544-494f-434c49500001")]

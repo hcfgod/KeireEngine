@@ -79,7 +79,8 @@ namespace Keire::RenderBackend
 {
     void RenderSharedState::CreateGeometryResources()
     {
-        ShadowPipeline = CreateShadowPipeline();
+        ShadowPipeline = CreateDepthPipeline(true);
+        SceneDepthPipeline = CreateDepthPipeline(false);
         ToneMapPipeline = CreateToneMapPipeline();
         SDL_GPUSamplerCreateInfo shadowSampler{};
         shadowSampler.min_filter = SDL_GPU_FILTER_NEAREST;
@@ -345,6 +346,13 @@ namespace Keire::RenderBackend
                 result.Depth = SDL_CreateGPUTexture(Device, &depth);
                 if (!result.Depth)
                     throw std::runtime_error("SDL_CreateGPUTexture(depth) failed: " + LastSdlError());
+
+                depth.format = ShadowDepthFormat;
+                depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+                depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
+                result.SampledDepth = SDL_CreateGPUTexture(Device, &depth);
+                if (!result.SampledDepth)
+                    throw std::runtime_error("SDL_CreateGPUTexture(sampled depth) failed: " + LastSdlError());
             }
             return result;
         }
@@ -410,7 +418,7 @@ namespace Keire::RenderBackend
 
     SDL_GPUGraphicsPipeline* RenderSharedState::CreatePipeline(const SDL_GPUSampleCount samples,
                                                                const SDL_GPUPrimitiveType primitive,
-                                                               const bool depthWrite)
+                                                               const bool depthWrite, const bool blend)
     {
         SDL_GPUShader* vertex = CreateShader(true);
         SDL_GPUShader* fragment = nullptr;
@@ -420,6 +428,13 @@ namespace Keire::RenderBackend
 
             SDL_GPUColorTargetDescription color{};
             color.format = SceneColorFormat;
+            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.enable_blend = blend;
 
             SDL_GPUVertexBufferDescription vertexBuffer{};
             vertexBuffer.slot = 0;
@@ -520,7 +535,7 @@ namespace Keire::RenderBackend
         }
     }
 
-    SDL_GPUGraphicsPipeline* RenderSharedState::CreateShadowPipeline()
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateDepthPipeline(const bool depthBias)
     {
         SDL_GPUShader* vertex = CreateShadowShader(true);
         SDL_GPUShader* fragment = nullptr;
@@ -545,10 +560,13 @@ namespace Keire::RenderBackend
             information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
             information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
             information.rasterizer_state.enable_depth_clip = true;
-            information.rasterizer_state.depth_bias_constant_factor = DirectionalShadowDepthBiasConstant;
-            information.rasterizer_state.depth_bias_clamp = 0.0F;
-            information.rasterizer_state.depth_bias_slope_factor = DirectionalShadowDepthBiasSlope;
-            information.rasterizer_state.enable_depth_bias = true;
+            if (depthBias)
+            {
+                information.rasterizer_state.depth_bias_constant_factor = DirectionalShadowDepthBiasConstant;
+                information.rasterizer_state.depth_bias_clamp = 0.0F;
+                information.rasterizer_state.depth_bias_slope_factor = DirectionalShadowDepthBiasSlope;
+                information.rasterizer_state.enable_depth_bias = true;
+            }
             information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
             information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
             information.depth_stencil_state.enable_depth_test = true;
@@ -558,7 +576,7 @@ namespace Keire::RenderBackend
             information.target_info.has_depth_stencil_target = true;
             auto* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
             if (!result)
-                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(shadow) failed: " + LastSdlError());
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(depth-only) failed: " + LastSdlError());
             SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
             return result;
@@ -620,10 +638,13 @@ namespace Keire::RenderBackend
             result.Cube = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
             result.Grid = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_LINELIST, false);
             result.Sky = CreateSkyPipeline(samples);
+            result.Vfx = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, false, true);
             return Pipelines.emplace_back(result);
         }
         catch (...)
         {
+            if (result.Vfx)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.Vfx);
             if (result.Grid)
                 SDL_ReleaseGPUGraphicsPipeline(Device, result.Grid);
             if (result.Sky)

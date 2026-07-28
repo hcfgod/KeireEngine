@@ -25,6 +25,7 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::AssetId AssetBrowserSceneAsset() const noexcept = 0;
         [[nodiscard]] virtual bool AssetBrowserSceneDirty() const noexcept = 0;
         [[nodiscard]] virtual bool AssetBrowserImportPending() const noexcept = 0;
+        [[nodiscard]] virtual std::vector<Keire::ManagedAssetTypeDescriptor> AssetBrowserManagedAssetTypes() const = 0;
         virtual void RefreshAssetBrowserRecords() = 0;
         virtual void SetAssetBrowserSelected(Keire::AssetId asset) noexcept = 0;
         virtual void ClearAssetBrowserSceneSelection() noexcept = 0;
@@ -33,8 +34,13 @@ namespace KeireEditor
         virtual void ImportAssetBrowserAssets() = 0;
         virtual void RequestAssetBrowserCreateScene() = 0;
         virtual bool CreateAssetBrowserMaterial(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserAnimationGraph(std::string_view name) = 0;
         virtual bool CreateAssetBrowserScript(std::string_view name) = 0;
         virtual bool CreateAssetBrowserManagedAssembly(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserManagedData(Keire::ManagedTypeId type, std::string_view name) = 0;
+        virtual bool CreateAssetBrowserAudioMixer(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserPhysicsMaterial(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserVfxEffect(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefab(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) = 0;
         virtual void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) = 0;
@@ -46,6 +52,9 @@ namespace KeireEditor
                                         Keire::Detail::AssetWorkerMutation reverse, std::string name,
                                         bool revealResult = false) = 0;
         virtual void OpenAssetBrowserInputActions(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserAudioMixer(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserVfxEffect(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserPrefab(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserScene(Keire::AssetId asset) = 0;
         virtual void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) = 0;

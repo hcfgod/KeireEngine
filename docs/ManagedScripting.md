@@ -25,10 +25,30 @@ remain under `Library/ScriptAssemblies/Intermediate`.
 Kéire serializes supported public instance fields and private fields marked `[SerializeField]`. `[HotReloadState]`
 includes a field in Play Mode migration without writing it into scene or prefab state. `[StableFieldId]` is the durable
 identity. Field names and `[FormerlySerializedAs]` aliases are compatibility fallbacks and produce migration warnings.
+Inspector edits to these fields during Play Mode hydrate the active `Behaviour` immediately while remaining isolated
+to the runtime scene until they are selected in **Play Mode Changes** and applied.
 
 Play Mode reload is transactional. The runtime captures state, invokes `OnBeforeReload`, constructs and hydrates every
 candidate instance, and swaps the Coral context only after the complete migration succeeds. A failed candidate is
 unloaded and the last-good generation resumes. Migrated instances do not rerun `Awake` or `Start`.
+
+## Managed data assets
+
+Authorable `ScriptableObject` types require a public parameterless constructor and `[StableAssetTypeId]`.
+`[CreateAssetMenu]` adds a deterministic **Create > Managed Data** path after the runtime assembly builds. Every
+serialized member requires `[StableFieldId]`; supported members are primitives, enums, vectors/colors, nested
+`[SerializableType]` values, arrays/lists, and `AssetReference<T>`. Range, header, tooltip, read-only, and hidden
+metadata is reflected into the default Inspector. Dictionaries, cyclic or polymorphic inline graphs, and inline
+ScriptableObjects are rejected; use typed asset references for cross-object relationships.
+
+`.keiredata` edits are project-asset edits, not Play scene-clone edits. They persist through the asset document’s own
+Save action and publish a new development revision immediately during Play. Loaded objects retain identity across
+successful asset reloads. `Assets.Load`, `TryLoad`, and cancellation-aware `LoadAsync` use the application-owned asset
+pipeline, while `ScriptableObject.Instantiate` deep-copies the supported serialized graph.
+
+Script reload hydrates all active managed data into the candidate context before migrating Behaviours. Any migration
+failure abandons the candidate context and leaves the last-good objects and scripts active. Strict cooking similarly
+compiles and discovers runtime types before validating type IDs, field shapes, and typed dependency closure.
 
 ## Exceptions and async work
 

@@ -44,12 +44,23 @@ namespace KeireEditor
                                        const Keire::RenderEnvironmentSettings settings,
                                        Keire::Ref<Keire::UndoContext> undo)
     {
+        const auto authoring = Keire::LoadProjectAuthoringSettings(projectRoot);
+        Open(std::move(projectRoot), settings, authoring, std::move(undo));
+    }
+
+    void ProjectSettingsDocument::Open(std::filesystem::path projectRoot,
+                                       const Keire::RenderEnvironmentSettings settings,
+                                       Keire::ProjectAuthoringSettings authoringSettings,
+                                       Keire::Ref<Keire::UndoContext> undo)
+    {
         if (projectRoot.empty())
             throw std::invalid_argument("ProjectSettingsDocument requires a project root.");
         Validate(settings);
+        Keire::ValidateProjectAuthoringSettings(authoringSettings);
         Close();
         m_ProjectRoot = std::move(projectRoot);
         m_Settings = settings;
+        m_AuthoringSettings = std::move(authoringSettings);
         m_Undo = std::move(undo);
     }
 
@@ -57,6 +68,7 @@ namespace KeireEditor
     {
         m_ProjectRoot.clear();
         m_Settings = {};
+        m_AuthoringSettings = Keire::DefaultProjectAuthoringSettings();
         m_EditBaseline.reset();
         if (m_Undo && m_Undo->IsOpen())
             m_Undo->Close();
@@ -72,8 +84,21 @@ namespace KeireEditor
         if (settings == m_Settings)
             return;
         if (!m_EditBaseline)
-            m_EditBaseline = m_Settings;
+            m_EditBaseline = Current();
         m_Settings = settings;
+        m_Dirty = true;
+    }
+
+    void ProjectSettingsDocument::UpdateAuthoring(Keire::ProjectAuthoringSettings settings)
+    {
+        if (!Opened())
+            throw std::logic_error("ProjectSettingsDocument is closed.");
+        Keire::ValidateProjectAuthoringSettings(settings);
+        if (settings == m_AuthoringSettings)
+            return;
+        if (!m_EditBaseline)
+            m_EditBaseline = Current();
+        m_AuthoringSettings = std::move(settings);
         m_Dirty = true;
     }
 
@@ -82,7 +107,7 @@ namespace KeireEditor
         if (!m_EditBaseline)
             return;
         const auto before = *m_EditBaseline;
-        const auto after = m_Settings;
+        const auto after = Current();
         m_EditBaseline.reset();
         if (before == after || !m_Undo || !m_Undo->IsOpen())
             return;
@@ -95,7 +120,7 @@ namespace KeireEditor
     {
         if (!m_EditBaseline)
             return;
-        m_Settings = *m_EditBaseline;
+        Assign(*m_EditBaseline);
         m_EditBaseline.reset();
     }
 
@@ -105,18 +130,26 @@ namespace KeireEditor
         CommitEdit("Reset Project Settings");
     }
 
+    void ProjectSettingsDocument::ResetAuthoring()
+    {
+        UpdateAuthoring(Keire::DefaultProjectAuthoringSettings());
+        CommitEdit("Reset Authoring Settings");
+    }
+
     void ProjectSettingsDocument::Save()
     {
         if (!Opened())
             throw std::logic_error("ProjectSettingsDocument is closed.");
         CommitEdit();
         Keire::SaveRenderEnvironmentSettings(m_ProjectRoot, m_Settings);
+        Keire::SaveProjectAuthoringSettings(m_ProjectRoot, m_AuthoringSettings);
         m_Dirty = false;
     }
 
-    void ProjectSettingsDocument::Assign(const Keire::RenderEnvironmentSettings& settings) noexcept
+    void ProjectSettingsDocument::Assign(const Snapshot& settings) noexcept
     {
-        m_Settings = settings;
+        m_Settings = settings.Rendering;
+        m_AuthoringSettings = settings.Authoring;
         m_EditBaseline.reset();
         m_Dirty = true;
     }

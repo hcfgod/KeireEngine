@@ -2,14 +2,23 @@
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
+#include "KeireInternal/Rendering/TransparencyInternal.h"
 
+#include "Keire/BuiltinSkinningShaders.h"
 #include "Keire/Log.h"
 
 #include <imgui_impl_sdlgpu3.h>
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <tuple>
+#include <vector>
 
 namespace
 {
@@ -121,9 +130,176 @@ namespace
 
 namespace Keire::RenderBackend
 {
+    bool RenderSharedState::EnsureSkinningPipeline()
+    {
+        if (SkinningPipelineAttempted)
+            return SkinningPipeline != nullptr;
+        SkinningPipelineAttempted = true;
+
+        const auto formats = SDL_GetGPUShaderFormats(Device);
+        const unsigned char* code = nullptr;
+        std::size_t codeSize = 0;
+        SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID;
+        if ((formats & SDL_GPU_SHADERFORMAT_DXIL) != 0)
+        {
+            code = ::Keire::Detail::BuiltinSkinningComputeDxil;
+            codeSize = sizeof(::Keire::Detail::BuiltinSkinningComputeDxil);
+            format = SDL_GPU_SHADERFORMAT_DXIL;
+        }
+        else if ((formats & SDL_GPU_SHADERFORMAT_SPIRV) != 0)
+        {
+            code = ::Keire::Detail::BuiltinSkinningComputeSpirv;
+            codeSize = sizeof(::Keire::Detail::BuiltinSkinningComputeSpirv);
+            format = SDL_GPU_SHADERFORMAT_SPIRV;
+        }
+        else if ((formats & SDL_GPU_SHADERFORMAT_MSL) != 0)
+        {
+            code = ::Keire::Detail::BuiltinSkinningComputeMsl;
+            codeSize = sizeof(::Keire::Detail::BuiltinSkinningComputeMsl);
+            format = SDL_GPU_SHADERFORMAT_MSL;
+        }
+        if (!code)
+            return false;
+
+        SDL_GPUComputePipelineCreateInfo createInfo{};
+        createInfo.code = code;
+        createInfo.code_size = codeSize;
+        createInfo.entrypoint = "CSMain";
+        createInfo.format = format;
+        createInfo.num_readonly_storage_buffers = 3;
+        createInfo.num_readwrite_storage_buffers = 2;
+        createInfo.num_uniform_buffers = 1;
+        createInfo.threadcount_x = 64;
+        createInfo.threadcount_y = 1;
+        createInfo.threadcount_z = 1;
+        SkinningPipeline = SDL_CreateGPUComputePipeline(Device, &createInfo);
+        return SkinningPipeline != nullptr;
+    }
+
+    void RenderSharedState::PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet)
+    {
+        struct GpuSkinInfluence
+        {
+            std::array<std::uint32_t, 4> Bones0{};
+            std::array<std::uint32_t, 4> Bones1{};
+            std::array<float, 4> Weights0{};
+            std::array<float, 4> Weights1{};
+        };
+        struct SkinDispatch
+        {
+            std::uint32_t VertexCount = 0;
+            std::uint32_t InfluenceCount = 4;
+            std::uint32_t SkinningMode = 0;
+            std::uint32_t Padding = 0;
+        };
+
+        const auto createOutput = [this](const std::size_t bytes, const SDL_GPUBufferUsageFlags usage)
+        {
+            SDL_GPUBufferCreateInfo createInfo{};
+            createInfo.usage = usage;
+            createInfo.size = static_cast<std::uint32_t>(bytes);
+            auto* result = SDL_CreateGPUBuffer(Device, &createInfo);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUBuffer(skin cache) failed: " + LastSdlError());
+            FrameTransientBuffers.push_back(result);
+            return result;
+        };
+
+        for (auto& item : packet.DrawItems)
+        {
+            item.SkinnedAssetVertices = nullptr;
+            item.SkinnedBuiltinVertices = nullptr;
+            if (!item.Skin || item.SkinPalette.empty())
+                continue;
+
+            const auto skin = Assets->Load<SkinnedMeshAsset>(item.Skin, AssetPriority::High).TryGetLoaded();
+            const auto meshAsset = Assets->Load<MeshAsset>(item.Mesh, AssetPriority::High).TryGetLoaded();
+            if (!skin || !meshAsset || skin->Mesh() != item.Mesh ||
+                skin->Influences8().size() != meshAsset->Vertices().size() || meshAsset->Vertices().empty())
+            {
+                continue;
+            }
+            item.Skinning = skin->Method();
+            const auto& mesh = ResolveMesh(item.Mesh);
+            if (mesh.Empty() || !mesh.AssetVertices)
+                continue;
+
+            const auto useCompute = item.Skinning == SkinningMethod::LinearBlend && EnsureSkinningPipeline();
+            if (!useCompute)
+            {
+                std::vector<MeshVertex> deformed(meshAsset->Vertices().size());
+                SkinMeshCpu(meshAsset->Vertices(), skin->Influences8(), item.SkinPalette, item.Skinning, deformed);
+                std::vector<RenderVertex> builtinVertices;
+                builtinVertices.reserve(deformed.size());
+                for (const auto& vertex : deformed)
+                {
+                    builtinVertices.push_back(
+                        {vertex.Position,
+                         {vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue},
+                         vertex.Normal});
+                }
+                item.SkinnedAssetVertices =
+                    UploadBuffer(std::as_bytes(std::span(deformed)), SDL_GPU_BUFFERUSAGE_VERTEX);
+                item.SkinnedBuiltinVertices =
+                    UploadBuffer(std::as_bytes(std::span(builtinVertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
+                FrameTransientBuffers.push_back(item.SkinnedAssetVertices);
+                FrameTransientBuffers.push_back(item.SkinnedBuiltinVertices);
+                continue;
+            }
+
+            std::vector<GpuSkinInfluence> influences(skin->Influences8().size());
+            for (std::size_t vertex = 0; vertex < skin->Influences8().size(); ++vertex)
+            {
+                const auto& source = skin->Influences8()[vertex];
+                for (std::size_t influence = 0; influence < source.Count; ++influence)
+                {
+                    if (influence < 4)
+                    {
+                        influences[vertex].Bones0[influence] = source.Bones[influence];
+                        influences[vertex].Weights0[influence] = source.Weights[influence];
+                    }
+                    else
+                    {
+                        influences[vertex].Bones1[influence - 4] = source.Bones[influence];
+                        influences[vertex].Weights1[influence - 4] = source.Weights[influence];
+                    }
+                }
+            }
+            auto* influenceBuffer =
+                UploadBuffer(std::as_bytes(std::span(influences)), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
+            auto* paletteBuffer =
+                UploadBuffer(std::as_bytes(std::span(item.SkinPalette)), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
+            FrameTransientBuffers.push_back(influenceBuffer);
+            FrameTransientBuffers.push_back(paletteBuffer);
+
+            item.SkinnedAssetVertices =
+                createOutput(meshAsset->Vertices().size_bytes(),
+                             SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
+            item.SkinnedBuiltinVertices =
+                createOutput(meshAsset->Vertices().size() * sizeof(RenderVertex),
+                             SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
+
+            const std::array writeBindings{SDL_GPUStorageBufferReadWriteBinding{item.SkinnedAssetVertices, false},
+                                           SDL_GPUStorageBufferReadWriteBinding{item.SkinnedBuiltinVertices, false}};
+            auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
+                                                 static_cast<std::uint32_t>(writeBindings.size()));
+            if (!pass)
+                throw std::runtime_error("SDL_BeginGPUComputePass(skin cache) failed: " + LastSdlError());
+            SDL_BindGPUComputePipeline(pass, SkinningPipeline);
+            const std::array readBindings{mesh.AssetVertices, influenceBuffer, paletteBuffer};
+            SDL_BindGPUComputeStorageBuffers(pass, 0, readBindings.data(),
+                                             static_cast<std::uint32_t>(readBindings.size()));
+            const SkinDispatch dispatch{static_cast<std::uint32_t>(meshAsset->Vertices().size()),
+                                        skin->MaximumInfluences()};
+            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+            SDL_DispatchGPUCompute(pass, (dispatch.VertexCount + 63U) / 64U, 1, 1);
+            SDL_EndGPUComputePass(pass);
+        }
+    }
+
     void RenderSharedState::DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
                                       RenderSurfaceState& surface, const SceneRenderPacket& packet,
-                                      const ShadowFrameData& shadows)
+                                      const ShadowFrameData& shadows, const SceneDrawPhase phase)
     {
         const auto samples = ToSdlSampleCount(surface.ActualSamples);
         auto& pipelines = PipelinesFor(samples);
@@ -134,7 +310,7 @@ namespace Keire::RenderBackend
         std::array<SDL_GPUBuffer*, 3> forwardPlusBuffers{surface.ForwardPlus.Lights, surface.ForwardPlus.Tiles,
                                                          surface.ForwardPlus.LightIndices};
 
-        if (packet.Environment.SkyVisible && pipelines.Sky)
+        if (phase == SceneDrawPhase::Opaque && packet.Environment.SkyVisible && pipelines.Sky)
         {
             const auto& environment =
                 packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
@@ -155,7 +331,7 @@ namespace Keire::RenderBackend
             }
         }
 
-        if (packet.DrawGrid && GridBuffer && GridVertexCount > 0)
+        if (phase == SceneDrawPhase::Opaque && packet.DrawGrid && GridBuffer && GridVertexCount > 0)
         {
             const ObjectUniforms object =
                 MakeObjectUniforms(Math::Multiply(camera.Projection, camera.View), {}, {}, {1.0F, 1.0F, 1.0F, 1.0F},
@@ -208,11 +384,6 @@ namespace Keire::RenderBackend
             {
                 const auto submeshIndex = firstSubmesh + offset;
                 const auto& submesh = mesh.Submeshes[submeshIndex];
-                if (!IntersectsFrustum(clipFromLocal, submesh.Bounds))
-                {
-                    ++Statistics.CulledSubmeshes;
-                    continue;
-                }
                 AssetId materialId;
                 if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot])
                     materialId = item.Materials[submesh.MaterialSlot];
@@ -221,6 +392,14 @@ namespace Keire::RenderBackend
                 MaterialSurfaceState surfaceState;
                 if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr)
                     surfaceState = material->Surface;
+                const bool transparent = surfaceState.AlphaMode == MaterialAlphaMode::Blend;
+                if (transparent != (phase == SceneDrawPhase::Transparent))
+                    continue;
+                if (!IntersectsFrustum(clipFromLocal, submesh.Bounds))
+                {
+                    ++Statistics.CulledSubmeshes;
+                    continue;
+                }
                 const Vector3 center{(submesh.Bounds.Minimum.X + submesh.Bounds.Maximum.X) * 0.5F,
                                      (submesh.Bounds.Minimum.Y + submesh.Bounds.Maximum.Y) * 0.5F,
                                      (submesh.Bounds.Minimum.Z + submesh.Bounds.Maximum.Z) * 0.5F};
@@ -238,7 +417,7 @@ namespace Keire::RenderBackend
                 if (leftBlended != rightBlended)
                     return !leftBlended;
                 if (leftBlended && left.Depth != right.Depth)
-                    return left.Depth > right.Depth;
+                    return Detail::TransparentBackToFront(left.Depth, right.Depth);
                 if (!leftBlended)
                 {
                     const auto leftKey =
@@ -296,7 +475,7 @@ namespace Keire::RenderBackend
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             instanceKeys.push_back({draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
                                     draw.Item->ReceiveShadows, draw.Item->CastShadows,
-                                    material && material->UsesInstancing});
+                                    material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices});
         }
         const auto batches = BuildInstanceBatches(instanceKeys);
         for (const auto batch : batches)
@@ -311,7 +490,7 @@ namespace Keire::RenderBackend
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             const auto instanceCount = batch.Count;
             SDL_GPUBuffer* instanceBuffer = nullptr;
-            if (material && material->UsesInstancing)
+            if (material && material->UsesInstancing && !item.SkinnedAssetVertices)
             {
                 std::vector<GpuInstanceUniform> instances;
                 instances.reserve(instanceCount);
@@ -391,9 +570,10 @@ namespace Keire::RenderBackend
                     }
                     SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindingCount));
                 }
-                const SDL_GPUBufferBinding vertexBinding{mesh.AssetVertices, 0};
+                const SDL_GPUBufferBinding vertexBinding{
+                    item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
-                if (material->UsesInstancing)
+                if (material->UsesInstancing && !item.SkinnedAssetVertices)
                     SDL_BindGPUVertexStorageBuffers(pass, 0, &instanceBuffer, 1);
             }
             else
@@ -416,7 +596,8 @@ namespace Keire::RenderBackend
                 SDL_BindGPUGraphicsPipeline(pass, pipelines.Cube);
                 SDL_BindGPUFragmentSamplers(pass, 0, shadowBindings.data(),
                                             static_cast<std::uint32_t>(shadowBindings.size()));
-                const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
+                const SDL_GPUBufferBinding vertexBinding{
+                    item.SkinnedBuiltinVertices ? item.SkinnedBuiltinVertices : mesh.Vertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
             }
             SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, instanceCount, draw.Submesh.FirstIndex, 0,
@@ -425,6 +606,171 @@ namespace Keire::RenderBackend
             Statistics.Triangles += draw.Submesh.IndexCount / 3 * instanceCount;
             Statistics.InstanceBatches += instanceCount > 1 ? 1U : 0U;
         }
+    }
+
+    void RenderSharedState::DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
+                                    RenderSurfaceState& surface, const SceneRenderPacket& packet)
+    {
+        const auto particles = packet.Vfx.Particles();
+        if (particles.empty())
+            return;
+        auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+        if (!pipelines.Vfx)
+            return;
+
+        struct PreparedParticle final
+        {
+            const VfxRenderParticle* Particle = nullptr;
+            float Depth = 0.0F;
+            std::uint32_t SpriteFirstVertex = 0;
+        };
+        std::vector<PreparedParticle> prepared;
+        prepared.reserve(particles.size());
+        for (const auto& particle : particles)
+            prepared.push_back(
+                {std::addressof(particle), Math::TransformPoint(packet.Camera.View, particle.Position).Z});
+        std::ranges::stable_sort(prepared, [](const auto& left, const auto& right)
+                                 { return Detail::TransparentBackToFront(left.Depth, right.Depth); });
+
+        const auto cameraWorld = Math::Inverse(packet.Camera.View);
+        const auto cameraRight = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
+        const auto cameraUp = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
+        const auto cameraForward = Math::TransformDirection(cameraWorld, {0.0F, 0.0F, -1.0F});
+        std::vector<RenderVertex> spriteVertices;
+        spriteVertices.reserve(std::ranges::count_if(prepared, [](const PreparedParticle& value)
+                                                     { return value.Particle->Renderer == VfxRendererType::Sprite; }) *
+                               6U);
+        constexpr float degreesToRadians = 0.01745329251994329577F;
+        for (auto& value : prepared)
+        {
+            const auto& particle = *value.Particle;
+            if (particle.Renderer != VfxRendererType::Sprite)
+                continue;
+            value.SpriteFirstVertex = static_cast<std::uint32_t>(spriteVertices.size());
+            const auto angle = particle.Rotation.Z * degreesToRadians;
+            const auto cosine = std::cos(angle);
+            const auto sine = std::sin(angle);
+            const auto right = Scale(Add(Scale(cameraRight, cosine), Scale(cameraUp, sine)), particle.Size * 0.5F);
+            const auto up = Scale(Add(Scale(cameraUp, cosine), Scale(cameraRight, -sine)), particle.Size * 0.5F);
+            const auto lowerLeft = Subtract(Subtract(particle.Position, right), up);
+            const auto lowerRight = Add(Subtract(particle.Position, up), right);
+            const auto upperRight = Add(Add(particle.Position, right), up);
+            const auto upperLeft = Add(Subtract(particle.Position, right), up);
+            constexpr Vector3 white{1.0F, 1.0F, 1.0F};
+            spriteVertices.push_back({lowerLeft, white, cameraForward});
+            spriteVertices.push_back({lowerRight, white, cameraForward});
+            spriteVertices.push_back({upperRight, white, cameraForward});
+            spriteVertices.push_back({lowerLeft, white, cameraForward});
+            spriteVertices.push_back({upperRight, white, cameraForward});
+            spriteVertices.push_back({upperLeft, white, cameraForward});
+        }
+
+        SDL_GPUBuffer* spriteBuffer = nullptr;
+        if (!spriteVertices.empty())
+        {
+            spriteBuffer = UploadVertexBuffer(spriteVertices);
+            FrameTransientBuffers.push_back(spriteBuffer);
+        }
+
+        const AssetShadowUniforms noShadows{};
+        const AssetLocalLightUniforms noLocalLights{};
+        const std::array shadowBindings{SDL_GPUTextureSamplerBinding{EmptyShadowTexture, ShadowSampler},
+                                        SDL_GPUTextureSamplerBinding{EmptyShadowTexture, ShadowSampler}};
+        SDL_BindGPUGraphicsPipeline(pass, pipelines.Vfx);
+        SDL_PushGPUFragmentUniformData(commands, 0, &noShadows, sizeof(noShadows));
+        SDL_PushGPUFragmentUniformData(commands, 1, &noLocalLights, sizeof(noLocalLights));
+        SDL_BindGPUFragmentSamplers(pass, 0, shadowBindings.data(), static_cast<std::uint32_t>(shadowBindings.size()));
+
+        const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
+        for (const auto& value : prepared)
+        {
+            const auto& particle = *value.Particle;
+            if (particle.Size <= 0.0F)
+                continue;
+            if (particle.Renderer == VfxRendererType::Sprite)
+            {
+                const ObjectUniforms object = MakeObjectUniforms(viewProjection, {}, packet.Camera.View, particle.Tint,
+                                                                 packet.Lighting, packet.Environment, false);
+                const SDL_GPUBufferBinding vertexBinding{spriteBuffer, 0};
+                SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                SDL_DrawGPUPrimitives(pass, 6, 1, value.SpriteFirstVertex, 0);
+                ++Statistics.DrawCalls;
+                Statistics.Triangles += 2;
+                continue;
+            }
+
+            const auto& mesh = ResolveMesh(particle.Mesh);
+            if (mesh.Empty())
+                continue;
+            const auto model =
+                Math::ComposeTransform(particle.Position, Math::EulerDegreesToQuaternion(particle.Rotation),
+                                       {particle.Size, particle.Size, particle.Size});
+            const ObjectUniforms object =
+                MakeObjectUniforms(Math::Multiply(viewProjection, model), model, packet.Camera.View, particle.Tint,
+                                   packet.Lighting, packet.Environment, false);
+            const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
+            const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
+            SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+            SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+            SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            for (const auto& submesh : mesh.Submeshes)
+            {
+                SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
+                ++Statistics.DrawCalls;
+                Statistics.Triangles += submesh.IndexCount / 3U;
+            }
+        }
+    }
+
+    void RenderSharedState::RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                               const SceneRenderPacket& packet)
+    {
+        if (!surface.Resources.SampledDepth || !SceneDepthPipeline)
+            return;
+        SDL_GPUDepthStencilTargetInfo depth{};
+        depth.texture = surface.Resources.SampledDepth;
+        depth.clear_depth = 1.0F;
+        depth.load_op = SDL_GPU_LOADOP_CLEAR;
+        depth.store_op = SDL_GPU_STOREOP_STORE;
+        depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+        depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+        auto* pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depth);
+        if (!pass)
+            throw std::runtime_error("SDL_BeginGPURenderPass(sampled depth) failed: " + LastSdlError());
+        SDL_BindGPUGraphicsPipeline(pass, SceneDepthPipeline);
+        const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
+        const auto samples = ToSdlSampleCount(surface.ActualSamples);
+        for (const auto& item : packet.DrawItems)
+        {
+            const auto& mesh = ResolveMesh(item.Mesh);
+            if (mesh.Empty())
+                continue;
+            const auto object = Math::Multiply(viewProjection, item.World);
+            SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+            const SDL_GPUBufferBinding vertexBinding{
+                item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
+            const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
+            SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+            SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            for (const auto& submesh : mesh.Submeshes)
+            {
+                AssetId materialId;
+                if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot])
+                    materialId = item.Materials[submesh.MaterialSlot];
+                else if (submesh.MaterialSlot < mesh.DefaultMaterials.size())
+                    materialId = mesh.DefaultMaterials[submesh.MaterialSlot];
+                if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr;
+                    material && material->Surface.AlphaMode == MaterialAlphaMode::Blend)
+                {
+                    continue;
+                }
+                SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
+            }
+        }
+        SDL_EndGPURenderPass(pass);
+        ++Statistics.Passes;
+        Statistics.SampledResolvedDepthAvailable = true;
     }
 
     ShadowFrameData RenderSharedState::RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -487,7 +833,8 @@ namespace Keire::RenderBackend
                     continue;
                 const auto object = Math::Multiply(lightMatrix, item.World);
                 SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-                const SDL_GPUBufferBinding vertexBinding{mesh.AssetVertices, 0};
+                const SDL_GPUBufferBinding vertexBinding{
+                    item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
                 const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
                 SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -640,6 +987,8 @@ namespace Keire::RenderBackend
             return;
 
         const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
+        if (request != Requests.end())
+            PrepareSkinning(commands, request->Packet);
         ShadowFrameData shadows;
         shadows.LocalLayers.fill(-1.0F);
         CallbackFrameGraphExecutionContext execution(
@@ -649,14 +998,61 @@ namespace Keire::RenderBackend
                 ++Statistics.ExecutedFrameGraphPasses;
                 if (frameGraphPass == SceneFrameGraph.DirectionalShadows)
                 {
+                    const auto started = std::chrono::steady_clock::now();
                     if (request != Requests.end())
                         shadows = RecordShadows(commands, surface, request->Packet);
+                    Statistics.ShadowRecordingMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
                 }
                 if (frameGraphPass == SceneFrameGraph.ForwardPlusCulling)
                 {
                     if (request == Requests.end())
                         return;
+                    const auto started = std::chrono::steady_clock::now();
+                    auto contentHash = std::uint64_t{1469598103934665603ULL};
+                    const auto hashValue = [&](const auto value)
+                    {
+                        const auto bytes = std::as_bytes(std::span(std::addressof(value), 1));
+                        for (const auto byte : bytes)
+                        {
+                            contentHash ^= std::to_integer<std::uint8_t>(byte);
+                            contentHash *= 1099511628211ULL;
+                        }
+                    };
+                    hashValue(surface.Width);
+                    hashValue(surface.Height);
+                    for (const auto value : request->Packet.Camera.View.Elements)
+                        hashValue(value);
+                    for (const auto value : request->Packet.Camera.Projection.Elements)
+                        hashValue(value);
+                    for (const auto& light : request->Packet.LocalLights)
+                    {
+                        hashValue(light.Position.X);
+                        hashValue(light.Position.Y);
+                        hashValue(light.Position.Z);
+                        hashValue(light.Range);
+                        hashValue(light.Direction.X);
+                        hashValue(light.Direction.Y);
+                        hashValue(light.Direction.Z);
+                        hashValue(light.OuterConeCosine);
+                        hashValue(light.ColorAndIntensity.Red);
+                        hashValue(light.ColorAndIntensity.Green);
+                        hashValue(light.ColorAndIntensity.Blue);
+                        hashValue(light.ColorAndIntensity.Alpha);
+                        hashValue(light.InnerConeCosine);
+                        hashValue(light.Type);
+                    }
+                    Statistics.VisibleLocalLights += static_cast<std::uint32_t>(request->Packet.LocalLights.size());
+                    if (surface.ForwardPlusContentValid && surface.ForwardPlusContentHash == contentHash &&
+                        !surface.ForwardPlus.Empty())
+                    {
+                        ++Statistics.ForwardPlusCacheHits;
+                        Statistics.ForwardPlusCullingMilliseconds +=
+                            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started)
+                                .count();
+                        return;
+                    }
                     std::vector<ForwardPlusLightBounds> localLightBounds;
                     localLightBounds.reserve(request->Packet.LocalLights.size());
                     for (const auto& light : request->Packet.LocalLights)
@@ -664,7 +1060,6 @@ namespace Keire::RenderBackend
                             {Math::TransformPoint(request->Packet.Camera.View, light.Position), light.Range});
                     const auto tiles = BuildForwardPlusCpuTiles(surface.Width, surface.Height,
                                                                 request->Packet.Camera.Projection, localLightBounds);
-                    Statistics.VisibleLocalLights += static_cast<std::uint32_t>(localLightBounds.size());
                     Statistics.OverflowedLightTiles += tiles.OverflowedTiles;
                     std::vector<AssetLocalLightUniform> gpuLights(
                         std::max<std::size_t>(1, request->Packet.LocalLights.size()));
@@ -686,34 +1081,125 @@ namespace Keire::RenderBackend
                     for (std::size_t index = 0; index < tiles.LightIndices.size(); ++index)
                         gpuIndices[index / 4U].Indices[index % 4U] = tiles.LightIndices[index];
 
-                    ForwardPlusGpuResources replacement;
+                    const std::array payloads{std::as_bytes(std::span(gpuLights)), std::as_bytes(std::span(gpuTiles)),
+                                              std::as_bytes(std::span(gpuIndices))};
+                    const auto capacityFor = [](const std::size_t required)
+                    {
+                        if (required == 0 || required > std::numeric_limits<std::uint32_t>::max())
+                            throw std::invalid_argument("Forward+ buffer payload exceeds SDL's 32-bit limit.");
+                        auto capacity = std::uint32_t{256};
+                        while (capacity < required && capacity <= std::numeric_limits<std::uint32_t>::max() / 2U)
+                            capacity *= 2U;
+                        if (capacity < required)
+                            capacity = static_cast<std::uint32_t>(required);
+                        return capacity;
+                    };
+                    const std::array requiredCapacities{capacityFor(payloads[0].size()),
+                                                        capacityFor(payloads[1].size()),
+                                                        capacityFor(payloads[2].size())};
+                    const bool requiresReplacement =
+                        surface.ForwardPlus.Empty() || surface.ForwardPlus.LightCapacityBytes < requiredCapacities[0] ||
+                        surface.ForwardPlus.TileCapacityBytes < requiredCapacities[1] ||
+                        surface.ForwardPlus.LightIndexCapacityBytes < requiredCapacities[2];
+                    if (requiresReplacement)
+                    {
+                        ForwardPlusGpuResources replacement;
+                        const auto createBuffer = [&](const std::uint32_t byteSize)
+                        {
+                            SDL_GPUBufferCreateInfo information{};
+                            information.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+                            information.size = byteSize;
+                            auto* buffer = SDL_CreateGPUBuffer(Device, &information);
+                            if (!buffer)
+                                throw std::runtime_error("SDL_CreateGPUBuffer(Forward+) failed: " + LastSdlError());
+                            return buffer;
+                        };
+                        try
+                        {
+                            replacement.Lights = createBuffer(requiredCapacities[0]);
+                            replacement.Tiles = createBuffer(requiredCapacities[1]);
+                            replacement.LightIndices = createBuffer(requiredCapacities[2]);
+                            replacement.LightCapacityBytes = requiredCapacities[0];
+                            replacement.TileCapacityBytes = requiredCapacities[1];
+                            replacement.LightIndexCapacityBytes = requiredCapacities[2];
+                        }
+                        catch (...)
+                        {
+                            ReleaseForwardPlusResources(replacement);
+                            throw;
+                        }
+                        Retire(std::exchange(surface.ForwardPlus, replacement));
+                        ++Statistics.ForwardPlusBufferReallocations;
+                    }
+
+                    std::size_t totalBytes = 0;
+                    for (const auto payload : payloads)
+                    {
+                        if (payload.size() > std::numeric_limits<std::uint32_t>::max() - totalBytes)
+                            throw std::invalid_argument("Combined Forward+ upload exceeds SDL's 32-bit limit.");
+                        totalBytes += payload.size();
+                    }
+                    SDL_GPUTransferBuffer* transfer = nullptr;
                     try
                     {
-                        constexpr auto usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-                        replacement.Lights = UploadBuffer(std::as_bytes(std::span(gpuLights)), usage);
-                        replacement.Tiles = UploadBuffer(std::as_bytes(std::span(gpuTiles)), usage);
-                        replacement.LightIndices = UploadBuffer(std::as_bytes(std::span(gpuIndices)), usage);
-                        replacement.Columns = tiles.Columns;
-                        replacement.Rows = tiles.Rows;
+                        SDL_GPUTransferBufferCreateInfo information{};
+                        information.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+                        information.size = static_cast<std::uint32_t>(totalBytes);
+                        transfer = SDL_CreateGPUTransferBuffer(Device, &information);
+                        if (!transfer)
+                            throw std::runtime_error("SDL_CreateGPUTransferBuffer(Forward+) failed: " + LastSdlError());
+                        auto* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(Device, transfer, false));
+                        if (!mapped)
+                            throw std::runtime_error("SDL_MapGPUTransferBuffer(Forward+) failed: " + LastSdlError());
+                        std::size_t offset = 0;
+                        for (const auto payload : payloads)
+                        {
+                            std::memcpy(mapped + offset, payload.data(), payload.size());
+                            offset += payload.size();
+                        }
+                        SDL_UnmapGPUTransferBuffer(Device, transfer);
+
+                        EnsureFrameUploadContext();
+                        const std::array destinations{surface.ForwardPlus.Lights, surface.ForwardPlus.Tiles,
+                                                      surface.ForwardPlus.LightIndices};
+                        offset = 0;
+                        for (std::size_t index = 0; index < payloads.size(); ++index)
+                        {
+                            SDL_GPUTransferBufferLocation source{transfer, static_cast<std::uint32_t>(offset)};
+                            SDL_GPUBufferRegion destination{destinations[index], 0,
+                                                            static_cast<std::uint32_t>(payloads[index].size())};
+                            SDL_UploadToGPUBuffer(FrameUploadPass, &source, &destination, true);
+                            offset += payloads[index].size();
+                        }
+                        FrameUploadTransfers.push_back(transfer);
+                        transfer = nullptr;
                     }
                     catch (...)
                     {
-                        ReleaseForwardPlusResources(replacement);
+                        if (transfer)
+                            SDL_ReleaseGPUTransferBuffer(Device, transfer);
                         throw;
                     }
-                    Retire(std::exchange(surface.ForwardPlus, replacement));
+                    surface.ForwardPlus.Columns = tiles.Columns;
+                    surface.ForwardPlus.Rows = tiles.Rows;
+                    surface.ForwardPlusContentHash = contentHash;
+                    surface.ForwardPlusContentValid = true;
+                    Statistics.ForwardPlusUploadBytes += totalBytes;
+                    Statistics.ForwardPlusCullingMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
                 }
                 if (frameGraphPass == SceneFrameGraph.Opaque)
                 {
+                    const auto started = std::chrono::steady_clock::now();
                     SDL_GPUColorTargetInfo color{};
                     color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
                                                                           : surface.Resources.HdrColor;
                     color.clear_color = {surface.FrameClearColor.Red, surface.FrameClearColor.Green,
                                          surface.FrameClearColor.Blue, surface.FrameClearColor.Alpha};
                     color.load_op = SDL_GPU_LOADOP_CLEAR;
-                    color.store_op =
-                        surface.Resources.MultisampleHdrColor ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+                    color.store_op = surface.Resources.MultisampleHdrColor ? SDL_GPU_STOREOP_RESOLVE_AND_STORE
+                                                                           : SDL_GPU_STOREOP_STORE;
                     color.resolve_texture =
                         surface.Resources.MultisampleHdrColor ? surface.Resources.HdrColor : nullptr;
                     SDL_GPUDepthStencilTargetInfo depth{};
@@ -723,7 +1209,7 @@ namespace Keire::RenderBackend
                         depth.texture = surface.Resources.Depth;
                         depth.clear_depth = 1.0F;
                         depth.load_op = SDL_GPU_LOADOP_CLEAR;
-                        depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+                        depth.store_op = SDL_GPU_STOREOP_STORE;
                         depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
                         depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
                         depthPointer = &depth;
@@ -732,13 +1218,62 @@ namespace Keire::RenderBackend
                     if (!pass)
                         throw std::runtime_error("SDL_BeginGPURenderPass(HDR scene) failed: " + LastSdlError());
                     if (request != Requests.end())
-                        DrawScene(commands, pass, surface, request->Packet, shadows);
+                        DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Opaque);
                     SDL_EndGPURenderPass(pass);
                     ++Statistics.Passes;
+                    Statistics.ScenePassMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.ResolveDepth)
+                {
+                    if (request != Requests.end())
+                        RecordSampledDepth(commands, surface, request->Packet);
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.Transparency)
+                {
+                    const auto started = std::chrono::steady_clock::now();
+                    SDL_GPUColorTargetInfo color{};
+                    color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
+                                                                          : surface.Resources.HdrColor;
+                    color.load_op = SDL_GPU_LOADOP_LOAD;
+                    color.store_op =
+                        surface.Resources.MultisampleHdrColor ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+                    color.resolve_texture =
+                        surface.Resources.MultisampleHdrColor ? surface.Resources.HdrColor : nullptr;
+                    SDL_GPUDepthStencilTargetInfo depth{};
+                    SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
+                    if (surface.Resources.Depth)
+                    {
+                        depth.texture = surface.Resources.Depth;
+                        depth.load_op = SDL_GPU_LOADOP_LOAD;
+                        depth.store_op = SDL_GPU_STOREOP_DONT_CARE;
+                        depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+                        depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+                        depthPointer = &depth;
+                    }
+                    auto* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
+                    if (!pass)
+                        throw std::runtime_error("SDL_BeginGPURenderPass(transparency) failed: " + LastSdlError());
+                    if (request != Requests.end())
+                    {
+                        DrawScene(commands, pass, surface, request->Packet, shadows, SceneDrawPhase::Transparent);
+                        DrawVfx(commands, pass, surface, request->Packet);
+                    }
+                    SDL_EndGPURenderPass(pass);
+                    ++Statistics.Passes;
+                    Statistics.ScenePassMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
                 }
                 if (frameGraphPass == SceneFrameGraph.ToneMap)
+                {
+                    const auto started = std::chrono::steady_clock::now();
                     RecordToneMap(commands, surface);
+                    Statistics.ToneMapMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                }
             });
         SceneFrameGraph.Graph.Execute(SceneFrameGraph.Compiled, execution);
         ++Statistics.Surfaces;
@@ -786,50 +1321,56 @@ namespace Keire::RenderBackend
     void RenderSharedState::ExecuteFrame(ImDrawData* drawData)
     {
         Statistics.CommandRecordingMilliseconds = 0.0F;
+        Statistics.ShadowRecordingMilliseconds = 0.0F;
+        Statistics.ForwardPlusCullingMilliseconds = 0.0F;
+        Statistics.ScenePassMilliseconds = 0.0F;
+        Statistics.ToneMapMilliseconds = 0.0F;
+        Statistics.FrameUploadMilliseconds = 0.0F;
         Statistics.SwapchainWaitMilliseconds = 0.0F;
         Statistics.UiRecordingMilliseconds = 0.0F;
         Statistics.GpuSubmissionMilliseconds = 0.0F;
+        Statistics.GpuFrameMilliseconds = 0.0F;
+        Statistics.ForwardPlusCacheHits = 0;
         if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
             throw std::runtime_error("Injected GPU device loss.");
         if (FrameUploadCommands || FrameUploadPass || !FrameUploadTransfers.empty())
             throw std::logic_error("A previous frame left the GPU upload context active.");
-        FrameUploadCommands = SDL_AcquireGPUCommandBuffer(Device);
-        if (!FrameUploadCommands)
-            throw std::runtime_error("SDL_AcquireGPUCommandBuffer(frame uploads) failed: " + LastSdlError());
-        FrameUploadPass = SDL_BeginGPUCopyPass(FrameUploadCommands);
-        if (!FrameUploadPass)
-        {
-            (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
-            FrameUploadCommands = nullptr;
-            throw std::runtime_error("SDL_BeginGPUCopyPass(frame uploads) failed: " + LastSdlError());
-        }
 
         SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
         if (!commands)
-        {
-            SDL_EndGPUCopyPass(FrameUploadPass);
-            FrameUploadPass = nullptr;
-            (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
-            FrameUploadCommands = nullptr;
             throw std::runtime_error("SDL_AcquireGPUCommandBuffer failed: " + LastSdlError());
-        }
 
         try
         {
             const auto recordingStarted = std::chrono::steady_clock::now();
-            for (const auto& surface : LiveSurfaces())
-                RecordSurface(commands, *surface);
+            for (const auto& request : Requests)
+                RecordSurface(commands, *request.Surface);
             Statistics.CommandRecordingMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - recordingStarted).count();
 
-            SDL_EndGPUCopyPass(FrameUploadPass);
-            FrameUploadPass = nullptr;
-            auto* uploadCommands = std::exchange(FrameUploadCommands, nullptr);
-            if (!SDL_SubmitGPUCommandBuffer(uploadCommands))
-                throw std::runtime_error("SDL_SubmitGPUCommandBuffer(frame uploads) failed: " + LastSdlError());
+            const auto uploadStarted = std::chrono::steady_clock::now();
+            if (FrameUploadPass)
+            {
+                SDL_EndGPUCopyPass(FrameUploadPass);
+                FrameUploadPass = nullptr;
+            }
+            if (FrameUploadCommands)
+            {
+                auto* uploadCommands = std::exchange(FrameUploadCommands, nullptr);
+                if (FrameUploadTransfers.empty())
+                {
+                    (void)SDL_CancelGPUCommandBuffer(uploadCommands);
+                }
+                else if (!SDL_SubmitGPUCommandBuffer(uploadCommands))
+                {
+                    throw std::runtime_error("SDL_SubmitGPUCommandBuffer(frame uploads) failed: " + LastSdlError());
+                }
+            }
             for (auto* transfer : FrameUploadTransfers)
                 SDL_ReleaseGPUTransferBuffer(Device, transfer);
             FrameUploadTransfers.clear();
+            Statistics.FrameUploadMilliseconds =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uploadStarted).count();
 
             SDL_GPUTexture* swapchain = nullptr;
             const auto swapchainStarted = std::chrono::steady_clock::now();
@@ -882,8 +1423,9 @@ namespace Keire::RenderBackend
             PendingRetiredPipelines.clear();
             PendingRetiredForwardPlus.clear();
             FrameTransientBuffers.clear();
-            for (const auto& surface : LiveSurfaces())
+            for (const auto& request : Requests)
             {
+                auto* surface = request.Surface;
                 if (surface->HasOutput)
                     std::swap(surface->Resources.SampledColor, surface->Resources.ExchangeColor);
                 else
@@ -978,6 +1520,8 @@ namespace Keire::RenderBackend
 
         for (auto& pipelines : Pipelines)
         {
+            if (pipelines.Vfx)
+                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Vfx);
             if (pipelines.Sky)
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Sky);
             if (pipelines.Grid)
@@ -1032,6 +1576,13 @@ namespace Keire::RenderBackend
         if (ShadowPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, ShadowPipeline);
         ShadowPipeline = nullptr;
+        if (SceneDepthPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(Device, SceneDepthPipeline);
+        SceneDepthPipeline = nullptr;
+        if (SkinningPipeline)
+            SDL_ReleaseGPUComputePipeline(Device, SkinningPipeline);
+        SkinningPipeline = nullptr;
+        SkinningPipelineAttempted = false;
         if (ToneMapPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
         ToneMapPipeline = nullptr;

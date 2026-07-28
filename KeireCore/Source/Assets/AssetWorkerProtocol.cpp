@@ -115,6 +115,8 @@ namespace Keire::Detail
 
         [[nodiscard]] AssetImportSettings DecodeSettings(const Json& value)
         {
+            if (!value.is_object())
+                throw std::invalid_argument("Asset-worker import settings must be an object.");
             AssetImportSettings result;
             for (const auto& [key, setting] : value.items())
                 result.emplace(key, DecodeSetting(setting));
@@ -267,6 +269,8 @@ namespace Keire::Detail
                            {"compression", request.BuildProfile.CompressionLevel},
                            {"maximumPackBytes", request.BuildProfile.MaximumPackBytes},
                            {"strict", request.BuildProfile.Strict},
+                           {"managedTypeDiscoveryComplete", request.BuildProfile.ManagedTypeDiscoveryComplete},
+                           {"managedTypeCatalog", request.BuildProfile.ManagedTypeCatalog},
                            {"roots", std::move(roots)}}}});
     }
 
@@ -310,8 +314,7 @@ namespace Keire::Detail
             item.SourcePath = PathFromUtf8(encoded.at("source").get<std::string>());
             item.RelativeDestination = PathFromUtf8(encoded.at("destination").get<std::string>());
             item.Conflict = DecodeEnum<ExternalAssetConflictPolicy>(encoded.at("conflict"), 2, "conflict policy");
-            for (const auto& [key, setting] : encoded.value("settings", Json::object()).items())
-                item.Settings.emplace(key, DecodeSetting(setting));
+            item.Settings = DecodeSettings(encoded.value("settings", Json::object()));
             request.ExternalItems.push_back(std::move(item));
         }
         const auto& profile = value.at("profile");
@@ -321,6 +324,8 @@ namespace Keire::Detail
         request.BuildProfile.CompressionLevel = profile.value("compression", 6);
         request.BuildProfile.MaximumPackBytes = profile.value("maximumPackBytes", 2ULL * 1024ULL * 1024ULL * 1024ULL);
         request.BuildProfile.Strict = profile.value("strict", false);
+        request.BuildProfile.ManagedTypeDiscoveryComplete = profile.value("managedTypeDiscoveryComplete", false);
+        request.BuildProfile.ManagedTypeCatalog = profile.value("managedTypeCatalog", std::string{});
         for (const auto& root : profile.value("roots", Json::array()))
             request.BuildProfile.Roots.push_back(AssetId::Parse(root.get<std::string>()));
         return request;

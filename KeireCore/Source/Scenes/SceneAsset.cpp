@@ -1,18 +1,25 @@
 #include "Keire/Scenes/SceneAsset.h"
 
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/ECS/Components/AnimatorComponent.h"
+#include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/CameraComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/ECS/Components/VfxEmitterComponent.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 
 namespace Keire
@@ -27,44 +34,178 @@ namespace Keire
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
 
-        [[nodiscard]] std::vector<AssetId> RenderingDependencies(const SceneDefinition& definition)
+        [[nodiscard]] const Json* FindMember(const Json& value, const std::string_view canonical,
+                                             const std::string_view alternate = {})
+        {
+            if (!value.is_object())
+                return nullptr;
+            if (const auto found = value.find(canonical); found != value.end())
+                return std::addressof(*found);
+            if (!alternate.empty())
+            {
+                if (const auto found = value.find(alternate); found != value.end())
+                    return std::addressof(*found);
+            }
+            return nullptr;
+        }
+
+        void InsertDependency(std::set<AssetId>& dependencies, const AssetId dependency)
+        {
+            if (dependency)
+                dependencies.insert(dependency);
+        }
+
+        void CollectSerializedAsset(const Json& data, const std::string_view key, std::set<AssetId>& dependencies)
+        {
+            const auto* value = FindMember(data, key);
+            if (!value || value->is_null())
+                return;
+            if (value->is_array())
+            {
+                for (const auto& element : *value)
+                    if (!element.is_null())
+                        InsertDependency(dependencies, AssetId::Parse(element.get<std::string>()));
+                return;
+            }
+            InsertDependency(dependencies, AssetId::Parse(value->get<std::string>()));
+        }
+
+        [[nodiscard]] std::optional<AssetId> ManagedAssetReferenceId(const Json& value)
+        {
+            if (value.is_string())
+                return AssetId::Parse(value.get<std::string>());
+            if (!value.is_object())
+                return std::nullopt;
+
+            const auto* id = FindMember(value, "Id", "id");
+            const auto& serializedId = id ? *id : value;
+            if (serializedId.is_string())
+                return AssetId::Parse(serializedId.get<std::string>());
+            const auto* high = FindMember(serializedId, "High", "high");
+            const auto* low = FindMember(serializedId, "Low", "low");
+            if (!high || !low || !high->is_number_unsigned() || !low->is_number_unsigned())
+                return std::nullopt;
+            return AssetId(high->get<std::uint64_t>(), low->get<std::uint64_t>());
+        }
+
+        void CollectManagedAssetReferenceValue(const Json& value, std::set<AssetId>& dependencies)
+        {
+            if (const auto direct = ManagedAssetReferenceId(value))
+            {
+                InsertDependency(dependencies, *direct);
+                return;
+            }
+            if (value.is_array())
+            {
+                for (const auto& element : value)
+                    CollectManagedAssetReferenceValue(element, dependencies);
+                return;
+            }
+            if (value.is_object())
+                for (const auto& member : value)
+                    CollectManagedAssetReferenceValue(member, dependencies);
+        }
+
+        void CollectManagedStateDependencies(const Json& data, std::set<AssetId>& dependencies)
+        {
+            const auto* serializedState = FindMember(data, "managedState");
+            if (!serializedState)
+                return;
+            if (!serializedState->is_string())
+                throw std::invalid_argument("Managed component state must be text.");
+
+            const auto document = Json::parse(serializedState->get_ref<const std::string&>());
+            const auto* fields = FindMember(document, "Fields", "fields");
+            if (!fields || !fields->is_array())
+                throw std::invalid_argument("Managed component state fields must be an array.");
+            for (const auto& field : *fields)
+            {
+                const auto* type = FindMember(field, "Type", "type");
+                const auto* value = FindMember(field, "Value", "value");
+                if (!type || !type->is_string() || !value ||
+                    type->get_ref<const std::string&>().find("Keire.AssetReference") == std::string::npos)
+                {
+                    continue;
+                }
+                CollectManagedAssetReferenceValue(*value, dependencies);
+            }
+        }
+
+        void CollectComponentDependencies(const SceneComponentDefinition& component, std::set<AssetId>& dependencies)
+        {
+            const auto data = Json::parse(component.Data);
+            if (component.Type == MeshRendererComponent::StaticType())
+            {
+                for (const auto key : {"mesh", "material"})
+                {
+                    const auto* value = FindMember(data, key);
+                    if (!value || value->is_null())
+                        continue;
+                    const auto dependency = AssetId::Parse(value->get<std::string>());
+                    if (dependency != MeshAsset::CubeId() && dependency != MeshAsset::ErrorId())
+                        InsertDependency(dependencies, dependency);
+                }
+            }
+            else if (component.Type == AnimatorComponent::StaticType())
+            {
+                for (const auto key : {"graph", "skeleton", "skinnedMesh", "avatarMask", "avatarMasks"})
+                    CollectSerializedAsset(data, key, dependencies);
+            }
+            else if (component.Type == ColliderComponent::StaticType())
+            {
+                CollectSerializedAsset(data, "collisionMesh", dependencies);
+                CollectSerializedAsset(data, "physicsMaterial", dependencies);
+            }
+            else if (component.Type == AudioSourceComponent::StaticType())
+            {
+                CollectSerializedAsset(data, "clip", dependencies);
+                CollectSerializedAsset(data, "mixer", dependencies);
+            }
+            else if (component.Type == AudioReverbZoneComponent::StaticType())
+            {
+                CollectSerializedAsset(data, "mixer", dependencies);
+            }
+            else if (component.Type == VfxEmitterComponent::StaticType())
+            {
+                CollectSerializedAsset(data, "effect", dependencies);
+            }
+            CollectManagedStateDependencies(data, dependencies);
+        }
+
+        void CollectObjectDependencies(const SceneObjectDefinition& object, std::set<AssetId>& dependencies)
+        {
+            for (const auto& component : object.Components)
+                CollectComponentDependencies(component, dependencies);
+        }
+
+        void CollectOverrideDependencies(const std::vector<PrefabOverrideDefinition>& overrides,
+                                         std::set<AssetId>& dependencies)
+        {
+            for (const auto& overrideValue : overrides)
+            {
+                if (overrideValue.Kind == PrefabOverrideKind::SetComponentProperty &&
+                    std::holds_alternative<AssetId>(overrideValue.Value))
+                {
+                    InsertDependency(dependencies, std::get<AssetId>(overrideValue.Value));
+                }
+                if (overrideValue.AddedComponent)
+                    CollectComponentDependencies(*overrideValue.AddedComponent, dependencies);
+                if (overrideValue.AddedObject)
+                    CollectObjectDependencies(*overrideValue.AddedObject, dependencies);
+            }
+        }
+
+        [[nodiscard]] std::vector<AssetId> AuthoredDependencies(const SceneDefinition& definition)
         {
             std::set<AssetId> unique;
             for (const auto& instance : definition.PrefabInstances)
-                unique.insert(instance.Prefab);
-            const auto collectOverrideDependencies = [&](const std::vector<PrefabOverrideDefinition>& overrides)
             {
-                for (const auto& overrideValue : overrides)
-                {
-                    if (overrideValue.Kind == PrefabOverrideKind::SetComponentProperty &&
-                        std::holds_alternative<AssetId>(overrideValue.Value))
-                    {
-                        const auto dependency = std::get<AssetId>(overrideValue.Value);
-                        if (dependency)
-                            unique.insert(dependency);
-                    }
-                }
-            };
-            collectOverrideDependencies(definition.PrefabOverrides);
-            for (const auto& instance : definition.PrefabInstances)
-                collectOverrideDependencies(instance.Overrides);
-            for (const auto& object : definition.Objects)
-            {
-                for (const auto& component : object.Components)
-                {
-                    if (component.Type != MeshRendererComponent::StaticType())
-                        continue;
-                    const auto data = Json::parse(component.Data);
-                    for (const auto* key : {"mesh", "material"})
-                    {
-                        if (!data.contains(key) || data.at(key).is_null())
-                            continue;
-                        const auto dependency = AssetId::Parse(data.at(key).get<std::string>());
-                        if (dependency && dependency != MeshAsset::CubeId() && dependency != MeshAsset::ErrorId())
-                            unique.insert(dependency);
-                    }
-                }
+                InsertDependency(unique, instance.Prefab);
+                CollectOverrideDependencies(instance.Overrides, unique);
             }
+            CollectOverrideDependencies(definition.PrefabOverrides, unique);
+            for (const auto& object : definition.Objects)
+                CollectObjectDependencies(object, unique);
             return {unique.begin(), unique.end()};
         }
 
@@ -181,6 +322,31 @@ namespace Keire
                         }
                         return listeners;
                     }
+                    else if constexpr (std::same_as<T, Curve1D>)
+                    {
+                        Json keys = Json::array();
+                        for (const auto& key : current.Keys())
+                        {
+                            keys.push_back({{"time", key.Time},
+                                            {"value", key.Value},
+                                            {"inTangent", key.InTangent},
+                                            {"outTangent", key.OutTangent},
+                                            {"interpolation", static_cast<std::uint8_t>(key.Interpolation)}});
+                        }
+                        return keys;
+                    }
+                    else if constexpr (std::same_as<T, ColorGradient>)
+                    {
+                        Json keys = Json::array();
+                        for (const auto& key : current.Keys())
+                        {
+                            keys.push_back(
+                                {{"time", key.Time},
+                                 {"color", {key.Value.Red, key.Value.Green, key.Value.Blue, key.Value.Alpha}}});
+                        }
+                        return Json{{"interpolation", static_cast<std::uint8_t>(current.Interpolation())},
+                                    {"keys", std::move(keys)}};
+                    }
                     else
                         return Json(current);
                 },
@@ -248,6 +414,54 @@ namespace Keire
                     result.Listeners.push_back(std::move(listener));
                 }
                 return result;
+            }
+            case 12:
+            {
+                if (!value.is_array())
+                    throw std::runtime_error("Prefab curve override must be an array.");
+                std::vector<CurveKey> keys;
+                keys.reserve(value.size());
+                for (const auto& serialized : value)
+                {
+                    if (!serialized.is_object())
+                        throw std::runtime_error("Prefab curve key must be an object.");
+                    CurveKey key;
+                    key.Time = serialized.at("time").get<float>();
+                    key.Value = serialized.at("value").get<float>();
+                    key.InTangent = serialized.value("inTangent", 0.0F);
+                    key.OutTangent = serialized.value("outTangent", 0.0F);
+                    const auto interpolation = serialized.value("interpolation", std::uint8_t{1});
+                    if (interpolation > static_cast<std::uint8_t>(CurveInterpolation::Cubic))
+                        throw std::runtime_error("Prefab curve key interpolation is invalid.");
+                    key.Interpolation = static_cast<CurveInterpolation>(interpolation);
+                    keys.push_back(key);
+                }
+                return Curve1D(std::move(keys));
+            }
+            case 13:
+            {
+                if (!value.is_object())
+                    throw std::runtime_error("Prefab gradient override must be an object.");
+                const auto interpolation = value.value("interpolation", std::uint8_t{0});
+                if (interpolation > static_cast<std::uint8_t>(GradientInterpolation::Linear))
+                    throw std::runtime_error("Prefab gradient interpolation is invalid.");
+                const auto& serializedKeys = value.at("keys");
+                if (!serializedKeys.is_array())
+                    throw std::runtime_error("Prefab gradient keys must be an array.");
+                std::vector<ColorGradientKey> keys;
+                keys.reserve(serializedKeys.size());
+                for (const auto& serialized : serializedKeys)
+                {
+                    if (!serialized.is_object())
+                        throw std::runtime_error("Prefab gradient key must be an object.");
+                    const auto& color = serialized.at("color");
+                    if (!color.is_array() || color.size() != 4)
+                        throw std::runtime_error("Prefab gradient color must contain four channels.");
+                    keys.push_back(
+                        {serialized.at("time").get<float>(),
+                         {color[0].get<float>(), color[1].get<float>(), color[2].get<float>(), color[3].get<float>()}});
+                }
+                return ColorGradient(std::move(keys), static_cast<GradientInterpolation>(interpolation));
             }
             default:
                 throw std::runtime_error("Prefab override value uses an unsupported type.");
@@ -708,7 +922,7 @@ namespace Keire
             const auto parsed = SceneAsset::Decode(bytes);
             AssetImportOutput output;
             output.Bytes = SceneAsset::Encode(parsed->Definition());
-            output.AssetDependencies = RenderingDependencies(parsed->Definition());
+            output.AssetDependencies = AuthoredDependencies(parsed->Definition());
             return output;
         };
         return result;

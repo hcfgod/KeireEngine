@@ -529,7 +529,6 @@ void EditorWorkspaceLayer::BeginPlayMode()
 {
     if (!m_SceneDocument->EditingScene() || m_SceneDocument->PlaySession())
         return;
-    ResetManagedPhysicsWorld();
     m_ManagedInputCaptureOverride.reset();
     m_GameplayInputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
@@ -545,7 +544,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     Keire::Ref<Keire::UndoContext> playUndo;
     if (const auto undo = Owner().Undo())
         playUndo = undo->CreateContext({.Name = "Play Mode"});
-    m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio());
+    m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics());
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
     m_SceneViewportPanel->Registration().RequestFocus();
@@ -584,7 +583,6 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
 {
     if (!m_SceneDocument->PlaySession())
         return;
-    ResetManagedPhysicsWorld();
     try
     {
         std::optional<Keire::SceneDefinition> applied;
@@ -1020,7 +1018,11 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         auto environment = m_ProjectSettingsDocument->Settings();
         environment.SkyVisible =
             environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-        Owner().Renderer()->Submit({scene, m_GameRenderView, false, environment});
+        Keire::SceneRenderRequest renderRequest{scene, m_GameRenderView, false, environment};
+        if (const auto play = m_SceneDocument->PlaySession(); play && play->State() != Keire::ScenePlayState::Stopped)
+            if (const auto vfx = play->Vfx())
+                renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+        Owner().Renderer()->Submit(std::move(renderRequest));
         ui.Image(m_GameRenderView->Surface(), size);
         const auto imageRect = ui.LastItemRect();
         m_GameViewportRect = imageRect;

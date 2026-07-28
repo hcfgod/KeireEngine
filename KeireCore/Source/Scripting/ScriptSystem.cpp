@@ -1,16 +1,25 @@
 #include "Keire/Scripting/ScriptSystem.h"
 
+#include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Component.h"
+#include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4146)
+#endif
 #include <Coral/Assembly.hpp>
 #include <Coral/Attribute.hpp>
 #include <Coral/HostInstance.hpp>
 #include <Coral/ManagedObject.hpp>
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -790,6 +799,10 @@ namespace Keire
                 return EntityId{};
             case ComponentPropertyKind::Event:
                 return ComponentEventValue{};
+            case ComponentPropertyKind::Curve:
+                return Curve1D{};
+            case ComponentPropertyKind::Gradient:
+                return ColorGradient{};
             }
             throw std::logic_error("Unsupported managed Inspector property kind.");
         }
@@ -882,6 +895,9 @@ namespace Keire
                 }
                 return result;
             }
+            case ComponentPropertyKind::Curve:
+            case ComponentPropertyKind::Gradient:
+                throw std::logic_error("Managed fields do not expose native authoring curve values.");
             }
             throw std::logic_error("Unsupported managed Inspector property kind.");
         }
@@ -948,6 +964,9 @@ namespace Keire
                 }
                 return {{"persistentCalls", std::move(listeners)}};
             }
+            case ComponentPropertyKind::Curve:
+            case ComponentPropertyKind::Gradient:
+                throw std::logic_error("Managed fields do not expose native authoring curve values.");
             }
             throw std::logic_error("Unsupported managed Inspector property kind.");
         }
@@ -959,13 +978,19 @@ namespace Keire
                                                          : nullptr;
             if (!fields || !fields->is_array())
                 return nullptr;
+            nlohmann::json* legacyField = nullptr;
             for (auto& field : *fields)
             {
                 const auto* fieldName = JsonMember(field, "Name", "name");
-                if (fieldName && fieldName->is_string() && fieldName->get<std::string>() == name)
+                if (!fieldName || !fieldName->is_string() || fieldName->get<std::string>() != name)
+                    continue;
+                const auto* stableId = JsonMember(field, "StableId", "stableId");
+                if (stableId && stableId->is_string() && !stableId->get_ref<const std::string&>().empty())
                     return std::addressof(field);
+                if (!legacyField)
+                    legacyField = std::addressof(field);
             }
-            return nullptr;
+            return legacyField;
         }
 
         [[nodiscard]] const nlohmann::json* ManagedStateField(const nlohmann::json& document,
@@ -976,13 +1001,19 @@ namespace Keire
                                                                : nullptr;
             if (!fields || !fields->is_array())
                 return nullptr;
+            const nlohmann::json* legacyField = nullptr;
             for (const auto& field : *fields)
             {
                 const auto* fieldName = JsonMember(field, "Name", "name");
-                if (fieldName && fieldName->is_string() && fieldName->get<std::string>() == name)
+                if (!fieldName || !fieldName->is_string() || fieldName->get<std::string>() != name)
+                    continue;
+                const auto* stableId = JsonMember(field, "StableId", "stableId");
+                if (stableId && stableId->is_string() && !stableId->get_ref<const std::string&>().empty())
                     return std::addressof(field);
+                if (!legacyField)
+                    legacyField = std::addressof(field);
             }
-            return nullptr;
+            return legacyField;
         }
 
         [[nodiscard]] std::vector<std::string_view> ManagedPropertyPath(const std::string_view path)
@@ -1078,6 +1109,108 @@ namespace Keire
             }
             return document.dump();
         }
+
+        [[nodiscard]] ManagedAssetPropertyDescriptor ParseManagedAssetPropertyDescriptor(const nlohmann::json& source)
+        {
+            ManagedAssetPropertyDescriptor result;
+            result.StableFieldId = AssetId::Parse(source.at("stableFieldId").get<std::string>());
+            result.Name = source.at("name").get<std::string>();
+            result.DisplayName = source.at("displayName").get<std::string>();
+            result.ManagedTypeName = source.at("managedTypeName").get<std::string>();
+            const auto kind = source.at("kind").get<std::uint32_t>();
+            if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::AssetReference))
+                throw std::runtime_error("Managed asset metadata contains an unsupported property kind.");
+            result.Kind = static_cast<ManagedAssetPropertyKind>(kind);
+            result.ReadOnly = source.value("readOnly", false);
+            result.Hidden = source.value("hidden", false);
+            if (const auto found = source.find("minimum"); found != source.end())
+                result.Minimum = found->get<double>();
+            if (const auto found = source.find("maximum"); found != source.end())
+                result.Maximum = found->get<double>();
+            result.Header = source.value("header", std::string{});
+            result.Tooltip = source.value("tooltip", std::string{});
+            if (const auto found = source.find("expectedAssetType"); found != source.end())
+                result.ExpectedAssetType = AssetTypeId(AssetId::Parse(found->get<std::string>()));
+            if (const auto found = source.find("expectedManagedType"); found != source.end())
+                result.ExpectedManagedType = ManagedTypeId::Parse(found->get<std::string>());
+            result.IncludeDerivedAssetTypes = source.value("includeDerivedAssetTypes", true);
+            if (const auto found = source.find("children"); found != source.end())
+            {
+                if (!found->is_array())
+                    throw std::runtime_error("Managed asset metadata property children are malformed.");
+                result.Children.reserve(found->size());
+                for (const auto& child : *found)
+                    result.Children.push_back(ParseManagedAssetPropertyDescriptor(child));
+            }
+            return result;
+        }
+
+        struct ManagedAssetMetadataResult final
+        {
+            std::vector<ManagedAssetTypeDescriptor> Types;
+            std::vector<ManagedAssetTypeDiagnostic> Diagnostics;
+        };
+
+        [[nodiscard]] ManagedAssetMetadataResult ParseManagedAssetMetadata(const std::string_view text)
+        {
+            const auto document = nlohmann::json::parse(text);
+            if (document.at("schemaVersion").get<std::uint32_t>() != 1)
+                throw std::runtime_error("Keire.Managed returned an unsupported managed asset metadata schema.");
+            const auto& types = document.at("types");
+            const auto& diagnostics = document.at("diagnostics");
+            if (!types.is_array() || !diagnostics.is_array())
+                throw std::runtime_error("Keire.Managed returned malformed managed asset metadata.");
+
+            ManagedAssetMetadataResult result;
+            result.Types.reserve(types.size());
+            for (const auto& source : types)
+            {
+                ManagedAssetTypeDescriptor descriptor;
+                descriptor.StableTypeId = ManagedTypeId::Parse(source.at("stableTypeId").get<std::string>());
+                descriptor.FullName = source.at("fullName").get<std::string>();
+                descriptor.DisplayName = source.at("displayName").get<std::string>();
+                if (const auto found = source.find("baseTypeId"); found != source.end())
+                    descriptor.BaseTypeId = ManagedTypeId::Parse(found->get<std::string>());
+                descriptor.MenuPath = source.value("menuPath", std::string{});
+                descriptor.DefaultFileName = source.at("defaultFileName").get<std::string>();
+                const auto& properties = source.at("properties");
+                if (!properties.is_array())
+                    throw std::runtime_error("Managed asset metadata properties are malformed.");
+                descriptor.Properties.reserve(properties.size());
+                for (const auto& property : properties)
+                    descriptor.Properties.push_back(ParseManagedAssetPropertyDescriptor(property));
+                ValidateManagedAssetTypeDescriptor(descriptor);
+                result.Types.push_back(std::move(descriptor));
+            }
+            result.Diagnostics.reserve(diagnostics.size());
+            for (const auto& source : diagnostics)
+            {
+                result.Diagnostics.push_back(
+                    {source.at("typeName").get<std::string>(), source.at("message").get<std::string>()});
+            }
+
+            std::ranges::sort(result.Types, {}, &ManagedAssetTypeDescriptor::FullName);
+            std::ranges::sort(result.Diagnostics,
+                              [](const ManagedAssetTypeDiagnostic& left, const ManagedAssetTypeDiagnostic& right)
+                              {
+                                  return left.TypeName != right.TypeName ? left.TypeName < right.TypeName
+                                                                         : left.Message < right.Message;
+                              });
+            std::set<ManagedTypeId> stableTypeIds;
+            std::set<std::string, std::less<>> fullNames;
+            std::set<std::string, std::less<>> menuPaths;
+            for (const auto& descriptor : result.Types)
+            {
+                if (!stableTypeIds.emplace(descriptor.StableTypeId).second ||
+                    !fullNames.emplace(descriptor.FullName).second)
+                {
+                    throw std::runtime_error("Managed asset metadata contains duplicate type names or stable IDs.");
+                }
+                if (!descriptor.MenuPath.empty() && !menuPaths.emplace(descriptor.MenuPath).second)
+                    throw std::runtime_error("Managed asset metadata contains duplicate CreateAssetMenu paths.");
+            }
+            return result;
+        }
     } // namespace
 
     class ScriptSystem::Impl final
@@ -1095,6 +1228,17 @@ namespace Keire
             std::vector<ComponentMethod> Methods;
         };
 
+        struct CallbackProfile final
+        {
+            std::uint64_t Invocations = 0;
+            std::uint64_t SkippedInvocations = 0;
+            double Milliseconds = 0.0;
+            double MaximumMilliseconds = 0.0;
+        };
+
+        static constexpr std::size_t CallbackProfileCount =
+            static_cast<std::size_t>(ManagedBehaviourCallback::AfterReload) + 1;
+
         struct BehaviourInstance final
         {
             std::string TypeName;
@@ -1103,10 +1247,28 @@ namespace Keire
             AssetId Entity;
             Coral::ManagedObject Object;
             std::string State = "{\"version\":1,\"fields\":[]}";
+            CallbackProfile CallbackProfiles[CallbackProfileCount]{};
             bool Enabled = true;
             bool Faulted = false;
             Keire::Entity NativeEntity;
+            std::uint32_t CallbackMask = ~std::uint32_t{0};
         };
+
+        struct ManagedAssetSource final
+        {
+            AssetHandle<ManagedDataAsset> Handle;
+            std::uint64_t ObservedRevision = 0;
+        };
+
+        struct PendingManagedAssetLoad final
+        {
+            AssetHandle<ManagedDataAsset> Handle;
+            std::uint64_t Generation = 0;
+        };
+
+        static constexpr std::uint32_t FixedUpdateCallback = 1U << 0;
+        static constexpr std::uint32_t UpdateCallback = 1U << 1;
+        static constexpr std::uint32_t LateUpdateCallback = 1U << 2;
 
         class RuntimeScope final
         {
@@ -1138,6 +1300,61 @@ namespace Keire
         {
             if (std::this_thread::get_id() != Owner)
                 throw std::logic_error("ScriptSystem operation must run on the owner thread.");
+        }
+
+        [[nodiscard]] Coral::ManagedObject
+        HydrateManagedAsset(const ManagedDataAsset& source,
+                            const std::map<ManagedTypeId, const Coral::Type*>& runtimeTypes)
+        {
+            const auto found = runtimeTypes.find(source.Definition().ManagedType);
+            if (found == runtimeTypes.end() || !found->second)
+            {
+                throw std::runtime_error("Managed data type '" + source.Definition().ManagedTypeName +
+                                         "' is unavailable in the target script generation.");
+            }
+            auto object = const_cast<Coral::Type*>(found->second)->CreateInstance();
+            if (!object.IsValid())
+                throw std::runtime_error("Managed data type '" + source.Definition().ManagedTypeName +
+                                         "' could not be constructed.");
+            const auto encoded = ManagedDataAsset::Encode(source.Definition());
+            const std::string document(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+            const RuntimeScope scope(*this);
+            object.InvokeMethod("RuntimeHydrateManagedData", document);
+            return object;
+        }
+
+        void InstallManagedAssetGeneration(Coral::Type& nativeRuntime, const std::uint64_t generation)
+        {
+            if (generation == 0)
+                throw std::invalid_argument("Managed asset generation must be non-zero.");
+            if (Specification.MaximumManagedDataAssets == 0 ||
+                Specification.MaximumManagedDataAssets >
+                    static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()) ||
+                Specification.MaximumManagedDataLoads == 0 ||
+                Specification.MaximumManagedDataLoads > Specification.MaximumManagedDataAssets ||
+                Specification.MaximumManagedDataLoads >
+                    static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
+            {
+                throw std::invalid_argument("Managed data asset capacities are invalid.");
+            }
+            const RuntimeScope scope(*this);
+            nativeRuntime.InvokeStaticMethod("InstallManagedAssetGeneration", generation,
+                                             static_cast<std::int32_t>(Specification.MaximumManagedDataAssets),
+                                             static_cast<std::int32_t>(Specification.MaximumManagedDataLoads));
+        }
+
+        void ResetManagedAssetGeneration(const Coral::Type* nativeRuntime, const std::uint64_t generation) noexcept
+        {
+            if (!nativeRuntime || generation == 0)
+                return;
+            try
+            {
+                const RuntimeScope scope(*this);
+                (void)nativeRuntime->InvokeStaticMethod<bool>("ResetManagedAssets", generation);
+            }
+            catch (...)
+            {
+            }
         }
 
         void ResumeGenerationSequence()
@@ -1252,9 +1469,24 @@ namespace Keire
 
         void ShutdownRuntime() noexcept
         {
+            ResetManagedAssetGeneration(CandidateNativeRuntimeType, Reload.Generation + 1);
+            ResetManagedAssetGeneration(ActiveNativeRuntimeType, Reload.Generation);
+            {
+                std::scoped_lock lock(ManagedAssetMutex);
+                PendingManagedAssetLoads.clear();
+                ManagedAssetSources.clear();
+            }
             Instances.clear();
             ActiveTypes.clear();
             CandidateTypes.clear();
+            ActiveManagedAssetTypes.clear();
+            CandidateManagedAssetTypes.clear();
+            ActiveManagedAssetDiagnostics.clear();
+            CandidateManagedAssetDiagnostics.clear();
+            ActiveManagedAssetRuntimeTypes.clear();
+            CandidateManagedAssetRuntimeTypes.clear();
+            ActiveNativeRuntimeType = nullptr;
+            CandidateNativeRuntimeType = nullptr;
             Unload(CandidateContext);
             Unload(ActiveContext);
             if (RuntimeInitialized)
@@ -1298,6 +1530,85 @@ namespace Keire
                                      { return entry.second.World == world && entry.second.NativeEntity; });
             return found == CurrentRuntime->Instances.end() ? Entity{}
                                                             : found->second.NativeEntity.Resolve(EntityId(id));
+        }
+
+        static std::uint8_t RuntimeRequestManagedAssetLoad(const std::uint64_t generation, const std::uint64_t high,
+                                                           const std::uint64_t low) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Assets)
+                return 0;
+            try
+            {
+                {
+                    std::scoped_lock lock(CurrentRuntime->Mutex);
+                    const bool active = CurrentRuntime->Reload.Generation == generation &&
+                                        CurrentRuntime->Reload.State == ManagedReloadState::Active;
+                    const bool candidate =
+                        CurrentRuntime->Reload.State == ManagedReloadState::Prepared &&
+                        CurrentRuntime->Reload.Generation != std::numeric_limits<std::uint64_t>::max() &&
+                        CurrentRuntime->Reload.Generation + 1 == generation;
+                    if (!active && !candidate)
+                        return 0;
+                }
+                const AssetId id(high, low);
+                if (!id)
+                    return 0;
+                std::scoped_lock lock(CurrentRuntime->ManagedAssetMutex);
+                if (CurrentRuntime->PendingManagedAssetLoads.contains(id) ||
+                    CurrentRuntime->ManagedAssetSources.contains(id) ||
+                    CurrentRuntime->PendingManagedAssetLoads.size() >=
+                        CurrentRuntime->Specification.MaximumManagedDataLoads)
+                {
+                    return 0;
+                }
+                CurrentRuntime->PendingManagedAssetLoads.emplace(
+                    id, PendingManagedAssetLoad{CurrentRuntime->Assets->Load<ManagedDataAsset>(id, AssetPriority::High),
+                                                generation});
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        static void RuntimeCancelManagedAssetLoad(const std::uint64_t generation, const std::uint64_t high,
+                                                  const std::uint64_t low) noexcept
+        {
+            if (!CurrentRuntime)
+                return;
+            try
+            {
+                std::scoped_lock lock(CurrentRuntime->ManagedAssetMutex);
+                const auto found = CurrentRuntime->PendingManagedAssetLoads.find(AssetId(high, low));
+                if (found != CurrentRuntime->PendingManagedAssetLoads.end() && found->second.Generation == generation)
+                    CurrentRuntime->PendingManagedAssetLoads.erase(found);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        static void RuntimeReleaseManagedAsset(const std::uint64_t generation, const std::uint64_t high,
+                                               const std::uint64_t low) noexcept
+        {
+            if (!CurrentRuntime)
+                return;
+            try
+            {
+                {
+                    std::scoped_lock lock(CurrentRuntime->Mutex);
+                    if (CurrentRuntime->Reload.Generation != generation)
+                        return;
+                }
+                std::scoped_lock lock(CurrentRuntime->ManagedAssetMutex);
+                const AssetId id(high, low);
+                CurrentRuntime->PendingManagedAssetLoads.erase(id);
+                CurrentRuntime->ManagedAssetSources.erase(id);
+            }
+            catch (...)
+            {
+            }
         }
 
         static void RuntimeWriteLog(const std::uint8_t level, const Coral::String message) noexcept
@@ -1501,6 +1812,285 @@ namespace Keire
                 catch (...)
                 {
                 }
+            }
+        }
+
+        [[nodiscard]] static Ref<AnimatorComponent> RuntimeAnimator(const std::uint64_t world, const std::uint64_t high,
+                                                                    const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            return entity ? entity.GetComponent<AnimatorComponent>() : Ref<AnimatorComponent>{};
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorFloat(const std::uint64_t world, const std::uint64_t high,
+                                                                  const std::uint64_t low,
+                                                                  const Coral::String parameter,
+                                                                  const float value) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetFloat(static_cast<std::string>(parameter), value);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorInteger(const std::uint64_t world, const std::uint64_t high,
+                                                                    const std::uint64_t low,
+                                                                    const Coral::String parameter,
+                                                                    const std::int32_t value) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetInteger(static_cast<std::string>(parameter), value);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorBoolean(const std::uint64_t world, const std::uint64_t high,
+                                                                    const std::uint64_t low,
+                                                                    const Coral::String parameter,
+                                                                    const std::uint8_t value) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetBool(static_cast<std::string>(parameter), value != 0);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorTrigger(const std::uint64_t world, const std::uint64_t high,
+                                                                    const std::uint64_t low,
+                                                                    const Coral::String parameter,
+                                                                    const std::uint8_t set) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                if (set != 0)
+                    animator->SetTrigger(static_cast<std::string>(parameter));
+                else
+                    animator->ResetTrigger(static_cast<std::string>(parameter));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetAnimatorLayerWeight(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                      const Coral::String layer, const float value) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetLayerWeight(static_cast<std::string>(layer), value);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetAnimatorTwoBoneIk(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                    const Coral::String goal, const Coral::String root, const Coral::String middle,
+                                    const Coral::String end, const Vector3 target, const Vector3 pole,
+                                    const float weight, const std::uint8_t space) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::World))
+                    return 0;
+                animator->SetTwoBoneIk(static_cast<std::string>(goal), static_cast<std::string>(root),
+                                       static_cast<std::string>(middle), static_cast<std::string>(end), target, pole,
+                                       weight, static_cast<AnimatorIkSpace>(space));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetAnimatorFabrikIk(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                   const Coral::String goal, const Coral::String encodedBones, const Vector3 target,
+                                   const float weight, const std::uint32_t maximumIterations, const float tolerance,
+                                   const std::uint8_t space) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::World))
+                    return 0;
+                const auto encoded = static_cast<std::string>(encodedBones);
+                std::vector<std::string> bones;
+                std::size_t offset = 0;
+                while (offset <= encoded.size())
+                {
+                    const auto next = encoded.find('\x1f', offset);
+                    bones.emplace_back(encoded.substr(offset, next == std::string::npos ? next : next - offset));
+                    if (next == std::string::npos)
+                        break;
+                    offset = next + 1;
+                }
+                animator->SetFabrikIk(static_cast<std::string>(goal), std::move(bones), target, weight,
+                                      maximumIterations, tolerance, static_cast<AnimatorIkSpace>(space));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeClearAnimatorIk(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low,
+                                                                 const Coral::String goal) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                return animator && animator->ClearIk(static_cast<std::string>(goal)) ? 1 : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeTryGetAnimatorFloat(const std::uint64_t world,
+                                                                     const std::uint64_t high, const std::uint64_t low,
+                                                                     const Coral::String parameter,
+                                                                     float* value) noexcept
+        {
+            try
+            {
+                if (!value)
+                    return 0;
+                const auto animator = RuntimeAnimator(world, high, low);
+                const auto snapshot = animator ? animator->RuntimeDebugSnapshot() : nullptr;
+                const auto name = static_cast<std::string>(parameter);
+                if (!snapshot)
+                    return 0;
+                const auto found = std::ranges::find_if(snapshot->Parameters, [&](const auto& candidate)
+                                                        { return candidate.Name == name || candidate.Id == name; });
+                if (found == snapshot->Parameters.end() || found->Type != AnimationParameterType::Float)
+                    return 0;
+                *value = found->FloatValue;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeTryGetAnimatorInteger(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                     const Coral::String parameter, std::int32_t* value) noexcept
+        {
+            try
+            {
+                if (!value)
+                    return 0;
+                const auto animator = RuntimeAnimator(world, high, low);
+                const auto snapshot = animator ? animator->RuntimeDebugSnapshot() : nullptr;
+                const auto name = static_cast<std::string>(parameter);
+                if (!snapshot)
+                    return 0;
+                const auto found = std::ranges::find_if(snapshot->Parameters, [&](const auto& candidate)
+                                                        { return candidate.Name == name || candidate.Id == name; });
+                if (found == snapshot->Parameters.end() || found->Type != AnimationParameterType::Integer)
+                    return 0;
+                *value = found->IntegerValue;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeTryGetAnimatorBoolean(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                     const Coral::String parameter, std::uint8_t* value) noexcept
+        {
+            try
+            {
+                if (!value)
+                    return 0;
+                const auto animator = RuntimeAnimator(world, high, low);
+                const auto snapshot = animator ? animator->RuntimeDebugSnapshot() : nullptr;
+                const auto name = static_cast<std::string>(parameter);
+                if (!snapshot)
+                    return 0;
+                const auto found = std::ranges::find_if(snapshot->Parameters, [&](const auto& candidate)
+                                                        { return candidate.Name == name || candidate.Id == name; });
+                if (found == snapshot->Parameters.end() ||
+                    (found->Type != AnimationParameterType::Boolean && found->Type != AnimationParameterType::Trigger))
+                    return 0;
+                *value = found->BooleanValue ? 1 : 0;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeTryGetAnimatorLayerWeight(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                         const Coral::String layer, float* value) noexcept
+        {
+            try
+            {
+                if (!value)
+                    return 0;
+                const auto animator = RuntimeAnimator(world, high, low);
+                const auto snapshot = animator ? animator->RuntimeDebugSnapshot() : nullptr;
+                const auto name = static_cast<std::string>(layer);
+                if (!snapshot)
+                    return 0;
+                const auto found = std::ranges::find_if(snapshot->Layers, [&](const auto& candidate)
+                                                        { return candidate.Name == name || candidate.Id == name; });
+                if (found == snapshot->Layers.end())
+                    return 0;
+                *value = found->Weight;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
             }
         }
 
@@ -1815,7 +2405,7 @@ namespace Keire
             {
                 const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
                 return entity && CurrentRuntime->Specification.RuntimeServices->PlayManagedAudio(
-                                     entity.Id().Value(), AssetId(clipHigh, clipLow), gain)
+                                     {.Entity = entity.Id().Value(), .Clip = AssetId(clipHigh, clipLow), .Gain = gain})
                            ? 1
                            : 0;
             }
@@ -1958,6 +2548,7 @@ namespace Keire
 
         void Invoke(Coral::ManagedObject& object, const std::string_view method)
         {
+            ++ManagedInteropCalls;
             const RuntimeScope scope(*this);
             ClearRuntimeException();
             object.InvokeMethod(method);
@@ -1966,10 +2557,20 @@ namespace Keire
 
         void Invoke(Coral::ManagedObject& object, const std::string_view method, const float value)
         {
+            ++ManagedInteropCalls;
             const RuntimeScope scope(*this);
             ClearRuntimeException();
             object.InvokeMethod(method, value);
             ThrowRuntimeException();
+        }
+
+        [[nodiscard]] std::uint32_t ReadCallbackMask(Coral::ManagedObject& object)
+        {
+            const RuntimeScope scope(*this);
+            ClearRuntimeException();
+            const auto result = object.InvokeMethod<std::uint32_t>("RuntimeGetCallbackMask");
+            ThrowRuntimeException();
+            return result;
         }
 
         [[nodiscard]] std::string CaptureState(Coral::ManagedObject& object, const bool persistent)
@@ -2023,6 +2624,18 @@ namespace Keire
             if (instance.Faulted && callback != ManagedBehaviourCallback::Disable &&
                 callback != ManagedBehaviourCallback::Destroy)
                 return;
+            auto& callbackProfile = instance.CallbackProfiles[static_cast<std::size_t>(callback)];
+            if ((callback == ManagedBehaviourCallback::FixedUpdate &&
+                 (instance.CallbackMask & FixedUpdateCallback) == 0) ||
+                (callback == ManagedBehaviourCallback::LateUpdate && (instance.CallbackMask & LateUpdateCallback) == 0))
+            {
+                ++SkippedCallbacks;
+                ++callbackProfile.SkippedInvocations;
+                return;
+            }
+            const auto callbackStarted = std::chrono::steady_clock::now();
+            ++CallbackInvocations;
+            ++callbackProfile.Invocations;
             try
             {
                 switch (callback)
@@ -2046,6 +2659,10 @@ namespace Keire
                 case ManagedBehaviourCallback::LateUpdate:
                     Invoke(instance.Object, "RuntimeLateUpdate");
                     break;
+                case ManagedBehaviourCallback::AnimationEvent:
+                    throw std::logic_error("Animation events require an event payload.");
+                case ManagedBehaviourCallback::PhysicsContact:
+                    throw std::logic_error("Physics contacts require a contact payload.");
                 case ManagedBehaviourCallback::Disable:
                     Invoke(instance.Object, "RuntimeDisable");
                     instance.Enabled = false;
@@ -2063,6 +2680,13 @@ namespace Keire
             }
             catch (const std::exception& error)
             {
+                const auto elapsed =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted)
+                        .count();
+                CallbackMilliseconds += elapsed;
+                MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+                callbackProfile.Milliseconds += elapsed;
+                callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
                 RuntimeDiagnostics.push_back({ManagedBehaviourInstanceId(id), ManagedDiagnosticSeverity::Error,
                                               callback, Reload.Generation, instance.TypeName, instance.Entity,
                                               error.what()});
@@ -2070,7 +2694,109 @@ namespace Keire
                     throw;
                 instance.Faulted = true;
                 instance.Enabled = false;
+                return;
             }
+            const auto elapsed =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted).count();
+            CallbackMilliseconds += elapsed;
+            MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+            callbackProfile.Milliseconds += elapsed;
+            callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
+        }
+
+        void InvokeAnimationEvent(const std::uint64_t id, const AnimationEventMessage& event)
+        {
+            const auto found = Instances.find(id);
+            if (found == Instances.end() || !found->second.Object.IsValid() || found->second.Faulted)
+                return;
+            auto& instance = found->second;
+            constexpr auto callback = ManagedBehaviourCallback::AnimationEvent;
+            auto& callbackProfile = instance.CallbackProfiles[static_cast<std::size_t>(callback)];
+            const auto callbackStarted = std::chrono::steady_clock::now();
+            ++CallbackInvocations;
+            ++callbackProfile.Invocations;
+            try
+            {
+                ++ManagedInteropCalls;
+                const RuntimeScope scope(*this);
+                ClearRuntimeException();
+                instance.Object.InvokeMethod("RuntimeAnimationEvent", event.Name, event.NormalizedTime, event.Integer,
+                                             event.Scalar, event.Text);
+                ThrowRuntimeException();
+            }
+            catch (const std::exception& error)
+            {
+                const auto elapsed =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted)
+                        .count();
+                CallbackMilliseconds += elapsed;
+                MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+                callbackProfile.Milliseconds += elapsed;
+                callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
+                RuntimeDiagnostics.push_back({ManagedBehaviourInstanceId(id), ManagedDiagnosticSeverity::Error,
+                                              callback, Reload.Generation, instance.TypeName, instance.Entity,
+                                              error.what()});
+                if (Specification.ExceptionPolicy == ManagedExceptionPolicy::Propagate)
+                    throw;
+                instance.Faulted = true;
+                instance.Enabled = false;
+                return;
+            }
+            const auto elapsed =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted).count();
+            CallbackMilliseconds += elapsed;
+            MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+            callbackProfile.Milliseconds += elapsed;
+            callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
+        }
+
+        void InvokePhysicsContact(const std::uint64_t id, const PhysicsContactPhase phase,
+                                  const PhysicsContactMessage& contact)
+        {
+            const auto found = Instances.find(id);
+            if (found == Instances.end() || !found->second.Object.IsValid() || found->second.Faulted)
+                return;
+            auto& instance = found->second;
+            constexpr auto callback = ManagedBehaviourCallback::PhysicsContact;
+            auto& callbackProfile = instance.CallbackProfiles[static_cast<std::size_t>(callback)];
+            const auto callbackStarted = std::chrono::steady_clock::now();
+            ++CallbackInvocations;
+            ++callbackProfile.Invocations;
+            try
+            {
+                ++ManagedInteropCalls;
+                const RuntimeScope scope(*this);
+                ClearRuntimeException();
+                instance.Object.InvokeMethod("RuntimePhysicsContact", static_cast<std::uint8_t>(phase),
+                                             contact.Trigger ? std::uint8_t{1} : std::uint8_t{0},
+                                             contact.Other.Value().High(), contact.Other.Value().Low(), contact.Point,
+                                             contact.Normal, contact.Impulse);
+                ThrowRuntimeException();
+            }
+            catch (const std::exception& error)
+            {
+                const auto elapsed =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted)
+                        .count();
+                CallbackMilliseconds += elapsed;
+                MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+                callbackProfile.Milliseconds += elapsed;
+                callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
+                RuntimeDiagnostics.push_back({ManagedBehaviourInstanceId(id), ManagedDiagnosticSeverity::Error,
+                                              callback, Reload.Generation, instance.TypeName, instance.Entity,
+                                              error.what()});
+                if (Specification.ExceptionPolicy == ManagedExceptionPolicy::Propagate)
+                    throw;
+                instance.Faulted = true;
+                instance.Enabled = false;
+                return;
+            }
+            const auto elapsed =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - callbackStarted).count();
+            CallbackMilliseconds += elapsed;
+            MaximumCallbackMilliseconds = std::max(MaximumCallbackMilliseconds, elapsed);
+            callbackProfile.Milliseconds += elapsed;
+            callbackProfile.MaximumMilliseconds = std::max(callbackProfile.MaximumMilliseconds, elapsed);
         }
 
         void SetState(const ManagedBuildState state)
@@ -2286,9 +3012,26 @@ namespace Keire
         std::unique_ptr<Coral::AssemblyLoadContext> CandidateContext;
         std::vector<BehaviourType> ActiveTypes;
         std::vector<BehaviourType> CandidateTypes;
+        std::vector<ManagedAssetTypeDescriptor> ActiveManagedAssetTypes;
+        std::vector<ManagedAssetTypeDescriptor> CandidateManagedAssetTypes;
+        std::vector<ManagedAssetTypeDiagnostic> ActiveManagedAssetDiagnostics;
+        std::vector<ManagedAssetTypeDiagnostic> CandidateManagedAssetDiagnostics;
+        std::map<ManagedTypeId, const Coral::Type*> ActiveManagedAssetRuntimeTypes;
+        std::map<ManagedTypeId, const Coral::Type*> CandidateManagedAssetRuntimeTypes;
+        const Coral::Type* ActiveNativeRuntimeType = nullptr;
+        const Coral::Type* CandidateNativeRuntimeType = nullptr;
+        Ref<AssetSystem> Assets;
+        std::mutex ManagedAssetMutex;
+        std::map<AssetId, PendingManagedAssetLoad> PendingManagedAssetLoads;
+        std::map<AssetId, ManagedAssetSource> ManagedAssetSources;
         std::unordered_map<std::uint64_t, BehaviourInstance> Instances;
         std::vector<ComponentTypeId> InstalledComponentTypes;
         std::vector<ManagedRuntimeDiagnostic> RuntimeDiagnostics;
+        std::uint64_t CallbackInvocations = 0;
+        std::uint64_t SkippedCallbacks = 0;
+        std::uint64_t ManagedInteropCalls = 0;
+        double CallbackMilliseconds = 0.0;
+        double MaximumCallbackMilliseconds = 0.0;
         std::unordered_map<std::uint64_t, std::string> ProfileNames;
         std::uint64_t NextInstance = 1;
         std::shared_ptr<Impl*> Lifetime;
@@ -2329,6 +3072,7 @@ namespace Keire
                                               std::move(object), m_State});
                     (void)inserted;
                     instance->second.NativeEntity = owner;
+                    instance->second.CallbackMask = implementation.ReadCallbackMask(instance->second.Object);
                     m_Instance = ManagedBehaviourInstanceId(id);
                     if (!m_State.empty())
                         implementation.RestoreState(implementation.Instances.at(id).Object, m_State, true);
@@ -2342,10 +3086,40 @@ namespace Keire
         {
             Invoke(ManagedBehaviourCallback::FixedUpdate, deltaSeconds);
         }
-        void Update(const float deltaSeconds) override
+        void Update(const float deltaSeconds) override { Invoke(ManagedBehaviourCallback::Update, deltaSeconds); }
+        void LateUpdate() override { Invoke(ManagedBehaviourCallback::LateUpdate); }
+        void OnAnimationEvent(const AnimationEventMessage& event) override
         {
-            Invoke(ManagedBehaviourCallback::Update, deltaSeconds);
-            Invoke(ManagedBehaviourCallback::LateUpdate);
+            WithImplementation(
+                [&](ScriptImpl& implementation)
+                {
+                    if (m_Instance)
+                        implementation.InvokeAnimationEvent(m_Instance.Value(), event);
+                });
+        }
+        void OnCollisionEnter(const PhysicsContactMessage& contact) override
+        {
+            InvokeContact(PhysicsContactPhase::Enter, contact);
+        }
+        void OnCollisionStay(const PhysicsContactMessage& contact) override
+        {
+            InvokeContact(PhysicsContactPhase::Stay, contact);
+        }
+        void OnCollisionExit(const PhysicsContactMessage& contact) override
+        {
+            InvokeContact(PhysicsContactPhase::Exit, contact);
+        }
+        void OnTriggerEnter(const PhysicsContactMessage& contact) override
+        {
+            InvokeContact(PhysicsContactPhase::Enter, contact);
+        }
+        void OnTriggerStay(const PhysicsContactMessage& contact) override
+        {
+            InvokeContact(PhysicsContactPhase::Stay, contact);
+        }
+        void OnTriggerExit(const PhysicsContactMessage& contact) override
+        {
+            InvokeContact(PhysicsContactPhase::Exit, contact);
         }
         void OnDisable() override { Invoke(ManagedBehaviourCallback::Disable); }
         void OnDestroy() override
@@ -2395,6 +3169,16 @@ namespace Keire
                     if (found == implementation.Instances.end() || !found->second.Object.IsValid())
                         return;
                     implementation.InvokeInstance(found->first, callback, deltaSeconds);
+                });
+        }
+
+        void InvokeContact(const PhysicsContactPhase phase, const PhysicsContactMessage& contact)
+        {
+            WithImplementation(
+                [&](ScriptImpl& implementation)
+                {
+                    if (m_Instance)
+                        implementation.InvokePhysicsContact(m_Instance.Value(), phase, contact);
                 });
         }
 
@@ -2627,6 +3411,11 @@ namespace Keire
         if (request.Assemblies.empty())
             throw std::invalid_argument("Managed reload requires at least one assembly.");
 
+        m_Impl->ResetManagedAssetGeneration(
+            m_Impl->CandidateNativeRuntimeType,
+            m_Impl->Reload.Generation == std::numeric_limits<std::uint64_t>::max() ? 0 : m_Impl->Reload.Generation + 1);
+        m_Impl->CandidateManagedAssetRuntimeTypes.clear();
+        m_Impl->CandidateNativeRuntimeType = nullptr;
         m_Impl->Unload(m_Impl->CandidateContext);
         {
             std::scoped_lock lock(m_Impl->Mutex);
@@ -2650,6 +3439,9 @@ namespace Keire
             Coral::Type* rangeType = nullptr;
             Coral::Type* tooltipType = nullptr;
             Coral::Type* groupType = nullptr;
+            Coral::Type* managedAssetMetadataType = nullptr;
+            Coral::Type* nativeRuntimeType = nullptr;
+            std::map<std::string, const Coral::Type*, std::less<>> managedRuntimeTypesByName;
             auto managedApiPath =
                 request.ManagedApiAssembly.empty() ? m_Impl->ManagedApi : std::move(request.ManagedApiAssembly);
             if (!managedApiPath.empty())
@@ -2669,6 +3461,12 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeRecordProfileSpan));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetProfileCounterIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetProfileCounter));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "RequestManagedAssetLoadIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeRequestManagedAssetLoad));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "CancelManagedAssetLoadIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeCancelManagedAssetLoad));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ReleaseManagedAssetIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeReleaseManagedAsset));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DeltaTimeIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeDeltaTime));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "FixedDeltaTimeIcall",
@@ -2697,6 +3495,30 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetLocalRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetLocalRotation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFloatIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFloat));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorIntegerIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorInteger));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorBooleanIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorBoolean));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorTriggerIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorTrigger));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorLayerWeightIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorLayerWeight));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorTwoBoneIkIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorTwoBoneIk));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFabrikIkIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFabrikIk));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ClearAnimatorIkIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeClearAnimatorIk));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "TryGetAnimatorFloatIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeTryGetAnimatorFloat));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "TryGetAnimatorIntegerIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeTryGetAnimatorInteger));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "TryGetAnimatorBooleanIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeTryGetAnimatorBoolean));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "TryGetAnimatorLayerWeightIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeTryGetAnimatorLayerWeight));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "EntityExistsIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeEntityExists));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityActiveIcall",
@@ -2787,8 +3609,18 @@ namespace Keire
                 rangeType = &managedApi.GetLocalType("Keire.RangeAttribute");
                 tooltipType = &managedApi.GetLocalType("Keire.TooltipAttribute");
                 groupType = &managedApi.GetLocalType("Keire.InspectorGroupAttribute");
+                managedAssetMetadataType = &managedApi.GetLocalType("Keire.ManagedAssetMetadata");
+                nativeRuntimeType = &managedApi.GetLocalType("Keire.NativeRuntime");
                 if (!*stableComponentIdType || !*executionOrderType || !*serializeFieldType)
                     throw std::runtime_error("Keire.Managed does not expose managed component metadata.");
+                if (!*managedAssetMetadataType)
+                    throw std::runtime_error("Keire.Managed does not expose managed asset metadata.");
+                if (!*nativeRuntimeType)
+                    throw std::runtime_error("Keire.Managed does not expose its managed asset runtime.");
+                for (const auto& type : managedApi.GetLocalTypes())
+                    if (type)
+                        managedRuntimeTypesByName.emplace(ManagedTypeName(const_cast<Coral::Type&>(type)),
+                                                          std::addressof(type));
             }
             std::vector<std::string> availableTypes;
             std::vector<Impl::BehaviourType> candidateTypes;
@@ -2803,6 +3635,10 @@ namespace Keire
                 if (assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
                     throw std::runtime_error("Managed reload rejected assembly '" + PathText(path) + "' (status " +
                                              std::to_string(static_cast<int>(assembly.GetLoadStatus())) + ").");
+                for (const auto& type : assembly.GetLocalTypes())
+                    if (type)
+                        managedRuntimeTypesByName.emplace(ManagedTypeName(const_cast<Coral::Type&>(type)),
+                                                          std::addressof(type));
                 if (behaviourType)
                 {
                     for (const auto& type : assembly.GetLocalTypes())
@@ -2841,6 +3677,28 @@ namespace Keire
                     }
                 }
             }
+            if (!managedAssetMetadataType)
+                throw std::runtime_error("Managed asset discovery requires Keire.Managed metadata.");
+            const Coral::ScopedString managedAssetMetadata(
+                managedAssetMetadataType->InvokeStaticMethod<Coral::String>("Export"));
+            auto discoveredManagedAssets = ParseManagedAssetMetadata(static_cast<std::string>(managedAssetMetadata));
+            std::map<ManagedTypeId, const Coral::Type*> discoveredManagedRuntimeTypes;
+            for (const auto& descriptor : discoveredManagedAssets.Types)
+            {
+                const auto found = managedRuntimeTypesByName.find(descriptor.FullName);
+                if (found == managedRuntimeTypesByName.end())
+                    throw std::runtime_error("Managed asset metadata references an unavailable runtime type.");
+                discoveredManagedRuntimeTypes.emplace(descriptor.StableTypeId, found->second);
+            }
+            std::uint64_t candidateGeneration = 0;
+            {
+                std::scoped_lock lock(m_Impl->Mutex);
+                if (m_Impl->Reload.Generation == std::numeric_limits<std::uint64_t>::max())
+                    throw std::overflow_error("Managed reload generation is exhausted.");
+                candidateGeneration = m_Impl->Reload.Generation + 1;
+            }
+            m_Impl->CandidateNativeRuntimeType = nativeRuntimeType;
+            m_Impl->InstallManagedAssetGeneration(*nativeRuntimeType, candidateGeneration);
             std::ranges::sort(availableTypes);
             if (std::adjacent_find(availableTypes.begin(), availableTypes.end()) != availableTypes.end())
                 throw std::runtime_error("Managed reload contains duplicate Behaviour type names.");
@@ -2858,6 +3716,10 @@ namespace Keire
                 if (runtimeException.empty())
                 {
                     m_Impl->CandidateTypes = std::move(candidateTypes);
+                    m_Impl->CandidateManagedAssetTypes = std::move(discoveredManagedAssets.Types);
+                    m_Impl->CandidateManagedAssetDiagnostics = std::move(discoveredManagedAssets.Diagnostics);
+                    m_Impl->CandidateManagedAssetRuntimeTypes = std::move(discoveredManagedRuntimeTypes);
+                    m_Impl->CandidateNativeRuntimeType = nativeRuntimeType;
                     m_Impl->Reload.AvailableTypes = std::move(availableTypes);
                     m_Impl->Reload.State = ManagedReloadState::Prepared;
                 }
@@ -2868,7 +3730,15 @@ namespace Keire
         }
         catch (const std::exception& error)
         {
+            m_Impl->ResetManagedAssetGeneration(m_Impl->CandidateNativeRuntimeType,
+                                                m_Impl->Reload.Generation == std::numeric_limits<std::uint64_t>::max()
+                                                    ? 0
+                                                    : m_Impl->Reload.Generation + 1);
             m_Impl->CandidateTypes.clear();
+            m_Impl->CandidateManagedAssetTypes.clear();
+            m_Impl->CandidateManagedAssetDiagnostics.clear();
+            m_Impl->CandidateManagedAssetRuntimeTypes.clear();
+            m_Impl->CandidateNativeRuntimeType = nullptr;
             m_Impl->Unload(m_Impl->CandidateContext);
             std::scoped_lock lock(m_Impl->Mutex);
             m_Impl->Reload.State = ManagedReloadState::Failed;
@@ -2886,6 +3756,47 @@ namespace Keire
             std::scoped_lock lock(m_Impl->Mutex);
             if (m_Impl->Reload.State != ManagedReloadState::Prepared || !m_Impl->CandidateContext)
                 throw std::logic_error("No prepared managed reload is available.");
+        }
+
+        std::uint64_t candidateGeneration = 0;
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            candidateGeneration = m_Impl->Reload.Generation + 1;
+        }
+        try
+        {
+            std::vector<std::pair<AssetId, AssetHandle<ManagedDataAsset>>> sources;
+            {
+                std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+                sources.reserve(m_Impl->ManagedAssetSources.size());
+                for (const auto& [id, source] : m_Impl->ManagedAssetSources)
+                    sources.emplace_back(id, source.Handle);
+            }
+            for (const auto& [id, handle] : sources)
+            {
+                const auto asset = handle.TryGetLoaded();
+                if (!asset)
+                    throw std::runtime_error("A loaded managed data source became unavailable during script reload.");
+                auto object = m_Impl->HydrateManagedAsset(*asset, m_Impl->CandidateManagedAssetRuntimeTypes);
+                const Impl::RuntimeScope scope(*m_Impl);
+                if (!object.InvokeMethod<bool>("RuntimeRegisterManagedAsset", candidateGeneration, id.High(), id.Low()))
+                    throw std::runtime_error("The candidate managed asset registry rejected a hydrated object.");
+            }
+        }
+        catch (...)
+        {
+            m_Impl->ResetManagedAssetGeneration(m_Impl->CandidateNativeRuntimeType, candidateGeneration);
+            m_Impl->CandidateTypes.clear();
+            m_Impl->CandidateManagedAssetTypes.clear();
+            m_Impl->CandidateManagedAssetDiagnostics.clear();
+            m_Impl->CandidateManagedAssetRuntimeTypes.clear();
+            m_Impl->CandidateNativeRuntimeType = nullptr;
+            m_Impl->Unload(m_Impl->CandidateContext);
+            std::scoped_lock lock(m_Impl->Mutex);
+            m_Impl->Reload.State = ManagedReloadState::Failed;
+            m_Impl->Reload.Diagnostic =
+                "Managed data hydration failed; the last-good script and asset generation remains active.";
+            throw;
         }
 
         std::unordered_map<std::uint64_t, Impl::BehaviourInstance> migrated;
@@ -2913,6 +3824,7 @@ namespace Keire
                     replacement.TypeName = type->Name;
                     replacement.ComponentType = type->ComponentType;
                     replacement.Object = m_Impl->CreateObject(*type, instance.World, instance.Entity);
+                    replacement.CallbackMask = m_Impl->ReadCallbackMask(replacement.Object);
                     m_Impl->RestoreState(replacement.Object, replacement.State, false);
                 }
                 migrated.emplace(id, std::move(replacement));
@@ -2930,6 +3842,11 @@ namespace Keire
                 }
             }
             m_Impl->CandidateTypes.clear();
+            m_Impl->CandidateManagedAssetTypes.clear();
+            m_Impl->CandidateManagedAssetDiagnostics.clear();
+            m_Impl->ResetManagedAssetGeneration(m_Impl->CandidateNativeRuntimeType, candidateGeneration);
+            m_Impl->CandidateManagedAssetRuntimeTypes.clear();
+            m_Impl->CandidateNativeRuntimeType = nullptr;
             m_Impl->Unload(m_Impl->CandidateContext);
             std::scoped_lock lock(m_Impl->Mutex);
             m_Impl->Reload.State = ManagedReloadState::Failed;
@@ -2938,9 +3855,22 @@ namespace Keire
         }
 
         auto previous = std::move(m_Impl->ActiveContext);
+        const auto* previousNativeRuntime = m_Impl->ActiveNativeRuntimeType;
+        const auto previousGeneration = m_Impl->Reload.Generation;
         m_Impl->Instances = std::move(migrated);
         m_Impl->ActiveContext = std::move(m_Impl->CandidateContext);
         m_Impl->ActiveTypes = std::move(m_Impl->CandidateTypes);
+        m_Impl->ActiveManagedAssetTypes = std::move(m_Impl->CandidateManagedAssetTypes);
+        m_Impl->ActiveManagedAssetDiagnostics = std::move(m_Impl->CandidateManagedAssetDiagnostics);
+        m_Impl->ActiveManagedAssetRuntimeTypes = std::move(m_Impl->CandidateManagedAssetRuntimeTypes);
+        m_Impl->ActiveNativeRuntimeType = m_Impl->CandidateNativeRuntimeType;
+        m_Impl->CandidateNativeRuntimeType = nullptr;
+        {
+            std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+            std::erase_if(m_Impl->PendingManagedAssetLoads, [previousGeneration](const auto& entry)
+                          { return entry.second.Generation == previousGeneration; });
+        }
+        m_Impl->ResetManagedAssetGeneration(previousNativeRuntime, previousGeneration);
         m_Impl->Unload(previous);
         {
             std::scoped_lock lock(m_Impl->Mutex);
@@ -2958,7 +3888,14 @@ namespace Keire
     void ScriptSystem::CancelReload()
     {
         m_Impl->RequireOwner();
+        m_Impl->ResetManagedAssetGeneration(
+            m_Impl->CandidateNativeRuntimeType,
+            m_Impl->Reload.Generation == std::numeric_limits<std::uint64_t>::max() ? 0 : m_Impl->Reload.Generation + 1);
         m_Impl->CandidateTypes.clear();
+        m_Impl->CandidateManagedAssetTypes.clear();
+        m_Impl->CandidateManagedAssetDiagnostics.clear();
+        m_Impl->CandidateManagedAssetRuntimeTypes.clear();
+        m_Impl->CandidateNativeRuntimeType = nullptr;
         m_Impl->Unload(m_Impl->CandidateContext);
         std::scoped_lock lock(m_Impl->Mutex);
         if (m_Impl->Reload.State == ManagedReloadState::Preparing ||
@@ -2986,6 +3923,156 @@ namespace Keire
         return result;
     }
 
+    std::vector<ManagedAssetTypeDescriptor> ScriptSystem::ManagedAssetTypes() const
+    {
+        m_Impl->RequireOwner();
+        return m_Impl->ActiveManagedAssetTypes;
+    }
+
+    std::vector<ManagedAssetTypeDiagnostic> ScriptSystem::ManagedAssetTypeDiagnostics() const
+    {
+        m_Impl->RequireOwner();
+        return m_Impl->ActiveManagedAssetDiagnostics;
+    }
+
+    void ScriptSystem::SetAssetSystem(Ref<AssetSystem> assets)
+    {
+        m_Impl->RequireOwner();
+        if (!IsOpen())
+            throw std::logic_error("ScriptSystem is closed.");
+        if (!assets || !assets->IsOpen())
+            throw std::invalid_argument("Managed data integration requires an open AssetSystem.");
+        {
+            std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+            if ((!m_Impl->PendingManagedAssetLoads.empty() || !m_Impl->ManagedAssetSources.empty()) &&
+                m_Impl->Assets != assets)
+            {
+                throw std::logic_error("The managed data AssetSystem cannot change while assets are active.");
+            }
+        }
+        m_Impl->Assets = std::move(assets);
+    }
+
+    void ScriptSystem::PumpManagedAssets()
+    {
+        m_Impl->RequireOwner();
+        if (!IsOpen() || !m_Impl->ActiveContext || !m_Impl->ActiveNativeRuntimeType)
+            return;
+        std::uint64_t generation = 0;
+        {
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (m_Impl->Reload.State != ManagedReloadState::Active)
+                return;
+            generation = m_Impl->Reload.Generation;
+        }
+
+        struct Completion final
+        {
+            AssetId Id;
+            AssetHandle<ManagedDataAsset> Handle;
+            bool Failed = false;
+            std::string Diagnostic;
+        };
+        std::vector<Completion> completions;
+        {
+            std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+            for (auto iterator = m_Impl->PendingManagedAssetLoads.begin();
+                 iterator != m_Impl->PendingManagedAssetLoads.end();)
+            {
+                if (iterator->second.Generation != generation)
+                {
+                    ++iterator;
+                    continue;
+                }
+                const auto state = iterator->second.Handle.State();
+                if (state == AssetState::Ready || state == AssetState::Reloading)
+                {
+                    completions.push_back({iterator->first, iterator->second.Handle});
+                    iterator = m_Impl->PendingManagedAssetLoads.erase(iterator);
+                }
+                else if (state == AssetState::Failed || state == AssetState::Cancelled)
+                {
+                    const auto diagnostic = iterator->second.Handle.Diagnostic();
+                    completions.push_back(
+                        {iterator->first, iterator->second.Handle, true,
+                         diagnostic.Message.empty() ? "Managed data asset loading failed." : diagnostic.Message});
+                    iterator = m_Impl->PendingManagedAssetLoads.erase(iterator);
+                }
+                else
+                {
+                    ++iterator;
+                }
+            }
+        }
+
+        for (auto& completion : completions)
+        {
+            try
+            {
+                const Impl::RuntimeScope scope(*m_Impl);
+                if (completion.Failed)
+                {
+                    (void)m_Impl->ActiveNativeRuntimeType->InvokeStaticMethod<bool>(
+                        "FailManagedAssetLoad", generation, completion.Id.High(), completion.Id.Low(),
+                        completion.Diagnostic);
+                    continue;
+                }
+                const auto asset = completion.Handle.TryGetLoaded();
+                if (!asset)
+                    throw std::runtime_error("Managed data asset completed without a loaded object.");
+                auto object = m_Impl->HydrateManagedAsset(*asset, m_Impl->ActiveManagedAssetRuntimeTypes);
+                if (!object.InvokeMethod<bool>("RuntimeCompleteManagedAssetLoad", generation, completion.Id.High(),
+                                               completion.Id.Low()))
+                {
+                    continue;
+                }
+                std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+                m_Impl->ManagedAssetSources.insert_or_assign(
+                    completion.Id, Impl::ManagedAssetSource{completion.Handle, completion.Handle.Revision()});
+            }
+            catch (const std::exception& exception)
+            {
+                const Impl::RuntimeScope scope(*m_Impl);
+                (void)m_Impl->ActiveNativeRuntimeType->InvokeStaticMethod<bool>(
+                    "FailManagedAssetLoad", generation, completion.Id.High(), completion.Id.Low(),
+                    std::string(exception.what()));
+            }
+        }
+
+        std::vector<std::pair<AssetId, Impl::ManagedAssetSource>> reloads;
+        {
+            std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+            for (const auto& [id, source] : m_Impl->ManagedAssetSources)
+                if (source.Handle.Revision() != source.ObservedRevision && source.Handle.TryGetLoaded())
+                    reloads.emplace_back(id, source);
+        }
+        for (const auto& [id, source] : reloads)
+        {
+            try
+            {
+                const auto asset = source.Handle.TryGetLoaded();
+                if (!asset)
+                    continue;
+                auto candidate = m_Impl->HydrateManagedAsset(*asset, m_Impl->ActiveManagedAssetRuntimeTypes);
+                const Impl::RuntimeScope scope(*m_Impl);
+                if (!candidate.InvokeMethod<bool>("RuntimeReloadManagedAsset", generation, id.High(), id.Low()))
+                    continue;
+                std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+                if (const auto found = m_Impl->ManagedAssetSources.find(id); found != m_Impl->ManagedAssetSources.end())
+                    found->second.ObservedRevision = source.Handle.Revision();
+            }
+            catch (const std::exception& exception)
+            {
+                std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+                m_Impl->ActiveManagedAssetDiagnostics.push_back(
+                    {"Asset " + id.ToString(),
+                     std::string("Hot reload kept the last-good object: ") + exception.what()});
+                if (const auto found = m_Impl->ManagedAssetSources.find(id); found != m_Impl->ManagedAssetSources.end())
+                    found->second.ObservedRevision = source.Handle.Revision();
+            }
+        }
+    }
+
     ManagedBehaviourInstanceId ScriptSystem::CreateBehaviour(std::string typeName, const std::uint64_t world,
                                                              const AssetId entity)
     {
@@ -2997,8 +4084,10 @@ namespace Keire
             throw std::invalid_argument("The requested managed Behaviour type is unavailable.");
         const auto id = m_Impl->NextInstance++;
         auto object = m_Impl->CreateObject(*type, world, entity);
-        m_Impl->Instances.emplace(
+        const auto [instance, inserted] = m_Impl->Instances.emplace(
             id, Impl::BehaviourInstance{std::move(typeName), type->ComponentType, world, entity, std::move(object)});
+        (void)inserted;
+        instance->second.CallbackMask = m_Impl->ReadCallbackMask(instance->second.Object);
         return ManagedBehaviourInstanceId(id);
     }
 
@@ -3055,6 +4144,64 @@ namespace Keire
         result.Diagnostics = m_Impl->RuntimeDiagnostics.size();
         result.FaultedInstances = static_cast<std::size_t>(
             std::ranges::count_if(m_Impl->Instances, [](const auto& entry) { return entry.second.Faulted; }));
+        result.CallbackInvocations = m_Impl->CallbackInvocations;
+        result.SkippedCallbacks = m_Impl->SkippedCallbacks;
+        result.ManagedInteropCalls = m_Impl->ManagedInteropCalls;
+        result.CallbackMilliseconds = m_Impl->CallbackMilliseconds;
+        result.MaximumCallbackMilliseconds = m_Impl->MaximumCallbackMilliseconds;
+        return result;
+    }
+
+    ManagedCallbackMetrics ScriptSystem::CallbackMetrics() const
+    {
+        m_Impl->RequireOwner();
+        constexpr std::size_t maximumEntries = 64;
+        ManagedCallbackMetrics result;
+        result.Entries.reserve(std::min(maximumEntries, m_Impl->Instances.size() * 3));
+        for (const auto& [id, instance] : m_Impl->Instances)
+        {
+            (void)id;
+            for (std::size_t callbackIndex = 0; callbackIndex < Impl::CallbackProfileCount; ++callbackIndex)
+            {
+                const auto& source = instance.CallbackProfiles[callbackIndex];
+                if (source.Invocations == 0 && source.SkippedInvocations == 0)
+                    continue;
+                const auto callback = static_cast<ManagedBehaviourCallback>(callbackIndex);
+                const auto found =
+                    std::ranges::find_if(result.Entries, [&](const ManagedCallbackMetric& entry)
+                                         { return entry.TypeName == instance.TypeName && entry.Callback == callback; });
+                ManagedCallbackMetric* destination = nullptr;
+                if (found == result.Entries.end())
+                {
+                    if (result.Entries.size() == maximumEntries)
+                    {
+                        result.Truncated = true;
+                        continue;
+                    }
+                    result.Entries.push_back({instance.TypeName, callback, 0, 0, 0, 0.0, 0.0});
+                    destination = std::addressof(result.Entries.back());
+                }
+                else
+                {
+                    destination = std::addressof(*found);
+                }
+                ++destination->InstanceCount;
+                destination->Invocations += source.Invocations;
+                destination->SkippedInvocations += source.SkippedInvocations;
+                destination->Milliseconds += source.Milliseconds;
+                destination->MaximumMilliseconds =
+                    std::max(destination->MaximumMilliseconds, source.MaximumMilliseconds);
+            }
+        }
+        std::ranges::sort(result.Entries,
+                          [](const ManagedCallbackMetric& left, const ManagedCallbackMetric& right)
+                          {
+                              if (left.Milliseconds != right.Milliseconds)
+                                  return left.Milliseconds > right.Milliseconds;
+                              if (left.TypeName != right.TypeName)
+                                  return left.TypeName < right.TypeName;
+                              return left.Callback < right.Callback;
+                          });
         return result;
     }
 

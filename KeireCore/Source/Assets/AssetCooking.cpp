@@ -1,5 +1,9 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
+#include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Animation/RiggingSystem.h"
+#include "Keire/Scripting/ManagedDataAsset.h"
+
 namespace Keire
 {
     AssetCookResult AssetCooker::Cook(const AssetDatabase& database, const AssetBuildProfile& profile,
@@ -69,6 +73,100 @@ namespace Keire
             ++preparedCount;
             ReportOperationProgress(progress, AssetOperationPhase::Cooking, preparedCount, records.size(),
                                     record.RelativePath);
+        }
+        if (profile.Strict)
+        {
+            std::vector<std::pair<AssetId, Ref<ManagedDataAsset>>> managedData;
+            std::vector<ManagedDataCookAsset> validationAssets;
+            validationAssets.reserve(prepared.size());
+            const auto requireReference = [&indices, &prepared](const PreparedAsset& owner, const AssetId reference,
+                                                                const AssetTypeId expectedType,
+                                                                const std::string_view description)
+            {
+                const auto found = indices.find(reference);
+                if (!reference || found == indices.end() || prepared[found->second].Type != expectedType)
+                {
+                    throw std::runtime_error("Strict cooking rejected " + std::string(description) +
+                                             " with a missing or incorrectly typed reference: " + reference.ToString());
+                }
+                if (std::ranges::find(owner.Dependencies, reference) == owner.Dependencies.end())
+                {
+                    throw std::runtime_error("Strict cooking rejected " + std::string(description) +
+                                             " because its dependency was not declared: " + reference.ToString());
+                }
+                return found->second;
+            };
+            for (const auto& asset : prepared)
+            {
+                std::optional<ManagedTypeId> managedType;
+                if (asset.Type == ManagedDataAsset::StaticType())
+                {
+                    auto decoded = ManagedDataAsset::Decode(asset.Imported.Bytes);
+                    managedType = decoded->Definition().ManagedType;
+                    managedData.emplace_back(asset.Id, std::move(decoded));
+                }
+                else if (asset.Type == RigDefinitionAsset::StaticType())
+                {
+                    static_cast<void>(RigDefinitionAsset::Decode(asset.Imported.Bytes));
+                }
+                else if (asset.Type == AnimationClipAsset::StaticType())
+                {
+                    const auto clip = AnimationClipAsset::Decode(asset.Imported.Bytes);
+                    requireReference(asset, clip->Skeleton(), SkeletonAsset::StaticType(), "an animation clip");
+                }
+                else if (asset.Type == SkinnedMeshAsset::StaticType())
+                {
+                    const auto skinned = SkinnedMeshAsset::Decode(asset.Imported.Bytes);
+                    const auto meshIndex =
+                        requireReference(asset, skinned->Mesh(), MeshAsset::StaticType(), "a skinned mesh");
+                    const auto skeletonIndex =
+                        requireReference(asset, skinned->Skeleton(), SkeletonAsset::StaticType(), "a skinned mesh");
+                    const auto mesh = MeshAsset::Decode(prepared[meshIndex].Imported.Bytes);
+                    const auto skeleton = SkeletonAsset::Decode(prepared[skeletonIndex].Imported.Bytes);
+                    const auto influenceCount =
+                        skinned->Influences8().empty() ? skinned->Influences().size() : skinned->Influences8().size();
+                    if (influenceCount != mesh->Vertices().size())
+                    {
+                        throw std::runtime_error(
+                            "Strict cooking rejected a skinned mesh whose influence count does not match its mesh.");
+                    }
+                    for (const auto& influence : skinned->Influences())
+                    {
+                        for (std::size_t index = 0; index < influence.Bones.size(); ++index)
+                        {
+                            if (influence.Weights[index] > 0.0F && influence.Bones[index] >= skeleton->Bones().size())
+                            {
+                                throw std::runtime_error(
+                                    "Strict cooking rejected a skinned mesh with an out-of-range bone influence.");
+                            }
+                        }
+                    }
+                    for (const auto& influence : skinned->Influences8())
+                    {
+                        for (std::size_t index = 0; index < influence.Count; ++index)
+                        {
+                            if (influence.Bones[index] >= skeleton->Bones().size())
+                            {
+                                throw std::runtime_error(
+                                    "Strict cooking rejected a skinned mesh with an out-of-range bone influence.");
+                            }
+                        }
+                    }
+                }
+                validationAssets.push_back({asset.Id, asset.Type, managedType});
+            }
+            if (!managedData.empty())
+            {
+                if (!profile.ManagedTypeDiscoveryComplete)
+                {
+                    throw std::runtime_error(
+                        "Strict cooking requires managed runtime compilation and type discovery before validating "
+                        "managed data assets.");
+                }
+                const auto managedTypes = DecodeManagedAssetTypeCatalog(profile.ManagedTypeCatalog);
+                for (const auto& [asset, data] : managedData)
+                    ValidateManagedDataForCook(asset, data->Definition(), managedTypes, validationAssets);
+            }
         }
         if (!profile.Strict)
         {
@@ -257,8 +355,6 @@ namespace Keire
             }
             if (pack.is_open())
                 pack.close();
-            ValidateDependencies(entries);
-            Detail::WriteCatalog(temporary / "catalog.json", entries);
             const Json buildProfile{{"schemaVersion", 1},
                                     {"name", profile.Name},
                                     {"target", static_cast<std::uint8_t>(profile.Target)},
@@ -267,6 +363,25 @@ namespace Keire
                                     {"streamPageBytes", profile.StreamPageBytes},
                                     {"maximumPackBytes", profile.MaximumPackBytes},
                                     {"strict", profile.Strict}};
+            ValidateDependencies(entries);
+            const auto catalogPath = temporary / "catalog.json";
+            Detail::WriteCatalog(catalogPath, entries);
+            auto generationSeed = ReadSource(catalogPath, 64U * 1024U * 1024U);
+            const auto profileIdentity = buildProfile.dump();
+            const auto profileBytes = std::as_bytes(std::span(profileIdentity));
+            generationSeed.insert(generationSeed.end(), profileBytes.begin(), profileBytes.end());
+            const auto generation = Detail::DigestToString(Detail::Sha256(generationSeed));
+            for (std::size_t packIndex = 0; packIndex < result.PackCount; ++packIndex)
+            {
+                const auto previousName = std::filesystem::path("content-" + std::to_string(packIndex) + ".keirepak");
+                const auto publishedName =
+                    std::filesystem::path("content-" + generation + "-" + std::to_string(packIndex) + ".keirepak");
+                Detail::RenamePathWithRetry(temporary / previousName, temporary / publishedName);
+                for (auto& entry : entries)
+                    if (entry.PackPath == previousName)
+                        entry.PackPath = publishedName;
+            }
+            Detail::WriteCatalog(catalogPath, entries);
             Detail::WriteTextFileAtomically(temporary / "build-profile.json", buildProfile.dump(2) + '\n');
             std::filesystem::create_directories(destination.parent_path());
             ThrowIfOperationCancelled(cancellation);

@@ -4,6 +4,7 @@
 #include "Keire/Assets/Asset.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
+#include "Keire/Vfx/VfxSystem.h"
 
 #include <compare>
 #include <cstdint>
@@ -74,6 +75,7 @@ namespace Keire
         [[nodiscard]] Color ClearColor() const noexcept;
         [[nodiscard]] std::uint64_t Generation() const noexcept;
         [[nodiscard]] bool Available() const noexcept;
+        [[nodiscard]] bool SampledDepthAvailable() const noexcept;
 
         void RequestSize(std::uint32_t width, std::uint32_t height);
         void SetClearColor(Color color);
@@ -143,6 +145,19 @@ namespace Keire
         Ref<RenderView> View;
         bool DrawGrid = false;
         RenderEnvironmentSettings Environment;
+        VfxRenderSnapshot Vfx;
+    };
+
+    struct RenderCapabilities
+    {
+        bool CpuVfxSimulation = true;
+        bool GpuVfxSimulation = false;
+        bool TransparentPass = false;
+        bool DynamicSpritePackets = false;
+        bool TexturedSpritePackets = false;
+        bool DynamicMeshPackets = false;
+        bool SampledResolvedDepth = false;
+        bool GpuDepthCollision = false;
     };
 
     struct RenderStatistics
@@ -158,17 +173,32 @@ namespace Keire
         std::uint32_t VisibleLocalLights = 0;
         std::uint32_t OverflowedLightTiles = 0;
         std::uint32_t DirectionalShadowCascades = 0;
+        std::uint32_t VfxSpriteParticles = 0;
+        std::uint32_t VfxMeshParticles = 0;
         std::uint32_t PlannedFrameGraphPasses = 0;
         std::uint32_t ExecutedFrameGraphPasses = 0;
         std::uint32_t FrameGraphTransitions = 0;
         std::uint32_t TransientResourceAllocations = 0;
         std::uint32_t RendererQueueHighWaterMark = 0;
+        std::uint32_t ForwardPlusBufferReallocations = 0;
+        std::uint32_t ForwardPlusCacheHits = 0;
+        std::uint64_t ForwardPlusUploadBytes = 0;
+        std::uint64_t DroppedVfxParticles = 0;
+        bool GpuTimingSupported = false;
+        bool ForwardPlusGpuCullingSupported = false;
+        bool SampledResolvedDepthAvailable = false;
         float CpuPreparationMilliseconds = 0.0F;
         float CpuPreparationP95Milliseconds = 0.0F;
         float CommandRecordingMilliseconds = 0.0F;
+        float ShadowRecordingMilliseconds = 0.0F;
+        float ForwardPlusCullingMilliseconds = 0.0F;
+        float ScenePassMilliseconds = 0.0F;
+        float ToneMapMilliseconds = 0.0F;
+        float FrameUploadMilliseconds = 0.0F;
         float SwapchainWaitMilliseconds = 0.0F;
         float UiRecordingMilliseconds = 0.0F;
         float GpuSubmissionMilliseconds = 0.0F;
+        float GpuFrameMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
     };
 
@@ -185,6 +215,7 @@ namespace Keire
         void Submit(SceneRenderRequest request);
 
         [[nodiscard]] RenderMode Mode() const noexcept;
+        [[nodiscard]] RenderCapabilities Capabilities() const noexcept;
         [[nodiscard]] RenderStatistics Statistics() const noexcept;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;

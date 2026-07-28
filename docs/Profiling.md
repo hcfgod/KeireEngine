@@ -43,6 +43,10 @@ without limit.
 The Kéire editor requests mailbox presentation to avoid falling from 60 FPS toward 30 FPS whenever a frame narrowly
 misses a VSync deadline. Platforms without mailbox support automatically retain the renderer's VSync fallback.
 
+The Profiler panel refreshes its rolling statistical analysis at a diagnostic cadence instead of cloning and sorting
+the complete history every rendered frame. Captures continue recording at full frame frequency, and clipboard reports
+are generated only when requested.
+
 ## Cursor release behavior
 
 When gameplay releases relative cursor capture through Escape or opens UI through Tab, the editor centers the cursor

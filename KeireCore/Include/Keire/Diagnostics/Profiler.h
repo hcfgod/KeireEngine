@@ -70,6 +70,10 @@ namespace Keire
         double RenderingMicroseconds = 0.0;
         double AudioMicroseconds = 0.0;
         bool Truncated = false;
+        double AssetsMicroseconds = 0.0;
+        double AnimationMicroseconds = 0.0;
+        double NavigationMicroseconds = 0.0;
+        double UserMicroseconds = 0.0;
     };
 
     struct ProfileFrameSummary
@@ -87,6 +91,10 @@ namespace Keire
         double RenderingMicroseconds = 0.0;
         double AudioMicroseconds = 0.0;
         bool Truncated = false;
+        double AssetsMicroseconds = 0.0;
+        double AnimationMicroseconds = 0.0;
+        double NavigationMicroseconds = 0.0;
+        double UserMicroseconds = 0.0;
     };
 
     class KEIRE_API Profiler final : public RefCounted
@@ -104,6 +112,7 @@ namespace Keire
                         double durationMicroseconds) noexcept;
         void SetCounter(ProfileCategory category, std::string_view name, double value) noexcept;
         [[nodiscard]] ProfileFrame LatestFrame() const;
+        [[nodiscard]] std::string LatestChromeTrace() const;
         [[nodiscard]] ProfileFrameSummary LatestSummary() const;
         [[nodiscard]] std::vector<ProfileFrameSummary> RecentSummaries(std::size_t maximumFrames) const;
         [[nodiscard]] bool IsOpen() const noexcept;

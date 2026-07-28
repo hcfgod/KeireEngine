@@ -6,6 +6,13 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
+#include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
@@ -19,9 +26,11 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <deque>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <ranges>
 #include <set>
 #include <stdexcept>
 #include <thread>
@@ -71,14 +80,27 @@ namespace Keire
             std::atomic<bool> Open{true};
             std::atomic<std::uint32_t> Worlds{0};
             std::uint32_t MaximumWorlds = 0;
+            std::array<std::uint32_t, 32> CollisionMatrix;
             std::shared_ptr<JoltRuntimeLease> Runtime = std::make_shared<JoltRuntimeLease>();
         };
 
-        struct Bounds final
+        void ValidateCollisionMatrix(const std::array<std::uint32_t, 32>& matrix)
         {
-            Vector3 Minimum;
-            Vector3 Maximum;
-        };
+            for (std::size_t first = 0; first < matrix.size(); ++first)
+            {
+                for (std::size_t second = first + 1; second < matrix.size(); ++second)
+                {
+                    if (((matrix[first] >> second) & 1U) != ((matrix[second] >> first) & 1U))
+                        throw std::invalid_argument("Physics collision matrix must be symmetric.");
+                }
+            }
+        }
+
+        [[nodiscard]] std::uint32_t EffectiveMask(const std::uint32_t layer, const std::uint32_t authoredMask,
+                                                  const std::array<std::uint32_t, 32>& matrix) noexcept
+        {
+            return authoredMask & matrix[std::countr_zero(layer)];
+        }
 
         [[nodiscard]] Vector3 Add(const Vector3 left, const Vector3 right) noexcept
         {
@@ -102,45 +124,12 @@ namespace Keire
 
         [[nodiscard]] float LengthSquared(const Vector3 value) noexcept { return Dot(value, value); }
 
-        [[nodiscard]] Vector3 Extent(const PhysicsBodyDefinition& body) noexcept
+        [[nodiscard]] Vector3 Normalize(const Vector3 value) noexcept
         {
-            switch (body.Shape)
-            {
-            case ColliderShape::Box:
-                return body.HalfExtent;
-            case ColliderShape::Sphere:
-                return {body.Radius, body.Radius, body.Radius};
-            case ColliderShape::Capsule:
-                return {body.Radius, body.Height * 0.5F + body.Radius, body.Radius};
-            case ColliderShape::ConvexMesh:
-            case ColliderShape::TriangleMesh:
-            {
-                Vector3 result{};
-                if (!body.Collision)
-                    return result;
-                for (const auto vertex : body.Collision->Vertices)
-                {
-                    result.X = std::max(result.X, std::abs(vertex.X));
-                    result.Y = std::max(result.Y, std::abs(vertex.Y));
-                    result.Z = std::max(result.Z, std::abs(vertex.Z));
-                }
-                return result;
-            }
-            }
-            return {};
-        }
-
-        [[nodiscard]] Bounds BodyBounds(const PhysicsBodyDefinition& body) noexcept
-        {
-            const auto extent = Extent(body);
-            return {Subtract(body.Position, extent), Add(body.Position, extent)};
-        }
-
-        [[nodiscard]] bool Intersects(const Bounds& left, const Bounds& right) noexcept
-        {
-            return left.Minimum.X <= right.Maximum.X && left.Maximum.X >= right.Minimum.X &&
-                   left.Minimum.Y <= right.Maximum.Y && left.Maximum.Y >= right.Minimum.Y &&
-                   left.Minimum.Z <= right.Maximum.Z && left.Maximum.Z >= right.Minimum.Z;
+            const auto lengthSquared = LengthSquared(value);
+            if (lengthSquared <= std::numeric_limits<float>::epsilon())
+                return {};
+            return Multiply(value, 1.0F / std::sqrt(lengthSquared));
         }
 
         [[nodiscard]] bool ValidBody(const PhysicsBodyDefinition& body) noexcept
@@ -148,7 +137,10 @@ namespace Keire
             if (!Math::IsFinite(body.Position) || !Math::IsFinite(body.Rotation) ||
                 !Math::IsFinite(body.LinearVelocity) || !Math::IsFinite(body.HalfExtent) ||
                 !std::isfinite(body.Radius) || !std::isfinite(body.Height) || !std::isfinite(body.Mass) ||
-                body.Layer == 0)
+                !std::isfinite(body.Friction) || !std::isfinite(body.Restitution) || !std::has_single_bit(body.Layer) ||
+                body.Friction < 0.0F || body.Friction > 100.0F || body.Restitution < 0.0F || body.Restitution > 1.0F ||
+                body.FrictionCombine > PhysicsMaterialCombineMode::Maximum ||
+                body.RestitutionCombine > PhysicsMaterialCombineMode::Maximum)
                 return false;
             if (body.Shape == ColliderShape::Box &&
                 (body.HalfExtent.X <= 0.0F || body.HalfExtent.Y <= 0.0F || body.HalfExtent.Z <= 0.0F))
@@ -184,6 +176,25 @@ namespace Keire
             return {value.GetX(), value.GetY(), value.GetZ(), value.GetW()};
         }
 
+        [[nodiscard]] float CombineMaterialValues(const float first, const PhysicsMaterialCombineMode firstMode,
+                                                  const float second,
+                                                  const PhysicsMaterialCombineMode secondMode) noexcept
+        {
+            const auto mode = std::max(firstMode, secondMode);
+            switch (mode)
+            {
+            case PhysicsMaterialCombineMode::Average:
+                return (first + second) * 0.5F;
+            case PhysicsMaterialCombineMode::Minimum:
+                return std::min(first, second);
+            case PhysicsMaterialCombineMode::Multiply:
+                return first * second;
+            case PhysicsMaterialCombineMode::Maximum:
+                return std::max(first, second);
+            }
+            return (first + second) * 0.5F;
+        }
+
         class BroadPhaseLayerInterface final : public JPH::BroadPhaseLayerInterface
         {
           public:
@@ -212,6 +223,38 @@ namespace Keire
             {
                 return first == MovingLayer || second == MovingLayer;
             }
+        };
+
+        class QueryBodyFilter final : public JPH::BodyFilter
+        {
+          public:
+            QueryBodyFilter(const std::uint32_t mask, const std::uint32_t layer, const bool includeTriggers) noexcept
+                : m_Mask(mask), m_Layer(layer), m_IncludeTriggers(includeTriggers)
+            {
+            }
+
+            [[nodiscard]] bool ShouldCollideLocked(const JPH::Body& body) const override
+            {
+                const auto& group = body.GetCollisionGroup();
+                return (group.GetGroupID() & m_Mask) != 0 && (group.GetSubGroupID() & m_Layer) != 0 &&
+                       (m_IncludeTriggers || !body.IsSensor());
+            }
+
+          private:
+            std::uint32_t m_Mask;
+            std::uint32_t m_Layer;
+            bool m_IncludeTriggers;
+        };
+
+        class SpecificBodyFilter final : public JPH::BodyFilter
+        {
+          public:
+            explicit SpecificBodyFilter(const JPH::BodyID body) noexcept : m_Body(body) {}
+
+            [[nodiscard]] bool ShouldCollide(const JPH::BodyID& body) const override { return body == m_Body; }
+
+          private:
+            JPH::BodyID m_Body;
         };
 
         template <typename Value> void HashValue(std::uint64_t& hash, const Value value) noexcept
@@ -336,12 +379,146 @@ namespace Keire
             JPH::BodyID Native;
         };
 
+        struct ContactData final
+        {
+            Vector3 Point;
+            Vector3 Normal;
+            float Impulse = 0.0F;
+            float Penetration = 0.0F;
+            bool Trigger = false;
+        };
+
+        using BodyPair = std::pair<std::uint64_t, std::uint64_t>;
+
+        class WorldContactListener final : public JPH::ContactListener
+        {
+          public:
+            explicit WorldContactListener(const Impl& owner) noexcept : m_Owner(owner) {}
+
+            [[nodiscard]] JPH::ValidateResult OnContactValidate(const JPH::Body& first, const JPH::Body& second,
+                                                                JPH::RVec3Arg, const JPH::CollideShapeResult&) override
+            {
+                const auto firstBody = m_Owner.Bodies.find(first.GetUserData());
+                const auto secondBody = m_Owner.Bodies.find(second.GetUserData());
+                if (firstBody == m_Owner.Bodies.end() || secondBody == m_Owner.Bodies.end())
+                    return JPH::ValidateResult::RejectAllContactsForThisBodyPair;
+                const auto& firstDefinition = firstBody->second.Definition;
+                const auto& secondDefinition = secondBody->second.Definition;
+                if ((firstDefinition.Layer & secondDefinition.Mask) == 0 ||
+                    (secondDefinition.Layer & firstDefinition.Mask) == 0)
+                {
+                    return JPH::ValidateResult::RejectAllContactsForThisBodyPair;
+                }
+                return JPH::ValidateResult::AcceptAllContactsForThisBodyPair;
+            }
+
+            void OnContactAdded(const JPH::Body& first, const JPH::Body& second, const JPH::ContactManifold& manifold,
+                                JPH::ContactSettings& settings) override
+            {
+                ApplyMaterial(first, second, settings);
+                Capture(first, second, manifold);
+            }
+
+            void OnContactPersisted(const JPH::Body& first, const JPH::Body& second,
+                                    const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) override
+            {
+                ApplyMaterial(first, second, settings);
+                Capture(first, second, manifold);
+            }
+
+            void Clear()
+            {
+                std::scoped_lock lock(m_Mutex);
+                m_Samples.clear();
+            }
+
+            [[nodiscard]] std::map<BodyPair, ContactData> TakeSamples()
+            {
+                std::scoped_lock lock(m_Mutex);
+                return std::exchange(m_Samples, {});
+            }
+
+          private:
+            void ApplyMaterial(const JPH::Body& first, const JPH::Body& second, JPH::ContactSettings& settings) const
+            {
+                const auto firstBody = m_Owner.Bodies.find(first.GetUserData());
+                const auto secondBody = m_Owner.Bodies.find(second.GetUserData());
+                if (firstBody == m_Owner.Bodies.end() || secondBody == m_Owner.Bodies.end())
+                    return;
+                const auto& firstDefinition = firstBody->second.Definition;
+                const auto& secondDefinition = secondBody->second.Definition;
+                settings.mCombinedFriction =
+                    CombineMaterialValues(firstDefinition.Friction, firstDefinition.FrictionCombine,
+                                          secondDefinition.Friction, secondDefinition.FrictionCombine);
+                settings.mCombinedRestitution =
+                    CombineMaterialValues(firstDefinition.Restitution, firstDefinition.RestitutionCombine,
+                                          secondDefinition.Restitution, secondDefinition.RestitutionCombine);
+                settings.mIsSensor = firstDefinition.Trigger || secondDefinition.Trigger;
+            }
+
+            void Capture(const JPH::Body& first, const JPH::Body& second, const JPH::ContactManifold& manifold)
+            {
+                auto firstValue = first.GetUserData();
+                auto secondValue = second.GetUserData();
+                if (firstValue == 0 || secondValue == 0)
+                    return;
+
+                ContactData sample;
+                if (!manifold.mRelativeContactPointsOn1.empty() && !manifold.mRelativeContactPointsOn2.empty())
+                {
+                    sample.Point = Multiply(Add(FromJoltPosition(manifold.GetWorldSpaceContactPointOn1(0)),
+                                                FromJoltPosition(manifold.GetWorldSpaceContactPointOn2(0))),
+                                            0.5F);
+                }
+                sample.Normal = Normalize(FromJoltVector(manifold.mWorldSpaceNormal));
+                sample.Penetration = manifold.mPenetrationDepth;
+                sample.Trigger = first.IsSensor() || second.IsSensor();
+
+                const auto relativeVelocity = FromJoltVector(second.GetLinearVelocity() - first.GetLinearVelocity());
+                const auto closingSpeed = std::max(0.0F, -Dot(relativeVelocity, sample.Normal));
+                const auto firstInverseMass =
+                    first.IsDynamic() ? first.GetMotionProperties()->GetInverseMassUnchecked() : 0.0F;
+                const auto secondInverseMass =
+                    second.IsDynamic() ? second.GetMotionProperties()->GetInverseMassUnchecked() : 0.0F;
+                const auto inverseMass = firstInverseMass + secondInverseMass;
+                if (!sample.Trigger && inverseMass > std::numeric_limits<float>::epsilon())
+                    sample.Impulse = closingSpeed / inverseMass;
+
+                if (firstValue > secondValue)
+                {
+                    std::swap(firstValue, secondValue);
+                    sample.Normal = Multiply(sample.Normal, -1.0F);
+                }
+                const BodyPair pair{firstValue, secondValue};
+                std::scoped_lock lock(m_Mutex);
+                const auto found = m_Samples.find(pair);
+                if (found == m_Samples.end() || Prefer(sample, found->second))
+                    m_Samples[pair] = sample;
+            }
+
+            [[nodiscard]] static bool Prefer(const ContactData& candidate, const ContactData& current) noexcept
+            {
+                if (candidate.Penetration != current.Penetration)
+                    return candidate.Penetration > current.Penetration;
+                if (candidate.Point.X != current.Point.X)
+                    return candidate.Point.X < current.Point.X;
+                if (candidate.Point.Y != current.Point.Y)
+                    return candidate.Point.Y < current.Point.Y;
+                return candidate.Point.Z < current.Point.Z;
+            }
+
+            const Impl& m_Owner;
+            std::mutex m_Mutex;
+            std::map<BodyPair, ContactData> m_Samples;
+        };
+
         explicit Impl(std::shared_ptr<PhysicsServiceState> service)
-            : Service(std::move(service)), Owner(std::this_thread::get_id()),
+            : Service(std::move(service)), Owner(std::this_thread::get_id()), ContactListener(*this),
               Jobs(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
                    static_cast<int>(std::max(1U, std::thread::hardware_concurrency()) - 1U))
         {
             Native.Init(65'536, 0, 65'536, 10'240, BroadPhaseLayers, BroadPhaseFilter, LayerFilter);
+            Native.SetContactListener(&ContactListener);
         }
 
         ~Impl()
@@ -370,6 +547,111 @@ namespace Keire
                 bodyInterface.DestroyBody(body.Native);
             }
             Bodies.clear();
+            ActiveContacts.clear();
+            ContactListener.Clear();
+            QueryTraces.clear();
+        }
+
+        [[nodiscard]] std::optional<ContactData> QueryContact(const Body& first, const Body& second)
+        {
+            const auto& bodyInterface = Native.GetBodyInterface();
+            const auto shape = bodyInterface.GetShape(first.Native);
+            JPH::CollideShapeSettings settings;
+            settings.mMaxSeparationDistance = 0.001F;
+            JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+            const SpecificBodyFilter bodyFilter(second.Native);
+            Native.GetNarrowPhaseQuery().CollideShape(shape.GetPtr(), JPH::Vec3::sOne(),
+                                                      bodyInterface.GetCenterOfMassTransform(first.Native), settings,
+                                                      JPH::RVec3::sZero(), collector, {}, {}, bodyFilter);
+            if (!collector.HadHit())
+                return std::nullopt;
+
+            const auto best = std::ranges::max_element(
+                collector.mHits, [](const JPH::CollideShapeResult& left, const JPH::CollideShapeResult& right)
+                { return left.mPenetrationDepth < right.mPenetrationDepth; });
+            ContactData result;
+            result.Point =
+                Multiply(Add(FromJoltVector(best->mContactPointOn1), FromJoltVector(best->mContactPointOn2)), 0.5F);
+            result.Normal = Normalize(Multiply(FromJoltVector(best->mPenetrationAxis), -1.0F));
+            result.Penetration = best->mPenetrationDepth;
+            result.Trigger = first.Definition.Trigger || second.Definition.Trigger;
+            if (!result.Trigger)
+            {
+                const auto relativeVelocity =
+                    Subtract(second.Definition.LinearVelocity, first.Definition.LinearVelocity);
+                const auto closingSpeed = std::max(0.0F, -Dot(relativeVelocity, result.Normal));
+                const auto firstInverseMass =
+                    first.Definition.Motion == PhysicsMotionType::Dynamic ? 1.0F / first.Definition.Mass : 0.0F;
+                const auto secondInverseMass =
+                    second.Definition.Motion == PhysicsMotionType::Dynamic ? 1.0F / second.Definition.Mass : 0.0F;
+                if (firstInverseMass + secondInverseMass > std::numeric_limits<float>::epsilon())
+                    result.Impulse = closingSpeed / (firstInverseMass + secondInverseMass);
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::vector<std::uint64_t> QueryPotentialContacts(const std::uint64_t value, const Body& body)
+        {
+            const auto& bodyInterface = Native.GetBodyInterface();
+            const auto shape = bodyInterface.GetShape(body.Native);
+            JPH::CollideShapeSettings settings;
+            settings.mMaxSeparationDistance = 0.001F;
+            JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+            const QueryBodyFilter bodyFilter(body.Definition.Mask, body.Definition.Layer, true);
+            Native.GetNarrowPhaseQuery().CollideShape(shape.GetPtr(), JPH::Vec3::sOne(),
+                                                      bodyInterface.GetCenterOfMassTransform(body.Native), settings,
+                                                      JPH::RVec3::sZero(), collector, {}, {}, bodyFilter);
+
+            std::set<std::uint64_t> unique;
+            for (const auto& hit : collector.mHits)
+            {
+                JPH::BodyLockRead lock(Native.GetBodyLockInterface(), hit.mBodyID2);
+                if (lock.Succeeded() && lock.GetBody().GetUserData() != value)
+                    unique.insert(lock.GetBody().GetUserData());
+            }
+            return {unique.begin(), unique.end()};
+        }
+
+        void RecordRayQuery(const PhysicsRayQuery& query, const std::vector<PhysicsQueryHit>& hits) const
+        {
+            if (!DebugCapture.Enabled)
+                return;
+            PhysicsDebugQueryTrace trace;
+            trace.Sequence = NextQuerySequence++;
+            trace.Kind = PhysicsDebugQueryKind::RayCast;
+            trace.Ray = query;
+            const auto count = std::min<std::size_t>(hits.size(), DebugCapture.MaximumHitsPerQuery);
+            trace.Hits.assign(hits.begin(), hits.begin() + static_cast<std::ptrdiff_t>(count));
+            trace.DroppedHits = hits.size() - count;
+            PushQueryTrace(std::move(trace));
+        }
+
+        void RecordOverlapQuery(const Vector3 center, const float radius, const std::uint32_t mask,
+                                const std::uint32_t layer, const std::vector<PhysicsBodyId>& overlaps) const
+        {
+            if (!DebugCapture.Enabled)
+                return;
+            PhysicsDebugQueryTrace trace;
+            trace.Sequence = NextQuerySequence++;
+            trace.Kind = PhysicsDebugQueryKind::SphereOverlap;
+            trace.SphereCenter = center;
+            trace.SphereRadius = radius;
+            trace.Mask = mask;
+            trace.Layer = layer;
+            const auto count = std::min<std::size_t>(overlaps.size(), DebugCapture.MaximumHitsPerQuery);
+            trace.Overlaps.assign(overlaps.begin(), overlaps.begin() + static_cast<std::ptrdiff_t>(count));
+            trace.DroppedHits = overlaps.size() - count;
+            PushQueryTrace(std::move(trace));
+        }
+
+        void PushQueryTrace(PhysicsDebugQueryTrace trace) const
+        {
+            if (QueryTraces.size() == DebugCapture.MaximumQueryTraces)
+            {
+                QueryTraces.pop_front();
+                ++DroppedQueryTraces;
+            }
+            QueryTraces.push_back(std::move(trace));
         }
 
         std::shared_ptr<PhysicsServiceState> Service;
@@ -378,8 +660,14 @@ namespace Keire
         bool NativeOpen = true;
         std::uint64_t NextBody = 1;
         std::map<std::uint64_t, Body> Bodies;
-        std::set<std::pair<std::uint64_t, std::uint64_t>> Contacts;
+        std::map<BodyPair, ContactData> ActiveContacts;
         std::vector<PhysicsContactEvent> Events;
+        PhysicsDebugCaptureConfiguration DebugCapture;
+        mutable std::deque<PhysicsDebugQueryTrace> QueryTraces;
+        mutable std::uint64_t NextQuerySequence = 1;
+        mutable std::size_t DroppedQueryTraces = 0;
+        std::uint64_t Revision = 0;
+        WorldContactListener ContactListener;
         BroadPhaseLayerInterface BroadPhaseLayers;
         ObjectBroadPhaseFilter BroadPhaseFilter;
         ObjectLayerFilter LayerFilter;
@@ -403,6 +691,8 @@ namespace Keire
             throw std::invalid_argument("Physics body definition contains invalid or non-finite values.");
         if (definition.Motion == PhysicsMotionType::Dynamic && definition.Shape == ColliderShape::TriangleMesh)
             throw std::invalid_argument("Dynamic triangle-mesh collision is unsupported; use a convex collider.");
+        auto runtimeDefinition = definition;
+        runtimeDefinition.Mask = EffectiveMask(definition.Layer, definition.Mask, m_Impl->Service->CollisionMatrix);
 
         JPH::ShapeRefC shape;
         switch (definition.Shape)
@@ -436,6 +726,10 @@ namespace Keire
         settings.mMotionQuality =
             definition.Continuous ? JPH::EMotionQuality::LinearCast : JPH::EMotionQuality::Discrete;
         settings.mUserData = id.m_Value;
+        settings.mCollisionGroup = JPH::CollisionGroup(nullptr, runtimeDefinition.Layer, runtimeDefinition.Mask);
+        settings.mFriction = definition.Friction;
+        settings.mRestitution = definition.Restitution;
+        settings.mGravityFactor = definition.UseGravity ? 1.0F : 0.0F;
         if (definition.Motion == PhysicsMotionType::Dynamic)
         {
             settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
@@ -443,16 +737,15 @@ namespace Keire
         }
 
         auto& bodyInterface = m_Impl->Native.GetBodyInterface();
-        const auto native = bodyInterface.CreateAndAddBody(settings, definition.Motion == PhysicsMotionType::Dynamic
-                                                                         ? JPH::EActivation::Activate
-                                                                         : JPH::EActivation::DontActivate);
+        const auto native = bodyInterface.CreateAndAddBody(
+            settings, motion == JPH::EMotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
         if (native.IsInvalid())
             throw std::runtime_error("Jolt body capacity was exhausted.");
         bodyInterface.SetLinearVelocity(
             native, JPH::Vec3(definition.LinearVelocity.X, definition.LinearVelocity.Y, definition.LinearVelocity.Z));
         try
         {
-            m_Impl->Bodies.emplace(id.m_Value, Impl::Body{definition, native});
+            m_Impl->Bodies.emplace(id.m_Value, Impl::Body{std::move(runtimeDefinition), native});
         }
         catch (...)
         {
@@ -473,8 +766,8 @@ namespace Keire
         bodyInterface.RemoveBody(found->second.Native);
         bodyInterface.DestroyBody(found->second.Native);
         m_Impl->Bodies.erase(found);
-        std::erase_if(m_Impl->Contacts,
-                      [body](const auto& pair) { return pair.first == body.m_Value || pair.second == body.m_Value; });
+        std::erase_if(m_Impl->ActiveContacts, [body](const auto& entry)
+                      { return entry.first.first == body.m_Value || entry.first.second == body.m_Value; });
     }
 
     void PhysicsWorld::SetKinematicTarget(const PhysicsBodyId body, const Vector3 position, const Quaternion rotation)
@@ -489,6 +782,22 @@ namespace Keire
         m_Impl->Native.GetBodyInterface().SetPositionAndRotation(found->second.Native, ToJolt(position),
                                                                  ToJolt(found->second.Definition.Rotation),
                                                                  JPH::EActivation::Activate);
+    }
+
+    void PhysicsWorld::SetGravityEnabled(const PhysicsBodyId body, const bool enabled)
+    {
+        m_Impl->RequireOwner("SetGravityEnabled");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end())
+            throw std::invalid_argument("Physics body is unavailable.");
+        found->second.Definition.UseGravity = enabled;
+        if (found->second.Definition.Motion == PhysicsMotionType::Dynamic)
+        {
+            auto& bodyInterface = m_Impl->Native.GetBodyInterface();
+            bodyInterface.SetGravityFactor(found->second.Native, enabled ? 1.0F : 0.0F);
+            if (enabled)
+                bodyInterface.ActivateBody(found->second.Native);
+        }
     }
 
     std::optional<PhysicsBodyState> PhysicsWorld::TryGetBody(const PhysicsBodyId body) const
@@ -514,68 +823,62 @@ namespace Keire
             LengthSquared(query.Direction) <= std::numeric_limits<float>::epsilon())
             throw std::invalid_argument("Physics ray query is invalid.");
         const auto direction = Multiply(query.Direction, 1.0F / std::sqrt(LengthSquared(query.Direction)));
+
+        const JPH::RRayCast ray(ToJolt(query.Origin),
+                                JPH::Vec3(direction.X, direction.Y, direction.Z) * query.MaximumDistance);
+        JPH::RayCastSettings settings;
+        JPH::ClosestHitPerBodyCollisionCollector<JPH::CastRayCollector> collector;
+        if (!std::has_single_bit(query.Layer))
+            throw std::invalid_argument("Physics ray query layer must select one collision layer.");
+        const QueryBodyFilter bodyFilter(query.Mask, query.Layer, query.IncludeTriggers);
+        m_Impl->Native.GetNarrowPhaseQuery().CastRay(ray, settings, collector, {}, {}, bodyFilter);
+        collector.Sort();
+
         std::vector<PhysicsQueryHit> result;
-        for (const auto& [value, body] : m_Impl->Bodies)
+        result.reserve(collector.mHits.size());
+        for (const auto& hit : collector.mHits)
         {
-            if ((body.Definition.Layer & query.Mask) == 0 || (body.Definition.Trigger && !query.IncludeTriggers))
+            JPH::BodyLockRead lock(m_Impl->Native.GetBodyLockInterface(), hit.mBodyID);
+            if (!lock.Succeeded())
                 continue;
-            const auto bounds = BodyBounds(body.Definition);
-            float nearValue = 0.0F;
-            float farValue = query.MaximumDistance;
-            Vector3 normal{};
-            bool hit = true;
-            for (int axis = 0; axis < 3; ++axis)
-            {
-                const auto origin = axis == 0 ? query.Origin.X : axis == 1 ? query.Origin.Y : query.Origin.Z;
-                const auto component = axis == 0 ? direction.X : axis == 1 ? direction.Y : direction.Z;
-                const auto minimum = axis == 0 ? bounds.Minimum.X : axis == 1 ? bounds.Minimum.Y : bounds.Minimum.Z;
-                const auto maximum = axis == 0 ? bounds.Maximum.X : axis == 1 ? bounds.Maximum.Y : bounds.Maximum.Z;
-                if (std::abs(component) <= std::numeric_limits<float>::epsilon())
-                {
-                    if (origin < minimum || origin > maximum)
-                        hit = false;
-                    continue;
-                }
-                float first = (minimum - origin) / component;
-                float second = (maximum - origin) / component;
-                float sign = -1.0F;
-                if (first > second)
-                {
-                    std::swap(first, second);
-                    sign = 1.0F;
-                }
-                if (first > nearValue)
-                {
-                    nearValue = first;
-                    normal = axis == 0   ? Vector3{sign, 0.0F, 0.0F}
-                             : axis == 1 ? Vector3{0.0F, sign, 0.0F}
-                                         : Vector3{0.0F, 0.0F, sign};
-                }
-                farValue = std::min(farValue, second);
-                if (nearValue > farValue)
-                    hit = false;
-            }
-            if (hit && nearValue <= query.MaximumDistance)
-                result.push_back(
-                    {PhysicsBodyId(value), Add(query.Origin, Multiply(direction, nearValue)), normal, nearValue});
+            const auto& nativeBody = lock.GetBody();
+            const auto position = ray.GetPointOnRay(hit.mFraction);
+            result.push_back({PhysicsBodyId(nativeBody.GetUserData()), FromJoltPosition(position),
+                              FromJoltVector(nativeBody.GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, position)),
+                              hit.mFraction * query.MaximumDistance});
         }
         std::ranges::sort(
             result, [](const PhysicsQueryHit& left, const PhysicsQueryHit& right)
             { return left.Distance < right.Distance || (left.Distance == right.Distance && left.Body < right.Body); });
+        m_Impl->RecordRayQuery(query, result);
         return result;
     }
 
     std::vector<PhysicsBodyId> PhysicsWorld::OverlapSphere(const Vector3 center, const float radius,
-                                                           const std::uint32_t mask) const
+                                                           const std::uint32_t mask, const std::uint32_t layer) const
     {
         m_Impl->RequireOwner("OverlapSphere");
-        if (!Math::IsFinite(center) || !std::isfinite(radius) || radius <= 0.0F)
+        if (!Math::IsFinite(center) || !std::isfinite(radius) || radius <= 0.0F || !std::has_single_bit(layer))
             throw std::invalid_argument("Physics sphere overlap is invalid.");
-        const Bounds query{Subtract(center, {radius, radius, radius}), Add(center, {radius, radius, radius})};
+
+        const JPH::SphereShape queryShape(radius);
+        JPH::CollideShapeSettings settings;
+        JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+        const QueryBodyFilter bodyFilter(mask, layer, true);
+        m_Impl->Native.GetNarrowPhaseQuery().CollideShape(&queryShape, JPH::Vec3::sOne(),
+                                                          JPH::RMat44::sTranslation(ToJolt(center)), settings,
+                                                          JPH::RVec3::sZero(), collector, {}, {}, bodyFilter);
+
+        std::set<PhysicsBodyId> unique;
+        for (const auto& hit : collector.mHits)
+        {
+            JPH::BodyLockRead lock(m_Impl->Native.GetBodyLockInterface(), hit.mBodyID2);
+            if (lock.Succeeded())
+                unique.emplace(PhysicsBodyId(lock.GetBody().GetUserData()));
+        }
         std::vector<PhysicsBodyId> result;
-        for (const auto& [value, body] : m_Impl->Bodies)
-            if ((body.Definition.Layer & mask) != 0 && Intersects(query, BodyBounds(body.Definition)))
-                result.emplace_back(PhysicsBodyId(value));
+        result.assign(unique.begin(), unique.end());
+        m_Impl->RecordOverlapQuery(center, radius, mask, layer, result);
         return result;
     }
 
@@ -584,6 +887,13 @@ namespace Keire
         m_Impl->RequireOwner("Step");
         if (!std::isfinite(deltaSeconds) || deltaSeconds <= 0.0F || deltaSeconds > 1.0F)
             throw std::invalid_argument("Physics step delta is invalid.");
+        if (m_Impl->Bodies.empty())
+        {
+            m_Impl->ActiveContacts.clear();
+            m_Impl->Events.clear();
+            return;
+        }
+        m_Impl->ContactListener.Clear();
         const auto collisionSteps = std::max(1, static_cast<int>(std::ceil(deltaSeconds * 60.0F)));
         const auto error = m_Impl->Native.Update(deltaSeconds, collisionSteps, &m_Impl->Temporary, &m_Impl->Jobs);
         if (error != JPH::EPhysicsUpdateError::None)
@@ -601,33 +911,124 @@ namespace Keire
             body.Definition.LinearVelocity = FromJoltVector(bodyInterface.GetLinearVelocity(body.Native));
         }
 
-        std::set<std::pair<std::uint64_t, std::uint64_t>> current;
-        for (auto first = m_Impl->Bodies.begin(); first != m_Impl->Bodies.end(); ++first)
+        const auto samples = m_Impl->ContactListener.TakeSamples();
+        std::set<Impl::BodyPair> candidates;
+        for (const auto& [pair, data] : samples)
         {
-            for (auto second = std::next(first); second != m_Impl->Bodies.end(); ++second)
+            (void)data;
+            candidates.insert(pair);
+        }
+        for (const auto& [pair, data] : m_Impl->ActiveContacts)
+        {
+            (void)data;
+            candidates.insert(pair);
+        }
+        for (const auto& [value, body] : m_Impl->Bodies)
+        {
+            if (!body.Definition.Trigger)
+                continue;
+            for (const auto other : m_Impl->QueryPotentialContacts(value, body))
+                candidates.emplace(std::min(value, other), std::max(value, other));
+        }
+
+        std::map<Impl::BodyPair, Impl::ContactData> current;
+        for (const auto& pair : candidates)
+        {
+            const auto first = m_Impl->Bodies.find(pair.first);
+            const auto second = m_Impl->Bodies.find(pair.second);
+            if (first == m_Impl->Bodies.end() || second == m_Impl->Bodies.end() ||
+                (first->second.Definition.Layer & second->second.Definition.Mask) == 0 ||
+                (second->second.Definition.Layer & first->second.Definition.Mask) == 0)
+                continue;
+            auto queried = m_Impl->QueryContact(first->second, second->second);
+            if (!queried)
+                continue;
+            auto data = *queried;
+            if (const auto sample = samples.find(pair); sample != samples.end())
+                data = sample->second;
+            current.emplace(pair, data);
+            m_Impl->Events.push_back({PhysicsBodyId(pair.first), PhysicsBodyId(pair.second),
+                                      m_Impl->ActiveContacts.contains(pair) ? ContactPhase::Stay : ContactPhase::Enter,
+                                      data.Trigger, data.Point, data.Normal, data.Impulse});
+        }
+        for (const auto& [pair, data] : m_Impl->ActiveContacts)
+        {
+            if (!current.contains(pair))
             {
-                if ((first->second.Definition.Layer & second->second.Definition.Mask) == 0 ||
-                    (second->second.Definition.Layer & first->second.Definition.Mask) == 0 ||
-                    !Intersects(BodyBounds(first->second.Definition), BodyBounds(second->second.Definition)))
-                    continue;
-                const auto pair = std::pair{first->first, second->first};
-                current.insert(pair);
-                m_Impl->Events.push_back({PhysicsBodyId(pair.first), PhysicsBodyId(pair.second),
-                                          m_Impl->Contacts.contains(pair) ? ContactPhase::Stay : ContactPhase::Enter,
-                                          first->second.Definition.Trigger || second->second.Definition.Trigger});
+                m_Impl->Events.push_back({PhysicsBodyId(pair.first), PhysicsBodyId(pair.second), ContactPhase::Exit,
+                                          data.Trigger, data.Point, data.Normal, data.Impulse});
             }
         }
-        for (const auto& pair : m_Impl->Contacts)
-            if (!current.contains(pair))
-                m_Impl->Events.push_back(
-                    {PhysicsBodyId(pair.first), PhysicsBodyId(pair.second), ContactPhase::Exit, false});
-        m_Impl->Contacts = std::move(current);
+        m_Impl->ActiveContacts = std::move(current);
+        ++m_Impl->Revision;
     }
 
     std::vector<PhysicsContactEvent> PhysicsWorld::DrainContactEvents()
     {
         m_Impl->RequireOwner("DrainContactEvents");
         return std::exchange(m_Impl->Events, {});
+    }
+
+    void PhysicsWorld::ConfigureDebugCapture(const PhysicsDebugCaptureConfiguration configuration)
+    {
+        m_Impl->RequireOwner("ConfigureDebugCapture");
+        if (configuration.Enabled &&
+            (configuration.MaximumBodies == 0 || configuration.MaximumBodies > 65'536 ||
+             configuration.MaximumContacts == 0 || configuration.MaximumContacts > 262'144 ||
+             configuration.MaximumQueryTraces == 0 || configuration.MaximumQueryTraces > 4096 ||
+             configuration.MaximumHitsPerQuery == 0 || configuration.MaximumHitsPerQuery > 65'536))
+        {
+            throw std::invalid_argument("Physics debug capture configuration exceeds its bounded limits.");
+        }
+        m_Impl->DebugCapture = configuration;
+        m_Impl->QueryTraces.clear();
+        m_Impl->NextQuerySequence = 1;
+        m_Impl->DroppedQueryTraces = 0;
+    }
+
+    std::shared_ptr<const PhysicsDebugSnapshot> PhysicsWorld::CaptureDebugSnapshot() const
+    {
+        m_Impl->RequireOwner("CaptureDebugSnapshot");
+        if (!m_Impl->DebugCapture.Enabled)
+            return {};
+
+        auto result = std::make_shared<PhysicsDebugSnapshot>();
+        result->Revision = m_Impl->Revision;
+        result->DroppedBodies = m_Impl->Bodies.size() > m_Impl->DebugCapture.MaximumBodies
+                                    ? m_Impl->Bodies.size() - m_Impl->DebugCapture.MaximumBodies
+                                    : 0;
+        result->Bodies.reserve(std::min<std::size_t>(m_Impl->Bodies.size(), m_Impl->DebugCapture.MaximumBodies));
+        const auto& bodyInterface = m_Impl->Native.GetBodyInterface();
+        for (const auto& [value, body] : m_Impl->Bodies)
+        {
+            if (result->Bodies.size() == m_Impl->DebugCapture.MaximumBodies)
+                break;
+            JPH::RVec3 position;
+            JPH::Quat rotation;
+            bodyInterface.GetPositionAndRotation(body.Native, position, rotation);
+            result->Bodies.push_back({PhysicsBodyId(value), body.Definition.Motion, body.Definition.Shape,
+                                      FromJoltPosition(position), FromJoltRotation(rotation),
+                                      body.Definition.HalfExtent, body.Definition.Radius, body.Definition.Height,
+                                      body.Definition.Layer, body.Definition.Mask, body.Definition.Trigger,
+                                      !bodyInterface.IsActive(body.Native), body.Definition.UseGravity});
+        }
+
+        result->DroppedContacts = m_Impl->ActiveContacts.size() > m_Impl->DebugCapture.MaximumContacts
+                                      ? m_Impl->ActiveContacts.size() - m_Impl->DebugCapture.MaximumContacts
+                                      : 0;
+        result->Contacts.reserve(
+            std::min<std::size_t>(m_Impl->ActiveContacts.size(), m_Impl->DebugCapture.MaximumContacts));
+        for (const auto& [pair, data] : m_Impl->ActiveContacts)
+        {
+            if (result->Contacts.size() == m_Impl->DebugCapture.MaximumContacts)
+                break;
+            result->Contacts.push_back({PhysicsBodyId(pair.first), PhysicsBodyId(pair.second), ContactPhase::Stay,
+                                        data.Trigger, data.Point, data.Normal, data.Impulse});
+        }
+
+        result->Queries.assign(m_Impl->QueryTraces.begin(), m_Impl->QueryTraces.end());
+        result->DroppedQueries = m_Impl->DroppedQueryTraces;
+        return result;
     }
 
     void PhysicsWorld::Close()
@@ -637,16 +1038,18 @@ namespace Keire
         if (!std::exchange(m_Impl->Open, false))
             return;
         m_Impl->CloseNative();
-        m_Impl->Contacts.clear();
+        m_Impl->ActiveContacts.clear();
         m_Impl->Events.clear();
     }
 
     class PhysicsSystem::Impl final
     {
       public:
-        explicit Impl(const std::uint32_t maximumWorlds) : Owner(std::this_thread::get_id())
+        Impl(const std::uint32_t maximumWorlds, std::array<std::uint32_t, 32> collisionMatrix)
+            : Owner(std::this_thread::get_id())
         {
             Service->MaximumWorlds = maximumWorlds;
+            Service->CollisionMatrix = std::move(collisionMatrix);
         }
 
         std::thread::id Owner;
@@ -654,8 +1057,9 @@ namespace Keire
     };
 
     PhysicsSystem::PhysicsSystem(const PhysicsSystemSpecification specification)
-        : m_Impl(std::make_unique<Impl>(specification.MaximumWorlds))
+        : m_Impl(std::make_unique<Impl>(specification.MaximumWorlds, specification.CollisionMatrix))
     {
+        ValidateCollisionMatrix(specification.CollisionMatrix);
         if (specification.Mode == PhysicsMode::Disabled || specification.MaximumWorlds == 0 ||
             specification.MaximumWorlds > 4096)
             throw std::invalid_argument("PhysicsSystem specification is invalid.");
@@ -685,6 +1089,25 @@ namespace Keire
             m_Impl->Service->Worlds.fetch_sub(1, std::memory_order_relaxed);
             throw;
         }
+    }
+
+    void PhysicsSystem::ConfigureCollisionMatrix(std::array<std::uint32_t, 32> matrix)
+    {
+        if (std::this_thread::get_id() != m_Impl->Owner)
+            throw std::logic_error("PhysicsSystem::ConfigureCollisionMatrix must run on the owner thread.");
+        if (!IsOpen())
+            throw std::logic_error("PhysicsSystem is closed.");
+        if (m_Impl->Service->Worlds.load(std::memory_order_acquire) != 0)
+            throw std::logic_error("Physics collision matrix cannot change while a physics world is active.");
+        ValidateCollisionMatrix(matrix);
+        m_Impl->Service->CollisionMatrix = std::move(matrix);
+    }
+
+    std::array<std::uint32_t, 32> PhysicsSystem::CollisionMatrix() const
+    {
+        if (std::this_thread::get_id() != m_Impl->Owner)
+            throw std::logic_error("PhysicsSystem::CollisionMatrix must run on the owner thread.");
+        return m_Impl->Service->CollisionMatrix;
     }
 
     void PhysicsSystem::Close()

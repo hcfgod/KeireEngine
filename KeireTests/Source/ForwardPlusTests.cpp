@@ -18,6 +18,15 @@ TEST_CASE("Forward+ CPU fallback produces deterministic bounded tile lists")
     CHECK(first.Counts == second.Counts);
     CHECK(first.OverflowedTiles == 0);
     CHECK(std::ranges::find(first.LightIndices, 1U) == first.LightIndices.end());
+    REQUIRE(first.Offsets.size() == first.Counts.size());
+    for (std::size_t tile = 0; tile < first.Counts.size(); ++tile)
+    {
+        if (first.Counts[tile] == 0)
+            continue;
+        REQUIRE(first.Counts[tile] == 1);
+        REQUIRE(first.Offsets[tile] < first.LightIndices.size());
+        CHECK(first.LightIndices[first.Offsets[tile]] == 0);
+    }
 }
 
 TEST_CASE("Forward+ CPU fallback reports per-tile overflow without exceeding its ABI limit")

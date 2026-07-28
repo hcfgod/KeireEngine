@@ -43,11 +43,161 @@ internal struct NativeRaycastHit
 
 internal static unsafe class NativeRuntime
 {
+    private static readonly object ManagedAssetGate = new();
+    private static ManagedAssetRegistry? s_managedAssets;
+    private static NativeManagedAssetProvider? s_nativeManagedAssetProvider;
+
+    internal static ManagedAssetRegistry? ManagedAssets => Volatile.Read(ref s_managedAssets);
+    internal static bool HasManagedAssetLoadProvider => RequestManagedAssetLoadIcall != null;
+
+    internal static bool RequestManagedAssetLoad(ulong generation, AssetId id) =>
+        RequestManagedAssetLoadIcall != null &&
+        RequestManagedAssetLoadIcall(generation, id.High, id.Low) != 0;
+
+    internal static void CancelManagedAssetLoad(ulong generation, AssetId id)
+    {
+        if (CancelManagedAssetLoadIcall != null)
+            CancelManagedAssetLoadIcall(generation, id.High, id.Low);
+    }
+
+    internal static void ReleaseManagedAsset(ulong generation, AssetId id)
+    {
+        if (ReleaseManagedAssetIcall != null)
+            ReleaseManagedAssetIcall(generation, id.High, id.Low);
+    }
+
+    internal static void InstallManagedAssetGeneration(ulong generation, int maximumLoadedAssets,
+                                                       int maximumInFlightLoads)
+    {
+        var provider = new NativeManagedAssetProvider(generation);
+        InstallManagedAssets(generation, maximumLoadedAssets, maximumInFlightLoads, provider.LoadAsync, provider);
+    }
+
+    internal static bool RegisterManagedAsset(ulong generation, ulong high, ulong low, ScriptableObject asset)
+    {
+        ManagedAssetRegistry? registry = ManagedAssets;
+        if (registry is null || registry.Generation != generation)
+            return false;
+        try
+        {
+            registry.Register(new AssetId(high, low), asset);
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool UnloadManagedAsset(ulong generation, ulong high, ulong low)
+    {
+        ManagedAssetRegistry? registry = ManagedAssets;
+        if (registry is null || registry.Generation != generation)
+            return false;
+        try
+        {
+            return registry.Unload(new AssetId(high, low));
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool ReloadManagedAsset(ulong generation, ulong high, ulong low,
+                                            ScriptableObject candidate)
+    {
+        ManagedAssetRegistry? registry = ManagedAssets;
+        if (registry is null || registry.Generation != generation)
+            return false;
+        try
+        {
+            return registry.Reload(new AssetId(high, low), candidate);
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+    }
+
+    internal static bool CompleteManagedAssetLoad(ulong generation, ulong high, ulong low,
+                                                  ScriptableObject asset)
+    {
+        NativeManagedAssetProvider? provider;
+        lock (ManagedAssetGate)
+        {
+            provider = s_nativeManagedAssetProvider;
+        }
+        return provider is not null && provider.Generation == generation &&
+               provider.Complete(new AssetId(high, low), asset);
+    }
+
+    internal static bool FailManagedAssetLoad(ulong generation, ulong high, ulong low, string diagnostic)
+    {
+        NativeManagedAssetProvider? provider;
+        lock (ManagedAssetGate)
+        {
+            provider = s_nativeManagedAssetProvider;
+        }
+        return provider is not null && provider.Generation == generation &&
+               provider.Fail(new AssetId(high, low), diagnostic);
+    }
+
+    internal static void InstallManagedAssetsForTests(ulong generation, int maximumLoadedAssets,
+                                                      int maximumInFlightLoads,
+                                                      ManagedAssetLoadProvider? provider) =>
+        InstallManagedAssets(generation, maximumLoadedAssets, maximumInFlightLoads, provider, null);
+
+    private static void InstallManagedAssets(ulong generation, int maximumLoadedAssets,
+                                             int maximumInFlightLoads, ManagedAssetLoadProvider? provider,
+                                             NativeManagedAssetProvider? nativeProvider)
+    {
+        var replacement = new ManagedAssetRegistry(generation, maximumLoadedAssets, maximumInFlightLoads, provider);
+        lock (ManagedAssetGate)
+        {
+            ManagedAssetRegistry? previous = s_managedAssets;
+            if (previous is not null && generation <= previous.Generation)
+            {
+                replacement.Dispose();
+                throw new InvalidOperationException(
+                    $"Managed asset generation {generation} must be newer than generation {previous.Generation}.");
+            }
+            try
+            {
+                previous?.Dispose();
+            }
+            catch
+            {
+                replacement.Dispose();
+                throw;
+            }
+            s_nativeManagedAssetProvider = nativeProvider;
+            Volatile.Write(ref s_managedAssets, replacement);
+        }
+    }
+
+    internal static bool ResetManagedAssets(ulong generation)
+    {
+        lock (ManagedAssetGate)
+        {
+            ManagedAssetRegistry? current = s_managedAssets;
+            if (current is null || current.Generation != generation)
+                return false;
+            current.Dispose();
+            s_nativeManagedAssetProvider = null;
+            Volatile.Write(ref s_managedAssets, null);
+            return true;
+        }
+    }
+
 #pragma warning disable CS0649
     internal static delegate* unmanaged<byte, NativeString, void> WriteLogIcall;
     internal static delegate* unmanaged<ulong, NativeString, void> RegisterProfileNameIcall;
     internal static delegate* unmanaged<ulong, double, double, void> RecordProfileSpanIcall;
     internal static delegate* unmanaged<ulong, double, void> SetProfileCounterIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> RequestManagedAssetLoadIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, void> CancelManagedAssetLoadIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, void> ReleaseManagedAssetIcall;
     internal static delegate* unmanaged<float> DeltaTimeIcall;
     internal static delegate* unmanaged<float> FixedDeltaTimeIcall;
     internal static delegate* unmanaged<float> UnscaledDeltaTimeIcall;
@@ -62,6 +212,20 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetLocalRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetLocalRotationIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float, byte> SetAnimatorFloatIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, int, byte> SetAnimatorIntegerIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte, byte> SetAnimatorBooleanIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte, byte> SetAnimatorTriggerIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float, byte> SetAnimatorLayerWeightIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, NativeString, NativeString,
+        Vector3, Vector3, float, byte, byte> SetAnimatorTwoBoneIkIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, Vector3, float, uint, float,
+        byte, byte> SetAnimatorFabrikIkIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> ClearAnimatorIkIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float*, byte> TryGetAnimatorFloatIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, int*, byte> TryGetAnimatorIntegerIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte*, byte> TryGetAnimatorBooleanIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float*, byte> TryGetAnimatorLayerWeightIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetWorldPositionIcall;
@@ -222,6 +386,125 @@ internal static unsafe class NativeRuntime
         GetLocalRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void SetLocalRotation(Entity entity, Quaternion value) =>
         SetLocalRotationIcall(entity.World, entity.Id.High, entity.Id.Low, value);
+
+    private static void RequireAnimatorResult(byte result)
+    {
+        if (result == 0)
+            throw new InvalidOperationException("The Animator command could not be applied.");
+    }
+
+    internal static void SetAnimatorFloat(Entity entity, string parameter, float value)
+    {
+        using NativeString nativeParameter = parameter;
+        RequireAnimatorResult(SetAnimatorFloatIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter,
+                                                     value));
+    }
+
+    internal static void SetAnimatorInteger(Entity entity, string parameter, int value)
+    {
+        using NativeString nativeParameter = parameter;
+        RequireAnimatorResult(SetAnimatorIntegerIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter,
+                                                       value));
+    }
+
+    internal static void SetAnimatorBoolean(Entity entity, string parameter, bool value)
+    {
+        using NativeString nativeParameter = parameter;
+        RequireAnimatorResult(SetAnimatorBooleanIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter,
+                                                       value ? (byte)1 : (byte)0));
+    }
+
+    internal static void SetAnimatorTrigger(Entity entity, string parameter, bool set)
+    {
+        using NativeString nativeParameter = parameter;
+        RequireAnimatorResult(SetAnimatorTriggerIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter,
+                                                       set ? (byte)1 : (byte)0));
+    }
+
+    internal static void SetAnimatorLayerWeight(Entity entity, string layer, float value)
+    {
+        using NativeString nativeLayer = layer;
+        RequireAnimatorResult(SetAnimatorLayerWeightIcall(entity.World, entity.Id.High, entity.Id.Low, nativeLayer,
+                                                           value));
+    }
+
+    internal static void SetAnimatorTwoBoneIk(Entity entity, string goal, string rootBone, string middleBone,
+                                              string endBone, Vector3 target, Vector3 pole, float weight,
+                                              AnimatorIkSpace space)
+    {
+        using NativeString nativeGoal = goal;
+        using NativeString nativeRoot = rootBone;
+        using NativeString nativeMiddle = middleBone;
+        using NativeString nativeEnd = endBone;
+        RequireAnimatorResult(SetAnimatorTwoBoneIkIcall(
+            entity.World, entity.Id.High, entity.Id.Low, nativeGoal, nativeRoot, nativeMiddle, nativeEnd, target, pole,
+            weight, (byte)space));
+    }
+
+    internal static void SetAnimatorFabrikIk(Entity entity, string goal, IReadOnlyList<string> bones, Vector3 target,
+                                             float weight, uint maximumIterations, float tolerance,
+                                             AnimatorIkSpace space)
+    {
+        ArgumentNullException.ThrowIfNull(bones);
+        const char separator = '\u001f';
+        foreach (string bone in bones)
+        {
+            if (string.IsNullOrWhiteSpace(bone) || bone.Contains(separator))
+                throw new ArgumentException("FABRIK bone names must be non-empty and may not contain U+001F.",
+                                            nameof(bones));
+        }
+        using NativeString nativeGoal = goal;
+        using NativeString nativeBones = string.Join(separator.ToString(), bones);
+        RequireAnimatorResult(SetAnimatorFabrikIkIcall(entity.World, entity.Id.High, entity.Id.Low, nativeGoal,
+                                                        nativeBones, target, weight, maximumIterations, tolerance,
+                                                        (byte)space));
+    }
+
+    internal static bool ClearAnimatorIk(Entity entity, string goal)
+    {
+        using NativeString nativeGoal = goal;
+        return ClearAnimatorIkIcall(entity.World, entity.Id.High, entity.Id.Low, nativeGoal) != 0;
+    }
+
+    internal static bool TryGetAnimatorFloat(Entity entity, string parameter, out float value)
+    {
+        float result = default;
+        using NativeString nativeParameter = parameter;
+        bool found = TryGetAnimatorFloatIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter, &result) != 0;
+        value = result;
+        return found;
+    }
+
+    internal static bool TryGetAnimatorInteger(Entity entity, string parameter, out int value)
+    {
+        int result = default;
+        using NativeString nativeParameter = parameter;
+        bool found =
+            TryGetAnimatorIntegerIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter, &result) != 0;
+        value = result;
+        return found;
+    }
+
+    internal static bool TryGetAnimatorBoolean(Entity entity, string parameter, out bool value)
+    {
+        byte result = default;
+        using NativeString nativeParameter = parameter;
+        bool found =
+            TryGetAnimatorBooleanIcall(entity.World, entity.Id.High, entity.Id.Low, nativeParameter, &result) != 0;
+        value = result != 0;
+        return found;
+    }
+
+    internal static bool TryGetAnimatorLayerWeight(Entity entity, string layer, out float value)
+    {
+        float result = default;
+        using NativeString nativeLayer = layer;
+        bool found =
+            TryGetAnimatorLayerWeightIcall(entity.World, entity.Id.High, entity.Id.Low, nativeLayer, &result) != 0;
+        value = result;
+        return found;
+    }
+
     internal static Vector3 GetLocalScale(Entity entity) =>
         GetLocalScaleIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void SetLocalScale(Entity entity, Vector3 value) =>

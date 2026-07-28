@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
@@ -133,6 +134,7 @@ namespace Keire::RenderBackend
         SDL_GPUTexture* HdrColor = nullptr;
         SDL_GPUTexture* MultisampleHdrColor = nullptr;
         SDL_GPUTexture* Depth = nullptr;
+        SDL_GPUTexture* SampledDepth = nullptr;
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
         std::vector<SDL_GPUTexture*> TransientTextures;
@@ -143,7 +145,7 @@ namespace Keire::RenderBackend
 
         [[nodiscard]] bool Empty() const noexcept
         {
-            return !SampledColor && !ExchangeColor && !HdrColor && !MultisampleHdrColor && !Depth &&
+            return !SampledColor && !ExchangeColor && !HdrColor && !MultisampleHdrColor && !Depth && !SampledDepth &&
                    !DirectionalShadow && !LocalShadow;
         }
     };
@@ -155,6 +157,9 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* LightIndices = nullptr;
         std::uint32_t Columns = 0;
         std::uint32_t Rows = 0;
+        std::uint32_t LightCapacityBytes = 0;
+        std::uint32_t TileCapacityBytes = 0;
+        std::uint32_t LightIndexCapacityBytes = 0;
 
         [[nodiscard]] bool Empty() const noexcept { return !Lights && !Tiles && !LightIndices; }
     };
@@ -176,6 +181,8 @@ namespace Keire::RenderBackend
         Color FrameClearColor;
         SurfaceResources Resources;
         ForwardPlusGpuResources ForwardPlus;
+        std::uint64_t ForwardPlusContentHash = 0;
+        bool ForwardPlusContentValid = false;
         std::uint64_t Generation = 0;
         bool Submitted = false;
         bool HasOutput = false;
@@ -411,9 +418,13 @@ namespace Keire::RenderBackend
         Matrix4 World;
         Color Tint;
         EntityId Entity;
+        AssetId Skin;
         std::vector<Matrix4> SkinPalette;
         bool CastShadows = true;
         bool ReceiveShadows = true;
+        SkinningMethod Skinning = SkinningMethod::LinearBlend;
+        SDL_GPUBuffer* SkinnedAssetVertices = nullptr;
+        SDL_GPUBuffer* SkinnedBuiltinVertices = nullptr;
     };
 
     enum class SceneLocalLightType : std::uint8_t
@@ -445,6 +456,7 @@ namespace Keire::RenderBackend
         std::vector<SceneDrawItem> DrawItems;
         std::vector<SceneLocalLight> LocalLights;
         bool DrawGrid = false;
+        VfxRenderSnapshot Vfx;
     };
 
     [[nodiscard]] inline SceneLighting ResolveLighting(const Ref<Scene>& scene)
@@ -575,6 +587,13 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* Cube = nullptr;
         SDL_GPUGraphicsPipeline* Grid = nullptr;
         SDL_GPUGraphicsPipeline* Sky = nullptr;
+        SDL_GPUGraphicsPipeline* Vfx = nullptr;
+    };
+
+    enum class SceneDrawPhase : std::uint8_t
+    {
+        Opaque,
+        Transparent
     };
 
     struct QueuedSceneRequest final
@@ -596,6 +615,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateSkyShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
+        void EnsureFrameUploadContext();
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
@@ -613,11 +633,17 @@ namespace Keire::RenderBackend
         [[nodiscard]] GpuShaderEntry* ResolveShader(AssetId id, SDL_GPUSampleCount samples,
                                                     MaterialSurfaceState surface, bool explicitSurface);
         [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
+        [[nodiscard]] bool EnsureSkinningPipeline();
+        void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet);
 
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
-                       const SceneRenderPacket& packet, const ShadowFrameData& shadows);
+                       const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase);
+        void DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
+                     const SceneRenderPacket& packet);
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
+        void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                const SceneRenderPacket& packet);
         void RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void EndFrame(ImDrawData* drawData);
         void ExecuteFrame(ImDrawData* drawData);
@@ -639,10 +665,10 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUSampleCount ResolveSamples(RenderSampleCount requested) const noexcept;
         [[nodiscard]] SurfaceResources CreateResources(const RenderSurfaceState& surface, SDL_GPUSampleCount samples);
         void EnsureSurface(RenderSurfaceState& surface);
-        [[nodiscard]] SDL_GPUGraphicsPipeline* CreatePipeline(SDL_GPUSampleCount samples,
-                                                              SDL_GPUPrimitiveType primitive, bool depthWrite);
+        [[nodiscard]] SDL_GPUGraphicsPipeline*
+        CreatePipeline(SDL_GPUSampleCount samples, SDL_GPUPrimitiveType primitive, bool depthWrite, bool blend = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
-        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateShadowPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthPipeline(bool depthBias);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
         void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
@@ -666,6 +692,7 @@ namespace Keire::RenderBackend
         SDL_GPUTextureFormat ShadowDepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
         SDL_GPUBuffer* GridBuffer = nullptr;
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;
         SDL_GPUSampler* ToneMapSampler = nullptr;
@@ -699,6 +726,8 @@ namespace Keire::RenderBackend
         std::vector<SDL_GPUTransferBuffer*> FrameUploadTransfers;
         SDL_GPUCommandBuffer* FrameUploadCommands = nullptr;
         SDL_GPUCopyPass* FrameUploadPass = nullptr;
+        SDL_GPUComputePipeline* SkinningPipeline = nullptr;
+        bool SkinningPipelineAttempted = false;
         std::deque<InFlightFrame> InFlight;
         StaticSceneFrameGraph SceneFrameGraph;
         RenderStatistics Statistics;

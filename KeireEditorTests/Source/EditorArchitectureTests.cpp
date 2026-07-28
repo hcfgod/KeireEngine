@@ -121,6 +121,7 @@ namespace
             value = Keire::EntityId(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000011"));
             return true;
         }
+        bool EditEvent(std::string_view, Keire::ComponentEventValue&, std::size_t) override { return false; }
 
         double Scalar = 3.0;
         std::optional<Keire::AssetTypeId> ExpectedAssetType;
@@ -681,6 +682,21 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     document.Save();
     CHECK_FALSE(document.Dirty());
     CHECK(Keire::LoadRenderEnvironmentSettings(root) == document.Settings());
+    CHECK(Keire::LoadProjectAuthoringSettings(root) == document.AuthoringSettings());
+    auto authoring = document.AuthoringSettings();
+    authoring.DefaultMixer = Keire::AssetId::Parse("18000000-0000-4000-8000-000000000001");
+    authoring.PhysicsLayerNames[7] = "Effects";
+    authoring.PhysicsCollisionMatrix[1] &= ~(1U << 7U);
+    authoring.PhysicsCollisionMatrix[7] &= ~(1U << 1U);
+    document.UpdateAuthoring(authoring);
+    document.CommitEdit("Edit Audio and Physics");
+    CHECK(document.Dirty());
+    CHECK(undo->Undo());
+    CHECK_FALSE(document.AuthoringSettings().DefaultMixer);
+    CHECK(undo->Redo());
+    CHECK(document.AuthoringSettings().DefaultMixer == authoring.DefaultMixer);
+    document.Save();
+    CHECK(Keire::LoadProjectAuthoringSettings(root) == authoring);
     edited = document.Settings();
     edited.Exposure = std::numeric_limits<float>::infinity();
     CHECK_THROWS_AS(document.Update(edited), std::invalid_argument);

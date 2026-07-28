@@ -83,6 +83,91 @@ namespace KeireEditor
             ui.TextColored(theme.Warning, m_Error);
         ui.Spacing();
         ui.Separator();
+        ui.Text("Audio / Physics Authoring");
+        ui.TextColored(theme.MutedText,
+                       "Project assets persist during Play; collision-matrix changes require no active physics world.");
+        auto authoring = m_Document.AuthoringSettings();
+        bool authoringChanged = false;
+        bool authoringCommit = false;
+        bool matrixChanged = false;
+        AssetPickerOptions mixerOptions;
+        mixerOptions.Label = "Default Mixer";
+        mixerOptions.EmptyLabel = "No project mixer";
+        mixerOptions.ExpectedType = Keire::AudioMixerAsset::StaticType();
+        mixerOptions.Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealProjectSettingsAsset(asset); };
+        if (m_AssetPicker->Draw(ui, m_Controller.ProjectSettingsAssetRecords(), authoring.DefaultMixer, mixerOptions))
+        {
+            authoringChanged = true;
+            authoringCommit = true;
+        }
+        if (auto layers = ui.BeginTreeNode("Physics Layers (32)"); layers)
+        {
+            for (std::size_t index = 0; index < authoring.PhysicsLayerNames.size(); ++index)
+            {
+                if (ui.InputText("Layer " + std::to_string(index) + "###PhysicsLayer" + std::to_string(index),
+                                 authoring.PhysicsLayerNames[index]))
+                {
+                    authoringChanged = true;
+                }
+                authoringCommit |= ui.LastItemState().DeactivatedAfterEdit;
+            }
+        }
+        if (auto matrix = ui.BeginTreeNode("Collision Matrix"); matrix)
+        {
+            ui.TextColored(theme.MutedText, "Each row is mirrored automatically to keep filtering deterministic.");
+            for (std::size_t first = 0; first < authoring.PhysicsLayerNames.size(); ++first)
+            {
+                const auto rowLabel =
+                    authoring.PhysicsLayerNames[first] + "###PhysicsCollisionRow" + std::to_string(first);
+                if (auto row = ui.BeginTreeNode(rowLabel); row)
+                {
+                    for (std::size_t second = 0; second < authoring.PhysicsLayerNames.size(); ++second)
+                    {
+                        bool collides = (authoring.PhysicsCollisionMatrix[first] & (1U << second)) != 0;
+                        const auto label = authoring.PhysicsLayerNames[second] + "###PhysicsCollision" +
+                                           std::to_string(first) + "_" + std::to_string(second);
+                        if (ui.Checkbox(label, collides))
+                        {
+                            const auto firstBit = 1U << second;
+                            const auto secondBit = 1U << first;
+                            if (collides)
+                            {
+                                authoring.PhysicsCollisionMatrix[first] |= firstBit;
+                                authoring.PhysicsCollisionMatrix[second] |= secondBit;
+                            }
+                            else
+                            {
+                                authoring.PhysicsCollisionMatrix[first] &= ~firstBit;
+                                authoring.PhysicsCollisionMatrix[second] &= ~secondBit;
+                            }
+                            authoringChanged = true;
+                            authoringCommit = true;
+                            matrixChanged = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (ui.Button("Reset Audio / Physics"))
+        {
+            m_Document.ResetAuthoring();
+            authoringCommit = true;
+            matrixChanged = true;
+        }
+        else if (authoringChanged)
+        {
+            try
+            {
+                m_Document.UpdateAuthoring(std::move(authoring));
+            }
+            catch (const std::exception& error)
+            {
+                m_Error = error.what();
+                authoringCommit = false;
+            }
+        }
+        ui.Spacing();
+        ui.Separator();
         ui.Text("Rendering / Environment");
         ui.TextColored(theme.MutedText, "These values are project-owned and light both the Scene and Game views.");
         ui.Spacing();
@@ -163,6 +248,23 @@ namespace KeireEditor
         {
             try
             {
+                if (matrixChanged)
+                    m_Controller.ApplyProjectAuthoringSettings(m_Document.AuthoringSettings());
+                m_Document.CommitEdit();
+                m_Document.Save();
+                m_Error.clear();
+            }
+            catch (const std::exception& error)
+            {
+                m_Error = error.what();
+            }
+        }
+        else if (authoringCommit && m_Document.Dirty())
+        {
+            try
+            {
+                if (matrixChanged)
+                    m_Controller.ApplyProjectAuthoringSettings(m_Document.AuthoringSettings());
                 m_Document.CommitEdit();
                 m_Document.Save();
                 m_Error.clear();

@@ -28,13 +28,13 @@ project(ProjectConfig.CORE_TARGET)
 
     filter "system:windows"
         prebuildcommands {
-            "if exist Scripts\\Windows\\build-info.ps1 (powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\build-info.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\builtin-shaders.ps1) else (powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\build-info.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\builtin-shaders.ps1)"
+            "if exist Scripts\\Windows\\build-info.ps1 (powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\build-info.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\builtin-shaders.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\builtin-skinning.ps1) else (powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\build-info.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\builtin-shaders.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\builtin-skinning.ps1)"
         }
 
     filter { "system:linux or macosx" }
         prebuildcommands {
             "if [ -f Scripts/Unix/build-info.sh ]; then bash Scripts/Unix/build-info.sh; else bash ../Scripts/Unix/build-info.sh; fi",
-            "if [ -f Scripts/Unix/builtin-shaders.sh ]; then bash Scripts/Unix/builtin-shaders.sh; else bash ../Scripts/Unix/builtin-shaders.sh; fi"
+            "if [ -f Scripts/Unix/builtin-shaders.sh ]; then bash Scripts/Unix/builtin-shaders.sh && bash Scripts/Unix/builtin-skinning.sh; else bash ../Scripts/Unix/builtin-shaders.sh && bash ../Scripts/Unix/builtin-skinning.sh; fi"
         }
 
     filter {}

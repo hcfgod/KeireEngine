@@ -1,5 +1,7 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
+#include <memory>
+
 namespace Keire
 {
     AssetOperationCancelled::AssetOperationCancelled() : std::runtime_error("Asset operation was cancelled.") {}
@@ -19,6 +21,7 @@ namespace Keire
         : m_Impl(std::make_unique<Impl>(std::move(specification)))
     {
         (void)Refresh();
+        m_Impl->StartChangeMonitor();
     }
 
     AssetDatabase::~AssetDatabase() = default;
@@ -57,6 +60,8 @@ namespace Keire
         database.m_Impl->Records = std::move(records);
         database.m_Impl->Observed = std::move(signatures);
         database.m_Impl->PendingChanges.clear();
+        database.m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
+        database.m_Impl->RequestChangeMonitorScan();
         std::erase_if(database.m_Impl->ImportStatuses,
                       [&database](const auto& entry)
                       {
@@ -79,6 +84,8 @@ namespace Keire
         m_Impl->Records = std::move(scanned.Records);
         m_Impl->Observed = std::move(scanned.Signatures);
         m_Impl->PendingChanges.clear();
+        m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
+        m_Impl->RequestChangeMonitorScan();
         std::erase_if(m_Impl->ImportStatuses,
                       [this](const auto& entry)
                       {
@@ -114,44 +121,62 @@ namespace Keire
 
     std::vector<AssetId> AssetDatabase::PollChangedAssets()
     {
-        std::scoped_lock operation(*m_Impl->OperationMutex);
-        auto scanned = m_Impl->Scan(false);
+        m_Impl->RequestChangeMonitorScan();
+        auto monitored = m_Impl->TakeChangeMonitorScan();
         const auto now = std::chrono::steady_clock::now();
         std::vector<AssetId> ready;
-        std::scoped_lock lock(m_Impl->Mutex);
-        for (const auto& [id, signature] : scanned.Signatures)
         {
-            if (!m_Impl->Observed.contains(id) || m_Impl->Observed[id] != signature)
-                m_Impl->PendingChanges[id] = now;
-        }
-        for (const auto& [id, signature] : m_Impl->Observed)
-        {
-            if (!scanned.Signatures.contains(id))
-                m_Impl->PendingChanges[id] = now;
-        }
-        for (auto& record : scanned.Records)
-        {
-            const auto previous = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
-            if (previous != m_Impl->Records.end())
+            std::scoped_lock lock(m_Impl->Mutex);
+            if (monitored && monitored->SourceRevision == m_Impl->SourceRevision.load(std::memory_order_acquire))
             {
-                record.SourceDigest = previous->SourceDigest;
-                record.MetadataDigest = previous->MetadataDigest;
+                auto& scanned = monitored->Result;
+                for (const auto& [id, signature] : scanned.Signatures)
+                {
+                    const auto previous = m_Impl->Observed.find(id);
+                    if (previous == m_Impl->Observed.end() || previous->second != signature)
+                        m_Impl->PendingChanges.try_emplace(id, now);
+                }
+                for (const auto& [id, signature] : m_Impl->Observed)
+                    if (!scanned.Signatures.contains(id))
+                        m_Impl->PendingChanges.try_emplace(id, now);
+                for (auto& record : scanned.Records)
+                {
+                    const auto previous = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
+                    if (previous != m_Impl->Records.end())
+                    {
+                        record.SourceDigest = previous->SourceDigest;
+                        record.MetadataDigest = previous->MetadataDigest;
+                    }
+                }
+                m_Impl->Observed = std::move(scanned.Signatures);
+                m_Impl->Records = std::move(scanned.Records);
+            }
+            for (auto iterator = m_Impl->PendingChanges.begin(); iterator != m_Impl->PendingChanges.end();)
+            {
+                if (now - iterator->second >= m_Impl->Specification.ChangeDebounce)
+                {
+                    ready.push_back(iterator->first);
+                    iterator = m_Impl->PendingChanges.erase(iterator);
+                }
+                else
+                    ++iterator;
             }
         }
-        m_Impl->Observed = std::move(scanned.Signatures);
-        m_Impl->Records = std::move(scanned.Records);
-        for (auto iterator = m_Impl->PendingChanges.begin(); iterator != m_Impl->PendingChanges.end();)
-        {
-            if (now - iterator->second >= m_Impl->Specification.ChangeDebounce)
-            {
-                ready.push_back(iterator->first);
-                iterator = m_Impl->PendingChanges.erase(iterator);
-            }
-            else
-                ++iterator;
-        }
+
         std::ranges::sort(ready);
         return ready;
+    }
+
+    AssetChangeMonitorStatistics AssetDatabase::ChangeMonitorStatistics() const noexcept
+    {
+        AssetChangeMonitorStatistics result;
+        result.PublishedScans = m_Impl->PublishedScans.load(std::memory_order_relaxed);
+        result.FailedScans = m_Impl->FailedScans.load(std::memory_order_relaxed);
+        {
+            std::scoped_lock lock(m_Impl->ChangeMonitorMutex);
+            result.ScanPending = m_Impl->ChangeMonitorRequested || m_Impl->PublishedChangeScan.has_value();
+        }
+        return result;
     }
 
     AssetImportResult AssetDatabase::ImportAll() { return ImportAll(AssetImportPolicy::FailFast, {}, {}); }

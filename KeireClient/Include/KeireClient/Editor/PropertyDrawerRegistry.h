@@ -31,6 +31,18 @@ namespace KeireEditor
         [[nodiscard]] virtual bool EditVector4(std::string_view label, Keire::Vector4& value, double step) = 0;
         [[nodiscard]] virtual bool EditQuaternion(std::string_view label, Keire::Quaternion& value, double step) = 0;
         [[nodiscard]] virtual bool EditColor(std::string_view label, Keire::Color& value) = 0;
+        [[nodiscard]] virtual bool EditCurve(std::string_view label, Keire::Curve1D& value)
+        {
+            (void)label;
+            (void)value;
+            return false;
+        }
+        [[nodiscard]] virtual bool EditGradient(std::string_view label, Keire::ColorGradient& value)
+        {
+            (void)label;
+            (void)value;
+            return false;
+        }
         [[nodiscard]] virtual bool EditAsset(std::string_view label, Keire::AssetId& value,
                                              std::optional<Keire::AssetTypeId> expectedType) = 0;
         [[nodiscard]] virtual bool EditTextureAsset(std::string_view label, Keire::AssetId& value,

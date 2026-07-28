@@ -30,6 +30,12 @@ namespace
         void Start() override { m_Calls->push_back("Start"); }
         void FixedUpdate(float) override { m_Calls->push_back("FixedUpdate"); }
         void Update(float) override { m_Calls->push_back("Update"); }
+        void LateUpdate() override { m_Calls->push_back("LateUpdate"); }
+        void OnAnimationEvent(const Keire::AnimationEventMessage& event) override
+        {
+            m_Calls->push_back("Animation:" + event.Name);
+        }
+        void OnCollisionEnter(const Keire::PhysicsContactMessage&) override { m_Calls->push_back("CollisionEnter"); }
         void OnDisable() override { m_Calls->push_back("OnDisable"); }
         void OnDestroy() override { m_Calls->push_back("OnDestroy"); }
 
@@ -45,6 +51,66 @@ namespace
         result.Name = "Lifecycle Probe";
         result.Factory = [calls]
         { return Keire::Ref<Keire::Component>(Keire::CreateRef<LifecycleProbeComponent>(calls)); };
+        result.Serialize = [](const Keire::Component&) { return Keire::ComponentPropertyBag{}; };
+        result.Deserialize = [](Keire::Component&, const Keire::ComponentPropertyBag&, std::uint32_t) {};
+        return result;
+    }
+
+    struct PhysicsLifecycleProbeState
+    {
+        Keire::SceneRuntimeSession* Session = nullptr;
+        Keire::EntityId Target;
+        std::vector<std::string> Calls;
+        std::vector<bool> WorldReady;
+        std::vector<bool> QueryReady;
+    };
+
+    class PhysicsLifecycleProbeComponent final : public Keire::Component
+    {
+      public:
+        explicit PhysicsLifecycleProbeComponent(std::shared_ptr<PhysicsLifecycleProbeState> state)
+            : Component(StaticType()), m_State(std::move(state))
+        {
+        }
+
+        [[nodiscard]] static constexpr Keire::ComponentTypeId StaticType() noexcept
+        {
+            return Keire::ComponentTypeId(Keire::AssetId(0x746573742d706879ULL, 0x736c696665000001ULL));
+        }
+
+      protected:
+        void Awake() override { Observe("Awake"); }
+        void OnEnable() override { Observe("OnEnable"); }
+
+      private:
+        void Observe(std::string callback)
+        {
+            const bool worldReady =
+                m_State->Session && m_State->Session->Physics() && m_State->Session->Physics()->IsOpen();
+            bool queryReady = false;
+            if (worldReady)
+            {
+                const auto hits = m_State->Session->RayCast(
+                    {.Origin = {0.0F, 3.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}, .MaximumDistance = 6.0F});
+                queryReady =
+                    std::ranges::find(hits, m_State->Target, &Keire::ScenePhysicsQueryHit::Entity) != hits.end();
+            }
+            m_State->Calls.push_back(std::move(callback));
+            m_State->WorldReady.push_back(worldReady);
+            m_State->QueryReady.push_back(queryReady);
+        }
+
+        std::shared_ptr<PhysicsLifecycleProbeState> m_State;
+    };
+
+    [[nodiscard]] Keire::ComponentRegistration
+    MakePhysicsLifecycleProbeRegistration(const std::shared_ptr<PhysicsLifecycleProbeState>& state)
+    {
+        Keire::ComponentRegistration result;
+        result.Type = PhysicsLifecycleProbeComponent::StaticType();
+        result.Name = "Physics Lifecycle Probe";
+        result.Factory = [state]
+        { return Keire::Ref<Keire::Component>(Keire::CreateRef<PhysicsLifecycleProbeComponent>(state)); };
         result.Serialize = [](const Keire::Component&) { return Keire::ComponentPropertyBag{}; };
         result.Deserialize = [](Keire::Component&, const Keire::ComponentPropertyBag&, std::uint32_t) {};
         return result;
@@ -97,6 +163,24 @@ TEST_CASE("Entities own required Transforms and stale handles become inert after
     CHECK_FALSE(root.GetComponent<Keire::TransformComponent>());
 }
 
+TEST_CASE("Hierarchy snapshots omit component payload serialization")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const auto root = scene->CreateEntity("Root");
+    auto child = scene->CreateEntity("Child", root);
+    child.SetActive(false);
+
+    const auto hierarchy = scene->HierarchySnapshot();
+    REQUIRE(hierarchy.Objects.size() == 2);
+    CHECK(hierarchy.Objects[0].Id == root.Id().Value());
+    CHECK(hierarchy.Objects[0].Name == "Root");
+    CHECK(hierarchy.Objects[0].Components.empty());
+    CHECK(hierarchy.Objects[1].Id == child.Id().Value());
+    CHECK(hierarchy.Objects[1].Parent == root.Id().Value());
+    CHECK_FALSE(hierarchy.Objects[1].Active);
+    CHECK(hierarchy.Objects[1].Components.empty());
+}
+
 TEST_CASE("Component lifecycle callbacks are deterministic and component handles become inert after removal")
 {
     auto calls = std::make_shared<std::vector<std::string>>();
@@ -109,11 +193,14 @@ TEST_CASE("Component lifecycle callbacks are deterministic and component handles
     scene->BeginPlay();
     scene->FixedUpdate(1.0F / 60.0F);
     scene->Update(1.0F / 60.0F);
+    scene->DispatchAnimationEvent(entity.Id(), {"Footstep", 0.5F});
+    scene->LateUpdate();
     component->SetEnabled(false);
     REQUIRE(entity.RemoveComponent<LifecycleProbeComponent>());
     CHECK_FALSE(component->IsAttached());
-    const std::vector<std::string> expected{"Awake",  "OnEnable",  "Start",    "FixedUpdate",
-                                            "Update", "OnDisable", "OnDestroy"};
+    const std::vector<std::string> expected{"Awake",       "OnEnable",  "Start",
+                                            "FixedUpdate", "Update",    "Animation:Footstep",
+                                            "LateUpdate",  "OnDisable", "OnDestroy"};
     CHECK(*calls == expected);
 }
 
@@ -133,6 +220,104 @@ TEST_CASE("Play mode clones authored state and discards runtime mutations on Sto
     session->Stop();
     CHECK(edit->FindEntity(authored.Id()).Name() == "Authored");
     CHECK(edit->ObjectCount() == 1);
+}
+
+TEST_CASE("Play session eagerly owns physics and runs gameplay sync step pullback and contact dispatch")
+{
+    auto calls = std::make_shared<std::vector<std::string>>();
+    auto registry = Keire::ComponentRegistry::CreateDefault();
+    registry->Register(MakeProbeRegistration(calls));
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition(), registry);
+
+    auto floor = scene->CreateEntity("Floor");
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, -0.5F, 0.0F});
+    const auto floorCollider = floor.AddComponent<Keire::ColliderComponent>();
+    floorCollider->SetHalfExtent({5.0F, 0.5F, 5.0F});
+
+    auto falling = scene->CreateEntity("Falling");
+    falling.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 2.0F, 0.0F});
+    const auto fallingCollider = falling.AddComponent<Keire::ColliderComponent>();
+    fallingCollider->SetShape(Keire::ColliderShape::Sphere);
+    fallingCollider->SetRadius(0.5F);
+    const auto body = falling.AddComponent<Keire::RigidBodyComponent>();
+    body->SetMotion(Keire::PhysicsMotionType::Dynamic);
+    REQUIRE(falling.AddComponent<LifecycleProbeComponent>());
+
+    Keire::PhysicsSystemSpecification physicsSpecification;
+    physicsSpecification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(physicsSpecification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    REQUIRE(session->Physics());
+    for (int step = 0; step < 180 && session->State() == Keire::ScenePlayState::Playing; ++step)
+        session->FixedUpdate(1.0F / 60.0F);
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+
+    const auto runtimeFalling = session->RuntimeScene()->FindEntity(falling.Id());
+    REQUIRE(runtimeFalling);
+    CHECK(runtimeFalling.GetComponent<Keire::TransformComponent>()->LocalPosition().Y < 2.0F);
+    CHECK(std::ranges::find(*calls, "CollisionEnter") != calls->end());
+
+    const auto hits =
+        session->RayCast({.Origin = {0.0F, 5.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}, .MaximumDistance = 10.0F});
+    REQUIRE_FALSE(hits.empty());
+    CHECK(hits.front().Entity == falling.Id());
+
+    session->Stop();
+    CHECK_FALSE(session->Physics());
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("Play lifecycle observes eager physics before Awake and OnEnable including runtime replacement")
+{
+    auto observations = std::make_shared<PhysicsLifecycleProbeState>();
+    auto registry = Keire::ComponentRegistry::CreateDefault();
+    registry->Register(MakePhysicsLifecycleProbeRegistration(observations));
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition(), registry);
+
+    auto target = scene->CreateEntity("Query Target");
+    const auto collider = target.AddComponent<Keire::ColliderComponent>();
+    collider->SetHalfExtent({1.0F, 0.5F, 1.0F});
+    auto probe = scene->CreateEntity("Lifecycle Probe");
+    REQUIRE(probe.AddComponent<PhysicsLifecycleProbeComponent>());
+
+    Keire::PhysicsSystemSpecification physicsSpecification;
+    physicsSpecification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(physicsSpecification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    observations->Session = session.Get();
+    observations->Target = target.Id();
+
+    session->Play();
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    REQUIRE((observations->Calls == std::vector<std::string>{"Awake", "OnEnable"}));
+    CHECK(std::ranges::all_of(observations->WorldReady, [](const bool ready) { return ready; }));
+    CHECK(std::ranges::all_of(observations->QueryReady, [](const bool ready) { return ready; }));
+    const auto initialWorld = session->Physics();
+    REQUIRE(initialWorld);
+    REQUIRE(initialWorld->IsOpen());
+
+    session->ReplaceRuntime(scene->Snapshot());
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    CHECK((observations->Calls == std::vector<std::string>{"Awake", "OnEnable", "Awake", "OnEnable"}));
+    CHECK(std::ranges::all_of(observations->WorldReady, [](const bool ready) { return ready; }));
+    CHECK(std::ranges::all_of(observations->QueryReady, [](const bool ready) { return ready; }));
+    CHECK_FALSE(initialWorld->IsOpen());
+    const auto replacementWorld = session->Physics();
+    REQUIRE(replacementWorld);
+    CHECK(replacementWorld != initialWorld);
+    CHECK(replacementWorld->IsOpen());
+
+    session->Stop();
+    CHECK_FALSE(replacementWorld->IsOpen());
+    observations->Session = nullptr;
+    physics->Close();
+    scene->Close();
 }
 
 TEST_CASE("Play mode retains the authored active camera and its transform")

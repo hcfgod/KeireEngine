@@ -64,11 +64,17 @@ namespace Keire::RenderBackend
         Statistics.VisibleLocalLights = 0;
         Statistics.OverflowedLightTiles = 0;
         Statistics.DirectionalShadowCascades = 0;
+        Statistics.VfxSpriteParticles = 0;
+        Statistics.VfxMeshParticles = 0;
+        Statistics.DroppedVfxParticles = 0;
+        Statistics.SampledResolvedDepthAvailable = false;
         Statistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
         Statistics.ExecutedFrameGraphPasses = 0;
         Statistics.FrameGraphTransitions = 0;
         Statistics.TransientResourceAllocations =
             static_cast<std::uint32_t>(SceneFrameGraph.Compiled.TransientAllocations.size());
+        Statistics.ForwardPlusBufferReallocations = 0;
+        Statistics.ForwardPlusUploadBytes = 0;
         CollectCompletedFrames();
         for (const auto& surface : LiveSurfaces())
         {
@@ -102,7 +108,7 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("SceneRenderRequest surface belongs to another renderer.");
         if (surface.Submitted)
             throw std::logic_error("A render surface may receive only one scene request per frame.");
-        if (!surface.Specification.Depth || !DepthFormat)
+        if (Specification.Mode == RenderMode::Rendered && (!surface.Specification.Depth || !DepthFormat))
             throw std::logic_error("Scene rendering requires a depth-enabled render surface.");
         const auto camera = request.View->Camera();
         if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) || !ValidColor(camera.ClearColor))
@@ -114,6 +120,22 @@ namespace Keire::RenderBackend
         {
             throw std::invalid_argument("SceneRenderRequest environment contains invalid values.");
         }
+        if (request.Vfx.Particles().size() > VfxRenderSnapshot::MaximumParticles)
+            throw std::invalid_argument("SceneRenderRequest exceeds the VFX particle packet bound.");
+        for (const auto& particle : request.Vfx.Particles())
+        {
+            if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.Rotation) ||
+                !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Size) || particle.Size < 0.0F ||
+                particle.Renderer > VfxRendererType::Mesh)
+            {
+                throw std::invalid_argument("SceneRenderRequest contains an invalid VFX particle.");
+            }
+            if (particle.Renderer == VfxRendererType::Sprite)
+                ++Statistics.VfxSpriteParticles;
+            else
+                ++Statistics.VfxMeshParticles;
+        }
+        Statistics.DroppedVfxParticles += request.Vfx.DroppedParticles();
 
         surface.Submitted = true;
         surface.FrameClearColor = camera.ClearColor;
@@ -123,6 +145,7 @@ namespace Keire::RenderBackend
         packet.Lighting = ResolveLighting(request.Scene);
         packet.LocalLights = ResolveLocalLights(request.Scene);
         packet.DrawGrid = request.DrawGrid;
+        packet.Vfx = std::move(request.Vfx);
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
         packet.DrawItems.reserve(renderEntities.size());
         for (const auto& entity : renderEntities)
@@ -134,13 +157,18 @@ namespace Keire::RenderBackend
             if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
                 continue;
             std::vector<Matrix4> skinPalette;
+            AssetId skin;
             if (const auto animator = entity.GetComponent<AnimatorComponent>(); animator && animator->Enabled())
+            {
                 skinPalette.assign(animator->SkinPalette().begin(), animator->SkinPalette().end());
+                skin = animator->SkinnedMesh();
+            }
             packet.DrawItems.push_back({renderer->Mesh(),
                                         {renderer->Materials().begin(), renderer->Materials().end()},
                                         transform->WorldMatrix(),
                                         renderer->Tint(),
                                         entity.Id(),
+                                        skin,
                                         std::move(skinPalette),
                                         renderer->CastShadows(),
                                         renderer->ReceiveShadows()});

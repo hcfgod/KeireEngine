@@ -1,6 +1,7 @@
 #include "Keire/Application.h"
 
 #include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Scenes/PrefabAsset.h"
@@ -153,26 +154,7 @@ namespace Keire
                     m_Impl->Specification.Assets.Decoders.push_back(CreateSceneAssetDecoder());
             }
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
-            {
-                const auto addDecoder = [this](AssetDecoderRegistration registration)
-                {
-                    const auto found = std::ranges::find(m_Impl->Specification.Assets.Decoders, registration.Type,
-                                                         &AssetDecoderRegistration::Type);
-                    if (found == m_Impl->Specification.Assets.Decoders.end())
-                        m_Impl->Specification.Assets.Decoders.push_back(std::move(registration));
-                };
-                addDecoder(CreateShaderAssetDecoder());
-                addDecoder(CreateMaterialAssetDecoder());
-                addDecoder(CreateMeshAssetDecoder());
-                addDecoder(CreateTexture2DAssetDecoder());
-                addDecoder(CreateAudioClipAssetDecoder());
-                addDecoder(CreateSkeletonAssetDecoder());
-                addDecoder(CreateSkinnedMeshAssetDecoder());
-                addDecoder(CreateAnimationClipAssetDecoder());
-                addDecoder(CreateAnimationGraphAssetDecoder());
-                addDecoder(CreatePrefabAssetDecoder());
-                addDecoder(CreateManagedAssemblyAssetDecoder());
-            }
+                AppendMissingBuiltinAssetDecoders(m_Impl->Specification.Assets.Decoders);
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
             {
                 m_Impl->Assets = CreateRef<AssetSystem>(m_Impl->Specification.Assets, m_Impl->EventSystem);
@@ -182,6 +164,7 @@ namespace Keire
                 if (!m_Impl->Assets)
                     throw std::invalid_argument("Enabled scripting requires enabled assets.");
                 m_Impl->ScriptService = CreateRef<ScriptSystem>(m_Impl->Specification.Scripting);
+                m_Impl->ScriptService->SetAssetSystem(m_Impl->Assets);
             }
             if (m_Impl->Specification.Physics.Mode == PhysicsMode::Enabled)
                 m_Impl->PhysicsService = CreateRef<PhysicsSystem>(m_Impl->Specification.Physics);
@@ -288,6 +271,8 @@ namespace Keire
                         {
                             (void)m_Impl->Assets->PumpCompletions();
                         }
+                        if (m_Impl->ScriptService)
+                            m_Impl->ScriptService->PumpManagedAssets();
                         if (m_Impl->SceneService)
                             m_Impl->SceneService->AdvanceFrame();
                     }
@@ -300,6 +285,12 @@ namespace Keire
                 {
                     ProfileScope input(m_Impl->ProfilerService, ProfileCategory::Application, "Input");
                     m_Impl->InputService->AdvanceFrame(m_Impl->Clock->UnscaledDeltaTime(), UiCapture(), nowSuspended);
+                }
+                if (!ExitRequested() && m_Impl->AudioService)
+                {
+                    ProfileScope audio(m_Impl->ProfilerService, ProfileCategory::Audio, "Audio update");
+                    m_Impl->AudioService->Update(
+                        std::chrono::duration<float>(static_cast<float>(m_Impl->Clock->UnscaledDeltaTime().Seconds())));
                 }
 
                 bool renderFrame = false;
@@ -404,12 +395,34 @@ namespace Keire
                                                             statistics.CpuPreparationMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Command recording (ms)",
                                                             statistics.CommandRecordingMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Shadow recording (ms)",
+                                                            statistics.ShadowRecordingMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ culling (ms)",
+                                                            statistics.ForwardPlusCullingMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Scene pass (ms)",
+                                                            statistics.ScenePassMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Tone mapping (ms)",
+                                                            statistics.ToneMapMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Frame uploads (ms)",
+                                                            statistics.FrameUploadMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "Forward+ buffer reallocations",
+                            static_cast<double>(statistics.ForwardPlusBufferReallocations));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ cache hits",
+                                                            static_cast<double>(statistics.ForwardPlusCacheHits));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ upload bytes",
+                                                            static_cast<double>(statistics.ForwardPlusUploadBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Swapchain wait (ms)",
                                                             statistics.SwapchainWaitMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "UI recording (ms)",
                                                             statistics.UiRecordingMilliseconds);
-                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU submission (ms)",
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU submission CPU (ms)",
                                                             statistics.GpuSubmissionMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU timing supported",
+                                                            statistics.GpuTimingSupported ? 1.0 : 0.0);
+                        if (statistics.GpuTimingSupported)
+                            m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU frame (ms)",
+                                                                statistics.GpuFrameMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Renderer latency (ms)",
                                                             statistics.RendererLatencyMilliseconds);
                     }
@@ -417,38 +430,51 @@ namespace Keire
                     {
                         const auto statistics = m_Impl->Assets->Statistics();
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Known assets",
-                                                            statistics.KnownAssets);
+                                                            static_cast<double>(statistics.KnownAssets));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Queued assets",
-                                                            statistics.QueuedAssets);
+                                                            static_cast<double>(statistics.QueuedAssets));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Loading assets",
-                                                            statistics.LoadingAssets);
+                                                            static_cast<double>(statistics.LoadingAssets));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Resident bytes",
-                                                            statistics.ResidentBytes);
+                                                            static_cast<double>(statistics.ResidentBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Failed loads",
-                                                            statistics.FailedLoads);
-                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Evictions", statistics.Evictions);
+                                                            static_cast<double>(statistics.FailedLoads));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Evictions",
+                                                            static_cast<double>(statistics.Evictions));
                     }
                     if (m_Impl->AudioService)
                     {
                         const auto statistics = m_Impl->AudioService->Statistics();
-                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Voices", statistics.Voices);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Voices",
+                                                            static_cast<double>(statistics.Voices));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Audible voices",
-                                                            statistics.AudibleVoices);
+                                                            static_cast<double>(statistics.AudibleVoices));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Virtual voices",
-                                                            statistics.VirtualVoices);
-                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Underruns", statistics.Underruns);
+                                                            static_cast<double>(statistics.VirtualVoices));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Underruns",
+                                                            static_cast<double>(statistics.Underruns));
                     }
                     if (m_Impl->ScriptService)
                     {
                         const auto metrics = m_Impl->ScriptService->Metrics();
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Generation",
-                                                            metrics.Generation);
+                                                            static_cast<double>(metrics.Generation));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Active instances",
-                                                            metrics.ActiveInstances);
+                                                            static_cast<double>(metrics.ActiveInstances));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Faulted instances",
-                                                            metrics.FaultedInstances);
+                                                            static_cast<double>(metrics.FaultedInstances));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Diagnostics",
-                                                            metrics.Diagnostics);
+                                                            static_cast<double>(metrics.Diagnostics));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Callback invocations",
+                                                            static_cast<double>(metrics.CallbackInvocations));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Skipped callbacks",
+                                                            static_cast<double>(metrics.SkippedCallbacks));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Managed interop calls",
+                                                            static_cast<double>(metrics.ManagedInteropCalls));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Callback total (ms)",
+                                                            metrics.CallbackMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Callback maximum (ms)",
+                                                            metrics.MaximumCallbackMilliseconds);
                     }
                     m_Impl->ProfilerService->EndFrame();
                 }

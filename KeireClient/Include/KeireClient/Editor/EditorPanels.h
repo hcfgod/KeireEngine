@@ -19,6 +19,7 @@ namespace KeireEditor
     class AssetPicker;
     class SceneDocument;
     class InputActionsDocument;
+    class ManagedDataInspectorPanel;
     class MaterialDocument;
     class PropertyDrawerRegistry;
     class SceneCameraController;
@@ -85,10 +86,14 @@ namespace KeireEditor
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept = 0;
         [[nodiscard]] virtual Keire::AssetId InspectorSelectedAsset() const noexcept = 0;
         [[nodiscard]] virtual std::string_view InspectorAssetStatus() const noexcept = 0;
+        [[nodiscard]] virtual std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const = 0;
+        [[nodiscard]] virtual Keire::Ref<Keire::UndoContext> InspectorManagedDataHistory() const noexcept = 0;
+        [[nodiscard]] virtual bool InspectorPlayModeActive() const noexcept = 0;
         virtual void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept = 0;
         virtual void PreviewInspectorAudio(Keire::AssetId asset) = 0;
         virtual void StopInspectorAudioPreview() noexcept = 0;
         virtual void ActivateInspectorHistory() noexcept = 0;
+        virtual void ActivateInspectorManagedDataHistory() noexcept = 0;
         virtual void RecordInspectorUndo(std::string_view name = "Edit Scene", std::string mergeKey = {}) = 0;
         virtual void AddScriptToEntity(Keire::EntityId, Keire::AssetId)
         {
@@ -97,6 +102,9 @@ namespace KeireEditor
         virtual void CommitInspectorMaterial() = 0;
         virtual void OpenInspectorInputActions(Keire::AssetId asset) = 0;
         virtual void ImportInspectorAssets() = 0;
+        virtual void PreviewInspectorManagedData(Keire::AssetId asset,
+                                                 const Keire::ManagedDataDefinition& definition) = 0;
+        virtual void PersistInspectorManagedData(Keire::AssetId asset, std::span<const std::byte> bytes) = 0;
         virtual void RenameInspectorAsset(Keire::AssetId asset, std::string_view name) = 0;
         virtual void DuplicateInspectorAsset(Keire::AssetId asset, const std::filesystem::path& destination) = 0;
         virtual void TrashInspectorAsset(Keire::AssetId asset) = 0;
@@ -137,6 +145,7 @@ namespace KeireEditor
         virtual void RevealProjectSettingsAsset(Keire::AssetId asset) = 0;
         [[nodiscard]] virtual ManagedSdkPreference ProjectManagedSdk() const = 0;
         virtual void SetProjectManagedSdk(ManagedSdkPreference preference) = 0;
+        virtual void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) = 0;
     };
 
     class SceneViewportPanel final
@@ -200,15 +209,12 @@ namespace KeireEditor
         explicit AssetInspectorPanel(IInspectorController& controller);
         ~AssetInspectorPanel();
         void Draw(Keire::UiFrame& ui);
-        void ClearState() noexcept
-        {
-            m_EditingAsset = {};
-            m_AssetName.clear();
-        }
+        void ClearState() noexcept;
 
       private:
         IInspectorController& m_Controller;
         std::unique_ptr<AssetPicker> m_AssetPicker;
+        std::unique_ptr<ManagedDataInspectorPanel> m_ManagedDataInspector;
         Keire::AssetId m_EditingAsset;
         std::string m_AssetName;
     };

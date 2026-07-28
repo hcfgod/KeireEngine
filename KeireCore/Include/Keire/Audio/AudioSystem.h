@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Keire/Api.h"
+#include "Keire/Assets/Asset.h"
+#include "Keire/Math/Curves.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 
@@ -28,6 +30,7 @@ namespace Keire
     {
         AudioMode Mode = AudioMode::Disabled;
         std::uint32_t MaximumVoices = 256;
+        std::uint32_t MaximumMeterReadings = 256;
     };
 
     enum class AudioGraphNodeType : std::uint8_t
@@ -128,7 +131,12 @@ namespace Keire
         float MinimumDistance = 1.0F;
         float MaximumDistance = 100.0F;
         float Occlusion = 0.0F;
+        AssetId Mixer;
+        AssetId BusId;
+        Curve1D Attenuation = Curve1D::Constant(1.0F);
     };
+
+    using AudioPlaybackRequest = AudioVoiceSpecification;
 
     struct AudioListenerState
     {
@@ -170,6 +178,21 @@ namespace Keire
         float Gain = 1.0F;
     };
 
+    struct AudioMeterReading
+    {
+        AssetId Bus;
+        float Peak = 0.0F;
+        float Rms = 0.0F;
+        bool Clipping = false;
+    };
+
+    struct AudioMeterSnapshot
+    {
+        std::uint64_t Revision = 0;
+        std::uint64_t DroppedReadings = 0;
+        std::vector<AudioMeterReading> Readings;
+    };
+
     class KEIRE_API AudioSystem final : public RefCounted
     {
       public:
@@ -181,9 +204,9 @@ namespace Keire
         [[nodiscard]] std::uint64_t GraphRevision() const noexcept;
         [[nodiscard]] std::vector<float> RenderOffline(std::span<const float> interleavedInput,
                                                        std::uint64_t frameCount) const;
-        [[nodiscard]] AudioVoiceId Play(AudioVoiceSpecification specification);
+        [[nodiscard]] AudioVoiceId Play(AudioPlaybackRequest request);
         [[nodiscard]] bool Stop(AudioVoiceId voice);
-        [[nodiscard]] bool SetVoice(AudioVoiceId voice, AudioVoiceSpecification specification);
+        [[nodiscard]] bool SetVoice(AudioVoiceId voice, AudioPlaybackRequest request);
         [[nodiscard]] std::size_t StopAll(std::string_view bus = {});
         void SetBusGain(std::string bus, float gain);
         [[nodiscard]] float BusGain(std::string_view bus) const;
@@ -194,6 +217,8 @@ namespace Keire
         [[nodiscard]] std::vector<float> RenderVoicesOffline(std::uint64_t frameCount);
         [[nodiscard]] std::vector<AudioVoiceInfo> Voices() const;
         [[nodiscard]] AudioSystemStatistics Statistics() const;
+        void SubmitMeterSnapshot(AudioMeterSnapshot snapshot);
+        [[nodiscard]] AudioMeterSnapshot LatestMeterSnapshot() const;
         void Close();
 
       private:

@@ -1,5 +1,9 @@
 #include "Keire/ECS/Components/ColliderComponent.h"
 
+#include "Keire/Assets/PhysicsMaterialAsset.h"
+#include "Keire/Assets/RenderingAssets.h"
+
+#include <bit>
 #include <cmath>
 #include <stdexcept>
 
@@ -71,6 +75,8 @@ namespace Keire
 
     void ColliderComponent::SetLayer(const std::uint32_t value)
     {
+        if (!std::has_single_bit(value))
+            throw std::invalid_argument("Collider layer must select exactly one of the 32 collision layers.");
         m_Layer = value;
         NotifyChanged();
     }
@@ -87,18 +93,49 @@ namespace Keire
         NotifyChanged();
     }
 
+    void ColliderComponent::SetCollisionMesh(const AssetId value)
+    {
+        m_CollisionMesh = value;
+        NotifyChanged();
+    }
+
+    void ColliderComponent::SetPhysicsMaterial(const AssetId value)
+    {
+        m_PhysicsMaterial = value;
+        NotifyChanged();
+    }
+
     ComponentRegistration CreateColliderComponentRegistration()
     {
         ComponentRegistration result;
         result.Type = ColliderComponent::StaticType();
         result.Name = "Collider";
         result.Category = "Physics";
+        result.SchemaVersion = 2;
         result.Properties = {
             {"shape", "Shape", "Collider", ComponentPropertyKind::Integer, false, 0.0, 4.0, 1.0},
             {"center", "Center", "Collider", ComponentPropertyKind::Vector3},
             {"halfExtent", "Half Extent", "Collider", ComponentPropertyKind::Vector3},
             {"radius", "Radius", "Collider", ComponentPropertyKind::Scalar, false, 0.001, 100'000.0, 0.05},
             {"height", "Height", "Collider", ComponentPropertyKind::Scalar, false, 0.001, 100'000.0, 0.05},
+            {"collisionMesh",
+             "Collision Mesh",
+             "Collider",
+             ComponentPropertyKind::Asset,
+             false,
+             {},
+             {},
+             0.1,
+             MeshAsset::StaticType()},
+            {"physicsMaterial",
+             "Physics Material",
+             "Material",
+             ComponentPropertyKind::Asset,
+             false,
+             {},
+             {},
+             0.1,
+             PhysicsMaterialAsset::StaticType()},
             {"layer", "Layer", "Filtering", ComponentPropertyKind::Integer},
             {"mask", "Mask", "Filtering", ComponentPropertyKind::Integer},
             {"trigger", "Is Trigger", "Filtering", ComponentPropertyKind::Boolean}};
@@ -111,13 +148,15 @@ namespace Keire
                                         {"halfExtent", collider.m_HalfExtent},
                                         {"radius", static_cast<double>(collider.m_Radius)},
                                         {"height", static_cast<double>(collider.m_Height)},
+                                        {"collisionMesh", collider.m_CollisionMesh},
+                                        {"physicsMaterial", collider.m_PhysicsMaterial},
                                         {"layer", static_cast<std::int64_t>(collider.m_Layer)},
                                         {"mask", static_cast<std::int64_t>(collider.m_Mask)},
                                         {"trigger", collider.m_Trigger}};
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1)
+            if (version != 2)
                 throw std::invalid_argument("Unsupported Collider component schema version.");
             auto& collider = dynamic_cast<ColliderComponent&>(component);
             const auto shape = ReadColliderProperty(values, "shape", std::int64_t{0});
@@ -128,16 +167,27 @@ namespace Keire
             collider.m_HalfExtent = ReadColliderProperty(values, "halfExtent", Vector3{0.5F, 0.5F, 0.5F});
             collider.m_Radius = static_cast<float>(ReadColliderProperty(values, "radius", 0.5));
             collider.m_Height = static_cast<float>(ReadColliderProperty(values, "height", 1.0));
+            collider.m_CollisionMesh = ReadColliderProperty(values, "collisionMesh", AssetId{});
+            collider.m_PhysicsMaterial = ReadColliderProperty(values, "physicsMaterial", AssetId{});
             collider.m_Layer = ReadUnsigned(values, "layer", 1);
             collider.m_Mask = ReadUnsigned(values, "mask", ~0U);
             collider.m_Trigger = ReadColliderProperty(values, "trigger", false);
             if (!Math::IsFinite(collider.m_Center) || !Math::IsFinite(collider.m_HalfExtent) ||
                 collider.m_HalfExtent.X <= 0.0F || collider.m_HalfExtent.Y <= 0.0F || collider.m_HalfExtent.Z <= 0.0F ||
                 !std::isfinite(collider.m_Radius) || collider.m_Radius <= 0.0F || !std::isfinite(collider.m_Height) ||
-                collider.m_Height <= 0.0F)
+                collider.m_Height <= 0.0F || !std::has_single_bit(collider.m_Layer))
             {
                 throw std::invalid_argument("Collider component contains invalid geometry.");
             }
+        };
+        result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
+        {
+            if (version != 1)
+                throw std::invalid_argument("Unsupported Collider component schema migration.");
+            auto migrated = values;
+            migrated.emplace("collisionMesh", AssetId{});
+            migrated.emplace("physicsMaterial", AssetId{});
+            return migrated;
         };
         return result;
     }

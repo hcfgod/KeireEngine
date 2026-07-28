@@ -225,23 +225,13 @@ namespace Keire
             UiTree->Layout(viewportWidth, viewportHeight, safeArea, settings);
         }
 
-        [[nodiscard]] AudioVoiceSpecification VoiceSpecification(const Entity entity,
-                                                                 const AudioSourceComponent& source,
-                                                                 std::shared_ptr<const AudioClipData> clip) const
+        [[nodiscard]] AudioPlaybackRequest PlaybackRequest(const Entity entity, const AudioSourceComponent& source,
+                                                           std::shared_ptr<const AudioClipData> clip) const
         {
-            AudioVoiceSpecification result;
-            result.Clip = std::move(clip);
-            result.Bus = source.Bus();
-            result.Gain = source.Gain();
-            result.Pitch = source.Pitch();
-            result.Priority = source.Priority();
-            result.Loop = source.Loop();
-            result.Spatial = source.Spatial();
-            result.MinimumDistance = source.MinimumDistance();
-            result.MaximumDistance = source.MaximumDistance();
+            Vector3 position;
             if (const auto transform = entity.GetComponent<TransformComponent>())
-                result.Position = transform->WorldPosition();
-            return result;
+                position = transform->WorldPosition();
+            return source.PlaybackRequest(std::move(clip), position);
         }
 
         void StopVoice(AudioSourceState& state) noexcept
@@ -303,7 +293,7 @@ namespace Keire
                     StopVoice(state);
                     continue;
                 }
-                auto specification = VoiceSpecification(entity, *source, clip->Clip());
+                auto specification = PlaybackRequest(entity, *source, clip->Clip());
                 if (state.Voice)
                 {
                     if (Audio->SetVoice(state.Voice, specification))

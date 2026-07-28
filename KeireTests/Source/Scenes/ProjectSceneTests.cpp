@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <memory>
 #include <ranges>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -39,6 +41,50 @@ namespace
         REQUIRE(setenv("SDL_VIDEODRIVER", "dummy", 1) == 0);
 #endif
         REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    }
+
+    [[nodiscard]] std::string JsonString(const std::string_view value)
+    {
+        std::string result;
+        result.reserve(value.size() + 2);
+        result.push_back('"');
+        for (const char character : value)
+        {
+            switch (character)
+            {
+            case '"':
+                result += "\\\"";
+                break;
+            case '\\':
+                result += "\\\\";
+                break;
+            case '\b':
+                result += "\\b";
+                break;
+            case '\f':
+                result += "\\f";
+                break;
+            case '\n':
+                result += "\\n";
+                break;
+            case '\r':
+                result += "\\r";
+                break;
+            case '\t':
+                result += "\\t";
+                break;
+            default:
+                result.push_back(character);
+                break;
+            }
+        }
+        result.push_back('"');
+        return result;
+    }
+
+    [[nodiscard]] std::string ManagedReference(const Keire::AssetId id)
+    {
+        return "{\"Id\":{\"High\":" + std::to_string(id.High()) + ",\"Low\":" + std::to_string(id.Low()) + "}}";
     }
 
     struct SceneProbe final
@@ -258,6 +304,143 @@ TEST_CASE("Scene assets and mutable scenes preserve validated hierarchy ordering
     CHECK(rejectedOffThread);
     scene->Close();
     CHECK_FALSE(root);
+}
+
+TEST_CASE("Scene import discovers deterministic authored and managed asset dependencies")
+{
+    const auto graph = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000001");
+    const auto skeleton = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000002");
+    const auto skinnedMesh = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000003");
+    const auto avatarMask = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000004");
+    const auto collisionMesh = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000005");
+    const auto physicsMaterial = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000006");
+    const auto clip = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000007");
+    const auto mixer = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000008");
+    const auto effect = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000009");
+    const auto managedDirect = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000a");
+    const auto managedArray = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000b");
+    const auto overrideAsset = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000c");
+    const auto addedEffect = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000d");
+    const auto prefab = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000e");
+    const auto ignoredEntity = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000f");
+
+    const std::string managedState =
+        "{\"Version\":1,\"Fields\":["
+        "{\"StableId\":\"20000000-0000-4000-8000-000000000001\",\"Name\":\"Definition\","
+        "\"Type\":\"Keire.AssetReference`1[[Game.Definition, Game]]\",\"Aliases\":[],\"Value\":" +
+        ManagedReference(managedDirect) +
+        "},"
+        "{\"StableId\":\"20000000-0000-4000-8000-000000000002\",\"Name\":\"Effects\","
+        "\"Type\":\"Keire.AssetReference`1[[Keire.VfxEffect, Keire.Managed]][]\",\"Aliases\":[],\"Value\":[" +
+        ManagedReference(managedArray) + "," + ManagedReference(effect) +
+        "]},"
+        "{\"StableId\":\"20000000-0000-4000-8000-000000000003\",\"Name\":\"Target\","
+        "\"Type\":\"Keire.Entity\",\"Aliases\":[],\"Value\":" +
+        ManagedReference(ignoredEntity) + "}]}";
+
+    auto definition = Keire::SceneAsset::EmptyDefinition("Authored Dependencies");
+    Keire::SceneObjectDefinition object;
+    object.Id = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000001");
+    object.Name = "Authoring";
+    object.Components = {
+        {Keire::AnimatorComponent::StaticType(), 1, true,
+         "{\"graph\":" + JsonString(graph.ToString()) + ",\"skeleton\":" + JsonString(skeleton.ToString()) +
+             ",\"skinnedMesh\":" + JsonString(skinnedMesh.ToString()) + ",\"avatarMasks\":[" +
+             JsonString(avatarMask.ToString()) + "," + JsonString(avatarMask.ToString()) + "]}"},
+        {Keire::ColliderComponent::StaticType(), 2, true,
+         "{\"collisionMesh\":" + JsonString(collisionMesh.ToString()) +
+             ",\"physicsMaterial\":" + JsonString(physicsMaterial.ToString()) + "}"},
+        {Keire::AudioSourceComponent::StaticType(), 2, true,
+         "{\"clip\":" + JsonString(clip.ToString()) + ",\"mixer\":" + JsonString(mixer.ToString()) + "}"},
+        {Keire::VfxEmitterComponent::StaticType(), 1, true, "{\"effect\":" + JsonString(effect.ToString()) + "}"},
+        {Keire::ComponentTypeId::Parse("40000000-0000-4000-8000-000000000001"), 1, true,
+         "{\"managedState\":" + JsonString(managedState) + "}"},
+    };
+    definition.Objects.push_back(object);
+    definition.PrefabInstances.push_back(
+        {.Prefab = prefab,
+         .Root = object.Id,
+         .Objects = {{Keire::AssetId::Parse("50000000-0000-4000-8000-000000000001"), object.Id}}});
+    definition.PrefabOverrides.push_back({.Kind = Keire::PrefabOverrideKind::SetComponentProperty,
+                                          .Object = object.Id,
+                                          .Component = Keire::VfxEmitterComponent::StaticType(),
+                                          .Property = "effect",
+                                          .Value = overrideAsset});
+    definition.PrefabOverrides.push_back(
+        {.Kind = Keire::PrefabOverrideKind::AddComponent,
+         .Object = object.Id,
+         .AddedComponent = Keire::SceneComponentDefinition{Keire::VfxEmitterComponent::StaticType(), 1, true,
+                                                           "{\"effect\":" + JsonString(addedEffect.ToString()) + "}"}});
+
+    const auto importer = Keire::CreateSceneAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    const auto first = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
+    const auto second = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
+    auto expected = std::vector{graph, skeleton, skinnedMesh,   avatarMask,   collisionMesh, physicsMaterial, clip,
+                                mixer, effect,   managedDirect, managedArray, overrideAsset, addedEffect,     prefab};
+    std::ranges::sort(expected);
+    CHECK(first.AssetDependencies == expected);
+    CHECK(second.AssetDependencies == expected);
+    CHECK(std::ranges::find(first.AssetDependencies, ignoredEntity) == first.AssetDependencies.end());
+}
+
+TEST_CASE("A rooted scene cook includes managed data dependency closure")
+{
+    TemporaryDirectory directory("SceneManagedDependencyCook");
+    std::filesystem::create_directories(directory.Path / "Assets");
+
+    const auto leafType = Keire::AssetTypeId::Parse("60000000-0000-4000-8000-000000000001");
+    Keire::AssetImporterRegistration leafImporter;
+    leafImporter.Name = "Test.ManagedDependencyLeaf";
+    leafImporter.Type = leafType;
+    leafImporter.Extensions = {".leaf"};
+    leafImporter.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+
+    Keire::AssetDatabaseSpecification specification{.ProjectRoot = directory.Path};
+    specification.Importers = {leafImporter, Keire::CreateManagedDataAssetImporter(),
+                               Keire::CreateSceneAssetImporter()};
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
+    const std::string leafSource = "managed dependency";
+    const auto leaf = database->CreateAsset("Data/Dependency.leaf", leafImporter,
+                                            std::as_bytes(std::span(leafSource.data(), leafSource.size())));
+    const auto unrelated = database->CreateAsset("Data/Unrelated.leaf", leafImporter,
+                                                 std::as_bytes(std::span(leafSource.data(), leafSource.size())));
+
+    Keire::ManagedDataDefinition managedDefinition;
+    managedDefinition.ManagedType = Keire::ManagedTypeId::Parse("70000000-0000-4000-8000-000000000001");
+    managedDefinition.ManagedTypeName = "Game.SceneSettings";
+    managedDefinition.Dependencies = {{.Asset = leaf, .AssetType = leafType}};
+    const auto managedBytes = Keire::ManagedDataAsset::Encode(managedDefinition);
+    const auto managed =
+        database->CreateAsset("Data/SceneSettings.keiredata", Keire::CreateManagedDataAssetImporter(), managedBytes);
+
+    const std::string state =
+        "{\"Version\":1,\"Fields\":["
+        "{\"StableId\":\"80000000-0000-4000-8000-000000000001\",\"Name\":\"Settings\","
+        "\"Type\":\"Keire.AssetReference`1[[Game.SceneSettings, Game]]\",\"Aliases\":[],\"Value\":" +
+        ManagedReference(managed) + "}]}";
+    auto sceneDefinition = Keire::SceneAsset::EmptyDefinition("Managed Root");
+    sceneDefinition.Objects.push_back(
+        {.Id = Keire::AssetId::Parse("90000000-0000-4000-8000-000000000001"),
+         .Name = "Root",
+         .Components = {{Keire::ComponentTypeId::Parse("90000000-0000-4000-8000-000000000002"), 1, true,
+                         "{\"managedState\":" + JsonString(state) + "}"}}});
+    const auto sceneBytes = Keire::SceneAsset::Encode(sceneDefinition);
+    const auto scene =
+        database->CreateAsset("Scenes/ManagedRoot.keirescene", Keire::CreateSceneAssetImporter(), sceneBytes);
+
+    Keire::AssetBuildProfile profile;
+    profile.Roots = {scene};
+    const auto first = Keire::AssetCooker::Cook(*database, profile, directory.Path / "CookA");
+    const auto second = Keire::AssetCooker::Cook(*database, profile, directory.Path / "CookB");
+    CHECK(first.AssetCount == 3);
+    CHECK(KeireTests::ReadFile(first.CatalogPath) == KeireTests::ReadFile(second.CatalogPath));
+    const auto catalog = KeireTests::ReadFile(first.CatalogPath);
+    CHECK(catalog.find(scene.ToString()) != std::string::npos);
+    CHECK(catalog.find(managed.ToString()) != std::string::npos);
+    CHECK(catalog.find(leaf.ToString()) != std::string::npos);
+    CHECK(catalog.find(unrelated.ToString()) == std::string::npos);
 }
 
 TEST_CASE("Scene entity moves preserve hierarchy order and reject invalid insertion targets")

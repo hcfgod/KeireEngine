@@ -4,7 +4,9 @@
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 
+#include <array>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -23,6 +25,12 @@ namespace Keire
     {
         PhysicsMode Mode = PhysicsMode::Disabled;
         std::uint32_t MaximumWorlds = 64;
+        std::array<std::uint32_t, 32> CollisionMatrix = []
+        {
+            std::array<std::uint32_t, 32> result;
+            result.fill(~0U);
+            return result;
+        }();
     };
 
     enum class PhysicsMotionType : std::uint8_t
@@ -45,6 +53,14 @@ namespace Keire
     {
         Convex,
         Triangle
+    };
+
+    enum class PhysicsMaterialCombineMode : std::uint8_t
+    {
+        Average,
+        Minimum,
+        Multiply,
+        Maximum
     };
 
     struct CollisionCookInput
@@ -94,6 +110,11 @@ namespace Keire
         bool Trigger = false;
         bool Continuous = false;
         std::shared_ptr<const CookedCollisionMesh> Collision;
+        bool UseGravity = true;
+        float Friction = 0.5F;
+        float Restitution = 0.0F;
+        PhysicsMaterialCombineMode FrictionCombine = PhysicsMaterialCombineMode::Average;
+        PhysicsMaterialCombineMode RestitutionCombine = PhysicsMaterialCombineMode::Average;
     };
 
     struct PhysicsBodyState
@@ -112,6 +133,7 @@ namespace Keire
         float MaximumDistance = 1000.0F;
         std::uint32_t Mask = ~0U;
         bool IncludeTriggers = true;
+        std::uint32_t Layer = 1;
     };
 
     struct PhysicsQueryHit
@@ -135,6 +157,66 @@ namespace Keire
         PhysicsBodyId Second;
         ContactPhase Phase = ContactPhase::Enter;
         bool Trigger = false;
+        Vector3 Point;
+        Vector3 Normal;
+        float Impulse = 0.0F;
+    };
+
+    enum class PhysicsDebugQueryKind : std::uint8_t
+    {
+        RayCast,
+        SphereOverlap
+    };
+
+    struct PhysicsDebugBody
+    {
+        PhysicsBodyId Body;
+        PhysicsMotionType Motion = PhysicsMotionType::Static;
+        ColliderShape Shape = ColliderShape::Box;
+        Vector3 Position;
+        Quaternion Rotation;
+        Vector3 HalfExtent;
+        float Radius = 0.0F;
+        float Height = 0.0F;
+        std::uint32_t Layer = 0;
+        std::uint32_t Mask = 0;
+        bool Trigger = false;
+        bool Sleeping = false;
+        bool UseGravity = true;
+    };
+
+    struct PhysicsDebugQueryTrace
+    {
+        std::uint64_t Sequence = 0;
+        PhysicsDebugQueryKind Kind = PhysicsDebugQueryKind::RayCast;
+        PhysicsRayQuery Ray;
+        Vector3 SphereCenter;
+        float SphereRadius = 0.0F;
+        std::uint32_t Mask = ~0U;
+        std::uint32_t Layer = 1;
+        std::vector<PhysicsQueryHit> Hits;
+        std::vector<PhysicsBodyId> Overlaps;
+        std::size_t DroppedHits = 0;
+    };
+
+    struct PhysicsDebugSnapshot
+    {
+        std::uint64_t Revision = 0;
+        std::vector<PhysicsDebugBody> Bodies;
+        std::vector<PhysicsContactEvent> Contacts;
+        std::vector<PhysicsDebugQueryTrace> Queries;
+        std::size_t DroppedBodies = 0;
+        std::size_t DroppedContacts = 0;
+        std::size_t DroppedQueries = 0;
+    };
+
+    struct PhysicsDebugCaptureConfiguration
+    {
+        bool Enabled = false;
+        std::uint32_t MaximumBodies = 4096;
+        std::uint32_t MaximumContacts = 4096;
+        std::uint32_t MaximumQueryTraces = 128;
+        std::uint32_t MaximumHitsPerQuery = 256;
     };
 
     class KEIRE_API PhysicsWorld final : public RefCounted
@@ -146,12 +228,15 @@ namespace Keire
         [[nodiscard]] PhysicsBodyId CreateBody(const PhysicsBodyDefinition& definition);
         void DestroyBody(PhysicsBodyId body);
         void SetKinematicTarget(PhysicsBodyId body, Vector3 position, Quaternion rotation);
+        void SetGravityEnabled(PhysicsBodyId body, bool enabled);
         [[nodiscard]] std::optional<PhysicsBodyState> TryGetBody(PhysicsBodyId body) const;
         [[nodiscard]] std::vector<PhysicsQueryHit> RayCast(const PhysicsRayQuery& query) const;
-        [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(Vector3 center, float radius,
-                                                               std::uint32_t mask = ~0U) const;
+        [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(Vector3 center, float radius, std::uint32_t mask = ~0U,
+                                                               std::uint32_t layer = 1) const;
         void Step(float deltaSeconds);
         [[nodiscard]] std::vector<PhysicsContactEvent> DrainContactEvents();
+        void ConfigureDebugCapture(PhysicsDebugCaptureConfiguration configuration);
+        [[nodiscard]] std::shared_ptr<const PhysicsDebugSnapshot> CaptureDebugSnapshot() const;
         void Close();
 
       private:
@@ -168,6 +253,8 @@ namespace Keire
         ~PhysicsSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] Ref<PhysicsWorld> CreateWorld();
+        void ConfigureCollisionMatrix(std::array<std::uint32_t, 32> matrix);
+        [[nodiscard]] std::array<std::uint32_t, 32> CollisionMatrix() const;
         void Close();
 
       private:

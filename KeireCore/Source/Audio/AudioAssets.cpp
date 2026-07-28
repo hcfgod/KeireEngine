@@ -1,6 +1,7 @@
 #include "Keire/Audio/AudioAssets.h"
 
 #include <miniaudio.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -9,8 +10,12 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <ranges>
+#include <set>
 #include <stdexcept>
+#include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace Keire
@@ -263,5 +268,542 @@ namespace Keire
             AudioClipAsset::Silence(),
             [](const std::span<const std::byte> bytes) -> Ref<Asset> { return AudioClipAsset::Decode(bytes); },
         };
+    }
+
+    namespace
+    {
+        using Json = nlohmann::json;
+
+        constexpr std::size_t MaximumMixerBuses = 256;
+        constexpr std::size_t MaximumMixerEffectsPerBus = 128;
+        constexpr std::size_t MaximumMixerSendsPerBus = 64;
+        constexpr std::size_t MaximumMixerEffectParameters = 64;
+        constexpr std::size_t MaximumMixerSnapshots = 128;
+        constexpr std::size_t MaximumMixerSnapshotParameters = 4096;
+        constexpr std::size_t MaximumMixerDuckingRules = 128;
+        constexpr std::size_t MaximumMixerNameLength = 128;
+
+        [[nodiscard]] std::string IdText(const AssetId id) { return id ? id.ToString() : std::string{}; }
+
+        [[nodiscard]] AssetId ParseId(const Json& object, const char* key)
+        {
+            const auto text = object.value(key, std::string{});
+            return text.empty() ? AssetId{} : AssetId::Parse(text);
+        }
+
+        [[nodiscard]] std::string_view GraphNodeTypeName(const AudioGraphNodeType type)
+        {
+            switch (type)
+            {
+            case AudioGraphNodeType::Input:
+                return "input";
+            case AudioGraphNodeType::Gain:
+                return "gain";
+            case AudioGraphNodeType::LowPass:
+                return "lowPass";
+            case AudioGraphNodeType::HighPass:
+                return "highPass";
+            case AudioGraphNodeType::Equalizer:
+                return "equalizer";
+            case AudioGraphNodeType::Compressor:
+                return "compressor";
+            case AudioGraphNodeType::Limiter:
+                return "limiter";
+            case AudioGraphNodeType::Gate:
+                return "gate";
+            case AudioGraphNodeType::Delay:
+                return "delay";
+            case AudioGraphNodeType::Chorus:
+                return "chorus";
+            case AudioGraphNodeType::Distortion:
+                return "distortion";
+            case AudioGraphNodeType::AlgorithmicReverb:
+                return "algorithmicReverb";
+            case AudioGraphNodeType::ConvolutionReverb:
+                return "convolutionReverb";
+            case AudioGraphNodeType::Meter:
+                return "meter";
+            case AudioGraphNodeType::Capture:
+                return "capture";
+            case AudioGraphNodeType::Output:
+                return "output";
+            }
+            throw std::invalid_argument("Audio mixer effect type is unsupported.");
+        }
+
+        [[nodiscard]] AudioGraphNodeType ParseGraphNodeType(const std::string_view value)
+        {
+            if (value == "input")
+                return AudioGraphNodeType::Input;
+            if (value == "gain")
+                return AudioGraphNodeType::Gain;
+            if (value == "lowPass")
+                return AudioGraphNodeType::LowPass;
+            if (value == "highPass")
+                return AudioGraphNodeType::HighPass;
+            if (value == "equalizer")
+                return AudioGraphNodeType::Equalizer;
+            if (value == "compressor")
+                return AudioGraphNodeType::Compressor;
+            if (value == "limiter")
+                return AudioGraphNodeType::Limiter;
+            if (value == "gate")
+                return AudioGraphNodeType::Gate;
+            if (value == "delay")
+                return AudioGraphNodeType::Delay;
+            if (value == "chorus")
+                return AudioGraphNodeType::Chorus;
+            if (value == "distortion")
+                return AudioGraphNodeType::Distortion;
+            if (value == "algorithmicReverb")
+                return AudioGraphNodeType::AlgorithmicReverb;
+            if (value == "convolutionReverb")
+                return AudioGraphNodeType::ConvolutionReverb;
+            if (value == "meter")
+                return AudioGraphNodeType::Meter;
+            if (value == "capture")
+                return AudioGraphNodeType::Capture;
+            if (value == "output")
+                return AudioGraphNodeType::Output;
+            throw std::invalid_argument("Audio mixer effect type is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view SendStageName(const AudioMixerSendStage stage)
+        {
+            switch (stage)
+            {
+            case AudioMixerSendStage::PreFader:
+                return "preFader";
+            case AudioMixerSendStage::PostFader:
+                return "postFader";
+            }
+            throw std::invalid_argument("Audio mixer send stage is unsupported.");
+        }
+
+        [[nodiscard]] AudioMixerSendStage ParseSendStage(const std::string_view value)
+        {
+            if (value == "preFader")
+                return AudioMixerSendStage::PreFader;
+            if (value == "postFader")
+                return AudioMixerSendStage::PostFader;
+            throw std::invalid_argument("Audio mixer send stage is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view SnapshotParameterTypeName(const AudioMixerSnapshotParameterType type)
+        {
+            switch (type)
+            {
+            case AudioMixerSnapshotParameterType::BusGain:
+                return "busGain";
+            case AudioMixerSnapshotParameterType::BusMute:
+                return "busMute";
+            case AudioMixerSnapshotParameterType::BusSolo:
+                return "busSolo";
+            case AudioMixerSnapshotParameterType::SendGain:
+                return "sendGain";
+            case AudioMixerSnapshotParameterType::EffectBypass:
+                return "effectBypass";
+            case AudioMixerSnapshotParameterType::EffectParameter:
+                return "effectParameter";
+            }
+            throw std::invalid_argument("Audio mixer snapshot parameter type is unsupported.");
+        }
+
+        [[nodiscard]] AudioMixerSnapshotParameterType ParseSnapshotParameterType(const std::string_view value)
+        {
+            if (value == "busGain")
+                return AudioMixerSnapshotParameterType::BusGain;
+            if (value == "busMute")
+                return AudioMixerSnapshotParameterType::BusMute;
+            if (value == "busSolo")
+                return AudioMixerSnapshotParameterType::BusSolo;
+            if (value == "sendGain")
+                return AudioMixerSnapshotParameterType::SendGain;
+            if (value == "effectBypass")
+                return AudioMixerSnapshotParameterType::EffectBypass;
+            if (value == "effectParameter")
+                return AudioMixerSnapshotParameterType::EffectParameter;
+            throw std::invalid_argument("Audio mixer snapshot parameter type is unsupported.");
+        }
+
+        void RequireStableId(const AssetId id, std::set<AssetId>& stableIds)
+        {
+            if (!id || !stableIds.insert(id).second)
+                throw std::invalid_argument("Audio mixer contains an empty or duplicate stable ID.");
+        }
+
+        void RequireName(const std::string_view name)
+        {
+            if (name.empty() || name.size() > MaximumMixerNameLength)
+                throw std::invalid_argument("Audio mixer contains an empty or excessive name.");
+        }
+
+        [[nodiscard]] bool IsBooleanValue(const float value) noexcept { return value == 0.0F || value == 1.0F; }
+    } // namespace
+
+    void ValidateAudioMixer(const AudioMixerDefinition& definition)
+    {
+        if (definition.SchemaVersion != 1 || !definition.MasterBus || definition.Buses.empty() ||
+            definition.Buses.size() > MaximumMixerBuses || definition.Snapshots.size() > MaximumMixerSnapshots ||
+            definition.Ducking.size() > MaximumMixerDuckingRules)
+            throw std::invalid_argument("Audio mixer header is invalid.");
+
+        std::set<AssetId> stableIds;
+        std::set<std::string, std::less<>> busNames;
+        std::set<std::string, std::less<>> snapshotNames;
+        std::set<std::string, std::less<>> duckingNames;
+        std::map<AssetId, const AudioMixerBusDefinition*> buses;
+        std::map<AssetId, const AudioMixerEffectDefinition*> effects;
+        std::map<AssetId, const AudioMixerSendDefinition*> sends;
+
+        for (const auto& bus : definition.Buses)
+        {
+            RequireStableId(bus.Id, stableIds);
+            RequireName(bus.Name);
+            if (!busNames.insert(bus.Name).second || !std::isfinite(bus.Gain) || bus.Gain < 0.0F || bus.Gain > 16.0F ||
+                bus.Effects.size() > MaximumMixerEffectsPerBus || bus.Sends.size() > MaximumMixerSendsPerBus ||
+                !buses.emplace(bus.Id, &bus).second)
+                throw std::invalid_argument("Audio mixer contains an invalid or duplicate bus.");
+            for (const auto& effect : bus.Effects)
+            {
+                RequireStableId(effect.Id, stableIds);
+                RequireName(effect.Name);
+                const bool processingType =
+                    effect.Type >= AudioGraphNodeType::Gain && effect.Type <= AudioGraphNodeType::Capture;
+                const bool validImpulseResponse = effect.Type == AudioGraphNodeType::ConvolutionReverb
+                                                      ? static_cast<bool>(effect.ImpulseResponse)
+                                                      : !effect.ImpulseResponse;
+                if (!processingType || !validImpulseResponse ||
+                    effect.Parameters.size() > MaximumMixerEffectParameters ||
+                    !std::ranges::all_of(effect.Parameters, [](const float value) { return std::isfinite(value); }) ||
+                    !effects.emplace(effect.Id, &effect).second)
+                    throw std::invalid_argument("Audio mixer contains an invalid or duplicate effect.");
+            }
+            for (const auto& send : bus.Sends)
+            {
+                RequireStableId(send.Id, stableIds);
+                if (!send.DestinationBus || send.DestinationBus == bus.Id || !std::isfinite(send.Gain) ||
+                    send.Gain < 0.0F || send.Gain > 16.0F ||
+                    (send.Stage != AudioMixerSendStage::PreFader && send.Stage != AudioMixerSendStage::PostFader) ||
+                    !sends.emplace(send.Id, &send).second)
+                    throw std::invalid_argument("Audio mixer contains an invalid or duplicate send.");
+            }
+        }
+
+        const auto master = buses.find(definition.MasterBus);
+        if (master == buses.end() || master->second->Name != "Master" || master->second->Parent)
+            throw std::invalid_argument("Audio mixer Master bus is unavailable or malformed.");
+        for (const auto& [id, bus] : buses)
+        {
+            if (id == definition.MasterBus)
+                continue;
+            if (!bus->Parent || !buses.contains(bus->Parent))
+                throw std::invalid_argument("Audio mixer bus parent is unavailable.");
+        }
+
+        std::map<AssetId, std::vector<AssetId>> routing;
+        for (const auto& [id, bus] : buses)
+        {
+            auto& destinations = routing[id];
+            if (bus->Parent)
+                destinations.push_back(bus->Parent);
+            for (const auto& send : bus->Sends)
+            {
+                if (!buses.contains(send.DestinationBus))
+                    throw std::invalid_argument("Audio mixer send destination is unavailable.");
+                destinations.push_back(send.DestinationBus);
+            }
+        }
+        std::map<AssetId, std::uint8_t> visitState;
+        const auto visit = [&](const auto& self, const AssetId bus) -> void
+        {
+            if (visitState[bus] == 1)
+                throw std::invalid_argument("Audio mixer routing contains a cycle.");
+            if (visitState[bus] == 2)
+                return;
+            visitState[bus] = 1;
+            for (const auto destination : routing.at(bus))
+                self(self, destination);
+            visitState[bus] = 2;
+        };
+        for (const auto& [id, bus] : buses)
+        {
+            (void)bus;
+            visit(visit, id);
+        }
+
+        for (const auto& snapshot : definition.Snapshots)
+        {
+            RequireStableId(snapshot.Id, stableIds);
+            RequireName(snapshot.Name);
+            if (!snapshotNames.insert(snapshot.Name).second ||
+                snapshot.Parameters.size() > MaximumMixerSnapshotParameters)
+                throw std::invalid_argument("Audio mixer contains an invalid or duplicate snapshot.");
+            std::set<std::tuple<AudioMixerSnapshotParameterType, AssetId, std::uint32_t>> targets;
+            for (const auto& parameter : snapshot.Parameters)
+            {
+                if (!parameter.Target || !std::isfinite(parameter.Value) ||
+                    !targets.emplace(parameter.Type, parameter.Target, parameter.Parameter).second)
+                    throw std::invalid_argument("Audio mixer snapshot contains an invalid or duplicate parameter.");
+                switch (parameter.Type)
+                {
+                case AudioMixerSnapshotParameterType::BusGain:
+                    if (!buses.contains(parameter.Target) || parameter.Parameter != 0 || parameter.Value < 0.0F ||
+                        parameter.Value > 16.0F)
+                        throw std::invalid_argument("Audio mixer snapshot bus gain is invalid.");
+                    break;
+                case AudioMixerSnapshotParameterType::BusMute:
+                case AudioMixerSnapshotParameterType::BusSolo:
+                    if (!buses.contains(parameter.Target) || parameter.Parameter != 0 ||
+                        !IsBooleanValue(parameter.Value))
+                        throw std::invalid_argument("Audio mixer snapshot bus switch is invalid.");
+                    break;
+                case AudioMixerSnapshotParameterType::SendGain:
+                    if (!sends.contains(parameter.Target) || parameter.Parameter != 0 || parameter.Value < 0.0F ||
+                        parameter.Value > 16.0F)
+                        throw std::invalid_argument("Audio mixer snapshot send gain is invalid.");
+                    break;
+                case AudioMixerSnapshotParameterType::EffectBypass:
+                    if (!effects.contains(parameter.Target) || parameter.Parameter != 0 ||
+                        !IsBooleanValue(parameter.Value))
+                        throw std::invalid_argument("Audio mixer snapshot effect bypass is invalid.");
+                    break;
+                case AudioMixerSnapshotParameterType::EffectParameter:
+                {
+                    const auto found = effects.find(parameter.Target);
+                    if (found == effects.end() || parameter.Parameter >= found->second->Parameters.size())
+                        throw std::invalid_argument("Audio mixer snapshot effect parameter is unavailable.");
+                    break;
+                }
+                default:
+                    throw std::invalid_argument("Audio mixer snapshot parameter type is unsupported.");
+                }
+            }
+        }
+
+        for (const auto& ducking : definition.Ducking)
+        {
+            RequireStableId(ducking.Id, stableIds);
+            RequireName(ducking.Name);
+            if (!duckingNames.insert(ducking.Name).second || !buses.contains(ducking.SidechainBus) ||
+                !buses.contains(ducking.TargetBus) || ducking.SidechainBus == ducking.TargetBus ||
+                !std::isfinite(ducking.ThresholdDb) || ducking.ThresholdDb < -96.0F || ducking.ThresholdDb > 0.0F ||
+                !std::isfinite(ducking.Ratio) || ducking.Ratio < 1.0F || ducking.Ratio > 100.0F ||
+                !std::isfinite(ducking.AttackSeconds) || ducking.AttackSeconds < 0.0F ||
+                ducking.AttackSeconds > 10.0F || !std::isfinite(ducking.HoldSeconds) || ducking.HoldSeconds < 0.0F ||
+                ducking.HoldSeconds > 10.0F || !std::isfinite(ducking.ReleaseSeconds) ||
+                ducking.ReleaseSeconds < 0.0F || ducking.ReleaseSeconds > 30.0F ||
+                !std::isfinite(ducking.MaximumAttenuationDb) || ducking.MaximumAttenuationDb < 0.0F ||
+                ducking.MaximumAttenuationDb > 96.0F)
+                throw std::invalid_argument("Audio mixer contains an invalid or duplicate ducking rule.");
+        }
+    }
+
+    std::vector<AssetId> AudioMixerDependencies(const AudioMixerDefinition& definition)
+    {
+        ValidateAudioMixer(definition);
+        std::vector<AssetId> result;
+        for (const auto& bus : definition.Buses)
+            for (const auto& effect : bus.Effects)
+                if (effect.ImpulseResponse)
+                    result.push_back(effect.ImpulseResponse);
+        std::ranges::sort(result);
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+        return result;
+    }
+
+    AudioMixerAsset::AudioMixerAsset(AudioMixerDefinition definition) : m_Definition(std::move(definition))
+    {
+        ValidateAudioMixer(m_Definition);
+    }
+
+    std::size_t AudioMixerAsset::ResidentBytes() const noexcept
+    {
+        std::size_t result = sizeof(*this);
+        for (const auto& bus : m_Definition.Buses)
+        {
+            result += sizeof(bus) + bus.Name.size();
+            for (const auto& effect : bus.Effects)
+                result += sizeof(effect) + effect.Name.size() + effect.Parameters.size() * sizeof(float);
+            result += bus.Sends.size() * sizeof(AudioMixerSendDefinition);
+        }
+        for (const auto& snapshot : m_Definition.Snapshots)
+            result += sizeof(snapshot) + snapshot.Name.size() +
+                      snapshot.Parameters.size() * sizeof(AudioMixerSnapshotParameterDefinition);
+        for (const auto& ducking : m_Definition.Ducking)
+            result += sizeof(ducking) + ducking.Name.size();
+        return result;
+    }
+
+    AudioMixerDefinition AudioMixerAsset::DefaultDefinition()
+    {
+        const AssetId master(0x4b454952454d4958ULL, 0x45524d4153544552ULL);
+        return {.SchemaVersion = 1, .MasterBus = master, .Buses = {{.Id = master, .Name = "Master", .Gain = 1.0F}}};
+    }
+
+    std::vector<std::byte> AudioMixerAsset::Encode(const AudioMixerDefinition& definition)
+    {
+        ValidateAudioMixer(definition);
+        Json buses = Json::array();
+        for (const auto& bus : definition.Buses)
+        {
+            Json effects = Json::array();
+            for (const auto& effect : bus.Effects)
+                effects.push_back({{"id", IdText(effect.Id)},
+                                   {"name", effect.Name},
+                                   {"type", GraphNodeTypeName(effect.Type)},
+                                   {"bypassed", effect.Bypassed},
+                                   {"parameters", effect.Parameters},
+                                   {"impulseResponse", IdText(effect.ImpulseResponse)}});
+            Json sends = Json::array();
+            for (const auto& send : bus.Sends)
+                sends.push_back({{"id", IdText(send.Id)},
+                                 {"destinationBus", IdText(send.DestinationBus)},
+                                 {"stage", SendStageName(send.Stage)},
+                                 {"gain", send.Gain}});
+            buses.push_back({{"id", IdText(bus.Id)},
+                             {"name", bus.Name},
+                             {"parent", IdText(bus.Parent)},
+                             {"mute", bus.Mute},
+                             {"solo", bus.Solo},
+                             {"gain", bus.Gain},
+                             {"effects", std::move(effects)},
+                             {"sends", std::move(sends)}});
+        }
+
+        Json snapshots = Json::array();
+        for (const auto& snapshot : definition.Snapshots)
+        {
+            Json parameters = Json::array();
+            for (const auto& parameter : snapshot.Parameters)
+                parameters.push_back({{"type", SnapshotParameterTypeName(parameter.Type)},
+                                      {"target", IdText(parameter.Target)},
+                                      {"parameter", parameter.Parameter},
+                                      {"value", parameter.Value}});
+            snapshots.push_back(
+                {{"id", IdText(snapshot.Id)}, {"name", snapshot.Name}, {"parameters", std::move(parameters)}});
+        }
+
+        Json ducking = Json::array();
+        for (const auto& rule : definition.Ducking)
+            ducking.push_back({{"id", IdText(rule.Id)},
+                               {"name", rule.Name},
+                               {"sidechainBus", IdText(rule.SidechainBus)},
+                               {"targetBus", IdText(rule.TargetBus)},
+                               {"thresholdDb", rule.ThresholdDb},
+                               {"ratio", rule.Ratio},
+                               {"attackSeconds", rule.AttackSeconds},
+                               {"holdSeconds", rule.HoldSeconds},
+                               {"releaseSeconds", rule.ReleaseSeconds},
+                               {"maximumAttenuationDb", rule.MaximumAttenuationDb}});
+
+        const Json document{{"schemaVersion", definition.SchemaVersion},
+                            {"masterBus", IdText(definition.MasterBus)},
+                            {"buses", std::move(buses)},
+                            {"snapshots", std::move(snapshots)},
+                            {"ducking", std::move(ducking)}};
+        const auto text = document.dump(2) + '\n';
+        return {reinterpret_cast<const std::byte*>(text.data()),
+                reinterpret_cast<const std::byte*>(text.data() + text.size())};
+    }
+
+    Ref<AudioMixerAsset> AudioMixerAsset::Decode(const std::span<const std::byte> bytes)
+    {
+        try
+        {
+            const Json document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
+                                              reinterpret_cast<const char*>(bytes.data() + bytes.size()));
+            AudioMixerDefinition definition;
+            definition.SchemaVersion = document.value("schemaVersion", 0U);
+            definition.MasterBus = ParseId(document, "masterBus");
+            for (const auto& encodedBus : document.at("buses"))
+            {
+                AudioMixerBusDefinition bus;
+                bus.Id = ParseId(encodedBus, "id");
+                bus.Name = encodedBus.at("name").get<std::string>();
+                bus.Parent = ParseId(encodedBus, "parent");
+                bus.Mute = encodedBus.value("mute", false);
+                bus.Solo = encodedBus.value("solo", false);
+                bus.Gain = encodedBus.value("gain", 1.0F);
+                for (const auto& encodedEffect : encodedBus.value("effects", Json::array()))
+                {
+                    AudioMixerEffectDefinition effect;
+                    effect.Id = ParseId(encodedEffect, "id");
+                    effect.Name = encodedEffect.at("name").get<std::string>();
+                    effect.Type = ParseGraphNodeType(encodedEffect.at("type").get<std::string>());
+                    effect.Bypassed = encodedEffect.value("bypassed", false);
+                    effect.Parameters = encodedEffect.value("parameters", std::vector<float>{});
+                    effect.ImpulseResponse = ParseId(encodedEffect, "impulseResponse");
+                    bus.Effects.push_back(std::move(effect));
+                }
+                for (const auto& encodedSend : encodedBus.value("sends", Json::array()))
+                    bus.Sends.push_back({.Id = ParseId(encodedSend, "id"),
+                                         .DestinationBus = ParseId(encodedSend, "destinationBus"),
+                                         .Stage = ParseSendStage(encodedSend.value("stage", std::string("postFader"))),
+                                         .Gain = encodedSend.value("gain", 1.0F)});
+                definition.Buses.push_back(std::move(bus));
+            }
+            for (const auto& encodedSnapshot : document.value("snapshots", Json::array()))
+            {
+                AudioMixerSnapshotDefinition snapshot;
+                snapshot.Id = ParseId(encodedSnapshot, "id");
+                snapshot.Name = encodedSnapshot.at("name").get<std::string>();
+                for (const auto& encodedParameter : encodedSnapshot.value("parameters", Json::array()))
+                    snapshot.Parameters.push_back(
+                        {.Type = ParseSnapshotParameterType(encodedParameter.at("type").get<std::string>()),
+                         .Target = ParseId(encodedParameter, "target"),
+                         .Parameter = encodedParameter.value("parameter", 0U),
+                         .Value = encodedParameter.at("value").get<float>()});
+                definition.Snapshots.push_back(std::move(snapshot));
+            }
+            for (const auto& encodedRule : document.value("ducking", Json::array()))
+                definition.Ducking.push_back(
+                    {.Id = ParseId(encodedRule, "id"),
+                     .Name = encodedRule.at("name").get<std::string>(),
+                     .SidechainBus = ParseId(encodedRule, "sidechainBus"),
+                     .TargetBus = ParseId(encodedRule, "targetBus"),
+                     .ThresholdDb = encodedRule.value("thresholdDb", -24.0F),
+                     .Ratio = encodedRule.value("ratio", 4.0F),
+                     .AttackSeconds = encodedRule.value("attackSeconds", 0.01F),
+                     .HoldSeconds = encodedRule.value("holdSeconds", 0.0F),
+                     .ReleaseSeconds = encodedRule.value("releaseSeconds", 0.1F),
+                     .MaximumAttenuationDb = encodedRule.value("maximumAttenuationDb", 12.0F)});
+            return CreateRef<AudioMixerAsset>(std::move(definition));
+        }
+        catch (const nlohmann::json::exception& exception)
+        {
+            throw std::invalid_argument(std::string("Audio mixer source is malformed: ") + exception.what());
+        }
+    }
+
+    Ref<AudioMixerAsset> AudioMixerAsset::Default() { return CreateRef<AudioMixerAsset>(DefaultDefinition()); }
+
+    AssetImporterRegistration CreateAudioMixerAssetImporter()
+    {
+        AssetImporterRegistration result;
+        result.Name = "Keire.AudioMixer";
+        result.Version = 1;
+        result.Type = AudioMixerAsset::StaticType();
+        result.Extensions = {".keiremixer"};
+        result.Import = [](const std::span<const std::byte> bytes)
+        {
+            const auto mixer = AudioMixerAsset::Decode(bytes);
+            return AudioMixerAsset::Encode(mixer->Definition());
+        };
+        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        {
+            const auto mixer = AudioMixerAsset::Decode(bytes);
+            AssetImportOutput output;
+            output.Bytes = AudioMixerAsset::Encode(mixer->Definition());
+            output.AssetDependencies = AudioMixerDependencies(mixer->Definition());
+            return output;
+        };
+        return result;
+    }
+
+    AssetDecoderRegistration CreateAudioMixerAssetDecoder()
+    {
+        return {AudioMixerAsset::StaticType(), AudioMixerAsset::Default(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset> { return AudioMixerAsset::Decode(bytes); }};
     }
 } // namespace Keire

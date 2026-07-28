@@ -1,6 +1,8 @@
 #include "Keire/Project/Project.h"
+#include "Keire/Project/ProjectAuthoringSettings.h"
 
 #include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
@@ -258,6 +260,7 @@ namespace Keire
             Detail::WriteTextFileAtomically(root / ".gitignore",
                                             "/Library/\n/Logs/\n/Temp/\n/Build/\n/*.csproj\n/*.sln\n");
             SaveRenderEnvironmentSettings(root, {});
+            SaveProjectAuthoringSettings(root, DefaultProjectAuthoringSettings());
 
             ProjectDescriptor descriptor;
             descriptor.Id = ProjectId::Generate();
@@ -267,16 +270,7 @@ namespace Keire
             if (specification.Template == ProjectTemplate::Starter)
             {
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
-                databaseSpecification.Importers = {CreateTextAssetImporter(),
-                                                   CreateInputActionAssetImporter(),
-                                                   CreateSceneAssetImporter(),
-                                                   CreatePrefabAssetImporter(),
-                                                   CreateManagedAssemblyAssetImporter(),
-                                                   CreateShaderAssetImporter(),
-                                                   CreateMaterialAssetImporter(),
-                                                   CreateMeshAssetImporter(),
-                                                   CreateTexture2DAssetImporter(),
-                                                   CreateAudioClipAssetImporter()};
+                databaseSpecification.Importers = CreateBuiltinAssetImporters();
                 auto database = CreateRef<AssetDatabase>(std::move(databaseSpecification));
                 const auto inputBytes = InputActionAsset::Encode(InputActionAsset::DefaultDefinition());
                 descriptor.DefaultInput = database->CreateAsset("Input/DefaultInput.keireinput",

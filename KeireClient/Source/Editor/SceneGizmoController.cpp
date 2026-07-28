@@ -22,7 +22,11 @@ namespace KeireEditor
         constexpr Keire::UiColor AxisZ{0.25F, 0.52F, 1.0F, 1.0F};
         constexpr Keire::UiColor CameraColor{0.35F, 0.78F, 1.0F, 1.0F};
         constexpr Keire::UiColor LightColor{1.0F, 0.76F, 0.20F, 1.0F};
+        constexpr Keire::UiColor ColliderColor{0.25F, 0.92F, 0.56F, 1.0F};
+        constexpr Keire::UiColor TriggerColor{1.0F, 0.43F, 0.18F, 1.0F};
         constexpr float Pi = 3.14159265358979323846F;
+        constexpr float MinimumColliderGeometry = 0.001F;
+        constexpr float MaximumColliderGeometry = 100'000.0F;
 
         [[nodiscard]] Keire::UiColor AxisColor(const SceneGizmoController::Axis axis)
         {
@@ -196,6 +200,173 @@ namespace KeireEditor
                 if (previous && projected)
                     ui.DrawLine(*previous, *projected, color, 1.2F);
                 previous = projected;
+            }
+        }
+
+        [[nodiscard]] Keire::Vector3 Add(const Keire::Vector3 left, const Keire::Vector3 right) noexcept
+        {
+            return {left.X + right.X, left.Y + right.Y, left.Z + right.Z};
+        }
+
+        [[nodiscard]] Keire::Vector3 Multiply(const Keire::Vector3 value, const float scalar) noexcept
+        {
+            return {value.X * scalar, value.Y * scalar, value.Z * scalar};
+        }
+
+        [[nodiscard]] Keire::Vector3 AxisVector(const std::size_t axis) noexcept
+        {
+            switch (axis)
+            {
+            case 0:
+                return {1.0F, 0.0F, 0.0F};
+            case 1:
+                return {0.0F, 1.0F, 0.0F};
+            default:
+                return {0.0F, 0.0F, 1.0F};
+            }
+        }
+
+        void DrawWorldBox(Keire::UiFrame& ui, const Keire::Matrix4& world, const Keire::Vector3 minimum,
+                          const Keire::Vector3 maximum, const Keire::Matrix4& viewProjection,
+                          const Keire::UiItemRect viewport, const Keire::UiColor color, const float thickness)
+        {
+            const std::array local{
+                Keire::Vector3{minimum.X, minimum.Y, minimum.Z}, Keire::Vector3{maximum.X, minimum.Y, minimum.Z},
+                Keire::Vector3{maximum.X, maximum.Y, minimum.Z}, Keire::Vector3{minimum.X, maximum.Y, minimum.Z},
+                Keire::Vector3{minimum.X, minimum.Y, maximum.Z}, Keire::Vector3{maximum.X, minimum.Y, maximum.Z},
+                Keire::Vector3{maximum.X, maximum.Y, maximum.Z}, Keire::Vector3{minimum.X, maximum.Y, maximum.Z},
+            };
+            std::array<std::optional<Keire::UiPosition>, local.size()> projected{};
+            for (std::size_t index = 0; index < local.size(); ++index)
+                projected[index] = Project(Keire::Math::TransformPoint(world, local[index]), viewProjection, viewport);
+            constexpr std::array edges{
+                std::array<std::size_t, 2>{0, 1}, std::array<std::size_t, 2>{1, 2}, std::array<std::size_t, 2>{2, 3},
+                std::array<std::size_t, 2>{3, 0}, std::array<std::size_t, 2>{4, 5}, std::array<std::size_t, 2>{5, 6},
+                std::array<std::size_t, 2>{6, 7}, std::array<std::size_t, 2>{7, 4}, std::array<std::size_t, 2>{0, 4},
+                std::array<std::size_t, 2>{1, 5}, std::array<std::size_t, 2>{2, 6}, std::array<std::size_t, 2>{3, 7}};
+            for (const auto edge : edges)
+            {
+                if (projected[edge[0]] && projected[edge[1]])
+                    ui.DrawLine(*projected[edge[0]], *projected[edge[1]], color, thickness);
+            }
+        }
+
+        void DrawLocalCircle(Keire::UiFrame& ui, const Keire::Matrix4& world, const Keire::Vector3 center,
+                             const Keire::Vector3 axisA, const Keire::Vector3 axisB, const float radius,
+                             const Keire::Matrix4& viewProjection, const Keire::UiItemRect viewport,
+                             const Keire::UiColor color, const float thickness)
+        {
+            constexpr std::size_t segments = 48;
+            std::optional<Keire::UiPosition> previous;
+            for (std::size_t segment = 0; segment <= segments; ++segment)
+            {
+                const float angle = static_cast<float>(segment) / static_cast<float>(segments) * Pi * 2.0F;
+                const auto local = Add(
+                    center, Multiply(Add(Multiply(axisA, std::cos(angle)), Multiply(axisB, std::sin(angle))), radius));
+                const auto projected = Project(Keire::Math::TransformPoint(world, local), viewProjection, viewport);
+                if (previous && projected)
+                    ui.DrawLine(*previous, *projected, color, thickness);
+                previous = projected;
+            }
+        }
+
+        void DrawLocalArc(Keire::UiFrame& ui, const Keire::Matrix4& world, const Keire::Vector3 center,
+                          const Keire::Vector3 axisA, const Keire::Vector3 axisB, const float radius,
+                          const float startAngle, const float endAngle, const Keire::Matrix4& viewProjection,
+                          const Keire::UiItemRect viewport, const Keire::UiColor color, const float thickness)
+        {
+            constexpr std::size_t segments = 24;
+            std::optional<Keire::UiPosition> previous;
+            for (std::size_t segment = 0; segment <= segments; ++segment)
+            {
+                const float alpha = static_cast<float>(segment) / static_cast<float>(segments);
+                const float angle = startAngle + (endAngle - startAngle) * alpha;
+                const auto local = Add(
+                    center, Multiply(Add(Multiply(axisA, std::cos(angle)), Multiply(axisB, std::sin(angle))), radius));
+                const auto projected = Project(Keire::Math::TransformPoint(world, local), viewProjection, viewport);
+                if (previous && projected)
+                    ui.DrawLine(*previous, *projected, color, thickness);
+                previous = projected;
+            }
+        }
+
+        [[nodiscard]] Keire::UiColor ColliderWireColor(const Keire::ColliderComponent& collider,
+                                                       const bool selected) noexcept
+        {
+            const auto base = collider.Trigger() ? TriggerColor : ColliderColor;
+            return {base.Red, base.Green, base.Blue, selected ? 0.95F : 0.34F};
+        }
+
+        void DrawColliderWireframe(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
+                                   const Keire::ColliderComponent& collider, const Keire::Matrix4& viewProjection,
+                                   const Keire::UiItemRect viewport, const bool selected,
+                                   const MeshBoundsResolver& resolveMeshBounds)
+        {
+            const auto world = transform.WorldMatrix();
+            const auto center = collider.Center();
+            const auto color = ColliderWireColor(collider, selected);
+            const float thickness = selected ? 2.0F : 1.0F;
+            switch (collider.Shape())
+            {
+            case Keire::ColliderShape::Box:
+            {
+                const auto halfExtent = collider.HalfExtent();
+                DrawWorldBox(ui, world, {center.X - halfExtent.X, center.Y - halfExtent.Y, center.Z - halfExtent.Z},
+                             {center.X + halfExtent.X, center.Y + halfExtent.Y, center.Z + halfExtent.Z},
+                             viewProjection, viewport, color, thickness);
+                break;
+            }
+            case Keire::ColliderShape::Sphere:
+                DrawLocalCircle(ui, world, center, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, collider.Radius(),
+                                viewProjection, viewport, color, thickness);
+                DrawLocalCircle(ui, world, center, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, collider.Radius(),
+                                viewProjection, viewport, color, thickness);
+                DrawLocalCircle(ui, world, center, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, collider.Radius(),
+                                viewProjection, viewport, color, thickness);
+                break;
+            case Keire::ColliderShape::Capsule:
+            {
+                const float halfHeight = collider.Height() * 0.5F;
+                const auto top = Add(center, {0.0F, halfHeight, 0.0F});
+                const auto bottom = Add(center, {0.0F, -halfHeight, 0.0F});
+                DrawLocalCircle(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, collider.Radius(),
+                                viewProjection, viewport, color, thickness);
+                DrawLocalCircle(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, collider.Radius(),
+                                viewProjection, viewport, color, thickness);
+                constexpr std::array radialAxes{Keire::Vector3{1.0F, 0.0F, 0.0F}, Keire::Vector3{-1.0F, 0.0F, 0.0F},
+                                                Keire::Vector3{0.0F, 0.0F, 1.0F}, Keire::Vector3{0.0F, 0.0F, -1.0F}};
+                for (const auto radial : radialAxes)
+                {
+                    const auto topPoint =
+                        Keire::Math::TransformPoint(world, Add(top, Multiply(radial, collider.Radius())));
+                    const auto bottomPoint =
+                        Keire::Math::TransformPoint(world, Add(bottom, Multiply(radial, collider.Radius())));
+                    const auto projectedTop = Project(topPoint, viewProjection, viewport);
+                    const auto projectedBottom = Project(bottomPoint, viewProjection, viewport);
+                    if (projectedTop && projectedBottom)
+                        ui.DrawLine(*projectedTop, *projectedBottom, color, thickness);
+                }
+                DrawLocalArc(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, collider.Radius(), 0.0F, Pi,
+                             viewProjection, viewport, color, thickness);
+                DrawLocalArc(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, collider.Radius(), Pi,
+                             Pi * 2.0F, viewProjection, viewport, color, thickness);
+                DrawLocalArc(ui, world, top, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, collider.Radius(), 0.0F, Pi,
+                             viewProjection, viewport, color, thickness);
+                DrawLocalArc(ui, world, bottom, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, collider.Radius(), Pi,
+                             Pi * 2.0F, viewProjection, viewport, color, thickness);
+                break;
+            }
+            case Keire::ColliderShape::ConvexMesh:
+            case Keire::ColliderShape::TriangleMesh:
+                if (resolveMeshBounds && collider.CollisionMesh())
+                {
+                    if (const auto bounds = resolveMeshBounds(collider.CollisionMesh()))
+                    {
+                        DrawWorldBox(ui, world, Add(bounds->Minimum, center), Add(bounds->Maximum, center),
+                                     viewProjection, viewport, color, thickness);
+                    }
+                }
+                break;
             }
         }
 
@@ -402,6 +573,8 @@ namespace KeireEditor
             m_Settings.LocalSpace = !m_Settings.LocalSpace;
         if (button("SceneSnap", Keire::UiIcon::Snap, "Toggle snapping", m_Settings.Snapping))
             m_Settings.Snapping = !m_Settings.Snapping;
+        if (button("SceneColliderEdit", Keire::UiIcon::Filter, "Edit collider shapes", m_Settings.EditColliders))
+            m_Settings.EditColliders = !m_Settings.EditColliders;
         if (button("SceneGizmoSettings", Keire::UiIcon::Settings, "Gizmo and snap settings", false))
             ui.OpenPopup("SceneSnapSettings");
 
@@ -419,6 +592,7 @@ namespace KeireEditor
             (void)ui.Checkbox("Scene icons", m_Settings.ShowIcons);
             (void)ui.Checkbox("Camera frustums", m_Settings.ShowCameraFrustums);
             (void)ui.Checkbox("Light directions", m_Settings.ShowLightDirections);
+            (void)ui.Checkbox("Edit collider shapes", m_Settings.EditColliders);
         }
         return {origin, {position.X - gap, origin.Y + size}};
     }
@@ -437,9 +611,11 @@ namespace KeireEditor
         bool selectionActivated = false;
         bool pointerConsumed = false;
         const bool hovered = viewport.Contains(pointer.Position);
-        const bool selectionRequested =
-            hovered && !pointerBlocked && pointer.LeftPressed && m_Drag.ActiveAxis == Axis::None;
-        if (hovered && !ui.ControlDown() && !ui.AltDown() && m_Drag.ActiveAxis == Axis::None)
+        const bool selectionRequested = hovered && !pointerBlocked && pointer.LeftPressed &&
+                                        m_Drag.ActiveAxis == Axis::None &&
+                                        m_ColliderDrag.Handle == ColliderHandle::None;
+        if (hovered && !ui.ControlDown() && !ui.AltDown() && m_Drag.ActiveAxis == Axis::None &&
+            m_ColliderDrag.Handle == ColliderHandle::None)
         {
             if (ui.Shortcut({Keire::UiKey::Q}))
                 (void)ApplyToolShortcut(Keire::UiKey::Q);
@@ -503,6 +679,19 @@ namespace KeireEditor
             drawIcons(scene->Query<Keire::SpotLightComponent>(), false, true);
         }
 
+        for (const auto& colliderEntity : scene->Query<Keire::ColliderComponent>())
+        {
+            const bool colliderSelected = selected == colliderEntity.Id();
+            if (!colliderSelected && !m_Settings.EditColliders)
+                continue;
+            const auto collider = colliderEntity.GetComponent<Keire::ColliderComponent>();
+            const auto colliderTransform = colliderEntity.GetComponent<Keire::TransformComponent>();
+            if (!collider || !collider->Enabled() || !colliderTransform || !colliderEntity.ActiveInHierarchy())
+                continue;
+            DrawColliderWireframe(ui, *colliderTransform, *collider, viewProjection, viewport, colliderSelected,
+                                  resolveMeshBounds);
+        }
+
         if (m_Settings.ShowLightDirections && selected)
         {
             const auto selectedLight = scene->FindEntity(selected);
@@ -518,6 +707,205 @@ namespace KeireEditor
 
         const auto entity = scene->FindEntity(selected);
         const auto transform = entity.GetComponent<Keire::TransformComponent>();
+        const auto collider = entity.GetComponent<Keire::ColliderComponent>();
+
+        struct ProjectedColliderHandle
+        {
+            ColliderHandle Handle = ColliderHandle::None;
+            Keire::UiPosition Position;
+            Keire::UiPosition ScreenAxis;
+            float ScreenPixelsPerUnit = 1.0F;
+        };
+        std::vector<ProjectedColliderHandle> colliderHandles;
+        const bool colliderEditing =
+            allowManipulation && m_Settings.EditColliders && entity && transform && collider && collider->Enabled();
+        if (colliderEditing)
+        {
+            const auto world = transform->WorldMatrix();
+            const auto appendHandle = [&](const ColliderHandle handle, const Keire::Vector3 localPosition,
+                                          const Keire::Vector3 localDirection)
+            {
+                const auto projected =
+                    Project(Keire::Math::TransformPoint(world, localPosition), viewProjection, viewport);
+                const auto projectedOutward = Project(
+                    Keire::Math::TransformPoint(world, Add(localPosition, localDirection)), viewProjection, viewport);
+                if (!projected || !projectedOutward)
+                    return;
+                const Keire::UiPosition screenAxis{projectedOutward->X - projected->X,
+                                                   projectedOutward->Y - projected->Y};
+                const float pixelsPerUnit = Distance(*projected, *projectedOutward);
+                if (!std::isfinite(pixelsPerUnit) || pixelsPerUnit < 0.5F)
+                    return;
+                colliderHandles.push_back({handle, *projected, screenAxis, pixelsPerUnit});
+            };
+            const auto center = collider->Center();
+            switch (collider->Shape())
+            {
+            case Keire::ColliderShape::Box:
+            {
+                const auto halfExtent = collider->HalfExtent();
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                {
+                    const auto direction = AxisVector(axis);
+                    const float extent = axis == 0 ? halfExtent.X : axis == 1 ? halfExtent.Y : halfExtent.Z;
+                    const auto handle = axis == 0   ? ColliderHandle::BoxX
+                                        : axis == 1 ? ColliderHandle::BoxY
+                                                    : ColliderHandle::BoxZ;
+                    appendHandle(handle, Add(center, Multiply(direction, extent)), direction);
+                    appendHandle(handle, Add(center, Multiply(direction, -extent)), Multiply(direction, -1.0F));
+                }
+                break;
+            }
+            case Keire::ColliderShape::Sphere:
+                for (std::size_t axis = 0; axis < 3; ++axis)
+                {
+                    const auto direction = AxisVector(axis);
+                    appendHandle(ColliderHandle::SphereRadius, Add(center, Multiply(direction, collider->Radius())),
+                                 direction);
+                    appendHandle(ColliderHandle::SphereRadius, Add(center, Multiply(direction, -collider->Radius())),
+                                 Multiply(direction, -1.0F));
+                }
+                break;
+            case Keire::ColliderShape::Capsule:
+            {
+                for (const auto direction : {Keire::Vector3{1.0F, 0.0F, 0.0F}, Keire::Vector3{-1.0F, 0.0F, 0.0F},
+                                             Keire::Vector3{0.0F, 0.0F, 1.0F}, Keire::Vector3{0.0F, 0.0F, -1.0F}})
+                {
+                    appendHandle(ColliderHandle::CapsuleRadius, Add(center, Multiply(direction, collider->Radius())),
+                                 direction);
+                }
+                const float end = collider->Height() * 0.5F + collider->Radius();
+                appendHandle(ColliderHandle::CapsuleHeight, Add(center, {0.0F, end, 0.0F}), {0.0F, 1.0F, 0.0F});
+                appendHandle(ColliderHandle::CapsuleHeight, Add(center, {0.0F, -end, 0.0F}), {0.0F, -1.0F, 0.0F});
+                break;
+            }
+            case Keire::ColliderShape::ConvexMesh:
+            case Keire::ColliderShape::TriangleMesh:
+                break;
+            }
+        }
+
+        const ProjectedColliderHandle* hoveredColliderHandle = nullptr;
+        float hoveredColliderDistance = 9.0F;
+        for (const auto& handle : colliderHandles)
+        {
+            const float distance = Distance(pointer.Position, handle.Position);
+            if (distance < hoveredColliderDistance)
+            {
+                hoveredColliderDistance = distance;
+                hoveredColliderHandle = &handle;
+            }
+            const Keire::UiItemRect rectangle{{handle.Position.X - 4.5F, handle.Position.Y - 4.5F},
+                                              {handle.Position.X + 4.5F, handle.Position.Y + 4.5F}};
+            ui.DrawFilledRectangle(rectangle, ColliderWireColor(*collider, true), 1.5F);
+            ui.DrawRectangle(rectangle, {0.03F, 0.04F, 0.06F, 0.9F}, 1.0F, 1.5F);
+        }
+
+        if (hovered && !pointerBlocked && pointer.LeftPressed && hoveredColliderHandle &&
+            m_ColliderDrag.Handle == ColliderHandle::None && m_Drag.ActiveAxis == Axis::None)
+        {
+            pointerConsumed = true;
+            m_ColliderDrag.Collider = collider;
+            m_ColliderDrag.Handle = hoveredColliderHandle->Handle;
+            m_ColliderDrag.StartPointer = pointer.Position;
+            m_ColliderDrag.ScreenAxis = hoveredColliderHandle->ScreenAxis;
+            m_ColliderDrag.ScreenPixelsPerUnit = hoveredColliderHandle->ScreenPixelsPerUnit;
+            m_ColliderDrag.InitialCenter = collider->Center();
+            m_ColliderDrag.InitialHalfExtent = collider->HalfExtent();
+            m_ColliderDrag.InitialRadius = collider->Radius();
+            m_ColliderDrag.InitialHeight = collider->Height();
+            m_ColliderDrag.UndoRecorded = false;
+        }
+
+        if (m_ColliderDrag.Handle != ColliderHandle::None)
+        {
+            pointerConsumed = true;
+            if (ui.KeyDown(Keire::UiKey::Escape))
+            {
+                if (m_ColliderDrag.UndoRecorded)
+                {
+                    m_ColliderDrag.Collider->SetCenter(m_ColliderDrag.InitialCenter);
+                    m_ColliderDrag.Collider->SetHalfExtent(m_ColliderDrag.InitialHalfExtent);
+                    m_ColliderDrag.Collider->SetRadius(m_ColliderDrag.InitialRadius);
+                    m_ColliderDrag.Collider->SetHeight(m_ColliderDrag.InitialHeight);
+                    scene->MarkDirty();
+                }
+                m_ColliderDrag = {};
+            }
+            else if (pointer.LeftDown)
+            {
+                const float axisLength =
+                    std::max(Length({m_ColliderDrag.ScreenAxis.X, m_ColliderDrag.ScreenAxis.Y, 0.0F}), 0.5F);
+                const float normalizedX = m_ColliderDrag.ScreenAxis.X / axisLength;
+                const float normalizedY = m_ColliderDrag.ScreenAxis.Y / axisLength;
+                const float projectedPixels = (pointer.Position.X - m_ColliderDrag.StartPointer.X) * normalizedX +
+                                              (pointer.Position.Y - m_ColliderDrag.StartPointer.Y) * normalizedY;
+                float amount = projectedPixels / m_ColliderDrag.ScreenPixelsPerUnit;
+                if (m_Settings.Snapping)
+                    amount = Snap(amount, m_Settings.ScaleSnap);
+
+                auto nextHalfExtent = m_ColliderDrag.InitialHalfExtent;
+                float nextRadius = m_ColliderDrag.InitialRadius;
+                float nextHeight = m_ColliderDrag.InitialHeight;
+                switch (m_ColliderDrag.Handle)
+                {
+                case ColliderHandle::BoxX:
+                    nextHalfExtent.X = std::clamp(m_ColliderDrag.InitialHalfExtent.X + amount, MinimumColliderGeometry,
+                                                  MaximumColliderGeometry);
+                    break;
+                case ColliderHandle::BoxY:
+                    nextHalfExtent.Y = std::clamp(m_ColliderDrag.InitialHalfExtent.Y + amount, MinimumColliderGeometry,
+                                                  MaximumColliderGeometry);
+                    break;
+                case ColliderHandle::BoxZ:
+                    nextHalfExtent.Z = std::clamp(m_ColliderDrag.InitialHalfExtent.Z + amount, MinimumColliderGeometry,
+                                                  MaximumColliderGeometry);
+                    break;
+                case ColliderHandle::SphereRadius:
+                case ColliderHandle::CapsuleRadius:
+                    nextRadius = std::clamp(m_ColliderDrag.InitialRadius + amount, MinimumColliderGeometry,
+                                            MaximumColliderGeometry);
+                    break;
+                case ColliderHandle::CapsuleHeight:
+                    nextHeight = std::clamp(m_ColliderDrag.InitialHeight + amount * 2.0F, MinimumColliderGeometry,
+                                            MaximumColliderGeometry);
+                    break;
+                case ColliderHandle::None:
+                    break;
+                }
+                const bool differsFromBaseline = nextHalfExtent != m_ColliderDrag.InitialHalfExtent ||
+                                                 nextRadius != m_ColliderDrag.InitialRadius ||
+                                                 nextHeight != m_ColliderDrag.InitialHeight;
+                const bool differsFromCurrent = nextHalfExtent != m_ColliderDrag.Collider->HalfExtent() ||
+                                                nextRadius != m_ColliderDrag.Collider->Radius() ||
+                                                nextHeight != m_ColliderDrag.Collider->Height();
+                if (differsFromCurrent && (differsFromBaseline || m_ColliderDrag.UndoRecorded))
+                {
+                    if (!m_ColliderDrag.UndoRecorded)
+                    {
+                        beginUndo("Resize Collider");
+                        m_ColliderDrag.UndoRecorded = true;
+                    }
+                    m_ColliderDrag.Collider->SetHalfExtent(nextHalfExtent);
+                    m_ColliderDrag.Collider->SetRadius(nextRadius);
+                    m_ColliderDrag.Collider->SetHeight(nextHeight);
+                    scene->MarkDirty();
+                }
+            }
+            else
+                m_ColliderDrag = {};
+        }
+
+        if (colliderEditing)
+        {
+            if (selectionRequested && !selectionActivated && !pointerConsumed)
+            {
+                selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+                selectionActivated = true;
+            }
+            return {selected, selectionActivated, pointerConsumed || m_ColliderDrag.Handle != ColliderHandle::None};
+        }
+
         if (!allowManipulation || !entity || !transform || m_Tool == SceneTool::View)
         {
             if (selectionRequested && !selectionActivated)
@@ -713,11 +1101,18 @@ namespace KeireEditor
         std::ifstream input(projectRoot / "Library/Editor/SceneTools.state");
         std::uint32_t version = 0;
         std::uint32_t tool = 0;
-        if (!(input >> version >> tool >> m_Settings.PositionSnap.X >> m_Settings.PositionSnap.Y >>
-              m_Settings.PositionSnap.Z >> m_Settings.RotationSnapDegrees >> m_Settings.ScaleSnap >>
-              m_Settings.Snapping >> m_Settings.LocalSpace >> m_Settings.ShowIcons >> m_Settings.ShowCameraFrustums >>
-              m_Settings.ShowLightDirections) ||
-            version != 1 || tool > static_cast<std::uint32_t>(SceneTool::Scale))
+        if (!(input >> version) || (version != 1 && version != 2) ||
+            !(input >> tool >> m_Settings.PositionSnap.X >> m_Settings.PositionSnap.Y >> m_Settings.PositionSnap.Z >>
+              m_Settings.RotationSnapDegrees >> m_Settings.ScaleSnap >> m_Settings.Snapping >> m_Settings.LocalSpace >>
+              m_Settings.ShowIcons >> m_Settings.ShowCameraFrustums >> m_Settings.ShowLightDirections) ||
+            tool > static_cast<std::uint32_t>(SceneTool::Scale))
+        {
+            m_Settings = {};
+            m_Tool = SceneTool::Translate;
+            return;
+        }
+        m_Settings.EditColliders = false;
+        if (version == 2 && !(input >> m_Settings.EditColliders))
         {
             m_Settings = {};
             m_Tool = SceneTool::Translate;
@@ -741,13 +1136,14 @@ namespace KeireEditor
         {
             std::filesystem::create_directories(projectRoot / "Library/Editor");
             std::ostringstream output;
-            output << "1\n"
+            output << "2\n"
                    << static_cast<std::uint32_t>(m_Tool) << '\n'
                    << m_Settings.PositionSnap.X << ' ' << m_Settings.PositionSnap.Y << ' ' << m_Settings.PositionSnap.Z
                    << '\n'
                    << m_Settings.RotationSnapDegrees << ' ' << m_Settings.ScaleSnap << '\n'
                    << m_Settings.Snapping << ' ' << m_Settings.LocalSpace << ' ' << m_Settings.ShowIcons << ' '
-                   << m_Settings.ShowCameraFrustums << ' ' << m_Settings.ShowLightDirections << '\n';
+                   << m_Settings.ShowCameraFrustums << ' ' << m_Settings.ShowLightDirections << ' '
+                   << m_Settings.EditColliders << '\n';
             Keire::Detail::WriteTextFileAtomically(projectRoot / "Library/Editor/SceneTools.state", output.str());
         }
         catch (...)

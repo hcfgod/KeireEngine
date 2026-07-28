@@ -9,6 +9,11 @@
 #include <string_view>
 #include <vector>
 
+namespace Keire
+{
+    struct SceneHierarchySnapshot;
+}
+
 namespace Keire::Detail
 {
     class SceneState final : public RefCounted
@@ -31,6 +36,7 @@ namespace Keire::Detail
         [[nodiscard]] bool Contains(EntityId id) const noexcept;
         [[nodiscard]] std::size_t Count() const noexcept;
         [[nodiscard]] std::optional<SceneObjectDefinition> SnapshotObject(EntityId id) const;
+        [[nodiscard]] SceneHierarchySnapshot HierarchySnapshot() const;
         [[nodiscard]] SceneDefinition Snapshot() const;
         [[nodiscard]] std::vector<Entity> Entities() const;
         [[nodiscard]] Entity Find(EntityId id) const noexcept;
@@ -59,6 +65,9 @@ namespace Keire::Detail
         void BeginPlay();
         void FixedUpdate(float deltaSeconds);
         void Update(float deltaSeconds);
+        void LateUpdate();
+        void DispatchAnimationEvent(EntityId entity, const AnimationEventMessage& event);
+        void DispatchPhysicsContact(EntityId entity, PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void EndPlay() noexcept;
         void FlushDeferred();
         void Close() noexcept;
