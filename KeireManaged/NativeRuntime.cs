@@ -45,6 +45,9 @@ internal static unsafe class NativeRuntime
 {
 #pragma warning disable CS0649
     internal static delegate* unmanaged<byte, NativeString, void> WriteLogIcall;
+    internal static delegate* unmanaged<ulong, NativeString, void> RegisterProfileNameIcall;
+    internal static delegate* unmanaged<ulong, double, double, void> RecordProfileSpanIcall;
+    internal static delegate* unmanaged<ulong, double, void> SetProfileCounterIcall;
     internal static delegate* unmanaged<float> DeltaTimeIcall;
     internal static delegate* unmanaged<float> FixedDeltaTimeIcall;
     internal static delegate* unmanaged<float> UnscaledDeltaTimeIcall;
@@ -94,6 +97,17 @@ internal static unsafe class NativeRuntime
         using NativeString nativeMessage = message;
         WriteLogIcall(level, nativeMessage);
     }
+
+    internal static void RegisterProfileName(ulong id, string name)
+    {
+        using NativeString nativeName = name;
+        RegisterProfileNameIcall(id, nativeName);
+    }
+
+    internal static void RecordProfileSpan(ulong id, double startMicroseconds, double durationMicroseconds) =>
+        RecordProfileSpanIcall(id, startMicroseconds, durationMicroseconds);
+
+    internal static void SetProfileCounter(ulong id, double value) => SetProfileCounterIcall(id, value);
 
     internal static float DeltaTime => DeltaTimeIcall();
     internal static float FixedDeltaTime => FixedDeltaTimeIcall();

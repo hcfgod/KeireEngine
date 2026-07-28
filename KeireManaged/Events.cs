@@ -65,6 +65,7 @@ public abstract class KeireEventBase
     [SerializeField] protected List<PersistentEventCall> persistentCalls = [];
 
     public int PersistentListenerCount => persistentCalls.Count;
+    protected bool HasPersistentListeners => persistentCalls.Count != 0;
 
     protected void InvokePersistent(object?[] arguments)
     {
@@ -113,7 +114,8 @@ public sealed class KeireEvent : KeireEventBase
 
     public void Invoke()
     {
-        InvokePersistent([]);
+        if (HasPersistentListeners)
+            InvokePersistent([]);
         RuntimeListeners?.Invoke();
     }
 }
@@ -129,7 +131,8 @@ public sealed class KeireEvent<T0> : KeireEventBase
 
     public void Invoke(T0 value0)
     {
-        InvokePersistent([value0]);
+        if (HasPersistentListeners)
+            InvokePersistent([value0]);
         RuntimeListeners?.Invoke(value0);
     }
 }
@@ -145,7 +148,8 @@ public sealed class KeireEvent<T0, T1> : KeireEventBase
 
     public void Invoke(T0 value0, T1 value1)
     {
-        InvokePersistent([value0, value1]);
+        if (HasPersistentListeners)
+            InvokePersistent([value0, value1]);
         RuntimeListeners?.Invoke(value0, value1);
     }
 }
@@ -161,7 +165,8 @@ public sealed class KeireEvent<T0, T1, T2> : KeireEventBase
 
     public void Invoke(T0 value0, T1 value1, T2 value2)
     {
-        InvokePersistent([value0, value1, value2]);
+        if (HasPersistentListeners)
+            InvokePersistent([value0, value1, value2]);
         RuntimeListeners?.Invoke(value0, value1, value2);
     }
 }
@@ -177,7 +182,8 @@ public sealed class KeireEvent<T0, T1, T2, T3> : KeireEventBase
 
     public void Invoke(T0 value0, T1 value1, T2 value2, T3 value3)
     {
-        InvokePersistent([value0, value1, value2, value3]);
+        if (HasPersistentListeners)
+            InvokePersistent([value0, value1, value2, value3]);
         RuntimeListeners?.Invoke(value0, value1, value2, value3);
     }
 }

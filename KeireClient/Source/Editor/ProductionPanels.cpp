@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <ranges>
@@ -549,47 +550,193 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             return;
         }
 
-        const auto frame = profiler->LatestFrame();
-        ui.Text("Capture " + std::to_string(frame.Sequence));
+        const auto liveFrame = profiler->LatestFrame();
+        const auto liveHistory = profiler->RecentSummaries(240);
+        if (ui.Checkbox("Freeze capture", m_ProfilerPaused))
+        {
+            if (m_ProfilerPaused)
+            {
+                m_FrozenProfileFrame = liveFrame;
+                m_FrozenProfileHistory = liveHistory;
+            }
+            else
+            {
+                m_FrozenProfileFrame = {};
+                m_FrozenProfileHistory.clear();
+            }
+        }
+        ui.SameLine();
+        (void)ui.Checkbox("Viewport FPS overlay", m_ShowPerformanceOverlay);
+
+        const auto& frame = m_ProfilerPaused ? m_FrozenProfileFrame : liveFrame;
+        const auto& history = m_ProfilerPaused ? m_FrozenProfileHistory : liveHistory;
+        if (frame.Sequence == 0)
+        {
+            DrawEmptyState(ui, "Waiting for capture", "The profiler has not completed an application frame yet.",
+                           "Keep the editor active for one frame.");
+            return;
+        }
+
+        std::vector<double> frameTimes;
+        frameTimes.reserve(history.size());
+        double totalFrameMicroseconds = 0.0;
+        for (const auto& sample : history)
+        {
+            if (sample.DurationMicroseconds <= 0.0)
+                continue;
+            frameTimes.push_back(sample.DurationMicroseconds);
+            totalFrameMicroseconds += sample.DurationMicroseconds;
+        }
+        std::ranges::sort(frameTimes);
+        const auto percentile = [&](const double fraction)
+        {
+            if (frameTimes.empty())
+                return 0.0;
+            const auto index =
+                static_cast<std::size_t>(std::clamp(fraction, 0.0, 1.0) * static_cast<double>(frameTimes.size() - 1));
+            return frameTimes[index];
+        };
+        const double averageFrameMicroseconds =
+            frameTimes.empty() ? 0.0 : totalFrameMicroseconds / static_cast<double>(frameTimes.size());
+        const double p95FrameMicroseconds = percentile(0.95);
+        const double p99FrameMicroseconds = percentile(0.99);
+        const double maximumFrameMicroseconds = frameTimes.empty() ? 0.0 : frameTimes.back();
+        const auto framesPerSecond = frame.DurationMicroseconds > 0.0 ? 1'000'000.0 / frame.DurationMicroseconds : 0.0;
+        const auto averageFramesPerSecond =
+            averageFrameMicroseconds > 0.0 ? 1'000'000.0 / averageFrameMicroseconds : 0.0;
+        const auto onePercentLow = p99FrameMicroseconds > 0.0 ? 1'000'000.0 / p99FrameMicroseconds : 0.0;
+        const double stutterThreshold = std::max(33'333.0, averageFrameMicroseconds * 1.5);
+        const auto stutterCount =
+            std::ranges::count_if(frameTimes, [&](const double value) { return value > stutterThreshold; });
+
+        ui.TextColored(m_ProfilerPaused ? m_Theme.Warning : m_Theme.Accent,
+                       m_ProfilerPaused ? "FROZEN PERFORMANCE CAPTURE" : "LIVE PERFORMANCE CAPTURE");
+        ui.Text("Frame " + std::to_string(frame.Sequence) + "  |  " +
+                std::to_string(static_cast<std::uint32_t>(std::lround(framesPerSecond))) + " FPS  |  " +
+                FormatMicroseconds(frame.DurationMicroseconds));
+        ui.TextColored(m_Theme.MutedText,
+                       "Rolling " + std::to_string(history.size()) + " frames  |  Avg " +
+                           std::to_string(static_cast<std::uint32_t>(std::lround(averageFramesPerSecond))) +
+                           " FPS  |  1% low " + std::to_string(static_cast<std::uint32_t>(std::lround(onePercentLow))) +
+                           " FPS");
+        ui.TextColored(stutterCount == 0 ? m_Theme.Success : m_Theme.Warning,
+                       "P95 " + FormatMicroseconds(p95FrameMicroseconds) + "  |  P99 " +
+                           FormatMicroseconds(p99FrameMicroseconds) + "  |  Max " +
+                           FormatMicroseconds(maximumFrameMicroseconds) + "  |  Stutters " +
+                           std::to_string(stutterCount));
         if (frame.Truncated)
-            ui.TextColored(m_Theme.Warning, "Capture was truncated by the configured limits.");
+            ui.TextColored(m_Theme.Warning, "Capture truncated: " + std::to_string(frame.DroppedSpans) + " spans and " +
+                                                std::to_string(frame.DroppedCounters) + " counters dropped.");
+
+        std::ostringstream snapshot;
+        snapshot << "Keire Profiler Capture " << frame.Sequence << '\n'
+                 << "Frame: " << FormatMicroseconds(frame.DurationMicroseconds) << " (" << framesPerSecond << " FPS)\n"
+                 << "Average: " << FormatMicroseconds(averageFrameMicroseconds) << " (" << averageFramesPerSecond
+                 << " FPS)\n"
+                 << "P95: " << FormatMicroseconds(p95FrameMicroseconds)
+                 << "\nP99: " << FormatMicroseconds(p99FrameMicroseconds) << "\n1% low: " << onePercentLow << " FPS\n"
+                 << "Stutters: " << stutterCount << "\nSpans: " << frame.Spans.size()
+                 << "\nCounters: " << frame.Counters.size() << '\n';
+        for (const auto& span : frame.Spans)
+            snapshot << "SPAN," << ProfileCategoryName(span.Category) << ',' << span.Name << ',' << span.Thread << ','
+                     << span.StartMicroseconds << ',' << span.DurationMicroseconds << '\n';
+        for (const auto& counter : frame.Counters)
+            snapshot << "COUNTER," << ProfileCategoryName(counter.Category) << ',' << counter.Name << ','
+                     << counter.Value << '\n';
+
+        if (ui.Button("Copy Full Snapshot"))
+            Owner().Windows()->SetClipboardText(snapshot.str());
+        ui.SameLine();
+        if (ui.Button("Copy Frame CSV"))
+        {
+            std::ostringstream csv;
+            csv << "sequence,start_us,duration_us,spans,counters,dropped_spans,dropped_counters\n";
+            for (const auto& sample : history)
+                csv << sample.Sequence << ',' << sample.StartMicroseconds << ',' << sample.DurationMicroseconds << ','
+                    << sample.SpanCount << ',' << sample.CounterCount << ',' << sample.DroppedSpans << ','
+                    << sample.DroppedCounters << '\n';
+            Owner().Windows()->SetClipboardText(csv.str());
+        }
+
         ui.Separator();
-        if (auto spans = ui.BeginTreeNode("CPU spans (" + std::to_string(frame.Spans.size()) + ")", true); spans)
+        if (auto overview = ui.BeginTreeNode("Subsystem overview", true); overview)
+        {
+            ui.Text("Application  " + FormatMicroseconds(frame.ApplicationMicroseconds));
+            ui.Text("Scripting    " + FormatMicroseconds(frame.ScriptingMicroseconds));
+            ui.Text("Physics      " + FormatMicroseconds(frame.PhysicsMicroseconds));
+            ui.Text("Rendering    " + FormatMicroseconds(frame.RenderingMicroseconds));
+            ui.Text("Audio        " + FormatMicroseconds(frame.AudioMicroseconds));
+            if (const auto renderer = Owner().Renderer())
+            {
+                const auto statistics = renderer->Statistics();
+                ui.Text("GPU submit   " + std::to_string(statistics.DrawCalls) + " draws / " +
+                        std::to_string(statistics.Triangles) + " triangles");
+                ui.Text("Visibility   " + std::to_string(statistics.VisibleSubmeshes) + " visible / " +
+                        std::to_string(statistics.CulledSubmeshes) + " culled / " +
+                        std::to_string(statistics.InstanceBatches) + " batches");
+                ui.Text("Frame graph  " + std::to_string(statistics.ExecutedFrameGraphPasses) + " / " +
+                        std::to_string(statistics.PlannedFrameGraphPasses) + " passes / " +
+                        std::to_string(statistics.FrameGraphTransitions) + " transitions");
+                ui.Text("Renderer CPU " + std::to_string(statistics.CpuPreparationMilliseconds) + " ms / P95 " +
+                        std::to_string(statistics.CpuPreparationP95Milliseconds) + " ms / latency " +
+                        std::to_string(statistics.RendererLatencyMilliseconds) + " ms");
+                if (statistics.OverflowedLightTiles != 0)
+                    ui.TextColored(m_Theme.Warning,
+                                   std::to_string(statistics.OverflowedLightTiles) + " overflowed light tiles");
+            }
+            if (const auto assets = Owner().Assets())
+            {
+                const auto statistics = assets->Statistics();
+                ui.Text("Assets       " + std::to_string(statistics.KnownAssets) + " known / " +
+                        std::to_string(statistics.ResidentBytes) + " resident bytes");
+                ui.Text("Streaming    " + std::to_string(statistics.QueuedAssets) + " queued / " +
+                        std::to_string(statistics.LoadingAssets) + " loading / high-water " +
+                        std::to_string(statistics.QueueHighWaterMark));
+                ui.Text("Asset health " + std::to_string(statistics.CompletedLoads) + " loaded / " +
+                        std::to_string(statistics.FailedLoads) + " failed / " + std::to_string(statistics.Evictions) +
+                        " evicted");
+            }
+            if (const auto audio = Owner().Audio())
+            {
+                const auto statistics = audio->Statistics();
+                ui.Text("Audio voices " + std::to_string(statistics.AudibleVoices) + " audible / " +
+                        std::to_string(statistics.VirtualVoices) + " virtual / " + std::to_string(statistics.Voices) +
+                        " allocated");
+                ui.Text("Audio frames " + std::to_string(statistics.RenderedFrames));
+                if (statistics.Underruns != 0)
+                    ui.TextColored(m_Theme.Warning, std::to_string(statistics.Underruns) + " output underruns");
+            }
+        }
+
+        if (auto spans = ui.BeginTreeNode("CPU hotspots (" + std::to_string(frame.Spans.size()) + ")", true); spans)
         {
             auto ordered = frame.Spans;
             std::ranges::sort(ordered, std::greater{}, &Keire::ProfileSpan::DurationMicroseconds);
-            for (const auto& span : ordered)
-                ui.Text(ProfileCategoryName(span.Category) + " / " + span.Name + "  " +
-                        FormatMicroseconds(span.DurationMicroseconds));
+            ui.TextColored(m_Theme.MutedText, "Click any row to copy it.");
+            for (std::size_t index = 0; index < ordered.size(); ++index)
+            {
+                const auto& span = ordered[index];
+                const auto line = ProfileCategoryName(span.Category) + " / " + span.Name + "  " +
+                                  FormatMicroseconds(span.DurationMicroseconds) + "  thread " +
+                                  std::to_string(span.Thread);
+                auto id = ui.PushId(std::to_string(index));
+                if (ui.Selectable(line))
+                    Owner().Windows()->SetClipboardText(line);
+            }
         }
         if (auto counters = ui.BeginTreeNode("Counters (" + std::to_string(frame.Counters.size()) + ")", true);
             counters)
         {
-            for (const auto& counter : frame.Counters)
-                ui.Text(ProfileCategoryName(counter.Category) + " / " + counter.Name + "  " +
-                        std::to_string(counter.Value));
-        }
-
-        ui.Separator();
-        if (const auto renderer = Owner().Renderer())
-        {
-            const auto statistics = renderer->Statistics();
-            ui.Text("Rendering: " + std::to_string(statistics.DrawCalls) + " draws, " +
-                    std::to_string(statistics.Triangles) + " triangles");
-        }
-        if (const auto assets = Owner().Assets())
-        {
-            const auto statistics = assets->Statistics();
-            ui.Text("Assets: " + std::to_string(statistics.KnownAssets) + " known, " +
-                    std::to_string(statistics.ResidentBytes) + " bytes");
-        }
-        if (const auto audio = Owner().Audio())
-        {
-            const auto statistics = audio->Statistics();
-            ui.Text("Audio: " + std::to_string(statistics.AudibleVoices) + " audible / " +
-                    std::to_string(statistics.Voices) + " voices");
-            if (statistics.Underruns != 0)
-                ui.TextColored(m_Theme.Warning, std::to_string(statistics.Underruns) + " audio underruns");
+            ui.TextColored(m_Theme.MutedText, "Click any row to copy it.");
+            for (std::size_t index = 0; index < frame.Counters.size(); ++index)
+            {
+                const auto& counter = frame.Counters[index];
+                const auto line =
+                    ProfileCategoryName(counter.Category) + " / " + counter.Name + "  " + std::to_string(counter.Value);
+                auto id = ui.PushId("counter-" + std::to_string(index));
+                if (ui.Selectable(line))
+                    Owner().Windows()->SetClipboardText(line);
+            }
         }
     }
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+- Improved editor frame pacing with mailbox presentation, removed duplicate Play Mode UI/audio synchronization,
+  eliminated native profiling-scope and render-preparation hot-path allocations, and added detailed frame-stage,
+  swapchain-wait, command-recording, UI-recording, and GPU-submission diagnostics.
+
+- Expanded profiling with bounded frame history, percentile and stutter analysis, reusable recorder storage, managed
+  samples/counters, a modern copyable diagnostics workspace, a Scene/Game FPS overlay, and active-viewport cursor
+  centering on capture release.
+
 - Reduced managed-event editor and Play Mode overhead by sharing immutable callback metadata, caching persistent
   callback resolution, caching Inspector entity lists, and removing per-frame cursor bridge queries.
 

@@ -80,6 +80,8 @@ namespace Keire
         virtual ~IScriptRuntimeServices() = default;
 
         virtual void WriteManagedLog(ManagedLogLevel level, std::string_view message) noexcept = 0;
+        virtual void RecordManagedProfileSpan(std::string_view, double, double) noexcept {}
+        virtual void SetManagedProfileCounter(std::string_view, double) noexcept {}
         [[nodiscard]] virtual float ManagedDeltaTime() const noexcept = 0;
         [[nodiscard]] virtual float ManagedFixedDeltaTime() const noexcept { return 1.0F / 60.0F; }
         [[nodiscard]] virtual float ManagedUnscaledDeltaTime() const noexcept { return ManagedDeltaTime(); }
@@ -265,6 +267,14 @@ namespace Keire
         std::string Diagnostic;
     };
 
+    struct ManagedRuntimeMetrics
+    {
+        std::uint64_t Generation = 0;
+        std::size_t ActiveInstances = 0;
+        std::size_t FaultedInstances = 0;
+        std::size_t Diagnostics = 0;
+    };
+
     struct ManagedBehaviourTypeDescriptor
     {
         std::string FullName;
@@ -338,6 +348,7 @@ namespace Keire
                              float deltaSeconds = 0.0F);
         [[nodiscard]] bool DestroyBehaviour(ManagedBehaviourInstanceId instance);
         [[nodiscard]] std::vector<ManagedRuntimeDiagnostic> RuntimeDiagnostics() const;
+        [[nodiscard]] ManagedRuntimeMetrics Metrics() const;
         [[nodiscard]] bool RetryBehaviour(ManagedBehaviourInstanceId instance);
         [[nodiscard]] bool SetBehaviourEnabled(ManagedBehaviourInstanceId instance, bool enabled);
         void InstallManagedComponents(Ref<ComponentRegistry> registry);

@@ -36,6 +36,7 @@ namespace Keire
         ProfilerMode Mode = ProfilerMode::Disabled;
         std::size_t MaximumSpansPerFrame = 16U * 1024U;
         std::size_t MaximumCountersPerFrame = 1024U;
+        std::size_t MaximumRetainedFrameSummaries = 600U;
     };
 
     struct ProfileSpan
@@ -57,8 +58,34 @@ namespace Keire
     struct ProfileFrame
     {
         std::uint64_t Sequence = 0;
+        double StartMicroseconds = 0.0;
+        double DurationMicroseconds = 0.0;
         std::vector<ProfileSpan> Spans;
         std::vector<ProfileCounter> Counters;
+        std::size_t DroppedSpans = 0;
+        std::size_t DroppedCounters = 0;
+        double ApplicationMicroseconds = 0.0;
+        double ScriptingMicroseconds = 0.0;
+        double PhysicsMicroseconds = 0.0;
+        double RenderingMicroseconds = 0.0;
+        double AudioMicroseconds = 0.0;
+        bool Truncated = false;
+    };
+
+    struct ProfileFrameSummary
+    {
+        std::uint64_t Sequence = 0;
+        double StartMicroseconds = 0.0;
+        double DurationMicroseconds = 0.0;
+        std::size_t SpanCount = 0;
+        std::size_t CounterCount = 0;
+        std::size_t DroppedSpans = 0;
+        std::size_t DroppedCounters = 0;
+        double ApplicationMicroseconds = 0.0;
+        double ScriptingMicroseconds = 0.0;
+        double PhysicsMicroseconds = 0.0;
+        double RenderingMicroseconds = 0.0;
+        double AudioMicroseconds = 0.0;
         bool Truncated = false;
     };
 
@@ -77,6 +104,8 @@ namespace Keire
                         double durationMicroseconds) noexcept;
         void SetCounter(ProfileCategory category, std::string_view name, double value) noexcept;
         [[nodiscard]] ProfileFrame LatestFrame() const;
+        [[nodiscard]] ProfileFrameSummary LatestSummary() const;
+        [[nodiscard]] std::vector<ProfileFrameSummary> RecentSummaries(std::size_t maximumFrames) const;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close();
 
@@ -97,7 +126,11 @@ namespace Keire
         ProfileScope& operator=(ProfileScope&& other) noexcept;
 
       private:
-        class Impl;
-        std::unique_ptr<Impl> m_Impl;
+        void Finish() noexcept;
+
+        Ref<Profiler> m_Target;
+        ProfileCategory m_Category = ProfileCategory::Application;
+        std::string m_Name;
+        double m_StartMicroseconds = 0.0;
     };
 } // namespace Keire

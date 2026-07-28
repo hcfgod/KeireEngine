@@ -785,6 +785,10 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::ExecuteFrame(ImDrawData* drawData)
     {
+        Statistics.CommandRecordingMilliseconds = 0.0F;
+        Statistics.SwapchainWaitMilliseconds = 0.0F;
+        Statistics.UiRecordingMilliseconds = 0.0F;
+        Statistics.GpuSubmissionMilliseconds = 0.0F;
         if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
             throw std::runtime_error("Injected GPU device loss.");
         if (FrameUploadCommands || FrameUploadPass || !FrameUploadTransfers.empty())
@@ -812,8 +816,11 @@ namespace Keire::RenderBackend
 
         try
         {
+            const auto recordingStarted = std::chrono::steady_clock::now();
             for (const auto& surface : LiveSurfaces())
                 RecordSurface(commands, *surface);
+            Statistics.CommandRecordingMilliseconds =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - recordingStarted).count();
 
             SDL_EndGPUCopyPass(FrameUploadPass);
             FrameUploadPass = nullptr;
@@ -825,13 +832,17 @@ namespace Keire::RenderBackend
             FrameUploadTransfers.clear();
 
             SDL_GPUTexture* swapchain = nullptr;
+            const auto swapchainStarted = std::chrono::steady_clock::now();
             if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, NativeWindow, &swapchain, nullptr, nullptr))
             {
                 (void)SDL_CancelGPUCommandBuffer(commands);
                 commands = nullptr;
                 throw std::runtime_error("SDL_WaitAndAcquireGPUSwapchainTexture failed: " + LastSdlError());
             }
+            Statistics.SwapchainWaitMilliseconds =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - swapchainStarted).count();
 
+            const auto uiRecordingStarted = std::chrono::steady_clock::now();
             if (swapchain)
             {
                 const bool renderUi = drawData && drawData->DisplaySize.x > 0.0F && drawData->DisplaySize.y > 0.0F;
@@ -852,11 +863,16 @@ namespace Keire::RenderBackend
                 SDL_EndGPURenderPass(pass);
                 ++Statistics.Passes;
             }
+            Statistics.UiRecordingMilliseconds =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uiRecordingStarted).count();
 
+            const auto submissionStarted = std::chrono::steady_clock::now();
             SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
             commands = nullptr;
             if (!fence)
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
+            Statistics.GpuSubmissionMilliseconds =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - submissionStarted).count();
             InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
                                 std::move(PendingRetiredTextures), std::move(PendingRetiredPipelines),
                                 std::move(PendingRetiredForwardPlus), std::move(FrameTransientBuffers)});

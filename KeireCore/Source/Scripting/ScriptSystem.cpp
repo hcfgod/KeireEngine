@@ -1315,6 +1315,56 @@ namespace Keire
             }
         }
 
+        static void RuntimeRegisterProfileName(const std::uint64_t id, const Coral::String name) noexcept
+        {
+            if (!CurrentRuntime || id == 0)
+                return;
+            try
+            {
+                std::scoped_lock lock(CurrentRuntime->Mutex);
+                CurrentRuntime->ProfileNames.insert_or_assign(id, static_cast<std::string>(name));
+            }
+            catch (...)
+            {
+            }
+        }
+
+        static void RuntimeRecordProfileSpan(const std::uint64_t id, const double startMicroseconds,
+                                             const double durationMicroseconds) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return;
+            try
+            {
+                std::scoped_lock lock(CurrentRuntime->Mutex);
+                const auto found = CurrentRuntime->ProfileNames.find(id);
+                if (found != CurrentRuntime->ProfileNames.end())
+                {
+                    CurrentRuntime->Specification.RuntimeServices->RecordManagedProfileSpan(
+                        found->second, startMicroseconds, durationMicroseconds);
+                }
+            }
+            catch (...)
+            {
+            }
+        }
+
+        static void RuntimeSetProfileCounter(const std::uint64_t id, const double value) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return;
+            try
+            {
+                std::scoped_lock lock(CurrentRuntime->Mutex);
+                const auto found = CurrentRuntime->ProfileNames.find(id);
+                if (found != CurrentRuntime->ProfileNames.end())
+                    CurrentRuntime->Specification.RuntimeServices->SetManagedProfileCounter(found->second, value);
+            }
+            catch (...)
+            {
+            }
+        }
+
         [[nodiscard]] static float RuntimeDeltaTime() noexcept
         {
             return CurrentRuntime && CurrentRuntime->Specification.RuntimeServices
@@ -2239,6 +2289,7 @@ namespace Keire
         std::unordered_map<std::uint64_t, BehaviourInstance> Instances;
         std::vector<ComponentTypeId> InstalledComponentTypes;
         std::vector<ManagedRuntimeDiagnostic> RuntimeDiagnostics;
+        std::unordered_map<std::uint64_t, std::string> ProfileNames;
         std::uint64_t NextInstance = 1;
         std::shared_ptr<Impl*> Lifetime;
         ManagedReloadStatus Reload;
@@ -2612,6 +2663,12 @@ namespace Keire
                                              std::to_string(static_cast<int>(managedApi.GetLoadStatus())) + ").");
                 managedApi.AddInternalCall("Keire.NativeRuntime", "WriteLogIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeWriteLog));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "RegisterProfileNameIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeRegisterProfileName));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "RecordProfileSpanIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeRecordProfileSpan));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetProfileCounterIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetProfileCounter));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DeltaTimeIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeDeltaTime));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "FixedDeltaTimeIcall",
@@ -2987,6 +3044,18 @@ namespace Keire
     {
         m_Impl->RequireOwner();
         return m_Impl->RuntimeDiagnostics;
+    }
+
+    ManagedRuntimeMetrics ScriptSystem::Metrics() const
+    {
+        m_Impl->RequireOwner();
+        ManagedRuntimeMetrics result;
+        result.Generation = m_Impl->Reload.Generation;
+        result.ActiveInstances = m_Impl->Instances.size();
+        result.Diagnostics = m_Impl->RuntimeDiagnostics.size();
+        result.FaultedInstances = static_cast<std::size_t>(
+            std::ranges::count_if(m_Impl->Instances, [](const auto& entry) { return entry.second.Faulted; }));
+        return result;
     }
 
     bool ScriptSystem::RetryBehaviour(const ManagedBehaviourInstanceId instance)

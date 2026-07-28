@@ -226,7 +226,6 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (playActive)
         {
             const auto session = document.PlaySession();
-            session->SetPresentationViewport(size.Width, size.Height);
             presentation = session->Presentation();
         }
         else

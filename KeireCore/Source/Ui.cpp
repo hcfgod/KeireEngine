@@ -834,6 +834,9 @@ namespace Keire
         case UiKey::Escape:
             chord = ImGuiKey_Escape;
             break;
+        case UiKey::Tab:
+            chord = ImGuiKey_Tab;
+            break;
         case UiKey::Delete:
             chord = ImGuiKey_Delete;
             break;
@@ -1440,6 +1443,9 @@ namespace Keire
             break;
         case UiKey::Escape:
             imguiKey = ImGuiKey_Escape;
+            break;
+        case UiKey::Tab:
+            imguiKey = ImGuiKey_Tab;
             break;
         case UiKey::Delete:
             imguiKey = ImGuiKey_Delete;

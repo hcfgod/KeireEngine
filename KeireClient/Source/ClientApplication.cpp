@@ -346,6 +346,7 @@ namespace Keire
 
         specification.TargetFrameRate = commandLine.SmokeWindow ? 240 : 0;
         specification.Ui.Mode = commandLine.SmokeWindow ? UiMode::Disabled : UiMode::Rendered;
+        specification.Ui.PresentMode = UiPresentMode::Mailbox;
         specification.Ui.Workspace.Enabled = !commandLine.SmokeWindow;
         specification.Ui.Workspace.Ephemeral = commandLine.SmokeUi;
         specification.Ui.Workspace.BuildFactoryLayout = BuildEditorLayout;

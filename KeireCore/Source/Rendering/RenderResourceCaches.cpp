@@ -1,5 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
+#include <array>
+
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/Log.h"
@@ -121,7 +123,9 @@ namespace Keire::RenderBackend
         packet.Lighting = ResolveLighting(request.Scene);
         packet.LocalLights = ResolveLocalLights(request.Scene);
         packet.DrawGrid = request.DrawGrid;
-        for (const auto& entity : request.Scene->Query<MeshRendererComponent>())
+        const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
+        packet.DrawItems.reserve(renderEntities.size());
+        for (const auto& entity : renderEntities)
         {
             if (!entity.ActiveInHierarchy())
                 continue;
@@ -148,9 +152,11 @@ namespace Keire::RenderBackend
         constexpr std::size_t sampleWindow = 120;
         if (PreparationSamples.size() > sampleWindow)
             PreparationSamples.pop_front();
-        std::vector<float> orderedSamples(PreparationSamples.begin(), PreparationSamples.end());
-        std::ranges::sort(orderedSamples);
-        const auto percentileIndex = (orderedSamples.size() * 95U + 99U) / 100U - 1U;
+        std::array<float, sampleWindow> orderedSamples{};
+        std::ranges::copy(PreparationSamples, orderedSamples.begin());
+        std::ranges::sort(orderedSamples.begin(),
+                          orderedSamples.begin() + static_cast<std::ptrdiff_t>(PreparationSamples.size()));
+        const auto percentileIndex = (PreparationSamples.size() * 95U + 99U) / 100U - 1U;
         Statistics.CpuPreparationP95Milliseconds = orderedSamples[percentileIndex];
     }
 

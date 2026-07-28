@@ -64,6 +64,7 @@ namespace Keire
     {
         Enter,
         Escape,
+        Tab,
         Delete,
         F2,
         A,

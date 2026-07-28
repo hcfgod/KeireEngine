@@ -960,6 +960,7 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
 
 void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
 {
+    m_GameViewportRect = {};
     if (auto gamePanel = ui.BeginPanel(m_Game); gamePanel)
     {
         constexpr std::array aspectLabels{std::string_view("Free"), std::string_view("16:9"), std::string_view("16:10"),
@@ -1022,6 +1023,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         Owner().Renderer()->Submit({scene, m_GameRenderView, false, environment});
         ui.Image(m_GameRenderView->Surface(), size);
         const auto imageRect = ui.LastItemRect();
+        m_GameViewportRect = imageRect;
 
         Keire::Ref<Keire::ScenePresentationRuntime> presentation;
         const auto playSession = m_SceneDocument->PlaySession();
@@ -1074,6 +1076,52 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                     presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Middle, false);
             }
         }
+        if (playActive)
+            DrawPerformanceOverlay(ui, imageRect, "GAME");
+    }
+}
+
+void EditorWorkspaceLayer::DrawPerformanceOverlay(Keire::UiFrame& ui, const Keire::UiItemRect viewport,
+                                                  const std::string_view label)
+{
+    if (!m_ShowPerformanceOverlay || viewport.Size().Width < 220.0F || viewport.Size().Height < 80.0F)
+        return;
+    const auto profiler = Owner().GetProfiler();
+    if (!profiler || !profiler->IsOpen())
+        return;
+    const auto frame = profiler->LatestSummary();
+    if (frame.Sequence == 0 || frame.DurationMicroseconds <= 0.0)
+        return;
+
+    const auto decimal = [](const double value)
+    {
+        const auto scaled = static_cast<std::int64_t>(std::lround(std::max(0.0, value) * 10.0));
+        return std::to_string(scaled / 10) + "." + std::to_string(scaled % 10);
+    };
+    const double frameMilliseconds = frame.DurationMicroseconds / 1000.0;
+    const auto framesPerSecond = static_cast<std::uint32_t>(std::lround(1'000'000.0 / frame.DurationMicroseconds));
+    const auto performanceColor =
+        frameMilliseconds <= 16.7 ? m_Theme.Success : (frameMilliseconds <= 33.3 ? m_Theme.Warning : m_Theme.Error);
+    const Keire::UiItemRect overlay{{viewport.Minimum.X + 12.0F, viewport.Minimum.Y + 12.0F},
+                                    {viewport.Minimum.X + 292.0F, viewport.Minimum.Y + 102.0F}};
+    ui.DrawFilledRectangle(overlay, {0.018F, 0.024F, 0.035F, 0.92F}, 7.0F);
+    ui.DrawRectangle(overlay, {performanceColor.Red, performanceColor.Green, performanceColor.Blue, 0.72F}, 1.0F, 7.0F);
+    ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 9.0F}, m_Theme.MutedText,
+                       "PERFORMANCE / " + std::string(label), 11.0F, overlay);
+    ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 29.0F}, performanceColor,
+                       std::to_string(framesPerSecond) + " FPS   " + decimal(frameMilliseconds) + " ms", 16.0F,
+                       overlay);
+    ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 54.0F}, m_Theme.Text,
+                       "Scripts " + decimal(frame.ScriptingMicroseconds / 1000.0) + " ms   " +
+                           std::to_string(frame.SpanCount) + " spans",
+                       11.0F, overlay);
+    if (const auto renderer = Owner().Renderer())
+    {
+        const auto statistics = renderer->Statistics();
+        ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 72.0F}, m_Theme.MutedText,
+                           std::to_string(statistics.DrawCalls) + " draws   " + std::to_string(statistics.Triangles) +
+                               " triangles",
+                           11.0F, overlay);
     }
 }
 

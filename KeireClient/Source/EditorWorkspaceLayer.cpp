@@ -1145,7 +1145,29 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     DrawDialogs(ui, workspace);
     DrawExternalAssetImport(ui);
 
+    const bool playActive =
+        m_SceneDocument->PlaySession() && m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped;
+    if (!playActive)
+    {
+        const auto windows = Owner().Windows();
+        const auto window = Owner().MainWindow();
+        if (windows && window && windows->GetCursorMode(window->Id()) != Keire::CursorMode::Normal &&
+            (ui.Shortcut({.Key = Keire::UiKey::Escape, .Global = true}) ||
+             ui.Shortcut({.Key = Keire::UiKey::Tab, .Global = true})))
+        {
+            const auto viewport = m_SceneViewportPanel->ViewportRect();
+            windows->SetCursorMode(window->Id(), Keire::CursorMode::Normal);
+            if (viewport.Size().Width > 0.0F && viewport.Size().Height > 0.0F)
+            {
+                windows->WarpCursor(window->Id(),
+                                    {static_cast<std::int32_t>((viewport.Minimum.X + viewport.Maximum.X) * 0.5F),
+                                     static_cast<std::int32_t>((viewport.Minimum.Y + viewport.Maximum.Y) * 0.5F)});
+            }
+        }
+    }
     m_SceneViewportPanel->Draw(ui);
+    if (!playActive)
+        DrawPerformanceOverlay(ui, m_SceneViewportPanel->ViewportRect(), "SCENE");
     DrawGame(ui);
     m_HierarchyPanel->Draw(ui);
     m_InspectorPanel->Draw(ui);

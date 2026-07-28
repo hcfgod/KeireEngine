@@ -268,26 +268,29 @@ namespace Keire
                 m_Impl->Clock->AdvanceFrame(rawDelta, suspended);
                 if (m_Impl->ProfilerService)
                     m_Impl->ProfilerService->BeginFrame();
-                m_Impl->LayerSystem->ApplyPending();
-
-                while (const auto event = m_Impl->Windowing->PollEvent())
                 {
-                    (void)DispatchWindowEvent(*event);
-                    if (ExitRequested())
-                    {
-                        break;
-                    }
-                }
+                    ProfileScope services(m_Impl->ProfilerService, ProfileCategory::Application, "Frame services");
+                    m_Impl->LayerSystem->ApplyPending();
 
-                if (!ExitRequested())
-                {
-                    (void)m_Impl->EventSystem->DispatchQueued();
-                    if (m_Impl->Assets)
+                    while (const auto event = m_Impl->Windowing->PollEvent())
                     {
-                        (void)m_Impl->Assets->PumpCompletions();
+                        (void)DispatchWindowEvent(*event);
+                        if (ExitRequested())
+                        {
+                            break;
+                        }
                     }
-                    if (m_Impl->SceneService)
-                        m_Impl->SceneService->AdvanceFrame();
+
+                    if (!ExitRequested())
+                    {
+                        (void)m_Impl->EventSystem->DispatchQueued();
+                        if (m_Impl->Assets)
+                        {
+                            (void)m_Impl->Assets->PumpCompletions();
+                        }
+                        if (m_Impl->SceneService)
+                            m_Impl->SceneService->AdvanceFrame();
+                    }
                 }
 
                 const bool nowSuspended =
@@ -295,12 +298,14 @@ namespace Keire
 
                 if (!ExitRequested() && m_Impl->InputService)
                 {
+                    ProfileScope input(m_Impl->ProfilerService, ProfileCategory::Application, "Input");
                     m_Impl->InputService->AdvanceFrame(m_Impl->Clock->UnscaledDeltaTime(), UiCapture(), nowSuspended);
                 }
 
                 bool renderFrame = false;
                 if (!ExitRequested() && !nowSuspended && m_Impl->Renderer)
                 {
+                    ProfileScope beginRender(m_Impl->ProfilerService, ProfileCategory::Rendering, "Render begin");
                     RenderSystemInternalAccess::BeginFrame(*m_Impl->Renderer);
                     renderFrame = true;
                 }
@@ -311,26 +316,37 @@ namespace Keire
                     // but every fixed step produced by AdvanceFrame must still be consumed before the next frame.
                     if (!ExitRequested() && !suspended)
                     {
-                        while (m_Impl->Clock->ConsumeFixedStep())
                         {
-                            m_Impl->LayerSystem->FixedUpdate(*m_Impl->Clock);
-                            if (ExitRequested())
+                            ProfileScope fixedUpdate(m_Impl->ProfilerService, ProfileCategory::Application,
+                                                     "Fixed update");
+                            while (m_Impl->Clock->ConsumeFixedStep())
                             {
-                                break;
+                                m_Impl->LayerSystem->FixedUpdate(*m_Impl->Clock);
+                                if (ExitRequested())
+                                {
+                                    break;
+                                }
                             }
                         }
                         if (!ExitRequested())
                         {
+                            ProfileScope update(m_Impl->ProfilerService, ProfileCategory::Application, "Update");
                             m_Impl->LayerSystem->Update(*m_Impl->Clock);
                         }
                     }
 
                     if (!ExitRequested() && !nowSuspended && m_Impl->UserInterface)
                     {
-                        m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
-                                                          m_Impl->PrimaryWindow->LogicalSize());
-                        m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
-                        m_Impl->UserInterface->EndFrame();
+                        {
+                            ProfileScope editorUi(m_Impl->ProfilerService, ProfileCategory::Application, "Editor UI");
+                            m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
+                                                              m_Impl->PrimaryWindow->LogicalSize());
+                            m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
+                        }
+                        {
+                            ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
+                            m_Impl->UserInterface->EndFrame();
+                        }
                         renderFrame = false;
                     }
 
@@ -338,6 +354,7 @@ namespace Keire
                     // active-frame state makes shutdown race GPU work in optimized builds.
                     if (renderFrame)
                     {
+                        ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
                         RenderSystemInternalAccess::EndFrame(*m_Impl->Renderer, nullptr);
                         renderFrame = false;
                     }
@@ -355,6 +372,84 @@ namespace Keire
                 {
                     m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Frame",
                                                         static_cast<double>(m_Impl->Clock->FrameCount()));
+                    const auto unscaledDeltaMilliseconds = m_Impl->Clock->UnscaledDeltaTime().Seconds() * 1000.0;
+                    m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Frame time (ms)",
+                                                        unscaledDeltaMilliseconds);
+                    m_Impl->ProfilerService->SetCounter(
+                        ProfileCategory::Application, "FPS",
+                        unscaledDeltaMilliseconds > 0.0 ? 1000.0 / unscaledDeltaMilliseconds : 0.0);
+                    m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Simulation delta (ms)",
+                                                        m_Impl->Clock->DeltaTime().Seconds() * 1000.0);
+                    m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Fixed delta (ms)",
+                                                        m_Impl->Clock->FixedDeltaTime().Seconds() * 1000.0);
+                    if (m_Impl->Renderer)
+                    {
+                        const auto statistics = m_Impl->Renderer->Statistics();
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Passes", statistics.Passes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Surfaces",
+                                                            statistics.Surfaces);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Draw calls",
+                                                            statistics.DrawCalls);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Triangles",
+                                                            statistics.Triangles);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Visible submeshes",
+                                                            statistics.VisibleSubmeshes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Culled submeshes",
+                                                            statistics.CulledSubmeshes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Instance batches",
+                                                            statistics.InstanceBatches);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Visible local lights",
+                                                            statistics.VisibleLocalLights);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "CPU preparation (ms)",
+                                                            statistics.CpuPreparationMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Command recording (ms)",
+                                                            statistics.CommandRecordingMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Swapchain wait (ms)",
+                                                            statistics.SwapchainWaitMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "UI recording (ms)",
+                                                            statistics.UiRecordingMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU submission (ms)",
+                                                            statistics.GpuSubmissionMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Renderer latency (ms)",
+                                                            statistics.RendererLatencyMilliseconds);
+                    }
+                    if (m_Impl->Assets)
+                    {
+                        const auto statistics = m_Impl->Assets->Statistics();
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Known assets",
+                                                            statistics.KnownAssets);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Queued assets",
+                                                            statistics.QueuedAssets);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Loading assets",
+                                                            statistics.LoadingAssets);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Resident bytes",
+                                                            statistics.ResidentBytes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Failed loads",
+                                                            statistics.FailedLoads);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Evictions", statistics.Evictions);
+                    }
+                    if (m_Impl->AudioService)
+                    {
+                        const auto statistics = m_Impl->AudioService->Statistics();
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Voices", statistics.Voices);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Audible voices",
+                                                            statistics.AudibleVoices);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Virtual voices",
+                                                            statistics.VirtualVoices);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Audio, "Underruns", statistics.Underruns);
+                    }
+                    if (m_Impl->ScriptService)
+                    {
+                        const auto metrics = m_Impl->ScriptService->Metrics();
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Generation",
+                                                            metrics.Generation);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Active instances",
+                                                            metrics.ActiveInstances);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Faulted instances",
+                                                            metrics.FaultedInstances);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Scripting, "Diagnostics",
+                                                            metrics.Diagnostics);
+                    }
                     m_Impl->ProfilerService->EndFrame();
                 }
 

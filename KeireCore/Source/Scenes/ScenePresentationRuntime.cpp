@@ -9,6 +9,7 @@
 #include "Keire/Ui.h"
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <map>
 #include <ranges>
@@ -360,6 +361,10 @@ namespace Keire
         std::set<EntityId> SeenAudio;
         std::size_t PendingAudio = 0;
         bool WasPlaying = false;
+        std::uint64_t SynchronizationCount = 0;
+        float UiSynchronizationMilliseconds = 0.0F;
+        float AudioSynchronizationMilliseconds = 0.0F;
+        float SynchronizationMilliseconds = 0.0F;
     };
 
     ScenePresentationRuntime::ScenePresentationRuntime(Ref<AssetSystem> assets, Ref<AudioSystem> audio,
@@ -378,9 +383,20 @@ namespace Keire
             Clear();
             return;
         }
+        const auto synchronizationStarted = std::chrono::steady_clock::now();
         m_Impl->ActiveScene = std::move(scene);
+        const auto uiStarted = std::chrono::steady_clock::now();
         m_Impl->SynchronizeUi(m_Impl->ActiveScene, viewportWidth, viewportHeight, safeArea);
+        const auto audioStarted = std::chrono::steady_clock::now();
         m_Impl->SynchronizeAudio(m_Impl->ActiveScene, playing);
+        const auto completed = std::chrono::steady_clock::now();
+        m_Impl->UiSynchronizationMilliseconds =
+            std::chrono::duration<float, std::milli>(audioStarted - uiStarted).count();
+        m_Impl->AudioSynchronizationMilliseconds =
+            std::chrono::duration<float, std::milli>(completed - audioStarted).count();
+        m_Impl->SynchronizationMilliseconds =
+            std::chrono::duration<float, std::milli>(completed - synchronizationStarted).count();
+        ++m_Impl->SynchronizationCount;
     }
 
     void ScenePresentationRuntime::Clear() noexcept
@@ -402,6 +418,10 @@ namespace Keire
         m_Impl->ActiveScene.Reset();
         m_Impl->PendingAudio = 0;
         m_Impl->WasPlaying = false;
+        m_Impl->SynchronizationCount = 0;
+        m_Impl->UiSynchronizationMilliseconds = 0.0F;
+        m_Impl->AudioSynchronizationMilliseconds = 0.0F;
+        m_Impl->SynchronizationMilliseconds = 0.0F;
     }
 
     bool ScenePresentationRuntime::Play(const EntityId source)
@@ -493,6 +513,10 @@ namespace Keire
         result.ActiveAudioSources =
             std::ranges::count_if(m_Impl->AudioSources, [](const auto& item) { return bool(item.second.Voice); });
         result.PendingAudioAssets = m_Impl->PendingAudio;
+        result.SynchronizationCount = m_Impl->SynchronizationCount;
+        result.UiSynchronizationMilliseconds = m_Impl->UiSynchronizationMilliseconds;
+        result.AudioSynchronizationMilliseconds = m_Impl->AudioSynchronizationMilliseconds;
+        result.SynchronizationMilliseconds = m_Impl->SynchronizationMilliseconds;
         return result;
     }
 

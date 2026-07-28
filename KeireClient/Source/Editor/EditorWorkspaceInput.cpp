@@ -51,6 +51,19 @@ void EditorWorkspaceLayer::WriteManagedLog(const Keire::ManagedLogLevel level, c
     AddConsoleMessage("Script", std::string(message), color, nativeLevel);
 }
 
+void EditorWorkspaceLayer::RecordManagedProfileSpan(const std::string_view name, const double startMicroseconds,
+                                                    const double durationMicroseconds) noexcept
+{
+    if (const auto profiler = Owner().GetProfiler())
+        profiler->RecordSpan(Keire::ProfileCategory::Scripting, name, startMicroseconds, durationMicroseconds);
+}
+
+void EditorWorkspaceLayer::SetManagedProfileCounter(const std::string_view name, const double value) noexcept
+{
+    if (const auto profiler = Owner().GetProfiler())
+        profiler->SetCounter(Keire::ProfileCategory::Scripting, name, value);
+}
+
 float EditorWorkspaceLayer::ManagedDeltaTime() const noexcept
 {
     return static_cast<float>(Owner().GetTime().DeltaTime().Seconds());
@@ -326,10 +339,14 @@ void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
         const auto mode = m_ManagedCursorLocked
                               ? Keire::CursorMode::RelativeLocked
                               : (m_ManagedCursorVisible ? Keire::CursorMode::Normal : Keire::CursorMode::Hidden);
-        if (mode == Keire::CursorMode::RelativeLocked &&
-            windows->GetCursorMode(window->Id()) != Keire::CursorMode::RelativeLocked)
+        const auto previousMode = windows->GetCursorMode(window->Id());
+        const bool playActive = m_SceneDocument && m_SceneDocument->PlaySession() &&
+                                m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped;
+        auto viewport = playActive ? m_GameViewportRect : m_SceneViewportPanel->ViewportRect();
+        if (viewport.Size().Width <= 0.0F || viewport.Size().Height <= 0.0F)
+            viewport = playActive ? m_SceneViewportPanel->ViewportRect() : m_GameViewportRect;
+        const auto centerCursor = [&]
         {
-            const auto viewport = m_SceneViewportPanel->ViewportRect();
             if (viewport.Size().Width > 0.0F && viewport.Size().Height > 0.0F)
             {
                 windows->WarpCursor(window->Id(),
@@ -337,8 +354,14 @@ void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
                                      static_cast<std::int32_t>((viewport.Minimum.Y + viewport.Maximum.Y) * 0.5F)});
                 m_SuppressManagedLookFrames = 2;
             }
+        };
+        if (mode == Keire::CursorMode::RelativeLocked && previousMode != Keire::CursorMode::RelativeLocked)
+        {
+            centerCursor();
         }
         windows->SetCursorMode(window->Id(), mode);
+        if (previousMode == Keire::CursorMode::RelativeLocked && mode != Keire::CursorMode::RelativeLocked)
+            centerCursor();
     }
     catch (...)
     {

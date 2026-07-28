@@ -232,6 +232,27 @@ TEST_CASE("audio clip assets preserve encoded streaming payloads without PCM exp
     CHECK(decoded->Clip()->EncodedSource == source.EncodedSource);
 }
 
+TEST_CASE("scene runtime presentation ignores unchanged viewport assignments")
+{
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Viewport"));
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{});
+
+    session->Play();
+    const auto presentation = session->Presentation();
+    REQUIRE(presentation);
+    CHECK(presentation->Statistics().SynchronizationCount == 1);
+
+    session->SetPresentationViewport(1920.0F, 1080.0F);
+    CHECK(presentation->Statistics().SynchronizationCount == 1);
+
+    session->SetPresentationViewport(1280.0F, 720.0F);
+    CHECK(presentation->Statistics().SynchronizationCount == 2);
+    session->SetPresentationViewport(1280.0F, 720.0F);
+    CHECK(presentation->Statistics().SynchronizationCount == 2);
+}
+
 TEST_CASE("scene presentation clear discards UI events deferred during filtered consumption")
 {
     auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});

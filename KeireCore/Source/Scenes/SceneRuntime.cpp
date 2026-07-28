@@ -76,6 +76,12 @@ namespace Keire
         m_Impl->RequireOwner("SetPresentationViewport");
         if (!std::isfinite(width) || !std::isfinite(height) || width <= 0.0F || height <= 0.0F)
             throw std::invalid_argument("Scene presentation viewport dimensions must be finite and positive.");
+        if (m_Impl->PresentationWidth == width && m_Impl->PresentationHeight == height &&
+            m_Impl->SafeArea.Left == safeArea.Left && m_Impl->SafeArea.Top == safeArea.Top &&
+            m_Impl->SafeArea.Right == safeArea.Right && m_Impl->SafeArea.Bottom == safeArea.Bottom)
+        {
+            return;
+        }
         m_Impl->PresentationWidth = width;
         m_Impl->PresentationHeight = height;
         m_Impl->SafeArea = safeArea;

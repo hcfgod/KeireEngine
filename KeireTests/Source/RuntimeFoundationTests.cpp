@@ -62,10 +62,40 @@ TEST_CASE("Profiler records bounded cross-thread spans and counters")
     REQUIRE(frame.Counters.size() == 1);
     CHECK(frame.Counters.front().Value == 2.0);
     CHECK(frame.Truncated);
+    CHECK(frame.DroppedSpans == 1);
+    CHECK(frame.DroppedCounters == 1);
+    const auto summary = profiler->LatestSummary();
+    CHECK(summary.Sequence == frame.Sequence);
+    CHECK(summary.SpanCount == frame.Spans.size());
+    CHECK(summary.CounterCount == frame.Counters.size());
+    CHECK(summary.DroppedSpans == 1);
+    CHECK(summary.DroppedCounters == 1);
 
     profiler->Close();
     CHECK_FALSE(profiler->IsOpen());
     CHECK_NOTHROW(profiler->Close());
+}
+
+TEST_CASE("Profiler retains bounded frame summaries in chronological order")
+{
+    Keire::ProfilerSpecification specification;
+    specification.Mode = Keire::ProfilerMode::Enabled;
+    specification.MaximumRetainedFrameSummaries = 2;
+    auto profiler = Keire::CreateRef<Keire::Profiler>(specification);
+
+    for (std::uint64_t frame = 1; frame <= 3; ++frame)
+    {
+        profiler->BeginFrame();
+        profiler->SetCounter(Keire::ProfileCategory::Application, "Frame", static_cast<double>(frame));
+        profiler->EndFrame();
+    }
+
+    const auto summaries = profiler->RecentSummaries(10);
+    REQUIRE(summaries.size() == 2);
+    CHECK(summaries[0].Sequence == 2);
+    CHECK(summaries[1].Sequence == 3);
+    CHECK(summaries[1].DurationMicroseconds >= 0.0);
+    CHECK(profiler->RecentSummaries(1).front().Sequence == 3);
 }
 
 TEST_CASE("Profiler owner-thread rejections leave recording state unchanged")

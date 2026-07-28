@@ -165,6 +165,10 @@ namespace Keire
         std::uint32_t RendererQueueHighWaterMark = 0;
         float CpuPreparationMilliseconds = 0.0F;
         float CpuPreparationP95Milliseconds = 0.0F;
+        float CommandRecordingMilliseconds = 0.0F;
+        float SwapchainWaitMilliseconds = 0.0F;
+        float UiRecordingMilliseconds = 0.0F;
+        float GpuSubmissionMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
     };
 

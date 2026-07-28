@@ -164,6 +164,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawPrefabOverrides(Keire::UiFrame& ui);
     void DrawBuildSettings(Keire::UiFrame& ui);
     void DrawProfiler(Keire::UiFrame& ui);
+    void DrawPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport, std::string_view label);
     void DrawProject(Keire::UiFrame& ui);
     [[nodiscard]] const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept override;
@@ -271,6 +272,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void BeginInputTest();
     void EndInputTest() noexcept;
     void WriteManagedLog(Keire::ManagedLogLevel level, std::string_view message) noexcept override;
+    void RecordManagedProfileSpan(std::string_view name, double startMicroseconds,
+                                  double durationMicroseconds) noexcept override;
+    void SetManagedProfileCounter(std::string_view name, double value) noexcept override;
     [[nodiscard]] float ManagedDeltaTime() const noexcept override;
     [[nodiscard]] float ManagedFixedDeltaTime() const noexcept override;
     [[nodiscard]] float ManagedUnscaledDeltaTime() const noexcept override;
@@ -419,6 +423,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::deque<InputHistoryEntry> m_InputHistory;
     Keire::Ref<Keire::RenderView> m_GameRenderView;
     Keire::Ref<Keire::ScenePresentationRuntime> m_GameEditPresentation;
+    Keire::UiItemRect m_GameViewportRect;
     Keire::AudioVoiceId m_InspectorAudioPreviewVoice;
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
@@ -436,6 +441,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_InputForwardToConsole = false;
     bool m_InputRecordReleases = false;
     bool m_PlayFaultReported = false;
+    bool m_ShowPerformanceOverlay = false;
+    bool m_ProfilerPaused = false;
+    Keire::ProfileFrame m_FrozenProfileFrame;
+    std::vector<Keire::ProfileFrameSummary> m_FrozenProfileHistory;
     Keire::ScenePlayState m_PlayResumeState = Keire::ScenePlayState::Stopped;
     std::unordered_set<Keire::AssetId> m_PlayEditorTouchedEntities;
     bool m_CloseThemeAfterDecision = false;
