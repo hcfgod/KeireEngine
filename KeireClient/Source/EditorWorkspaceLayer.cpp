@@ -918,6 +918,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_ManagedCursorLocked = false;
     m_ManagedCursorVisible = true;
     ApplyManagedCursorMode();
+    StopInspectorAudioPreview();
     m_SceneDocument->EndPlay();
     m_GameEditPresentation.Reset();
     m_GameRenderView.Reset();

@@ -241,7 +241,28 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             }
         }
         if (presentation)
+        {
             presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
+            if (playActive && imageRect.Contains(ui.PointerState().Position))
+            {
+                const auto pointer = ui.PointerState();
+                const float localX = pointer.Position.X - imageRect.Minimum.X;
+                const float localY = pointer.Position.Y - imageRect.Minimum.Y;
+                presentation->PointerMove(localX, localY);
+                if (pointer.LeftPressed)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
+                if (pointer.RightPressed)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, true);
+                if (pointer.MiddlePressed)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Middle, true);
+                if (pointer.LeftReleased)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
+                if (pointer.RightReleased)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, false);
+                if (pointer.MiddleReleased)
+                    presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Middle, false);
+            }
+        }
     }
     m_ViewportRect = imageRect;
     m_LastCamera = camera;

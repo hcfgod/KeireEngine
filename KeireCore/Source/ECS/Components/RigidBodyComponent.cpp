@@ -65,12 +65,11 @@ namespace Keire
         result.Name = "Rigid Body";
         result.Category = "Physics";
         result.RequiredComponents = {ColliderComponent::StaticType()};
-        result.Properties = {
-            {"motion", "Motion", "Body", ComponentPropertyKind::Integer, false, 0.0, 2.0, 1.0},
-            {"mass", "Mass", "Body", ComponentPropertyKind::Scalar, false, 0.001, 1'000'000.0, 0.05},
-            {"linearVelocity", "Linear Velocity", "Body", ComponentPropertyKind::Vector3},
-            {"continuous", "Continuous Collision", "Body", ComponentPropertyKind::Boolean},
-            {"useGravity", "Use Gravity", "Body", ComponentPropertyKind::Boolean}};
+        result.Properties = {{"motion", "Motion", "Body", ComponentPropertyKind::Integer, false, 0.0, 2.0, 1.0},
+                             {"mass", "Mass", "Body", ComponentPropertyKind::Scalar, false, 0.001, 1'000'000.0, 0.05},
+                             {"linearVelocity", "Linear Velocity", "Body", ComponentPropertyKind::Vector3},
+                             {"continuous", "Continuous Collision", "Body", ComponentPropertyKind::Boolean},
+                             {"useGravity", "Use Gravity", "Body", ComponentPropertyKind::Boolean}};
         result.Factory = [] { return Ref<Component>(CreateRef<RigidBodyComponent>()); };
         result.Serialize = [](const Component& component)
         {

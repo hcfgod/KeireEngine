@@ -52,3 +52,28 @@ and registers the Behaviour as a component. Attach it from the Inspector's searc
 menu, drag the `.cs` asset onto the Inspector drop target, or drop it directly onto a GameObject in the Hierarchy.
 Like Unity, the public Behaviour type name must match the script filename. If the script is not present in the active
 managed generation yet, the editor queues the attachment, compiles and reloads scripts, then attaches it automatically.
+## Inspector events and cursor ownership
+
+Declare `KeireEvent` fields with `SerializeField` to expose Unity-style persistent listeners in the Inspector.
+Generic events support up to four engine or project-defined argument types, while `AddListener` and `RemoveListener`
+provide runtime-only subscriptions.
+
+```csharp
+[SerializeField] private KeireEvent opened = new();
+[SerializeField] private KeireEvent<DamageInfo> damaged = new();
+```
+
+Each persistent listener stores an enabled flag, target entity, managed component stable ID, and callback method.
+Renaming a component type is safe when its `StableComponentId` remains unchanged. Callback methods must return `void`
+and accept the event's argument count and runtime-compatible types.
+
+Use scoped cursor requests when multiple systems can control pointer capture:
+
+```csharp
+IDisposable gameplayCapture = Cursor.RequestCapture();
+IDisposable menuCursor = Cursor.RequestVisible();
+menuCursor.Dispose(); // Gameplay capture resumes automatically.
+```
+
+Visible requests take priority over capture requests. Dispose requests during disable, destruction, or managed reload;
+direct `Cursor.Show`, `Hide`, `Lock`, and `Unlock` calls remain available for simple single-owner workflows.

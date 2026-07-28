@@ -45,43 +45,62 @@ public sealed class FirstPersonCamera : Behaviour
     [HotReloadState]
     private bool _escapeWasDown;
 
+    [HotReloadState]
+    private bool _captureEnabled = true;
+
+    private IDisposable? _cursorCapture;
+    private bool _uiVisible;
+
     protected override void Awake()
     {
         _targetYaw = _yaw;
         _targetPitch = _pitch;
-        Cursor.Lock();
-        Cursor.Hide();
         Debug.Log($"{nameof(FirstPersonCamera)} attached.");
+    }
+
+    protected override void OnEnable()
+    {
+        SubscribeUiVisibility();
+        SetCaptureEnabled(_captureEnabled);
     }
 
     protected override void OnDisable()
     {
+        UnsubscribeUiVisibility();
+        ReleaseCapture();
         Cursor.Unlock();
         Cursor.Show();
+    }
+
+    protected override void OnBeforeReload()
+    {
+        UnsubscribeUiVisibility();
+        ReleaseCapture();
+    }
+
+    protected override void OnAfterReload()
+    {
+        SubscribeUiVisibility();
+        SetCaptureEnabled(_captureEnabled);
     }
 
     protected override void Update()
     {
         bool escapeDown = Input.Button("Escape");
-        if (escapeDown && !_escapeWasDown)
+        if (_uiVisible || Cursor.VisibilityRequested)
         {
-            if (Cursor.Locked)
-            {
-                Cursor.Unlock();
-                Cursor.Show();
-            }
-            else
-            {
-                Cursor.Lock();
-                Cursor.Hide();
-            }
+            _escapeWasDown = escapeDown;
+            _velocity = default;
+            return;
         }
+        if (escapeDown && !_escapeWasDown)
+            SetCaptureEnabled(!_captureEnabled);
         _escapeWasDown = escapeDown;
 
         float deltaTime = Time.DeltaTime;
         if (deltaTime <= 0.0f)
             return;
-        if (!Cursor.Locked)
+        if (!_captureEnabled)
         {
             _velocity = default;
             return;
@@ -113,6 +132,41 @@ public sealed class FirstPersonCamera : Behaviour
         float blend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _movementSharpness) * deltaTime);
         _velocity += (desiredVelocity - _velocity) * blend;
         transform.LocalPosition = transform.LocalPosition + (_velocity * deltaTime);
+    }
+
+    private void SubscribeUiVisibility()
+    {
+        UIController.VisibilityChanged -= HandleUiVisibilityChanged;
+        UIController.VisibilityChanged += HandleUiVisibilityChanged;
+        HandleUiVisibilityChanged(UIController.IsAnyUiVisible);
+    }
+
+    private void UnsubscribeUiVisibility()
+    {
+        UIController.VisibilityChanged -= HandleUiVisibilityChanged;
+        _uiVisible = false;
+    }
+
+    private void HandleUiVisibilityChanged(bool visible)
+    {
+        _uiVisible = visible;
+        if (visible)
+            _velocity = default;
+    }
+
+    private void SetCaptureEnabled(bool enabled)
+    {
+        _captureEnabled = enabled;
+        if (enabled)
+            _cursorCapture ??= Cursor.RequestCapture();
+        else
+            ReleaseCapture();
+    }
+
+    private void ReleaseCapture()
+    {
+        _cursorCapture?.Dispose();
+        _cursorCapture = null;
     }
 
     private static Quaternion CreateRotation(float pitch, float yaw)

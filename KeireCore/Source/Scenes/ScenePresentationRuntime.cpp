@@ -26,7 +26,8 @@ namespace Keire
             AssetId Clip;
             AssetHandle<AudioClipAsset> Handle;
             AudioVoiceId Voice;
-            bool ManualPlay = false;
+            bool ManualPlayRequested = false;
+            bool PlayOnAwakeConsumed = false;
         };
 
         Impl(Ref<AssetSystem> assets, Ref<AudioSystem> audio, const std::size_t maximumUiElements)
@@ -264,8 +265,18 @@ namespace Keire
                 AudioSources.clear();
                 SeenAudio.clear();
                 PendingAudio = 0;
+                WasPlaying = false;
                 return;
             }
+            if (playing && !WasPlaying)
+            {
+                for (auto& [entity, state] : AudioSources)
+                {
+                    (void)entity;
+                    state.PlayOnAwakeConsumed = false;
+                }
+            }
+            WasPlaying = playing;
             SeenAudio.clear();
             std::size_t pending = 0;
             for (const auto entity : scene->Query<AudioSourceComponent>())
@@ -283,12 +294,10 @@ namespace Keire
                     if (state.Clip)
                         state.Handle = Assets->Load<AudioClipAsset>(state.Clip, AssetPriority::High);
                 }
-                const bool requested = playing && entity.ActiveInHierarchy() && source->Enabled() &&
-                                       (source->PlayOnAwake() || state.ManualPlay);
                 const auto clip = state.Handle.TryGetLoaded();
                 if (state.Clip && !clip)
                     ++pending;
-                if (!requested || !clip)
+                if (!playing || !entity.ActiveInHierarchy() || !source->Enabled() || !clip)
                 {
                     StopVoice(state);
                     continue;
@@ -296,11 +305,23 @@ namespace Keire
                 auto specification = VoiceSpecification(entity, *source, clip->Clip());
                 if (state.Voice)
                 {
-                    if (!Audio->SetVoice(state.Voice, std::move(specification)))
-                        state.Voice = {};
+                    if (Audio->SetVoice(state.Voice, specification))
+                    {
+                        state.ManualPlayRequested = false;
+                        continue;
+                    }
+                    state.Voice = {};
                 }
-                if (!state.Voice)
-                    state.Voice = Audio->Play(std::move(specification));
+                const bool requested =
+                    state.ManualPlayRequested || (source->PlayOnAwake() && !state.PlayOnAwakeConsumed);
+                if (!requested)
+                    continue;
+                state.Voice = Audio->Play(std::move(specification));
+                if (state.Voice)
+                {
+                    state.ManualPlayRequested = false;
+                    state.PlayOnAwakeConsumed = state.PlayOnAwakeConsumed || source->PlayOnAwake();
+                }
             }
             for (auto iterator = AudioSources.begin(); iterator != AudioSources.end();)
             {
@@ -338,6 +359,7 @@ namespace Keire
         std::map<EntityId, AudioSourceState> AudioSources;
         std::set<EntityId> SeenAudio;
         std::size_t PendingAudio = 0;
+        bool WasPlaying = false;
     };
 
     ScenePresentationRuntime::ScenePresentationRuntime(Ref<AssetSystem> assets, Ref<AudioSystem> audio,
@@ -374,17 +396,19 @@ namespace Keire
         m_Impl->UiNodes.clear();
         m_Impl->NodeEntities.clear();
         m_Impl->SeenUi.clear();
+        m_Impl->DeferredUiEvents.clear();
         m_Impl->SeenAudio.clear();
         m_Impl->UiTree->Clear();
         m_Impl->ActiveScene.Reset();
         m_Impl->PendingAudio = 0;
+        m_Impl->WasPlaying = false;
     }
 
     bool ScenePresentationRuntime::Play(const EntityId source)
     {
         if (const auto found = m_Impl->AudioSources.find(source); found != m_Impl->AudioSources.end())
         {
-            found->second.ManualPlay = true;
+            found->second.ManualPlayRequested = true;
             return true;
         }
         return false;
@@ -394,7 +418,8 @@ namespace Keire
     {
         if (const auto found = m_Impl->AudioSources.find(source); found != m_Impl->AudioSources.end())
         {
-            found->second.ManualPlay = false;
+            found->second.ManualPlayRequested = false;
+            found->second.PlayOnAwakeConsumed = true;
             m_Impl->StopVoice(found->second);
             return true;
         }

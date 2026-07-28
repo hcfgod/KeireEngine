@@ -1,8 +1,58 @@
+using System.Collections.Concurrent;
+
 namespace Keire;
 
 public readonly record struct CollisionContact(Entity Other, Vector3 Point, Vector3 Normal, float Impulse, bool Trigger);
 public readonly record struct AnimationEvent(string Name, float NormalizedTime, int Integer, float Scalar, string Text);
 public readonly record struct AnimationIkContext(float LayerWeight);
+
+internal static class BehaviourRegistry
+{
+    private readonly record struct Key(ulong World, EntityId Entity, ComponentTypeId Component);
+    private static readonly ConcurrentDictionary<Key, WeakReference<Behaviour>> Instances = new();
+
+    internal static void Register(Behaviour behaviour)
+    {
+        var key = new Key(behaviour.Entity.World, behaviour.Entity.Id, ComponentType.Of(behaviour.GetType()));
+        Instances[key] = new WeakReference<Behaviour>(behaviour);
+    }
+
+    internal static void Unregister(Behaviour behaviour)
+    {
+        if (!behaviour.Entity.Id.IsValid)
+            return;
+        Instances.TryRemove(
+            new Key(behaviour.Entity.World, behaviour.Entity.Id, ComponentType.Of(behaviour.GetType())), out _);
+    }
+
+    internal static bool TryGet<T>(Entity entity, out T? behaviour) where T : Behaviour
+    {
+        var key = new Key(entity.World, entity.Id, ComponentType.Of<T>());
+        if (Instances.TryGetValue(key, out WeakReference<Behaviour>? reference) &&
+            reference.TryGetTarget(out Behaviour? value) && value is T typed)
+        {
+            behaviour = typed;
+            return true;
+        }
+        Instances.TryRemove(key, out _);
+        behaviour = null;
+        return false;
+    }
+
+    internal static bool TryGet(Entity entity, ComponentTypeId component, out Behaviour? behaviour)
+    {
+        var key = new Key(entity.World, entity.Id, component);
+        if (Instances.TryGetValue(key, out WeakReference<Behaviour>? reference) &&
+            reference.TryGetTarget(out Behaviour? value))
+        {
+            behaviour = value;
+            return true;
+        }
+        Instances.TryRemove(key, out _);
+        behaviour = null;
+        return false;
+    }
+}
 
 public abstract class Behaviour
 {
@@ -41,6 +91,7 @@ public abstract class Behaviour
     {
         Entity = entity;
         _synchronizationContext = new BehaviourSynchronizationContext();
+        BehaviourRegistry.Register(this);
     }
 
     private void InvokeWithContext(Action callback, bool pump = false)
@@ -71,7 +122,11 @@ public abstract class Behaviour
     }
     public void RuntimeStart() => InvokeWithContext(Start);
     public void RuntimeFixedUpdate(float deltaSeconds) => InvokeWithContext(FixedUpdate, true);
-    public void RuntimeUpdate(float deltaSeconds) => InvokeWithContext(Update, true);
+    public void RuntimeUpdate(float deltaSeconds)
+    {
+        UiButton.DispatchNativeClicks();
+        InvokeWithContext(Update, true);
+    }
     public void RuntimeLateUpdate() => InvokeWithContext(LateUpdate, true);
     public void RuntimeDisable()
     {
@@ -81,16 +136,33 @@ public abstract class Behaviour
     public void RuntimeDestroy()
     {
         _synchronizationContext.Cancel();
-        InvokeWithContext(OnDestroy);
+        try
+        {
+            InvokeWithContext(OnDestroy);
+        }
+        finally
+        {
+            BehaviourRegistry.Unregister(this);
+        }
     }
     public void RuntimeBeforeReload()
     {
         _synchronizationContext.Cancel();
-        InvokeWithContext(OnBeforeReload);
+        try
+        {
+            InvokeWithContext(OnBeforeReload);
+        }
+        finally
+        {
+            BehaviourRegistry.Unregister(this);
+        }
     }
     public void RuntimeAfterReload() => InvokeWithContext(OnAfterReload);
-    public void RuntimeResumeAfterFailedReload() =>
+    public void RuntimeResumeAfterFailedReload()
+    {
         _synchronizationContext = new BehaviourSynchronizationContext();
+        BehaviourRegistry.Register(this);
+    }
     public void RuntimeCaptureReloadState() =>
         RuntimeSerializedState = ManagedStateSerializer.Capture(this, RuntimeSerializedState, true);
     public void RuntimeCapturePersistentState() =>

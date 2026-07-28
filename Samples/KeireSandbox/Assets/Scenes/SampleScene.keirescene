@@ -49,7 +49,7 @@
         },
         {
           "data": {
-            "managedState": "{\"version\":1,\"fields\":[]}"
+            "managedState": "{\"fields\":[],\"version\":1}"
           },
           "enabled": true,
           "type": "73616e64-626f-4078-8000-000000000040",
@@ -59,15 +59,25 @@
           "data": {
             "_invertHorizontal": false,
             "_invertVertical": false,
-            "_lookSensitivity": 0.0,
-            "_lookSharpness": 0.0,
-            "_maximumPitch": 0.0,
-            "_movementSharpness": 0.0,
-            "_movementSpeed": 0.0,
-            "managedState": "{\"version\":1,\"fields\":[]}"
+            "_lookSensitivity": 1.0,
+            "_lookSharpness": 30.0,
+            "_maximumPitch": 89.0,
+            "_movementSharpness": 14.0,
+            "_movementSpeed": 12.0,
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":12.0},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":30.0}],\"version\":1}"
           },
           "enabled": true,
           "type": "73616e64-626f-4078-8000-000000000030",
+          "version": 1
+        },
+        {
+          "data": {
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":14447222651353186851,\"Low\":12685995010641050639}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}}],\"version\":1}",
+            "uiButton": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
+            "uiPanel": "c87ed874-ece2-4223-b00d-b53fb7a33c0f"
+          },
+          "enabled": true,
+          "type": "3f100613-b2cc-4dc0-a7b2-216428d75ae0",
           "version": 1
         }
       ],
@@ -146,7 +156,7 @@
           "data": {
             "_hitZoneMultiplier": 0.0,
             "_maximumHealth": 0.0,
-            "managedState": "{\"version\":1,\"fields\":[]}"
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_maximumHealth\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.0},{\"Aliases\":[],\"Name\":\"_hitZoneMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.0}],\"version\":1}"
           },
           "enabled": true,
           "type": "73616e64-626f-4078-8000-000000000041",
@@ -168,10 +178,10 @@
               1.5814927816390991
             ],
             "rotation": [
-              0.8806511759757996,
-              0.11315172165632248,
-              -0.3761036992073059,
-              0.26494550704956055
+              0.8806512951850891,
+              0.11315173655748367,
+              -0.3761037588119507,
+              0.26494553685188293
             ],
             "scale": [
               1.0,

@@ -1468,6 +1468,15 @@ namespace KeireEditor
                             request.PreviewAsset = handle.Get();
                         ready = static_cast<bool>(request.PreviewAsset);
                     }
+                    else if (assets && record.Type == Keire::AudioClipAsset::StaticType())
+                    {
+                        const auto handle = assets->Load<Keire::AudioClipAsset>(record.Id, Keire::AssetPriority::Low);
+                        request.PreviewAsset = handle.TryGetLoaded();
+                        request.Missing = handle.State() == Keire::AssetState::Failed;
+                        if (!request.PreviewAsset && request.Missing)
+                            request.PreviewAsset = handle.Get();
+                        ready = static_cast<bool>(request.PreviewAsset);
+                    }
                     else if (assets && record.Type == Keire::PrefabAsset::StaticType())
                     {
                         const auto source =

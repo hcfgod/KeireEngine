@@ -233,6 +233,7 @@ namespace KeireEditor
         auto validation = registration->Factory();
         registration->Deserialize(*validation, values, registration->SchemaVersion);
         registration->Deserialize(*component, values, registration->SchemaVersion);
+        scene->MarkDirty();
     }
 
     void SceneDocument::SetMeshRendererMaterial(const Keire::EntityId entity, const std::size_t slot,

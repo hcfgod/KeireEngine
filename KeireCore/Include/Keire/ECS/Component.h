@@ -6,6 +6,7 @@
 #include "Keire/Ref.h"
 
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -75,11 +76,29 @@ namespace Keire
         Quaternion,
         Color,
         Asset,
-        Entity
+        Entity,
+        Event
+    };
+
+    struct ComponentEventListener
+    {
+        bool Enabled = true;
+        EntityId Target;
+        ComponentTypeId Component;
+        std::string Method;
+
+        [[nodiscard]] bool operator==(const ComponentEventListener&) const = default;
+    };
+
+    struct ComponentEventValue
+    {
+        std::vector<ComponentEventListener> Listeners;
+
+        [[nodiscard]] bool operator==(const ComponentEventValue&) const = default;
     };
 
     using ComponentPropertyValue = std::variant<bool, std::int64_t, double, std::string, Vector2, Vector3, Vector4,
-                                                Quaternion, Color, AssetId, EntityId>;
+                                                Quaternion, Color, AssetId, EntityId, ComponentEventValue>;
     using ComponentPropertyBag = std::map<std::string, ComponentPropertyValue, std::less<>>;
 
     struct ComponentProperty
@@ -93,6 +112,15 @@ namespace Keire
         std::optional<double> Maximum;
         double Step = 0.1;
         std::optional<AssetTypeId> ExpectedAssetType;
+        std::string Tooltip;
+        std::size_t EventArgumentCount = 0;
+    };
+
+    struct ComponentMethod
+    {
+        std::string Name;
+        std::string DisplayName;
+        std::vector<std::string> ParameterTypes;
     };
 
     class KEIRE_API Component : public RefCounted
@@ -152,6 +180,7 @@ namespace Keire
         std::function<ComponentPropertyBag(const Component&)> Serialize;
         std::function<void(Component&, const ComponentPropertyBag&, std::uint32_t)> Deserialize;
         std::function<ComponentPropertyBag(const ComponentPropertyBag&, std::uint32_t)> Migrate;
+        std::shared_ptr<const std::vector<ComponentMethod>> Methods;
     };
 
     class KEIRE_API ComponentRegistry final : public RefCounted

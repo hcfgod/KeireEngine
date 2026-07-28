@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 
 #include <algorithm>
@@ -304,7 +305,7 @@ namespace
                 }
                 if (m_Scene)
                 {
-                    for (const auto& entity : m_Scene->Entities())
+                    for (const auto& entity : SceneEntities())
                     {
                         if (m_Ui.Selectable(entity.Name(), entity.Id() == value))
                         {
@@ -317,7 +318,131 @@ namespace
             return changed;
         }
 
+        bool EditEvent(const std::string_view label, Keire::ComponentEventValue& value,
+                       const std::size_t argumentCount) override
+        {
+            if (!m_Scene)
+                return false;
+            const auto registry = m_Scene->Components();
+            auto eventId = m_Ui.PushId(label);
+            bool changed = false;
+            m_Ui.Text(label);
+            m_Ui.TextColored({0.48F, 0.55F, 0.64F, 1.0F},
+                             std::to_string(value.Listeners.size()) +
+                                 (value.Listeners.size() == 1 ? " persistent listener" : " persistent listeners"));
+
+            for (std::size_t index = 0; index < value.Listeners.size(); ++index)
+            {
+                auto& listener = value.Listeners[index];
+                const auto listenerId = std::to_string(index);
+                auto id = m_Ui.PushId(listenerId);
+                changed |= m_Ui.Checkbox("Enabled", listener.Enabled);
+
+                auto target = m_Scene->FindEntity(listener.Target);
+                const auto targetPreview = target ? target.Name() : std::string("None");
+                if (auto combo = m_Ui.BeginCombo("Target", targetPreview); combo)
+                {
+                    if (m_Ui.Selectable("None", !listener.Target))
+                    {
+                        listener.Target = {};
+                        listener.Component = {};
+                        listener.Method.clear();
+                        changed = true;
+                    }
+                    for (const auto& entity : SceneEntities())
+                    {
+                        if (m_Ui.Selectable(entity.Name(), entity.Id() == listener.Target))
+                        {
+                            listener.Target = entity.Id();
+                            listener.Component = {};
+                            listener.Method.clear();
+                            changed = true;
+                        }
+                    }
+                }
+
+                target = m_Scene->FindEntity(listener.Target);
+                std::optional<Keire::ComponentRegistration> selectedRegistration;
+                if (listener.Component)
+                    selectedRegistration = registry->Find(listener.Component);
+                const auto componentPreview = selectedRegistration ? selectedRegistration->Name : std::string("None");
+                if (auto combo = m_Ui.BeginCombo("Component", componentPreview); combo)
+                {
+                    if (m_Ui.Selectable("None", !listener.Component))
+                    {
+                        listener.Component = {};
+                        listener.Method.clear();
+                        changed = true;
+                    }
+                    if (target)
+                    {
+                        for (const auto& component : target.GetComponents())
+                        {
+                            const auto registration = registry->Find(component->Type());
+                            if (!registration || !registration->Methods ||
+                                std::ranges::none_of(*registration->Methods, [argumentCount](const auto& method)
+                                                     { return method.ParameterTypes.size() == argumentCount; }))
+                            {
+                                continue;
+                            }
+                            if (m_Ui.Selectable(registration->Name, component->Type() == listener.Component))
+                            {
+                                listener.Component = component->Type();
+                                listener.Method.clear();
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+
+                selectedRegistration = listener.Component ? registry->Find(listener.Component) : std::nullopt;
+                const auto methodPreview = listener.Method.empty() ? std::string("No Function") : listener.Method;
+                if (auto combo = m_Ui.BeginCombo("Function", methodPreview); combo)
+                {
+                    if (m_Ui.Selectable("No Function", listener.Method.empty()))
+                    {
+                        listener.Method.clear();
+                        changed = true;
+                    }
+                    if (selectedRegistration && selectedRegistration->Methods)
+                    {
+                        for (const auto& method : *selectedRegistration->Methods)
+                        {
+                            if (method.ParameterTypes.size() != argumentCount)
+                                continue;
+                            if (m_Ui.Selectable(method.DisplayName, method.Name == listener.Method))
+                            {
+                                listener.Method = method.Name;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+
+                if (m_Ui.Button("Remove Listener"))
+                {
+                    value.Listeners.erase(value.Listeners.begin() + static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+                m_Ui.Separator();
+            }
+
+            if (m_Ui.Button("Add Listener"))
+            {
+                value.Listeners.emplace_back();
+                changed = true;
+            }
+            return changed;
+        }
+
       private:
+        const std::vector<Keire::Entity>& SceneEntities()
+        {
+            if (!m_EntityCache)
+                m_EntityCache = m_Scene ? m_Scene->Entities() : std::vector<Keire::Entity>{};
+            return *m_EntityCache;
+        }
+
         bool Track(const bool changed)
         {
             const auto state = m_Ui.LastItemState();
@@ -329,6 +454,7 @@ namespace
         std::span<const Keire::AssetSourceRecord> m_Assets;
         Keire::Ref<Keire::Scene> m_Scene;
         KeireEditor::AssetPicker& m_AssetPicker;
+        std::optional<std::vector<Keire::Entity>> m_EntityCache;
         bool m_EditBoundary = false;
     };
 } // namespace
@@ -838,8 +964,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 const auto cardId = "ComponentCard##" + registration->Type.ToString();
                 const bool rectTransform = registration->Type == Keire::RectTransformComponent::StaticType();
                 const float anchorPickerHeight = rectTransform ? 64.0F : 0.0F;
+                std::size_t groupRows = 0;
+                std::string_view previousGroup;
+                for (const auto& property : registration->Properties)
+                {
+                    if (!property.Group.empty() && property.Group != previousGroup)
+                    {
+                        ++groupRows;
+                        previousGroup = property.Group;
+                    }
+                }
                 const float cardHeight =
-                    expanded ? std::max(115.0F, 80.0F + anchorPickerHeight + registration->Properties.size() * 34.0F)
+                    expanded ? std::max(115.0F, 80.0F + anchorPickerHeight + registration->Properties.size() * 34.0F +
+                                                    groupRows * 22.0F)
                              : 38.0F;
                 if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                 {
@@ -933,6 +1070,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             }
                             else
                                 changed = propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate);
+                            if (!property.Tooltip.empty() && ui.LastItemState().Hovered)
+                                ui.SetTooltip(property.Tooltip, {.Delayed = true});
                             if (changed)
                             {
                                 m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
@@ -1063,6 +1202,49 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
                 m_Controller.ReportInspectorAssetError(std::string("Input editor failed to open: ") + error.what());
             }
         }
+    }
+    else if (record->Type == Keire::AudioClipAsset::StaticType())
+    {
+        ui.Separator();
+        ui.TextColored(theme.Accent, "AUDIO CLIP");
+        if (assets)
+        {
+            const auto handle = assets->Load<Keire::AudioClipAsset>(record->Id, Keire::AssetPriority::High);
+            if (const auto clip = handle.TryGetLoaded())
+            {
+                const auto& data = *clip->Clip();
+                ui.Text("Duration: " + std::to_string(clip->DurationSeconds()) + " seconds");
+                ui.Text("Sample rate: " + std::to_string(data.SampleRate) + " Hz");
+                ui.Text("Channels: " + std::to_string(data.Channels));
+                ui.Text("Frames: " + std::to_string(clip->FrameCount()));
+                ui.TextColored(theme.MutedText,
+                               data.Streaming ? "Storage: streamed encoded source" : "Storage: resident PCM");
+            }
+            else
+            {
+                ui.TextColored(theme.MutedText, "Loading decoded audio metadata...");
+            }
+        }
+        if (ui.Button("Preview"))
+        {
+            try
+            {
+                m_Controller.PreviewInspectorAudio(record->Id);
+                m_Controller.SetInspectorAssetStatus("Playing audio preview through the EditorPreview bus.");
+            }
+            catch (const std::exception& error)
+            {
+                m_Controller.ReportInspectorAssetError(std::string("Audio preview failed: ") + error.what());
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Stop Preview"))
+            m_Controller.StopInspectorAudioPreview();
+        ui.SameLine();
+        if (ui.Button("Reimport Audio"))
+            m_Controller.ImportInspectorAssets();
+        if (!assetStatus.empty())
+            ui.TextColored(theme.MutedText, assetStatus);
     }
     else if (record->RelativePath.extension() == ".keireshader")
     {

@@ -56,6 +56,21 @@ float EditorWorkspaceLayer::ManagedDeltaTime() const noexcept
     return static_cast<float>(Owner().GetTime().DeltaTime().Seconds());
 }
 
+float EditorWorkspaceLayer::ManagedFixedDeltaTime() const noexcept
+{
+    return static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds());
+}
+
+float EditorWorkspaceLayer::ManagedUnscaledDeltaTime() const noexcept
+{
+    return static_cast<float>(Owner().GetTime().UnscaledDeltaTime().Seconds());
+}
+
+double EditorWorkspaceLayer::ManagedElapsedTime() const noexcept
+{
+    return Owner().GetTime().TimeSinceStartup().Seconds();
+}
+
 Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view action) noexcept
 {
     try
@@ -111,8 +126,7 @@ Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::
     }
 }
 
-bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::AssetId entity, const Keire::AssetId clip,
-                                            const float gain) noexcept
+bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept
 {
     try
     {
@@ -120,15 +134,32 @@ bool EditorWorkspaceLayer::PlayManagedAudio(const Keire::AssetId entity, const K
             m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
         const auto scene = session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
         const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
-        auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
-        if (!sourceEntity || !presentation || !clip || !std::isfinite(gain) || gain < 0.0F)
+        auto sourceEntity = scene ? scene->FindEntity(Keire::EntityId(playback.Entity)) : Keire::Entity{};
+        if (!sourceEntity || !presentation || !playback.Clip)
             return false;
         auto source = sourceEntity.GetComponent<Keire::AudioSourceComponent>();
         if (!source)
             source = sourceEntity.AddComponent<Keire::AudioSourceComponent>();
-        source->SetClip(clip);
-        source->SetGain(gain);
+        (void)presentation->Stop(sourceEntity.Id());
+        source->SetClip(playback.Clip);
+        source->SetBus(playback.Bus);
+        source->SetGain(playback.Gain);
+        source->SetPitch(playback.Pitch);
+        source->SetPriority(playback.Priority);
+        source->SetLoop(playback.Loop);
+        source->SetSpatial(playback.Spatial);
+        if (playback.MaximumDistance > source->MinimumDistance())
+        {
+            source->SetMaximumDistance(playback.MaximumDistance);
+            source->SetMinimumDistance(playback.MinimumDistance);
+        }
+        else
+        {
+            source->SetMinimumDistance(playback.MinimumDistance);
+            source->SetMaximumDistance(playback.MaximumDistance);
+        }
         source->SetPlayOnAwake(true);
+        (void)presentation->Play(sourceEntity.Id());
         return true;
     }
     catch (...)

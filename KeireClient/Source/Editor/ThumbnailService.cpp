@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/ThumbnailService.h"
 
+#include "Keire/Audio/AudioAssets.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
@@ -573,6 +574,56 @@ namespace KeireEditor
                                  174);
             return result;
         }
+
+        [[nodiscard]] std::vector<std::byte> MakeAudioPreview(const ThumbnailRequest& request,
+                                                              const std::uint32_t width, const std::uint32_t height)
+        {
+            auto result = MakeIcon(width, height, {22, 38, 46}, {58, 209, 174}, ' ', request.Missing);
+            const auto asset = Keire::DynamicRefCast<const Keire::AudioClipAsset>(request.PreviewAsset);
+            if (!asset)
+                return result;
+            const auto& clip = *asset->Clip();
+            const auto center = static_cast<int>(height / 2);
+            DrawLine(result, width, height, 8, center, static_cast<int>(width) - 9, center, {47, 103, 105});
+            const auto columns = width > 16 ? width - 16 : 1;
+            for (std::uint32_t column = 0; column < columns; ++column)
+            {
+                float amplitude = 0.0F;
+                if (!clip.Samples.empty())
+                {
+                    const auto first =
+                        static_cast<std::size_t>(static_cast<double>(column) / columns * clip.Samples.size());
+                    const auto last = std::min(
+                        clip.Samples.size(),
+                        static_cast<std::size_t>(static_cast<double>(column + 1) / columns * clip.Samples.size()) + 1);
+                    for (std::size_t sample = first; sample < last; ++sample)
+                        amplitude = std::max(amplitude, std::abs(clip.Samples[sample]));
+                }
+                else if (!clip.EncodedSource.empty())
+                {
+                    const auto first =
+                        static_cast<std::size_t>(static_cast<double>(column) / columns * clip.EncodedSource.size());
+                    const auto last = std::min(clip.EncodedSource.size(),
+                                               static_cast<std::size_t>(static_cast<double>(column + 1) / columns *
+                                                                        clip.EncodedSource.size()) +
+                                                   1);
+                    for (std::size_t sample = first; sample < last; ++sample)
+                    {
+                        const auto normalized =
+                            std::abs(static_cast<int>(std::to_integer<std::uint8_t>(clip.EncodedSource[sample])) -
+                                     128) /
+                            128.0F;
+                        amplitude = std::max(amplitude, normalized);
+                    }
+                    amplitude *= 0.72F;
+                }
+                const auto halfHeight =
+                    std::max(1, static_cast<int>(std::clamp(amplitude, 0.0F, 1.0F) * (height * 0.34F)));
+                const auto x = static_cast<int>(column + 8);
+                DrawLine(result, width, height, x, center - halfHeight, x, center + halfHeight, {72, 231, 190});
+            }
+            return result;
+        }
     } // namespace
 
     std::vector<std::byte> MakeFolderThumbnail(const std::uint32_t width, const std::uint32_t height,
@@ -739,6 +790,9 @@ namespace KeireEditor
         RegisterProvider(".keireshader", 3, MakeShaderPreview);
         RegisterProvider(".hlsl", 3, MakeShaderPreview);
         RegisterProvider(".keireinput", 3, MakeInputPreview);
+        RegisterProvider(".wav", 1, MakeAudioPreview);
+        RegisterProvider(".ogg", 1, MakeAudioPreview);
+        RegisterProvider(".flac", 1, MakeAudioPreview);
         RegisterProvider("*", 2, icon({40, 44, 52}, {130, 142, 162}, 'X'));
     }
 

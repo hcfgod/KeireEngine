@@ -7,6 +7,9 @@ var tests = new (string Name, Action Run)[]
     ("Deterministic shot identity", DeterministicShotIdentity),
     ("Pickup transaction", PickupTransaction),
     ("Bounded ballistic lifecycle", BoundedBallisticLifecycle),
+    ("Reload interruption returns reserved magazines", ReloadInterruptionReturnsReservedMagazine),
+    ("Feedback pool acquisition is transactional", FeedbackPoolAcquisitionIsTransactional),
+    ("Ballistic zero-time and invalid steps", BallisticZeroTimeAndInvalidSteps),
 };
 
 int failed = 0;
@@ -107,18 +110,121 @@ static void BoundedBallisticLifecycle()
     Assert(world.ActiveCount == 0, "Expired projectiles must return to the pool.");
 }
 
+static void ReloadInterruptionReturnsReservedMagazine()
+{
+    var weapon = new ProductionWeaponDefinition();
+    var ammo = new ProductionAmmoDefinition();
+    var magazineDefinition = new ProductionMagazineDefinition();
+    var inventory = new PhysicalAmmunitionInventory();
+    var sink = new RecordingSink();
+    var inserted = new PhysicalMagazine(1, magazineDefinition, 10);
+    var replacement = new PhysicalMagazine(2, magazineDefinition, 20);
+    inventory.AddMagazine(replacement);
+    var runtime = new ProductionWeaponRuntime(100, weapon, ammo, inventory, sink);
+    runtime.SetInitialMagazine(inserted, chamberRound: true);
+    runtime.Equip();
+    Advance(runtime, 1.0f, 1);
+
+    runtime.Tick(0.0f, new WeaponInputFrame(false, false, false, false, true, false, false), 20);
+    Advance(runtime, 0.8f, 21);
+    Assert(runtime.Snapshot.State == WeaponRuntimeState.InsertingMagazine,
+        "The reload must hold the replacement after removing the current magazine.");
+    Assert(runtime.InsertedMagazine is null, "The old magazine must be removed before replacement insertion.");
+    Assert(inventory.CountNonEmptyMagazines("mag.stanag") == 1,
+        "Only the retained old magazine should be in inventory while the replacement is reserved.");
+
+    runtime.Unequip();
+    Assert(runtime.Snapshot.State == WeaponRuntimeState.Unequipping, "Unequip must interrupt the reload.");
+    Assert(runtime.Snapshot.ReloadKind == WeaponReloadKind.None, "Interrupted reload metadata must be cleared.");
+    Assert(inventory.CountNonEmptyMagazines("mag.stanag") == 2,
+        "Unequip must return the reserved replacement magazine to inventory.");
+    Assert(inventory.CountMagazineRounds("mag.stanag") == 29,
+        "Reload interruption must preserve every round outside the chamber.");
+}
+
+static void FeedbackPoolAcquisitionIsTransactional()
+{
+    var item = new object();
+    bool rejectAcquire = true;
+    var pool = new WeaponFeedbackPool<object>(
+        new[] { item },
+        _ =>
+        {
+            if (rejectAcquire)
+                throw new InvalidOperationException("activation failed");
+        });
+
+    AssertThrows<InvalidOperationException>(
+        () => pool.TryAcquire(out _),
+        "Activation callback failures must be observable.");
+    Assert(pool.ActiveCount == 0, "A failed activation callback must release its reserved slot.");
+
+    rejectAcquire = false;
+    Assert(pool.TryAcquire(out WeaponFeedbackLease<object> first), "The rolled-back slot must remain reusable.");
+    WeaponFeedbackLease<object> staleCopy = first;
+    first.Dispose();
+    Assert(pool.TryAcquire(out WeaponFeedbackLease<object> second), "A released slot must be reacquirable.");
+    staleCopy.Dispose();
+    Assert(pool.ActiveCount == 1, "A stale copied lease must not release a newer acquisition.");
+    second.Dispose();
+    Assert(pool.ActiveCount == 0, "The current lease must release its acquisition.");
+}
+
+static void BallisticZeroTimeAndInvalidSteps()
+{
+    var world = new ProductionBallisticWorld(1, new EmptyCollisionWorld(), new RecordingImpactSink());
+    var request = new WeaponShotRequest(
+        new ProductionShotId(1, 1, 0),
+        100.0f,
+        0.004f,
+        0.003f,
+        0.0f,
+        1.0f,
+        0.00005f,
+        10.0f,
+        10.0f,
+        uint.MaxValue,
+        1);
+    Assert(world.Spawn(request, 9, Vector3.Zero, Vector3.UnitZ), "The test projectile must spawn.");
+    world.Step(0.0f);
+    Assert(world.ActiveCount == 1, "A zero-time step must not advance projectile lifetime.");
+    AssertThrows<ArgumentOutOfRangeException>(
+        () => world.Step(-0.01f),
+        "Negative ballistic steps must be rejected.");
+    AssertThrows<ArgumentOutOfRangeException>(
+        () => world.Step(float.NaN),
+        "Non-finite ballistic steps must be rejected.");
+    world.Step(0.0001f);
+    Assert(world.ActiveCount == 0, "A positive step must continue advancing projectile lifetime.");
+}
+
 static void Assert(bool condition, string message)
 {
     if (!condition)
         throw new InvalidOperationException(message);
 }
 
-static void Advance(ProductionWeaponRuntime runtime, float seconds, ulong firstTick)
+static void AssertThrows<TException>(Action action, string message)
+    where TException : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException(message);
+}
+
+static void Advance(ProductionWeaponRuntime runtime, float seconds, uint firstTick)
 {
     const float step = 0.1f;
     int steps = (int)MathF.Ceiling(seconds / step);
     for (int index = 0; index < steps; ++index)
-        runtime.Tick(step, default, firstTick + (ulong)index);
+        runtime.Tick(step, default, unchecked(firstTick + (uint)index));
 }
 
 file sealed class RecordingSink : IWeaponRuntimeSink

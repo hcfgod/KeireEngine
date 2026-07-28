@@ -398,7 +398,7 @@ public sealed class ProductionWeaponRuntime
     private readonly PhysicalAmmunitionInventory _inventory;
     private readonly IWeaponRuntimeSink _sink;
     private PhysicalMagazine? _insertedMagazine;
-    private PhysicalMagazine? _removedMagazine;
+    private PhysicalMagazine? _pendingMagazine;
     private WeaponRuntimeState _state = WeaponRuntimeState.Holstered;
     private WeaponReloadKind _reloadKind;
     private WeaponFireMode _fireMode;
@@ -467,8 +467,11 @@ public sealed class ProductionWeaponRuntime
 
     public void Unequip()
     {
-        if (_state != WeaponRuntimeState.Holstered)
-            Transition(WeaponRuntimeState.Unequipping);
+        if (_state == WeaponRuntimeState.Holstered)
+            return;
+
+        CancelReload();
+        Transition(WeaponRuntimeState.Unequipping);
     }
 
     public void Tick(float deltaTime, in WeaponInputFrame input, uint deterministicSeed)
@@ -596,7 +599,7 @@ public sealed class ProductionWeaponRuntime
             if (replacement is null)
                 return;
 
-            _removedMagazine = replacement;
+            _pendingMagazine = replacement;
             _reloadKind = _chamberedRounds > 0 ? WeaponReloadKind.Tactical : WeaponReloadKind.Empty;
         }
 
@@ -684,12 +687,24 @@ public sealed class ProductionWeaponRuntime
 
     private void InsertReplacementMagazine()
     {
-        if (_removedMagazine is null)
+        if (_pendingMagazine is null)
             return;
 
-        _insertedMagazine = _removedMagazine;
-        _removedMagazine = null;
+        _insertedMagazine = _pendingMagazine;
+        _pendingMagazine = null;
         _sink.OnMagazineInserted(_insertedMagazine);
+    }
+
+    private void CancelReload()
+    {
+        if (_pendingMagazine is not null)
+        {
+            _inventory.AddMagazine(_pendingMagazine);
+            _pendingMagazine = null;
+        }
+
+        _reloadKind = WeaponReloadKind.None;
+        _reloadInterrupted = false;
     }
 
     private void InsertShell()
@@ -908,7 +923,12 @@ public sealed class ProductionBallisticWorld
 
     public void Step(float fixedDeltaTime)
     {
-        float step = Math.Clamp(fixedDeltaTime, 0.0001f, 0.05f);
+        if (!float.IsFinite(fixedDeltaTime) || fixedDeltaTime < 0.0f)
+            throw new ArgumentOutOfRangeException(nameof(fixedDeltaTime));
+        if (fixedDeltaTime == 0.0f)
+            return;
+
+        float step = Math.Min(fixedDeltaTime, 0.05f);
         for (int index = 0; index < _projectiles.Length; ++index)
         {
             if (_projectiles[index].Active)
@@ -1023,6 +1043,7 @@ public sealed class WeaponFeedbackPool<T> where T : class
 {
     private readonly T[] _items;
     private readonly bool[] _active;
+    private readonly uint[] _generations;
     private readonly Action<T>? _onAcquire;
     private readonly Action<T>? _onRelease;
 
@@ -1037,6 +1058,7 @@ public sealed class WeaponFeedbackPool<T> where T : class
 
         _items = new T[items.Count];
         _active = new bool[items.Count];
+        _generations = new uint[items.Count];
         for (int index = 0; index < items.Count; ++index)
             _items[index] = items[index];
         _onAcquire = onAcquire;
@@ -1053,10 +1075,23 @@ public sealed class WeaponFeedbackPool<T> where T : class
             if (_active[index])
                 continue;
 
+            uint generation = unchecked(++_generations[index]);
+            if (generation == 0)
+                generation = ++_generations[index];
             _active[index] = true;
             ++ActiveCount;
-            _onAcquire?.Invoke(_items[index]);
-            lease = new WeaponFeedbackLease<T>(this, index, _items[index]);
+            try
+            {
+                _onAcquire?.Invoke(_items[index]);
+            }
+            catch
+            {
+                _active[index] = false;
+                --ActiveCount;
+                throw;
+            }
+
+            lease = new WeaponFeedbackLease<T>(this, index, generation, _items[index]);
             return true;
         }
 
@@ -1064,9 +1099,9 @@ public sealed class WeaponFeedbackPool<T> where T : class
         return false;
     }
 
-    internal void Release(int index)
+    internal void Release(int index, uint generation)
     {
-        if ((uint)index >= (uint)_items.Length || !_active[index])
+        if ((uint)index >= (uint)_items.Length || !_active[index] || _generations[index] != generation)
             return;
 
         _active[index] = false;
@@ -1079,16 +1114,18 @@ public readonly struct WeaponFeedbackLease<T> : IDisposable where T : class
 {
     private readonly WeaponFeedbackPool<T>? _owner;
     private readonly int _index;
+    private readonly uint _generation;
 
-    internal WeaponFeedbackLease(WeaponFeedbackPool<T> owner, int index, T value)
+    internal WeaponFeedbackLease(WeaponFeedbackPool<T> owner, int index, uint generation, T value)
     {
         _owner = owner;
         _index = index;
+        _generation = generation;
         Value = value;
     }
 
     public T? Value { get; }
-    public void Dispose() => _owner?.Release(_index);
+    public void Dispose() => _owner?.Release(_index, _generation);
 }
 
 public sealed class WeaponLoadout

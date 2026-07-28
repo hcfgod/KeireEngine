@@ -49,6 +49,8 @@ namespace KeireEditor
                     else if constexpr (std::same_as<T, Keire::Vector3>)
                         return std::to_string(typed.X) + ", " + std::to_string(typed.Y) + ", " +
                                std::to_string(typed.Z);
+                    else if constexpr (std::same_as<T, Keire::ComponentEventValue>)
+                        return std::to_string(typed.Listeners.size()) + " persistent listener(s)";
                     else
                         return "Changed";
                 },

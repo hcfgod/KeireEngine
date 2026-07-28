@@ -315,7 +315,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     Keire::ManagedReloadRequest request;
     request.Assemblies = {assembly};
     request.State = {{42, "Game.Player", {{"speed", "7.5"}, {"target", "entity:123"}}}};
-    REQUIRE(scripts->PrepareReload(request));
+    const auto prepared = scripts->PrepareReload(request);
+    INFO(scripts->ReloadStatus().Diagnostic);
+    REQUIRE(prepared);
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
     CHECK(scripts->ReloadStatus().AvailableTypes == std::vector<std::string>{"Game.Player"});
     CHECK(scripts->ReloadStatus().RetainedState == request.State);

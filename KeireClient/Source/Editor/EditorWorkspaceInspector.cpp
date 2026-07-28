@@ -2,6 +2,7 @@
 
 #include <cctype>
 
+#include "Keire/Audio/AudioAssets.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/ConsolePanel.h"
@@ -86,7 +87,47 @@ Keire::AssetId EditorWorkspaceLayer::InspectorSelectedAsset() const noexcept { r
 
 std::string_view EditorWorkspaceLayer::InspectorAssetStatus() const noexcept { return m_AssetStatus; }
 
-void EditorWorkspaceLayer::SetInspectorSelectedAsset(const Keire::AssetId asset) noexcept { m_SelectedAsset = asset; }
+void EditorWorkspaceLayer::SetInspectorSelectedAsset(const Keire::AssetId asset) noexcept
+{
+    if (asset != m_SelectedAsset)
+        StopInspectorAudioPreview();
+    m_SelectedAsset = asset;
+}
+
+void EditorWorkspaceLayer::PreviewInspectorAudio(const Keire::AssetId asset)
+{
+    const auto audio = Owner().Audio();
+    const auto assets = Owner().Assets();
+    if (!audio || !audio->IsOpen() || !assets || !asset)
+        throw std::logic_error("Audio preview services are unavailable.");
+    StopInspectorAudioPreview();
+    const auto handle = assets->Load<Keire::AudioClipAsset>(asset, Keire::AssetPriority::High);
+    const auto clip = handle.Get();
+    if (!clip)
+        throw std::runtime_error("The selected audio clip could not be loaded.");
+    Keire::AudioVoiceSpecification specification;
+    specification.Clip = clip->Clip();
+    specification.Bus = "EditorPreview";
+    specification.Spatial = false;
+    specification.Priority = 255;
+    m_InspectorAudioPreviewVoice = audio->Play(std::move(specification));
+}
+
+void EditorWorkspaceLayer::StopInspectorAudioPreview() noexcept
+{
+    try
+    {
+        if (m_InspectorAudioPreviewVoice)
+        {
+            if (const auto audio = Owner().Audio(); audio && audio->IsOpen())
+                (void)audio->Stop(m_InspectorAudioPreviewVoice);
+        }
+    }
+    catch (...)
+    {
+    }
+    m_InspectorAudioPreviewVoice = {};
+}
 
 void EditorWorkspaceLayer::ActivateInspectorHistory() noexcept { m_ActiveUndoContext = m_SceneDocument->History(); }
 

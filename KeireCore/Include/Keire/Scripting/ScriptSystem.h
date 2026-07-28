@@ -60,6 +60,20 @@ namespace Keire
         float Distance = 0.0F;
     };
 
+    struct ManagedAudioPlayback
+    {
+        AssetId Entity;
+        AssetId Clip;
+        std::string Bus = "SFX";
+        float Gain = 1.0F;
+        float Pitch = 1.0F;
+        std::uint32_t Priority = 128;
+        bool Loop = false;
+        bool Spatial = true;
+        float MinimumDistance = 1.0F;
+        float MaximumDistance = 100.0F;
+    };
+
     class KEIRE_API IScriptRuntimeServices
     {
       public:
@@ -67,6 +81,9 @@ namespace Keire
 
         virtual void WriteManagedLog(ManagedLogLevel level, std::string_view message) noexcept = 0;
         [[nodiscard]] virtual float ManagedDeltaTime() const noexcept = 0;
+        [[nodiscard]] virtual float ManagedFixedDeltaTime() const noexcept { return 1.0F / 60.0F; }
+        [[nodiscard]] virtual float ManagedUnscaledDeltaTime() const noexcept { return ManagedDeltaTime(); }
+        [[nodiscard]] virtual double ManagedElapsedTime() const noexcept { return 0.0; }
         [[nodiscard]] virtual Vector2 ReadManagedInput(std::string_view action) noexcept = 0;
         [[nodiscard]] virtual ManagedInputState ReadManagedInputState(std::string_view) noexcept
         {
@@ -81,6 +98,10 @@ namespace Keire
         [[nodiscard]] virtual bool IsManagedCursorVisible() const noexcept { return true; }
         [[nodiscard]] virtual bool IsManagedCursorLocked() const noexcept { return false; }
         [[nodiscard]] virtual bool PlayManagedAudio(AssetId, AssetId, float) noexcept { return false; }
+        [[nodiscard]] virtual bool PlayManagedAudio(const ManagedAudioPlayback& playback) noexcept
+        {
+            return PlayManagedAudio(playback.Entity, playback.Clip, playback.Gain);
+        }
         [[nodiscard]] virtual bool StopManagedAudio(AssetId) noexcept { return false; }
         [[nodiscard]] virtual bool SetManagedUiText(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ConsumeManagedUiClick(AssetId) noexcept { return false; }

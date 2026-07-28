@@ -109,6 +109,14 @@ namespace KeireEditor
                 return DrawValue<Keire::EntityId>(value, [&](Keire::EntityId& typed)
                                                   { return editor.EditEntity(property.DisplayName, typed); });
             });
+        Register(
+            Keire::ComponentPropertyKind::Event,
+            [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
+            {
+                return DrawValue<Keire::ComponentEventValue>(
+                    value, [&](Keire::ComponentEventValue& typed)
+                    { return editor.EditEvent(property.DisplayName, typed, property.EventArgumentCount); });
+            });
     }
 
     void PropertyDrawerRegistry::Register(const Keire::ComponentPropertyKind kind, Drawer drawer)

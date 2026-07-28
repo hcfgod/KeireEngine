@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Keire;
 
@@ -45,6 +46,9 @@ internal static unsafe class NativeRuntime
 #pragma warning disable CS0649
     internal static delegate* unmanaged<byte, NativeString, void> WriteLogIcall;
     internal static delegate* unmanaged<float> DeltaTimeIcall;
+    internal static delegate* unmanaged<float> FixedDeltaTimeIcall;
+    internal static delegate* unmanaged<float> UnscaledDeltaTimeIcall;
+    internal static delegate* unmanaged<double> ElapsedTimeIcall;
     internal static delegate* unmanaged<NativeString, float*, float*, void> InputAxis2DIcall;
     internal static delegate* unmanaged<NativeString, byte> InputStateIcall;
     internal static delegate* unmanaged<byte, void> SetCursorVisibleIcall;
@@ -60,12 +64,26 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetWorldPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> EntityExistsIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveInHierarchyIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, void> SetEntityActiveIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte*, int, int> GetEntityNameIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> SetEntityNameIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong*, ulong*, byte> GetEntityParentIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte, byte> SetEntityParentIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, int> GetEntityChildCountIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, int, ulong*, ulong*, byte> GetEntityChildIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> ComponentExistsIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> AddComponentIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> RemoveComponentIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> GetComponentEnabledIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte, byte> SetComponentEnabledIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong*, ulong*, void> CloneEntityIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, void> DestroyEntityIcall;
     internal static delegate* unmanaged<ulong, Vector3, Vector3, float, uint, ulong, ulong, NativeRaycastHit*, byte>
         RaycastIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, float, byte> PlayAudioIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, float, float, uint, byte, byte,
+        float, float, byte> PlayAudioAdvancedIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopAudioIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> SetUiTextIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> ConsumeUiClickIcall;
@@ -78,6 +96,9 @@ internal static unsafe class NativeRuntime
     }
 
     internal static float DeltaTime => DeltaTimeIcall();
+    internal static float FixedDeltaTime => FixedDeltaTimeIcall();
+    internal static float UnscaledDeltaTime => UnscaledDeltaTimeIcall();
+    internal static double ElapsedTime => ElapsedTimeIcall();
 
     internal static Vector2 ReadInputAxis2D(string action)
     {
@@ -102,8 +123,83 @@ internal static unsafe class NativeRuntime
         EntityExistsIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
     internal static bool GetEntityActive(Entity entity) =>
         GetEntityActiveIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+    internal static bool GetEntityActiveInHierarchy(Entity entity) =>
+        GetEntityActiveInHierarchyIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
     internal static void SetEntityActive(Entity entity, bool active) =>
         SetEntityActiveIcall(entity.World, entity.Id.High, entity.Id.Low, active ? (byte)1 : (byte)0);
+
+    internal static string GetEntityName(Entity entity)
+    {
+        int length = GetEntityNameIcall(entity.World, entity.Id.High, entity.Id.Low, null, 0);
+        if (length <= 0)
+            return string.Empty;
+        byte[] bytes = new byte[length];
+        fixed (byte* destination = bytes)
+        {
+            int copiedLength = GetEntityNameIcall(entity.World, entity.Id.High, entity.Id.Low, destination, bytes.Length);
+            if (copiedLength < 0)
+                return string.Empty;
+        }
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    internal static void SetEntityName(Entity entity, string name)
+    {
+        using NativeString nativeName = name;
+        if (SetEntityNameIcall(entity.World, entity.Id.High, entity.Id.Low, nativeName) == 0)
+            throw new InvalidOperationException("The entity name could not be changed.");
+    }
+
+    internal static Entity GetEntityParent(Entity entity)
+    {
+        ulong high = 0;
+        ulong low = 0;
+        return GetEntityParentIcall(entity.World, entity.Id.High, entity.Id.Low, &high, &low) != 0
+            ? new Entity(entity.World, new EntityId(high, low))
+            : default;
+    }
+
+    internal static void SetEntityParent(Entity entity, Entity parent, bool preserveWorldTransform)
+    {
+        if (parent.Id.IsValid && parent.World != entity.World)
+            throw new ArgumentException("An entity cannot be parented across worlds.", nameof(parent));
+        if (SetEntityParentIcall(entity.World, entity.Id.High, entity.Id.Low, parent.Id.High, parent.Id.Low,
+                                 preserveWorldTransform ? (byte)1 : (byte)0) == 0)
+            throw new InvalidOperationException("The entity parent could not be changed.");
+    }
+
+    internal static IReadOnlyList<Entity> GetEntityChildren(Entity entity)
+    {
+        int count = GetEntityChildCountIcall(entity.World, entity.Id.High, entity.Id.Low);
+        if (count <= 0)
+            return Array.Empty<Entity>();
+        var children = new Entity[count];
+        int written = 0;
+        for (int index = 0; index < count; ++index)
+        {
+            ulong high = 0;
+            ulong low = 0;
+            if (GetEntityChildIcall(entity.World, entity.Id.High, entity.Id.Low, index, &high, &low) != 0)
+                children[written++] = new Entity(entity.World, new EntityId(high, low));
+        }
+        return written == children.Length ? children : children[..written];
+    }
+
+    internal static bool ComponentExists(Entity entity, ComponentTypeId type) =>
+        entity.Id.IsValid && type.IsValid &&
+        ComponentExistsIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low) != 0;
+    internal static bool AddComponent(Entity entity, ComponentTypeId type) =>
+        AddComponentIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low) != 0;
+    internal static bool RemoveComponent(Entity entity, ComponentTypeId type) =>
+        RemoveComponentIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low) != 0;
+    internal static bool GetComponentEnabled(Entity entity, ComponentTypeId type) =>
+        GetComponentEnabledIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low) != 0;
+    internal static void SetComponentEnabled(Entity entity, ComponentTypeId type, bool enabled)
+    {
+        if (SetComponentEnabledIcall(entity.World, entity.Id.High, entity.Id.Low, type.High, type.Low,
+                                     enabled ? (byte)1 : (byte)0) == 0)
+            throw new InvalidOperationException("The component enabled state could not be changed.");
+    }
     internal static Vector3 GetLocalPosition(Entity entity) =>
         GetLocalPositionIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void SetLocalPosition(Entity entity, Vector3 value) =>
@@ -132,6 +228,15 @@ internal static unsafe class NativeRuntime
 
     internal static bool PlayAudio(Entity entity, AssetId clip, float gain) =>
         PlayAudioIcall(entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low, gain) != 0;
+
+    internal static bool PlayAudio(Entity entity, AssetId clip, AudioPlaybackOptions options)
+    {
+        using NativeString bus = options.Bus;
+        return PlayAudioAdvancedIcall(entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low, bus,
+                                      options.Gain, options.Pitch, options.Priority, options.Loop ? (byte)1 : (byte)0,
+                                      options.Spatial ? (byte)1 : (byte)0, options.MinimumDistance,
+                                      options.MaximumDistance) != 0;
+    }
 
     internal static bool StopAudio(Entity entity) =>
         StopAudioIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;

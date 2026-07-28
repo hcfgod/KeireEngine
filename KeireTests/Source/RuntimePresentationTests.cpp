@@ -2,7 +2,43 @@
 
 #include <doctest/doctest.h>
 
+#include <chrono>
 #include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <string_view>
+#include <thread>
+
+namespace
+{
+    class TemporaryPresentationProject final
+    {
+      public:
+        TemporaryPresentationProject()
+            : Root(std::filesystem::temp_directory_path() /
+                   ("krp-" + Keire::AssetId::Generate().ToString().substr(0, 8)))
+        {
+            std::filesystem::create_directories(Root / "Assets");
+        }
+
+        ~TemporaryPresentationProject()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+
+        void Write(const std::filesystem::path& relative, const std::string_view content) const
+        {
+            const auto path = Root / "Assets" / relative;
+            std::filesystem::create_directories(path.parent_path());
+            std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+            stream.write(content.data(), static_cast<std::streamsize>(content.size()));
+            REQUIRE(stream.good());
+        }
+
+        std::filesystem::path Root;
+    };
+} // namespace
 
 TEST_CASE("retained runtime UI lays out, draws, hit-tests, and emits clicks")
 {
@@ -194,4 +230,125 @@ TEST_CASE("audio clip assets preserve encoded streaming payloads without PCM exp
     CHECK(decoded->Clip()->Streaming);
     CHECK(decoded->Clip()->Samples.empty());
     CHECK(decoded->Clip()->EncodedSource == source.EncodedSource);
+}
+
+TEST_CASE("scene presentation clear discards UI events deferred during filtered consumption")
+{
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Presentation UI"));
+    auto canvas = scene->CreateEntity("Canvas");
+    const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
+    REQUIRE(canvasComponent);
+    canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
+
+    auto first = scene->CreateEntity("First", canvas);
+    const auto firstRect = first.AddComponent<Keire::RectTransformComponent>();
+    REQUIRE(firstRect);
+    firstRect->SetAnchorMinimum({});
+    firstRect->SetAnchorMaximum({});
+    firstRect->SetPivot({});
+    firstRect->SetAnchoredPosition({10.0F, 10.0F});
+    firstRect->SetSizeDelta({100.0F, 50.0F});
+    REQUIRE(first.AddComponent<Keire::UiButtonComponent>());
+
+    auto second = scene->CreateEntity("Second", canvas);
+    const auto secondRect = second.AddComponent<Keire::RectTransformComponent>();
+    REQUIRE(secondRect);
+    secondRect->SetAnchorMinimum({});
+    secondRect->SetAnchorMaximum({});
+    secondRect->SetPivot({});
+    secondRect->SetAnchoredPosition({140.0F, 10.0F});
+    secondRect->SetSizeDelta({100.0F, 50.0F});
+    REQUIRE(second.AddComponent<Keire::UiButtonComponent>());
+
+    presentation->Synchronize(scene, 320.0F, 180.0F, false);
+    presentation->PointerMove(25.0F, 25.0F);
+    presentation->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true);
+    presentation->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, false);
+    CHECK_FALSE(presentation->ConsumeClick(second.Id()));
+
+    presentation->Clear();
+    Keire::RuntimeUiEvent event;
+    CHECK_FALSE(presentation->PollUiEvent(event));
+
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("scene presentation treats automatic and manual audio playback as edge-triggered requests")
+{
+    TemporaryPresentationProject project;
+    project.Write("OneShot.testaudio", "test");
+
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.AudioClip";
+    importer.Type = Keire::AudioClipAsset::StaticType();
+    importer.Extensions = {".testaudio"};
+    importer.Import = [](const std::span<const std::byte>)
+    {
+        Keire::AudioClipData clip;
+        clip.SampleRate = 48'000;
+        clip.Channels = 1;
+        clip.Samples = {0.25F, -0.25F, 0.5F, -0.5F};
+        return Keire::AudioClipAsset::Encode(clip);
+    };
+    Keire::AssetDatabaseSpecification databaseSpecification;
+    databaseSpecification.ProjectRoot = project.Root;
+    databaseSpecification.Importers.push_back(std::move(importer));
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+    const auto imported = database->ImportAll();
+    const auto record = database->Find("OneShot.testaudio");
+    REQUIRE(record);
+
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.DevelopmentCatalog = imported.CatalogPath;
+    assetSpecification.WorkerCount = 1;
+    assetSpecification.Decoders.push_back(Keire::CreateAudioClipAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    Keire::AudioSystemSpecification audioSpecification;
+    audioSpecification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(audioSpecification);
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, audio);
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Presentation Audio"));
+    auto sourceEntity = scene->CreateEntity("One shot");
+    const auto source = sourceEntity.AddComponent<Keire::AudioSourceComponent>();
+    REQUIRE(source);
+    source->SetClip(record->Id);
+    source->SetPlayOnAwake(true);
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (presentation->Statistics().ActiveAudioSources == 0 && std::chrono::steady_clock::now() < deadline)
+    {
+        presentation->Synchronize(scene, 320.0F, 180.0F, true);
+        (void)assets->PumpCompletions();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(presentation->Statistics().ActiveAudioSources == 1);
+
+    (void)audio->RenderVoicesOffline(16);
+    REQUIRE(audio->Voices().empty());
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK(audio->Voices().empty());
+    CHECK(presentation->Statistics().ActiveAudioSources == 0);
+
+    REQUIRE(presentation->Play(sourceEntity.Id()));
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    REQUIRE(audio->Voices().size() == 1);
+    REQUIRE(presentation->Stop(sourceEntity.Id()));
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK(audio->Voices().empty());
+
+    presentation->Synchronize(scene, 320.0F, 180.0F, false);
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK(audio->Voices().size() == 1);
+
+    presentation->Clear();
+    scene->Close();
+    assets->Close();
+    audio->Close();
 }

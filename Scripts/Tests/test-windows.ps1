@@ -273,27 +273,20 @@ Assert-True ($commonPremake.Contains('_DISABLE_STRING_ANNOTATION') -and $commonP
 
 $packageStage = Join-Path ([IO.Path]::GetTempPath()) ("template-package-test-" + [guid]::NewGuid().ToString("N"))
 try {
-    foreach ($path in @("bin\Client.exe", "bin\Hub.exe", "lib\Core.lib", "lib\CoreImGui.lib", "lib\Jolt.lib", "lib\Recast.lib", "lib\Detour.lib", "lib\DetourCrowd.lib", "lib\DetourTileCache.lib", "lib\miniaudio.lib", "Config\Client.json", "include\Core\Core.h", "include\Core\Log.h", "include\Core\Api.h", "include\Core\Application.h", "include\Core\Assert.h", "include\Core\BuildInfo.h", "include\Core\EntryPoint.h", "include\Core\Event.h", "include\Core\Layer.h", "include\Core\Ref.h", "include\Core\Time.h", "include\Core\Project\Project.h", "include\Core\Scenes\Scene.h", "include\Core\Scenes\SceneAsset.h", "include\Core\Scenes\SceneSystem.h", "include\Core\Window.h", "include\Core\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md", "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md", "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake", "third-party\spdlog\spdlog.h", "third-party\SDL3\include\SDL3\SDL.h", "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake", "third-party\SDL3\licenses\SDL3\LICENSE.txt", "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt", "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\Jolt-LICENSE.txt", "third-party\licenses\Recast-LICENSE.txt", "third-party\licenses\miniaudio-LICENSE.txt", "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
+    foreach ($path in (Get-WindowsRequiredPackagePaths Client Hub Core Core)) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
-    foreach ($path in @("bin\CoreAssetTool.exe", "bin\CoreAssetWorker.exe", "lib\CoreZstd.lib", "include\Core\Math\Math.h", "include\Core\ECS\Component.h", "include\Core\ECS\Entity.h", "include\Core\ECS\Components\TransformComponent.h", "include\Core\ECS\Components\DirectionalLightComponent.h", "include\Core\Assets\Asset.h", "include\Core\Assets\AssetSystem.h", "include\Core\Assets\AssetPipeline.h", "include\Core\Assets\InputActionAsset.h", "include\Core\Input\Input.h", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput.keiremeta", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt")) {
+    foreach ($path in @(
+        "lib\cmake\CrossPlatformCoreClientTemplate\CrossPlatformCoreClientTemplateConfig.cmake",
+        "third-party\spdlog\spdlog.h"
+    )) {
         $file = Join-Path $packageStage $path
         New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
         New-Item -ItemType File -Force $file | Out-Null
     }
     Remove-Item (Join-Path $packageStage "third-party\spdlog") -Recurse -Force
-    foreach ($path in @("bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "lib\assimp.lib", "lib\zlibstatic.lib", "include\Core\Undo.h", "include\Core\ECS\Components\CameraComponent.h", "include\Core\ECS\Components\MeshRendererComponent.h", "include\Core\Rendering\RenderSystem.h", "include\Core\Assets\RenderingAssets.h", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt", "third-party\licenses\assimp-LICENSE.txt", "third-party\licenses\assimp-zlib-LICENSE.txt", "third-party\licenses\stb-LICENSE.txt")) {
-        $file = Join-Path $packageStage $path
-        New-Item -ItemType Directory -Force (Split-Path $file) | Out-Null
-        New-Item -ItemType File -Force $file | Out-Null
-    }
-    $uiHeader = Join-Path $packageStage "include\Core\Ui.h"
-    New-Item -ItemType Directory -Force (Split-Path $uiHeader) | Out-Null
-    New-Item -ItemType File -Force $uiHeader | Out-Null
-    New-Item -ItemType File -Force (Join-Path $packageStage "include\Core\UiWorkspace.h") | Out-Null
-    New-Item -ItemType File -Force (Join-Path $packageStage "bin\CoreRuntime.exe") | Out-Null
     Assert-WindowsPackageStage $packageStage Client Hub Core Core
     foreach ($generatedPath in @(
         "samples\KeireSandbox\Build\generated.vcxproj",

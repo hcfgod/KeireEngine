@@ -95,8 +95,124 @@ public sealed class UiImage : UiElement
 
 public sealed class UiButton : UiElement
 {
-    public event Action? Clicked;
-    public void Invoke() => Clicked?.Invoke();
+    private static readonly Dictionary<Entity, List<WeakReference<UiButton>>> NativeBindings = [];
+    private static readonly List<Entity> DispatchKeys = [];
+    private static readonly List<UiButton> DispatchTargets = [];
+    private static bool s_dispatching;
+
+    private Action? _clicked;
+
+    public UiButton()
+    {
+    }
+
+    internal UiButton(Entity entity)
+    {
+        Entity = entity;
+        Interactable = true;
+    }
+
+    public Entity Entity { get; }
+    public bool NativeBound => Entity.Id != default;
+    public bool IsValid => NativeBound && Entity.HasComponent<UiButtonComponent>();
+
+    public event Action? Clicked
+    {
+        add
+        {
+            if (value is null)
+                return;
+            bool register = _clicked is null;
+            _clicked += value;
+            if (register && NativeBound)
+                RegisterNativeBinding(this);
+        }
+        remove
+        {
+            _clicked -= value;
+            if (_clicked is null && NativeBound)
+                UnregisterNativeBinding(this);
+        }
+    }
+
+    public static UiButton? FromEntity(Entity entity) =>
+        entity.HasComponent<UiButtonComponent>() ? new UiButton(entity) : null;
+
+    public void Invoke() => _clicked?.Invoke();
+
+    internal static void DispatchNativeClicks()
+    {
+        if (s_dispatching || NativeBindings.Count == 0)
+            return;
+
+        s_dispatching = true;
+        try
+        {
+            DispatchKeys.Clear();
+            foreach (Entity entity in NativeBindings.Keys)
+                DispatchKeys.Add(entity);
+
+            foreach (Entity entity in DispatchKeys)
+            {
+                if (!NativeBindings.TryGetValue(entity, out List<WeakReference<UiButton>>? bindings))
+                    continue;
+
+                DispatchTargets.Clear();
+                for (int index = bindings.Count - 1; index >= 0; --index)
+                {
+                    if (!bindings[index].TryGetTarget(out UiButton? button) || button._clicked is null)
+                    {
+                        bindings.RemoveAt(index);
+                        continue;
+                    }
+                    DispatchTargets.Add(button);
+                }
+
+                if (bindings.Count == 0)
+                {
+                    NativeBindings.Remove(entity);
+                    continue;
+                }
+
+                if (!NativeRuntime.ConsumeUiClick(entity))
+                    continue;
+
+                foreach (UiButton button in DispatchTargets)
+                    button.Invoke();
+            }
+        }
+        finally
+        {
+            DispatchTargets.Clear();
+            DispatchKeys.Clear();
+            s_dispatching = false;
+        }
+    }
+
+    private static void RegisterNativeBinding(UiButton button)
+    {
+        if (!NativeBindings.TryGetValue(button.Entity, out List<WeakReference<UiButton>>? bindings))
+        {
+            bindings = [];
+            NativeBindings.Add(button.Entity, bindings);
+        }
+
+        foreach (WeakReference<UiButton> binding in bindings)
+            if (binding.TryGetTarget(out UiButton? existing) && ReferenceEquals(existing, button))
+                return;
+        bindings.Add(new WeakReference<UiButton>(button));
+    }
+
+    private static void UnregisterNativeBinding(UiButton button)
+    {
+        if (!NativeBindings.TryGetValue(button.Entity, out List<WeakReference<UiButton>>? bindings))
+            return;
+        for (int index = bindings.Count - 1; index >= 0; --index)
+            if (!bindings[index].TryGetTarget(out UiButton? existing) || ReferenceEquals(existing, button))
+                bindings.RemoveAt(index);
+        if (bindings.Count == 0)
+            NativeBindings.Remove(button.Entity);
+    }
 }
 
 public sealed class RuntimeCanvas
@@ -167,4 +283,5 @@ public static class RuntimeUi
 {
     public static bool SetText(Entity entity, string text) => NativeRuntime.SetUiText(entity, text);
     public static bool WasClicked(Entity entity) => NativeRuntime.ConsumeUiClick(entity);
+    public static UiButton? GetButton(Entity entity) => UiButton.FromEntity(entity);
 }

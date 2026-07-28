@@ -3,6 +3,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -39,6 +40,8 @@ namespace KeireEditor
             return EditAsset(label, value, Keire::Texture2DAsset::StaticType());
         }
         [[nodiscard]] virtual bool EditEntity(std::string_view label, Keire::EntityId& value) = 0;
+        [[nodiscard]] virtual bool EditEvent(std::string_view label, Keire::ComponentEventValue& value,
+                                             std::size_t argumentCount) = 0;
     };
 
     class PropertyDrawerRegistry final

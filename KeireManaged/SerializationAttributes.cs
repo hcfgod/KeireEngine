@@ -13,22 +13,36 @@ public sealed class SerializableTypeAttribute : Attribute;
 public sealed class HideInInspectorAttribute : Attribute;
 
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
-public sealed class RangeAttribute(double minimum, double maximum) : Attribute
+public sealed class RangeAttribute : Attribute
 {
-    public double Minimum { get; } = minimum;
-    public double Maximum { get; } = maximum;
+    public RangeAttribute(double minimum, double maximum)
+    {
+        if (!double.IsFinite(minimum) || !double.IsFinite(maximum) || minimum > maximum)
+            throw new ArgumentOutOfRangeException(nameof(minimum), "Inspector range bounds must be finite and ordered.");
+        Minimum = minimum;
+        Maximum = maximum;
+    }
+
+    public readonly double Minimum;
+    public readonly double Maximum;
 }
 
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
-public sealed class TooltipAttribute(string text) : Attribute
+public sealed class TooltipAttribute : Attribute
 {
-    public string Text { get; } = text ?? throw new ArgumentNullException(nameof(text));
+    public TooltipAttribute(string text) =>
+        Text = string.IsNullOrWhiteSpace(text) ? throw new ArgumentException("Tooltip text is empty.", nameof(text)) : text;
+
+    public readonly string Text;
 }
 
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
-public sealed class InspectorGroupAttribute(string name) : Attribute
+public sealed class InspectorGroupAttribute : Attribute
 {
-    public string Name { get; } = name ?? throw new ArgumentNullException(nameof(name));
+    public InspectorGroupAttribute(string name) =>
+        Name = string.IsNullOrWhiteSpace(name) ? throw new ArgumentException("Inspector group name is empty.", nameof(name)) : name;
+
+    public readonly string Name;
 }
 
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]

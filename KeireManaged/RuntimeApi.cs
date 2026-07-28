@@ -105,9 +105,9 @@ public static class RuntimeBridge
 public static class Time
 {
     public static float DeltaTime => NativeRuntime.DeltaTime;
-    public static float FixedDeltaTime => RuntimeBridge.Current.FixedDeltaTime;
-    public static float UnscaledDeltaTime => RuntimeBridge.Current.UnscaledDeltaTime;
-    public static double Elapsed => RuntimeBridge.Current.ElapsedTime;
+    public static float FixedDeltaTime => NativeRuntime.FixedDeltaTime;
+    public static float UnscaledDeltaTime => NativeRuntime.UnscaledDeltaTime;
+    public static double Elapsed => NativeRuntime.ElapsedTime;
 }
 
 public static class Input
@@ -156,10 +156,71 @@ public static class Animator
     public static void SetTrigger(Entity entity, string parameter) => RuntimeBridge.Current.SetAnimatorTrigger(entity, parameter);
 }
 
+[StableAssetTypeId("4b454952-4541-5544-494f-434c49500001")]
+public sealed class AudioClip;
+
+public readonly record struct AudioPlaybackOptions
+{
+    public AudioPlaybackOptions()
+    {
+        Bus = "SFX";
+        Gain = 1.0f;
+        Pitch = 1.0f;
+        Priority = 128;
+        Loop = false;
+        Spatial = true;
+        MinimumDistance = 1.0f;
+        MaximumDistance = 100.0f;
+    }
+
+    public string Bus { get; init; }
+    public float Gain { get; init; }
+    public float Pitch { get; init; }
+    public uint Priority { get; init; }
+    public bool Loop { get; init; }
+    public bool Spatial { get; init; }
+    public float MinimumDistance { get; init; }
+    public float MaximumDistance { get; init; }
+}
+
+public readonly record struct AudioSourceHandle(Entity Entity)
+{
+    public bool IsValid => Entity.HasComponent<AudioSourceComponent>();
+    public bool Play(AssetReference<AudioClip> clip) => Audio.Play(Entity, clip);
+    public bool Play(AssetReference<AudioClip> clip, AudioPlaybackOptions options) => Audio.Play(Entity, clip, options);
+    public bool Stop() => Audio.Stop(Entity);
+}
+
 public static class Audio
 {
     public static bool Play(Entity entity, AssetId clip, float volume = 1.0f) =>
-        NativeRuntime.PlayAudio(entity, clip, volume);
+        Play(entity, clip, new AudioPlaybackOptions { Gain = volume });
+
+    public static bool Play(Entity entity, AssetReference<AudioClip> clip) =>
+        Play(entity, clip.Id, new AudioPlaybackOptions());
+
+    public static bool Play(Entity entity, AssetReference<AudioClip> clip, AudioPlaybackOptions options) =>
+        Play(entity, clip.Id, options);
+
+    public static bool Play(Entity entity, AssetId clip, AudioPlaybackOptions options)
+    {
+        if (!entity.IsValid)
+            throw new ArgumentException("Audio playback requires a valid entity.", nameof(entity));
+        if (!clip.IsValid)
+            throw new ArgumentException("Audio playback requires a valid clip.", nameof(clip));
+        if (string.IsNullOrWhiteSpace(options.Bus) || options.Bus.Length > 128)
+            throw new ArgumentException("Audio bus names must contain between 1 and 128 characters.", nameof(options));
+        if (!float.IsFinite(options.Gain) || options.Gain < 0.0f || options.Gain > 16.0f)
+            throw new ArgumentOutOfRangeException(nameof(options), "Audio gain must be between zero and sixteen.");
+        if (!float.IsFinite(options.Pitch) || options.Pitch <= 0.01f || options.Pitch > 8.0f)
+            throw new ArgumentOutOfRangeException(nameof(options), "Audio pitch must be greater than 0.01 and at most eight.");
+        if (options.Priority > 255 || !float.IsFinite(options.MinimumDistance) ||
+            !float.IsFinite(options.MaximumDistance) || options.MinimumDistance < 0.0f ||
+            options.MaximumDistance <= options.MinimumDistance)
+            throw new ArgumentOutOfRangeException(nameof(options), "Audio priority or attenuation range is invalid.");
+        return NativeRuntime.PlayAudio(entity, clip, options);
+    }
+
     public static bool Stop(Entity entity) => NativeRuntime.StopAudio(entity);
 }
 
@@ -171,13 +232,118 @@ public static class Prefab
 
 public static class Cursor
 {
+    private static readonly object Sync = new();
+    private static int s_CaptureRequests;
+    private static int s_VisibilityRequests;
+    private static bool s_LegacyVisible = true;
+    private static bool s_LegacyLocked;
+
     public static bool Visible => NativeRuntime.IsCursorVisible;
     public static bool Locked => NativeRuntime.IsCursorLocked;
+    public static bool VisibilityRequested
+    {
+        get => Volatile.Read(ref s_VisibilityRequests) != 0;
+    }
 
-    public static void Hide() => NativeRuntime.SetCursorVisible(false);
-    public static void Show() => NativeRuntime.SetCursorVisible(true);
-    public static void Lock() => NativeRuntime.SetCursorLocked(true);
-    public static void Unlock() => NativeRuntime.SetCursorLocked(false);
+    public static IDisposable RequestCapture() => Request(CursorRequestKind.Capture);
+    public static IDisposable RequestVisible() => Request(CursorRequestKind.Visible);
+
+    public static void Hide()
+    {
+        lock (Sync)
+        {
+            s_LegacyVisible = false;
+            Apply();
+        }
+    }
+
+    public static void Show()
+    {
+        lock (Sync)
+        {
+            s_LegacyVisible = true;
+            Apply();
+        }
+    }
+
+    public static void Lock()
+    {
+        lock (Sync)
+        {
+            s_LegacyLocked = true;
+            Apply();
+        }
+    }
+
+    public static void Unlock()
+    {
+        lock (Sync)
+        {
+            s_LegacyLocked = false;
+            Apply();
+        }
+    }
+
+    private static IDisposable Request(CursorRequestKind kind)
+    {
+        lock (Sync)
+        {
+            if (kind == CursorRequestKind.Capture)
+                ++s_CaptureRequests;
+            else
+                ++s_VisibilityRequests;
+            Apply();
+        }
+        return new CursorRequest(kind);
+    }
+
+    private static void Release(CursorRequestKind kind)
+    {
+        lock (Sync)
+        {
+            if (kind == CursorRequestKind.Capture)
+                s_CaptureRequests = Math.Max(0, s_CaptureRequests - 1);
+            else
+                s_VisibilityRequests = Math.Max(0, s_VisibilityRequests - 1);
+            Apply();
+        }
+    }
+
+    private static void Apply()
+    {
+        bool visible = s_LegacyVisible;
+        bool locked = s_LegacyLocked;
+        if (s_VisibilityRequests != 0)
+        {
+            visible = true;
+            locked = false;
+        }
+        else if (s_CaptureRequests != 0)
+        {
+            visible = false;
+            locked = true;
+        }
+
+        NativeRuntime.SetCursorLocked(locked);
+        NativeRuntime.SetCursorVisible(visible);
+    }
+
+    private enum CursorRequestKind
+    {
+        Capture,
+        Visible
+    }
+
+    private sealed class CursorRequest(CursorRequestKind kind) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                Release(kind);
+        }
+    }
 }
 
 public static class Debug

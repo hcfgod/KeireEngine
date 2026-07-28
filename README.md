@@ -179,6 +179,47 @@ Managed gameplay now receives one shared opaque world identity per runtime scene
 destruction use validated handles, and managed raycasts resolve collider-backed hits to ordinary scene entities.
 The default component registry includes Collider and Rigid Body authoring components.
 
+Entity and asset references can be authored directly on Behaviours. Public fields and private `[SerializeField]`
+fields appear in Inspector; `[SerializableType]` values can be nested, grouped, ranged, and documented with tooltips.
+References retain stable entity or asset identity in scenes and prefabs and are rebound to the active Play world when
+the managed instance is restored:
+
+```csharp
+[SerializeField, Tooltip("Target damaged by this Behaviour.")]
+private Entity _target;
+
+[SerializeField]
+private AssetReference<AudioClip> _fireSound;
+
+protected override void Start()
+{
+    if (_target.TryGetBehaviour<Health>(out var health))
+        Debug.Log($"Target health: {health.Current}");
+
+    if (!_target.HasComponent<ColliderComponent>())
+        _target.AddComponent<ColliderComponent>();
+}
+```
+
+Managed entity, hierarchy, component, and Behaviour operations use generation-checked value handles. Stale worlds,
+destroyed entities, incompatible component types, and retired script generations are rejected at the native boundary;
+managed code never receives a native pointer.
+
+Scene-authored UI Buttons may be assigned directly to `[SerializeField] UiButton?` fields. The managed wrapper retains
+the owning entity, validates that it has a UI Button component, and dispatches native click events before script
+`Update`. `RuntimeUi.WasClicked` remains available for polling workflows:
+
+```csharp
+[SerializeField] private Entity uiPanel;
+[SerializeField] private UiButton? uiButton;
+
+protected override void Start()
+{
+    if (uiButton is not null)
+        uiButton.Clicked += () => uiPanel.Active = !uiPanel.Active;
+}
+```
+
 `ScriptableObject` provides Unity-style transient runtime data instances, stable managed asset-type metadata, typed
 `AssetReference<T>` access, validation callbacks, cloning, and asynchronous load syntax. The sandbox weapon framework
 uses physical magazine instances, chambered rounds, tube-fed loose shells, deterministic fire modes and shot IDs,
@@ -211,7 +252,14 @@ serialized with the scene and rendered during Play Mode and in cooked runtime bu
 Vorbis, and FLAC imports; assign the resulting asset to an Audio Source and enable Play On Awake, or start it from C#:
 
 ```csharp
-Audio.Play(Entity, clip.Id);
+Audio.Play(Entity, clip.Id, new AudioPlaybackOptions
+{
+    Spatial = true,
+    Bus = "SFX",
+    Gain = 0.9f,
+    MinimumDistance = 1.0f,
+    MaximumDistance = 40.0f
+});
 RuntimeUi.SetText(ammoLabel, $"{roundsInMagazine} / {reserveRounds}");
 if (RuntimeUi.WasClicked(resumeButton))
     ResumeGame();
@@ -220,6 +268,11 @@ if (RuntimeUi.WasClicked(resumeButton))
 Runtime UI uses retained scene components, reference-resolution scaling, safe-area layout, clipping, pointer hit
 testing, focus, and bounded event queues. Managed calls validate the active world and entity generation before
 mutating authored UI or audio components.
+
+Selecting an audio asset shows codec, channel, sample-rate, duration, frame-count, and streaming metadata in Inspector,
+with Preview, Stop, and Reimport controls. Project thumbnails display a waveform for resident and streaming clips.
+Audio Source exposes clip, output bus, gain, pitch, priority, looping, spatialization, attenuation distances, and
+Play On Awake through the normal component Inspector, scene serialization, undo, and prefab-override workflow.
 
 `Keire/Window.h` exposes SDL-free `WindowSystem`, `Window`, opaque `WindowId`, logical/pixel extents, and a typed ordered event variant. One system is active per process and any number of windows may be created. SDL video initialization, window creation, mutation, polling, and shutdown are creating-thread-affine; releasing the final `Ref<Window>` from a worker is safe because native destruction is deferred to the owner thread. Shutdown destroys all native windows and makes surviving handles inert.
 

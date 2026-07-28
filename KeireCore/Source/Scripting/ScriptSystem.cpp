@@ -1,5 +1,6 @@
 #include "Keire/Scripting/ScriptSystem.h"
 
+#include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
@@ -18,6 +19,7 @@
 #include <cctype>
 #include <condition_variable>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <fstream>
 #include <limits>
@@ -529,14 +531,26 @@ namespace Keire
             return result.empty() ? fallback : result;
         }
 
-        [[nodiscard]] std::optional<ComponentPropertyKind> ManagedFieldKind(Coral::Type& type)
+        [[nodiscard]] std::string ManagedTypeName(Coral::Type& type)
         {
             const Coral::ScopedString scopedName(type.GetFullName());
-            const auto name = static_cast<std::string>(scopedName);
+            return static_cast<std::string>(scopedName);
+        }
+
+        [[nodiscard]] bool ManagedTypeIsEnum(Coral::Type& type)
+        {
+            auto& baseType = type.GetBaseType();
+            return baseType && ManagedTypeName(baseType) == "System.Enum";
+        }
+
+        [[nodiscard]] std::optional<ComponentPropertyKind> ManagedFieldKind(Coral::Type& type)
+        {
+            const auto name = ManagedTypeName(type);
             if (name == "System.Boolean")
                 return ComponentPropertyKind::Boolean;
             if (name == "System.SByte" || name == "System.Byte" || name == "System.Int16" || name == "System.UInt16" ||
-                name == "System.Int32" || name == "System.UInt32" || name == "System.Int64" || name == "System.UInt64")
+                name == "System.Int32" || name == "System.UInt32" || name == "System.Int64" ||
+                name == "System.UInt64" || name == "System.Char" || ManagedTypeIsEnum(type))
             {
                 return ComponentPropertyKind::Integer;
             }
@@ -554,43 +568,178 @@ namespace Keire
                 return ComponentPropertyKind::Quaternion;
             if (name == "Keire.Color")
                 return ComponentPropertyKind::Color;
+            if (name == "Keire.Entity")
+                return ComponentPropertyKind::Entity;
+            if (name == "Keire.UiButton")
+                return ComponentPropertyKind::Entity;
+            if (name == "Keire.KeireEvent" || name.starts_with("Keire.KeireEvent`"))
+                return ComponentPropertyKind::Event;
+            if (name.starts_with("Keire.AssetReference`1"))
+                return ComponentPropertyKind::Asset;
             return std::nullopt;
         }
 
-        [[nodiscard]] std::vector<ComponentProperty> ReflectManagedProperties(const Coral::Type& concreteType,
-                                                                              const Coral::Type& behaviourType,
-                                                                              const Coral::Type& serializeFieldType,
-                                                                              const Coral::Type* hideInInspectorType)
+        [[nodiscard]] std::size_t ManagedEventArgumentCount(const std::string_view name)
+        {
+            const auto marker = name.find('`');
+            if (marker == std::string_view::npos)
+                return 0;
+            std::size_t result = 0;
+            for (auto index = marker + 1; index < name.size() && std::isdigit(static_cast<unsigned char>(name[index]));
+                 ++index)
+            {
+                result = result * 10 + static_cast<std::size_t>(name[index] - '0');
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::string ManagedAttributeText(Coral::Attribute& attribute, const std::string_view field)
+        {
+            const Coral::ScopedString value(attribute.GetFieldValue<Coral::String>(field));
+            return static_cast<std::string>(value);
+        }
+
+        void ReflectManagedFieldSet(Coral::Type& ownerType, const Coral::Type& serializeFieldType,
+                                    const Coral::Type* hideInInspectorType, const Coral::Type* serializableType,
+                                    const Coral::Type* rangeType, const Coral::Type* tooltipType,
+                                    const Coral::Type* groupType, const std::string_view prefix,
+                                    const std::string_view inheritedGroup, const std::size_t depth,
+                                    std::vector<std::int32_t>& typeStack, std::vector<ComponentProperty>& result)
+        {
+            for (auto field : ownerType.GetFields())
+            {
+                bool serialized = field.GetAccessibility() == Coral::TypeAccessibility::Public;
+                bool hidden = false;
+                std::optional<double> minimum;
+                std::optional<double> maximum;
+                std::string tooltip;
+                std::string group(inheritedGroup);
+                for (auto attribute : field.GetAttributes())
+                {
+                    if (attribute.GetType() == serializeFieldType)
+                        serialized = true;
+                    else if (hideInInspectorType && attribute.GetType() == *hideInInspectorType)
+                        hidden = true;
+                    else if (rangeType && attribute.GetType() == *rangeType)
+                    {
+                        minimum = attribute.GetFieldValue<double>("Minimum");
+                        maximum = attribute.GetFieldValue<double>("Maximum");
+                    }
+                    else if (tooltipType && attribute.GetType() == *tooltipType)
+                        tooltip = ManagedAttributeText(attribute, "Text");
+                    else if (groupType && attribute.GetType() == *groupType)
+                        group = ManagedAttributeText(attribute, "Name");
+                }
+                if (!serialized || hidden)
+                    continue;
+
+                const Coral::ScopedString scopedName(field.GetName());
+                const auto name = static_cast<std::string>(scopedName);
+                const auto key = prefix.empty() ? name : std::string(prefix) + "." + name;
+                auto& fieldType = field.GetType();
+                if (const auto kind = ManagedFieldKind(fieldType))
+                {
+                    if (std::ranges::find(result, key, &ComponentProperty::Key) != result.end())
+                        continue;
+                    ComponentProperty property;
+                    property.Key = key;
+                    property.DisplayName = ManagedFieldDisplayName(name);
+                    property.Group = std::move(group);
+                    property.Kind = *kind;
+                    property.Minimum = minimum;
+                    property.Maximum = maximum;
+                    property.Step = *kind == ComponentPropertyKind::Integer ? 1.0 : 0.1;
+                    property.Tooltip = std::move(tooltip);
+                    if (*kind == ComponentPropertyKind::Event)
+                        property.EventArgumentCount = ManagedEventArgumentCount(ManagedTypeName(fieldType));
+                    if (*kind == ComponentPropertyKind::Asset &&
+                        ManagedTypeName(fieldType).find("Keire.AudioClip") != std::string::npos)
+                    {
+                        property.ExpectedAssetType = AudioClipAsset::StaticType();
+                    }
+                    result.push_back(std::move(property));
+                    continue;
+                }
+                if (!serializableType || depth >= 4 || fieldType.IsSZArray() ||
+                    !fieldType.HasAttribute(*serializableType) ||
+                    std::ranges::find(typeStack, fieldType.GetTypeId()) != typeStack.end())
+                {
+                    continue;
+                }
+                typeStack.push_back(fieldType.GetTypeId());
+                const auto nestedGroup =
+                    group.empty() ? ManagedFieldDisplayName(name) : group + " / " + ManagedFieldDisplayName(name);
+                ReflectManagedFieldSet(fieldType, serializeFieldType, hideInInspectorType, serializableType, rangeType,
+                                       tooltipType, groupType, key, nestedGroup, depth + 1, typeStack, result);
+                typeStack.pop_back();
+            }
+        }
+
+        [[nodiscard]] std::vector<ComponentProperty>
+        ReflectManagedProperties(const Coral::Type& concreteType, const Coral::Type& behaviourType,
+                                 const Coral::Type& serializeFieldType, const Coral::Type* hideInInspectorType,
+                                 const Coral::Type* serializableType, const Coral::Type* rangeType,
+                                 const Coral::Type* tooltipType, const Coral::Type* groupType)
         {
             std::vector<ComponentProperty> result;
+            std::vector<std::int32_t> typeStack;
             auto* current = const_cast<Coral::Type*>(std::addressof(concreteType));
             while (*current && !(*current == behaviourType))
             {
-                for (auto field : current->GetFields())
-                {
-                    bool serialized = field.GetAccessibility() == Coral::TypeAccessibility::Public;
-                    bool hidden = false;
-                    for (auto attribute : field.GetAttributes())
-                    {
-                        if (attribute.GetType() == serializeFieldType)
-                            serialized = true;
-                        else if (hideInInspectorType && attribute.GetType() == *hideInInspectorType)
-                            hidden = true;
-                    }
-                    if (!serialized || hidden)
-                        continue;
-                    const auto kind = ManagedFieldKind(field.GetType());
-                    if (!kind)
-                        continue;
-                    const Coral::ScopedString scopedName(field.GetName());
-                    const auto name = static_cast<std::string>(scopedName);
-                    if (std::ranges::find(result, name, &ComponentProperty::Key) != result.end())
-                        continue;
-                    result.push_back(
-                        {.Key = name, .DisplayName = ManagedFieldDisplayName(name), .Kind = *kind, .Step = 0.1});
-                }
+                typeStack.push_back(current->GetTypeId());
+                ReflectManagedFieldSet(*current, serializeFieldType, hideInInspectorType, serializableType, rangeType,
+                                       tooltipType, groupType, {}, {}, 0, typeStack, result);
+                typeStack.pop_back();
                 current = std::addressof(current->GetBaseType());
             }
+            return result;
+        }
+
+        [[nodiscard]] std::vector<ComponentMethod> ReflectManagedMethods(const Coral::Type& concreteType)
+        {
+            std::vector<ComponentMethod> result;
+            for (auto method : concreteType.GetMethods())
+            {
+                const Coral::ScopedString scopedName(method.GetName());
+                const auto name = static_cast<std::string>(scopedName);
+                if (ManagedTypeName(method.GetReturnType()) != "System.Void" || name.starts_with("Runtime") ||
+                    name.starts_with("get_") || name.starts_with("set_") || name == "Awake" || name == "OnEnable" ||
+                    name == "Start" || name == "FixedUpdate" || name == "Update" || name == "LateUpdate" ||
+                    name == "OnDisable" || name == "OnDestroy" || name == "OnCollisionEnter" ||
+                    name == "OnCollisionStay" || name == "OnCollisionExit" || name == "OnTriggerEnter" ||
+                    name == "OnTriggerStay" || name == "OnTriggerExit" || name == "OnAnimationEvent" ||
+                    name == "OnAnimatorIk" || name == "OnBeforeReload" || name == "OnAfterReload")
+                {
+                    continue;
+                }
+
+                ComponentMethod reflected;
+                reflected.Name = name;
+                for (auto* parameter : method.GetParameterTypes())
+                {
+                    if (!parameter)
+                        break;
+                    reflected.ParameterTypes.push_back(ManagedTypeName(*parameter));
+                }
+                if (reflected.ParameterTypes.size() == method.GetParameterTypes().size())
+                {
+                    reflected.DisplayName = reflected.Name + "(";
+                    for (std::size_t index = 0; index < reflected.ParameterTypes.size(); ++index)
+                    {
+                        if (index != 0)
+                            reflected.DisplayName += ", ";
+                        reflected.DisplayName += reflected.ParameterTypes[index];
+                    }
+                    reflected.DisplayName += ")";
+                    result.push_back(std::move(reflected));
+                }
+            }
+            std::ranges::sort(result,
+                              [](const ComponentMethod& left, const ComponentMethod& right)
+                              {
+                                  return left.Name != right.Name ? left.Name < right.Name
+                                                                 : left.ParameterTypes < right.ParameterTypes;
+                              });
             return result;
         }
 
@@ -639,6 +788,8 @@ namespace Keire
                 return AssetId{};
             case ComponentPropertyKind::Entity:
                 return EntityId{};
+            case ComponentPropertyKind::Event:
+                return ComponentEventValue{};
             }
             throw std::logic_error("Unsupported managed Inspector property kind.");
         }
@@ -646,6 +797,30 @@ namespace Keire
         [[nodiscard]] ComponentPropertyValue ReadManagedPropertyValue(const nlohmann::json& value,
                                                                       const ComponentPropertyKind kind)
         {
+            const auto readUnsignedInteger = [](const nlohmann::json& source) -> std::optional<std::uint64_t>
+            {
+                if (source.is_number_unsigned())
+                    return source.get<std::uint64_t>();
+                if (!source.is_number_integer())
+                    return std::nullopt;
+                const auto signedValue = source.get<std::int64_t>();
+                return signedValue < 0 ? std::nullopt
+                                       : std::optional<std::uint64_t>(static_cast<std::uint64_t>(signedValue));
+            };
+            const auto readReferenceId = [&readUnsignedInteger](const nlohmann::json& source)
+            {
+                const auto* nested = JsonMember(source, "Id", "id");
+                const auto& id = nested && nested->is_object() ? *nested : source;
+                const auto* high = JsonMember(id, "High", "high");
+                const auto* low = JsonMember(id, "Low", "low");
+                if (!high || !low)
+                    return AssetId{};
+                const auto parsedHigh = readUnsignedInteger(*high);
+                const auto parsedLow = readUnsignedInteger(*low);
+                return parsedHigh && parsedLow ? AssetId(*parsedHigh, *parsedLow) : AssetId{};
+            };
+            if (value.is_null())
+                return DefaultManagedPropertyValue(kind);
             switch (kind)
             {
             case ComponentPropertyKind::Boolean:
@@ -677,8 +852,36 @@ namespace Keire
                              static_cast<float>(JsonNumber(value, "Blue", "blue")),
                              static_cast<float>(JsonNumber(value, "Alpha", "alpha"))};
             case ComponentPropertyKind::Asset:
+                return readReferenceId(value);
             case ComponentPropertyKind::Entity:
-                break;
+                return EntityId(readReferenceId(value));
+            case ComponentPropertyKind::Event:
+            {
+                ComponentEventValue result;
+                const auto* calls = JsonMember(value, "persistentCalls", "PersistentCalls");
+                if (!calls || !calls->is_array())
+                    return result;
+                constexpr std::size_t maximumPersistentListeners = 256;
+                for (const auto& call : *calls)
+                {
+                    if (!call.is_object() || result.Listeners.size() >= maximumPersistentListeners)
+                        break;
+                    ComponentEventListener listener;
+                    if (const auto* enabled = JsonMember(call, "Enabled", "enabled"); enabled && enabled->is_boolean())
+                        listener.Enabled = enabled->get<bool>();
+                    if (const auto* target = JsonMember(call, "Target", "target"); target && target->is_object())
+                        listener.Target = EntityId(readReferenceId(*target));
+                    if (const auto* component = JsonMember(call, "Component", "component");
+                        component && component->is_object())
+                    {
+                        listener.Component = ComponentTypeId(readReferenceId(*component));
+                    }
+                    if (const auto* method = JsonMember(call, "Method", "method"); method && method->is_string())
+                        listener.Method = method->get<std::string>();
+                    result.Listeners.push_back(std::move(listener));
+                }
+                return result;
+            }
             }
             throw std::logic_error("Unsupported managed Inspector property kind.");
         }
@@ -722,8 +925,29 @@ namespace Keire
                 return {{"Red", color.Red}, {"Green", color.Green}, {"Blue", color.Blue}, {"Alpha", color.Alpha}};
             }
             case ComponentPropertyKind::Asset:
+            {
+                const auto asset = std::get<AssetId>(value);
+                return {{"Id", {{"High", asset.High()}, {"Low", asset.Low()}}}};
+            }
             case ComponentPropertyKind::Entity:
-                break;
+            {
+                const auto entity = std::get<EntityId>(value).Value();
+                return {{"Id", {{"High", entity.High()}, {"Low", entity.Low()}}}};
+            }
+            case ComponentPropertyKind::Event:
+            {
+                nlohmann::json listeners = nlohmann::json::array();
+                for (const auto& listener : std::get<ComponentEventValue>(value).Listeners)
+                {
+                    const auto target = listener.Target.Value();
+                    const auto component = listener.Component.Value();
+                    listeners.push_back({{"Enabled", listener.Enabled},
+                                         {"Target", {{"Id", {{"High", target.High()}, {"Low", target.Low()}}}}},
+                                         {"Component", {{"High", component.High()}, {"Low", component.Low()}}},
+                                         {"Method", listener.Method}});
+                }
+                return {{"persistentCalls", std::move(listeners)}};
+            }
             }
             throw std::logic_error("Unsupported managed Inspector property kind.");
         }
@@ -744,6 +968,83 @@ namespace Keire
             return nullptr;
         }
 
+        [[nodiscard]] const nlohmann::json* ManagedStateField(const nlohmann::json& document,
+                                                              const std::string_view name)
+        {
+            const auto* fields = document.contains("Fields")   ? std::addressof(document["Fields"])
+                                 : document.contains("fields") ? std::addressof(document["fields"])
+                                                               : nullptr;
+            if (!fields || !fields->is_array())
+                return nullptr;
+            for (const auto& field : *fields)
+            {
+                const auto* fieldName = JsonMember(field, "Name", "name");
+                if (fieldName && fieldName->is_string() && fieldName->get<std::string>() == name)
+                    return std::addressof(field);
+            }
+            return nullptr;
+        }
+
+        [[nodiscard]] std::vector<std::string_view> ManagedPropertyPath(const std::string_view path)
+        {
+            std::vector<std::string_view> result;
+            std::size_t cursor = 0;
+            while (cursor <= path.size())
+            {
+                const auto separator = path.find('.', cursor);
+                result.push_back(path.substr(cursor, separator == std::string_view::npos ? path.size() - cursor
+                                                                                         : separator - cursor));
+                if (separator == std::string_view::npos)
+                    break;
+                cursor = separator + 1;
+            }
+            return result;
+        }
+
+        [[nodiscard]] const nlohmann::json* ManagedStateValue(const nlohmann::json& document,
+                                                              const std::string_view path)
+        {
+            const auto segments = ManagedPropertyPath(path);
+            if (segments.empty())
+                return nullptr;
+            const auto* field = ManagedStateField(document, segments.front());
+            const nlohmann::json* value = field ? JsonMember(*field, "Value", "value") : nullptr;
+            for (std::size_t index = 1; value && index < segments.size(); ++index)
+            {
+                if (!value->is_object())
+                    return nullptr;
+                const auto found = value->find(std::string(segments[index]));
+                value = found == value->end() ? nullptr : std::addressof(*found);
+            }
+            return value;
+        }
+
+        [[nodiscard]] nlohmann::json& EnsureManagedStateValue(nlohmann::json& document, nlohmann::json& fields,
+                                                              const std::string_view path)
+        {
+            const auto segments = ManagedPropertyPath(path);
+            if (segments.empty())
+                throw std::invalid_argument("Managed Inspector property path is empty.");
+            auto* field = ManagedStateField(document, segments.front());
+            if (!field)
+            {
+                fields.push_back({{"StableId", ""},
+                                  {"Name", std::string(segments.front())},
+                                  {"Type", ""},
+                                  {"Aliases", nlohmann::json::array()},
+                                  {"Value", nullptr}});
+                field = std::addressof(fields.back());
+            }
+            auto* value = std::addressof((*field)["Value"]);
+            for (std::size_t index = 1; index < segments.size(); ++index)
+            {
+                if (!value->is_object())
+                    *value = nlohmann::json::object();
+                value = std::addressof((*value)[std::string(segments[index])]);
+            }
+            return *value;
+        }
+
         [[nodiscard]] ComponentPropertyBag ProjectManagedState(const std::string& state,
                                                                const std::vector<ComponentProperty>& properties)
         {
@@ -751,8 +1052,7 @@ namespace Keire
             auto document = nlohmann::json::parse(state);
             for (const auto& property : properties)
             {
-                const auto* field = ManagedStateField(document, property.Key);
-                const auto* value = field ? JsonMember(*field, "Value", "value") : nullptr;
+                const auto* value = ManagedStateValue(document, property.Key);
                 result.emplace(property.Key, value ? ReadManagedPropertyValue(*value, property.Kind)
                                                    : DefaultManagedPropertyValue(property.Kind));
             }
@@ -773,17 +1073,8 @@ namespace Keire
                 const auto value = values.find(property.Key);
                 if (value == values.end())
                     continue;
-                auto* field = ManagedStateField(document, property.Key);
-                if (!field)
-                {
-                    fields.push_back({{"StableId", ""},
-                                      {"Name", property.Key},
-                                      {"Type", ""},
-                                      {"Aliases", nlohmann::json::array()},
-                                      {"Value", nullptr}});
-                    field = std::addressof(fields.back());
-                }
-                (*field)["Value"] = WriteManagedPropertyValue(value->second, property.Kind);
+                EnsureManagedStateValue(document, fields, property.Key) =
+                    WriteManagedPropertyValue(value->second, property.Kind);
             }
             return document.dump();
         }
@@ -801,6 +1092,7 @@ namespace Keire
             std::int32_t ExecutionOrder = 0;
             const Coral::Type* Type = nullptr;
             std::vector<ComponentProperty> Properties;
+            std::vector<ComponentMethod> Methods;
         };
 
         struct BehaviourInstance final
@@ -1030,6 +1322,27 @@ namespace Keire
                        : 0.0F;
         }
 
+        [[nodiscard]] static float RuntimeFixedDeltaTime() noexcept
+        {
+            return CurrentRuntime && CurrentRuntime->Specification.RuntimeServices
+                       ? CurrentRuntime->Specification.RuntimeServices->ManagedFixedDeltaTime()
+                       : 1.0F / 60.0F;
+        }
+
+        [[nodiscard]] static float RuntimeUnscaledDeltaTime() noexcept
+        {
+            return CurrentRuntime && CurrentRuntime->Specification.RuntimeServices
+                       ? CurrentRuntime->Specification.RuntimeServices->ManagedUnscaledDeltaTime()
+                       : 0.0F;
+        }
+
+        [[nodiscard]] static double RuntimeElapsedTime() noexcept
+        {
+            return CurrentRuntime && CurrentRuntime->Specification.RuntimeServices
+                       ? CurrentRuntime->Specification.RuntimeServices->ManagedElapsedTime()
+                       : 0.0;
+        }
+
         static void RuntimeInputAxis2D(const Coral::String action, float* x, float* y) noexcept
         {
             if (!x || !y)
@@ -1167,6 +1480,215 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t RuntimeGetEntityActiveInHierarchy(const std::uint64_t world,
+                                                                            const std::uint64_t high,
+                                                                            const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            return entity && entity.ActiveInHierarchy() ? 1 : 0;
+        }
+
+        [[nodiscard]] static std::int32_t RuntimeGetEntityName(const std::uint64_t world, const std::uint64_t high,
+                                                               const std::uint64_t low, char* destination,
+                                                               const std::int32_t capacity) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, high, low);
+                if (!entity)
+                    return 0;
+                const auto name = entity.Name();
+                if (destination && capacity > 0)
+                    std::memcpy(destination, name.data(), std::min<std::size_t>(name.size(), capacity));
+                return static_cast<std::int32_t>(
+                    std::min<std::size_t>(name.size(), std::numeric_limits<std::int32_t>::max()));
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetEntityName(const std::uint64_t world, const std::uint64_t high,
+                                                               const std::uint64_t low,
+                                                               const Coral::String name) noexcept
+        {
+            try
+            {
+                auto entity = ResolveRuntimeEntity(world, high, low);
+                if (!entity)
+                    return 0;
+                entity.SetName(static_cast<std::string>(name));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeGetEntityParent(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low, std::uint64_t* parentHigh,
+                                                                 std::uint64_t* parentLow) noexcept
+        {
+            if (!parentHigh || !parentLow)
+                return 0;
+            *parentHigh = 0;
+            *parentLow = 0;
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto parent = entity ? entity.Parent() : Entity{};
+            if (!parent)
+                return 0;
+            *parentHigh = parent.Id().Value().High();
+            *parentLow = parent.Id().Value().Low();
+            return 1;
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetEntityParent(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low,
+                                                                 const std::uint64_t parentHigh,
+                                                                 const std::uint64_t parentLow,
+                                                                 const std::uint8_t preserveWorld) noexcept
+        {
+            try
+            {
+                auto entity = ResolveRuntimeEntity(world, high, low);
+                const auto parent =
+                    parentHigh || parentLow ? ResolveRuntimeEntity(world, parentHigh, parentLow) : Entity{};
+                if (!entity || ((parentHigh || parentLow) && !parent))
+                    return 0;
+                entity.SetParent(parent, preserveWorld != 0);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::int32_t RuntimeGetEntityChildCount(const std::uint64_t world,
+                                                                     const std::uint64_t high,
+                                                                     const std::uint64_t low) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, high, low);
+                return entity ? static_cast<std::int32_t>(std::min<std::size_t>(
+                                    entity.Children().size(), std::numeric_limits<std::int32_t>::max()))
+                              : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeGetEntityChild(const std::uint64_t world, const std::uint64_t high,
+                                                                const std::uint64_t low, const std::int32_t index,
+                                                                std::uint64_t* childHigh,
+                                                                std::uint64_t* childLow) noexcept
+        {
+            if (!childHigh || !childLow || index < 0)
+                return 0;
+            *childHigh = 0;
+            *childLow = 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, high, low);
+                const auto children = entity ? entity.Children() : std::vector<Entity>{};
+                if (static_cast<std::size_t>(index) >= children.size())
+                    return 0;
+                *childHigh = children[static_cast<std::size_t>(index)].Id().Value().High();
+                *childLow = children[static_cast<std::size_t>(index)].Id().Value().Low();
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static ComponentTypeId RuntimeComponentType(const std::uint64_t high,
+                                                                  const std::uint64_t low) noexcept
+        {
+            return ComponentTypeId(AssetId(high, low));
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeComponentExists(const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
+                               const std::uint64_t typeHigh, const std::uint64_t typeLow) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+            return entity && entity.HasComponent(RuntimeComponentType(typeHigh, typeLow)) ? 1 : 0;
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeAddComponent(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                              const std::uint64_t entityLow,
+                                                              const std::uint64_t typeHigh,
+                                                              const std::uint64_t typeLow) noexcept
+        {
+            try
+            {
+                auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto type = RuntimeComponentType(typeHigh, typeLow);
+                if (!entity || !type)
+                    return 0;
+                return (entity.GetComponent(type) || entity.AddComponent(type)) ? 1 : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeRemoveComponent(const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
+                               const std::uint64_t typeHigh, const std::uint64_t typeLow) noexcept
+        {
+            try
+            {
+                auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && entity.RemoveComponent(RuntimeComponentType(typeHigh, typeLow)) ? 1 : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeGetComponentEnabled(const std::uint64_t world,
+                                                                     const std::uint64_t entityHigh,
+                                                                     const std::uint64_t entityLow,
+                                                                     const std::uint64_t typeHigh,
+                                                                     const std::uint64_t typeLow) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+            const auto component =
+                entity ? entity.GetComponent(RuntimeComponentType(typeHigh, typeLow)) : Ref<Component>{};
+            return component && component->Enabled() ? 1 : 0;
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetComponentEnabled(const std::uint64_t world, const std::uint64_t entityHigh,
+                                   const std::uint64_t entityLow, const std::uint64_t typeHigh,
+                                   const std::uint64_t typeLow, const std::uint8_t enabled) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto component =
+                    entity ? entity.GetComponent(RuntimeComponentType(typeHigh, typeLow)) : Ref<Component>{};
+                if (!component)
+                    return 0;
+                component->SetEnabled(enabled != 0);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static Vector3 RuntimeGetLocalScale(const std::uint64_t world, const std::uint64_t high,
                                                           const std::uint64_t low) noexcept
         {
@@ -1244,6 +1766,37 @@ namespace Keire
                 const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
                 return entity && CurrentRuntime->Specification.RuntimeServices->PlayManagedAudio(
                                      entity.Id().Value(), AssetId(clipHigh, clipLow), gain)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimePlayAudioAdvanced(
+            const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
+            const std::uint64_t clipHigh, const std::uint64_t clipLow, const Coral::String bus, const float gain,
+            const float pitch, const std::uint32_t priority, const std::uint8_t loop, const std::uint8_t spatial,
+            const float minimumDistance, const float maximumDistance) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->PlayManagedAudio(
+                                     {.Entity = entity.Id().Value(),
+                                      .Clip = AssetId(clipHigh, clipLow),
+                                      .Bus = static_cast<std::string>(bus),
+                                      .Gain = gain,
+                                      .Pitch = pitch,
+                                      .Priority = priority,
+                                      .Loop = loop != 0,
+                                      .Spatial = spatial != 0,
+                                      .MinimumDistance = minimumDistance,
+                                      .MaximumDistance = maximumDistance})
                            ? 1
                            : 0;
             }
@@ -1832,7 +2385,7 @@ namespace Keire
         std::string m_ManagedType;
         std::weak_ptr<ScriptImpl*> m_Lifetime;
         ManagedBehaviourInstanceId m_Instance;
-        std::string m_State = "{\"version\":1,\"fields\":[]}";
+        std::string m_State = "{\"Version\":1,\"Fields\":[]}";
     };
 
     ScriptSystem::ScriptSystem(ScriptSystemSpecification specification) : m_Impl(std::make_unique<Impl>(specification))
@@ -2042,6 +2595,10 @@ namespace Keire
             Coral::Type* executionOrderType = nullptr;
             Coral::Type* serializeFieldType = nullptr;
             Coral::Type* hideInInspectorType = nullptr;
+            Coral::Type* serializableType = nullptr;
+            Coral::Type* rangeType = nullptr;
+            Coral::Type* tooltipType = nullptr;
+            Coral::Type* groupType = nullptr;
             auto managedApiPath =
                 request.ManagedApiAssembly.empty() ? m_Impl->ManagedApi : std::move(request.ManagedApiAssembly);
             if (!managedApiPath.empty())
@@ -2057,6 +2614,12 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeWriteLog));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DeltaTimeIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeDeltaTime));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "FixedDeltaTimeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeFixedDeltaTime));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "UnscaledDeltaTimeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeUnscaledDeltaTime));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ElapsedTimeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeElapsedTime));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "InputAxis2DIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeInputAxis2D));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "InputStateIcall",
@@ -2081,8 +2644,32 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeEntityExists));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityActiveIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetEntityActive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityActiveInHierarchyIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityActiveInHierarchy));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityActiveIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetEntityActive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityNameIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityName));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityNameIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetEntityName));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityParentIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityParent));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityParentIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetEntityParent));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityChildCountIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityChildCount));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityChildIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityChild));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ComponentExistsIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeComponentExists));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "AddComponentIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeAddComponent));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "RemoveComponentIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeRemoveComponent));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetComponentEnabledIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetComponentEnabled));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetComponentEnabledIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetComponentEnabled));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetLocalScaleIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetLocalScale));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalScaleIcall",
@@ -2097,6 +2684,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeRaycast));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "PlayAudioIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimePlayAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PlayAudioAdvancedIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePlayAudioAdvanced));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "StopAudioIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeStopAudio));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetUiTextIcall",
@@ -2137,6 +2726,10 @@ namespace Keire
                 executionOrderType = &managedApi.GetLocalType("Keire.ExecutionOrderAttribute");
                 serializeFieldType = &managedApi.GetLocalType("Keire.SerializeFieldAttribute");
                 hideInInspectorType = &managedApi.GetLocalType("Keire.HideInInspectorAttribute");
+                serializableType = &managedApi.GetLocalType("Keire.SerializableTypeAttribute");
+                rangeType = &managedApi.GetLocalType("Keire.RangeAttribute");
+                tooltipType = &managedApi.GetLocalType("Keire.TooltipAttribute");
+                groupType = &managedApi.GetLocalType("Keire.InspectorGroupAttribute");
                 if (!*stableComponentIdType || !*executionOrderType || !*serializeFieldType)
                     throw std::runtime_error("Keire.Managed does not expose managed component metadata.");
             }
@@ -2181,8 +2774,12 @@ namespace Keire
                         {
                             candidateTypes.push_back(
                                 {typeName, componentType, executionOrder, std::addressof(type),
-                                 ReflectManagedProperties(type, *behaviourType, *serializeFieldType,
-                                                          *hideInInspectorType ? hideInInspectorType : nullptr)});
+                                 ReflectManagedProperties(
+                                     type, *behaviourType, *serializeFieldType,
+                                     *hideInInspectorType ? hideInInspectorType : nullptr,
+                                     *serializableType ? serializableType : nullptr, *rangeType ? rangeType : nullptr,
+                                     *tooltipType ? tooltipType : nullptr, *groupType ? groupType : nullptr),
+                                 ReflectManagedMethods(type)});
                         }
                     }
                 }
@@ -2436,6 +3033,7 @@ namespace Keire
             registration.Category = "Scripts";
             registration.ExecutionOrder = type.ExecutionOrder;
             registration.Properties = type.Properties;
+            registration.Methods = std::make_shared<const std::vector<ComponentMethod>>(type.Methods);
             const auto componentType = type.ComponentType;
             const auto managedType = type.Name;
             const auto properties = type.Properties;

@@ -1205,7 +1205,7 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     CHECK(std::ranges::any_of(meshResult.Pixels,
                               [](const std::byte value) { return std::to_integer<unsigned>(value) > 210U; }));
 
-    const auto prefabId = Keire::AssetId::Parse("00000000-0000-0000-0000-000000000074").value();
+    const auto prefabId = Keire::AssetId::Parse("00000000-0000-0000-0000-000000000074");
     KeireEditor::ThumbnailRequest prefabRequest{
         .Asset = prefabId,
         .Type = Keire::PrefabAsset::StaticType(),

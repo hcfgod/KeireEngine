@@ -27,13 +27,16 @@ the total impulse; the rest drives the physical viewmodel spring.
 Each equipped weapon owns a `ProductionWeaponRuntime`. The loadout owns weapon instances and serializes switching.
 `PhysicalAmmunitionInventory` owns magazine objects and loose shells. A magazine has a stable item ID and retains its
 remaining rounds when removed. `ReserveRounds` and `MagazineCount` are derived from compatible inventory objects.
+Detachable reloads reserve the selected replacement magazine transactionally. Interrupting a reload by unequipping
+returns any replacement that has not been inserted, including after the old magazine has already been removed.
 
 Call `Tick` once per simulation update with a `WeaponInputFrame`. Feed `ProductionShotId` and the provided spread seed
 into deterministic direction generation. Never substitute frame time or a process-global random generator.
 
 Ballistic projectiles live in a fixed-capacity `ProductionBallisticWorld`. Collision implementations must sweep a
 sphere from the old position to the new position and ignore the shooter's hierarchy. The world bounds interaction
-iterations, projectile lifetime, and capacity so malformed content cannot create unbounded collision loops.
+iterations, projectile lifetime, and capacity so malformed content cannot create unbounded collision loops. `Step`
+accepts finite, non-negative fixed time only; a zero-time step is an explicit no-op.
 
 ## Presentation and HUD
 
@@ -46,7 +49,8 @@ runtime UI system and connect it through `ProductionWeaponHudAdapter`. HUD rende
 
 Effects and audio are emitted through a bounded `WeaponFeedbackCommandBuffer`. Consumers acquire muzzle flashes,
 tracers, impacts, casings, and one-shot voices from pools. Commands may be dropped under pressure; gameplay simulation
-must never block or allocate to wait for presentation capacity.
+must never block or allocate to wait for presentation capacity. Pool activation is transactional when consumer
+callbacks fail, and leases are generation-bound so stale copies cannot release a newer acquisition.
 
 ## Validation
 

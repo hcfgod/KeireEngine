@@ -118,6 +118,14 @@
           "processors": [],
           "type": "Button",
           "valueType": "Boolean"
+        },
+        {
+          "id": "7a2d27f3-ba82-46f5-859f-a50336c250ca",
+          "interactions": [],
+          "name": "ToggleUI",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
         }
       ],
       "bindings": [
@@ -395,6 +403,17 @@
           "name": "",
           "part": "",
           "path": "<Keyboard>/3",
+          "processors": []
+        },
+        {
+          "action": "7a2d27f3-ba82-46f5-859f-a50336c250ca",
+          "composite": "",
+          "groups": [],
+          "id": "8c053f51-aa4d-4ff9-9161-57892443219c",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/tab",
           "processors": []
         }
       ],

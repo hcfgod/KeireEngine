@@ -208,6 +208,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::AssetId InspectorSelectedAsset() const noexcept override;
     [[nodiscard]] std::string_view InspectorAssetStatus() const noexcept override;
     void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept override;
+    void PreviewInspectorAudio(Keire::AssetId asset) override;
+    void StopInspectorAudioPreview() noexcept override;
     void ActivateInspectorHistory() noexcept override;
     void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
     void AddScriptToEntity(Keire::EntityId entity, Keire::AssetId script) override;
@@ -270,6 +272,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void EndInputTest() noexcept;
     void WriteManagedLog(Keire::ManagedLogLevel level, std::string_view message) noexcept override;
     [[nodiscard]] float ManagedDeltaTime() const noexcept override;
+    [[nodiscard]] float ManagedFixedDeltaTime() const noexcept override;
+    [[nodiscard]] float ManagedUnscaledDeltaTime() const noexcept override;
+    [[nodiscard]] double ManagedElapsedTime() const noexcept override;
     [[nodiscard]] Keire::Vector2 ReadManagedInput(std::string_view action) noexcept override;
     [[nodiscard]] Keire::ManagedInputState ReadManagedInputState(std::string_view action) noexcept override;
     [[nodiscard]] std::optional<Keire::ManagedRaycastHit>
@@ -278,7 +283,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetManagedCursorLocked(bool locked) noexcept override;
     [[nodiscard]] bool IsManagedCursorVisible() const noexcept override;
     [[nodiscard]] bool IsManagedCursorLocked() const noexcept override;
-    [[nodiscard]] bool PlayManagedAudio(Keire::AssetId entity, Keire::AssetId clip, float gain) noexcept override;
+    [[nodiscard]] bool PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept override;
     [[nodiscard]] bool StopManagedAudio(Keire::AssetId entity) noexcept override;
     [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
     [[nodiscard]] bool ConsumeManagedUiClick(Keire::AssetId entity) noexcept override;
@@ -414,6 +419,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::deque<InputHistoryEntry> m_InputHistory;
     Keire::Ref<Keire::RenderView> m_GameRenderView;
     Keire::Ref<Keire::ScenePresentationRuntime> m_GameEditPresentation;
+    Keire::AudioVoiceId m_InspectorAudioPreviewVoice;
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
     PendingSceneAction m_PendingSceneAction = PendingSceneAction::None;

@@ -38,6 +38,20 @@ namespace Keire
                         return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
                     else if constexpr (std::same_as<T, AssetId> || std::same_as<T, EntityId>)
                         return current ? Json(current.ToString()) : Json(nullptr);
+                    else if constexpr (std::same_as<T, ComponentEventValue>)
+                    {
+                        Json listeners = Json::array();
+                        for (const auto& listener : current.Listeners)
+                        {
+                            listeners.push_back(
+                                {{"enabled", listener.Enabled},
+                                 {"target", listener.Target ? Json(listener.Target.ToString()) : Json(nullptr)},
+                                 {"component",
+                                  listener.Component ? Json(listener.Component.ToString()) : Json(nullptr)},
+                                 {"method", listener.Method}});
+                        }
+                        return listeners;
+                    }
                     else
                         return Json(current);
                 },

@@ -86,6 +86,8 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::AssetId InspectorSelectedAsset() const noexcept = 0;
         [[nodiscard]] virtual std::string_view InspectorAssetStatus() const noexcept = 0;
         virtual void SetInspectorSelectedAsset(Keire::AssetId asset) noexcept = 0;
+        virtual void PreviewInspectorAudio(Keire::AssetId asset) = 0;
+        virtual void StopInspectorAudioPreview() noexcept = 0;
         virtual void ActivateInspectorHistory() noexcept = 0;
         virtual void RecordInspectorUndo(std::string_view name = "Edit Scene", std::string mergeKey = {}) = 0;
         virtual void AddScriptToEntity(Keire::EntityId, Keire::AssetId)

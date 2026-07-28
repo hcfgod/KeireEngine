@@ -125,19 +125,16 @@ namespace Keire
                 throw std::invalid_argument("Collider shape is outside the supported range.");
             collider.m_Shape = static_cast<ColliderShape>(shape);
             collider.m_Center = ReadColliderProperty(values, "center", Vector3{});
-            collider.m_HalfExtent =
-                ReadColliderProperty(values, "halfExtent", Vector3{0.5F, 0.5F, 0.5F});
-            collider.m_Radius =
-                static_cast<float>(ReadColliderProperty(values, "radius", 0.5));
-            collider.m_Height =
-                static_cast<float>(ReadColliderProperty(values, "height", 1.0));
+            collider.m_HalfExtent = ReadColliderProperty(values, "halfExtent", Vector3{0.5F, 0.5F, 0.5F});
+            collider.m_Radius = static_cast<float>(ReadColliderProperty(values, "radius", 0.5));
+            collider.m_Height = static_cast<float>(ReadColliderProperty(values, "height", 1.0));
             collider.m_Layer = ReadUnsigned(values, "layer", 1);
             collider.m_Mask = ReadUnsigned(values, "mask", ~0U);
             collider.m_Trigger = ReadColliderProperty(values, "trigger", false);
             if (!Math::IsFinite(collider.m_Center) || !Math::IsFinite(collider.m_HalfExtent) ||
-                collider.m_HalfExtent.X <= 0.0F || collider.m_HalfExtent.Y <= 0.0F ||
-                collider.m_HalfExtent.Z <= 0.0F || !std::isfinite(collider.m_Radius) ||
-                collider.m_Radius <= 0.0F || !std::isfinite(collider.m_Height) || collider.m_Height <= 0.0F)
+                collider.m_HalfExtent.X <= 0.0F || collider.m_HalfExtent.Y <= 0.0F || collider.m_HalfExtent.Z <= 0.0F ||
+                !std::isfinite(collider.m_Radius) || collider.m_Radius <= 0.0F || !std::isfinite(collider.m_Height) ||
+                collider.m_Height <= 0.0F)
             {
                 throw std::invalid_argument("Collider component contains invalid geometry.");
             }

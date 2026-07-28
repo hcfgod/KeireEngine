@@ -121,6 +121,23 @@ pointers. Managed physics queries are routed through the application-owned runti
 `PhysicsBodyId` values back to stable entity IDs. Collider and Rigid Body components remain serializable scene data,
 while the Play adapter owns the isolated physics world and tears it down before the runtime scene closes.
 
+The same boundary owns entity names, active-in-hierarchy state, hierarchy traversal, component registration lookup,
+enabled state, and deferred component mutations. Managed native-component classes are stable-ID markers whose
+`ComponentHandle<T>` values contain only world, entity, and component identities. Managed Behaviour lookup is resolved
+from a generation-local weak registry, so one Behaviour can reference another without retaining an obsolete load
+context after hot reload.
+
+Managed field discovery projects primitives, enums, entities, typed asset references, and bounded nested
+`[SerializableType]` members into ordinary `ComponentProperty` descriptors. Stable field IDs remain the serialized
+identity while dotted property paths address nested Inspector leaves. Range, tooltip, and group metadata flow through
+the same descriptor path used by native components. Canonical state JSON stores entity IDs without runtime-world
+identity; restoration rebinds them to the owning Behaviour's current world before lifecycle callbacks run.
+
+Audio playback crosses `IScriptRuntimeServices` as a value request containing the validated clip asset ID, output bus,
+gain, pitch, priority, loop/spatial flags, and attenuation distances. The Play adapter creates or updates the scene
+Audio Source and presentation runtime at the safe boundary. Editor-only asset preview uses a separately tracked voice
+on the `EditorPreview` bus and is stopped when selection changes or the workspace detaches.
+
 Weapon simulation is data-driven and split between deterministic command/state logic, a bounded ballistic projectile
 pool, collision/damage adapters, and presentation springs. Physical magazine instances and loose-shell inventories are
 runtime state; reserve counts are derived views rather than independently serialized values. Stable shot IDs include

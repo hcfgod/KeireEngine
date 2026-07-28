@@ -167,6 +167,20 @@ namespace Keire
                         return Json::array({current.Red, current.Green, current.Blue, current.Alpha});
                     else if constexpr (std::same_as<T, AssetId> || std::same_as<T, EntityId>)
                         return current ? Json(current.ToString()) : Json(nullptr);
+                    else if constexpr (std::same_as<T, ComponentEventValue>)
+                    {
+                        Json listeners = Json::array();
+                        for (const auto& listener : current.Listeners)
+                        {
+                            listeners.push_back(
+                                {{"enabled", listener.Enabled},
+                                 {"target", listener.Target ? Json(listener.Target.ToString()) : Json(nullptr)},
+                                 {"component",
+                                  listener.Component ? Json(listener.Component.ToString()) : Json(nullptr)},
+                                 {"method", listener.Method}});
+                        }
+                        return listeners;
+                    }
                     else
                         return Json(current);
                 },
@@ -212,6 +226,29 @@ namespace Keire
                 return value.is_null() ? AssetId{} : AssetId::Parse(value.get<std::string>());
             case 10:
                 return value.is_null() ? EntityId{} : EntityId::Parse(value.get<std::string>());
+            case 11:
+            {
+                if (!value.is_array())
+                    throw std::runtime_error("Prefab event override must be an array.");
+                ComponentEventValue result;
+                result.Listeners.reserve(value.size());
+                for (const auto& serialized : value)
+                {
+                    if (!serialized.is_object())
+                        throw std::runtime_error("Prefab event listener override must be an object.");
+                    ComponentEventListener listener;
+                    listener.Enabled = serialized.value("enabled", true);
+                    if (const auto found = serialized.find("target"); found != serialized.end() && !found->is_null())
+                        listener.Target = EntityId::Parse(found->get<std::string>());
+                    if (const auto found = serialized.find("component"); found != serialized.end() && !found->is_null())
+                    {
+                        listener.Component = ComponentTypeId::Parse(found->get<std::string>());
+                    }
+                    listener.Method = serialized.value("method", std::string{});
+                    result.Listeners.push_back(std::move(listener));
+                }
+                return result;
+            }
             default:
                 throw std::runtime_error("Prefab override value uses an unsupported type.");
             }

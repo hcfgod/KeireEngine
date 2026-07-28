@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Keire;
 
@@ -20,13 +22,90 @@ internal static class ManagedStateSerializer
         public JsonElement Value { get; set; }
     }
 
-    private static readonly JsonSerializerOptions Options = new()
+    [ThreadStatic]
+    private static ulong s_restoreWorld;
+
+    private sealed class EntityJsonConverter : JsonConverter<Entity>
     {
-        IncludeFields = true,
-        MaxDepth = 16,
-        PropertyNameCaseInsensitive = false,
-        WriteIndented = false
-    };
+        public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using JsonDocument document = JsonDocument.ParseValue(ref reader);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind == JsonValueKind.Null)
+                return default;
+            JsonElement id = TryProperty(root, "Id", "id", out JsonElement nested) ? nested : root;
+            ulong high = ReadUInt64(id, "High", "high");
+            ulong low = ReadUInt64(id, "Low", "low");
+            return new Entity(s_restoreWorld, new EntityId(high, low));
+        }
+
+        public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options)
+        {
+            writer.WriteStartObject();
+            writer.WritePropertyName("Id");
+            writer.WriteStartObject();
+            writer.WriteNumber("High", value.Id.High);
+            writer.WriteNumber("Low", value.Id.Low);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        private static bool TryProperty(JsonElement value, string primary, string fallback, out JsonElement result) =>
+            value.TryGetProperty(primary, out result) || value.TryGetProperty(fallback, out result);
+
+        private static ulong ReadUInt64(JsonElement value, string primary, string fallback) =>
+            TryProperty(value, primary, fallback, out JsonElement result) && result.ValueKind == JsonValueKind.Number
+                ? result.GetUInt64()
+                : 0;
+    }
+
+    private sealed class UiButtonJsonConverter : JsonConverter<UiButton>
+    {
+        public override UiButton? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+            Entity entity = JsonSerializer.Deserialize<Entity>(ref reader, options);
+            return entity.Id == default ? null : new UiButton(entity);
+        }
+
+        public override void Write(Utf8JsonWriter writer, UiButton value, JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value.Entity, options);
+    }
+
+    private static readonly JsonSerializerOptions Options = CreateOptions();
+
+    private static JsonSerializerOptions CreateOptions()
+    {
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(static typeInfo =>
+        {
+            if (typeInfo.Kind != JsonTypeInfoKind.Object)
+                return;
+            var existing = typeInfo.Properties.Select(property => property.Name).ToHashSet(StringComparer.Ordinal);
+            foreach (FieldInfo field in typeInfo.Type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
+            {
+                if (field.IsStatic || field.IsInitOnly || field.IsDefined(typeof(NonSerializedAttribute), false) ||
+                    !field.IsDefined(typeof(SerializeFieldAttribute), true) || !existing.Add(field.Name))
+                    continue;
+                JsonPropertyInfo property = typeInfo.CreateJsonPropertyInfo(field.FieldType, field.Name);
+                property.Get = field.GetValue;
+                property.Set = field.SetValue;
+                typeInfo.Properties.Add(property);
+            }
+        });
+        var options = new JsonSerializerOptions
+        {
+            IncludeFields = true,
+            MaxDepth = 16,
+            PropertyNameCaseInsensitive = true,
+            TypeInfoResolver = resolver,
+            WriteIndented = false
+        };
+        options.Converters.Add(new EntityJsonConverter());
+        options.Converters.Add(new UiButtonJsonConverter());
+        return options;
+    }
 
     public static string Capture(Behaviour behaviour, string previousState, bool includeReloadOnly)
     {
@@ -57,24 +136,33 @@ internal static class ManagedStateSerializer
         ArgumentNullException.ThrowIfNull(behaviour);
         var document = Read(state);
         var warnings = new List<string>();
-        foreach (var field in SerializableFields(behaviour.GetType(), includeReloadOnly))
+        ulong previousWorld = s_restoreWorld;
+        s_restoreWorld = behaviour.Entity.World;
+        try
         {
-            var descriptor = Describe(field);
-            var source = Find(document.Fields, descriptor, out var fallback);
-            if (source is null)
-                continue;
-            try
+            foreach (var field in SerializableFields(behaviour.GetType(), includeReloadOnly))
             {
-                field.SetValue(behaviour, source.Value.Deserialize(field.FieldType, Options));
-                if (fallback)
-                    warnings.Add($"{field.DeclaringType?.FullName}.{field.Name} restored through a rename fallback.");
+                var descriptor = Describe(field);
+                var source = Find(document.Fields, descriptor, out var fallback);
+                if (source is null)
+                    continue;
+                try
+                {
+                    field.SetValue(behaviour, source.Value.Deserialize(field.FieldType, Options));
+                    if (fallback)
+                        warnings.Add($"{field.DeclaringType?.FullName}.{field.Name} restored through a rename fallback.");
+                }
+                catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
+                {
+                    throw new InvalidOperationException(
+                        $"Managed field '{field.DeclaringType?.FullName}.{field.Name}' could not migrate from '{source.Type}'.",
+                        exception);
+                }
             }
-            catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
-            {
-                throw new InvalidOperationException(
-                    $"Managed field '{field.DeclaringType?.FullName}.{field.Name}' could not migrate from '{source.Type}'.",
-                    exception);
-            }
+        }
+        finally
+        {
+            s_restoreWorld = previousWorld;
         }
         return string.Join(Environment.NewLine, warnings);
     }

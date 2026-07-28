@@ -1,5 +1,13 @@
 # Changelog
 
+- Reduced managed-event editor and Play Mode overhead by sharing immutable callback metadata, caching persistent
+  callback resolution, caching Inspector entity lists, and removing per-frame cursor bridge queries.
+
+- Added serialized managed `KeireEvent` fields with persistent Inspector listeners and scoped cursor ownership so
+  gameplay capture yields to modal runtime UI without scripts fighting over cursor state.
+
+- Preserve managed Entity/component references when cloning an editing scene into Play Mode, and route runtime UI
+  pointer clicks through both Scene and Game viewports.
 - Added shared managed scene world identities, action edge-state APIs, scene-safe clone/destroy calls, collider-backed
   managed raycasts, and serializable Collider/Rigid Body components.
 - Added managed ScriptableObject foundations and a production-oriented weapon framework with physical magazines,
@@ -90,11 +98,24 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Preserve managed Inspector assignments when entering Play Mode by reading legacy lowercase state documents and
+  publishing new component state with canonical casing; restored UI Button references now register click events.
+- Added serializable scene UI Button references for managed Behaviours, including Inspector assignment, native
+  component validation, event-style `Clicked` dispatch, and compatibility with existing polling UI scripts.
+- Expanded the managed runtime bridge with generation-safe entity names, hierarchy traversal, active state,
+  native-component handles, Behaviour lookup, fixed/unscaled/elapsed time, and configurable spatial audio playback.
+- Added Inspector serialization for entity references, typed asset references, enums, and bounded nested
+  `[SerializableType]` data, including range, tooltip, grouping, undo, scene/prefab persistence, and Play-world rebinding.
+- Added audio metadata inspection, waveform thumbnails, Preview/Stop/Reimport actions, and full Audio Source authoring
+  for resident and streaming WAV, Ogg Vorbis, and FLAC clips.
 - Added scene-authored retained runtime UI and audio presentation in editor Play Mode and cooked runtimes, including
   managed audio playback, managed text updates, button click consumption, audio clip importing, and generation-safe
   teardown.
 - Fixed Ninja managed-build quoting, current scene-schema regression checks, input override persistence coverage, and
   clamped weapon equip timing in the managed production harness.
+- Fixed one-shot scene audio replay and Stop semantics, stale deferred UI events after teardown, interrupted-reload
+  magazine loss, feedback-pool callback rollback and stale leases, zero-time ballistic advancement, editor-test
+  compilation, and Windows package-fixture drift.
 
 - Added Project-panel C# script, managed assembly, prefab-from-selection, and prefab-variant creation; source assets open
   through a persisted external-editor choice with system-default fallback. Prefabs instantiate transactionally when
