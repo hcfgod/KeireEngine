@@ -143,6 +143,10 @@ namespace Keire
         [[nodiscard]] Ref<ScenePresentationRuntime> Presentation() const noexcept;
         [[nodiscard]] Ref<PhysicsWorld> Physics() const noexcept;
         [[nodiscard]] Ref<VfxWorld> Vfx() const noexcept;
+        [[nodiscard]] bool PlayVfx(EntityId entity, AssetId effect, bool restart = false);
+        [[nodiscard]] bool StopVfx(EntityId entity);
+        [[nodiscard]] bool PauseVfx(EntityId entity, bool paused);
+        [[nodiscard]] bool IsVfxAlive(EntityId entity) const noexcept;
         [[nodiscard]] std::vector<ScenePhysicsQueryHit> RayCast(const PhysicsRayQuery& query,
                                                                 EntityId ignoredEntity = {}) const;
         void SetPresentationViewport(float width, float height, RuntimeUiInsets safeArea = {});

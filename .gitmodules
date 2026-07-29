@@ -31,3 +31,6 @@
 [submodule "Vendor/stb"]
 	path = Vendor/stb
 	url = https://github.com/nothings/stb.git
+[submodule "Vendor/ffmpeg"]
+	path = Vendor/ffmpeg
+	url = https://git.ffmpeg.org/ffmpeg.git

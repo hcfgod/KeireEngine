@@ -28,6 +28,8 @@ core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/li
 imgui_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/DearImGui/lib$imgui_library.a"
 zstd_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/Zstd/lib$zstd_library.a"
 cp "$client_source" "$hub_source" "$stage/bin/"; cp "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_tool/$asset_tool" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker/$asset_worker" "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/$runtime" "$stage/bin/"; cp "$core_source" "$imgui_source" "$zstd_source" "$stage/lib/"
+find "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker" -maxdepth 1 -type f \( -name 'libav*.so*' -o -name 'libav*.dylib' -o -name 'libswresample*.so*' -o -name 'libswresample*.dylib' \) -exec cp {} "$stage/bin/" \;
+cp -R "$ROOT/Build/Dependencies/ffmpeg/Release/install/share/licenses/ffmpeg" "$stage/third-party/licenses/"
 cp -R "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/Managed" "$stage/bin/"
 dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
 cp "$dependency_install/lib/libassimp.a" "$dependency_install/lib/libzlibstatic.a" "$dependency_install/lib/libJolt.a" "$dependency_install/lib/libRecast.a" "$dependency_install/lib/libDetour.a" "$dependency_install/lib/libDetourCrowd.a" "$dependency_install/lib/libDetourTileCache.a" "$dependency_install/lib/libminiaudio.a" "$stage/lib/"

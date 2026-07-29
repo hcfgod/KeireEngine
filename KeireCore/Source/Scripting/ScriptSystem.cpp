@@ -2464,6 +2464,82 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t RuntimePlayVfx(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                         const std::uint64_t entityLow, const std::uint64_t effectHigh,
+                                                         const std::uint64_t effectLow,
+                                                         const std::uint8_t restart) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->PlayManagedVfx(
+                                     entity.Id().Value(), AssetId(effectHigh, effectLow), restart != 0)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeStopVfx(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                         const std::uint64_t entityLow) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->StopManagedVfx(entity.Id().Value()) ? 1
+                                                                                                                    : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimePauseVfx(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                          const std::uint64_t entityLow,
+                                                          const std::uint8_t paused) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->PauseManagedVfx(entity.Id().Value(),
+                                                                                                paused != 0)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeIsVfxAlive(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                            const std::uint64_t entityLow) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->IsManagedVfxAlive(entity.Id().Value())
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static std::uint8_t RuntimeSetUiText(const std::uint64_t world, const std::uint64_t entityHigh,
                                                            const std::uint64_t entityLow,
                                                            const Coral::String text) noexcept
@@ -3567,6 +3643,14 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimePlayAudioAdvanced));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "StopAudioIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeStopAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PlayVfxIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePlayVfx));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "StopVfxIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeStopVfx));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PauseVfxIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePauseVfx));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "IsVfxAliveIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeIsVfxAlive));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetUiTextIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetUiText));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",
@@ -3779,7 +3863,8 @@ namespace Keire
                     throw std::runtime_error("A loaded managed data source became unavailable during script reload.");
                 auto object = m_Impl->HydrateManagedAsset(*asset, m_Impl->CandidateManagedAssetRuntimeTypes);
                 const Impl::RuntimeScope scope(*m_Impl);
-                if (!object.InvokeMethod<bool>("RuntimeRegisterManagedAsset", candidateGeneration, id.High(), id.Low()))
+                if (object.InvokeMethod<Coral::Bool32>("RuntimeRegisterManagedAsset", candidateGeneration, id.High(),
+                                                       id.Low()) == 0)
                     throw std::runtime_error("The candidate managed asset registry rejected a hydrated object.");
             }
         }
@@ -4021,8 +4106,8 @@ namespace Keire
                 if (!asset)
                     throw std::runtime_error("Managed data asset completed without a loaded object.");
                 auto object = m_Impl->HydrateManagedAsset(*asset, m_Impl->ActiveManagedAssetRuntimeTypes);
-                if (!object.InvokeMethod<bool>("RuntimeCompleteManagedAssetLoad", generation, completion.Id.High(),
-                                               completion.Id.Low()))
+                if (object.InvokeMethod<Coral::Bool32>("RuntimeCompleteManagedAssetLoad", generation,
+                                                       completion.Id.High(), completion.Id.Low()) == 0)
                 {
                     continue;
                 }
@@ -4055,7 +4140,8 @@ namespace Keire
                     continue;
                 auto candidate = m_Impl->HydrateManagedAsset(*asset, m_Impl->ActiveManagedAssetRuntimeTypes);
                 const Impl::RuntimeScope scope(*m_Impl);
-                if (!candidate.InvokeMethod<bool>("RuntimeReloadManagedAsset", generation, id.High(), id.Low()))
+                if (candidate.InvokeMethod<Coral::Bool32>("RuntimeReloadManagedAsset", generation, id.High(),
+                                                          id.Low()) == 0)
                     continue;
                 std::scoped_lock lock(m_Impl->ManagedAssetMutex);
                 if (const auto found = m_Impl->ManagedAssetSources.find(id); found != m_Impl->ManagedAssetSources.end())

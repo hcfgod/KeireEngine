@@ -154,6 +154,39 @@ namespace Keire
         bool m_RootMotion = false;
     };
 
+    struct AnimationTakeDescriptor
+    {
+        AssetId Clip;
+        std::string Name;
+        float Duration = 0.0F;
+    };
+
+    struct AnimationSourceDefinition
+    {
+        std::uint32_t SchemaVersion = 1;
+        AssetId Skeleton;
+        AssetId Rig;
+        std::vector<AnimationTakeDescriptor> Takes;
+    };
+
+    class KEIRE_API AnimationSourceAsset final : public Asset
+    {
+      public:
+        explicit AnimationSourceAsset(AnimationSourceDefinition definition = {});
+        [[nodiscard]] static constexpr AssetTypeId StaticType() noexcept
+        {
+            return AssetTypeId(AssetId(0x4b45495245414e49ULL, 0x4d534f5552434501ULL));
+        }
+        [[nodiscard]] AssetTypeId Type() const noexcept override { return StaticType(); }
+        [[nodiscard]] std::size_t ResidentBytes() const noexcept override;
+        [[nodiscard]] const AnimationSourceDefinition& Definition() const noexcept { return m_Definition; }
+        [[nodiscard]] static Ref<AnimationSourceAsset> Decode(std::span<const std::byte> bytes);
+        [[nodiscard]] static std::vector<std::byte> Encode(const AnimationSourceDefinition& definition);
+
+      private:
+        AnimationSourceDefinition m_Definition;
+    };
+
     enum class AnimationConditionComparison : std::uint8_t
     {
         Greater,
@@ -445,6 +478,7 @@ namespace Keire
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateSkeletonAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateSkinnedMeshAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAnimationClipAssetDecoder();
+    [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAnimationSourceAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAnimationGraphAssetDecoder();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateAvatarMaskAssetDecoder();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateAnimationClipAssetImporter();

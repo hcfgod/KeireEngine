@@ -1,5 +1,7 @@
 #include "Keire/Audio/AudioAssets.h"
 
+#include "KeireInternal/Audio/AudioImportBackend.h"
+
 #include <miniaudio.h>
 #include <nlohmann/json.hpp>
 
@@ -9,14 +11,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <map>
 #include <ranges>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <system_error>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace Keire
 {
@@ -250,16 +256,104 @@ namespace Keire
         return CreateRef<AudioClipAsset>(std::move(clip));
     }
 
-    AssetImporterRegistration CreateAudioClipAssetImporter()
+    namespace
+    {
+        [[nodiscard]] AssetImportOutput
+        ImportAudioWithFallback(const AssetImportContext& context, const std::span<const std::byte> source,
+                                const std::function<std::vector<std::byte>(std::span<const std::byte>)>& nativeImport,
+                                const Detail::AudioTranscodeBackend& backend)
+        {
+            std::string nativeDiagnostic;
+            try
+            {
+                AssetImportOutput output;
+                output.Bytes = nativeImport(source);
+                return output;
+            }
+            catch (const std::exception& error)
+            {
+                nativeDiagnostic = error.what();
+            }
+
+            if (!backend)
+                throw std::runtime_error(
+                    "This audio codec or media container requires the private FFmpeg asset-worker backend. "
+                    "Regenerate the engine after building its locked FFmpeg dependency. Native decoder diagnostic: " +
+                    nativeDiagnostic);
+
+            AssetImportOutput output;
+            auto transcoded = backend(context, source);
+            if (transcoded.EncodedAudio.empty())
+                throw std::runtime_error("The private FFmpeg backend produced an empty audio stream.");
+            if (transcoded.EncodedAudio.size() > MaximumEncodedSourceBytes || transcoded.SampleRate < 8000 ||
+                transcoded.SampleRate > 384000 || transcoded.Channels == 0 || transcoded.Channels > 8 ||
+                transcoded.Frames == 0 || transcoded.Frames > MaximumFrames)
+                throw std::runtime_error("The private FFmpeg backend produced audio outside supported limits.");
+            output.Bytes.reserve(std::size(Magic) + 32U + transcoded.EncodedAudio.size());
+            AppendHeader(output.Bytes, transcoded.SampleRate, transcoded.Channels, transcoded.Frames,
+                         EncodedStreamStorage, transcoded.EncodedAudio.size());
+            output.Bytes.insert(output.Bytes.end(), transcoded.EncodedAudio.begin(), transcoded.EncodedAudio.end());
+            const auto runtimeEncoding =
+                transcoded.RuntimeEncoding.empty() ? std::string_view("runtime audio") : transcoded.RuntimeEncoding;
+            std::string diagnostic = "Audio stream was converted in-process from " + transcoded.SourceContainer + "/" +
+                                     transcoded.SourceCodec + " to " + std::string(runtimeEncoding);
+            if (transcoded.SampleRate != 0 && transcoded.Channels != 0)
+                diagnostic += " (" + std::to_string(transcoded.SampleRate) + " Hz, " +
+                              std::to_string(transcoded.Channels) + " channels)";
+            diagnostic += ".";
+            output.Diagnostics.push_back({AssetDiagnosticSeverity::Information, {}, 0, 0, std::move(diagnostic)});
+            return output;
+        }
+    } // namespace
+
+    AssetImporterRegistration Detail::CreateAudioClipAssetImporter(Detail::AudioTranscodeBackend backend)
     {
         AssetImporterRegistration result;
         result.Name = "Keire.AudioClip";
-        result.Version = 2;
+        result.Version = 7;
         result.Type = AudioClipAsset::StaticType();
-        result.Extensions = {".wav", ".ogg", ".flac"};
+        result.Extensions = {
+            ".wav",  ".wave", ".flac", ".ogg",  ".oga",  ".mp3",  ".mp2", ".aac", ".ac3", ".eac3", ".m4a",
+            ".m4b",  ".mp4",  ".mka",  ".mkv",  ".webm", ".weba", ".mov", ".wma", ".asf", ".aif",  ".aiff",
+            ".aifc", ".caf",  ".opus", ".spx",  ".amr",  ".ape",  ".wv",  ".tta", ".mpc", ".mpeg", ".mpg",
+            ".3gp",  ".3g2",  ".ts",   ".m2ts", ".mts",  ".au",   ".snd", ".voc", ".ra",  ".rm",
+        };
         result.Import = [](const std::span<const std::byte> bytes) { return ImportSource(bytes); };
+        const auto nativeImport = result.Import;
+        result.ContextualImport = [nativeImport, backend = std::move(backend)](const AssetImportContext& context,
+                                                                               const std::span<const std::byte> bytes)
+        { return ImportAudioWithFallback(context, bytes, nativeImport, backend); };
+        result.ImportOptions = {
+            {"audioStream",
+             "Audio Stream",
+             "Source",
+             AssetImportOptionKind::Integer,
+             std::int64_t{0},
+             0.0,
+             255.0,
+             1.0,
+             {}},
+            {"transcodeMode",
+             "Transcode Mode",
+             "Compression",
+             AssetImportOptionKind::Choice,
+             std::string("fast"),
+             {},
+             {},
+             1.0,
+             {"fast", "compressed"}},
+        };
+        result.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
+        {
+            (void)AudioClipAsset::Decode(bytes);
+            AssetImportOutput output;
+            output.Bytes.assign(bytes.begin(), bytes.end());
+            return output;
+        };
         return result;
     }
+
+    AssetImporterRegistration CreateAudioClipAssetImporter() { return Detail::CreateAudioClipAssetImporter({}); }
 
     AssetDecoderRegistration CreateAudioClipAssetDecoder()
     {

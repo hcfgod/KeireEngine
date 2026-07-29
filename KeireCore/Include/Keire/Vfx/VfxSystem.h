@@ -51,6 +51,12 @@ namespace Keire
         Mesh
     };
 
+    enum class VfxBackend : std::uint8_t
+    {
+        Cpu,
+        Gpu
+    };
+
     struct VfxEmissionRateModule
     {
         float ParticlesPerSecond = 10.0F;
@@ -146,9 +152,87 @@ namespace Keire
         [[nodiscard]] bool operator==(const VfxModuleDefinition&) const = default;
     };
 
+    enum class VfxContextType : std::uint8_t
+    {
+        Spawn,
+        Initialize,
+        Update,
+        Output,
+        Event
+    };
+
+    enum class VfxValueType : std::uint8_t
+    {
+        Boolean,
+        Integer,
+        Scalar,
+        Vector2,
+        Vector3,
+        Color,
+        Texture,
+        Mesh,
+        Asset
+    };
+
+    using VfxParameterValue = std::variant<bool, std::int64_t, float, Vector2, Vector3, Color, AssetId>;
+
+    struct VfxGraphPin
+    {
+        AssetId Id;
+        std::string Name;
+        VfxValueType Type = VfxValueType::Scalar;
+        bool Input = true;
+
+        [[nodiscard]] bool operator==(const VfxGraphPin&) const = default;
+    };
+
+    struct VfxGraphNode
+    {
+        AssetId Id;
+        std::string Type;
+        VfxContextType Context = VfxContextType::Update;
+        Vector2 EditorPosition;
+        std::vector<VfxGraphPin> Pins;
+        std::string CustomHlsl;
+
+        [[nodiscard]] bool operator==(const VfxGraphNode&) const = default;
+    };
+
+    struct VfxGraphConnection
+    {
+        AssetId Id;
+        AssetId OutputNode;
+        AssetId OutputPin;
+        AssetId InputNode;
+        AssetId InputPin;
+
+        [[nodiscard]] bool operator==(const VfxGraphConnection&) const = default;
+    };
+
+    struct VfxGraphSystem
+    {
+        AssetId Id;
+        std::string Name;
+        std::vector<VfxGraphNode> Nodes;
+        std::vector<VfxGraphConnection> Connections;
+
+        [[nodiscard]] bool operator==(const VfxGraphSystem&) const = default;
+    };
+
+    struct VfxBlackboardParameter
+    {
+        AssetId Id;
+        std::string Name;
+        VfxValueType Type = VfxValueType::Scalar;
+        VfxParameterValue DefaultValue = 0.0F;
+        bool Exposed = true;
+
+        [[nodiscard]] bool operator==(const VfxBlackboardParameter&) const = default;
+    };
+
     struct VfxEffectDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         AssetId EmitterId;
         std::string Name = "VFX Effect";
         bool Loop = false;
@@ -157,12 +241,39 @@ namespace Keire
         std::uint32_t Seed = 1;
         std::uint32_t Capacity = 1024;
         std::vector<VfxModuleDefinition> Modules;
+        std::vector<VfxGraphSystem> Systems;
+        std::vector<VfxBlackboardParameter> Blackboard;
 
         [[nodiscard]] bool operator==(const VfxEffectDefinition&) const = default;
     };
 
+    enum class VfxCompileDiagnosticSeverity : std::uint8_t
+    {
+        Information,
+        Warning,
+        Error
+    };
+
+    struct VfxCompileDiagnostic
+    {
+        VfxCompileDiagnosticSeverity Severity = VfxCompileDiagnosticSeverity::Error;
+        AssetId Node;
+        std::string Message;
+    };
+
+    struct VfxCompiledProgram
+    {
+        std::uint64_t Hash = 0;
+        VfxBackend Backend = VfxBackend::Cpu;
+        std::vector<std::byte> CanonicalIr;
+        std::vector<VfxCompileDiagnostic> Diagnostics;
+        bool Valid = false;
+    };
+
     KEIRE_API void ValidateVfxEffect(const VfxEffectDefinition& definition);
     [[nodiscard]] KEIRE_API std::vector<AssetId> VfxEffectDependencies(const VfxEffectDefinition& definition);
+    [[nodiscard]] KEIRE_API VfxCompiledProgram CompileVfxEffect(const VfxEffectDefinition& definition,
+                                                                VfxBackend backend);
 
     class KEIRE_API VfxEffectAsset final : public Asset
     {
@@ -253,6 +364,7 @@ namespace Keire
     {
         std::uint32_t MaximumEffects = 256;
         std::uint32_t MaximumParticles = 65'536;
+        VfxBackend Backend = VfxBackend::Cpu;
         std::function<std::optional<VfxCollisionHit>(Vector3 start, Vector3 end)> CollisionQuery;
         std::function<std::optional<Vector3>(AssetId shapeAsset, std::uint32_t randomValue)> ShapeSample;
     };
@@ -318,6 +430,30 @@ namespace Keire
         std::size_t Dropped = 0;
     };
 
+    struct VfxGpuEmitter
+    {
+        VfxHandle Handle;
+        std::uint64_t Revision = 0;
+        std::uint64_t SpawnSequence = 0;
+        Vector3 Position;
+        Quaternion Rotation;
+        Vector3 ShapeExtent;
+        Vector3 VelocityMinimum;
+        float LifetimeMinimum = 1.0F;
+        Vector3 VelocityMaximum;
+        float LifetimeMaximum = 1.0F;
+        Vector3 Acceleration;
+        float ShapeRadius = 0.0F;
+        Color ColorStart;
+        Color ColorEnd;
+        float SizeStart = 1.0F;
+        float SizeEnd = 1.0F;
+        std::uint32_t Seed = 1;
+        VfxShape Shape = VfxShape::Point;
+        VfxSimulationSpace Space = VfxSimulationSpace::World;
+        VfxRendererType Renderer = VfxRendererType::Sprite;
+    };
+
     class KEIRE_API VfxRenderSnapshot final
     {
       public:
@@ -330,13 +466,23 @@ namespace Keire
         VfxRenderSnapshot& operator=(VfxRenderSnapshot&&) noexcept = default;
 
         [[nodiscard]] std::uint64_t Revision() const noexcept { return m_Revision; }
+        [[nodiscard]] std::uint64_t WorldId() const noexcept { return m_WorldId; }
+        [[nodiscard]] std::uint64_t ResetRevision() const noexcept { return m_ResetRevision; }
+        [[nodiscard]] std::uint32_t ParticleCapacity() const noexcept { return m_ParticleCapacity; }
+        [[nodiscard]] float DeltaSeconds() const noexcept { return m_DeltaSeconds; }
         [[nodiscard]] std::span<const VfxRenderParticle> Particles() const noexcept { return m_Particles; }
+        [[nodiscard]] std::span<const VfxGpuEmitter> GpuEmitters() const noexcept { return m_GpuEmitters; }
         [[nodiscard]] std::size_t DroppedParticles() const noexcept { return m_DroppedParticles; }
 
       private:
         friend class VfxWorld;
         std::uint64_t m_Revision = 0;
+        std::uint64_t m_WorldId = 0;
+        std::uint64_t m_ResetRevision = 0;
+        std::uint32_t m_ParticleCapacity = 0;
+        float m_DeltaSeconds = 0.0F;
         std::vector<VfxRenderParticle> m_Particles;
+        std::vector<VfxGpuEmitter> m_GpuEmitters;
         std::size_t m_DroppedParticles = 0;
     };
 

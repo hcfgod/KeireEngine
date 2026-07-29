@@ -15,6 +15,7 @@ namespace KeireEditor
         [[nodiscard]] virtual AnimatorControllerDocument& AnimatorControllerState() noexcept = 0;
         [[nodiscard]] virtual const Keire::UiThemeDefinition& AnimatorControllerTheme() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> AnimatorControllerDatabase() const noexcept = 0;
+        [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> AnimatorControllerAssets() const noexcept = 0;
         virtual void ActivateAnimatorControllerHistory() noexcept = 0;
         virtual void SaveAnimatorControllerDocument() = 0;
         virtual void ReloadAnimatorControllerDocument(Keire::AssetId asset) = 0;

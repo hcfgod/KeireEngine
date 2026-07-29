@@ -75,6 +75,11 @@ namespace Keire
                     left.W * right.W - left.X * right.X - left.Y * right.Y - left.Z * right.Z};
         }
 
+        [[nodiscard]] Quaternion Conjugate(const Quaternion value) noexcept
+        {
+            return {-value.X, -value.Y, -value.Z, value.W};
+        }
+
         [[nodiscard]] Quaternion Normalize(const Quaternion value) noexcept
         {
             const auto length =
@@ -837,28 +842,27 @@ namespace Keire
         const auto diagonal = Length(extent);
         const auto radiusSquared = std::max(diagonal * diagonal * 0.0004F, Epsilon);
         result.Influences.reserve(mesh.Vertices().size());
+        std::vector<std::pair<float, std::uint16_t>> scores(worldPositions.size());
+        const auto scoreOrder = [](const auto& left, const auto& right)
+        {
+            if (left.first != right.first)
+                return left.first > right.first;
+            return left.second < right.second;
+        };
         for (const auto& vertex : mesh.Vertices())
         {
-            std::vector<std::pair<float, std::uint16_t>> scores;
-            scores.reserve(worldPositions.size());
             for (std::size_t bone = 0; bone < worldPositions.size(); ++bone)
             {
                 const auto parent = result.Rig.Bones[bone].Parent;
                 const auto start =
                     parent >= 0 ? worldPositions[static_cast<std::size_t>(parent)] : worldPositions[bone];
                 const auto distanceSquared = PointSegmentDistanceSquared(vertex.Position, start, worldPositions[bone]);
-                scores.emplace_back(1.0F / (distanceSquared + radiusSquared), static_cast<std::uint16_t>(bone));
+                scores[bone] = {1.0F / (distanceSquared + radiusSquared), static_cast<std::uint16_t>(bone)};
             }
-            std::ranges::sort(scores,
-                              [](const auto& left, const auto& right)
-                              {
-                                  if (left.first != right.first)
-                                      return left.first > right.first;
-                                  return left.second < right.second;
-                              });
             SkinVertexInfluence8 influence;
-            influence.Count =
-                static_cast<std::uint8_t>(std::min<std::size_t>(request.MaximumInfluences, scores.size()));
+            const auto influenceCount = std::min<std::size_t>(request.MaximumInfluences, scores.size());
+            std::partial_sort(scores.begin(), scores.begin() + influenceCount, scores.end(), scoreOrder);
+            influence.Count = static_cast<std::uint8_t>(influenceCount);
             float total = 0.0F;
             for (std::size_t index = 0; index < influence.Count; ++index)
             {
@@ -912,8 +916,10 @@ namespace Keire
             const auto target = targetBySemantic.find(sourceRig.Bones[sourceTrack.Bone].Semantic);
             if (target == targetBySemantic.end())
                 continue;
-            const auto sourceLength = Length(sourceRig.Bones[sourceTrack.Bone].BindPose.Translation);
-            const auto targetLength = Length(targetRig.Bones[target->second].BindPose.Translation);
+            const auto& sourceBind = sourceRig.Bones[sourceTrack.Bone].BindPose;
+            const auto& targetBind = targetRig.Bones[target->second].BindPose;
+            const auto sourceLength = Length(sourceBind.Translation);
+            const auto targetLength = Length(targetBind.Translation);
             const auto translationScale = sourceLength > Epsilon ? targetLength / sourceLength : 1.0F;
             AnimationTrack track;
             track.Bone = target->second;
@@ -921,11 +927,24 @@ namespace Keire
             for (const auto& key : sourceTrack.Keys)
             {
                 auto value = key.Value;
-                value.Translation = Multiply(value.Translation, translationScale);
+                value.Translation =
+                    Add(targetBind.Translation,
+                        Multiply(Subtract(value.Translation, sourceBind.Translation), translationScale));
+                const auto sourceRotation = Normalize(sourceBind.Rotation);
+                const auto targetRotation = Normalize(targetBind.Rotation);
+                const auto rotationDelta = Multiply(Normalize(value.Rotation), Conjugate(sourceRotation));
+                value.Rotation = Normalize(Multiply(rotationDelta, targetRotation));
+                const auto retargetScale = [](const float animated, const float source, const float target)
+                { return std::abs(source) > Epsilon ? target * (animated / source) : target; };
+                value.Scale = {retargetScale(value.Scale.X, sourceBind.Scale.X, targetBind.Scale.X),
+                               retargetScale(value.Scale.Y, sourceBind.Scale.Y, targetBind.Scale.Y),
+                               retargetScale(value.Scale.Z, sourceBind.Scale.Z, targetBind.Scale.Z)};
                 track.Keys.push_back({key.Time, value});
             }
             tracks.push_back(std::move(track));
         }
+        if (tracks.empty())
+            throw std::invalid_argument("Retargeting found no compatible semantic bone tracks.");
         return CreateRef<AnimationClipAsset>(
             targetSkeletonId, sourceClip.Duration(), std::move(tracks),
             std::vector<AnimationEvent>(sourceClip.Events().begin(), sourceClip.Events().end()),

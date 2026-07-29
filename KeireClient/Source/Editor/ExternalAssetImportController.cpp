@@ -1,9 +1,29 @@
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 
+#include <algorithm>
+#include <cctype>
 #include <stdexcept>
 
 namespace KeireEditor
 {
+    namespace
+    {
+        [[nodiscard]] std::string LowerExtension(const std::filesystem::path& path)
+        {
+            auto extension = path.extension().string();
+            std::ranges::transform(extension, extension.begin(),
+                                   [](const unsigned char value) { return static_cast<char>(std::tolower(value)); });
+            return extension;
+        }
+
+        [[nodiscard]] bool IsMediaContainer(const std::filesystem::path& path)
+        {
+            const auto extension = LowerExtension(path);
+            return extension == ".webm" || extension == ".mp4" || extension == ".mkv" || extension == ".mov" ||
+                   extension == ".m4a" || extension == ".aac";
+        }
+    } // namespace
+
     void ExternalAssetImportController::Queue(const std::span<const std::filesystem::path> paths,
                                               const std::filesystem::path& destinationFolder, const bool viewport,
                                               const Keire::EntityId viewportTarget,
@@ -25,7 +45,15 @@ namespace KeireEditor
             const bool directory = std::filesystem::is_directory(source);
             if (!directory && !importer)
             {
-                m_Diagnostic += "Unsupported asset: " + source.filename().string() + "\n";
+                if (IsMediaContainer(source))
+                {
+                    m_Diagnostic += "Unsupported media container: " + source.filename().string() +
+                                    ". Extract its audio track as WAV, Ogg Vorbis, FLAC, or MP3 before import.\n";
+                }
+                else
+                {
+                    m_Diagnostic += "Unsupported asset: " + source.filename().string() + "\n";
+                }
                 continue;
             }
             Keire::ExternalAssetImportItem item;
@@ -46,7 +74,13 @@ namespace KeireEditor
             m_Importers.push_back(importer);
         }
         if (m_Items.empty())
+        {
+            m_Failed = true;
+            m_OpenRequested = true;
+            if (m_Diagnostic.empty())
+                m_Diagnostic = "None of the dropped files has a registered asset importer.";
             return;
+        }
         if (requiresDialog)
             m_OpenRequested = true;
         else

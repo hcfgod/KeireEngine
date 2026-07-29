@@ -472,6 +472,19 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
 }
 
+TEST_CASE("model importer exposes explicit animation source routing")
+{
+    const auto importer = Keire::CreateMeshAssetImporter();
+    CHECK(importer.Version == 8);
+    const auto content =
+        std::ranges::find(importer.ImportOptions, std::string("contentType"),
+                          &Keire::AssetImportOptionDescriptor::Key);
+    REQUIRE(content != importer.ImportOptions.end());
+    CHECK(content->Kind == Keire::AssetImportOptionKind::Choice);
+    CHECK(std::get<std::string>(content->DefaultValue) == "model");
+    CHECK(content->Choices == std::vector<std::string>{"model", "animation"});
+}
+
 TEST_CASE("glTF import publishes faithful material and embedded texture subassets")
 {
     TemporaryDirectory directory("GltfMaterialImportTests");

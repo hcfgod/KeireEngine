@@ -38,6 +38,7 @@ namespace KeireEditor
         IRiggingStudioController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_DraftAsset;
+        Keire::AssetId m_LockedAsset;
         Keire::AssetImportSettings m_Draft;
         Keire::AssetId m_SourceClip;
         std::string m_RetargetName = "RetargetedClip";

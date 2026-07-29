@@ -187,7 +187,7 @@ bool EditorWorkspaceLayer::CreateAssetBrowserManagedData(const Keire::ManagedTyp
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating managed data.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Managed data asset name must be one non-empty path component.");
         const auto scripts = Owner().Scripts();
@@ -360,7 +360,7 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
                 undo->RecordApplied(Keire::CreateUndoCommand(
                     state->Name, [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Redo); },
                     [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Undo); }, sizeof(*state),
-                    [this] { return m_AssetOperations && !m_AssetOperations->Busy(); }));
+                    [this] { return static_cast<bool>(m_AssetOperations); }));
                 m_ActiveUndoContext = undo;
             }
             state->RecordCommand = false;
@@ -620,8 +620,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                                     state->Name,
                                     [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Redo); },
                                     [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Undo); },
-                                    sizeof(*state),
-                                    [this] { return m_AssetOperations && !m_AssetOperations->Busy(); }));
+                                    sizeof(*state), [this] { return static_cast<bool>(m_AssetOperations); }));
                                 m_ActiveUndoContext = undo;
                             }
                             state->RecordCommand = false;
@@ -674,7 +673,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                                 state->Name,
                                 [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Redo); },
                                 [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Undo); },
-                                sizeof(*state), [this] { return m_AssetOperations && !m_AssetOperations->Busy(); }));
+                                sizeof(*state), [this] { return static_cast<bool>(m_AssetOperations); }));
                             m_ActiveUndoContext = undo;
                         }
                     }
@@ -955,7 +954,7 @@ void EditorWorkspaceLayer::CreateInputActions(Keire::InputActionAssetDefinition 
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating input actions.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         auto destination = directory / (std::string(baseName) + ".keireinput");
         for (std::size_t copy = 2; m_AssetDatabase->Find(destination); ++copy)
@@ -1005,7 +1004,7 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name)
         if (!IsCSharpIdentifier(name))
             throw std::invalid_argument("C# script names must be valid type identifiers.");
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a script.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         auto destinationDirectory = directory;
         const auto projectRelativeParent = std::filesystem::path("Assets") / directory;
@@ -1085,7 +1084,7 @@ bool EditorWorkspaceLayer::CreateManagedAssembly(const std::string_view name)
         if (!IsCSharpIdentifier(name))
             throw std::invalid_argument("Managed assembly names must be valid C# identifiers.");
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating an assembly.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         const auto destination = directory / (std::string(name) + ".keireasm");
         const auto script = directory / std::string(name) / (std::string(name) + "Root.cs");
@@ -1122,7 +1121,7 @@ bool EditorWorkspaceLayer::CreateAudioMixer(const std::string_view name)
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating an Audio Mixer.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Audio Mixer name must be one non-empty path component.");
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
@@ -1149,7 +1148,7 @@ bool EditorWorkspaceLayer::CreatePhysicsMaterial(const std::string_view name)
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a Physics Material.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Physics Material name must be one non-empty path component.");
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
@@ -1176,7 +1175,7 @@ bool EditorWorkspaceLayer::CreateVfxEffect(const std::string_view name)
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a VFX Effect.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("VFX Effect name must be one non-empty path component.");
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
@@ -1203,7 +1202,7 @@ bool EditorWorkspaceLayer::CreatePrefabFromSelection(const std::string_view name
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a prefab.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto scene = m_SceneDocument->EditingScene();
         if (!scene)
             throw std::runtime_error("Open a scene before creating a prefab.");
@@ -1244,7 +1243,7 @@ bool EditorWorkspaceLayer::CreatePrefabVariant(const Keire::AssetId basePrefab, 
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a prefab variant.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto base = m_AssetDatabase->Find(basePrefab);
         if (!base || base->Type != Keire::PrefabAsset::StaticType())
             throw std::invalid_argument("Prefab variants require an available prefab base.");
@@ -1337,7 +1336,7 @@ Keire::AssetId EditorWorkspaceLayer::CreatePrefabAsset(const std::filesystem::pa
     if (!m_AssetDatabase || !m_AssetOperations)
         throw std::logic_error("Prefab creation services are unavailable.");
     if (m_AssetOperations->Busy())
-        throw std::runtime_error("Wait for the active asset operation before creating a prefab.");
+        (void)m_AssetOperations->PreemptBackgroundImports();
 
     const auto source = Keire::PrefabAsset::Encode(definition);
     const auto created =
@@ -1360,7 +1359,7 @@ Keire::AssetId EditorWorkspaceLayer::CreatePrefabAsset(const std::filesystem::pa
             undo->RecordApplied(Keire::CreateUndoCommand(
                 state->Name, [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Redo); },
                 [this, state] { QueueAssetMutation(state, KeireEditor::AssetMutationPhase::Undo); }, sizeof(*state),
-                [this] { return m_AssetOperations && !m_AssetOperations->Busy(); }));
+                [this] { return static_cast<bool>(m_AssetOperations); }));
             m_ActiveUndoContext = undo;
         }
     }
@@ -1645,7 +1644,7 @@ bool EditorWorkspaceLayer::CreateMaterial(const std::string_view name)
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a material.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         Keire::AssetId shader;
         if (const auto selected = m_AssetDatabase->Find(m_SelectedAsset);
             selected && selected->Type == Keire::ShaderAsset::StaticType())
@@ -1689,7 +1688,7 @@ bool EditorWorkspaceLayer::CreateAnimationGraph(const std::string_view name)
     try
     {
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating an Animator Controller.");
+            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Animator Controller name must be one non-empty path component.");
@@ -1722,6 +1721,11 @@ const Keire::UiThemeDefinition& EditorWorkspaceLayer::AnimatorControllerTheme() 
 Keire::Ref<Keire::AssetDatabase> EditorWorkspaceLayer::AnimatorControllerDatabase() const noexcept
 {
     return m_AssetDatabase;
+}
+
+Keire::Ref<Keire::AssetSystem> EditorWorkspaceLayer::AnimatorControllerAssets() const noexcept
+{
+    return Owner().Assets();
 }
 
 void EditorWorkspaceLayer::ActivateAnimatorControllerHistory() noexcept
@@ -1934,17 +1938,60 @@ void EditorWorkspaceLayer::RevealVfxEffectAsset(const Keire::AssetId asset)
     m_AssetBrowserPanel->Registration().RequestFocus();
 }
 
-void EditorWorkspaceLayer::StopVfxEffectPreview() noexcept { m_VfxEffectPreviewAsset = {}; }
+Keire::VfxRenderSnapshot EditorWorkspaceLayer::SceneViewportEditVfx() const
+{
+    return m_VfxEffectPreviewWorld ? m_VfxEffectPreviewWorld->CaptureRenderSnapshot() : Keire::VfxRenderSnapshot{};
+}
+
+void EditorWorkspaceLayer::StopVfxEffectPreview() noexcept
+{
+    if (m_VfxEffectPreviewWorld)
+        m_VfxEffectPreviewWorld->Clear();
+    m_VfxEffectPreviewWorld.Reset();
+    m_VfxEffectPreviewHandle = {};
+    m_VfxEffectPreviewAsset = {};
+    m_VfxEffectPreviewRevision = 0;
+    m_VfxEffectPreviewCapacity = 0;
+    m_VfxEffectPreviewDiagnostic.clear();
+}
 
 void EditorWorkspaceLayer::ReportVfxEffectError(std::string message) noexcept { SetAssetError(std::move(message)); }
 
 void EditorWorkspaceLayer::PreviewVfxEffect(const Keire::AssetId asset, const Keire::VfxEffectDefinition& definition)
 {
-    (void)definition;
-    m_VfxEffectPreviewAsset = asset;
-    m_VfxEffectPreviewDiagnostic =
-        "Live VFX preview is unavailable because no transient editor VFX world is connected. "
-        "Document edits remain isolated and never spawn or dirty scene effects.";
+    try
+    {
+        (void)Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(definition);
+        const auto capacity = static_cast<std::uint32_t>(std::clamp<std::size_t>(definition.Capacity, 1U, 1'000'000U));
+        if (!m_VfxEffectPreviewWorld || m_VfxEffectPreviewAsset != asset || !m_VfxEffectPreviewHandle ||
+            m_VfxEffectPreviewCapacity != capacity)
+        {
+            Keire::VfxWorldSpecification specification;
+            specification.Backend = Keire::VfxBackend::Gpu;
+            specification.MaximumEffects = 1;
+            specification.MaximumParticles = capacity;
+            m_VfxEffectPreviewWorld = Keire::CreateRef<Keire::VfxWorld>(std::move(specification));
+            m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate({effect});
+            if (!m_VfxEffectPreviewHandle)
+                throw std::runtime_error("The transient VFX preview world rejected the effect.");
+            m_VfxEffectPreviewRevision = 1;
+            m_VfxEffectPreviewCapacity = capacity;
+        }
+        else
+        {
+            if (++m_VfxEffectPreviewRevision == 0)
+                ++m_VfxEffectPreviewRevision;
+            (void)m_VfxEffectPreviewWorld->Reload(m_VfxEffectPreviewHandle, effect, m_VfxEffectPreviewRevision);
+        }
+        m_VfxEffectPreviewAsset = asset;
+        m_VfxEffectPreviewDiagnostic =
+            "Live GPU preview is active in the Scene viewport. Preview state is transient and scene-safe.";
+    }
+    catch (const std::exception& error)
+    {
+        m_VfxEffectPreviewDiagnostic = std::string("Preview retained its last-good program: ") + error.what();
+    }
 }
 
 void EditorWorkspaceLayer::PersistVfxEffect(const Keire::AssetId asset, const std::span<const std::byte> bytes)

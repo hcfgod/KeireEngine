@@ -60,6 +60,33 @@ Managed build generations contain both the engine API and gameplay outputs. Sour
 API project into generation-local storage, while packaged editors copy their bundled API; candidate reloads consume
 that immutable pair transactionally rather than resolving a process-global API artifact.
 
+## GPU VFX And Media Import Boundaries
+
+`VfxWorld` remains the backend-neutral scene facade. Render-capable scene sessions select the GPU backend; headless
+tests and explicit compatibility policy select deterministic CPU simulation. GPU snapshots contain only immutable
+per-emitter work descriptors, cumulative spawn sequences, reset revisions, and aggregate limits. They never contain
+per-particle CPU snapshots. The renderer owns persistent particle, free-list, alive-list, counter, event, dispatch, and
+indirect-draw buffers and mutates them only inside an active render frame. Compute initialization, reset, simulation,
+spawn, compaction, and indirect argument finalization precede one indirect output draw. Shutdown releases pipelines
+before the device and treats repeated close as inert.
+
+Schema-v2 `.keirevfx` documents contain stable systems, contexts, nodes, typed pins, connections, and blackboard
+parameters. The canonical compiler validates stable identity and pin types before producing backend-specific programs.
+Schema-v1 module documents remain readable and are adapted in memory; only Save publishes schema v2. CPU-incompatible
+features produce diagnostics rather than implicit substitutions. Managed VFX calls cross `IScriptRuntimeServices`,
+validate entity/world/script generations, and enqueue component state for the scene-safe render boundary.
+
+Asset import output may declare an effective primary type, but only from the importer's registered compatible type set.
+The database validates that declaration before atomically publishing metadata, catalog records, dependencies, generated
+subassets, and cache entries. Animation-only model containers use this path to become `AnimationSourceAsset` records
+without mesh validation while retaining the parent asset ID and stable generated clip IDs.
+
+Native WAV, Ogg Vorbis, FLAC, and MP3 probing remains on miniaudio's in-process fast path. Broad media conversion is
+keyed by source digest, stream selection, importer version, and codec configuration, and cached worker output is
+validated before restoration. FFmpeg is pinned as the signed `n8.1.2` source submodule and source-built as private
+shared libraries linked only by `KeireAssetWorker`. Custom AVIO reads the staged source and writes bounded FLAC output
+in-process; FFmpeg types never enter public headers or runtime/editor processes.
+
 ## Public Binary Boundary
 
 Public classes and free functions with KeireCore-owned out-of-line symbols use `KEIRE_API`. Exception types that cross the managed-client boundary are annotated as well so their type identity remains consistent in a same-toolchain shared-library build. Header-only value types, templates, IDs, and aggregates do not own exportable symbols and remain unannotated. `GetApplicationCommandLineDescription` and `CreateApplication` are the deliberate reverse boundary: the managed executable defines them for KeireCore, so they must not be marked as library imports. Script regressions keep this policy explicit as the API grows.
@@ -142,6 +169,11 @@ gain, pitch, priority, loop/spatial flags, and attenuation distances. The Play a
 Audio Source and presentation runtime at the safe boundary. Editor-only asset preview uses a separately tracked voice
 on the `EditorPreview` bus and is stopped when selection changes or the workspace detaches.
 
+Audio asset import probes WAV, Ogg Vorbis, FLAC, and MP3 in-process through miniaudio. Other registered codecs and
+media containers are normalized to lossless FLAC by an injected asset-worker backend using private FFmpeg shared
+libraries. Custom AVIO callbacks avoid process creation and temporary source/output files; packet decoding and
+resampling remain bounded, stream selection is explicit, and only the asset worker loads FFmpeg.
+
 Weapon simulation is data-driven and split between deterministic command/state logic, a bounded ballistic projectile
 pool, collision/damage adapters, and presentation springs. Physical magazine instances and loose-shell inventories are
 runtime state; reserve counts are derived views rather than independently serialized values. Stable shot IDs include
@@ -215,6 +247,9 @@ structural commands; `InspectorPanel` owns component inspection while its `Asset
 dispatch, diagnostics, naming actions, and material content; and the input-actions, project-settings,
 asset-browser, console, and diagnostics panels own their respective tools. Panels receive document data, frame-value
 snapshots, and named commands through narrow contracts; none retain, friend, or inspect `EditorWorkspaceLayer`.
+`UiPanelRegistration` supplies a common session-local view lock. The UI boundary prevents locked panels from moving,
+resizing, or collapsing, while selection-driven client panels retain only stable entity or asset IDs and validate them
+before each draw.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
 All authoring mutations, including menu primitives and viewport mesh/material drops, cross `SceneDocument`; workspace
@@ -514,4 +549,5 @@ and revision-aware replacement preserves bounded lifecycle behavior. The CPU pat
 render packets into the transparent pass and records explicit diagnostics when GPU depth or scene-physics requests
 select CPU simulation. Renderer capability flags and sampleable resolved depth are truthful prerequisites for the
 later portable compute/indirect slice. `VfxEffectDocument` exposes the ordered module stack, curves, and gradients
-without exposing ImGui; its panel deliberately has no live preview until an isolated transient `VfxWorld` is available.
+without exposing ImGui; its panel owns an isolated transient GPU `VfxWorld` whose edit-mode Scene-view snapshot never
+creates entities or mutates the authored scene.

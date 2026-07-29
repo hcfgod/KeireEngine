@@ -5,6 +5,7 @@
 #include "KeireInternal/Rendering/TransparencyInternal.h"
 
 #include "Keire/BuiltinSkinningShaders.h"
+#include "Keire/BuiltinVfxShaders.h"
 #include "Keire/Log.h"
 
 #include <imgui_impl_sdlgpu3.h>
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <tuple>
@@ -22,6 +24,54 @@
 
 namespace
 {
+    enum class BuiltinVfxShaderStage : std::uint8_t
+    {
+        Initialize,
+        Reset,
+        Simulate,
+        Spawn,
+        Finalize,
+        Vertex,
+        Fragment
+    };
+
+    struct EmbeddedShader final
+    {
+        const unsigned char* Code = nullptr;
+        std::size_t Size = 0;
+    };
+
+    [[nodiscard]] EmbeddedShader SelectVfxShader(const BuiltinVfxShaderStage stage,
+                                                 const SDL_GPUShaderFormat format) noexcept
+    {
+#define KEIRE_SELECT_VFX_SHADER(StageName)                                                                             \
+    if (format == SDL_GPU_SHADERFORMAT_DXIL)                                                                           \
+        return {Keire::Detail::BuiltinVfx##StageName##Dxil, sizeof(Keire::Detail::BuiltinVfx##StageName##Dxil)};       \
+    if (format == SDL_GPU_SHADERFORMAT_SPIRV)                                                                          \
+        return {Keire::Detail::BuiltinVfx##StageName##Spirv, sizeof(Keire::Detail::BuiltinVfx##StageName##Spirv)};     \
+    if (format == SDL_GPU_SHADERFORMAT_MSL)                                                                            \
+        return { Keire::Detail::BuiltinVfx##StageName##Msl, sizeof(Keire::Detail::BuiltinVfx##StageName##Msl) }
+        switch (stage)
+        {
+        case BuiltinVfxShaderStage::Initialize:
+            KEIRE_SELECT_VFX_SHADER(Initialize);
+        case BuiltinVfxShaderStage::Reset:
+            KEIRE_SELECT_VFX_SHADER(Reset);
+        case BuiltinVfxShaderStage::Simulate:
+            KEIRE_SELECT_VFX_SHADER(Simulate);
+        case BuiltinVfxShaderStage::Spawn:
+            KEIRE_SELECT_VFX_SHADER(Spawn);
+        case BuiltinVfxShaderStage::Finalize:
+            KEIRE_SELECT_VFX_SHADER(Finalize);
+        case BuiltinVfxShaderStage::Vertex:
+            KEIRE_SELECT_VFX_SHADER(Vertex);
+        case BuiltinVfxShaderStage::Fragment:
+            KEIRE_SELECT_VFX_SHADER(Fragment);
+        }
+#undef KEIRE_SELECT_VFX_SHADER
+        return {};
+    }
+
     class CallbackFrameGraphExecutionContext final : public Keire::RenderBackend::FrameGraphExecutionContext
     {
       public:
@@ -130,6 +180,281 @@ namespace
 
 namespace Keire::RenderBackend
 {
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateGpuVfxPipeline(const SDL_GPUSampleCount samples)
+    {
+        const auto supported = SDL_GetGPUShaderFormats(Device);
+        const auto format = (supported & SDL_GPU_SHADERFORMAT_DXIL)    ? SDL_GPU_SHADERFORMAT_DXIL
+                            : (supported & SDL_GPU_SHADERFORMAT_SPIRV) ? SDL_GPU_SHADERFORMAT_SPIRV
+                            : (supported & SDL_GPU_SHADERFORMAT_MSL)   ? SDL_GPU_SHADERFORMAT_MSL
+                                                                       : SDL_GPU_SHADERFORMAT_INVALID;
+        if (format == SDL_GPU_SHADERFORMAT_INVALID)
+            throw std::runtime_error("The active GPU backend cannot compile built-in VFX shaders.");
+        const auto createShader = [this, format](const BuiltinVfxShaderStage stage, const bool vertex)
+        {
+            const auto embedded = SelectVfxShader(stage, format);
+            SDL_GPUShaderCreateInfo information{};
+            information.code = embedded.Code;
+            information.code_size = embedded.Size;
+            information.entrypoint = vertex ? "VSMain" : "PSMain";
+            information.format = format;
+            information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+            information.num_storage_buffers = vertex ? 2U : 0U;
+            information.num_uniform_buffers = vertex ? 1U : 0U;
+            auto* result = SDL_CreateGPUShader(Device, &information);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUShader(GPU VFX) failed: " + LastSdlError());
+            return result;
+        };
+
+        auto* vertex = createShader(BuiltinVfxShaderStage::Vertex, true);
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            fragment = createShader(BuiltinVfxShaderStage::Fragment, false);
+            SDL_GPUColorTargetDescription color{};
+            color.format = SceneColorFormat;
+            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.enable_blend = true;
+
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_CLOCKWISE;
+            information.rasterizer_state.enable_depth_clip = true;
+            information.multisample_state.sample_count = samples;
+            information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            information.depth_stencil_state.enable_depth_test = true;
+            information.depth_stencil_state.enable_depth_write = false;
+            information.target_info.color_target_descriptions = &color;
+            information.target_info.num_color_targets = 1;
+            information.target_info.depth_stencil_format = DepthFormat;
+            information.target_info.has_depth_stencil_target = true;
+            auto* result = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!result)
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(GPU VFX) failed: " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return result;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
+    }
+
+    bool RenderSharedState::EnsureGpuVfxPipelines()
+    {
+        if (VfxPipelinesAttempted)
+            return VfxInitializePipeline && VfxResetPipeline && VfxSimulatePipeline && VfxSpawnPipeline &&
+                   VfxFinalizePipeline;
+        VfxPipelinesAttempted = true;
+
+        const auto supported = SDL_GetGPUShaderFormats(Device);
+        const auto format = (supported & SDL_GPU_SHADERFORMAT_DXIL)    ? SDL_GPU_SHADERFORMAT_DXIL
+                            : (supported & SDL_GPU_SHADERFORMAT_SPIRV) ? SDL_GPU_SHADERFORMAT_SPIRV
+                            : (supported & SDL_GPU_SHADERFORMAT_MSL)   ? SDL_GPU_SHADERFORMAT_MSL
+                                                                       : SDL_GPU_SHADERFORMAT_INVALID;
+        if (format == SDL_GPU_SHADERFORMAT_INVALID)
+            return false;
+
+        const auto create =
+            [this, format](const BuiltinVfxShaderStage stage, const char* entrypoint, const std::uint32_t threads)
+        {
+            const auto shader = SelectVfxShader(stage, format);
+            SDL_GPUComputePipelineCreateInfo information{};
+            information.code = shader.Code;
+            information.code_size = shader.Size;
+            information.entrypoint = entrypoint;
+            information.format = format;
+            information.num_readwrite_storage_buffers = 5;
+            information.num_uniform_buffers = 1;
+            information.threadcount_x = threads;
+            information.threadcount_y = 1;
+            information.threadcount_z = 1;
+            return SDL_CreateGPUComputePipeline(Device, &information);
+        };
+        VfxInitializePipeline = create(BuiltinVfxShaderStage::Initialize, "CSInitialize", 256);
+        VfxResetPipeline = create(BuiltinVfxShaderStage::Reset, "CSReset", 1);
+        VfxSimulatePipeline = create(BuiltinVfxShaderStage::Simulate, "CSSimulate", 256);
+        VfxSpawnPipeline = create(BuiltinVfxShaderStage::Spawn, "CSSpawn", 256);
+        VfxFinalizePipeline = create(BuiltinVfxShaderStage::Finalize, "CSFinalize", 1);
+        return VfxInitializePipeline && VfxResetPipeline && VfxSimulatePipeline && VfxSpawnPipeline &&
+               VfxFinalizePipeline;
+    }
+
+    void RenderSharedState::ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept
+    {
+        if (resources.IndirectArguments)
+            SDL_ReleaseGPUBuffer(Device, resources.IndirectArguments);
+        if (resources.Counters)
+            SDL_ReleaseGPUBuffer(Device, resources.Counters);
+        if (resources.AliveIndices)
+            SDL_ReleaseGPUBuffer(Device, resources.AliveIndices);
+        if (resources.FreeIndices)
+            SDL_ReleaseGPUBuffer(Device, resources.FreeIndices);
+        if (resources.Particles)
+            SDL_ReleaseGPUBuffer(Device, resources.Particles);
+        resources = {};
+    }
+
+    void RenderSharedState::PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot)
+    {
+        if (snapshot.WorldId() == 0 || snapshot.ParticleCapacity() == 0 || !EnsureGpuVfxPipelines())
+            return;
+        auto& resources = GpuVfxWorlds[snapshot.WorldId()];
+        if (resources.Capacity != snapshot.ParticleCapacity())
+        {
+            ReleaseGpuVfxWorld(resources);
+            const auto create = [this](const std::uint64_t size, const SDL_GPUBufferUsageFlags usage)
+            {
+                if (size == 0 || size > std::numeric_limits<std::uint32_t>::max())
+                    throw std::runtime_error("GPU VFX buffer size exceeds the backend limit.");
+                SDL_GPUBufferCreateInfo information{};
+                information.usage = usage;
+                information.size = static_cast<std::uint32_t>(size);
+                auto* result = SDL_CreateGPUBuffer(Device, &information);
+                if (!result)
+                    throw std::runtime_error("SDL_CreateGPUBuffer(GPU VFX) failed: " + LastSdlError());
+                return result;
+            };
+            constexpr std::uint64_t particleStride = 128;
+            const auto capacity = snapshot.ParticleCapacity();
+            try
+            {
+                resources.Particles = create(particleStride * capacity, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                                                                            SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                resources.FreeIndices =
+                    create(sizeof(std::uint32_t) * capacity, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
+                resources.AliveIndices =
+                    create(sizeof(std::uint32_t) * capacity,
+                           SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                resources.Counters = create(5U * sizeof(std::uint32_t), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
+                resources.IndirectArguments =
+                    create(sizeof(SDL_GPUIndirectDrawCommand),
+                           SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_INDIRECT);
+                resources.Capacity = capacity;
+            }
+            catch (...)
+            {
+                ReleaseGpuVfxWorld(resources);
+                GpuVfxWorlds.erase(snapshot.WorldId());
+                throw;
+            }
+        }
+        if (resources.LastPreparedFrame == Statistics.Frame)
+            return;
+        resources.LastPreparedFrame = Statistics.Frame;
+
+        struct alignas(16) Dispatch final
+        {
+            std::uint32_t Capacity = 0;
+            std::uint32_t SpawnCount = 0;
+            float DeltaSeconds = 0.0F;
+            std::uint32_t Seed = 0;
+            std::array<float, 4> Position{};
+            std::array<float, 4> Rotation{};
+            std::array<float, 4> ShapeExtentRadius{};
+            std::array<float, 4> VelocityMinimumLifetime{};
+            std::array<float, 4> VelocityMaximumLifetime{};
+            std::array<float, 4> AccelerationShape{};
+            std::array<float, 4> ColorStart{};
+            std::array<float, 4> ColorEnd{};
+            std::array<float, 4> Size{};
+            std::array<std::uint32_t, 4> Identity{};
+        };
+        Dispatch dispatch;
+        dispatch.Capacity = resources.Capacity;
+        dispatch.DeltaSeconds = std::clamp(snapshot.DeltaSeconds(), 0.0F, 0.1F);
+
+        const std::array writeBindings{
+            SDL_GPUStorageBufferReadWriteBinding{resources.Particles, false},
+            SDL_GPUStorageBufferReadWriteBinding{resources.FreeIndices, false},
+            SDL_GPUStorageBufferReadWriteBinding{resources.AliveIndices, false},
+            SDL_GPUStorageBufferReadWriteBinding{resources.Counters, false},
+            SDL_GPUStorageBufferReadWriteBinding{resources.IndirectArguments, false},
+        };
+        auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
+                                             static_cast<std::uint32_t>(writeBindings.size()));
+        if (!pass)
+            throw std::runtime_error("SDL_BeginGPUComputePass(VFX) failed: " + LastSdlError());
+
+        const auto resetWorld = resources.ResetRevision != snapshot.ResetRevision();
+        if (resetWorld)
+        {
+            resources.SpawnSequences.clear();
+            resources.ResetRevision = snapshot.ResetRevision();
+            SDL_BindGPUComputePipeline(pass, VfxInitializePipeline);
+            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+            SDL_DispatchGPUCompute(pass, (resources.Capacity + 255U) / 256U, 1, 1);
+            ++Statistics.VfxComputeDispatches;
+        }
+        SDL_BindGPUComputePipeline(pass, VfxResetPipeline);
+        SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+        SDL_DispatchGPUCompute(pass, 1, 1, 1);
+        ++Statistics.VfxComputeDispatches;
+
+        SDL_BindGPUComputePipeline(pass, VfxSimulatePipeline);
+        SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+        SDL_DispatchGPUCompute(pass, (resources.Capacity + 255U) / 256U, 1, 1);
+        ++Statistics.VfxComputeDispatches;
+
+        for (const auto& emitter : snapshot.GpuEmitters())
+        {
+            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+            auto& previous = resources.SpawnSequences[key];
+            const auto requested =
+                emitter.SpawnSequence >= previous ? emitter.SpawnSequence - previous : emitter.SpawnSequence;
+            previous = emitter.SpawnSequence;
+            if (requested == 0)
+                continue;
+            dispatch.SpawnCount = static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, resources.Capacity));
+            dispatch.Seed = emitter.Seed;
+            dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
+            dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
+            dispatch.ShapeExtentRadius = {emitter.ShapeExtent.X, emitter.ShapeExtent.Y, emitter.ShapeExtent.Z,
+                                          emitter.ShapeRadius};
+            dispatch.VelocityMinimumLifetime = {emitter.VelocityMinimum.X, emitter.VelocityMinimum.Y,
+                                                emitter.VelocityMinimum.Z, emitter.LifetimeMinimum};
+            dispatch.VelocityMaximumLifetime = {emitter.VelocityMaximum.X, emitter.VelocityMaximum.Y,
+                                                emitter.VelocityMaximum.Z, emitter.LifetimeMaximum};
+            dispatch.AccelerationShape = {emitter.Acceleration.X, emitter.Acceleration.Y, emitter.Acceleration.Z,
+                                          std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Shape))};
+            dispatch.ColorStart = {emitter.ColorStart.Red, emitter.ColorStart.Green, emitter.ColorStart.Blue,
+                                   emitter.ColorStart.Alpha};
+            dispatch.ColorEnd = {emitter.ColorEnd.Red, emitter.ColorEnd.Green, emitter.ColorEnd.Blue,
+                                 emitter.ColorEnd.Alpha};
+            dispatch.Size = {emitter.SizeStart, emitter.SizeEnd, 0.0F, 0.0F};
+            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(),
+                                 static_cast<std::uint32_t>(emitter.SpawnSequence),
+                                 static_cast<std::uint32_t>(emitter.Renderer)};
+            SDL_BindGPUComputePipeline(pass, VfxSpawnPipeline);
+            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+            SDL_DispatchGPUCompute(pass, (dispatch.SpawnCount + 255U) / 256U, 1, 1);
+            ++Statistics.VfxComputeDispatches;
+        }
+
+        SDL_BindGPUComputePipeline(pass, VfxFinalizePipeline);
+        SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+        SDL_DispatchGPUCompute(pass, 1, 1, 1);
+        ++Statistics.VfxComputeDispatches;
+        SDL_EndGPUComputePass(pass);
+        Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
+        Statistics.VfxGpuBufferBytes =
+            static_cast<std::uint64_t>(resources.Capacity) * (128U + sizeof(std::uint32_t) * 2U) +
+            5U * sizeof(std::uint32_t) + sizeof(SDL_GPUIndirectDrawCommand);
+    }
+
     bool RenderSharedState::EnsureSkinningPipeline()
     {
         if (SkinningPipelineAttempted)
@@ -214,11 +539,33 @@ namespace Keire::RenderBackend
 
             const auto skin = Assets->Load<SkinnedMeshAsset>(item.Skin, AssetPriority::High).TryGetLoaded();
             const auto meshAsset = Assets->Load<MeshAsset>(item.Mesh, AssetPriority::High).TryGetLoaded();
-            if (!skin || !meshAsset || skin->Mesh() != item.Mesh ||
+            if (!skin || !meshAsset || skin->Mesh() != item.Mesh || skin->Skeleton() != item.SkinSkeleton ||
                 skin->Influences8().size() != meshAsset->Vertices().size() || meshAsset->Vertices().empty())
             {
                 continue;
             }
+            bool validInfluences = true;
+            for (const auto& influence : skin->Influences8())
+            {
+                if (influence.Count == 0 || influence.Count > influence.Bones.size())
+                {
+                    validInfluences = false;
+                    break;
+                }
+                for (std::size_t index = 0; index < influence.Count; ++index)
+                {
+                    if (influence.Bones[index] >= item.SkinPalette.size() || !std::isfinite(influence.Weights[index]) ||
+                        influence.Weights[index] < 0.0F)
+                    {
+                        validInfluences = false;
+                        break;
+                    }
+                }
+                if (!validInfluences)
+                    break;
+            }
+            if (!validInfluences)
+                continue;
             item.Skinning = skin->Method();
             const auto& mesh = ResolveMesh(item.Mesh);
             if (mesh.Empty() || !mesh.AssetVertices)
@@ -611,10 +958,37 @@ namespace Keire::RenderBackend
     void RenderSharedState::DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
                                     RenderSurfaceState& surface, const SceneRenderPacket& packet)
     {
+        auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+        if (packet.Vfx.WorldId() != 0 && pipelines.GpuVfx)
+        {
+            const auto world = GpuVfxWorlds.find(packet.Vfx.WorldId());
+            if (world != GpuVfxWorlds.end() && !world->second.Empty())
+            {
+                struct alignas(16) CameraUniforms final
+                {
+                    Matrix4 ViewProjection;
+                    std::array<float, 4> Right{};
+                    std::array<float, 4> Up{};
+                };
+                const auto cameraWorld = Math::Inverse(packet.Camera.View);
+                const auto right = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
+                const auto up = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
+                const CameraUniforms camera{Math::Multiply(packet.Camera.Projection, packet.Camera.View),
+                                            {right.X, right.Y, right.Z, 0.0F},
+                                            {up.X, up.Y, up.Z, 0.0F}};
+                SDL_BindGPUGraphicsPipeline(pass, pipelines.GpuVfx);
+                SDL_PushGPUVertexUniformData(commands, 0, &camera, sizeof(camera));
+                const std::array storage{world->second.Particles, world->second.AliveIndices};
+                SDL_BindGPUVertexStorageBuffers(pass, 0, storage.data(), static_cast<std::uint32_t>(storage.size()));
+                SDL_DrawGPUPrimitivesIndirect(pass, world->second.IndirectArguments, 0, 1);
+                ++Statistics.DrawCalls;
+                ++Statistics.VfxIndirectDraws;
+            }
+        }
+
         const auto particles = packet.Vfx.Particles();
         if (particles.empty())
             return;
-        auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
         if (!pipelines.Vfx)
             return;
 
@@ -988,7 +1362,10 @@ namespace Keire::RenderBackend
 
         const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
         if (request != Requests.end())
+        {
             PrepareSkinning(commands, request->Packet);
+            PrepareGpuVfx(commands, request->Packet.Vfx);
+        }
         ShadowFrameData shadows;
         shadows.LocalLayers.fill(-1.0F);
         CallbackFrameGraphExecutionContext execution(
@@ -1520,6 +1897,8 @@ namespace Keire::RenderBackend
 
         for (auto& pipelines : Pipelines)
         {
+            if (pipelines.GpuVfx)
+                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.GpuVfx);
             if (pipelines.Vfx)
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Vfx);
             if (pipelines.Sky)
@@ -1583,6 +1962,28 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUComputePipeline(Device, SkinningPipeline);
         SkinningPipeline = nullptr;
         SkinningPipelineAttempted = false;
+        for (auto& [world, resources] : GpuVfxWorlds)
+        {
+            (void)world;
+            ReleaseGpuVfxWorld(resources);
+        }
+        GpuVfxWorlds.clear();
+        if (VfxFinalizePipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxFinalizePipeline);
+        if (VfxSpawnPipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxSpawnPipeline);
+        if (VfxSimulatePipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxSimulatePipeline);
+        if (VfxResetPipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxResetPipeline);
+        if (VfxInitializePipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxInitializePipeline);
+        VfxFinalizePipeline = nullptr;
+        VfxSpawnPipeline = nullptr;
+        VfxSimulatePipeline = nullptr;
+        VfxResetPipeline = nullptr;
+        VfxInitializePipeline = nullptr;
+        VfxPipelinesAttempted = false;
         if (ToneMapPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
         ToneMapPipeline = nullptr;

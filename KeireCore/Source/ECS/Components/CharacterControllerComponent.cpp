@@ -199,7 +199,8 @@ namespace Keire
             if (version != CharacterControllerSchemaVersion)
                 throw std::invalid_argument("Unsupported Character Controller component schema version.");
             auto& controller = dynamic_cast<CharacterControllerComponent&>(component);
-            controller.SetRuntimeId(ReadControllerProperty(values, "runtimeId", AssetId{}));
+            const auto runtimeId = ReadControllerProperty(values, "runtimeId", controller.RuntimeId());
+            controller.SetRuntimeId(runtimeId ? runtimeId : controller.RuntimeId());
             controller.ConfigureCapsule(
                 ReadControllerScalar(values, "radius", 0.5F), ReadControllerScalar(values, "height", 2.0F),
                 ReadControllerScalar(values, "stepHeight", 0.3F), ReadControllerScalar(values, "skinWidth", 0.05F));
@@ -212,7 +213,8 @@ namespace Keire
             if (version != 1)
                 throw std::invalid_argument("Unsupported Character Controller component schema migration.");
             auto migrated = values;
-            migrated.emplace("runtimeId", AssetId::Generate());
+            if (!ReadControllerProperty(migrated, "runtimeId", AssetId{}))
+                migrated.insert_or_assign("runtimeId", AssetId::Generate());
             migrated.emplace("skinWidth", 0.05);
             migrated.emplace("layer", std::int64_t{1});
             migrated.emplace("mask", static_cast<std::int64_t>(~0U));

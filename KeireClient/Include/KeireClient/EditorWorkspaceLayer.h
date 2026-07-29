@@ -150,6 +150,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] float SceneViewportDisplayScale() const noexcept override;
     [[nodiscard]] const Keire::Time& SceneViewportTime() const noexcept override;
     [[nodiscard]] bool SceneViewportPlayReviewActive() const noexcept override;
+    [[nodiscard]] Keire::VfxRenderSnapshot SceneViewportEditVfx() const override;
     void ActivateSceneViewportHistory() noexcept override;
     void RestoreSceneViewportRecovery() override;
     void DiscardSceneViewportRecovery() noexcept override;
@@ -291,6 +292,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] KeireEditor::AnimatorControllerDocument& AnimatorControllerState() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& AnimatorControllerTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AnimatorControllerDatabase() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> AnimatorControllerAssets() const noexcept override;
     void ActivateAnimatorControllerHistory() noexcept override;
     void SaveAnimatorControllerDocument() override;
     void ReloadAnimatorControllerDocument(Keire::AssetId asset) override;
@@ -377,6 +379,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool IsManagedCursorLocked() const noexcept override;
     [[nodiscard]] bool PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept override;
     [[nodiscard]] bool StopManagedAudio(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] bool PlayManagedVfx(Keire::AssetId entity, Keire::AssetId effect, bool restart) noexcept override;
+    [[nodiscard]] bool StopManagedVfx(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] bool PauseManagedVfx(Keire::AssetId entity, bool paused) noexcept override;
+    [[nodiscard]] bool IsManagedVfxAlive(Keire::AssetId entity) const noexcept override;
     [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
     [[nodiscard]] bool ConsumeManagedUiClick(Keire::AssetId entity) noexcept override;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
@@ -518,6 +524,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AudioVoiceId m_InspectorAudioPreviewVoice;
     Keire::AssetId m_AudioMixerPreviewAsset;
     Keire::AssetId m_VfxEffectPreviewAsset;
+    Keire::Ref<Keire::VfxWorld> m_VfxEffectPreviewWorld;
+    Keire::VfxHandle m_VfxEffectPreviewHandle;
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ManagedDataUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
@@ -528,6 +536,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::uint32_t m_FrameCount = 0;
     std::uint64_t m_AudioMixerDocumentRevision = 0;
     std::uint64_t m_VfxEffectDocumentRevision = 0;
+    std::uint64_t m_VfxEffectPreviewRevision = 0;
+    std::uint32_t m_VfxEffectPreviewCapacity = 0;
     double m_AssetPollSeconds = 0.0;
     double m_ManagedBuildDebounceSeconds = -1.0;
     std::vector<std::pair<Keire::EntityId, Keire::AssetId>> m_PendingScriptAttachments;

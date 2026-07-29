@@ -419,6 +419,7 @@ namespace Keire::RenderBackend
         Color Tint;
         EntityId Entity;
         AssetId Skin;
+        AssetId SkinSkeleton;
         std::vector<Matrix4> SkinPalette;
         bool CastShadows = true;
         bool ReceiveShadows = true;
@@ -588,6 +589,22 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* Grid = nullptr;
         SDL_GPUGraphicsPipeline* Sky = nullptr;
         SDL_GPUGraphicsPipeline* Vfx = nullptr;
+        SDL_GPUGraphicsPipeline* GpuVfx = nullptr;
+    };
+
+    struct GpuVfxWorldResources final
+    {
+        SDL_GPUBuffer* Particles = nullptr;
+        SDL_GPUBuffer* FreeIndices = nullptr;
+        SDL_GPUBuffer* AliveIndices = nullptr;
+        SDL_GPUBuffer* Counters = nullptr;
+        SDL_GPUBuffer* IndirectArguments = nullptr;
+        std::unordered_map<std::uint64_t, std::uint64_t> SpawnSequences;
+        std::uint32_t Capacity = 0;
+        std::uint64_t ResetRevision = 0;
+        std::uint64_t LastPreparedFrame = 0;
+
+        [[nodiscard]] bool Empty() const noexcept { return Particles == nullptr; }
     };
 
     enum class SceneDrawPhase : std::uint8_t
@@ -635,6 +652,9 @@ namespace Keire::RenderBackend
         [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
         [[nodiscard]] bool EnsureSkinningPipeline();
         void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet);
+        [[nodiscard]] bool EnsureGpuVfxPipelines();
+        void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot);
+        void ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept;
 
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                        const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase);
@@ -668,6 +688,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline*
         CreatePipeline(SDL_GPUSampleCount samples, SDL_GPUPrimitiveType primitive, bool depthWrite, bool blend = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthPipeline(bool depthBias);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
         void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
@@ -728,6 +749,13 @@ namespace Keire::RenderBackend
         SDL_GPUCopyPass* FrameUploadPass = nullptr;
         SDL_GPUComputePipeline* SkinningPipeline = nullptr;
         bool SkinningPipelineAttempted = false;
+        SDL_GPUComputePipeline* VfxInitializePipeline = nullptr;
+        SDL_GPUComputePipeline* VfxResetPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxSimulatePipeline = nullptr;
+        SDL_GPUComputePipeline* VfxSpawnPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxFinalizePipeline = nullptr;
+        bool VfxPipelinesAttempted = false;
+        std::unordered_map<std::uint64_t, GpuVfxWorldResources> GpuVfxWorlds;
         std::deque<InFlightFrame> InFlight;
         StaticSceneFrameGraph SceneFrameGraph;
         RenderStatistics Statistics;

@@ -8,8 +8,11 @@
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
+#include "KeireInternal/Audio/AudioImportBackend.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+
+#include "FfmpegAudioImportBackend.h"
 
 #include <array>
 #include <filesystem>
@@ -69,6 +72,14 @@ namespace
         (void)Keire::Project::Open(projectRoot);
         Keire::AssetDatabaseSpecification specification{.ProjectRoot = projectRoot};
         specification.Importers = Keire::CreateBuiltinAssetImporters();
+        for (auto& importer : specification.Importers)
+        {
+            if (importer.Name == "Keire.AudioClip")
+            {
+                importer = Keire::Detail::CreateAudioClipAssetImporter(Keire::Detail::CreateFfmpegAudioImportBackend());
+                break;
+            }
+        }
         return Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     }
 
@@ -192,7 +203,7 @@ namespace
                         publishedAuxiliary.push_back(destination);
                     }
                     const auto importer = database->FindImporterForPath(request.CreateRelativePath);
-                    if (request.CreateAuxiliarySources.empty() && importer && importer->Name == "Keire.Text")
+                    if (request.CreateAuxiliarySources.empty() && importer)
                     {
                         const auto source = Keire::Detail::ReadTextFile(request.CreatePayloadPath, 64U * 1024U * 1024U);
                         result.CreatedAsset = database->CreateAsset(

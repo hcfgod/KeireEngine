@@ -3,7 +3,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -15,6 +17,52 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
+
+        constexpr std::size_t PackedSkinInfluenceStride = 1U + 8U * 2U + 8U * 4U;
+
+        static_assert(sizeof(float) == sizeof(std::uint32_t));
+
+        void AppendUnsigned16(std::vector<std::uint8_t>& bytes, const std::uint16_t value)
+        {
+            bytes.push_back(static_cast<std::uint8_t>(value & 0xffU));
+            bytes.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xffU));
+        }
+
+        void AppendUnsigned32(std::vector<std::uint8_t>& bytes, const std::uint32_t value)
+        {
+            bytes.push_back(static_cast<std::uint8_t>(value & 0xffU));
+            bytes.push_back(static_cast<std::uint8_t>((value >> 8U) & 0xffU));
+            bytes.push_back(static_cast<std::uint8_t>((value >> 16U) & 0xffU));
+            bytes.push_back(static_cast<std::uint8_t>((value >> 24U) & 0xffU));
+        }
+
+        [[nodiscard]] std::uint16_t ReadUnsigned16(const std::span<const std::uint8_t> bytes, std::size_t& cursor)
+        {
+            if (cursor + 2U > bytes.size())
+                throw std::invalid_argument("Packed skinned mesh influence data is truncated.");
+            const auto result = static_cast<std::uint16_t>(
+                static_cast<std::uint16_t>(bytes[cursor]) |
+                static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes[cursor + 1U]) << 8U));
+            cursor += 2U;
+            return result;
+        }
+
+        [[nodiscard]] std::uint32_t ReadUnsigned32(const std::span<const std::uint8_t> bytes, std::size_t& cursor)
+        {
+            if (cursor + 4U > bytes.size())
+                throw std::invalid_argument("Packed skinned mesh influence data is truncated.");
+            const auto result = static_cast<std::uint32_t>(bytes[cursor]) |
+                                (static_cast<std::uint32_t>(bytes[cursor + 1U]) << 8U) |
+                                (static_cast<std::uint32_t>(bytes[cursor + 2U]) << 16U) |
+                                (static_cast<std::uint32_t>(bytes[cursor + 3U]) << 24U);
+            cursor += 4U;
+            return result;
+        }
+
+        [[nodiscard]] float ReadPackedFloat(const std::span<const std::uint8_t> bytes, std::size_t& cursor)
+        {
+            return std::bit_cast<float>(ReadUnsigned32(bytes, cursor));
+        }
 
         [[nodiscard]] Json EncodeVector(const Vector3 value) { return {value.X, value.Y, value.Z}; }
         [[nodiscard]] Json EncodeQuaternion(const Quaternion value) { return {value.X, value.Y, value.Z, value.W}; }
@@ -280,7 +328,8 @@ namespace Keire
     {
         if (!mesh || !skeleton || influences.empty() || influences.size() > 64U * 1024U * 1024U)
             throw std::invalid_argument("Skinned mesh asset header is invalid.");
-        Json encoded = Json::array();
+        std::vector<std::uint8_t> encoded;
+        encoded.reserve(influences.size() * PackedSkinInfluenceStride);
         std::uint8_t maximumInfluences = 0;
         for (const auto& influence : influences)
         {
@@ -297,14 +346,21 @@ namespace Keire
             if (std::abs(sum - 1.0F) > 0.001F)
                 throw std::invalid_argument("Skinned mesh influence weights must be normalized.");
             maximumInfluences = std::max(maximumInfluences, influence.Count);
-            encoded.push_back({{"count", influence.Count}, {"bones", influence.Bones}, {"weights", influence.Weights}});
+            encoded.push_back(influence.Count);
+            for (std::size_t index = 0; index < influence.Bones.size(); ++index)
+                AppendUnsigned16(encoded, index < influence.Count ? influence.Bones[index] : std::uint16_t{});
+            for (std::size_t index = 0; index < influence.Weights.size(); ++index)
+                AppendUnsigned32(
+                    encoded, std::bit_cast<std::uint32_t>(index < influence.Count ? influence.Weights[index] : 0.0F));
         }
-        const auto cbor = Json::to_cbor(Json{{"schemaVersion", 2},
+        const auto cbor = Json::to_cbor(Json{{"schemaVersion", 3},
                                              {"mesh", mesh.ToString()},
                                              {"skeleton", skeleton.ToString()},
                                              {"skinningMethod", static_cast<std::uint8_t>(method)},
                                              {"maximumInfluences", maximumInfluences},
-                                             {"influences", std::move(encoded)}});
+                                             {"vertexCount", influences.size()},
+                                             {"influenceStride", PackedSkinInfluenceStride},
+                                             {"influences", Json::binary(std::move(encoded))}});
         return {reinterpret_cast<const std::byte*>(cbor.data()),
                 reinterpret_cast<const std::byte*>(cbor.data() + cbor.size())};
     }
@@ -314,35 +370,61 @@ namespace Keire
         const auto document = Json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
                                               reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
         const auto schemaVersion = document.value("schemaVersion", 0);
-        if (schemaVersion != 1 && schemaVersion != 2)
+        if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3)
             throw std::invalid_argument("Skinned mesh asset schema is unsupported.");
         const auto mesh = AssetId::Parse(document.at("mesh").get<std::string>());
         const auto skeleton = AssetId::Parse(document.at("skeleton").get<std::string>());
-        const auto method = schemaVersion == 2 ? static_cast<SkinningMethod>(document.value("skinningMethod", 0))
+        const auto method = schemaVersion >= 2 ? static_cast<SkinningMethod>(document.value("skinningMethod", 0))
                                                : SkinningMethod::LinearBlend;
         if (method != SkinningMethod::LinearBlend && method != SkinningMethod::DualQuaternion)
             throw std::invalid_argument("Skinned mesh asset skinning method is invalid.");
         std::vector<SkinVertexInfluence8> influences;
-        for (const auto& encoded : document.at("influences"))
+        if (schemaVersion == 3)
         {
-            SkinVertexInfluence8 influence;
-            if (schemaVersion == 1)
+            const auto vertexCount = document.value("vertexCount", std::size_t{0});
+            const auto influenceStride = document.value("influenceStride", std::size_t{0});
+            const auto& encoded = document.at("influences");
+            if (vertexCount == 0 || vertexCount > 64U * 1024U * 1024U || influenceStride != PackedSkinInfluenceStride ||
+                !encoded.is_binary())
+                throw std::invalid_argument("Packed skinned mesh asset header is invalid.");
+            const auto& packed = encoded.get_binary();
+            if (packed.size() != vertexCount * PackedSkinInfluenceStride)
+                throw std::invalid_argument("Packed skinned mesh influence data has an invalid size.");
+            const std::span<const std::uint8_t> packedBytes{packed.data(), packed.size()};
+            influences.resize(vertexCount);
+            std::size_t cursor = 0;
+            for (auto& influence : influences)
             {
-                influence.Count = 4;
-                const auto bones = encoded.at("bones").get<std::array<std::uint16_t, 4>>();
-                const auto weights = encoded.at("weights").get<std::array<float, 4>>();
-                std::ranges::copy(bones, influence.Bones.begin());
-                std::ranges::copy(weights, influence.Weights.begin());
+                influence.Count = packedBytes[cursor++];
+                for (auto& bone : influence.Bones)
+                    bone = ReadUnsigned16(packedBytes, cursor);
+                for (auto& weight : influence.Weights)
+                    weight = ReadPackedFloat(packedBytes, cursor);
             }
-            else
-            {
-                influence.Count = encoded.at("count").get<std::uint8_t>();
-                influence.Bones = encoded.at("bones").get<std::array<std::uint16_t, 8>>();
-                influence.Weights = encoded.at("weights").get<std::array<float, 8>>();
-            }
-            influences.push_back(influence);
         }
-        if (!mesh || !skeleton || influences.empty())
+        else
+        {
+            for (const auto& encoded : document.at("influences"))
+            {
+                SkinVertexInfluence8 influence;
+                if (schemaVersion == 1)
+                {
+                    influence.Count = 4;
+                    const auto bones = encoded.at("bones").get<std::array<std::uint16_t, 4>>();
+                    const auto weights = encoded.at("weights").get<std::array<float, 4>>();
+                    std::ranges::copy(bones, influence.Bones.begin());
+                    std::ranges::copy(weights, influence.Weights.begin());
+                }
+                else
+                {
+                    influence.Count = encoded.at("count").get<std::uint8_t>();
+                    influence.Bones = encoded.at("bones").get<std::array<std::uint16_t, 8>>();
+                    influence.Weights = encoded.at("weights").get<std::array<float, 8>>();
+                }
+                influences.push_back(influence);
+            }
+        }
+        if (!mesh || !skeleton || influences.empty() || influences.size() > 64U * 1024U * 1024U)
             throw std::invalid_argument("Skinned mesh asset header is invalid.");
         for (const auto& influence : influences)
         {
@@ -455,6 +537,57 @@ namespace Keire
         return CreateRef<AnimationClipAsset>(AssetId::Parse(document.at("skeleton").get<std::string>()),
                                              document.at("duration").get<float>(), std::move(tracks), std::move(events),
                                              document.value("rootMotion", false));
+    }
+
+    AnimationSourceAsset::AnimationSourceAsset(AnimationSourceDefinition definition)
+        : m_Definition(std::move(definition))
+    {
+        if (m_Definition.SchemaVersion != 1)
+            throw std::invalid_argument("Animation source asset schema is unsupported.");
+        if (m_Definition.Takes.empty() && (m_Definition.Skeleton || m_Definition.Rig))
+            throw std::invalid_argument("Animation source asset requires at least one animation take.");
+        for (const auto& take : m_Definition.Takes)
+        {
+            if (!take.Clip || take.Name.empty() || !std::isfinite(take.Duration) || take.Duration <= 0.0F)
+                throw std::invalid_argument("Animation source asset contains an invalid animation take.");
+        }
+    }
+
+    std::size_t AnimationSourceAsset::ResidentBytes() const noexcept
+    {
+        std::size_t result =
+            sizeof(AnimationSourceAsset) + m_Definition.Takes.capacity() * sizeof(AnimationTakeDescriptor);
+        for (const auto& take : m_Definition.Takes)
+            result += take.Name.capacity();
+        return result;
+    }
+
+    std::vector<std::byte> AnimationSourceAsset::Encode(const AnimationSourceDefinition& definition)
+    {
+        const AnimationSourceAsset validated(definition);
+        Json takes = Json::array();
+        for (const auto& take : validated.Definition().Takes)
+            takes.push_back({{"clip", take.Clip.ToString()}, {"name", take.Name}, {"duration", take.Duration}});
+        const auto cbor = Json::to_cbor({{"schemaVersion", 1},
+                                         {"skeleton", validated.Definition().Skeleton.ToString()},
+                                         {"rig", validated.Definition().Rig.ToString()},
+                                         {"takes", std::move(takes)}});
+        return {reinterpret_cast<const std::byte*>(cbor.data()),
+                reinterpret_cast<const std::byte*>(cbor.data() + cbor.size())};
+    }
+
+    Ref<AnimationSourceAsset> AnimationSourceAsset::Decode(const std::span<const std::byte> bytes)
+    {
+        const auto document = Json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                              reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
+        AnimationSourceDefinition definition;
+        definition.SchemaVersion = document.value("schemaVersion", 0U);
+        definition.Skeleton = AssetId::Parse(document.at("skeleton").get<std::string>());
+        definition.Rig = AssetId::Parse(document.at("rig").get<std::string>());
+        for (const auto& take : document.at("takes"))
+            definition.Takes.push_back({AssetId::Parse(take.at("clip").get<std::string>()),
+                                        take.at("name").get<std::string>(), take.at("duration").get<float>()});
+        return CreateRef<AnimationSourceAsset>(std::move(definition));
     }
 
     namespace
@@ -976,9 +1109,14 @@ namespace Keire
             if (layer.Id.empty() || layer.Id.size() > 512 || layer.Name.empty() || layer.Name.size() > 256 ||
                 !localIds.insert(layer.Id).second || !layerNames.insert(layer.Name).second ||
                 layer.Mode > AnimationLayerMode::Additive || !std::isfinite(layer.DefaultWeight) ||
-                layer.DefaultWeight < 0.0F || layer.DefaultWeight > 1.0F || layer.States.empty() ||
-                layer.States.size() > 4096)
+                layer.DefaultWeight < 0.0F || layer.DefaultWeight > 1.0F || layer.States.size() > 4096)
                 throw std::invalid_argument("Animation graph contains an invalid layer.");
+            if (layer.States.empty())
+            {
+                if (!layer.EntryStateId.empty())
+                    throw std::invalid_argument("An empty animation graph layer cannot declare an entry state.");
+                continue;
+            }
             std::set<std::string, std::less<>> stateIds;
             std::set<std::string, std::less<>> stateNames;
             for (const auto& state : layer.States)
@@ -1173,7 +1311,9 @@ namespace Keire
                 const auto mask = encodedLayer.value("avatarMask", std::string{});
                 if (!mask.empty())
                     layer.AvatarMask = AssetId::Parse(mask);
-                layer.EntryStateId = DecodeLocalId(encodedLayer, "entryStateId");
+                layer.EntryStateId = encodedLayer.value("entryStateId", std::string{});
+                if (layer.EntryStateId.size() > 512)
+                    throw std::invalid_argument("Animation graph entry state ID is invalid.");
                 for (const auto& encodedState : encodedLayer.at("states"))
                     layer.States.push_back(DecodeStateV2(encodedState));
                 definition.Layers.push_back(std::move(layer));
@@ -1758,6 +1898,13 @@ namespace Keire
     {
         return {AnimationClipAsset::StaticType(), CreateRef<AnimationClipAsset>(),
                 [](const std::span<const std::byte> bytes) -> Ref<Asset> { return AnimationClipAsset::Decode(bytes); }};
+    }
+
+    AssetDecoderRegistration CreateAnimationSourceAssetDecoder()
+    {
+        return {AnimationSourceAsset::StaticType(), CreateRef<AnimationSourceAsset>(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset>
+                { return AnimationSourceAsset::Decode(bytes); }};
     }
 
     AssetDecoderRegistration CreateAnimationGraphAssetDecoder()

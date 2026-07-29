@@ -49,6 +49,15 @@
         },
         {
           "data": {
+            "gain": 1.0,
+            "primary": true
+          },
+          "enabled": true,
+          "type": "4b454952-4541-5544-494f-4c4953540001",
+          "version": 1
+        },
+        {
+          "data": {
             "managedState": "{\"fields\":[],\"version\":1}"
           },
           "enabled": true,
@@ -72,7 +81,7 @@
         },
         {
           "data": {
-            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":14447222651353186851,\"Low\":12685995010641050639}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}}],\"version\":1}",
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":14447222651353186851,\"Low\":12685995010641050639}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}},{\"Aliases\":[],\"Name\":\"uiOpened\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiClosed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}}],\"version\":1}",
             "uiButton": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
             "uiClosed": [],
             "uiOpened": [],
@@ -155,6 +164,34 @@
           "enabled": true,
           "type": "4b454952-4543-4f4c-4c49-444552000001",
           "version": 2
+        },
+        {
+          "data": {
+            "attenuation": [
+              {
+                "inTangent": 0.0,
+                "interpolation": 1,
+                "outTangent": 0.0,
+                "time": 0.0,
+                "value": 1.0
+              }
+            ],
+            "bus": "SFX",
+            "busId": "",
+            "clip": "d09e3f28-06e6-49eb-a714-0261348f5eee",
+            "gain": 1.0,
+            "loop": false,
+            "maximumDistance": 100.0,
+            "minimumDistance": 1.0,
+            "mixer": null,
+            "pitch": 1.0,
+            "playOnAwake": true,
+            "priority": 128,
+            "spatial": true
+          },
+          "enabled": true,
+          "type": "4b454952-4541-5544-494f-535243000001",
+          "version": 2
         }
       ],
       "id": "a1b2c3d4-1000-4000-8000-000000000003",
@@ -172,10 +209,10 @@
               1.5814927816390991
             ],
             "rotation": [
-              0.8806512951850891,
-              0.11315173655748367,
-              -0.3761037588119507,
-              0.26494553685188293
+              0.8806511759757996,
+              0.11315172165632248,
+              -0.3761036992073059,
+              0.26494550704956055
             ],
             "scale": [
               1.0,
@@ -334,96 +371,6 @@
       ],
       "id": "e3fbe155-f210-4d98-93e5-e32eadd53d5e",
       "name": "Ground",
-      "parent": null
-    },
-    {
-      "active": true,
-      "components": [
-        {
-          "data": {
-            "position": [
-              0.0,
-              6.628147602081299,
-              0.0
-            ],
-            "rotation": [
-              0.0,
-              0.0,
-              0.0,
-              1.0
-            ],
-            "scale": [
-              0.10000000149011612,
-              0.10000000149011612,
-              0.10000000149011612
-            ]
-          },
-          "enabled": true,
-          "type": "4b454952-4554-5241-4e53-464f524d0001",
-          "version": 1
-        },
-        {
-          "data": {
-            "castShadows": true,
-            "material": "e843c376-73b4-47e5-905a-3776564d5e4f",
-            "mesh": "c506e2a8-62f9-44f0-8831-b66755cc9b9b",
-            "receiveShadows": true,
-            "tint": [
-              1.0,
-              1.0,
-              1.0,
-              1.0
-            ],
-            "visible": true
-          },
-          "enabled": true,
-          "type": "4b454952-454d-4553-4852-454e44455201",
-          "version": 2
-        },
-        {
-          "data": {
-            "center": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "collisionMesh": null,
-            "halfExtent": [
-              0.5,
-              0.5,
-              0.5
-            ],
-            "height": 1.0,
-            "layer": 1,
-            "mask": 4294967295,
-            "physicsMaterial": null,
-            "radius": 0.5,
-            "shape": 0,
-            "trigger": false
-          },
-          "enabled": true,
-          "type": "4b454952-4543-4f4c-4c49-444552000001",
-          "version": 2
-        },
-        {
-          "data": {
-            "continuous": true,
-            "linearVelocity": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "mass": 153.85000610351563,
-            "motion": 1,
-            "useGravity": true
-          },
-          "enabled": true,
-          "type": "4b454952-4552-4947-4944-424f44590001",
-          "version": 1
-        }
-      ],
-      "id": "c675308e-c12d-47bc-baa6-38993de26b44",
-      "name": "Monster",
       "parent": null
     },
     {
@@ -977,6 +924,67 @@
       "id": "e4617127-881d-4ed6-b0c3-bc4bba434ec1",
       "name": "Label",
       "parent": "5b6268d8-d84d-4cfc-8112-3be82be767cd"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              3.280547618865967,
+              0.0
+            ],
+            "rotation": [
+              -6.369913080561673e-06,
+              0.7064968347549438,
+              -0.7077162265777588,
+              6.380907507264055e-06
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "castShadows": true,
+            "material": null,
+            "mesh": "b39a5ed3-81e2-41f8-bd7c-e723073bdd7e",
+            "receiveShadows": true,
+            "tint": [
+              0.25,
+              0.550000011920929,
+              1.0,
+              1.0
+            ],
+            "visible": true
+          },
+          "enabled": true,
+          "type": "4b454952-454d-4553-4852-454e44455201",
+          "version": 2
+        },
+        {
+          "data": {
+            "applyRootMotion": true,
+            "graph": "9ec01b6f-4862-443e-8cfd-efa2f23ef04a",
+            "skeleton": null,
+            "skinnedMesh": null,
+            "speed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4541-4e49-4d41-544f52000001",
+          "version": 1
+        }
+      ],
+      "id": "1a91b6b0-83b9-4aef-ab9b-ee2738c90360",
+      "name": "T-Pose",
+      "parent": null
     }
   ],
   "name": "SampleScene",

@@ -4,6 +4,11 @@
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 
+#include <atomic>
+#include <exception>
+#include <mutex>
+#include <thread>
+
 namespace Keire
 {
     AssetCookResult AssetCooker::Cook(const AssetDatabase& database, const AssetBuildProfile& profile,
@@ -311,15 +316,59 @@ namespace Keire
                 }
                 else
                 {
-                    for (std::size_t offset = 0; offset < bytes.size(); offset += profile.StreamPageBytes)
+                    const auto pageCount = (bytes.size() + profile.StreamPageBytes - 1U) / profile.StreamPageBytes;
+                    pages.resize(pageCount);
+                    std::atomic_size_t nextPage = 0;
+                    std::atomic_bool failed = false;
+                    std::exception_ptr failure;
+                    std::mutex failureMutex;
+                    const auto availableWorkers = std::max(1U, std::thread::hardware_concurrency());
+                    const auto workerCount =
+                        std::min<std::size_t>({pageCount, static_cast<std::size_t>(availableWorkers), 8U});
+                    const auto preparePages = [&]
                     {
-                        const auto count = std::min(profile.StreamPageBytes, bytes.size() - offset);
-                        const auto source = std::span(bytes).subspan(offset, count);
-                        auto compressed = Compress(source, profile.CompressionLevel);
+                        try
+                        {
+                            while (!failed.load(std::memory_order_relaxed))
+                            {
+                                const auto pageIndex = nextPage.fetch_add(1, std::memory_order_relaxed);
+                                if (pageIndex >= pageCount)
+                                    return;
+                                ThrowIfOperationCancelled(cancellation);
+                                const auto offset = pageIndex * profile.StreamPageBytes;
+                                const auto count = std::min(profile.StreamPageBytes, bytes.size() - offset);
+                                const auto source = std::span(bytes).subspan(offset, count);
+                                pages[pageIndex] = {offset, count, Compress(source, profile.CompressionLevel),
+                                                    Detail::Sha256(source)};
+                            }
+                        }
+                        catch (...)
+                        {
+                            std::scoped_lock lock(failureMutex);
+                            if (!failure)
+                                failure = std::current_exception();
+                            failed.store(true, std::memory_order_relaxed);
+                        }
+                    };
+                    if (workerCount == 1)
+                    {
+                        preparePages();
+                    }
+                    else
+                    {
+                        std::vector<std::jthread> workers;
+                        workers.reserve(workerCount);
+                        for (std::size_t worker = 0; worker < workerCount; ++worker)
+                            workers.emplace_back(preparePages);
+                    }
+                    if (failure)
+                        std::rethrow_exception(failure);
+                    for (const auto& page : pages)
+                    {
+                        const auto& compressed = page.Compressed;
                         if (compressed.size() > std::numeric_limits<std::uint64_t>::max() - compressedBytes)
                             throw std::runtime_error("Compressed streamed asset size overflowed.");
                         compressedBytes += compressed.size();
-                        pages.push_back({offset, count, std::move(compressed), Detail::Sha256(source)});
                     }
                 }
                 if (compressedBytes > profile.MaximumPackBytes - Detail::PackHeaderBytes)

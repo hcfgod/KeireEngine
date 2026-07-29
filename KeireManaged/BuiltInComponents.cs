@@ -24,6 +24,9 @@ public sealed class AudioSourceComponent;
 [StableComponentId("4b454952-4541-5544-494f-4c4953540001")]
 public sealed class AudioListenerComponent;
 
+[StableComponentId("4b454952-4556-4658-454d-495454455201")]
+public sealed class VfxEmitterComponent;
+
 [StableComponentId("4b454952-4544-4952-4c49-474854000001")]
 public sealed class DirectionalLightComponent;
 

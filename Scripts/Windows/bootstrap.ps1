@@ -154,6 +154,8 @@ function Ensure-LLVM {
 
 function Ensure-MSYS2 {
     if ($Update -or -not (Test-Path "C:\msys64")) { Invoke-WingetPackage "MSYS2.MSYS2" }
+    & "C:\msys64\usr\bin\bash.exe" -lc "pacman -S --needed --noconfirm make diffutils"
+    if ($LASTEXITCODE -ne 0) { throw "Could not install the MSYS2 tools required for source-built FFmpeg." }
     $bin = Add-MSYS2ToPath
     Assert-MinimumVersion "GCC" ((& (Join-Path $bin "g++.exe") -dumpfullversion -dumpversion) -join "") ([version]"12.0")
     Assert-MinimumVersion "GNU Make" ((& (Join-Path $bin "mingw32-make.exe") --version) -join "`n") ([version]"4.3")
@@ -169,6 +171,11 @@ if (Test-Path (Join-Path $cmakeBin "cmake.exe")) { $env:PATH = "$cmakeBin;$env:P
 Assert-MinimumVersion "CMake" ((& cmake --version) -join "") ([version]"3.20")
 Ensure-CommandPackage ninja "Ninja-build.Ninja"
 Assert-MinimumVersion "Ninja" ((& (Get-NinjaExecutable) --version) -join "") ([version]"1.11")
+if (-not (Test-Path "C:\msys64\usr\bin\make.exe")) {
+    if (-not (Test-Path "C:\msys64")) { Invoke-WingetPackage "MSYS2.MSYS2" }
+    & "C:\msys64\usr\bin\bash.exe" -lc "pacman -S --needed --noconfirm make diffutils"
+    if ($LASTEXITCODE -ne 0) { throw "Could not install the source-build tools required by FFmpeg." }
+}
 
 foreach ($generator in $Generators) {
     switch ($generator) {

@@ -39,6 +39,12 @@ namespace KeireEditor
 
         [[nodiscard]] std::string AssetTypeName(const Keire::AssetSourceRecord& record)
         {
+            if (const auto content = record.ImportSettings.find("contentType");
+                content != record.ImportSettings.end())
+            {
+                if (const auto* value = std::get_if<std::string>(&content->second); value && *value == "animation")
+                    return "Animation Source";
+            }
             const auto extension = record.RelativePath.extension().string();
             if (extension == ".keirescene")
                 return "Scene";

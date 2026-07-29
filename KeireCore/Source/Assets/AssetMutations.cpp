@@ -67,7 +67,7 @@ namespace Keire
         {
             Detail::WriteFileAtomically(destination, sourceBytes);
             WriteMetadata(metadata, id, importer.Type, importer.Name, importer.Version, settings);
-            UpdateMetadataSubAssets(metadata, validated.SubAssets);
+            UpdateMetadataImportOutput(metadata, validated.PrimaryType.value_or(importer.Type), validated.SubAssets);
         }
         catch (...)
         {
@@ -117,7 +117,7 @@ namespace Keire
         try
         {
             Detail::WriteFileAtomically(destination, sourceBytes);
-            UpdateMetadataSubAssets(metadata, validated.SubAssets);
+            UpdateMetadataImportOutput(metadata, validated.PrimaryType.value_or(existing->Type), validated.SubAssets);
             auto replacement = ReadMetadata(m_Impl->SourceRoot, destination, m_Impl->Specification.MaximumSourceBytes,
                                             true, &importer->second);
             if (replacement.Id != id)

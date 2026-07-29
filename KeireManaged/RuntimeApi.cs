@@ -280,6 +280,40 @@ public static class Audio
     public static bool Stop(Entity entity) => NativeRuntime.StopAudio(entity);
 }
 
+[StableAssetTypeId("4b454952-4556-4658-4546-464543540001")]
+public sealed class VfxEffect;
+
+public readonly record struct VfxEmitterHandle(Entity Entity)
+{
+    public bool IsValid => Entity.IsValid && Entity.HasComponent<VfxEmitterComponent>();
+    public bool IsAlive => IsValid && NativeRuntime.IsVfxAlive(Entity);
+    public bool Pause() => IsValid && NativeRuntime.PauseVfx(Entity, true);
+    public bool Resume() => IsValid && NativeRuntime.PauseVfx(Entity, false);
+    public bool Stop() => IsValid && NativeRuntime.StopVfx(Entity);
+    public bool Restart(AssetId effect) => IsValid && NativeRuntime.PlayVfx(Entity, effect, true);
+    public bool Restart(AssetReference<VfxEffect> effect) => Restart(effect.Id);
+}
+
+public static class Vfx
+{
+    public static VfxEmitterHandle Play(Entity entity, AssetReference<VfxEffect> effect, bool restart = false) =>
+        Play(entity, effect.Id, restart);
+
+    public static VfxEmitterHandle Play(Entity entity, AssetId effect, bool restart = false)
+    {
+        if (!entity.IsValid)
+            throw new ArgumentException("VFX playback requires a valid entity.", nameof(entity));
+        if (!effect.IsValid)
+            throw new ArgumentException("VFX playback requires a valid effect.", nameof(effect));
+        return NativeRuntime.PlayVfx(entity, effect, restart) ? new VfxEmitterHandle(entity) : default;
+    }
+
+    public static bool Stop(Entity entity) => entity.IsValid && NativeRuntime.StopVfx(entity);
+    public static bool Pause(Entity entity) => entity.IsValid && NativeRuntime.PauseVfx(entity, true);
+    public static bool Resume(Entity entity) => entity.IsValid && NativeRuntime.PauseVfx(entity, false);
+    public static bool IsAlive(Entity entity) => entity.IsValid && NativeRuntime.IsVfxAlive(entity);
+}
+
 public static class Prefab
 {
     public static PrefabInstance Instantiate(AssetId prefab, Vector3 position = default, Quaternion rotation = default) =>

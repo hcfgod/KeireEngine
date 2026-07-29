@@ -115,6 +115,7 @@ namespace Keire
         std::vector<AssetId> AssetDependencies;
         AssetDerivedMetadata Metadata;
         std::vector<AssetGeneratedSubAsset> SubAssets;
+        std::optional<AssetTypeId> PrimaryType;
     };
 
     struct AssetImporterRegistration
@@ -131,6 +132,7 @@ namespace Keire
         std::function<AssetImportSettings(const std::filesystem::path&, const AssetImportSettings&)>
             SuggestImportSettings;
         std::function<AssetImportOutput(std::span<const std::byte>)> RestoreCachedOutput;
+        std::vector<AssetTypeId> CompatibleTypes;
     };
 
     struct AssetSourceRecord
@@ -371,7 +373,7 @@ namespace Keire
     {
         std::string Name = "Development";
         AssetTargetPlatform Target = AssetTargetPlatform::Host;
-        int CompressionLevel = 6;
+        int CompressionLevel = 1;
         std::uint64_t MaximumPackBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
         std::size_t StreamPageBytes = 256U * 1024U;
         bool Strict = false;

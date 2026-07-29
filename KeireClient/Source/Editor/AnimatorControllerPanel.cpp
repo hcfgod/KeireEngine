@@ -251,6 +251,7 @@ namespace KeireEditor
         auto& document = m_Controller.AnimatorControllerState();
         const auto& theme = m_Controller.AnimatorControllerTheme();
         const auto database = m_Controller.AnimatorControllerDatabase();
+        const auto assets = m_Controller.AnimatorControllerAssets();
         if (ui.WindowFocused())
             m_Controller.ActivateAnimatorControllerHistory();
         if (!document.Asset())
@@ -487,7 +488,57 @@ namespace KeireEditor
                 {
                     try
                     {
-                        auto clips = AssetBrowserPanel::DecodeDragPayload(payload);
+                        const auto droppedAssets = AssetBrowserPanel::DecodeDragPayload(payload);
+                        struct ClipCandidate final
+                        {
+                            Keire::AssetId Id;
+                            std::string Name;
+                        };
+                        std::vector<ClipCandidate> clips;
+                        const auto appendClip = [&clips](const Keire::AssetId id, std::string name)
+                        {
+                            if (!id || std::ranges::any_of(clips, [id](const auto& value) { return value.Id == id; }))
+                                return;
+                            clips.push_back({id, std::move(name)});
+                        };
+                        for (const auto dropped : droppedAssets)
+                        {
+                            const auto record = database ? database->Find(dropped) : std::nullopt;
+                            if (record && record->Type == Keire::AnimationClipAsset::StaticType())
+                            {
+                                appendClip(dropped, record->RelativePath.stem().string());
+                                continue;
+                            }
+                            if (!record)
+                            {
+                                if (assets && assets->TryGetType(dropped) == Keire::AnimationClipAsset::StaticType())
+                                    appendClip(dropped, "Animation");
+                                continue;
+                            }
+                            if (record->Type != Keire::AnimationSourceAsset::StaticType() &&
+                                record->Type != Keire::MeshAsset::StaticType())
+                            {
+                                continue;
+                            }
+                            std::size_t generatedClip = 0;
+                            for (const auto subAsset : record->SubAssets)
+                            {
+                                if (!assets || assets->TryGetType(subAsset) != Keire::AnimationClipAsset::StaticType())
+                                {
+                                    continue;
+                                }
+                                ++generatedClip;
+                                auto name = record->RelativePath.stem().string();
+                                if (generatedClip > 1)
+                                    name += " " + std::to_string(generatedClip);
+                                appendClip(subAsset, std::move(name));
+                            }
+                        }
+                        if (clips.empty())
+                        {
+                            throw std::invalid_argument(
+                                "Drop an Animation Clip, Animation Source, or animated model asset.");
+                        }
                         if (!layer)
                         {
                             Keire::AnimationLayerDefinition base;
@@ -498,17 +549,13 @@ namespace KeireEditor
                             layer = &graph.Layers.back();
                         }
                         std::size_t added = 0;
-                        for (const auto clip : clips)
+                        for (const auto& clip : clips)
                         {
-                            const auto record = database ? database->Find(clip) : std::nullopt;
-                            if (!record || record->Type != Keire::AnimationClipAsset::StaticType())
-                                continue;
                             Keire::AnimationStateDefinition state;
                             state.Id = Keire::AssetId::Generate().ToString();
-                            state.Name = UniqueName(layer->States, record->RelativePath.stem().string(),
-                                                    &Keire::AnimationStateDefinition::Name);
-                            state.Clip = clip;
-                            state.Motion.Clip = clip;
+                            state.Name = UniqueName(layer->States, clip.Name, &Keire::AnimationStateDefinition::Name);
+                            state.Clip = clip.Id;
+                            state.Motion.Clip = clip.Id;
                             const auto index = layer->States.size();
                             state.EditorPosition = {static_cast<float>(index % 3) * 190.0F,
                                                     static_cast<float>(index / 3) * 104.0F};
@@ -518,8 +565,6 @@ namespace KeireEditor
                             layer->States.push_back(std::move(state));
                             ++added;
                         }
-                        if (added == 0)
-                            throw std::invalid_argument("Drop one or more Animation Clip assets.");
                         selectedParameter.clear();
                         m_Message = "Added " + std::to_string(added) + " animation state(s).";
                         markChanged("Add Animator States");

@@ -39,6 +39,7 @@ namespace KeireEditor
         [[nodiscard]] virtual float SceneViewportDisplayScale() const noexcept = 0;
         [[nodiscard]] virtual const Keire::Time& SceneViewportTime() const noexcept = 0;
         [[nodiscard]] virtual bool SceneViewportPlayReviewActive() const noexcept = 0;
+        [[nodiscard]] virtual Keire::VfxRenderSnapshot SceneViewportEditVfx() const = 0;
         virtual void ActivateSceneViewportHistory() noexcept = 0;
         virtual void RestoreSceneViewportRecovery() = 0;
         virtual void DiscardSceneViewportRecovery() noexcept = 0;
@@ -208,7 +209,7 @@ namespace KeireEditor
       public:
         explicit AssetInspectorPanel(IInspectorController& controller);
         ~AssetInspectorPanel();
-        void Draw(Keire::UiFrame& ui);
+        void Draw(Keire::UiFrame& ui, Keire::AssetId selectedAsset, bool pinned);
         void ClearState() noexcept;
 
       private:
@@ -248,7 +249,7 @@ namespace KeireEditor
         std::string m_ComponentSearch;
         std::uint64_t m_EditSerial = 0;
         Keire::AssetId m_LockedEntity;
-        bool m_Locked = false;
+        Keire::AssetId m_LockedAsset;
         bool m_UniformScale = false;
     };
 

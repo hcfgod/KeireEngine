@@ -222,6 +222,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (playActive)
             if (const auto vfx = document.PlaySession()->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+        if (!playActive)
+            renderRequest.Vfx = m_Controller.SceneViewportEditVfx();
         renderer->Submit(std::move(renderRequest));
         ui.Image(m_RenderView->Surface(), size);
         imageState = ui.LastItemState();

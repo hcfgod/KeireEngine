@@ -143,7 +143,7 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     const auto encoded = Keire::VfxEffectAsset::Encode(definition);
     const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
     REQUIRE(decoded);
-    CHECK(decoded->Definition().SchemaVersion == 1);
+    CHECK(decoded->Definition().SchemaVersion == 2);
     CHECK(decoded->Definition().EmitterId == Id(1));
     CHECK(decoded->Definition().Name == "Sparks");
     REQUIRE(decoded->Definition().Modules.size() == 9);
@@ -159,6 +159,21 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     const auto renamed = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(definition));
     CHECK(renamed->Definition().EmitterId == Id(1));
     CHECK(renamed->Definition().Modules[0].Id == Id(2));
+}
+
+TEST_CASE("VFX schema one definitions publish as schema two without mutating the source definition")
+{
+    auto legacy = EffectDefinition();
+    legacy.SchemaVersion = 1;
+    legacy.Systems.clear();
+    legacy.Blackboard.clear();
+
+    const auto published = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(legacy));
+    CHECK(legacy.SchemaVersion == 1);
+    CHECK(legacy.Systems.empty());
+    CHECK(published->Definition().SchemaVersion == 2);
+    REQUIRE(published->Definition().Systems.size() == 1);
+    CHECK(published->Definition().Systems.front().Nodes.size() == 4);
 }
 
 TEST_CASE("VFX validation rejects malformed assets and invalid stable topology")
@@ -266,6 +281,30 @@ TEST_CASE("CPU VFX simulation is deterministic and snapshots are bounded value o
     CHECK(renderSnapshot.DroppedParticles() == 1);
     CHECK_THROWS_AS((void)first->CaptureRenderSnapshot(Keire::VfxRenderSnapshot::MaximumParticles + 1),
                     std::invalid_argument);
+}
+
+TEST_CASE("GPU VFX simulation publishes compact emitter work without allocating CPU particles")
+{
+    auto definition = EffectDefinition();
+    definition.Modules.erase(definition.Modules.begin() + 1);
+
+    Keire::VfxWorldSpecification specification;
+    specification.Backend = Keire::VfxBackend::Gpu;
+    specification.MaximumEffects = 2;
+    specification.MaximumParticles = 64;
+    auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition), 1, {1.0F, 2.0F, 3.0F}}));
+
+    world->Update(0.25F);
+    const auto debug = world->CaptureDebugSnapshot();
+    CHECK(debug.EffectCount == 1);
+    CHECK(debug.ParticleCount == 0);
+
+    const auto render = world->CaptureRenderSnapshot();
+    CHECK(render.Particles().empty());
+    REQUIRE(render.GpuEmitters().size() == 1);
+    CHECK(render.GpuEmitters().front().Position == Keire::Vector3{1.0F, 2.0F, 3.0F});
+    CHECK(render.GpuEmitters().front().Renderer == Keire::VfxRendererType::Sprite);
 }
 
 TEST_CASE("Headless rendering consumes immutable VFX packets without advertising GPU support")
@@ -431,7 +470,7 @@ TEST_CASE("VFX Emitter component schema exposes typed effect authoring")
     CHECK(registration.SchemaVersion == 1);
     CHECK(registration.RequiredComponents ==
           std::vector<Keire::ComponentTypeId>{Keire::TransformComponent::StaticType()});
-    REQUIRE(registration.Properties.size() == 5);
+    REQUIRE(registration.Properties.size() == 10);
     CHECK(registration.Properties.front().ExpectedAssetType == Keire::VfxEffectAsset::StaticType());
 
     const auto component = registration.Factory();

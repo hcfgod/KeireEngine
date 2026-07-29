@@ -2,6 +2,8 @@
 
 #include "KeireClient/Editor/ScenePicker.h"
 
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
@@ -24,6 +26,11 @@ namespace KeireEditor
         constexpr Keire::UiColor LightColor{1.0F, 0.76F, 0.20F, 1.0F};
         constexpr Keire::UiColor ColliderColor{0.25F, 0.92F, 0.56F, 1.0F};
         constexpr Keire::UiColor TriggerColor{1.0F, 0.43F, 0.18F, 1.0F};
+        constexpr Keire::UiColor ControllerColor{0.18F, 0.78F, 1.0F, 1.0F};
+        constexpr Keire::UiColor GroundedControllerColor{0.30F, 0.94F, 0.52F, 1.0F};
+        constexpr Keire::UiColor StaticBodyColor{0.56F, 0.62F, 0.70F, 1.0F};
+        constexpr Keire::UiColor DynamicBodyColor{1.0F, 0.68F, 0.18F, 1.0F};
+        constexpr Keire::UiColor KinematicBodyColor{0.30F, 0.72F, 1.0F, 1.0F};
         constexpr float Pi = 3.14159265358979323846F;
         constexpr float MinimumColliderGeometry = 0.001F;
         constexpr float MaximumColliderGeometry = 100'000.0F;
@@ -370,6 +377,80 @@ namespace KeireEditor
             }
         }
 
+        void DrawCharacterControllerWireframe(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
+                                              const Keire::CharacterControllerComponent& controller,
+                                              const Keire::Matrix4& viewProjection,
+                                              const Keire::UiItemRect viewport, const bool selected)
+        {
+            const auto world = transform.WorldMatrix();
+            const auto base = controller.Grounded() ? GroundedControllerColor : ControllerColor;
+            const Keire::UiColor color{base.Red, base.Green, base.Blue, selected ? 0.95F : 0.38F};
+            const float thickness = selected ? 2.0F : 1.0F;
+            const float radius = controller.Radius();
+            const float halfSegment = std::max(controller.Height() * 0.5F - radius, 0.0F);
+            const Keire::Vector3 top{0.0F, halfSegment, 0.0F};
+            const Keire::Vector3 bottom{0.0F, -halfSegment, 0.0F};
+
+            DrawLocalCircle(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, radius, viewProjection,
+                            viewport, color, thickness);
+            DrawLocalCircle(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, radius, viewProjection,
+                            viewport, color, thickness);
+            constexpr std::array radialAxes{Keire::Vector3{1.0F, 0.0F, 0.0F}, Keire::Vector3{-1.0F, 0.0F, 0.0F},
+                                            Keire::Vector3{0.0F, 0.0F, 1.0F},
+                                            Keire::Vector3{0.0F, 0.0F, -1.0F}};
+            for (const auto radial : radialAxes)
+            {
+                const auto topPoint = Keire::Math::TransformPoint(world, Add(top, Multiply(radial, radius)));
+                const auto bottomPoint = Keire::Math::TransformPoint(world, Add(bottom, Multiply(radial, radius)));
+                const auto projectedTop = Project(topPoint, viewProjection, viewport);
+                const auto projectedBottom = Project(bottomPoint, viewProjection, viewport);
+                if (projectedTop && projectedBottom)
+                    ui.DrawLine(*projectedTop, *projectedBottom, color, thickness);
+            }
+            DrawLocalArc(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, radius, 0.0F, Pi,
+                         viewProjection, viewport, color, thickness);
+            DrawLocalArc(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, radius, Pi, Pi * 2.0F,
+                         viewProjection, viewport, color, thickness);
+            DrawLocalArc(ui, world, top, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, radius, 0.0F, Pi,
+                         viewProjection, viewport, color, thickness);
+            DrawLocalArc(ui, world, bottom, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, radius, Pi, Pi * 2.0F,
+                         viewProjection, viewport, color, thickness);
+        }
+
+        void DrawRigidBodyGizmo(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
+                                const Keire::RigidBodyComponent& body, const Keire::Matrix4& viewProjection,
+                                const Keire::UiItemRect viewport, const bool selected)
+        {
+            Keire::UiColor base = DynamicBodyColor;
+            if (body.Motion() == Keire::PhysicsMotionType::Static)
+                base = StaticBodyColor;
+            else if (body.Motion() == Keire::PhysicsMotionType::Kinematic)
+                base = KinematicBodyColor;
+            const Keire::UiColor color{base.Red, base.Green, base.Blue, selected ? 0.95F : 0.55F};
+            const auto center = transform.WorldPosition();
+            const auto projected = Project(center, viewProjection, viewport);
+            if (!projected)
+                return;
+
+            const float markerRadius = selected ? 5.0F : 3.5F;
+            ui.DrawFilledCircle(*projected, markerRadius,
+                                {color.Red, color.Green, color.Blue, selected ? 0.28F : 0.16F});
+            ui.DrawCircle(*projected, markerRadius, color, selected ? 2.0F : 1.0F);
+
+            const auto velocity = body.LinearVelocity();
+            const float speed = Length(velocity);
+            if (speed <= 0.001F)
+                return;
+            const float previewLength = std::clamp(speed * 0.25F, 0.25F, 5.0F);
+            const auto end =
+                Project(Add(center, Multiply(Normalize(velocity), previewLength)), viewProjection, viewport);
+            if (end)
+            {
+                ui.DrawLine(*projected, *end, color, selected ? 2.0F : 1.0F);
+                ui.DrawFilledCircle(*end, 2.0F, color);
+            }
+        }
+
         void DrawPointLightRange(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                  const Keire::PointLightComponent& light, const Keire::Matrix4& viewProjection,
                                  const Keire::UiItemRect viewport)
@@ -573,6 +654,9 @@ namespace KeireEditor
             m_Settings.LocalSpace = !m_Settings.LocalSpace;
         if (button("SceneSnap", Keire::UiIcon::Snap, "Toggle snapping", m_Settings.Snapping))
             m_Settings.Snapping = !m_Settings.Snapping;
+        if (button("ScenePhysicsGizmos", Keire::UiIcon::Filter, "Show physics gizmos",
+                   m_Settings.ShowPhysicsGizmos))
+            m_Settings.ShowPhysicsGizmos = !m_Settings.ShowPhysicsGizmos;
         if (button("SceneColliderEdit", Keire::UiIcon::Filter, "Edit collider shapes", m_Settings.EditColliders))
             m_Settings.EditColliders = !m_Settings.EditColliders;
         if (button("SceneGizmoSettings", Keire::UiIcon::Settings, "Gizmo and snap settings", false))
@@ -592,6 +676,7 @@ namespace KeireEditor
             (void)ui.Checkbox("Scene icons", m_Settings.ShowIcons);
             (void)ui.Checkbox("Camera frustums", m_Settings.ShowCameraFrustums);
             (void)ui.Checkbox("Light directions", m_Settings.ShowLightDirections);
+            (void)ui.Checkbox("Physics gizmos", m_Settings.ShowPhysicsGizmos);
             (void)ui.Checkbox("Edit collider shapes", m_Settings.EditColliders);
         }
         return {origin, {position.X - gap, origin.Y + size}};
@@ -682,7 +767,7 @@ namespace KeireEditor
         for (const auto& colliderEntity : scene->Query<Keire::ColliderComponent>())
         {
             const bool colliderSelected = selected == colliderEntity.Id();
-            if (!colliderSelected && !m_Settings.EditColliders)
+            if (!colliderSelected && !m_Settings.ShowPhysicsGizmos && !m_Settings.EditColliders)
                 continue;
             const auto collider = colliderEntity.GetComponent<Keire::ColliderComponent>();
             const auto colliderTransform = colliderEntity.GetComponent<Keire::TransformComponent>();
@@ -690,6 +775,31 @@ namespace KeireEditor
                 continue;
             DrawColliderWireframe(ui, *colliderTransform, *collider, viewProjection, viewport, colliderSelected,
                                   resolveMeshBounds);
+        }
+
+        for (const auto& controllerEntity : scene->Query<Keire::CharacterControllerComponent>())
+        {
+            const bool controllerSelected = selected == controllerEntity.Id();
+            if (!controllerSelected && !m_Settings.ShowPhysicsGizmos)
+                continue;
+            const auto controller = controllerEntity.GetComponent<Keire::CharacterControllerComponent>();
+            const auto controllerTransform = controllerEntity.GetComponent<Keire::TransformComponent>();
+            if (!controller || !controller->Enabled() || !controllerTransform || !controllerEntity.ActiveInHierarchy())
+                continue;
+            DrawCharacterControllerWireframe(ui, *controllerTransform, *controller, viewProjection, viewport,
+                                             controllerSelected);
+        }
+
+        for (const auto& rigidBodyEntity : scene->Query<Keire::RigidBodyComponent>())
+        {
+            const bool rigidBodySelected = selected == rigidBodyEntity.Id();
+            if (!rigidBodySelected && !m_Settings.ShowPhysicsGizmos)
+                continue;
+            const auto rigidBody = rigidBodyEntity.GetComponent<Keire::RigidBodyComponent>();
+            const auto rigidBodyTransform = rigidBodyEntity.GetComponent<Keire::TransformComponent>();
+            if (!rigidBody || !rigidBody->Enabled() || !rigidBodyTransform || !rigidBodyEntity.ActiveInHierarchy())
+                continue;
+            DrawRigidBodyGizmo(ui, *rigidBodyTransform, *rigidBody, viewProjection, viewport, rigidBodySelected);
         }
 
         if (m_Settings.ShowLightDirections && selected)
@@ -1101,7 +1211,7 @@ namespace KeireEditor
         std::ifstream input(projectRoot / "Library/Editor/SceneTools.state");
         std::uint32_t version = 0;
         std::uint32_t tool = 0;
-        if (!(input >> version) || (version != 1 && version != 2) ||
+        if (!(input >> version) || (version != 1 && version != 2 && version != 3) ||
             !(input >> tool >> m_Settings.PositionSnap.X >> m_Settings.PositionSnap.Y >> m_Settings.PositionSnap.Z >>
               m_Settings.RotationSnapDegrees >> m_Settings.ScaleSnap >> m_Settings.Snapping >> m_Settings.LocalSpace >>
               m_Settings.ShowIcons >> m_Settings.ShowCameraFrustums >> m_Settings.ShowLightDirections) ||
@@ -1112,7 +1222,14 @@ namespace KeireEditor
             return;
         }
         m_Settings.EditColliders = false;
-        if (version == 2 && !(input >> m_Settings.EditColliders))
+        m_Settings.ShowPhysicsGizmos = true;
+        if (version >= 2 && !(input >> m_Settings.EditColliders))
+        {
+            m_Settings = {};
+            m_Tool = SceneTool::Translate;
+            return;
+        }
+        if (version >= 3 && !(input >> m_Settings.ShowPhysicsGizmos))
         {
             m_Settings = {};
             m_Tool = SceneTool::Translate;
@@ -1136,14 +1253,14 @@ namespace KeireEditor
         {
             std::filesystem::create_directories(projectRoot / "Library/Editor");
             std::ostringstream output;
-            output << "2\n"
+            output << "3\n"
                    << static_cast<std::uint32_t>(m_Tool) << '\n'
                    << m_Settings.PositionSnap.X << ' ' << m_Settings.PositionSnap.Y << ' ' << m_Settings.PositionSnap.Z
                    << '\n'
                    << m_Settings.RotationSnapDegrees << ' ' << m_Settings.ScaleSnap << '\n'
                    << m_Settings.Snapping << ' ' << m_Settings.LocalSpace << ' ' << m_Settings.ShowIcons << ' '
                    << m_Settings.ShowCameraFrustums << ' ' << m_Settings.ShowLightDirections << ' '
-                   << m_Settings.EditColliders << '\n';
+                   << m_Settings.EditColliders << ' ' << m_Settings.ShowPhysicsGizmos << '\n';
             Keire::Detail::WriteTextFileAtomically(projectRoot / "Library/Editor/SceneTools.state", output.str());
         }
         catch (...)

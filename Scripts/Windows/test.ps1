@@ -65,9 +65,18 @@ if ($exitCode -eq 0) {
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
         -Architecture $Architecture -Toolset $Toolset -Target $editorTestsTarget -CI:$CI -Update:$Update -Generate:$Generate
     if (-not (Test-Path $editorTestsExe)) { throw "Editor tests executable was not found: $editorTestsExe" }
-    Write-Host "==> Running editor document and controller tests"
-    & $editorTestsExe
-    if ($LASTEXITCODE -ne 0) { throw "Editor tests failed with exit code $LASTEXITCODE." }
+    $editorOriginalPath = $env:PATH
+    try {
+        if ($Configuration -eq "DebugASan" -and $usesMSVC) {
+            $env:PATH = "$runtimeDirectory;$env:PATH"
+        }
+        Write-Host "==> Running editor document and controller tests"
+        & $editorTestsExe
+        if ($LASTEXITCODE -ne 0) { throw "Editor tests failed with exit code $LASTEXITCODE." }
+    }
+    finally {
+        $env:PATH = $editorOriginalPath
+    }
 }
 
 if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {

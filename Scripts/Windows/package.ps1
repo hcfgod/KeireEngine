@@ -33,11 +33,14 @@ Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName\$assetWorkerName.exe" "$stage\bin\"
+Get-ChildItem "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName" -Filter "av*.dll" -File | Copy-Item -Destination "$stage\bin\"
+Get-ChildItem "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetWorkerName" -Filter "swresample-*.dll" -File | Copy-Item -Destination "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\$runtimeName.exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\Managed" "$stage\bin\" -Recurse
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\nethost.dll" "$stage\bin\"
 Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
 Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"
+Copy-Item "$Root\Build\Dependencies\ffmpeg\Release\install\share\licenses\ffmpeg" "$stage\third-party\licenses\" -Recurse
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CORE_TARGET)\$($Project.CORE_TARGET).lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\DearImGui\$imguiLibraryName.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\Zstd\$zstdLibraryName.lib" "$stage\lib\"

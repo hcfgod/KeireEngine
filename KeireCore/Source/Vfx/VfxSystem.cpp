@@ -1,6 +1,7 @@
 #include "Keire/Vfx/VfxSystem.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -105,6 +106,8 @@ namespace Keire
             std::uint32_t SeedOffset = 0;
             std::uint32_t ActiveParticles = 0;
             std::uint64_t DroppedParticles = 0;
+            std::uint64_t GpuSpawnSequence = 0;
+            double GpuLastDeathTime = 0.0;
             float SimulationSpeed = 1.0F;
             VfxRuntimeDiagnostic Diagnostics = VfxRuntimeDiagnostic::None;
         };
@@ -132,13 +135,20 @@ namespace Keire
             }
 
             Effects.resize(Specification.MaximumEffects);
-            Particles.resize(Specification.MaximumParticles);
             FreeEffects.reserve(Specification.MaximumEffects);
-            FreeParticles.reserve(Specification.MaximumParticles);
             for (auto index = Specification.MaximumEffects; index > 0; --index)
                 FreeEffects.push_back(index - 1);
-            for (auto index = Specification.MaximumParticles; index > 0; --index)
-                FreeParticles.push_back(index - 1);
+            if (Specification.Backend == VfxBackend::Cpu)
+            {
+                Particles.resize(Specification.MaximumParticles);
+                FreeParticles.reserve(Specification.MaximumParticles);
+                for (auto index = Specification.MaximumParticles; index > 0; --index)
+                    FreeParticles.push_back(index - 1);
+            }
+            static std::atomic<std::uint64_t> nextWorldId{1};
+            WorldId = nextWorldId.fetch_add(1, std::memory_order_relaxed);
+            if (WorldId == 0)
+                WorldId = nextWorldId.fetch_add(1, std::memory_order_relaxed);
         }
 
         [[nodiscard]] bool IsAlive(const VfxHandle handle) const noexcept
@@ -423,6 +433,55 @@ namespace Keire
                 slot.Emitting = false;
         }
 
+        void EmitGpu(const std::uint32_t effectIndex, const float deltaSeconds)
+        {
+            auto& slot = Effects[effectIndex];
+            if (!slot.Emitting)
+                return;
+            const auto& definition = slot.Effect->Definition();
+            const auto previous = slot.Elapsed;
+            auto effectiveDelta = static_cast<double>(deltaSeconds);
+            if (!definition.Loop)
+                effectiveDelta = std::min(effectiveDelta, std::max(0.0, definition.Duration - slot.Elapsed));
+            const auto current = previous + effectiveDelta;
+
+            std::uint64_t requested = 0;
+            if (const auto* rate = FindEnabledModule<VfxEmissionRateModule>(definition))
+            {
+                slot.RateAccumulator += effectiveDelta * rate->ParticlesPerSecond;
+                const auto whole = std::floor(slot.RateAccumulator);
+                requested += static_cast<std::uint64_t>(
+                    std::min(whole, static_cast<double>(std::numeric_limits<std::uint64_t>::max())));
+                slot.RateAccumulator -= whole;
+            }
+            for (const auto& module : definition.Modules)
+            {
+                if (!module.Enabled)
+                    continue;
+                if (const auto* burst = std::get_if<VfxBurstModule>(&module.Payload))
+                {
+                    const auto count = CountBurst(slot, *burst, previous, current);
+                    requested = std::min(std::numeric_limits<std::uint64_t>::max() - requested, count) + requested;
+                }
+            }
+
+            SaturatingAdd(slot.GpuSpawnSequence, requested);
+            const auto* initialize = FindEnabledModule<VfxInitializeModule>(definition);
+            const auto lifetime = initialize ? initialize->LifetimeMaximum : 1.0F;
+            if (requested != 0)
+                slot.GpuLastDeathTime = std::max(slot.GpuLastDeathTime, current + lifetime);
+            slot.ActiveParticles =
+                requested == 0
+                    ? slot.ActiveParticles
+                    : std::min(definition.Capacity,
+                               slot.ActiveParticles +
+                                   static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, definition.Capacity)));
+            slot.Elapsed = current;
+            slot.FirstUpdate = false;
+            if (!definition.Loop && slot.Elapsed >= definition.Duration)
+                slot.Emitting = false;
+        }
+
         [[nodiscard]] Vector3 WorldPosition(const EffectSlot& slot, const Particle& particle) const noexcept
         {
             return slot.Effect->Definition().Space == VfxSimulationSpace::Local
@@ -523,6 +582,9 @@ namespace Keire
         std::vector<std::uint32_t> FreeParticles;
         VfxWorldStatistics WorldStatistics;
         std::uint64_t SnapshotRevision = 0;
+        std::uint64_t ResetRevision = 1;
+        std::uint64_t WorldId = 0;
+        float LastDeltaSeconds = 0.0F;
     };
 
     VfxWorld::VfxWorld(VfxWorldSpecification specification) : m_Impl(std::make_unique<Impl>(std::move(specification)))
@@ -564,6 +626,8 @@ namespace Keire
         slot.SeedOffset = activation.SeedOffset;
         slot.ActiveParticles = 0;
         slot.DroppedParticles = 0;
+        slot.GpuSpawnSequence = 0;
+        slot.GpuLastDeathTime = 0.0;
         slot.SimulationSpeed = 1.0F;
         slot.Diagnostics = diagnostics;
         ++m_Impl->WorldStatistics.ActiveEffects;
@@ -578,6 +642,8 @@ namespace Keire
         if (!m_Impl->IsAlive(handle))
             return;
         m_Impl->ReleaseEffect(handle.Index());
+        if (m_Impl->Specification.Backend == VfxBackend::Gpu)
+            ++m_Impl->ResetRevision;
         ++m_Impl->SnapshotRevision;
     }
 
@@ -624,8 +690,12 @@ namespace Keire
             slot.Emitting = true;
             const auto random = slot.Effect->Definition().Seed ^ slot.SeedOffset;
             slot.Random = random == 0 ? 0x9e3779b9U : random;
+            slot.GpuSpawnSequence = 0;
+            slot.GpuLastDeathTime = 0.0;
+            if (m_Impl->Specification.Backend == VfxBackend::Gpu)
+                ++m_Impl->ResetRevision;
         }
-        else
+        else if (m_Impl->Specification.Backend == VfxBackend::Cpu)
         {
             for (auto index = m_Impl->Particles.size();
                  index > 0 && slot.ActiveParticles > slot.Effect->Definition().Capacity; --index)
@@ -650,22 +720,33 @@ namespace Keire
             throw std::invalid_argument("VFX update delta must be finite and in the range 0..10 seconds.");
         if (deltaSeconds == 0.0F)
             return;
+        m_Impl->LastDeltaSeconds = deltaSeconds;
 
-        for (std::uint32_t index = 0; index < m_Impl->Particles.size(); ++index)
-            if (m_Impl->Particles[index].Active)
-            {
-                const auto speed = m_Impl->Effects[m_Impl->Particles[index].EffectIndex].SimulationSpeed;
-                if (speed > 0.0F)
-                    m_Impl->SimulateParticle(index, deltaSeconds * speed);
-            }
+        if (m_Impl->Specification.Backend == VfxBackend::Cpu)
+            for (std::uint32_t index = 0; index < m_Impl->Particles.size(); ++index)
+                if (m_Impl->Particles[index].Active)
+                {
+                    const auto speed = m_Impl->Effects[m_Impl->Particles[index].EffectIndex].SimulationSpeed;
+                    if (speed > 0.0F)
+                        m_Impl->SimulateParticle(index, deltaSeconds * speed);
+                }
 
         for (std::uint32_t index = 0; index < m_Impl->Effects.size(); ++index)
         {
             if (!m_Impl->Effects[index].Active)
                 continue;
             if (m_Impl->Effects[index].SimulationSpeed > 0.0F)
-                m_Impl->Emit(index, deltaSeconds * m_Impl->Effects[index].SimulationSpeed);
-            if (!m_Impl->Effects[index].Emitting && m_Impl->Effects[index].ActiveParticles == 0)
+            {
+                const auto scaledDelta = deltaSeconds * m_Impl->Effects[index].SimulationSpeed;
+                if (m_Impl->Specification.Backend == VfxBackend::Gpu)
+                    m_Impl->EmitGpu(index, scaledDelta);
+                else
+                    m_Impl->Emit(index, scaledDelta);
+            }
+            const auto gpuFinished = m_Impl->Specification.Backend == VfxBackend::Gpu &&
+                                     !m_Impl->Effects[index].Emitting &&
+                                     m_Impl->Effects[index].Elapsed >= m_Impl->Effects[index].GpuLastDeathTime;
+            if (gpuFinished || (!m_Impl->Effects[index].Emitting && m_Impl->Effects[index].ActiveParticles == 0))
                 m_Impl->ReleaseEffect(index);
         }
         ++m_Impl->SnapshotRevision;
@@ -707,6 +788,49 @@ namespace Keire
             throw std::invalid_argument("VFX render snapshot exceeds the supported particle bound.");
         VfxRenderSnapshot result;
         result.m_Revision = m_Impl->SnapshotRevision;
+        result.m_WorldId = m_Impl->WorldId;
+        result.m_ResetRevision = m_Impl->ResetRevision;
+        result.m_ParticleCapacity = m_Impl->Specification.MaximumParticles;
+        result.m_DeltaSeconds = m_Impl->LastDeltaSeconds;
+        if (m_Impl->Specification.Backend == VfxBackend::Gpu)
+        {
+            result.m_GpuEmitters.reserve(m_Impl->WorldStatistics.ActiveEffects);
+            for (std::uint32_t index = 0; index < m_Impl->Effects.size(); ++index)
+            {
+                const auto& slot = m_Impl->Effects[index];
+                if (!slot.Active || !slot.Effect)
+                    continue;
+                const auto& definition = slot.Effect->Definition();
+                const auto* shape = FindEnabledModule<VfxShapeModule>(definition);
+                const auto* initialize = FindEnabledModule<VfxInitializeModule>(definition);
+                const auto* force = FindEnabledModule<VfxForceModule>(definition);
+                const auto* size = FindEnabledModule<VfxSizeOverLifetimeModule>(definition);
+                const auto* color = FindEnabledModule<VfxColorOverLifetimeModule>(definition);
+                const auto* renderer = FindEnabledModule<VfxRendererModule>(definition);
+                result.m_GpuEmitters.push_back(
+                    {VfxHandle(index, slot.Generation),
+                     slot.Revision,
+                     slot.GpuSpawnSequence,
+                     slot.Position,
+                     slot.Rotation,
+                     shape ? shape->BoxHalfExtent : Vector3{},
+                     initialize ? initialize->VelocityMinimum : Vector3{},
+                     initialize ? initialize->LifetimeMinimum : 1.0F,
+                     initialize ? initialize->VelocityMaximum : Vector3{},
+                     initialize ? initialize->LifetimeMaximum : 1.0F,
+                     force ? Add(force->Force, Multiply(Gravity, force->GravityMultiplier)) : Vector3{},
+                     shape ? shape->Radius : 0.0F,
+                     color ? color->Color.Evaluate(0.0F) : Color{},
+                     color ? color->Color.Evaluate(1.0F) : Color{},
+                     size ? size->Size.Evaluate(0.0F) : 1.0F,
+                     size ? size->Size.Evaluate(1.0F) : 1.0F,
+                     definition.Seed ^ slot.SeedOffset,
+                     shape ? shape->Shape : VfxShape::Point,
+                     definition.Space,
+                     renderer ? renderer->Type : VfxRendererType::Sprite});
+            }
+            return result;
+        }
         result.m_Particles.resize(std::min<std::size_t>(m_Impl->WorldStatistics.ActiveParticles, maximumParticles));
         const auto copied = CopyRenderPackets(result.m_Particles);
         result.m_Particles.resize(copied.Written);
@@ -768,6 +892,8 @@ namespace Keire
     {
         for (std::uint32_t index = 0; index < m_Impl->Effects.size(); ++index)
             m_Impl->ReleaseEffect(index);
+        if (m_Impl->Specification.Backend == VfxBackend::Gpu)
+            ++m_Impl->ResetRevision;
         ++m_Impl->SnapshotRevision;
     }
 } // namespace Keire

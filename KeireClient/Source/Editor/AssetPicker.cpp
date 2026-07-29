@@ -43,6 +43,72 @@ namespace
             throw std::invalid_argument("Asset drag payload is empty.");
         return result;
     }
+
+    struct AssetPickerCandidate final
+    {
+        Keire::AssetId Id;
+        std::string DisplayLabel;
+        std::string SelectionLabel;
+    };
+
+    [[nodiscard]] std::string GeneratedAssetLabel(const Keire::AssetTypeId type)
+    {
+        if (type == Keire::SkeletonAsset::StaticType())
+            return "Skeleton";
+        if (type == Keire::SkinnedMeshAsset::StaticType())
+            return "Skinned Mesh";
+        if (type == Keire::AnimationClipAsset::StaticType())
+            return "Animation Clip";
+        if (type == Keire::RigDefinitionAsset::StaticType())
+            return "Rig";
+        return "Generated Asset";
+    }
+
+    [[nodiscard]] bool AcceptsCandidate(const Keire::AssetSourceRecord& source, const Keire::AssetId id,
+                                        const Keire::AssetTypeId type, const KeireEditor::AssetPickerOptions& options)
+    {
+        if (options.ExpectedType && type != *options.ExpectedType)
+            return false;
+        if (!options.Filter)
+            return true;
+        if (id == source.Id)
+            return options.Filter(source);
+        auto generated = source;
+        generated.Id = id;
+        generated.Type = type;
+        return options.Filter(generated);
+    }
+
+    [[nodiscard]] std::vector<AssetPickerCandidate>
+    BuildCandidates(const std::span<const Keire::AssetSourceRecord> records,
+                    const KeireEditor::AssetPickerOptions& options)
+    {
+        std::size_t capacity = records.size();
+        for (const auto& record : records)
+            capacity += record.SubAssets.size();
+
+        std::vector<AssetPickerCandidate> result;
+        result.reserve(capacity);
+        for (const auto& record : records)
+        {
+            if (AcceptsCandidate(record, record.Id, record.Type, options))
+            {
+                auto label = record.RelativePath.generic_string();
+                result.push_back({record.Id, label, label + "##" + record.Id.ToString()});
+            }
+            if (!options.ResolveType)
+                continue;
+            for (const auto subAsset : record.SubAssets)
+            {
+                const auto type = options.ResolveType(subAsset);
+                if (!type || !AcceptsCandidate(record, subAsset, *type, options))
+                    continue;
+                auto label = record.RelativePath.generic_string() + " / " + GeneratedAssetLabel(*type);
+                result.push_back({subAsset, label, label + "##" + subAsset.ToString()});
+            }
+        }
+        return result;
+    }
 } // namespace
 
 namespace KeireEditor
@@ -73,10 +139,11 @@ namespace KeireEditor
         if (options.Label.empty())
             throw std::invalid_argument("An asset picker requires a non-empty label.");
 
-        const auto selected = std::ranges::find(records, value, &Keire::AssetSourceRecord::Id);
-        const bool selectedCompatible = selected != records.end() && Accepts(*selected, options);
+        const auto candidates = BuildCandidates(records, options);
+        const auto selected = std::ranges::find(candidates, value, &AssetPickerCandidate::Id);
+        const bool selectedCompatible = selected != candidates.end();
         const std::string preview = !value               ? std::string(options.EmptyLabel)
-                                    : selectedCompatible ? selected->RelativePath.filename().string()
+                                    : selectedCompatible ? selected->DisplayLabel
                                                          : "Missing or incompatible asset";
         bool changed = false;
         {
@@ -94,15 +161,14 @@ namespace KeireEditor
                 }
 
                 std::size_t visible = 0;
-                for (const auto& record : records)
+                for (const auto& candidate : candidates)
                 {
-                    if (!Accepts(record, options) ||
-                        !ContainsInsensitive(record.RelativePath.generic_string(), m_Search))
+                    if (!ContainsInsensitive(candidate.DisplayLabel, m_Search))
                         continue;
                     ++visible;
-                    if (ui.Selectable(record.RelativePath.generic_string(), record.Id == value))
+                    if (ui.Selectable(candidate.SelectionLabel, candidate.Id == value))
                     {
-                        value = record.Id;
+                        value = candidate.Id;
                         changed = true;
                         m_Diagnostic.clear();
                         ui.CloseCurrentPopup();
@@ -122,9 +188,9 @@ namespace KeireEditor
                     {
                         const auto assets = DecodeAssetPayload(payload);
                         const auto dropped =
-                            assets.empty() ? records.end()
-                                           : std::ranges::find(records, assets.front(), &Keire::AssetSourceRecord::Id);
-                        if (dropped == records.end() || !Accepts(*dropped, options))
+                            assets.empty() ? candidates.end()
+                                           : std::ranges::find(candidates, assets.front(), &AssetPickerCandidate::Id);
+                        if (dropped == candidates.end())
                             m_Diagnostic = "The dropped asset is not compatible with this field.";
                         else
                         {

@@ -1,5 +1,36 @@
 # Changelog
 
+- Fixed Animator asset fields so generated skeleton and skinned-mesh subassets can be selected directly from imported
+  models, added cached bind-pose-aware retargeting for separately imported clips, rejected incompatible GPU skin data,
+  and reduced audio import publication time with bounded media probing and parallel fast development cooking.
+
+- Fixed animated-model and Animation Source drops in Animator Controllers by expanding stable generated clip subassets,
+  made FFmpeg-backed imports default to fast lossless PCM streaming with bounded FLAC fallback, and made audio reimport
+  stop and replay active voices instead of terminating the editor on clip replacement.
+- Added schema-v2 VFX graph data, deterministic v1 publication migration, GPU compute simulation with persistent
+  particle/free/alive/counter buffers, indirect sprite rendering, GPU runtime statistics, deterministic CPU fallback,
+  expanded emitter authoring, managed generation-safe playback controls, and graph/fallback compilation actions.
+- Added transactional importer-selected primary asset types and `AnimationSourceAsset`, allowing animation-only
+  FBX/glTF containers to publish stable skeleton, rig, and clip subassets without entering mesh vertex validation.
+- Pinned the signed FFmpeg `n8.1.2` tag and peeled source commit as a vendor submodule, added selectable audio-stream
+  import settings, source-built worker-only shared libraries, custom in-memory AVIO, fastest-lossless conversion, and
+  validated importer-cache restoration for repeated media imports.
+- Added native MP3 audio import plus FFmpeg-backed AAC, Opus, WMA, AIFF, WebM, MP4, MKV, MOV, M4A, and broad
+  codec/container routing with bounded lossless transcoding and actionable dependency diagnostics.
+- Animation Source FBX/glTF/GLB imports now derive skeletons from animated node hierarchies when skin weights are
+  absent, and the sandbox no longer retains orphaned mesh or collision-mesh references.
+- Made generated asset creation use direct worker publication so VFX and other authored assets appear promptly, and
+  asset operations now shut down before editor documents and the project database.
+- Fixed explicit Project asset creation being rejected behind queued work and completed imports rejecting their own
+  undo command while the asset worker was still publishing the result.
+- Added a common lock control to every registered editor panel. Locked panels retain their placement, Inspector can pin
+  either entities or assets, and Rigging Studio preserves or pins its model context while its own sections are used.
+- Fixed interactive Physics Material and Animator Controller creation being discarded behind background asset work,
+  allowed empty authoring layers, and repaired missing Character Controller runtime identities during scene migration.
+- Accelerated generated-rig imports by reusing top-influence solver storage and publishing compact schema-v3 binary skin
+  weights while retaining schema-v1/v2 decoding; Rigging Studio now recognizes current `Keire.Mesh` source records.
+- Added persistent scene physics gizmos for colliders, triggers, character-controller capsules, rigid-body motion types,
+  and runtime velocity vectors, with a toolbar toggle and versioned per-project editor settings.
 - Fixed model and other external imports failing after successful cooking when the running Windows editor held the
   active runtime pack open. Development and cooked publications now install deterministic content-addressed immutable
   packs and atomically switch the catalog without renaming the live cache directory.

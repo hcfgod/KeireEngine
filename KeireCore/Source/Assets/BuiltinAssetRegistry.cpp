@@ -69,6 +69,7 @@ namespace Keire
         result.emplace_back(CreateSkeletonAssetDecoder());
         result.emplace_back(CreateSkinnedMeshAssetDecoder());
         result.emplace_back(CreateAnimationClipAssetDecoder());
+        result.emplace_back(CreateAnimationSourceAssetDecoder());
         result.emplace_back(CreateAnimationGraphAssetDecoder());
         result.emplace_back(CreateAvatarMaskAssetDecoder());
         result.emplace_back(CreateRigDefinitionAssetDecoder());

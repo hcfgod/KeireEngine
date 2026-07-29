@@ -32,16 +32,28 @@ namespace Keire
       public:
         struct AnimationRuntimeState final
         {
+            struct RetargetedClip final
+            {
+                AssetId SourceSkeleton;
+                AssetHandle<SkeletonAsset> SourceSkeletonHandle;
+                Ref<AnimationClipAsset> Clip;
+                std::uint64_t ClipRevision = 0;
+                std::uint64_t SourceSkeletonRevision = 0;
+                std::uint64_t TargetSkeletonRevision = 0;
+            };
+
             AssetId Graph;
             AssetId Skeleton;
             AssetHandle<AnimationGraphAsset> GraphHandle;
             AssetHandle<SkeletonAsset> SkeletonHandle;
             std::map<AssetId, AssetHandle<AnimationClipAsset>> Clips;
+            std::map<AssetId, RetargetedClip> RetargetedClips;
             std::map<AssetId, AssetHandle<AvatarMaskAsset>> Masks;
             std::map<std::string, std::uint32_t, std::less<>> BoneIndices;
             std::unique_ptr<AnimatorInstance> Instance;
             std::uint64_t GraphRevision = 0;
             std::uint64_t SkeletonRevision = 0;
+            std::string DependencyDiagnostic;
         };
 
         struct PhysicsRuntimeState final
@@ -113,7 +125,49 @@ namespace Keire
             auto [iterator, inserted] = state.Clips.try_emplace(id);
             if (inserted)
                 iterator->second = Assets->Load<AnimationClipAsset>(id, AssetPriority::High);
-            return iterator->second.TryGetLoaded();
+            const auto clip = iterator->second.TryGetLoaded();
+            if (!clip || clip->Skeleton() == state.Skeleton)
+                return clip;
+
+            auto& retargeted = state.RetargetedClips[id];
+            if (retargeted.SourceSkeleton != clip->Skeleton())
+            {
+                retargeted = {};
+                retargeted.SourceSkeleton = clip->Skeleton();
+                retargeted.SourceSkeletonHandle =
+                    Assets->Load<SkeletonAsset>(retargeted.SourceSkeleton, AssetPriority::High);
+            }
+            const auto sourceSkeleton = retargeted.SourceSkeletonHandle.TryGetLoaded();
+            const auto targetSkeleton = state.SkeletonHandle.TryGetLoaded();
+            if (!sourceSkeleton || !targetSkeleton)
+                return {};
+
+            const auto clipRevision = iterator->second.Revision();
+            const auto sourceRevision = retargeted.SourceSkeletonHandle.Revision();
+            const auto targetRevision = state.SkeletonHandle.Revision();
+            if (!retargeted.Clip || retargeted.ClipRevision != clipRevision ||
+                retargeted.SourceSkeletonRevision != sourceRevision ||
+                retargeted.TargetSkeletonRevision != targetRevision)
+            {
+                try
+                {
+                    const auto sourceRig = BestRuntimeRig(*sourceSkeleton);
+                    const auto targetRig = BestRuntimeRig(*targetSkeleton);
+                    retargeted.Clip = RetargetAnimationClip(*sourceSkeleton, sourceRig, *clip, state.Skeleton,
+                                                            *targetSkeleton, targetRig);
+                    retargeted.ClipRevision = clipRevision;
+                    retargeted.SourceSkeletonRevision = sourceRevision;
+                    retargeted.TargetSkeletonRevision = targetRevision;
+                }
+                catch (const std::exception& error)
+                {
+                    state.DependencyDiagnostic =
+                        "Animation clip is incompatible with the Animator skeleton: " + std::string(error.what());
+                    retargeted.Clip = {};
+                    return {};
+                }
+            }
+            return retargeted.Clip;
         }
 
         [[nodiscard]] Ref<const AvatarMaskAsset> ResolveMask(AnimationRuntimeState& state, const AssetId id)
@@ -128,6 +182,7 @@ namespace Keire
 
         [[nodiscard]] bool DependenciesReady(AnimationRuntimeState& state, const AnimationGraphAsset& graph)
         {
+            state.DependencyDiagnostic.clear();
             bool ready = true;
             for (const auto& layer : graph.Definition().Layers)
             {
@@ -144,6 +199,18 @@ namespace Keire
                 }
             }
             return ready;
+        }
+
+        [[nodiscard]] static RigDefinition BestRuntimeRig(const SkeletonAsset& skeleton)
+        {
+            auto humanoid = InferRigDefinition(skeleton, RigProfileType::Humanoid);
+            auto quadruped = InferRigDefinition(skeleton, RigProfileType::Quadruped);
+            const auto semanticCount = [](const RigDefinition& rig)
+            {
+                return std::ranges::count_if(rig.Bones,
+                                             [](const auto& bone) { return bone.Semantic != RigBoneSemantic::None; });
+            };
+            return semanticCount(quadruped) > semanticCount(humanoid) ? std::move(quadruped) : std::move(humanoid);
         }
 
         static void ApplyCommands(AnimatorInstance& instance, std::span<const AnimatorCommand> commands)
@@ -329,7 +396,9 @@ namespace Keire
                 const auto skeleton = state->SkeletonHandle.TryGetLoaded();
                 if (!graph || !skeleton || !DependenciesReady(*state, *graph))
                 {
-                    animator->SetRuntimeDiagnostic("Animator is waiting for controller dependencies to load.");
+                    animator->SetRuntimeDiagnostic(state->DependencyDiagnostic.empty()
+                                                       ? "Animator is waiting for controller dependencies to load."
+                                                       : state->DependencyDiagnostic);
                     continue;
                 }
 
@@ -407,6 +476,8 @@ namespace Keire
         {
             ClearVfx();
             VfxWorldSpecification specification;
+            specification.Backend = Assets ? VfxBackend::Gpu : VfxBackend::Cpu;
+            specification.MaximumParticles = Assets ? 1'000'000U : VfxRenderSnapshot::MaximumParticles;
             specification.CollisionQuery = [this](const Vector3 start, const Vector3 end)
             { return QueryVfxCollision(start, end); };
             VfxWorldService = CreateRef<VfxWorld>(std::move(specification));
@@ -933,6 +1004,74 @@ namespace Keire
     Ref<ScenePresentationRuntime> SceneRuntimeSession::Presentation() const noexcept { return m_Impl->Presentation; }
     Ref<PhysicsWorld> SceneRuntimeSession::Physics() const noexcept { return m_Impl->PhysicsWorldService; }
     Ref<VfxWorld> SceneRuntimeSession::Vfx() const noexcept { return m_Impl->VfxWorldService; }
+
+    bool SceneRuntimeSession::PlayVfx(const EntityId entityId, const AssetId effect, const bool restart)
+    {
+        if (!m_Impl->Runtime || !m_Impl->VfxWorldService || !effect)
+            return false;
+        auto entity = m_Impl->Runtime->FindEntity(entityId);
+        if (!entity)
+            return false;
+        auto emitter = entity.GetComponent<VfxEmitterComponent>();
+        if (!emitter)
+            emitter = entity.AddComponent<VfxEmitterComponent>();
+        if (!emitter)
+            return false;
+        if (restart)
+        {
+            const auto state = m_Impl->VfxEmitters.find(entityId);
+            if (state != m_Impl->VfxEmitters.end())
+            {
+                if (state->second.Handle)
+                    m_Impl->VfxWorldService->Stop(state->second.Handle);
+                m_Impl->VfxEmitters.erase(state);
+            }
+        }
+        emitter->SetEffect(effect);
+        emitter->SetPlayOnAwake(true);
+        emitter->SetSimulationSpeed(1.0F);
+        emitter->SetEnabled(true);
+        return true;
+    }
+
+    bool SceneRuntimeSession::StopVfx(const EntityId entityId)
+    {
+        if (!m_Impl->Runtime || !m_Impl->VfxWorldService)
+            return false;
+        const auto entity = m_Impl->Runtime->FindEntity(entityId);
+        const auto emitter = entity ? entity.GetComponent<VfxEmitterComponent>() : Ref<VfxEmitterComponent>{};
+        if (!emitter)
+            return false;
+        emitter->SetPlayOnAwake(false);
+        if (const auto state = m_Impl->VfxEmitters.find(entityId); state != m_Impl->VfxEmitters.end())
+        {
+            if (state->second.Handle)
+                m_Impl->VfxWorldService->Stop(state->second.Handle);
+            m_Impl->VfxEmitters.erase(state);
+        }
+        return true;
+    }
+
+    bool SceneRuntimeSession::PauseVfx(const EntityId entityId, const bool paused)
+    {
+        if (!m_Impl->Runtime)
+            return false;
+        const auto entity = m_Impl->Runtime->FindEntity(entityId);
+        const auto emitter = entity ? entity.GetComponent<VfxEmitterComponent>() : Ref<VfxEmitterComponent>{};
+        if (!emitter)
+            return false;
+        emitter->SetSimulationSpeed(paused ? 0.0F : 1.0F);
+        return true;
+    }
+
+    bool SceneRuntimeSession::IsVfxAlive(const EntityId entityId) const noexcept
+    {
+        if (!m_Impl->VfxWorldService)
+            return false;
+        const auto state = m_Impl->VfxEmitters.find(entityId);
+        return state != m_Impl->VfxEmitters.end() && state->second.Handle &&
+               m_Impl->VfxWorldService->IsAlive(state->second.Handle);
+    }
 
     std::vector<ScenePhysicsQueryHit> SceneRuntimeSession::RayCast(const PhysicsRayQuery& query,
                                                                    const EntityId ignoredEntity) const

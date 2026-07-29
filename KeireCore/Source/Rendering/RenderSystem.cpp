@@ -173,7 +173,7 @@ namespace Keire
     {
         const bool rendered = m_Impl->State->Specification.Mode == RenderMode::Rendered && m_Impl->State->Device;
         return {.CpuVfxSimulation = true,
-                .GpuVfxSimulation = false,
+                .GpuVfxSimulation = rendered,
                 .TransparentPass = rendered,
                 .DynamicSpritePackets = rendered,
                 .TexturedSpritePackets = false,

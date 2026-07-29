@@ -1,7 +1,10 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/Audio/AudioImportBackend.h"
+
 #include <doctest/doctest.h>
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -230,6 +233,49 @@ TEST_CASE("audio clip assets preserve encoded streaming payloads without PCM exp
     CHECK(decoded->Clip()->Streaming);
     CHECK(decoded->Clip()->Samples.empty());
     CHECK(decoded->Clip()->EncodedSource == source.EncodedSource);
+}
+
+TEST_CASE("audio importer uses its private backend only after the native fast path rejects a source")
+{
+    bool backendInvoked = false;
+    auto importer = Keire::Detail::CreateAudioClipAssetImporter(
+        [&](const Keire::AssetImportContext&, const std::span<const std::byte>)
+        {
+            backendInvoked = true;
+            Keire::Detail::AudioTranscodeResult result;
+            result.EncodedAudio = {
+                std::byte{0x52}, std::byte{0x49}, std::byte{0x46}, std::byte{0x46}, std::byte{0x26}, std::byte{0x00},
+                std::byte{0x00}, std::byte{0x00}, std::byte{0x57}, std::byte{0x41}, std::byte{0x56}, std::byte{0x45},
+                std::byte{0x66}, std::byte{0x6d}, std::byte{0x74}, std::byte{0x20}, std::byte{0x10}, std::byte{0x00},
+                std::byte{0x00}, std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x01}, std::byte{0x00},
+                std::byte{0x40}, std::byte{0x1f}, std::byte{0x00}, std::byte{0x00}, std::byte{0x80}, std::byte{0x3e},
+                std::byte{0x00}, std::byte{0x00}, std::byte{0x02}, std::byte{0x00}, std::byte{0x10}, std::byte{0x00},
+                std::byte{0x64}, std::byte{0x61}, std::byte{0x74}, std::byte{0x61}, std::byte{0x02}, std::byte{0x00},
+                std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+            };
+            result.SampleRate = 8'000;
+            result.Channels = 1;
+            result.Frames = 1;
+            result.SourceCodec = "test";
+            result.SourceContainer = "test";
+            result.RuntimeEncoding = "PCM WAV";
+            return result;
+        });
+    const std::array invalidSource{std::byte{0xde}, std::byte{0xad}, std::byte{0xbe}, std::byte{0xef}};
+    const auto output = importer.ContextualImport(Keire::AssetImportContext{}, invalidSource);
+
+    REQUIRE(backendInvoked);
+    REQUIRE(output.Diagnostics.size() == 1);
+    CHECK(output.Diagnostics.front().Message.find("PCM WAV") != std::string::npos);
+    const auto transcodeMode = std::ranges::find(importer.ImportOptions, std::string("transcodeMode"),
+                                                 &Keire::AssetImportOptionDescriptor::Key);
+    REQUIRE(transcodeMode != importer.ImportOptions.end());
+    CHECK(std::get<std::string>(transcodeMode->DefaultValue) == "fast");
+    const auto decoded = Keire::AudioClipAsset::Decode(output.Bytes);
+    REQUIRE(decoded);
+    CHECK(decoded->Clip()->SampleRate == 8'000);
+    CHECK(decoded->Clip()->Channels == 1);
+    CHECK(decoded->FrameCount() == 1);
 }
 
 TEST_CASE("scene runtime presentation ignores unchanged viewport assignments")

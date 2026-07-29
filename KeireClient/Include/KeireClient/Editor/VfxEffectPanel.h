@@ -50,6 +50,7 @@ namespace KeireEditor
                                      const std::function<void(Keire::VfxEffectDefinition&)>& operation);
         [[nodiscard]] bool ApplyAction(std::string_view name, const std::function<bool()>& operation);
         void DrawEffectSettings(Keire::UiFrame& ui);
+        void DrawGraphSummary(Keire::UiFrame& ui);
         void DrawModules(Keire::UiFrame& ui);
         void DrawSelectedModule(Keire::UiFrame& ui);
 

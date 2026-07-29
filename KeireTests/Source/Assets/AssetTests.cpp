@@ -854,8 +854,11 @@ TEST_CASE("Asset database preserves metadata identities and produces validated d
     const auto firstCook = Keire::AssetCooker::Cook(*database, {}, project.Root / "CookA");
     const auto secondCook = Keire::AssetCooker::Cook(*database, {}, project.Root / "CookB");
     CHECK(ReadAll(firstCook.CatalogPath) == ReadAll(secondCook.CatalogPath));
-    CHECK(ReadAll(firstCook.CatalogPath.parent_path() / "content-0.keirepak") ==
-          ReadAll(secondCook.CatalogPath.parent_path() / "content-0.keirepak"));
+    const auto firstCookCatalog = Keire::Detail::LoadCatalog(firstCook.CatalogPath);
+    const auto secondCookCatalog = Keire::Detail::LoadCatalog(secondCook.CatalogPath);
+    REQUIRE(!firstCookCatalog.Entries.empty());
+    REQUIRE(!secondCookCatalog.Entries.empty());
+    CHECK(ReadAll(firstCookCatalog.Entries.front().PackPath) == ReadAll(secondCookCatalog.Entries.front().PackPath));
     const auto greeting = database->Find("Greeting.txt");
     REQUIRE(greeting);
     Keire::AssetBuildProfile rootedProfile;
@@ -1188,7 +1191,9 @@ TEST_CASE("Asset handles use fallbacks asynchronously and preserve last-good dat
     CHECK(handle.Revision() == 1);
     CHECK(handle.Require()->Text() == "hello assets");
 
-    const auto pack = imported.CatalogPath.parent_path() / "content-0.keirepak";
+    const auto catalog = Keire::Detail::LoadCatalog(imported.CatalogPath);
+    REQUIRE(!catalog.Entries.empty());
+    const auto pack = catalog.Entries.front().PackPath;
     std::fstream corrupt(pack, std::ios::binary | std::ios::in | std::ios::out);
     corrupt.seekp(16, std::ios::beg);
     corrupt.put('\0');

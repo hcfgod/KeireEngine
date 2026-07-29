@@ -78,6 +78,11 @@ visibility changes, workspace queries, and profile mutations are UI-owner-thread
 Use `SetVisible()` for Window-menu toggles. `BeginPanel()` owns the close button and records visibility changes. Do not
 also submit the same panel through `BeginWindow()`.
 
+Every registered panel receives a common lock control. `SetLocked()` and `Locked()` expose the same owner-thread state
+to custom panels. A locked view cannot be moved, resized, or collapsed; selection-driven panels should also retain
+their current document, entity, or asset context until unlocked. Lock state is intentionally session-local so stale
+objects are never restored across project launches.
+
 ## Layout Workflow
 
 `Layouts()` returns snapshots suitable for menus. Each entry provides its strong ID, name, built-in status, active

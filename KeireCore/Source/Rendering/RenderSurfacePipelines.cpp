@@ -639,10 +639,13 @@ namespace Keire::RenderBackend
             result.Grid = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_LINELIST, false);
             result.Sky = CreateSkyPipeline(samples);
             result.Vfx = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, false, true);
+            result.GpuVfx = CreateGpuVfxPipeline(samples);
             return Pipelines.emplace_back(result);
         }
         catch (...)
         {
+            if (result.GpuVfx)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.GpuVfx);
             if (result.Vfx)
                 SDL_ReleaseGPUGraphicsPipeline(Device, result.Vfx);
             if (result.Grid)

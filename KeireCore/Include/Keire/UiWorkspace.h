@@ -193,7 +193,9 @@ namespace Keire
         [[nodiscard]] std::string_view Id() const noexcept;
         [[nodiscard]] std::string_view Title() const noexcept;
         [[nodiscard]] bool Visible() const noexcept;
+        [[nodiscard]] bool Locked() const noexcept;
         void SetVisible(bool visible);
+        void SetLocked(bool locked);
         void RequestFocus();
 
       private:

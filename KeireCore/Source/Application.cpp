@@ -412,6 +412,14 @@ namespace Keire
                                                             static_cast<double>(statistics.ForwardPlusCacheHits));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ upload bytes",
                                                             static_cast<double>(statistics.ForwardPlusUploadBytes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU worlds",
+                                                            static_cast<double>(statistics.VfxGpuWorlds));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU buffer bytes",
+                                                            static_cast<double>(statistics.VfxGpuBufferBytes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX compute dispatches",
+                                                            static_cast<double>(statistics.VfxComputeDispatches));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX indirect draws",
+                                                            static_cast<double>(statistics.VfxIndirectDraws));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Swapchain wait (ms)",
                                                             statistics.SwapchainWaitMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "UI recording (ms)",

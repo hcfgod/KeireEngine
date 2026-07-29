@@ -1120,8 +1120,9 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 5;
+        result.Version = 8;
         result.Type = MeshAsset::StaticType();
+        result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
         result.ContextualImport = [](const AssetImportContext& context,
                                      const std::span<const std::byte> bytes) -> AssetImportOutput
@@ -1134,6 +1135,7 @@ namespace Keire
                 const auto* value = std::get_if<std::string>(&setting->second);
                 return value ? *value : std::string(fallback);
             };
+            const auto contentType = stringSetting("contentType", "model");
             const auto rigSource = stringSetting("rigSource", "embedded");
             const auto requestedRigProfile = stringSetting("rigProfile", "humanoid");
             const auto requestedSkinning = stringSetting("skinningMethod", "linearBlend");
@@ -1163,13 +1165,17 @@ namespace Keire
             const auto* scene = importer.ReadFileFromMemory(bytes.data(), bytes.size(), flags, extension.c_str());
             if (!scene)
                 throw std::invalid_argument(std::string("Mesh import failed: ") + importer.GetErrorString());
+            const bool animationSource = contentType == "animation";
+            if (animationSource && scene->mNumAnimations == 0)
+                throw std::invalid_argument("Animation Source import found no animation clips in the selected file.");
             bool hasSkinning = false;
             for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
                 hasSkinning = hasSkinning || (scene->mMeshes[meshIndex] && scene->mMeshes[meshIndex]->mNumBones != 0);
-            const bool useEmbeddedSkinning = hasSkinning && rigSource == "embedded";
-            const bool generateRig = rigSource == "generate";
+            const bool useEmbeddedSkinning = hasSkinning && (rigSource == "embedded" || animationSource);
+            const bool useEmbeddedHierarchy = useEmbeddedSkinning || animationSource;
+            const bool generateRig = !animationSource && rigSource == "generate";
             const bool animated = useEmbeddedSkinning || generateRig;
-            if (!animated)
+            if (!animated && !animationSource)
             {
                 scene = importer.ApplyPostProcessing(aiProcess_PreTransformVertices);
                 if (!scene)
@@ -1447,12 +1453,14 @@ namespace Keire
             }
             AssetId skeletonId;
             AssetId skinnedMeshId;
+            AssetId rigId;
+            std::vector<AnimationTakeDescriptor> animationTakes;
             std::vector<SkeletonBone> skeletonBones;
             std::unordered_map<std::string, std::uint16_t> boneIndices;
             std::vector<SkinVertexInfluence8> skinInfluences8;
             SkinningMethod skinningMethod =
                 requestedSkinning == "dualQuaternion" ? SkinningMethod::DualQuaternion : SkinningMethod::LinearBlend;
-            if (useEmbeddedSkinning)
+            if (useEmbeddedHierarchy)
             {
                 if (!context.ResolveSubAssetId)
                     throw std::logic_error("Animated mesh importing requires generated-subasset identities.");
@@ -1480,6 +1488,30 @@ namespace Keire
                         {
                             requiredNodes.insert(node->mName.C_Str());
                             node = node->mParent;
+                        }
+                    }
+                }
+                if (animationSource)
+                {
+                    for (unsigned int animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
+                    {
+                        const auto* animation = scene->mAnimations[animationIndex];
+                        if (!animation)
+                            continue;
+                        for (unsigned int channelIndex = 0; channelIndex < animation->mNumChannels; ++channelIndex)
+                        {
+                            const auto* channel = animation->mChannels[channelIndex];
+                            if (!channel || channel->mNodeName.length == 0)
+                                continue;
+                            const auto* node = scene->mRootNode->FindNode(channel->mNodeName);
+                            if (!node)
+                                throw std::invalid_argument(
+                                    "Animation channel references a node absent from the scene hierarchy.");
+                            while (node)
+                            {
+                                requiredNodes.insert(node->mName.C_Str());
+                                node = node->mParent;
+                            }
                         }
                     }
                 }
@@ -1519,7 +1551,7 @@ namespace Keire
                                                                         : RigProfileType::Humanoid;
                 const auto embeddedRig = InferRigDefinition(embeddedSkeleton, profile, skinningMethod,
                                                             static_cast<std::uint8_t>(requestedInfluences));
-                const auto rigId = context.ResolveSubAssetId("rig/default");
+                rigId = context.ResolveSubAssetId("rig/default");
                 output.SubAssets.push_back({rigId, RigDefinitionAsset::StaticType(), "rig/default", "Rig",
                                             RigDefinitionAsset::Encode(embeddedRig)});
 
@@ -1615,6 +1647,21 @@ namespace Keire
                                                 name,
                                                 AnimationClipAsset::Encode(skeletonId, duration, tracks, {}, true),
                                                 {skeletonId}});
+                    animationTakes.push_back({clipId, name, duration});
+                }
+                if (animationSource)
+                {
+                    if (animationTakes.empty())
+                        throw std::invalid_argument(
+                            "Animation Source import could not map any animation channels to the embedded skeleton.");
+                    output.PrimaryType = AnimationSourceAsset::StaticType();
+                    output.Bytes = AnimationSourceAsset::Encode({1, skeletonId, rigId, std::move(animationTakes)});
+                    output.AssetDependencies.push_back(skeletonId);
+                    output.AssetDependencies.push_back(rigId);
+                    output.Diagnostics.push_back(
+                        {AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                         "Published animation source with stable skeleton, rig, and clip subassets."});
+                    return output;
                 }
                 skinnedMeshId = context.ResolveSubAssetId("skinned-mesh/default");
             }
@@ -1760,7 +1807,7 @@ namespace Keire
                 auto generated = GenerateRig(rigMesh, request);
                 skeletonId = context.ResolveSubAssetId("skeleton/default");
                 skinnedMeshId = context.ResolveSubAssetId("skinned-mesh/default");
-                const auto rigId = context.ResolveSubAssetId("rig/default");
+                rigId = context.ResolveSubAssetId("rig/default");
                 skeletonBones = std::move(generated.Skeleton);
                 skinInfluences8 = std::move(generated.Influences);
                 skinningMethod = generated.Rig.Skinning;
@@ -1794,7 +1841,16 @@ namespace Keire
                                                       {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
             return output;
         };
-        result.ImportOptions = {{"rigSource",
+        result.ImportOptions = {{"contentType",
+                                 "Content",
+                                 "General",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("model"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"model", "animation"}},
+                                {"rigSource",
                                  "Rig Source",
                                  "Rig",
                                  AssetImportOptionKind::Choice,

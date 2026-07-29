@@ -20,6 +20,10 @@ namespace Keire
 
         constexpr std::size_t MaximumDocumentBytes = 4U * 1024U * 1024U;
         constexpr std::size_t MaximumModules = 128;
+        constexpr std::size_t MaximumSystems = 64;
+        constexpr std::size_t MaximumGraphNodes = 4096;
+        constexpr std::size_t MaximumGraphConnections = 16'384;
+        constexpr std::size_t MaximumBlackboardParameters = 1024;
         constexpr std::size_t MaximumBursts = 32;
         constexpr std::size_t MaximumBurstCycles = 1024;
         constexpr std::size_t MaximumNameBytes = 128;
@@ -37,6 +41,15 @@ namespace Keire
         {
             const auto text = object.value(key, std::string{});
             return text.empty() ? AssetId{} : AssetId::Parse(text);
+        }
+
+        [[nodiscard]] AssetId DerivedGraphId(const AssetId source, const std::uint64_t salt) noexcept
+        {
+            auto high = source.High() ^ 0x4752415048564658ULL;
+            auto low = source.Low() ^ salt;
+            high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
+            low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
+            return AssetId(high, low);
         }
 
         [[nodiscard]] Json EncodeVector(const Vector3 value) { return Json::array({value.X, value.Y, value.Z}); }
@@ -390,6 +403,241 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] std::string_view ContextName(const VfxContextType value)
+        {
+            switch (value)
+            {
+            case VfxContextType::Spawn:
+                return "spawn";
+            case VfxContextType::Initialize:
+                return "initialize";
+            case VfxContextType::Update:
+                return "update";
+            case VfxContextType::Output:
+                return "output";
+            case VfxContextType::Event:
+                return "event";
+            }
+            throw std::invalid_argument("VFX context type is unsupported.");
+        }
+
+        [[nodiscard]] VfxContextType ParseContext(const std::string_view value)
+        {
+            if (value == "spawn")
+                return VfxContextType::Spawn;
+            if (value == "initialize")
+                return VfxContextType::Initialize;
+            if (value == "update")
+                return VfxContextType::Update;
+            if (value == "output")
+                return VfxContextType::Output;
+            if (value == "event")
+                return VfxContextType::Event;
+            throw std::runtime_error("VFX context type is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view ValueTypeName(const VfxValueType value)
+        {
+            switch (value)
+            {
+            case VfxValueType::Boolean:
+                return "boolean";
+            case VfxValueType::Integer:
+                return "integer";
+            case VfxValueType::Scalar:
+                return "scalar";
+            case VfxValueType::Vector2:
+                return "vector2";
+            case VfxValueType::Vector3:
+                return "vector3";
+            case VfxValueType::Color:
+                return "color";
+            case VfxValueType::Texture:
+                return "texture";
+            case VfxValueType::Mesh:
+                return "mesh";
+            case VfxValueType::Asset:
+                return "asset";
+            }
+            throw std::invalid_argument("VFX value type is unsupported.");
+        }
+
+        [[nodiscard]] VfxValueType ParseValueType(const std::string_view value)
+        {
+            if (value == "boolean")
+                return VfxValueType::Boolean;
+            if (value == "integer")
+                return VfxValueType::Integer;
+            if (value == "scalar")
+                return VfxValueType::Scalar;
+            if (value == "vector2")
+                return VfxValueType::Vector2;
+            if (value == "vector3")
+                return VfxValueType::Vector3;
+            if (value == "color")
+                return VfxValueType::Color;
+            if (value == "texture")
+                return VfxValueType::Texture;
+            if (value == "mesh")
+                return VfxValueType::Mesh;
+            if (value == "asset")
+                return VfxValueType::Asset;
+            throw std::runtime_error("VFX value type is unsupported.");
+        }
+
+        [[nodiscard]] Json EncodeParameterValue(const VfxBlackboardParameter& parameter)
+        {
+            switch (parameter.Type)
+            {
+            case VfxValueType::Boolean:
+                return std::get<bool>(parameter.DefaultValue);
+            case VfxValueType::Integer:
+                return std::get<std::int64_t>(parameter.DefaultValue);
+            case VfxValueType::Scalar:
+                return std::get<float>(parameter.DefaultValue);
+            case VfxValueType::Vector2:
+            {
+                const auto value = std::get<Vector2>(parameter.DefaultValue);
+                return Json::array({value.X, value.Y});
+            }
+            case VfxValueType::Vector3:
+                return EncodeVector(std::get<Vector3>(parameter.DefaultValue));
+            case VfxValueType::Color:
+                return EncodeColor(std::get<Color>(parameter.DefaultValue));
+            case VfxValueType::Texture:
+            case VfxValueType::Mesh:
+            case VfxValueType::Asset:
+                return IdText(std::get<AssetId>(parameter.DefaultValue));
+            }
+            throw std::invalid_argument("VFX blackboard value type is unsupported.");
+        }
+
+        [[nodiscard]] VfxParameterValue DecodeParameterValue(const VfxValueType type, const Json& value)
+        {
+            switch (type)
+            {
+            case VfxValueType::Boolean:
+                return value.get<bool>();
+            case VfxValueType::Integer:
+                return value.get<std::int64_t>();
+            case VfxValueType::Scalar:
+                return value.get<float>();
+            case VfxValueType::Vector2:
+                if (value.is_array() && value.size() == 2)
+                    return Vector2{value.at(0).get<float>(), value.at(1).get<float>()};
+                break;
+            case VfxValueType::Vector3:
+                return DecodeVector(value);
+            case VfxValueType::Color:
+                return DecodeColor(value);
+            case VfxValueType::Texture:
+            case VfxValueType::Mesh:
+            case VfxValueType::Asset:
+            {
+                const auto text = value.get<std::string>();
+                return text.empty() ? AssetId{} : AssetId::Parse(text);
+            }
+            }
+            throw std::runtime_error("VFX blackboard default value is malformed.");
+        }
+
+        [[nodiscard]] Json EncodeSystems(const std::span<const VfxGraphSystem> systems)
+        {
+            auto encodedSystems = Json::array();
+            for (const auto& system : systems)
+            {
+                auto nodes = Json::array();
+                for (const auto& node : system.Nodes)
+                {
+                    auto pins = Json::array();
+                    for (const auto& pin : node.Pins)
+                        pins.push_back({{"id", IdText(pin.Id)},
+                                        {"name", pin.Name},
+                                        {"type", ValueTypeName(pin.Type)},
+                                        {"input", pin.Input}});
+                    nodes.push_back({{"id", IdText(node.Id)},
+                                     {"type", node.Type},
+                                     {"context", ContextName(node.Context)},
+                                     {"position", Json::array({node.EditorPosition.X, node.EditorPosition.Y})},
+                                     {"pins", std::move(pins)},
+                                     {"customHlsl", node.CustomHlsl}});
+                }
+                auto connections = Json::array();
+                for (const auto& connection : system.Connections)
+                    connections.push_back({{"id", IdText(connection.Id)},
+                                           {"outputNode", IdText(connection.OutputNode)},
+                                           {"outputPin", IdText(connection.OutputPin)},
+                                           {"inputNode", IdText(connection.InputNode)},
+                                           {"inputPin", IdText(connection.InputPin)}});
+                encodedSystems.push_back({{"id", IdText(system.Id)},
+                                          {"name", system.Name},
+                                          {"nodes", std::move(nodes)},
+                                          {"connections", std::move(connections)}});
+            }
+            return encodedSystems;
+        }
+
+        [[nodiscard]] std::vector<VfxGraphSystem> DecodeSystems(const Json& value)
+        {
+            if (!value.is_array())
+                throw std::runtime_error("VFX graph systems must be an array.");
+            std::vector<VfxGraphSystem> systems;
+            for (const auto& encodedSystem : value)
+            {
+                VfxGraphSystem system;
+                system.Id = ParseId(encodedSystem, "id");
+                system.Name = encodedSystem.at("name").get<std::string>();
+                for (const auto& encodedNode : encodedSystem.at("nodes"))
+                {
+                    VfxGraphNode node;
+                    node.Id = ParseId(encodedNode, "id");
+                    node.Type = encodedNode.at("type").get<std::string>();
+                    node.Context = ParseContext(encodedNode.at("context").get<std::string>());
+                    const auto& position = encodedNode.at("position");
+                    node.EditorPosition = {position.at(0).get<float>(), position.at(1).get<float>()};
+                    node.CustomHlsl = encodedNode.value("customHlsl", std::string{});
+                    for (const auto& encodedPin : encodedNode.at("pins"))
+                        node.Pins.push_back({ParseId(encodedPin, "id"), encodedPin.at("name").get<std::string>(),
+                                             ParseValueType(encodedPin.at("type").get<std::string>()),
+                                             encodedPin.value("input", true)});
+                    system.Nodes.push_back(std::move(node));
+                }
+                for (const auto& encodedConnection : encodedSystem.at("connections"))
+                    system.Connections.push_back(
+                        {ParseId(encodedConnection, "id"), ParseId(encodedConnection, "outputNode"),
+                         ParseId(encodedConnection, "outputPin"), ParseId(encodedConnection, "inputNode"),
+                         ParseId(encodedConnection, "inputPin")});
+                systems.push_back(std::move(system));
+            }
+            return systems;
+        }
+
+        [[nodiscard]] std::vector<VfxBlackboardParameter> DecodeBlackboard(const Json& value)
+        {
+            if (!value.is_array())
+                throw std::runtime_error("VFX blackboard must be an array.");
+            std::vector<VfxBlackboardParameter> result;
+            for (const auto& encoded : value)
+            {
+                const auto type = ParseValueType(encoded.at("type").get<std::string>());
+                result.push_back({ParseId(encoded, "id"), encoded.at("name").get<std::string>(), type,
+                                  DecodeParameterValue(type, encoded.at("default")), encoded.value("exposed", true)});
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeBlackboard(const std::span<const VfxBlackboardParameter> parameters)
+        {
+            auto result = Json::array();
+            for (const auto& parameter : parameters)
+                result.push_back({{"id", IdText(parameter.Id)},
+                                  {"name", parameter.Name},
+                                  {"type", ValueTypeName(parameter.Type)},
+                                  {"default", EncodeParameterValue(parameter)},
+                                  {"exposed", parameter.Exposed}});
+            return result;
+        }
+
         template <typename T> [[nodiscard]] bool FiniteRange(const T minimum, const T maximum) noexcept
         {
             return std::isfinite(minimum) && std::isfinite(maximum) && minimum <= maximum;
@@ -439,10 +687,11 @@ namespace Keire
 
     void ValidateVfxEffect(const VfxEffectDefinition& definition)
     {
-        if (definition.SchemaVersion != 1 || !definition.EmitterId || definition.Name.empty() ||
-            definition.Name.size() > MaximumNameBytes || !std::isfinite(definition.Duration) ||
-            definition.Duration < 0.001F || definition.Duration > 3600.0F || definition.Capacity == 0 ||
-            definition.Capacity > 1'000'000 || definition.Modules.empty() || definition.Modules.size() > MaximumModules)
+        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) || !definition.EmitterId ||
+            definition.Name.empty() || definition.Name.size() > MaximumNameBytes ||
+            !std::isfinite(definition.Duration) || definition.Duration < 0.001F || definition.Duration > 3600.0F ||
+            definition.Capacity == 0 || definition.Capacity > 1'000'000 || definition.Modules.empty() ||
+            definition.Modules.size() > MaximumModules)
         {
             throw std::invalid_argument("VFX effect header is invalid.");
         }
@@ -566,6 +815,74 @@ namespace Keire
             throw std::invalid_argument("VFX effect contains an invalid module multiplicity.");
         }
 
+        if (definition.SchemaVersion == 2)
+        {
+            if (definition.Systems.size() > MaximumSystems ||
+                definition.Blackboard.size() > MaximumBlackboardParameters)
+                throw std::invalid_argument("VFX graph system or blackboard count is invalid.");
+            std::size_t nodeCount = 0;
+            std::size_t connectionCount = 0;
+            std::set<std::string> parameterNames;
+            for (const auto& parameter : definition.Blackboard)
+            {
+                const bool valueMatches =
+                    (parameter.Type == VfxValueType::Boolean && std::holds_alternative<bool>(parameter.DefaultValue)) ||
+                    (parameter.Type == VfxValueType::Integer &&
+                     std::holds_alternative<std::int64_t>(parameter.DefaultValue)) ||
+                    (parameter.Type == VfxValueType::Scalar && std::holds_alternative<float>(parameter.DefaultValue)) ||
+                    (parameter.Type == VfxValueType::Vector2 &&
+                     std::holds_alternative<Vector2>(parameter.DefaultValue)) ||
+                    (parameter.Type == VfxValueType::Vector3 &&
+                     std::holds_alternative<Vector3>(parameter.DefaultValue)) ||
+                    (parameter.Type == VfxValueType::Color && std::holds_alternative<Color>(parameter.DefaultValue)) ||
+                    (parameter.Type >= VfxValueType::Texture &&
+                     std::holds_alternative<AssetId>(parameter.DefaultValue));
+                if (!parameter.Id || !stableIds.insert(parameter.Id).second || parameter.Name.empty() ||
+                    parameter.Name.size() > MaximumNameBytes || !parameterNames.insert(parameter.Name).second ||
+                    !valueMatches)
+                    throw std::invalid_argument("VFX blackboard contains an invalid parameter.");
+            }
+            for (const auto& system : definition.Systems)
+            {
+                if (!system.Id || !stableIds.insert(system.Id).second || system.Name.empty() ||
+                    system.Name.size() > MaximumNameBytes)
+                    throw std::invalid_argument("VFX graph contains an invalid system.");
+                nodeCount += system.Nodes.size();
+                connectionCount += system.Connections.size();
+                std::set<AssetId> nodeIds;
+                std::set<AssetId> pinIds;
+                for (const auto& node : system.Nodes)
+                {
+                    if (!node.Id || !stableIds.insert(node.Id).second || !nodeIds.insert(node.Id).second ||
+                        node.Type.empty() || node.Type.size() > MaximumNameBytes ||
+                        !Math::IsFinite(node.EditorPosition) || node.CustomHlsl.size() > MaximumDocumentBytes)
+                        throw std::invalid_argument("VFX graph contains an invalid node.");
+                    for (const auto& pin : node.Pins)
+                        if (!pin.Id || !stableIds.insert(pin.Id).second || !pinIds.insert(pin.Id).second ||
+                            pin.Name.empty() || pin.Name.size() > MaximumNameBytes || pin.Type > VfxValueType::Asset)
+                            throw std::invalid_argument("VFX graph contains an invalid pin.");
+                }
+                const auto findPin = [&system](const AssetId nodeId, const AssetId pinId) -> const VfxGraphPin*
+                {
+                    const auto node = std::ranges::find(system.Nodes, nodeId, &VfxGraphNode::Id);
+                    if (node == system.Nodes.end())
+                        return nullptr;
+                    const auto pin = std::ranges::find(node->Pins, pinId, &VfxGraphPin::Id);
+                    return pin == node->Pins.end() ? nullptr : std::addressof(*pin);
+                };
+                for (const auto& connection : system.Connections)
+                {
+                    const auto* output = findPin(connection.OutputNode, connection.OutputPin);
+                    const auto* input = findPin(connection.InputNode, connection.InputPin);
+                    if (!connection.Id || !stableIds.insert(connection.Id).second || !output || !input ||
+                        output->Input || !input->Input || output->Type != input->Type)
+                        throw std::invalid_argument("VFX graph contains an invalid connection.");
+                }
+            }
+            if (nodeCount > MaximumGraphNodes || connectionCount > MaximumGraphConnections)
+                throw std::invalid_argument("VFX graph exceeds its bounded complexity limits.");
+        }
+
         const auto hasEnabledEmission = std::ranges::any_of(
             definition.Modules,
             [](const VfxModuleDefinition& module)
@@ -606,8 +923,52 @@ namespace Keire
                 },
                 module.Payload);
         }
+        for (const auto& parameter : definition.Blackboard)
+            if (const auto* asset = std::get_if<AssetId>(&parameter.DefaultValue); asset && *asset)
+                result.push_back(*asset);
         std::ranges::sort(result);
         result.erase(std::unique(result.begin(), result.end()), result.end());
+        return result;
+    }
+
+    VfxCompiledProgram CompileVfxEffect(const VfxEffectDefinition& definition, const VfxBackend backend)
+    {
+        VfxCompiledProgram result;
+        result.Backend = backend;
+        try
+        {
+            ValidateVfxEffect(definition);
+            result.CanonicalIr = VfxEffectAsset::Encode(definition);
+            std::uint64_t hash = 1469598103934665603ULL;
+            for (const auto value : result.CanonicalIr)
+            {
+                hash ^= std::to_integer<std::uint8_t>(value);
+                hash *= 1099511628211ULL;
+            }
+            result.Hash = hash;
+            if (backend == VfxBackend::Cpu)
+            {
+                for (const auto& system : definition.Systems)
+                    for (const auto& node : system.Nodes)
+                        if (!node.CustomHlsl.empty())
+                            result.Diagnostics.push_back(
+                                {VfxCompileDiagnosticSeverity::Warning, node.Id,
+                                 "Custom HLSL is unavailable in the deterministic CPU compatibility backend."});
+                for (const auto& module : definition.Modules)
+                {
+                    if (const auto* collision = std::get_if<VfxCollisionModule>(&module.Payload);
+                        collision && collision->Mode == VfxCollisionMode::GpuDepth)
+                        result.Diagnostics.push_back(
+                            {VfxCompileDiagnosticSeverity::Warning, module.Id,
+                             "GPU depth collision degrades to the configured CPU collision query."});
+                }
+            }
+            result.Valid = true;
+        }
+        catch (const std::exception& error)
+        {
+            result.Diagnostics.push_back({VfxCompileDiagnosticSeverity::Error, {}, error.what()});
+        }
         return result;
     }
 
@@ -644,6 +1005,15 @@ namespace Keire
             {AssetId(0x5646584445464155ULL, 6), true, VfxColorOverLifetimeModule{}},
             {AssetId(0x5646584445464155ULL, 7), true, VfxRendererModule{}},
         };
+        definition.Systems = {
+            {AssetId(0x5646584445464155ULL, 8),
+             "Particle System",
+             {{AssetId(0x5646584445464155ULL, 9), "Spawn Context", VfxContextType::Spawn, {0.0F, 0.0F}},
+              {AssetId(0x5646584445464155ULL, 10), "Initialize Context", VfxContextType::Initialize, {280.0F, 0.0F}},
+              {AssetId(0x5646584445464155ULL, 11), "Update Context", VfxContextType::Update, {560.0F, 0.0F}},
+              {AssetId(0x5646584445464155ULL, 12), "Output Context", VfxContextType::Output, {840.0F, 0.0F}}},
+             {}},
+        };
         return definition;
     }
 
@@ -657,10 +1027,12 @@ namespace Keire
         {
             const auto document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                               reinterpret_cast<const char*>(bytes.data() + bytes.size()));
-            if (!document.is_object() || document.value("schemaVersion", 0U) != 1U)
+            const auto schemaVersion = document.value("schemaVersion", 0U);
+            if (!document.is_object() || (schemaVersion != 1U && schemaVersion != 2U))
                 throw std::runtime_error("VFX effect asset has an unsupported schema.");
 
             VfxEffectDefinition definition;
+            definition.SchemaVersion = schemaVersion;
             definition.EmitterId = ParseId(document, "emitterId");
             definition.Name = document.value("name", std::string("VFX Effect"));
             definition.Loop = document.value("loop", false);
@@ -674,6 +1046,11 @@ namespace Keire
             definition.Modules.reserve(modules.size());
             for (const auto& module : modules)
                 definition.Modules.push_back(DecodeModule(module));
+            if (schemaVersion == 2)
+            {
+                definition.Systems = DecodeSystems(document.at("systems"));
+                definition.Blackboard = DecodeBlackboard(document.value("blackboard", Json::array()));
+            }
             return CreateRef<VfxEffectAsset>(std::move(definition));
         }
         catch (const Json::exception& error)
@@ -684,19 +1061,39 @@ namespace Keire
 
     std::vector<std::byte> VfxEffectAsset::Encode(const VfxEffectDefinition& definition)
     {
-        ValidateVfxEffect(definition);
+        auto published = definition;
+        published.SchemaVersion = 2;
+        if (published.Systems.empty())
+        {
+            const auto systemId = DerivedGraphId(published.EmitterId, 1);
+            published.Systems = {
+                {systemId,
+                 "Migrated Particle System",
+                 {{DerivedGraphId(published.EmitterId, 2), "Spawn Context", VfxContextType::Spawn, {0.0F, 0.0F}},
+                  {DerivedGraphId(published.EmitterId, 3),
+                   "Initialize Context",
+                   VfxContextType::Initialize,
+                   {280.0F, 0.0F}},
+                  {DerivedGraphId(published.EmitterId, 4), "Update Context", VfxContextType::Update, {560.0F, 0.0F}},
+                  {DerivedGraphId(published.EmitterId, 5), "Output Context", VfxContextType::Output, {840.0F, 0.0F}}},
+                 {}},
+            };
+        }
+        ValidateVfxEffect(published);
         auto modules = Json::array();
-        for (const auto& module : definition.Modules)
+        for (const auto& module : published.Modules)
             modules.push_back(EncodeModule(module));
-        const Json document{{"schemaVersion", definition.SchemaVersion},
-                            {"emitterId", IdText(definition.EmitterId)},
-                            {"name", definition.Name},
-                            {"loop", definition.Loop},
-                            {"duration", definition.Duration},
-                            {"space", SpaceName(definition.Space)},
-                            {"seed", definition.Seed},
-                            {"capacity", definition.Capacity},
-                            {"modules", std::move(modules)}};
+        const Json document{{"schemaVersion", 2},
+                            {"emitterId", IdText(published.EmitterId)},
+                            {"name", published.Name},
+                            {"loop", published.Loop},
+                            {"duration", published.Duration},
+                            {"space", SpaceName(published.Space)},
+                            {"seed", published.Seed},
+                            {"capacity", published.Capacity},
+                            {"modules", std::move(modules)},
+                            {"systems", EncodeSystems(published.Systems)},
+                            {"blackboard", EncodeBlackboard(published.Blackboard)}};
         const auto encoded = document.dump(2);
         std::vector<std::byte> result(encoded.size());
         std::memcpy(result.data(), encoded.data(), encoded.size());
@@ -707,7 +1104,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.VfxEffect";
-        result.Version = 1;
+        result.Version = 2;
         result.Type = VfxEffectAsset::StaticType();
         result.Extensions = {".keirevfx"};
         result.Import = [](const std::span<const std::byte> bytes)

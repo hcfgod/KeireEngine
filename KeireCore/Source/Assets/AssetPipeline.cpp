@@ -206,7 +206,7 @@ namespace Keire
         bool failed = false;
         std::size_t completed = 0;
         std::vector<std::pair<AssetId, std::uint32_t>> metadataUpgrades;
-        for (const auto& record : records)
+        for (auto record : records)
         {
             ThrowIfOperationCancelled(cancellation);
             AssetImportStatus status;
@@ -218,6 +218,11 @@ namespace Keire
                 auto imported = validated  ? std::move(*validated)
                                 : restored ? std::move(*restored)
                                            : m_Impl->Import(record);
+                const auto effectiveType = imported.PrimaryType.value_or(record.Type);
+                UpdateMetadataImportOutput(record.MetadataPath, effectiveType, imported.SubAssets);
+                record.Type = effectiveType;
+                const auto metadataBytes = ReadSource(record.MetadataPath, 16U * 1024U * 1024U);
+                record.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
                 status.Diagnostics = imported.Diagnostics;
                 for (const auto& diagnostic : status.Diagnostics)
                     LogImportDiagnostic(record, diagnostic);
@@ -228,6 +233,8 @@ namespace Keire
                     {
                         stored->SourceDependencies = imported.SourceDependencies;
                         stored->Metadata = imported.Metadata;
+                        stored->Type = effectiveType;
+                        stored->MetadataDigest = record.MetadataDigest;
                         stored->SubAssets.clear();
                         stored->SubAssets.reserve(imported.SubAssets.size());
                         for (const auto& subAsset : imported.SubAssets)
@@ -240,7 +247,6 @@ namespace Keire
                         std::ranges::sort(stored->Dependencies);
                     }
                 }
-                UpdateMetadataSubAssets(record.MetadataPath, imported.SubAssets);
                 const auto object = m_Impl->ObjectPath(record, m_Impl->ImportDigest(record, imported));
                 if (std::filesystem::exists(object))
                 {

@@ -56,6 +56,25 @@ namespace
         return result;
     }
 
+    TEST_CASE("Character controller deserialization repairs missing and empty runtime IDs")
+    {
+        const auto registration = Keire::CreateCharacterControllerComponentRegistration();
+
+        const auto missingIdComponent = registration.Factory();
+        REQUIRE(static_cast<bool>(missingIdComponent));
+        CHECK_NOTHROW(registration.Deserialize(*missingIdComponent, {}, registration.SchemaVersion));
+        CHECK(static_cast<bool>(
+            dynamic_cast<const Keire::CharacterControllerComponent&>(*missingIdComponent).RuntimeId()));
+
+        const Keire::ComponentPropertyBag legacyValues{{"runtimeId", Keire::AssetId{}}};
+        const auto migratedValues = registration.Migrate(legacyValues, 1);
+        const auto migratedComponent = registration.Factory();
+        REQUIRE(static_cast<bool>(migratedComponent));
+        CHECK_NOTHROW(registration.Deserialize(*migratedComponent, migratedValues, registration.SchemaVersion));
+        CHECK(static_cast<bool>(
+            dynamic_cast<const Keire::CharacterControllerComponent&>(*migratedComponent).RuntimeId()));
+    }
+
     struct PhysicsLifecycleProbeState
     {
         Keire::SceneRuntimeSession* Session = nullptr;

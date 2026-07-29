@@ -11,17 +11,22 @@ namespace KeireEditor
 {
     namespace
     {
+        [[nodiscard]] bool IsModelRecord(const Keire::AssetSourceRecord& record) noexcept
+        {
+            return record.Importer == "Keire.Mesh" || record.Importer == "Keire.Model";
+        }
+
         [[nodiscard]] const Keire::AssetSourceRecord*
         FindModelRecord(const std::span<const Keire::AssetSourceRecord> records, const Keire::AssetId selected)
         {
             const auto direct = std::ranges::find(records, selected, &Keire::AssetSourceRecord::Id);
-            if (direct != records.end() && direct->Importer == "Keire.Model")
+            if (direct != records.end() && IsModelRecord(*direct))
                 return &*direct;
             const auto parent =
                 std::ranges::find_if(records,
                                      [selected](const auto& record)
                                      {
-                                         return record.Importer == "Keire.Model" &&
+                                         return IsModelRecord(record) &&
                                                 std::ranges::find(record.SubAssets, selected) != record.SubAssets.end();
                                      });
             return parent == records.end() ? nullptr : &*parent;
@@ -83,7 +88,7 @@ namespace KeireEditor
                 std::ranges::find_if(records,
                                      [subAsset](const auto& record)
                                      {
-                                         return record.Importer == "Keire.Model" &&
+                                         return IsModelRecord(record) &&
                                                 std::ranges::find(record.SubAssets, subAsset) != record.SubAssets.end();
                                      });
             return found == records.end() ? nullptr : &*found;
@@ -100,9 +105,41 @@ namespace KeireEditor
         if (auto panel = ui.BeginPanel(m_Registration); panel)
         {
             const auto records = m_Controller.RiggingStudioRecords();
-            const auto* model = FindModelRecord(records, m_Controller.RiggingStudioSelectedAsset());
+            const auto selectedAsset = m_Controller.RiggingStudioSelectedAsset();
+            const auto* selectedModel = FindModelRecord(records, selectedAsset);
+            const Keire::AssetSourceRecord* model = nullptr;
+            if (m_Registration.Locked())
+            {
+                if (!m_LockedAsset)
+                    m_LockedAsset = selectedModel ? selectedModel->Id : m_DraftAsset;
+                model = FindModelRecord(records, m_LockedAsset);
+                if (!model)
+                {
+                    m_Registration.SetLocked(false);
+                    m_LockedAsset = {};
+                }
+            }
+            if (!m_Registration.Locked())
+            {
+                m_LockedAsset = {};
+                model = selectedModel;
+                if (!model && !selectedAsset && ui.WindowFocused() && m_DraftAsset)
+                    model = FindModelRecord(records, m_DraftAsset);
+                if (!model && !ui.WindowFocused())
+                {
+                    m_DraftAsset = {};
+                    m_Draft.clear();
+                    m_Dirty = false;
+                    m_Message.clear();
+                }
+            }
             const auto& theme = m_Controller.RiggingStudioTheme();
             ui.TextColored(theme.Accent, "RIGGING STUDIO");
+            if (m_Registration.Locked())
+            {
+                ui.SameLine();
+                ui.TextColored(theme.MutedText, "PINNED");
+            }
             ui.TextColored(theme.MutedText,
                            "Generate, validate, and publish a deterministic runtime skeleton and skin cache.");
             ui.Separator();
@@ -288,7 +325,7 @@ namespace KeireEditor
                 std::vector<ClipChoice> clips;
                 for (const auto& candidate : records)
                 {
-                    if (candidate.Importer != "Keire.Model")
+                    if (!IsModelRecord(candidate))
                         continue;
                     const auto animation = DescribeModelAnimation(candidate, *assets);
                     for (const auto clip : animation.Clips)

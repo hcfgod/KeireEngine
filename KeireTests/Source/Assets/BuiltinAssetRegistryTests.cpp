@@ -34,6 +34,22 @@ TEST_CASE("Built-in asset registration is deterministic and covers authored prod
     CHECK(extensions.contains(".keirephysicsmaterial"));
     CHECK(extensions.contains(".keiredata"));
     CHECK(extensions.contains(".keirevfx"));
+    CHECK(extensions.contains(".mp3"));
+    CHECK(extensions.contains(".aac"));
+    CHECK(extensions.contains(".m4a"));
+    CHECK(extensions.contains(".mp4"));
+    CHECK(extensions.contains(".mkv"));
+    CHECK(extensions.contains(".webm"));
+    CHECK(extensions.contains(".opus"));
+    CHECK(extensions.contains(".wma"));
+    CHECK(extensions.contains(".aiff"));
+    CHECK(std::ranges::any_of(firstImporters,
+                              [](const Keire::AssetImporterRegistration& value)
+                              {
+                                  return std::ranges::find(value.CompatibleTypes,
+                                                           Keire::AnimationSourceAsset::StaticType()) !=
+                                         value.CompatibleTypes.end();
+                              }));
 
     auto decoders = Keire::CreateBuiltinAssetDecoders();
     const auto originalSize = decoders.size();
@@ -41,6 +57,8 @@ TEST_CASE("Built-in asset registration is deterministic and covers authored prod
     CHECK(decoders.size() == originalSize);
     CHECK(std::ranges::any_of(decoders, [](const Keire::AssetDecoderRegistration& value)
                               { return value.Type == Keire::AnimationGraphAsset::StaticType(); }));
+    CHECK(std::ranges::any_of(decoders, [](const Keire::AssetDecoderRegistration& value)
+                              { return value.Type == Keire::AnimationSourceAsset::StaticType(); }));
     CHECK(std::ranges::any_of(decoders, [](const Keire::AssetDecoderRegistration& value)
                               { return value.Type == Keire::AvatarMaskAsset::StaticType(); }));
     CHECK(std::ranges::any_of(decoders, [](const Keire::AssetDecoderRegistration& value)

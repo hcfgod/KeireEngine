@@ -109,6 +109,10 @@ namespace Keire
             return PlayManagedAudio(playback.Entity, playback.Clip, playback.Gain);
         }
         [[nodiscard]] virtual bool StopManagedAudio(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool PlayManagedVfx(AssetId, AssetId, bool) noexcept { return false; }
+        [[nodiscard]] virtual bool StopManagedVfx(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool PauseManagedVfx(AssetId, bool) noexcept { return false; }
+        [[nodiscard]] virtual bool IsManagedVfxAlive(AssetId) const noexcept { return false; }
         [[nodiscard]] virtual bool SetManagedUiText(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ConsumeManagedUiClick(AssetId) noexcept { return false; }
     };

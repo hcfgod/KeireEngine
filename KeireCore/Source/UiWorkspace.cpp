@@ -54,6 +54,7 @@ namespace Keire
             bool Visible = true;
             bool DefaultVisible = true;
             bool FocusRequested = false;
+            bool Locked = false;
         };
 
         struct PanelRegistry
@@ -507,6 +508,16 @@ namespace Keire
         return false;
     }
 
+    bool UiPanelRegistration::Locked() const noexcept
+    {
+        if (!m_Impl)
+            return false;
+        if (const auto registry = m_Impl->Registry.lock();
+            registry && registry->Alive && registry->Panels.contains(m_Impl->Id))
+            return registry->Panels.at(m_Impl->Id).Locked;
+        return false;
+    }
+
     void UiPanelRegistration::SetVisible(const bool visible)
     {
         if (!m_Impl)
@@ -523,6 +534,18 @@ namespace Keire
             registry->Visibility[panel.Id] = visible;
             registry->VisibilityDirty = true;
         }
+    }
+
+    void UiPanelRegistration::SetLocked(const bool locked)
+    {
+        if (!m_Impl)
+            throw std::logic_error("The UI panel registration is empty.");
+        const auto registry = m_Impl->Registry.lock();
+        if (!registry || !registry->Alive || !registry->Panels.contains(m_Impl->Id))
+            throw std::logic_error("The UI panel registration is no longer active.");
+        if (std::this_thread::get_id() != registry->OwnerThread)
+            throw std::logic_error("UiPanelRegistration::SetLocked must run on the UI owner thread.");
+        registry->Panels.at(m_Impl->Id).Locked = locked;
     }
 
     void UiPanelRegistration::RequestFocus()

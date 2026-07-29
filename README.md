@@ -259,15 +259,17 @@ data plus an inspection graph, and integrates with revisioned synchronous/asynch
 Published meshes, async cancellation/stale rejection, dynamic obstacle invalidation, and deterministic dependency
 hashes remain middleware-free public contracts.
 
-FBX/glTF/GLB import emits stable skeleton, semantic rig, skinned-mesh, and animation-clip subassets with normalized
-four/eight-influence weights. Embedded Mixamo, Blender, Unreal, humanoid, biped, and quadruped naming is mapped
+FBX/glTF/GLB import can be marked **Animation Source** in the Import Assets dialog and emits stable skeleton,
+semantic-rig, skinned-mesh, and animation-clip subassets with normalized four/eight-influence weights. Embedded Mixamo,
+Blender, Unreal, humanoid, biped, and quadruped naming is mapped
 deterministically; models without a rig can generate one from a non-destructive import preset. Open **Window > Rigging
 Studio** to change the rig source/profile/skinning method, inspect semantic mappings and generated subassets, and bake
 retargeted `.keireanim` clips. See [Animation and Rigging](docs/AnimationRigging.md) for the complete workflow.
 
 Animation graph assets, animator sampling, transitions, root motion, events, skin palettes, two-bone IK, and FABRIK are
 exposed through first-party types. Create an **Animator Controller** from the Project panel, double-click it to open the
-dockable state-machine editor, then drag imported animation clips onto the graph. Parameters, layers, entry states,
+dockable state-machine editor, then drag imported clips, Animation Sources, or animated models onto the graph. Source
+and model drops expand their generated clip subassets into states. Parameters, layers, entry states,
 transitions, conditions, blend trees, avatar masks, node layout, validation, and undo/redo are authored without editing
 JSON. Managed scripts can set or query typed parameters and layer weights and submit named IK goals through `Animator`.
 The sample project includes a
@@ -280,11 +282,29 @@ shapes, initialization, forces, size curves, color gradients, collision, and spr
 reload, diagnostics, and immutable debug/render snapshots. The deterministic CPU path is active on every backend;
 GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
 Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed; textured
-sprites, ribbons, decals, and GPU simulation are later VFX slices. Double-click a VFX asset to author its ordered
+the deterministic compatibility backend. GPU compute simulation and indirect sprite output are active; ribbons,
+decals, mesh particles, and volumetrics remain explicit advanced-output slices. Double-click a VFX asset to author its
 modules, curves, and gradients in a dockable typed document; live scene preview remains explicitly unavailable until
 the editor owns a transient preview-world boundary.
 
 ## Windowing And Configuration
+
+### GPU VFX runtime
+
+VFX effects publish schema-v2 graph documents with stable systems, nodes, pins, connections, contexts, and typed
+blackboard parameters. Opening or previewing a schema-v1 module effect is non-destructive; the compatibility adapter
+publishes schema v2 only when the user saves. Render-capable scene sessions use persistent structure-of-arrays GPU
+buffers, free/alive lists, compute spawn/update/compaction, and indirect sprite draws. Headless sessions and unsupported
+features use the deterministic bounded CPU backend and report degradation instead of silently changing behavior.
+
+The VFX Effect panel exposes graph topology plus separate **Compile Graph** and **Validate CPU Fallback** actions.
+`VfxEmitterComponent` provides quality, culling, bounds, seed, speed, Play On Awake, Edit Mode preview, and
+auto-destroy authoring. Managed scripts can control emitters through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`,
+`Vfx.Restart`, `Vfx.Stop`, and generation-safe `VfxEmitterHandle` values.
+
+Animation-only FBX/glTF imports now publish `AnimationSourceAsset` as their effective primary type and retain stable
+skeleton, rig, and clip subasset IDs. They never pass through mesh vertex validation. Reimport changes metadata,
+catalog type, dependencies, and generated subassets as one publication, retaining the last-good asset on failure.
 
 ## Runtime UI And Audio
 
@@ -451,6 +471,13 @@ model-folder drops preserve supported models and textures while ignoring unrelat
 publish immutable content-addressed packs, so active Scene/Game loads do not block catalog replacement on Windows.
 horizontal/vertical cubemap cross or strip atlases. Assimp and stb remain private implementation dependencies; their
 headers are not required by engine or SDK consumers.
+
+Audio clips import from WAV, Ogg Vorbis, FLAC, and MP3 natively. AAC, Opus, WMA, AIFF, WebM, MP4, MKV, MOV, M4A, and
+other registered codec/container sources are transcoded losslessly through the engine's private FFmpeg libraries.
+The default `fast` mode streams PCM WAV and avoids compression work; `compressed` emits FLAC, and oversized sources
+automatically use FLAC to stay within bounded memory and asset sizes.
+Project generation source-builds the locked LGPL FFmpeg revision; no system FFmpeg executable or temporary transcode
+file is used. Native sources keep the miniaudio fast path, while converted results are restored from the importer cache.
 
 Model import publishes referenced materials and embedded images as generated sub-assets with stable IDs, so mesh slots,
 PBR factors, alpha/double-sided state, and texture dependencies cook as one graph. Right-click an imported model in the

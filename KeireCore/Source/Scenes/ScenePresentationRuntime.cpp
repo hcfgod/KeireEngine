@@ -26,6 +26,7 @@ namespace Keire
         {
             AssetId Clip;
             AssetHandle<AudioClipAsset> Handle;
+            std::shared_ptr<const AudioClipData> LoadedClip;
             AudioVoiceId Voice;
             bool ManualPlayRequested = false;
             bool PlayOnAwakeConsumed = false;
@@ -290,10 +291,20 @@ namespace Keire
                     ++pending;
                 if (!playing || !entity.ActiveInHierarchy() || !source->Enabled() || !clip)
                 {
+                    if (playing && clip == nullptr && state.Voice)
+                        state.ManualPlayRequested = true;
                     StopVoice(state);
                     continue;
                 }
-                auto specification = PlaybackRequest(entity, *source, clip->Clip());
+                const auto loadedClip = clip->Clip();
+                if (state.LoadedClip != loadedClip)
+                {
+                    const bool resume = static_cast<bool>(state.Voice);
+                    StopVoice(state);
+                    state.LoadedClip = loadedClip;
+                    state.ManualPlayRequested = state.ManualPlayRequested || resume;
+                }
+                auto specification = PlaybackRequest(entity, *source, state.LoadedClip);
                 if (state.Voice)
                 {
                     if (Audio->SetVoice(state.Voice, specification))

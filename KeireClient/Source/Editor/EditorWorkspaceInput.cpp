@@ -205,6 +205,63 @@ bool EditorWorkspaceLayer::StopManagedAudio(const Keire::AssetId entity) noexcep
     }
 }
 
+bool EditorWorkspaceLayer::PlayManagedVfx(const Keire::AssetId entity, const Keire::AssetId effect,
+                                          const bool restart) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return session && session->PlayVfx(Keire::EntityId(entity), effect, restart);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::StopManagedVfx(const Keire::AssetId entity) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return session && session->StopVfx(Keire::EntityId(entity));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::PauseManagedVfx(const Keire::AssetId entity, const bool paused) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return session && session->PauseVfx(Keire::EntityId(entity), paused);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::IsManagedVfxAlive(const Keire::AssetId entity) const noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return session && session->IsVfxAlive(Keire::EntityId(entity));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 bool EditorWorkspaceLayer::SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept
 {
     try

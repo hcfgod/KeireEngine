@@ -815,6 +815,10 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.ForwardPlusUploadBytes) + " Forward+ bytes / " +
                         std::to_string(statistics.ForwardPlusBufferReallocations) + " buffer reallocations / " +
                         std::to_string(statistics.ForwardPlusCacheHits) + " cache hits");
+                ui.Text("GPU VFX " + std::to_string(statistics.VfxGpuWorlds) + " worlds / " +
+                        std::to_string(statistics.VfxComputeDispatches) + " dispatches / " +
+                        std::to_string(statistics.VfxIndirectDraws) + " indirect draws / " +
+                        std::to_string(statistics.VfxGpuBufferBytes) + " bytes");
                 ui.TextColored(
                     statistics.GpuTimingSupported ? m_Theme.Success : m_Theme.MutedText,
                     statistics.GpuTimingSupported

@@ -1,0 +1,13 @@
+{
+  "dependencies": [],
+  "id": "765d2c1e-a267-444d-b7ab-7c1f72580b24",
+  "importSettings": {
+    "audioStream": 0,
+    "transcodeMode": "fast"
+  },
+  "importer": "Keire.AudioClip",
+  "importerVersion": 7,
+  "schemaVersion": 1,
+  "subAssets": [],
+  "type": "4b454952-4541-5544-494f-434c49500001"
+}

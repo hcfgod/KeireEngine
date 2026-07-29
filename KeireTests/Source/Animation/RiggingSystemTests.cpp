@@ -49,6 +49,33 @@ TEST_CASE("Auto rig generation is deterministic and emits normalized four or eig
             total += influence.Weights[index];
         CHECK(total == doctest::Approx(1.0F));
     }
+
+    const auto meshId = Keire::AssetId::Generate();
+    const auto skeletonId = Keire::AssetId::Generate();
+    const auto decoded = Keire::SkinnedMeshAsset::Decode(
+        Keire::SkinnedMeshAsset::Encode(meshId, skeletonId, first.Influences, Keire::SkinningMethod::DualQuaternion));
+    CHECK(decoded->Mesh() == meshId);
+    CHECK(decoded->Skeleton() == skeletonId);
+    CHECK(decoded->Method() == Keire::SkinningMethod::DualQuaternion);
+    CHECK(decoded->MaximumInfluences() == 8);
+    REQUIRE(decoded->Influences8().size() == first.Influences.size());
+    for (std::size_t index = 0; index < first.Influences.size(); ++index)
+        CHECK(decoded->Influences8()[index] == first.Influences[index]);
+}
+
+TEST_CASE("Animator controller authoring permits an empty layer before its first state")
+{
+    Keire::AnimationGraphDefinition definition;
+    definition.SchemaVersion = 2;
+    Keire::AnimationLayerDefinition layer;
+    layer.Id = "base-layer";
+    layer.Name = "Base Layer";
+    definition.Layers.push_back(std::move(layer));
+
+    const auto decoded = Keire::AnimationGraphAsset::Decode(Keire::AnimationGraphAsset::Encode(definition));
+    REQUIRE(decoded->Definition().Layers.size() == 1);
+    CHECK(decoded->Definition().Layers.front().States.empty());
+    CHECK(decoded->Definition().Layers.front().EntryStateId.empty());
 }
 
 TEST_CASE("Rig definitions round trip semantic chains and reject invalid parent order")
@@ -62,6 +89,32 @@ TEST_CASE("Rig definitions round trip semantic chains and reject invalid parent 
     auto invalid = generated.Rig;
     invalid.Bones.front().Parent = 0;
     CHECK_THROWS_AS(Keire::ValidateRigDefinition(invalid), std::invalid_argument);
+}
+
+TEST_CASE("Animation retargeting applies source deltas to the target bind pose")
+{
+    const std::vector<Keire::SkeletonBone> sourceBones{{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                       {"Hips", 0, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const std::vector<Keire::SkeletonBone> targetBones{{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                       {"Pelvis", 0, {{2.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset sourceSkeleton(sourceBones);
+    const Keire::SkeletonAsset targetSkeleton(targetBones);
+    const auto sourceRig = Keire::InferRigDefinition(sourceSkeleton);
+    const auto targetRig = Keire::InferRigDefinition(targetSkeleton);
+    const auto sourceSkeletonId = Keire::AssetId::Generate();
+    const auto targetSkeletonId = Keire::AssetId::Generate();
+    const Keire::AnimationClipAsset sourceClip(sourceSkeletonId, 1.0F,
+                                               {{1, {{0.0F, {{1.0F, 3.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}}}}});
+
+    const auto retargeted = Keire::RetargetAnimationClip(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
+                                                         targetSkeleton, targetRig);
+
+    REQUIRE(retargeted);
+    CHECK(retargeted->Skeleton() == targetSkeletonId);
+    REQUIRE(retargeted->Tracks().size() == 1);
+    CHECK(retargeted->Tracks().front().Bone == 1);
+    REQUIRE(retargeted->Tracks().front().Keys.size() == 1);
+    CHECK((retargeted->Tracks().front().Keys.front().Value.Translation == Keire::Vector3{3.0F, 1.0F, 0.0F}));
 }
 
 TEST_CASE("Two bone and FABRIK solvers reject malformed chains and move valid chains toward targets")

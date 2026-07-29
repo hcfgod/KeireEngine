@@ -193,8 +193,9 @@ namespace
     {
       public:
         InspectorPropertyEditor(Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> assets,
+                                const Keire::Ref<Keire::AssetSystem>& assetSystem,
                                 const Keire::Ref<Keire::Scene>& scene, KeireEditor::AssetPicker& assetPicker)
-            : m_Ui(ui), m_Assets(assets), m_Scene(scene), m_AssetPicker(assetPicker)
+            : m_Ui(ui), m_Assets(assets), m_AssetSystem(assetSystem), m_Scene(scene), m_AssetPicker(assetPicker)
         {
         }
 
@@ -283,6 +284,9 @@ namespace
             KeireEditor::AssetPickerOptions options;
             options.Label = label;
             options.ExpectedType = expectedType;
+            if (m_AssetSystem)
+                options.ResolveType = [assets = m_AssetSystem](const Keire::AssetId id)
+                { return assets->TryGetType(id); };
             const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);
             if (changed)
                 m_EditBoundary = true;
@@ -462,6 +466,7 @@ namespace
 
         Keire::UiFrame& m_Ui;
         std::span<const Keire::AssetSourceRecord> m_Assets;
+        Keire::Ref<Keire::AssetSystem> m_AssetSystem;
         Keire::Ref<Keire::Scene> m_Scene;
         KeireEditor::AssetPicker& m_AssetPicker;
         std::optional<std::vector<Keire::Entity>> m_EntityCache;
@@ -487,24 +492,35 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
     const auto& theme = m_Controller.InspectorTheme();
     const auto records = m_Controller.InspectorAssetRecords();
     const auto assets = m_Controller.InspectorAssetSystem();
+    const auto database = m_Controller.InspectorAssetDatabase();
     const auto scene = sceneDocument.ActiveScene();
-    if (m_Locked && (!scene || !m_LockedEntity || !scene->FindEntity(Keire::EntityId(m_LockedEntity))))
+    const auto selectedAsset = m_Controller.InspectorSelectedAsset();
+    if (!m_Registration.Locked())
     {
-        m_Locked = false;
         m_LockedEntity = {};
+        m_LockedAsset = {};
     }
-    const auto inspectedEntity = m_Locked ? m_LockedEntity : sceneDocument.Selection();
+    else if (!m_LockedEntity && !m_LockedAsset)
+    {
+        if (scene && sceneDocument.Selection())
+            m_LockedEntity = sceneDocument.Selection();
+        else
+            m_LockedAsset = selectedAsset;
+    }
+    if (m_Registration.Locked() &&
+        ((!m_LockedEntity && !m_LockedAsset) ||
+         (m_LockedEntity && (!scene || !scene->FindEntity(Keire::EntityId(m_LockedEntity)))) ||
+         (m_LockedAsset && (!database || !database->Find(m_LockedAsset)))))
+    {
+        m_Registration.SetLocked(false);
+        m_LockedEntity = {};
+        m_LockedAsset = {};
+    }
+    const auto inspectedEntity = m_Registration.Locked() ? m_LockedEntity : sceneDocument.Selection();
+    const auto inspectedAsset = m_Registration.Locked() ? m_LockedAsset : selectedAsset;
     if (ui.WindowFocused() && scene && inspectedEntity)
         m_Controller.ActivateInspectorHistory();
     ui.TextColored(theme.Accent, "INSPECTOR");
-    ui.SameLine();
-    if (ui.IconButton("InspectorLock", Keire::UiIcon::Lock, m_Locked, {28.0F, 24.0F}))
-    {
-        m_Locked = !m_Locked;
-        m_LockedEntity = m_Locked ? sceneDocument.Selection() : Keire::AssetId{};
-    }
-    if (ui.LastItemState().Hovered)
-        ui.SetTooltip(m_Locked ? "Unlock Inspector" : "Lock Inspector to the current object", {.Delayed = true});
     ui.Separator();
     if (scene && inspectedEntity)
     {
@@ -877,7 +893,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             ++m_EditSerial;
                         if (const auto registration = scene->Components()->Find(renderer->Type()))
                         {
-                            InspectorPropertyEditor propertyEditor(ui, records, scene, *m_AssetPicker);
+                            InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
                             for (const auto& property : registration->Properties)
                             {
                                 if (property.Key != "mesh")
@@ -904,7 +920,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 }
                             }
                         }
-                        InspectorPropertyEditor propertyEditor(ui, records, scene, *m_AssetPicker);
+                        InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
                         if (assets && renderer->Mesh())
                         {
                             const auto mesh =
@@ -958,7 +974,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     }
                 }
             }
-            InspectorPropertyEditor propertyEditor(ui, records, scene, *m_AssetPicker);
+            InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
             for (const auto& component : entity.GetComponents())
             {
                 if (!component || component->Type() == Keire::TransformComponent::StaticType() ||
@@ -1159,7 +1175,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
         }
         sceneDocument.ClearSelection();
     }
-    m_AssetInspector->Draw(ui);
+    m_AssetInspector->Draw(ui, inspectedAsset, m_Registration.Locked());
 }
 
 KeireEditor::AssetInspectorPanel::AssetInspectorPanel(IInspectorController& controller)
@@ -1177,7 +1193,7 @@ void KeireEditor::AssetInspectorPanel::ClearState() noexcept
     m_ManagedDataInspector->Clear();
 }
 
-void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
+void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId selectedAsset, const bool pinned)
 {
     auto& inputDocument = m_Controller.InspectorInputDocument();
     auto& materialDocument = m_Controller.InspectorMaterialDocument();
@@ -1185,7 +1201,6 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
     const auto database = m_Controller.InspectorAssetDatabase();
     const auto assets = m_Controller.InspectorAssetSystem();
     const auto records = m_Controller.InspectorAssetRecords();
-    auto selectedAsset = m_Controller.InspectorSelectedAsset();
     const auto assetStatus = m_Controller.InspectorAssetStatus();
     const auto scene = m_Controller.InspectorSceneDocument().ActiveScene();
     if (!selectedAsset || !database)
@@ -1198,7 +1213,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
     if (!record)
     {
         selectedAsset = {};
-        m_Controller.SetInspectorSelectedAsset({});
+        if (!pinned)
+            m_Controller.SetInspectorSelectedAsset({});
         ui.TextColored(theme.Warning, "The selected asset no longer exists.");
         return;
     }
@@ -1356,7 +1372,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
             else
                 materialDocument.Open(materialDocument.DraftSource(), resolveShader);
             auto& document = materialDocument;
-            InspectorPropertyEditor editor(ui, records, scene, *m_AssetPicker);
+            InspectorPropertyEditor editor(ui, records, assets, scene, *m_AssetPicker);
             bool changed = false;
             auto shader = document.Shader();
             if (editor.EditAsset("Shader", shader, Keire::ShaderAsset::StaticType()))
@@ -1437,7 +1453,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui)
         {
             m_Controller.TrashInspectorAsset(record->Id);
             selectedAsset = {};
-            m_Controller.SetInspectorSelectedAsset({});
+            if (!pinned)
+                m_Controller.SetInspectorSelectedAsset({});
             m_EditingAsset = {};
             m_Controller.SetInspectorAssetStatus("Moving asset to recoverable trash in the isolated asset worker.");
         }

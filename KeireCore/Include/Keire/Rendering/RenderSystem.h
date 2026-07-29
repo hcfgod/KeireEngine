@@ -184,6 +184,10 @@ namespace Keire
         std::uint32_t ForwardPlusCacheHits = 0;
         std::uint64_t ForwardPlusUploadBytes = 0;
         std::uint64_t DroppedVfxParticles = 0;
+        std::uint64_t VfxGpuBufferBytes = 0;
+        std::uint32_t VfxComputeDispatches = 0;
+        std::uint32_t VfxIndirectDraws = 0;
+        std::uint32_t VfxGpuWorlds = 0;
         bool GpuTimingSupported = false;
         bool ForwardPlusGpuCullingSupported = false;
         bool SampledResolvedDepthAvailable = false;

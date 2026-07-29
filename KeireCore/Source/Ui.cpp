@@ -689,11 +689,35 @@ namespace Keire
             return UiPanelScope(*this, false, false);
         if (panel.ConsumeFocusRequest())
             ImGui::SetNextWindowFocus();
+        auto effectiveOptions = options;
+        if (panel.Locked())
+        {
+            effectiveOptions.NoResize = true;
+            effectiveOptions.NoMove = true;
+            effectiveOptions.NoCollapse = true;
+        }
         bool* visible = panel.VisibilityAddress();
         const bool previous = *visible;
-        const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible, ToImGuiWindowFlags(options));
+        const bool submitted =
+            ImGui::Begin(panel.SubmittedName().c_str(), visible, ToImGuiWindowFlags(effectiveOptions));
         panel.NotifyVisibilityChanged(previous);
         m_Impl->OpenScope(UiScope::Kind::Window);
+        if (submitted)
+        {
+            const float cursorX = ImGui::GetCursorPosX();
+            const float available = ImGui::GetContentRegionAvail().x;
+            ImGui::SetCursorPosX(cursorX + std::max(available - 28.0F, 0.0F));
+            const auto lockId = "PanelViewLock##" + std::string(panel.Id());
+            if (IconButton(lockId, UiIcon::Lock, panel.Locked(), {28.0F, 24.0F}))
+                panel.SetLocked(!panel.Locked());
+            if (LastItemState().Hovered)
+            {
+                SetTooltip(panel.Locked() ? "Unlock this panel view"
+                                          : "Lock this panel view, placement, and current context",
+                           {.Delayed = true});
+            }
+            ImGui::Separator();
+        }
         return UiPanelScope(*this, submitted, true);
     }
 

@@ -167,6 +167,10 @@ foreach ($configuration in @("Debug", "Release")) {
     [IO.File]::WriteAllText($stamp, "$key|$configuration`n", [Text.UTF8Encoding]::new($false))
 }
 
+foreach ($configuration in @("Debug", "Release")) {
+    & (Join-Path $PSScriptRoot "ffmpeg.ps1") -Configuration $configuration -Force:$Force
+}
+
 & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset -Force:$Force
 
 $coralDebug = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Debug -Build -Force:$Force

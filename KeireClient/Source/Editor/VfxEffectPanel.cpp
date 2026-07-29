@@ -278,6 +278,8 @@ namespace KeireEditor
 
         DrawEffectSettings(ui);
         ui.Separator();
+        DrawGraphSummary(ui);
+        ui.Separator();
         DrawModules(ui);
     }
 
@@ -316,6 +318,58 @@ namespace KeireEditor
             (void)ApplyEdit("Edit VFX effect settings",
                             [candidate = std::move(candidate)](Keire::VfxEffectDefinition& definition) mutable
                             { definition = std::move(candidate); });
+    }
+
+    void VfxEffectPanel::DrawGraphSummary(Keire::UiFrame& ui)
+    {
+        const auto& definition = m_Controller.VfxEffectState().Definition();
+        std::size_t nodeCount = 0;
+        std::size_t connectionCount = 0;
+        for (const auto& system : definition.Systems)
+        {
+            nodeCount += system.Nodes.size();
+            connectionCount += system.Connections.size();
+        }
+
+        ui.TextColored(m_Controller.VfxEffectTheme().Accent, "GPU GRAPH");
+        ui.Text("Schema v" + std::to_string(definition.SchemaVersion) + "  |  " +
+                std::to_string(definition.Systems.size()) + " systems  |  " + std::to_string(nodeCount) +
+                " nodes  |  " + std::to_string(connectionCount) + " connections");
+        ui.TextColored(m_Controller.VfxEffectTheme().MutedText,
+                       std::to_string(definition.Blackboard.size()) +
+                           " exposed parameters. GPU compute is preferred; deterministic CPU fallback is explicit.");
+        if (definition.Systems.empty())
+        {
+            ui.TextColored(m_Controller.VfxEffectTheme().Warning,
+                           "Legacy module effect. Save will publish a schema-v2 graph; preview does not rewrite it.");
+        }
+        if (ui.Button("Compile Graph"))
+        {
+            try
+            {
+                (void)Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+                m_Message = "GPU graph compiled successfully.";
+            }
+            catch (const std::exception& error)
+            {
+                m_Message = error.what();
+                m_Controller.ReportVfxEffectError(m_Message);
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Validate CPU Fallback"))
+        {
+            try
+            {
+                (void)Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+                m_Message = "CPU fallback validated.";
+            }
+            catch (const std::exception& error)
+            {
+                m_Message = error.what();
+                m_Controller.ReportVfxEffectError(m_Message);
+            }
+        }
     }
 
     void VfxEffectPanel::DrawModules(Keire::UiFrame& ui)

@@ -61,6 +61,7 @@ namespace KeireEditor
         bool ShowIcons = true;
         bool ShowCameraFrustums = true;
         bool ShowLightDirections = true;
+        bool ShowPhysicsGizmos = true;
         bool EditColliders = false;
     };
 
@@ -99,6 +100,7 @@ namespace KeireEditor
         void SetSnapping(bool enabled) noexcept { m_Settings.Snapping = enabled; }
         void SetShowCameraFrustums(bool enabled) noexcept { m_Settings.ShowCameraFrustums = enabled; }
         void SetShowLightDirections(bool enabled) noexcept { m_Settings.ShowLightDirections = enabled; }
+        void SetShowPhysicsGizmos(bool enabled) noexcept { m_Settings.ShowPhysicsGizmos = enabled; }
         void SetColliderEditing(bool enabled) noexcept { m_Settings.EditColliders = enabled; }
 
         [[nodiscard]] SceneTool ActiveTool() const noexcept { return m_Tool; }

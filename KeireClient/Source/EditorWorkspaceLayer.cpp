@@ -927,6 +927,8 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
+    if (m_AssetOperations)
+        m_AssetOperations->Shutdown();
     try
     {
         if (const auto scripts = Owner().Scripts())
@@ -1040,6 +1042,8 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
             m_PlayFaultReported = true;
         }
     }
+    if (m_VfxEffectPreviewWorld)
+        m_VfxEffectPreviewWorld->Update(static_cast<float>(time.DeltaTime().Seconds()));
     CompleteSaveSceneAs();
     {
         Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");

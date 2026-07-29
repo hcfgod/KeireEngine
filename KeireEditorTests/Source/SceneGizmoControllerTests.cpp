@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <fstream>
 
-TEST_CASE("scene collider editing setting migrates version one state and round trips version two")
+TEST_CASE("scene physics gizmo settings migrate version one state and round trip version three")
 {
     const auto root =
         std::filesystem::temp_directory_path() / ("Keire-SceneTools-" + Keire::AssetId::Generate().ToString());
@@ -28,6 +28,7 @@ TEST_CASE("scene collider editing setting migrates version one state and round t
     CHECK_FALSE(migrated.Settings().LocalSpace);
     CHECK_FALSE(migrated.Settings().ShowCameraFrustums);
     CHECK_FALSE(migrated.Settings().EditColliders);
+    CHECK(migrated.Settings().ShowPhysicsGizmos);
 
     migrated.SetColliderEditing(true);
     migrated.Save(root);
@@ -40,7 +41,7 @@ TEST_CASE("scene collider editing setting migrates version one state and round t
         std::ifstream input(state);
         std::uint32_t version = 0;
         input >> version;
-        CHECK(version == 2);
+        CHECK(version == 3);
     }
 
     std::error_code cleanupError;

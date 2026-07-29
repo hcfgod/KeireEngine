@@ -252,6 +252,10 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, float, float, uint, byte, byte,
         float, float, byte> PlayAudioAdvancedIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopAudioIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte, byte> PlayVfxIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopVfxIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseVfxIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> IsVfxAliveIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> SetUiTextIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> ConsumeUiClickIcall;
 #pragma warning restore CS0649
@@ -537,6 +541,19 @@ internal static unsafe class NativeRuntime
 
     internal static bool StopAudio(Entity entity) =>
         StopAudioIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+
+    internal static bool PlayVfx(Entity entity, AssetId effect, bool restart) =>
+        PlayVfxIcall(entity.World, entity.Id.High, entity.Id.Low, effect.High, effect.Low, restart ? (byte)1 : (byte)0) !=
+        0;
+
+    internal static bool StopVfx(Entity entity) =>
+        StopVfxIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+
+    internal static bool PauseVfx(Entity entity, bool paused) =>
+        PauseVfxIcall(entity.World, entity.Id.High, entity.Id.Low, paused ? (byte)1 : (byte)0) != 0;
+
+    internal static bool IsVfxAlive(Entity entity) =>
+        IsVfxAliveIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
 
     internal static bool SetUiText(Entity entity, string text)
     {

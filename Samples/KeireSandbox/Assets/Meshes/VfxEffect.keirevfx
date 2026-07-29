@@ -1,0 +1,165 @@
+{
+  "blackboard": [],
+  "capacity": 2979,
+  "duration": 5.409999847412109,
+  "emitterId": "56465844-4546-4155-0000-000000000001",
+  "loop": true,
+  "modules": [
+    {
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000002",
+      "particlesPerSecond": 378.0,
+      "type": "emissionRate"
+    },
+    {
+      "boxHalfExtent": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "coneAngleDegrees": 25.0,
+      "coneLength": 1.0,
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000003",
+      "mesh": "c0ffee00-0000-4000-8000-000000000001",
+      "radius": 0.5,
+      "shape": "cone",
+      "type": "shape",
+      "volume": "0a8ba309-c28a-4842-8949-09ff8c60a1fa"
+    },
+    {
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000004",
+      "lifetimeMaximum": 4.889999866485596,
+      "lifetimeMinimum": 1.0,
+      "rotationMaximum": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotationMinimum": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "initialize",
+      "velocityMaximum": [
+        0.5,
+        2.0,
+        0.5
+      ],
+      "velocityMinimum": [
+        -0.5,
+        1.0,
+        -0.5
+      ]
+    },
+    {
+      "curve": [
+        {
+          "inTangent": 0.0,
+          "interpolation": "linear",
+          "outTangent": 0.0,
+          "time": 0.6899999976158142,
+          "value": 1.0
+        }
+      ],
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000005",
+      "type": "sizeOverLifetime"
+    },
+    {
+      "enabled": true,
+      "gradient": {
+        "interpolation": "linear",
+        "keys": [
+          {
+            "color": [
+              0.07450980693101883,
+              0.29019609093666077,
+              1.0,
+              1.0
+            ],
+            "time": 0.3100000023841858
+          }
+        ]
+      },
+      "id": "56465844-4546-4155-0000-000000000006",
+      "type": "colorOverLifetime"
+    },
+    {
+      "enabled": true,
+      "id": "56465844-4546-4155-0000-000000000007",
+      "mesh": "c0ffee00-0000-4000-8000-000000000001",
+      "renderer": "sprite",
+      "sprite": "0a8ba309-c28a-4842-8949-09ff8c60a1fa",
+      "type": "renderer"
+    },
+    {
+      "count": 116,
+      "cycles": 13,
+      "enabled": true,
+      "id": "3d02dc95-b6ad-4ba7-bfea-4921cc5c1edc",
+      "interval": 0.12999999523162842,
+      "time": 0.23000000417232513,
+      "type": "burst"
+    }
+  ],
+  "name": "VFX Effect",
+  "schemaVersion": 2,
+  "seed": 83,
+  "space": "world",
+  "systems": [
+    {
+      "connections": [],
+      "id": "56465844-4546-4155-0000-000000000008",
+      "name": "Particle System",
+      "nodes": [
+        {
+          "context": "spawn",
+          "customHlsl": "",
+          "id": "56465844-4546-4155-0000-000000000009",
+          "pins": [],
+          "position": [
+            0.0,
+            0.0
+          ],
+          "type": "Spawn Context"
+        },
+        {
+          "context": "initialize",
+          "customHlsl": "",
+          "id": "56465844-4546-4155-0000-00000000000a",
+          "pins": [],
+          "position": [
+            280.0,
+            0.0
+          ],
+          "type": "Initialize Context"
+        },
+        {
+          "context": "update",
+          "customHlsl": "",
+          "id": "56465844-4546-4155-0000-00000000000b",
+          "pins": [],
+          "position": [
+            560.0,
+            0.0
+          ],
+          "type": "Update Context"
+        },
+        {
+          "context": "output",
+          "customHlsl": "",
+          "id": "56465844-4546-4155-0000-00000000000c",
+          "pins": [],
+          "position": [
+            840.0,
+            0.0
+          ],
+          "type": "Output Context"
+        }
+      ]
+    }
+  ]
+}

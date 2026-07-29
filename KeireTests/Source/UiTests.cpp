@@ -335,7 +335,15 @@ namespace
         explicit WorkspaceUiLayer(const bool create) : Layer("WorkspaceUiLayer"), m_Create(create) {}
 
       protected:
-        void OnAttach() override { m_Panel = Owner().GetUiWorkspace().RegisterPanel({"test.panel", "Test Panel"}); }
+        void OnAttach() override
+        {
+            m_Panel = Owner().GetUiWorkspace().RegisterPanel({"test.panel", "Test Panel"});
+            CHECK_FALSE(m_Panel.Locked());
+            m_Panel.SetLocked(true);
+            CHECK(m_Panel.Locked());
+            m_Panel.SetLocked(false);
+            CHECK_FALSE(m_Panel.Locked());
+        }
 
         void OnUi(Keire::UiFrame& ui) override
         {

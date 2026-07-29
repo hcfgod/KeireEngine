@@ -5,7 +5,8 @@ This keeps reimport, retargeting, prefab references, and cooked dependencies det
 
 ## Import A Character
 
-1. Import an FBX, glTF, or GLB model into the Project panel.
+1. Import an FBX, glTF, or GLB model into the Project panel. For an animation take, set **Content** to `animation` in
+   the Import Assets dialog; the source is labeled **Animation Source** and must include its embedded skinned skeleton.
 2. Select the model and open **Window > Rigging Studio**.
 3. Choose a **Rig Source**:
    - `Embedded` preserves authored bones and weights.
@@ -52,8 +53,9 @@ remain unchanged if validation fails.
 
 ## Animator Controllers
 
-Create an **Animator Controller** in the Project panel and double-click it. Drag clips into the graph, create parameters,
-layers, transitions, masks, and blend trees, then assign the controller to an Animator component. Runtime sampling,
+Create an **Animator Controller** in the Project panel and double-click it. Drag clips, Animation Sources, or animated
+models into the graph; container assets expand their generated clip subassets into states. Create parameters, layers,
+transitions, masks, and blend trees, then assign the controller to an Animator component. Runtime sampling,
 events, root motion, transitions, and skinning occur in scene-safe order.
 
 Managed gameplay code controls typed parameters and named IK goals:

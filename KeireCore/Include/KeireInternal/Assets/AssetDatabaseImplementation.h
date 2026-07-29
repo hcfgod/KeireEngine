@@ -320,6 +320,23 @@ namespace Keire
             }
         }
 
+        void UpdateMetadataImportOutput(const std::filesystem::path& path, const AssetTypeId type,
+                                        const std::span<const AssetGeneratedSubAsset> generated)
+        {
+            auto metadata = ReadJsonFile(path, 1024U * 1024U);
+            Json subAssets = Json::array();
+            for (const auto& subAsset : generated)
+                subAssets.push_back(subAsset.Id.ToString());
+            const auto encodedType = type.ToString();
+            if (!metadata.contains("type") || metadata["type"] != encodedType || !metadata.contains("subAssets") ||
+                metadata["subAssets"] != subAssets)
+            {
+                metadata["type"] = encodedType;
+                metadata["subAssets"] = std::move(subAssets);
+                WriteJsonAtomically(path, metadata);
+            }
+        }
+
         void UpdateMetadataImportSettings(const std::filesystem::path& path, const AssetImportSettings& settings)
         {
             auto metadata = ReadJsonFile(path, 1024U * 1024U);
@@ -562,6 +579,8 @@ namespace Keire
                     continue;
                 auxiliaryFiles.push_back(relative);
             }
+            const std::unordered_set<std::filesystem::path> activeAuxiliary(auxiliaryFiles.begin(),
+                                                                            auxiliaryFiles.end());
             for (const auto& relative : auxiliaryFiles)
             {
                 const auto source = temporary / relative;
@@ -573,13 +592,20 @@ namespace Keire
 
             constexpr auto retirementGrace = std::chrono::minutes(10);
             std::vector<std::filesystem::path> retiredPacks;
+            std::vector<std::filesystem::path> retiredAuxiliary;
             const auto now = std::filesystem::file_time_type::clock::now();
             for (std::filesystem::recursive_directory_iterator iterator(destination, error), end;
                  !error && iterator != end; iterator.increment(error))
             {
-                if (!iterator->is_regular_file(error) || iterator->path().extension() != ".keirepak")
+                if (!iterator->is_regular_file(error))
                     continue;
                 const auto relative = iterator->path().lexically_relative(destination).lexically_normal();
+                if (iterator->path().extension() != ".keirepak")
+                {
+                    if (relative != std::filesystem::path("catalog.json") && !activeAuxiliary.contains(relative))
+                        retiredAuxiliary.push_back(iterator->path());
+                    continue;
+                }
                 if (activePacks.contains(relative))
                     continue;
                 const auto modified = iterator->last_write_time(error);
@@ -588,6 +614,11 @@ namespace Keire
                 error.clear();
             }
             for (const auto& retired : retiredPacks)
+            {
+                std::filesystem::remove(retired, error);
+                error.clear();
+            }
+            for (const auto& retired : retiredAuxiliary)
             {
                 std::filesystem::remove(retired, error);
                 error.clear();
@@ -746,7 +777,10 @@ namespace Keire
             if (found == Importers.end())
                 return nullptr;
             const auto& importer = found->second;
-            return importer.Version >= record.ImporterVersion && importer.Type == record.Type ? &importer : nullptr;
+            const auto compatible =
+                importer.Type == record.Type ||
+                std::ranges::find(importer.CompatibleTypes, record.Type) != importer.CompatibleTypes.end();
+            return importer.Version >= record.ImporterVersion && compatible ? &importer : nullptr;
         }
 
         [[nodiscard]] AssetImportContext CreateImportContext(const AssetSourceRecord& record) const
@@ -832,10 +866,19 @@ namespace Keire
             return importer.NormalizeImportSettings ? importer.NormalizeImportSettings(result) : result;
         }
 
-        void ValidateImportOutput(const AssetImportOutput& result) const
+        void ValidateImportOutput(const AssetImporterRegistration* importer, const AssetImportOutput& result) const
         {
             if (result.Bytes.size() > Specification.MaximumSourceBytes)
                 throw std::runtime_error("Imported asset exceeds the configured maximum size.");
+            if (result.PrimaryType)
+            {
+                if (!*result.PrimaryType)
+                    throw std::runtime_error("Contextual importer returned an invalid primary asset type.");
+                if (!importer || (*result.PrimaryType != importer->Type &&
+                                  std::ranges::find(importer->CompatibleTypes, *result.PrimaryType) ==
+                                      importer->CompatibleTypes.end()))
+                    throw std::runtime_error("Contextual importer returned an undeclared primary asset type.");
+            }
             std::unordered_set<std::string> dependencies;
             for (const auto& dependency : result.SourceDependencies)
             {
@@ -882,7 +925,8 @@ namespace Keire
                                                      const std::span<const std::byte> source) const
         {
             AssetImportOutput result;
-            if (const auto* importer = FindImporter(record))
+            const auto* importer = FindImporter(record);
+            if (importer)
             {
                 if (importer->ContextualImport)
                     result = importer->ContextualImport(CreateImportContext(record), source);
@@ -895,7 +939,7 @@ namespace Keire
             else
                 throw std::runtime_error("No compatible importer is registered for asset: " +
                                          Detail::PathToUtf8(record.RelativePath));
-            ValidateImportOutput(result);
+            ValidateImportOutput(importer, result);
             return result;
         }
 
@@ -940,7 +984,7 @@ namespace Keire
             if (!std::filesystem::is_regular_file(object))
                 return std::nullopt;
             auto restored = importer->RestoreCachedOutput(ReadSource(object, Specification.MaximumSourceBytes));
-            ValidateImportOutput(restored);
+            ValidateImportOutput(importer, restored);
             if (!restored.SourceDependencies.empty())
                 throw std::logic_error("A dependency-free cached importer restored source dependencies.");
             return restored;

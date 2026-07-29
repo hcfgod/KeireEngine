@@ -154,7 +154,8 @@ namespace Keire
                 const auto stagedRecord = ReadMetadata(stagingRoot, stagedSource,
                                                        m_Impl->Specification.MaximumSourceBytes, true, item.Importer);
                 item.Validated = m_Impl->ImportSource(stagedRecord, item.SourceBytes);
-                UpdateMetadataSubAssets(stagedMetadata, item.Validated.SubAssets);
+                UpdateMetadataImportOutput(stagedMetadata, item.Validated.PrimaryType.value_or(stagedRecord.Type),
+                                           item.Validated.SubAssets);
                 if (item.Replaced)
                 {
                     const auto prefix = std::to_string(index);

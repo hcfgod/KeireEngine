@@ -67,6 +67,10 @@ namespace Keire::RenderBackend
         Statistics.VfxSpriteParticles = 0;
         Statistics.VfxMeshParticles = 0;
         Statistics.DroppedVfxParticles = 0;
+        Statistics.VfxComputeDispatches = 0;
+        Statistics.VfxIndirectDraws = 0;
+        Statistics.VfxGpuWorlds = 0;
+        Statistics.VfxGpuBufferBytes = 0;
         Statistics.SampledResolvedDepthAvailable = false;
         Statistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
         Statistics.ExecutedFrameGraphPasses = 0;
@@ -76,6 +80,19 @@ namespace Keire::RenderBackend
         Statistics.ForwardPlusBufferReallocations = 0;
         Statistics.ForwardPlusUploadBytes = 0;
         CollectCompletedFrames();
+        const auto vfxRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
+        for (auto iterator = GpuVfxWorlds.begin(); iterator != GpuVfxWorlds.end();)
+        {
+            if (iterator->second.LastPreparedFrame != 0 && Statistics.Frame > iterator->second.LastPreparedFrame &&
+                Statistics.Frame - iterator->second.LastPreparedFrame > vfxRetirementAge)
+            {
+                ReleaseGpuVfxWorld(iterator->second);
+                iterator = GpuVfxWorlds.erase(iterator);
+                continue;
+            }
+            ++iterator;
+        }
+        Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
         for (const auto& surface : LiveSurfaces())
         {
             surface->Submitted = false;
@@ -135,6 +152,27 @@ namespace Keire::RenderBackend
             else
                 ++Statistics.VfxMeshParticles;
         }
+        if (!request.Vfx.GpuEmitters().empty() &&
+            (request.Vfx.WorldId() == 0 || request.Vfx.ParticleCapacity() == 0 ||
+             request.Vfx.ParticleCapacity() > 10'000'000U || !std::isfinite(request.Vfx.DeltaSeconds()) ||
+             request.Vfx.DeltaSeconds() < 0.0F))
+        {
+            throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX snapshot.");
+        }
+        for (const auto& emitter : request.Vfx.GpuEmitters())
+        {
+            if (!emitter.Handle || emitter.Revision == 0 || !Math::IsFinite(emitter.Position) ||
+                !Math::IsFinite(emitter.Rotation) || !Math::IsFinite(emitter.ShapeExtent) ||
+                !Math::IsFinite(emitter.VelocityMinimum) || !Math::IsFinite(emitter.VelocityMaximum) ||
+                !Math::IsFinite(emitter.Acceleration) || !Math::IsFinite(emitter.ColorStart) ||
+                !Math::IsFinite(emitter.ColorEnd) || !std::isfinite(emitter.LifetimeMinimum) ||
+                !std::isfinite(emitter.LifetimeMaximum) || emitter.LifetimeMinimum <= 0.0F ||
+                emitter.LifetimeMaximum < emitter.LifetimeMinimum || !std::isfinite(emitter.SizeStart) ||
+                !std::isfinite(emitter.SizeEnd) || emitter.Renderer > VfxRendererType::Mesh)
+            {
+                throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX emitter.");
+            }
+        }
         Statistics.DroppedVfxParticles += request.Vfx.DroppedParticles();
 
         surface.Submitted = true;
@@ -158,10 +196,12 @@ namespace Keire::RenderBackend
                 continue;
             std::vector<Matrix4> skinPalette;
             AssetId skin;
+            AssetId skinSkeleton;
             if (const auto animator = entity.GetComponent<AnimatorComponent>(); animator && animator->Enabled())
             {
                 skinPalette.assign(animator->SkinPalette().begin(), animator->SkinPalette().end());
                 skin = animator->SkinnedMesh();
+                skinSkeleton = animator->Skeleton();
             }
             packet.DrawItems.push_back({renderer->Mesh(),
                                         {renderer->Materials().begin(), renderer->Materials().end()},
@@ -169,6 +209,7 @@ namespace Keire::RenderBackend
                                         renderer->Tint(),
                                         entity.Id(),
                                         skin,
+                                        skinSkeleton,
                                         std::move(skinPalette),
                                         renderer->CastShadows(),
                                         renderer->ReceiveShadows()});
