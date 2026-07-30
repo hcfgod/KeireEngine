@@ -65,6 +65,61 @@ Disable, destroy, reload, and Play Mode teardown cancel queued lifetime-bound wo
 queries, add/remove, clone, and deferred destroy operations. Generic component lookup resolves stable component IDs once
 and caches the result.
 
+## Audio and animation playback
+
+Audio clips, mixers, animation clips, and Animator Controllers are typed asset references, so they can be serialized
+directly on a `Behaviour`:
+
+```csharp
+[SerializeField] private AssetReference<AudioClip> alert;
+[SerializeField] private AssetReference<AudioMixer> gameplayMixer;
+[SerializeField] private AssetReference<AnimationClip> reloadClip;
+[SerializeField] private AssetReference<AnimatorController> controller;
+```
+
+`Entity.AudioSource` controls a scene-authored or script-created Audio Source. Playback is stateful: scripts can play
+the configured clip or replace it for one request, pause and resume without losing the playhead, seek in seconds, stop,
+and inspect `State`, `Time`, and `Duration`. Volume, pitch, looping, spatialization, clip, mixer, bus, priority, and
+attenuation settings are validated before reaching the native audio voice.
+
+```csharp
+AudioSourceHandle source = Entity.AudioSource;
+source.Clip = alert;
+source.Volume = 0.8f;
+source.Pitch = 1.1f;
+source.Loop = true;
+source.Play();
+
+source.Pause();
+source.Time = 0.5f;
+source.Resume();
+Debug.Log($"{source.State}: {source.Time:0.00}/{source.Duration:0.00}");
+```
+
+Use `Audio.Play(Entity, clip, options)` for a complete one-call setup. `AudioPlaybackOptions` accepts an optional typed
+mixer reference and stable bus ID in addition to the bus name, gain, pitch, priority, looping, spatialization, and
+distance range.
+
+`Entity.Animator` exposes explicit state playback alongside the existing parameter, layer-weight, trigger, and IK
+APIs. State names refer to states in the assigned Animator Controller. `Play` switches immediately, `CrossFade`
+transitions over a bounded duration, and pause preserves both the configured speed and current normalized time.
+
+```csharp
+AnimatorHandle animator = Entity.Animator;
+animator.Speed = 1.25f;
+animator.Play("Locomotion", normalizedTime: 0.0f);
+animator.CrossFade("Jump", duration: 0.15f);
+animator.Pause();
+animator.Resume();
+
+AnimatorStateInfo state = animator.StateInfo;
+Debug.Log($"{state.State} at {state.NormalizedTime:P0}");
+```
+
+`Stop` evaluates the skeleton bind pose until another state is played. Playback commands are ordered with parameter
+commands at the scene animation boundary, and invalid entities, missing components, unknown states or layers, and
+out-of-range speed/time values are rejected without exposing native ownership.
+
 ## Attaching scripts
 
 Create C# scripts inside a `.keireasm` source root. The editor generates a stable component ID, compiles the script,

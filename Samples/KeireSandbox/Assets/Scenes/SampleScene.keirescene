@@ -81,11 +81,12 @@
         },
         {
           "data": {
-            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":14447222651353186851,\"Low\":12685995010641050639}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}},{\"Aliases\":[],\"Name\":\"uiOpened\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiClosed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}}],\"version\":1}",
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":8968286786875574750,\"Low\":11350882427125024393}}},{\"Aliases\":[],\"Name\":\"uiButton\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":6584940885720255740,\"Low\":9300562048828532685}}},{\"Aliases\":[],\"Name\":\"uiOpened\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiClosed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiAudioClip\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":17595254351269544466,\"Low\":12566757923369154885}}}],\"version\":1}",
+            "uiAudioClip": "f42ee69b-dc11-4212-ae66-17bff0be7945",
             "uiButton": "5b6268d8-d84d-4cfc-8112-3be82be767cd",
             "uiClosed": [],
             "uiOpened": [],
-            "uiPanel": "c87ed874-ece2-4223-b00d-b53fb7a33c0f"
+            "uiPanel": "7c75c151-0f8c-49de-9d86-6f6d8c02c689"
           },
           "enabled": true,
           "type": "3f100613-b2cc-4dc0-a7b2-216428d75ae0",
@@ -454,7 +455,7 @@
       "parent": null
     },
     {
-      "active": false,
+      "active": true,
       "components": [
         {
           "data": {

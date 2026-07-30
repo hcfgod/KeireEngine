@@ -807,11 +807,19 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                 ui.Text("Renderer CPU " + std::to_string(statistics.CpuPreparationMilliseconds) + " ms / P95 " +
                         std::to_string(statistics.CpuPreparationP95Milliseconds) + " ms / latency " +
                         std::to_string(statistics.RendererLatencyMilliseconds) + " ms");
+                ui.Text("Command prep " + std::to_string(statistics.SkinningPreparationMilliseconds) + " ms skin / " +
+                        std::to_string(statistics.VfxPreparationMilliseconds) + " ms VFX / " +
+                        std::to_string(statistics.DrawPreparationMilliseconds) + " ms draws");
                 ui.Text("Render passes " + std::to_string(statistics.ShadowRecordingMilliseconds) + " ms shadows / " +
                         std::to_string(statistics.ForwardPlusCullingMilliseconds) + " ms Forward+ / " +
                         std::to_string(statistics.ScenePassMilliseconds) + " ms scene / " +
-                        std::to_string(statistics.ToneMapMilliseconds) + " ms tone map");
+                        std::to_string(statistics.DepthPassMilliseconds) + " ms depth / " +
+                        std::to_string(statistics.ToneMapMilliseconds) + " ms tone map / " +
+                        std::to_string(statistics.CommandRecordingUnattributedMilliseconds) + " ms other");
+                ui.Text("Scheduling " + std::to_string(statistics.AllowedFramesInFlight) + " frames in flight / " +
+                        std::to_string(statistics.SwapchainWaitMilliseconds) + " ms swapchain wait");
                 ui.Text("Frame uploads " + std::to_string(statistics.FrameUploadMilliseconds) + " ms / " +
+                        std::to_string(statistics.FrameUploadSubmissions) + " submissions / " +
                         std::to_string(statistics.ForwardPlusUploadBytes) + " Forward+ bytes / " +
                         std::to_string(statistics.ForwardPlusBufferReallocations) + " buffer reallocations / " +
                         std::to_string(statistics.ForwardPlusCacheHits) + " cache hits");

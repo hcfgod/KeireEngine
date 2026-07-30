@@ -78,6 +78,20 @@ namespace Keire
         Curve1D Attenuation = Curve1D::Constant(1.0F);
     };
 
+    enum class ManagedAudioPlaybackState : std::uint8_t
+    {
+        Stopped,
+        Playing,
+        Paused
+    };
+
+    struct ManagedAudioSourceStatus
+    {
+        ManagedAudioPlaybackState State = ManagedAudioPlaybackState::Stopped;
+        float PositionSeconds = 0.0F;
+        float DurationSeconds = 0.0F;
+    };
+
     class KEIRE_API IScriptRuntimeServices
     {
       public:
@@ -109,6 +123,9 @@ namespace Keire
             return PlayManagedAudio(playback.Entity, playback.Clip, playback.Gain);
         }
         [[nodiscard]] virtual bool StopManagedAudio(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool PauseManagedAudio(AssetId, bool) noexcept { return false; }
+        [[nodiscard]] virtual bool SeekManagedAudio(AssetId, float) noexcept { return false; }
+        [[nodiscard]] virtual ManagedAudioSourceStatus ManagedAudioStatus(AssetId) const noexcept { return {}; }
         [[nodiscard]] virtual bool PlayManagedVfx(AssetId, AssetId, bool) noexcept { return false; }
         [[nodiscard]] virtual bool StopManagedVfx(AssetId) noexcept { return false; }
         [[nodiscard]] virtual bool PauseManagedVfx(AssetId, bool) noexcept { return false; }

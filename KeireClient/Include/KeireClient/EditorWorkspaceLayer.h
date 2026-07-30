@@ -184,12 +184,12 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> AssetBrowserAssets() const noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> AssetBrowserRecords() const noexcept override;
+    [[nodiscard]] std::uint64_t AssetBrowserRecordRevision() const noexcept override;
     [[nodiscard]] std::string_view AssetBrowserStatus() const noexcept override;
     [[nodiscard]] Keire::AssetId AssetBrowserSceneAsset() const noexcept override;
     [[nodiscard]] bool AssetBrowserSceneDirty() const noexcept override;
-    [[nodiscard]] bool AssetBrowserImportPending() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> AssetBrowserManagedAssetTypes() const override;
-    void RefreshAssetBrowserRecords() override;
+    void RefreshAssetBrowserRecords();
     void SetAssetBrowserSelected(Keire::AssetId asset) noexcept override;
     void ClearAssetBrowserSceneSelection() noexcept override;
     void SetAssetBrowserStatus(std::string status) noexcept override;
@@ -380,6 +380,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool IsManagedCursorLocked() const noexcept override;
     [[nodiscard]] bool PlayManagedAudio(const Keire::ManagedAudioPlayback& playback) noexcept override;
     [[nodiscard]] bool StopManagedAudio(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] bool PauseManagedAudio(Keire::AssetId entity, bool paused) noexcept override;
+    [[nodiscard]] bool SeekManagedAudio(Keire::AssetId entity, float positionSeconds) noexcept override;
+    [[nodiscard]] Keire::ManagedAudioSourceStatus ManagedAudioStatus(Keire::AssetId entity) const noexcept override;
     [[nodiscard]] bool PlayManagedVfx(Keire::AssetId entity, Keire::AssetId effect, bool restart) noexcept override;
     [[nodiscard]] bool StopManagedVfx(Keire::AssetId entity) noexcept override;
     [[nodiscard]] bool PauseManagedVfx(Keire::AssetId entity, bool paused) noexcept override;
@@ -480,6 +483,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_VfxEffectPreviewDiagnostic;
     Keire::Ref<Keire::AssetDatabase> m_AssetDatabase;
     std::vector<Keire::AssetSourceRecord> m_AssetRecords;
+    std::uint64_t m_AssetRecordRevision = 0;
     Keire::AssetId m_SelectedAsset;
     std::filesystem::path m_ExecutablePath;
     Keire::AssetId m_PendingStartupScene;

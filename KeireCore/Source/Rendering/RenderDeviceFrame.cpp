@@ -48,6 +48,10 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("SDL_ClaimWindowForGPUDevice failed: " + LastSdlError());
             WindowClaimed = true;
 
+            Statistics.AllowedFramesInFlight = SdlAllowedFramesInFlight(Specification.MaximumFramesInFlight);
+            if (!SDL_SetGPUAllowedFramesInFlight(Device, Statistics.AllowedFramesInFlight))
+                throw std::runtime_error("SDL_SetGPUAllowedFramesInFlight failed: " + LastSdlError());
+
             PresentMode = ToSdlPresentMode(Specification.PresentMode);
             if (!SDL_WindowSupportsGPUPresentMode(Device, NativeWindow, PresentMode))
             {
@@ -97,6 +101,7 @@ namespace Keire::RenderBackend
             KEIRE_CORE_INFO("Selected GPU attachment formats (output={}, scene={}, depth={}, shadowDepth={}).",
                             static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(SceneColorFormat),
                             static_cast<std::uint32_t>(DepthFormat), static_cast<std::uint32_t>(ShadowDepthFormat));
+            KEIRE_CORE_INFO("Configured {} GPU frame(s) in flight.", Statistics.AllowedFramesInFlight);
 
             CreateGeometryResources();
             StartRenderThread();
@@ -389,6 +394,13 @@ namespace Keire::RenderBackend
     SDL_GPUBuffer* RenderSharedState::UploadBuffer(const std::span<const std::byte> bytes,
                                                    const SDL_GPUBufferUsageFlags usage)
     {
+        return UploadBuffer(nullptr, bytes, usage);
+    }
+
+    SDL_GPUBuffer* RenderSharedState::UploadBuffer(SDL_GPUCommandBuffer* commands,
+                                                   const std::span<const std::byte> bytes,
+                                                   const SDL_GPUBufferUsageFlags usage)
+    {
         if (bytes.empty() || bytes.size() > std::numeric_limits<std::uint32_t>::max())
             throw std::invalid_argument("GPU buffer payload is empty or exceeds the 32-bit SDL limit.");
         const auto byteSize = static_cast<std::uint32_t>(bytes.size());
@@ -417,6 +429,17 @@ namespace Keire::RenderBackend
 
             SDL_GPUTransferBufferLocation source{transfer, 0};
             SDL_GPUBufferRegion destination{buffer, 0, byteSize};
+            if (commands)
+            {
+                auto* copy = SDL_BeginGPUCopyPass(commands);
+                if (!copy)
+                    throw std::runtime_error("SDL_BeginGPUCopyPass(frame-local upload) failed: " + LastSdlError());
+                SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+                SDL_EndGPUCopyPass(copy);
+                FrameUploadTransfers.push_back(transfer);
+                transfer = nullptr;
+                return buffer;
+            }
             if (FrameExecutionActive && !FrameUploadPass)
                 EnsureFrameUploadContext();
             if (FrameUploadPass)
@@ -427,18 +450,18 @@ namespace Keire::RenderBackend
                 return buffer;
             }
 
-            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
-            if (!commands)
+            SDL_GPUCommandBuffer* uploadCommands = SDL_AcquireGPUCommandBuffer(Device);
+            if (!uploadCommands)
                 throw std::runtime_error("SDL_AcquireGPUCommandBuffer(upload) failed: " + LastSdlError());
-            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(uploadCommands);
             if (!copy)
             {
-                (void)SDL_CancelGPUCommandBuffer(commands);
+                (void)SDL_CancelGPUCommandBuffer(uploadCommands);
                 throw std::runtime_error("SDL_BeginGPUCopyPass failed: " + LastSdlError());
             }
             SDL_UploadToGPUBuffer(copy, &source, &destination, false);
             SDL_EndGPUCopyPass(copy);
-            if (!SDL_SubmitGPUCommandBuffer(commands))
+            if (!SDL_SubmitGPUCommandBuffer(uploadCommands))
                 throw std::runtime_error("SDL_SubmitGPUCommandBuffer(upload) failed: " + LastSdlError());
             SDL_ReleaseGPUTransferBuffer(Device, transfer);
             transfer = nullptr;
@@ -455,6 +478,12 @@ namespace Keire::RenderBackend
 
     SDL_GPUBuffer* RenderSharedState::UploadVertexBuffer(const std::span<const RenderVertex> vertices)
     {
+        return UploadVertexBuffer(nullptr, vertices);
+    }
+
+    SDL_GPUBuffer* RenderSharedState::UploadVertexBuffer(SDL_GPUCommandBuffer* commands,
+                                                         const std::span<const RenderVertex> vertices)
+    {
         std::vector<GpuRenderVertex> gpuVertices;
         gpuVertices.reserve(vertices.size());
         for (const auto& vertex : vertices)
@@ -465,10 +494,16 @@ namespace Keire::RenderBackend
                 {vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z, 0.0F},
             });
         }
-        return UploadBuffer(std::as_bytes(std::span(gpuVertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
+        return UploadBuffer(commands, std::as_bytes(std::span(gpuVertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
     }
 
     SDL_GPUBuffer* RenderSharedState::UploadMeshVertexBuffer(const std::span<const MeshVertex> vertices)
+    {
+        return UploadMeshVertexBuffer(nullptr, vertices);
+    }
+
+    SDL_GPUBuffer* RenderSharedState::UploadMeshVertexBuffer(SDL_GPUCommandBuffer* commands,
+                                                             const std::span<const MeshVertex> vertices)
     {
         std::vector<GpuMeshVertex> gpuVertices;
         gpuVertices.reserve(vertices.size());
@@ -482,7 +517,7 @@ namespace Keire::RenderBackend
                 vertex.Tangent,
             });
         }
-        return UploadBuffer(std::as_bytes(std::span(gpuVertices)),
+        return UploadBuffer(commands, std::as_bytes(std::span(gpuVertices)),
                             SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
     }
 

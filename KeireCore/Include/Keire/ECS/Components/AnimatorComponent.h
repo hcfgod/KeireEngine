@@ -20,7 +20,10 @@ namespace Keire
         SetBoolean,
         SetTrigger,
         ResetTrigger,
-        SetLayerWeight
+        SetLayerWeight,
+        Play,
+        CrossFade,
+        Stop
     };
 
     struct AnimatorCommand
@@ -28,7 +31,9 @@ namespace Keire
         std::uint64_t Sequence = 0;
         AnimatorCommandType Type = AnimatorCommandType::SetFloat;
         std::string Name;
+        std::string Layer;
         float FloatValue = 0.0F;
+        float SecondaryFloatValue = 0.0F;
         std::int32_t IntegerValue = 0;
         bool BooleanValue = false;
     };
@@ -72,7 +77,10 @@ namespace Keire
         [[nodiscard]] AssetId SkinnedMesh() const noexcept { return m_SkinnedMesh; }
         [[nodiscard]] bool ApplyRootMotion() const noexcept { return m_ApplyRootMotion; }
         [[nodiscard]] float Speed() const noexcept { return m_Speed; }
+        [[nodiscard]] bool Paused() const noexcept { return m_Paused; }
+        [[nodiscard]] bool RuntimePlaying() const noexcept { return m_RuntimePlaying; }
         [[nodiscard]] std::string_view CurrentState() const noexcept { return m_CurrentState; }
+        [[nodiscard]] float NormalizedTime() const noexcept { return m_NormalizedTime; }
         [[nodiscard]] std::span<const Matrix4> SkinPalette() const noexcept { return m_SkinPalette; }
         [[nodiscard]] std::string_view RuntimeDiagnostic() const noexcept { return m_RuntimeDiagnostic; }
         [[nodiscard]] std::shared_ptr<const AnimatorDebugSnapshot> RuntimeDebugSnapshot() const noexcept
@@ -85,6 +93,10 @@ namespace Keire
         void SetSkinnedMesh(AssetId mesh);
         void SetApplyRootMotion(bool enabled);
         void SetSpeed(float speed);
+        void SetPaused(bool paused) noexcept;
+        void Play(std::string state, std::string layer = {}, float normalizedTime = 0.0F);
+        void CrossFade(std::string state, float duration, std::string layer = {}, float normalizedTime = 0.0F);
+        void Stop();
         void SetFloat(std::string parameter, float value);
         void SetInteger(std::string parameter, std::int32_t value);
         void SetBool(std::string parameter, bool value);
@@ -101,7 +113,8 @@ namespace Keire
         void ClearIk() noexcept;
         [[nodiscard]] std::span<const AnimatorIkGoal> IkGoals() const noexcept { return m_IkGoals; }
         [[nodiscard]] std::vector<AnimatorCommand> ConsumeRuntimeCommands();
-        void SetRuntimePose(std::string state, std::span<const Matrix4> skinPalette);
+        void SetRuntimePose(std::string state, float normalizedTime, bool playing,
+                            std::span<const Matrix4> skinPalette);
         void SetRuntimeDebugSnapshot(std::shared_ptr<const AnimatorDebugSnapshot> snapshot) noexcept;
         void SetRuntimeDiagnostic(std::string diagnostic) noexcept;
         void ClearRuntimePose() noexcept;
@@ -115,7 +128,10 @@ namespace Keire
         AssetId m_SkinnedMesh;
         bool m_ApplyRootMotion = true;
         float m_Speed = 1.0F;
+        bool m_Paused = false;
+        bool m_RuntimePlaying = false;
         std::string m_CurrentState;
+        float m_NormalizedTime = 0.0F;
         std::vector<Matrix4> m_SkinPalette;
         std::vector<AnimatorCommand> m_RuntimeCommands;
         std::vector<AnimatorIkGoal> m_IkGoals;

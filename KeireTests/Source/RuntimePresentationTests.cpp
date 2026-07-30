@@ -406,6 +406,15 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     REQUIRE(presentation->Play(sourceEntity.Id()));
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
     REQUIRE(audio->Voices().size() == 1);
+    CHECK(presentation->Playback(sourceEntity.Id()).State == Keire::AudioSourcePlaybackState::Playing);
+    REQUIRE(presentation->Pause(sourceEntity.Id()));
+    CHECK(presentation->Playback(sourceEntity.Id()).State == Keire::AudioSourcePlaybackState::Paused);
+    (void)audio->RenderVoicesOffline(2);
+    CHECK(audio->Voices().front().Frame == 0);
+    REQUIRE(presentation->Seek(sourceEntity.Id(), 2.0F / 48'000.0F));
+    CHECK(audio->Voices().front().Frame == 2);
+    REQUIRE(presentation->Resume(sourceEntity.Id()));
+    CHECK(presentation->Playback(sourceEntity.Id()).State == Keire::AudioSourcePlaybackState::Playing);
     REQUIRE(presentation->Stop(sourceEntity.Id()));
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
     CHECK(audio->Voices().empty());

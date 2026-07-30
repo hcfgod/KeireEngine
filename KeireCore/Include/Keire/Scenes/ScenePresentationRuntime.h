@@ -16,6 +16,20 @@ namespace Keire
     class Scene;
     class UiFrame;
 
+    enum class AudioSourcePlaybackState : std::uint8_t
+    {
+        Stopped,
+        Playing,
+        Paused
+    };
+
+    struct AudioSourcePlaybackInfo
+    {
+        AudioSourcePlaybackState State = AudioSourcePlaybackState::Stopped;
+        float PositionSeconds = 0.0F;
+        float DurationSeconds = 0.0F;
+    };
+
     struct ScenePresentationRuntimeStatistics
     {
         RuntimeUiStatistics Ui;
@@ -45,7 +59,11 @@ namespace Keire
         void Clear() noexcept;
 
         [[nodiscard]] bool Play(EntityId source);
+        [[nodiscard]] bool Pause(EntityId source);
+        [[nodiscard]] bool Resume(EntityId source);
         [[nodiscard]] bool Stop(EntityId source);
+        [[nodiscard]] bool Seek(EntityId source, float positionSeconds);
+        [[nodiscard]] AudioSourcePlaybackInfo Playback(EntityId source) const;
         [[nodiscard]] bool SetFocus(EntityId entity);
         [[nodiscard]] bool ConsumeClick(EntityId entity);
         void PointerMove(float x, float y);

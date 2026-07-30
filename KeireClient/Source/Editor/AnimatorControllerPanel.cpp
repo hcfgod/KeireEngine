@@ -247,9 +247,9 @@ namespace KeireEditor
                 ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 10.0F}, {1, 1, 1, 1},
                                    state.Name);
                 const auto status =
-                    active ? "PLAYING " +
-                                 std::to_string(static_cast<int>(TimelineFraction(playback->NormalizedTime) * 100.0F)) +
-                                 "%"
+                    active  ? "PLAYING " +
+                                  std::to_string(static_cast<int>(TimelineFraction(playback->NormalizedTime) * 100.0F)) +
+                                  "%"
                     : entry ? std::string("ENTRY")
                             : std::string(MotionTypeNames[static_cast<std::size_t>(state.Motion.Type)]);
                 ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 32.0F},
@@ -648,7 +648,7 @@ namespace KeireEditor
                 return;
 
             const auto palette = BuildPalette(*skeleton, sample.LocalPose);
-            animator->SetRuntimePose(sample.State, palette);
+            animator->SetRuntimePose(sample.State, sample.NormalizedTime, Instance->Playing(), palette);
             animator->SetRuntimeDebugSnapshot(Instance->DebugSnapshot());
             animator->SetRuntimeDiagnostic({});
             NormalizedTime = TimelineFraction(sample.NormalizedTime);

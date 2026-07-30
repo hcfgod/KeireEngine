@@ -414,6 +414,11 @@ namespace Keire
         [[nodiscard]] bool Trigger(std::string_view parameter) const;
         void SetLayerWeight(std::string layer, float value);
         [[nodiscard]] float LayerWeight(std::string_view layer) const;
+        void Play(std::string_view state, std::string_view layer = {}, float normalizedTime = 0.0F);
+        void CrossFade(std::string_view state, float duration, std::string_view layer = {},
+                       float normalizedTime = 0.0F);
+        void Stop();
+        [[nodiscard]] bool Playing() const noexcept { return m_Playing; }
         [[nodiscard]] std::shared_ptr<const AnimatorDebugSnapshot> DebugSnapshot() const noexcept
         {
             return m_DebugSnapshot;
@@ -465,6 +470,7 @@ namespace Keire
         std::vector<RuntimeLayer> m_Layers;
         std::string m_State;
         float m_Time = 0.0F;
+        bool m_Playing = true;
         BoneTransform m_PreviousRoot;
         bool m_HasPreviousRootRotation = false;
         std::uint64_t m_DebugRevision = 0;

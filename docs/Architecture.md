@@ -28,7 +28,12 @@ window claim, swapchain, bounded submission thread, command recording, fences, v
 deferred retirement. Owner-thread scene snapshots cross the private queue by value; GPU recording and submission run
 on the renderer thread and complete before the next owner-thread frame boundary. UI records through a private renderer
 bridge rather than owning presentation. Scene/Game panels exchange only Kéire `RenderView` and `RenderSurface` handles;
-backend resources remain private.
+backend resources remain private. Dynamic skinning, instance, and Forward+ transfers are recorded before their consumers
+on the frame command buffer; the fallback upload queue is reserved for resource publication that cannot join that
+ordered recording path. The renderer applies the configured frames-in-flight policy to SDL's 1–3 frame presentation
+queue while retaining the full configured bound for fences and transient-resource retirement. Higher applied queue depths
+favor throughput at the cost of additional presentation latency. Profiling attributes command recording to skinning, VFX,
+draw preparation, frame-graph passes, and residual orchestration overhead.
 
 The public `RenderSystem.cpp` PImpl facade delegates to separately compiled private backend units for device/frame
 lifecycle, resource caches, surface/pipeline management, and scene recording. `RenderBackendInternal.h` is an internal

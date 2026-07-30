@@ -1,5 +1,15 @@
 # Changelog
 
+- Added typed managed audio mixer, animation clip, and Animator Controller references; stateful Audio Source
+  play/pause/resume/seek/status and live properties; and Animator play/cross-fade/stop/pause/speed/state controls.
+- Matched SDL's GPU presentation queue to Kéire's configured frames-in-flight policy and split command-recording
+  statistics into skinning, VFX, draw preparation, shadows, Forward+, scene, depth, tone mapping, and residual overhead.
+- Recorded steady-state skinning, instancing, and Forward+ uploads directly into the frame command buffer, removing the
+  extra GPU submission, and prepared visible draw batches before render passes to keep allocation work out of scene
+  recording.
+- Removed Project-panel steady-state asset snapshot copies, thumbnail digest rebuilds, and recursive filesystem walks.
+  Asset publications now advance a browser revision, while the folder tree uses a transactional cached snapshot with a
+  one-second external-folder fallback refresh.
 - Restored independent Scene and Game viewport camera ownership during Play Mode: Scene keeps its persistent editor
   camera and navigation, while managed gameplay input and cursor capture require the focused, hovered Game viewport.
 - Fixed animated GPU skinning corruption by using renderer-private, 16-byte-aligned vertex storage layouts across

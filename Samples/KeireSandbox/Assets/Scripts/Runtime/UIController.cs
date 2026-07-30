@@ -15,6 +15,8 @@ public sealed class UIController : Behaviour
     [SerializeField] private KeireEvent uiOpened = new();
     [SerializeField] private KeireEvent uiClosed = new();
 
+    [SerializeField] private AssetReference<AudioClip> uiAudioClip;
+
     private UiButton? _subscribedButton;
     private IDisposable? _cursorVisibility;
     private bool _eventsBound;
@@ -31,6 +33,8 @@ public sealed class UIController : Behaviour
     {
         Debug.Log("Button Clicked");
         ToggleUi();
+
+        Audio.Play(Entity, uiAudioClip);
     }
 
     protected override void OnDisable()
@@ -64,6 +68,7 @@ public sealed class UIController : Behaviour
     {
         if (!uiPanel.Id.IsValid)
             return;
+
         SetUiOpen(!uiPanel.Active);
     }
 

@@ -96,6 +96,11 @@ namespace Keire::RenderBackend
         }
     }
 
+    [[nodiscard]] constexpr std::uint32_t SdlAllowedFramesInFlight(const std::uint32_t requested) noexcept
+    {
+        return requested < 1U ? 1U : (requested > 3U ? 3U : requested);
+    }
+
     [[nodiscard]] inline SDL_GPUSampleCount ToSdlSampleCount(const RenderSampleCount samples) noexcept
     {
         switch (samples)
@@ -718,6 +723,36 @@ namespace Keire::RenderBackend
         Transparent
     };
 
+    struct PreparedSceneDraw final
+    {
+        const SceneDrawItem* Item = nullptr;
+        MeshSubmesh Submesh;
+        AssetId Material;
+        MaterialSurfaceState Surface;
+        float Depth = 0.0F;
+        std::uint32_t SubmeshIndex = 0;
+    };
+
+    struct PreparedSceneBatch final
+    {
+        std::uint32_t First = 0;
+        std::uint32_t Count = 0;
+        std::uint32_t GpuFirstInstance = 0;
+        SDL_GPUBuffer* InstanceBuffer = nullptr;
+    };
+
+    struct PreparedSceneDrawList final
+    {
+        std::vector<PreparedSceneDraw> Draws;
+        std::vector<PreparedSceneBatch> Batches;
+    };
+
+    struct PreparedSceneDrawLists final
+    {
+        PreparedSceneDrawList Opaque;
+        PreparedSceneDrawList Transparent;
+    };
+
     struct QueuedSceneRequest final
     {
         SceneRenderPacket Packet;
@@ -739,8 +774,14 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
         void EnsureFrameUploadContext();
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
+        [[nodiscard]] SDL_GPUBuffer* UploadBuffer(SDL_GPUCommandBuffer* commands, std::span<const std::byte> bytes,
+                                                  SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
+        [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(SDL_GPUCommandBuffer* commands,
+                                                        std::span<const RenderVertex> vertices);
         [[nodiscard]] SDL_GPUBuffer* UploadMeshVertexBuffer(std::span<const MeshVertex> vertices);
+        [[nodiscard]] SDL_GPUBuffer* UploadMeshVertexBuffer(SDL_GPUCommandBuffer* commands,
+                                                            std::span<const MeshVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
         [[nodiscard]] GpuTextureResources CreateTextureResources(const Texture2DAsset& asset);
         [[nodiscard]] GpuMeshResources CreateMeshResources(const MeshAsset& mesh);
@@ -762,8 +803,12 @@ namespace Keire::RenderBackend
         void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot);
         void ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept;
 
+        [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
+                                                                   RenderSurfaceState& surface,
+                                                                   const SceneRenderPacket& packet);
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
-                       const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase);
+                       const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase,
+                       const PreparedSceneDrawList& prepared);
         void DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                      const SceneRenderPacket& packet);
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,

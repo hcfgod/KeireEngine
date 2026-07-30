@@ -400,3 +400,49 @@ TEST_CASE("Animator publishes rotational root motion without reset or wrap disco
     CHECK(wrapped.RootRotation == Keire::Quaternion{});
     CHECK(animator.DebugSnapshot()->RootRotation == Keire::Quaternion{});
 }
+
+TEST_CASE("Animator supports explicit play, cross-fade, stop, and restart control")
+{
+    const auto skeletonId = Keire::AssetId::Parse("51000000-0000-4000-8000-000000000001");
+    const auto idleId = Keire::AssetId::Parse("51000000-0000-4000-8000-000000000002");
+    const auto runId = Keire::AssetId::Parse("51000000-0000-4000-8000-000000000003");
+    const auto skeleton = TestSkeleton();
+    const auto idleClip = ConstantHandClip(skeletonId, 0.0F);
+    const auto runClip = ConstantHandClip(skeletonId, 4.0F);
+    auto definition =
+        GraphWithBaseLayer({}, {ClipState("state-idle", "Idle", idleId), ClipState("state-run", "Run", runId)});
+    const auto graph = Keire::CreateRef<Keire::AnimationGraphAsset>(std::move(definition));
+    Keire::AnimatorInstance animator(skeleton, graph,
+                                     [&](const Keire::AssetId id)
+                                     {
+                                         if (id == idleId)
+                                             return idleClip;
+                                         if (id == runId)
+                                             return runClip;
+                                         return Keire::Ref<Keire::AnimationClipAsset>{};
+                                     });
+
+    animator.Play("Run", "Base", 0.5F);
+    auto sample = animator.Update(0.0F);
+    CHECK(animator.Playing());
+    CHECK(sample.State == "Run");
+    CHECK(sample.NormalizedTime == doctest::Approx(0.5F));
+    CHECK(sample.LocalPose[1].Translation.X == doctest::Approx(4.0F));
+
+    animator.CrossFade("Idle", 1.0F, "Base");
+    sample = animator.Update(0.5F);
+    CHECK(sample.State == "Idle");
+    CHECK(sample.LocalPose[1].Translation.X == doctest::Approx(2.0F));
+    REQUIRE(animator.DebugSnapshot());
+    CHECK(animator.DebugSnapshot()->Layers.front().InTransition);
+
+    animator.Stop();
+    sample = animator.Update(1.0F);
+    CHECK_FALSE(animator.Playing());
+    CHECK(sample.State.empty());
+    CHECK(sample.LocalPose[1].Translation.X == doctest::Approx(0.0F));
+
+    animator.Play("Idle");
+    CHECK(animator.Playing());
+    CHECK(animator.Update(0.0F).State == "Idle");
+}

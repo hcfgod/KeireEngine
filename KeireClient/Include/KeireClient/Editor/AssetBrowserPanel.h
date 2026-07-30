@@ -21,12 +21,11 @@ namespace KeireEditor
         [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> AssetBrowserAssets() const noexcept = 0;
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> AssetBrowserRecords() const noexcept = 0;
+        [[nodiscard]] virtual std::uint64_t AssetBrowserRecordRevision() const noexcept = 0;
         [[nodiscard]] virtual std::string_view AssetBrowserStatus() const noexcept = 0;
         [[nodiscard]] virtual Keire::AssetId AssetBrowserSceneAsset() const noexcept = 0;
         [[nodiscard]] virtual bool AssetBrowserSceneDirty() const noexcept = 0;
-        [[nodiscard]] virtual bool AssetBrowserImportPending() const noexcept = 0;
         [[nodiscard]] virtual std::vector<Keire::ManagedAssetTypeDescriptor> AssetBrowserManagedAssetTypes() const = 0;
-        virtual void RefreshAssetBrowserRecords() = 0;
         virtual void SetAssetBrowserSelected(Keire::AssetId asset) noexcept = 0;
         virtual void ClearAssetBrowserSceneSelection() noexcept = 0;
         virtual void SetAssetBrowserStatus(std::string status) noexcept = 0;

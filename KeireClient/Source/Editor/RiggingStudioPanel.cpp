@@ -442,7 +442,7 @@ void EditorWorkspaceLayer::ApplyRiggingStudioSettings(const Keire::AssetId asset
         throw std::runtime_error("The project asset database is unavailable.");
     m_AssetDatabase->SetImportSettings(asset, settings);
     m_AssetDatabase->RequestReimport(asset);
-    m_AssetRecords = m_AssetDatabase->Records();
+    RefreshAssetBrowserRecords();
     m_SelectedAsset = asset;
     ImportAssets();
 }

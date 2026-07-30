@@ -824,7 +824,7 @@ void EditorWorkspaceLayer::OnAttach()
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
-            m_AssetRecords = m_AssetDatabase->Records();
+            RefreshAssetBrowserRecords();
             const auto catalog = project->AssetCatalog();
             std::error_code catalogError;
             bool requiresSynchronousImport = !std::filesystem::is_regular_file(catalog, catalogError) || catalogError;
@@ -1151,7 +1151,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                 if (path.extension() != ".cs")
                     requiresAssetImport = true;
             }
-            m_AssetRecords = m_AssetDatabase->Records();
+            RefreshAssetBrowserRecords();
             if (requiresAssetImport)
                 ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             if (const auto assets = Owner().Assets())

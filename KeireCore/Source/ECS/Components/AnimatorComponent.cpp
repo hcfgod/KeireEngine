@@ -64,7 +64,11 @@ namespace Keire
     {
         if (!std::isfinite(value))
             throw std::invalid_argument("Animator float parameter values must be finite.");
-        QueueCommand({0, AnimatorCommandType::SetFloat, std::move(parameter), value});
+        AnimatorCommand command;
+        command.Type = AnimatorCommandType::SetFloat;
+        command.Name = std::move(parameter);
+        command.FloatValue = value;
+        QueueCommand(std::move(command));
     }
 
     void AnimatorComponent::SetInteger(std::string parameter, const std::int32_t value)
@@ -105,7 +109,48 @@ namespace Keire
     {
         if (!std::isfinite(value) || value < 0.0F || value > 1.0F)
             throw std::invalid_argument("Animator layer weights must be finite and in the range 0..1.");
-        QueueCommand({0, AnimatorCommandType::SetLayerWeight, std::move(layer), value});
+        AnimatorCommand command;
+        command.Type = AnimatorCommandType::SetLayerWeight;
+        command.Name = std::move(layer);
+        command.FloatValue = value;
+        QueueCommand(std::move(command));
+    }
+
+    void AnimatorComponent::SetPaused(const bool paused) noexcept { m_Paused = paused; }
+
+    void AnimatorComponent::Play(std::string state, std::string layer, const float normalizedTime)
+    {
+        if (!std::isfinite(normalizedTime) || normalizedTime < 0.0F || normalizedTime > 1.0F)
+            throw std::invalid_argument("Animator normalized time must be finite and in the range 0..1.");
+        AnimatorCommand command;
+        command.Type = AnimatorCommandType::Play;
+        command.Name = std::move(state);
+        command.Layer = std::move(layer);
+        command.FloatValue = normalizedTime;
+        QueueCommand(std::move(command));
+    }
+
+    void AnimatorComponent::CrossFade(std::string state, const float duration, std::string layer,
+                                      const float normalizedTime)
+    {
+        if (!std::isfinite(duration) || duration < 0.0F || duration > 60.0F)
+            throw std::invalid_argument("Animator cross-fade duration must be finite and in the range 0..60.");
+        if (!std::isfinite(normalizedTime) || normalizedTime < 0.0F || normalizedTime > 1.0F)
+            throw std::invalid_argument("Animator normalized time must be finite and in the range 0..1.");
+        AnimatorCommand command;
+        command.Type = AnimatorCommandType::CrossFade;
+        command.Name = std::move(state);
+        command.Layer = std::move(layer);
+        command.FloatValue = normalizedTime;
+        command.SecondaryFloatValue = duration;
+        QueueCommand(std::move(command));
+    }
+
+    void AnimatorComponent::Stop()
+    {
+        AnimatorCommand command;
+        command.Type = AnimatorCommandType::Stop;
+        QueueCommand(std::move(command));
     }
 
     void AnimatorComponent::SetTwoBoneIk(std::string name, std::string root, std::string middle, std::string end,
@@ -174,8 +219,10 @@ namespace Keire
 
     void AnimatorComponent::QueueCommand(AnimatorCommand command)
     {
-        if (command.Name.empty() || command.Name.size() > 256)
+        if (command.Type != AnimatorCommandType::Stop && (command.Name.empty() || command.Name.size() > 256))
             throw std::invalid_argument("Animator command names must contain 1..256 characters.");
+        if (command.Layer.size() > 256)
+            throw std::invalid_argument("Animator layer names may not exceed 256 characters.");
         if (m_RuntimeCommands.size() >= 1024)
             throw std::length_error("Animator runtime command queue exceeded its 1024-command bound.");
         command.Sequence = m_NextRuntimeCommand++;
@@ -184,14 +231,18 @@ namespace Keire
         m_RuntimeCommands.emplace_back(std::move(command));
     }
 
-    void AnimatorComponent::SetRuntimePose(std::string state, const std::span<const Matrix4> skinPalette)
+    void AnimatorComponent::SetRuntimePose(std::string state, const float normalizedTime, const bool playing,
+                                           const std::span<const Matrix4> skinPalette)
     {
-        if (state.size() > 256 || skinPalette.size() > 4096)
+        if (state.size() > 256 || !std::isfinite(normalizedTime) || normalizedTime < 0.0F || normalizedTime > 1.0F ||
+            skinPalette.size() > 4096)
             throw std::invalid_argument("Animator runtime pose exceeds its bounds.");
         for (const auto& matrix : skinPalette)
             if (!Math::IsFinite(matrix))
                 throw std::invalid_argument("Animator runtime pose contains a non-finite matrix.");
         m_CurrentState = std::move(state);
+        m_NormalizedTime = normalizedTime;
+        m_RuntimePlaying = playing;
         m_SkinPalette.assign(skinPalette.begin(), skinPalette.end());
     }
 
@@ -210,6 +261,8 @@ namespace Keire
     void AnimatorComponent::ClearRuntimePose() noexcept
     {
         m_CurrentState.clear();
+        m_NormalizedTime = 0.0F;
+        m_RuntimePlaying = false;
         m_SkinPalette.clear();
         m_DebugSnapshot.reset();
         m_RuntimeDiagnostic.clear();

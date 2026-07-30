@@ -47,3 +47,15 @@ TEST_CASE("GPU skinning output slots stay bounded by frames in flight")
     CHECK(SkinningOutputSlot(10, 3) == 0);
     CHECK(SkinningOutputSlot(10, 0) == 0);
 }
+
+TEST_CASE("SDL frame scheduling follows its bounded device queue")
+{
+    using Keire::RenderBackend::SdlAllowedFramesInFlight;
+
+    CHECK(SdlAllowedFramesInFlight(0) == 1);
+    CHECK(SdlAllowedFramesInFlight(1) == 1);
+    CHECK(SdlAllowedFramesInFlight(2) == 2);
+    CHECK(SdlAllowedFramesInFlight(3) == 3);
+    CHECK(SdlAllowedFramesInFlight(4) == 3);
+    CHECK(SdlAllowedFramesInFlight(8) == 3);
+}

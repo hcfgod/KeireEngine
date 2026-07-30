@@ -130,16 +130,13 @@ std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::AssetBrowserReco
     return m_AssetRecords;
 }
 
+std::uint64_t EditorWorkspaceLayer::AssetBrowserRecordRevision() const noexcept { return m_AssetRecordRevision; }
+
 std::string_view EditorWorkspaceLayer::AssetBrowserStatus() const noexcept { return m_AssetStatus; }
 
 Keire::AssetId EditorWorkspaceLayer::AssetBrowserSceneAsset() const noexcept { return m_SceneDocument->Asset(); }
 
 bool EditorWorkspaceLayer::AssetBrowserSceneDirty() const noexcept { return m_SceneDocument->Dirty(); }
-
-bool EditorWorkspaceLayer::AssetBrowserImportPending() const noexcept
-{
-    return m_ExternalAssetImport && m_ExternalAssetImport->Pending();
-}
 
 std::vector<Keire::ManagedAssetTypeDescriptor> EditorWorkspaceLayer::AssetBrowserManagedAssetTypes() const
 {
@@ -151,7 +148,10 @@ std::vector<Keire::ManagedAssetTypeDescriptor> EditorWorkspaceLayer::AssetBrowse
 void EditorWorkspaceLayer::RefreshAssetBrowserRecords()
 {
     if (m_AssetDatabase)
+    {
         m_AssetRecords = m_AssetDatabase->Records();
+        ++m_AssetRecordRevision;
+    }
 }
 
 void EditorWorkspaceLayer::SetAssetBrowserSelected(const Keire::AssetId asset) noexcept { m_SelectedAsset = asset; }
@@ -348,7 +348,7 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
             else
                 state->Reverse = std::move(restore);
         }
-        m_AssetRecords = m_AssetDatabase->Records();
+        RefreshAssetBrowserRecords();
         if (m_SelectedAsset && !m_AssetDatabase->Find(m_SelectedAsset))
             m_SelectedAsset = {};
 
@@ -558,7 +558,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
         {
             (void)Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*m_AssetDatabase,
                                                                               completion->SourceIndexPath);
-            m_AssetRecords = m_AssetDatabase->Records();
+            RefreshAssetBrowserRecords();
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ExternalImport)
             {
                 m_ExternalAssetImport->Complete(std::move(*completion));
@@ -751,7 +751,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
 void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult& result, const bool reloadLoadedAssets,
                                                   const Keire::AssetId reloadAsset)
 {
-    m_AssetRecords = m_AssetDatabase->Records();
+    RefreshAssetBrowserRecords();
     if (!result.CatalogPath.empty())
     {
         if (const auto assets = Owner().Assets())
@@ -1380,7 +1380,7 @@ Keire::AssetId EditorWorkspaceLayer::CreatePrefabAsset(const std::filesystem::pa
         m_AssetDatabase->CreateAsset(destination, Keire::CreatePrefabAssetImporter(), std::span(source));
     if (const auto assets = Owner().Assets())
         (void)assets->PublishDevelopmentAsset(created, Keire::CreateRef<Keire::PrefabAsset>(definition));
-    m_AssetRecords = m_AssetDatabase->Records();
+    RefreshAssetBrowserRecords();
     m_SelectedAsset = created;
     if (m_AssetBrowserPanel)
     {
@@ -1411,7 +1411,7 @@ void EditorWorkspaceLayer::ReplacePrefabSource(const Keire::AssetId asset, const
     if (!record || record->Type != Keire::PrefabAsset::StaticType())
         throw std::invalid_argument("The prefab source no longer exists in the project.");
     m_AssetDatabase->ReplaceAssetSource(asset, Keire::PrefabAsset::Encode(definition));
-    m_AssetRecords = m_AssetDatabase->Records();
+    RefreshAssetBrowserRecords();
     if (m_AssetBrowserPanel)
         m_AssetBrowserPanel->InvalidateThumbnail(asset);
 }

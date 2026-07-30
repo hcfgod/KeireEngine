@@ -395,16 +395,28 @@ namespace Keire
                                                             statistics.CpuPreparationMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Command recording (ms)",
                                                             statistics.CommandRecordingMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Skinning preparation (ms)",
+                                                            statistics.SkinningPreparationMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX preparation (ms)",
+                                                            statistics.VfxPreparationMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Draw preparation (ms)",
+                                                            statistics.DrawPreparationMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Shadow recording (ms)",
                                                             statistics.ShadowRecordingMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ culling (ms)",
                                                             statistics.ForwardPlusCullingMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Scene pass (ms)",
                                                             statistics.ScenePassMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Depth pass (ms)",
+                                                            statistics.DepthPassMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Tone mapping (ms)",
                                                             statistics.ToneMapMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Command unattributed (ms)",
+                                                            statistics.CommandRecordingUnattributedMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Frame uploads (ms)",
                                                             statistics.FrameUploadMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Frame upload submissions",
+                                                            static_cast<double>(statistics.FrameUploadSubmissions));
                         m_Impl->ProfilerService->SetCounter(
                             ProfileCategory::Rendering, "Forward+ buffer reallocations",
                             static_cast<double>(statistics.ForwardPlusBufferReallocations));
@@ -422,6 +434,8 @@ namespace Keire
                                                             static_cast<double>(statistics.VfxIndirectDraws));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Swapchain wait (ms)",
                                                             statistics.SwapchainWaitMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Allowed frames in flight",
+                                                            statistics.AllowedFramesInFlight);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "UI recording (ms)",
                                                             statistics.UiRecordingMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU submission CPU (ms)",

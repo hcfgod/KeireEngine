@@ -9,6 +9,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "Source/**.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetOperationService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetPicker.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetBrowserFolderCache.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AuthoringWidgets.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AudioMixerDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorCommandRouter.cpp",

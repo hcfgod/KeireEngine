@@ -182,6 +182,8 @@ namespace Keire
         std::uint32_t RendererQueueHighWaterMark = 0;
         std::uint32_t ForwardPlusBufferReallocations = 0;
         std::uint32_t ForwardPlusCacheHits = 0;
+        std::uint32_t FrameUploadSubmissions = 0;
+        std::uint32_t AllowedFramesInFlight = 0;
         std::uint64_t ForwardPlusUploadBytes = 0;
         std::uint64_t DroppedVfxParticles = 0;
         std::uint64_t VfxGpuBufferBytes = 0;
@@ -194,10 +196,15 @@ namespace Keire
         float CpuPreparationMilliseconds = 0.0F;
         float CpuPreparationP95Milliseconds = 0.0F;
         float CommandRecordingMilliseconds = 0.0F;
+        float SkinningPreparationMilliseconds = 0.0F;
+        float VfxPreparationMilliseconds = 0.0F;
+        float DrawPreparationMilliseconds = 0.0F;
         float ShadowRecordingMilliseconds = 0.0F;
         float ForwardPlusCullingMilliseconds = 0.0F;
         float ScenePassMilliseconds = 0.0F;
+        float DepthPassMilliseconds = 0.0F;
         float ToneMapMilliseconds = 0.0F;
+        float CommandRecordingUnattributedMilliseconds = 0.0F;
         float FrameUploadMilliseconds = 0.0F;
         float SwapchainWaitMilliseconds = 0.0F;
         float UiRecordingMilliseconds = 0.0F;

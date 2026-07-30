@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 
+#include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SelectionRange.h"
@@ -8,6 +9,7 @@
 #include "KeireInternal/Process.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <fstream>
 #include <optional>
@@ -39,8 +41,7 @@ namespace KeireEditor
 
         [[nodiscard]] std::string AssetTypeName(const Keire::AssetSourceRecord& record)
         {
-            if (const auto content = record.ImportSettings.find("contentType");
-                content != record.ImportSettings.end())
+            if (const auto content = record.ImportSettings.find("contentType"); content != record.ImportSettings.end())
             {
                 if (const auto* value = std::get_if<std::string>(&content->second); value && *value == "animation")
                     return "Animation Source";
@@ -173,6 +174,7 @@ namespace KeireEditor
             PreferencePath = ProjectRoot / "Library" / "Editor" / "asset-browser.settings";
             Thumbnails = std::make_unique<ThumbnailService>(ProjectRoot / "Library" / "Thumbnails");
             LoadPreferences();
+            RefreshFolderCache(true);
         }
 
         void SetUndoContext(Keire::Ref<Keire::UndoContext> context) { Undo = std::move(context); }
@@ -224,6 +226,9 @@ namespace KeireEditor
             CurrentFolder.clear();
             ProjectRoot.clear();
             AssetRoot.clear();
+            FolderCache.Clear();
+            ObservedRecordRevision = 0;
+            NextFolderRefresh = {};
         }
 
         void LoadPreferences()
@@ -267,16 +272,21 @@ namespace KeireEditor
             }
         }
 
-        [[nodiscard]] std::vector<std::filesystem::path> Folders() const
+        void RefreshFolderCache(const bool force)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            if (!force && now < NextFolderRefresh)
+                return;
+            NextFolderRefresh = now + std::chrono::seconds(1);
+            (void)FolderCache.Refresh(AssetRoot);
+        }
+
+        [[nodiscard]] std::vector<std::filesystem::path> Folders(const std::filesystem::path& parent) const
         {
             std::vector<std::filesystem::path> result;
-            const auto absolute = AssetRoot / CurrentFolder;
-            std::error_code error;
-            for (std::filesystem::directory_iterator iterator(absolute, error), end; !error && iterator != end;
-                 iterator.increment(error))
-                if (iterator->is_directory(error))
-                    result.push_back(std::filesystem::relative(iterator->path(), AssetRoot, error));
-            std::ranges::sort(result);
+            for (const auto& folder : FolderCache.Folders())
+                if (folder.parent_path() == parent)
+                    result.push_back(folder);
             return result;
         }
 
@@ -1283,13 +1293,7 @@ namespace KeireEditor
 
         void DrawFolderTree(Keire::UiFrame& ui, const std::filesystem::path& relative, IAssetBrowserController& editor)
         {
-            std::error_code error;
-            std::vector<std::filesystem::path> children;
-            for (std::filesystem::directory_iterator iterator(AssetRoot / relative, error), end;
-                 !error && iterator != end; iterator.increment(error))
-                if (iterator->is_directory(error))
-                    children.push_back(std::filesystem::relative(iterator->path(), AssetRoot, error));
-            std::ranges::sort(children);
+            const auto children = Folders(relative);
             for (const auto& child : children)
             {
                 auto id = ui.PushId(child.generic_string());
@@ -1395,7 +1399,7 @@ namespace KeireEditor
             const auto contentDropArea = ui.ContentRect();
             DrawBreadcrumbs(ui, editor);
 
-            const auto folders = Folders();
+            const auto folders = Folders(CurrentFolder);
             std::vector<const Keire::AssetSourceRecord*> assets;
             for (const auto& record : editor.AssetBrowserRecords())
                 if (record.RelativePath.parent_path() == CurrentFolder &&
@@ -1483,11 +1487,10 @@ namespace KeireEditor
                                                                          : editor.AssetBrowserStatus());
                     return;
                 }
-                // External imports publish source files before their cooked catalog is ready. Keep displaying the
-                // last published snapshot while that transaction is running so thumbnails cannot create failed
-                // handles for asset IDs that are not mountable yet.
-                if (!editor.AssetBrowserImportPending())
-                    editor.RefreshAssetBrowserRecords();
+                const auto recordRevision = editor.AssetBrowserRecordRevision();
+                const bool recordsChanged = recordRevision != ObservedRecordRevision;
+                ObservedRecordRevision = recordRevision;
+                RefreshFolderCache(recordsChanged);
                 if (!FolderImage)
                 {
                     const auto pixels = MakeFolderThumbnail(96, 96);
@@ -1495,15 +1498,18 @@ namespace KeireEditor
                 }
                 for (auto& completed : Thumbnails->DrainCompleted())
                     Images[completed.Asset] = ui.CreateImage(completed.Width, completed.Height, completed.Pixels);
-                for (const auto& record : editor.AssetBrowserRecords())
+                const auto records = editor.AssetBrowserRecords();
+                for (const auto& record : records)
                 {
+                    if (!recordsChanged && (Images.contains(record.Id) || ImageDigests.contains(record.Id)))
+                        continue;
                     std::string digest = record.SourceDigest + record.MetadataDigest;
                     for (const auto dependency : record.Dependencies)
                     {
                         digest += dependency.ToString();
                         const auto dependencyRecord =
-                            std::ranges::find(editor.AssetBrowserRecords(), dependency, &Keire::AssetSourceRecord::Id);
-                        if (dependencyRecord != editor.AssetBrowserRecords().end())
+                            std::ranges::find(records, dependency, &Keire::AssetSourceRecord::Id);
+                        if (dependencyRecord != records.end())
                             digest += dependencyRecord->SourceDigest + dependencyRecord->MetadataDigest;
                     }
                     if (const auto found = ImageDigests.find(record.Id);
@@ -1740,11 +1746,14 @@ namespace KeireEditor
         std::filesystem::path AssetRoot;
         std::filesystem::path CurrentFolder;
         std::filesystem::path PreferencePath;
+        AssetBrowserFolderCache FolderCache;
+        std::chrono::steady_clock::time_point NextFolderRefresh;
         std::filesystem::path RenamingFolder;
         std::filesystem::path PendingDeleteFolder;
         std::unique_ptr<ThumbnailService> Thumbnails;
         std::unordered_map<Keire::AssetId, Keire::Ref<Keire::UiImage>> Images;
         std::unordered_map<Keire::AssetId, std::string> ImageDigests;
+        std::uint64_t ObservedRecordRevision = 0;
         Keire::Ref<Keire::UiImage> FolderImage;
         Keire::Ref<Keire::UndoContext> Undo;
         std::vector<Keire::AssetId> Selection;

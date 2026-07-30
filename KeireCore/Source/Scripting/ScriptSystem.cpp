@@ -4,6 +4,7 @@
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
+#include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "KeireInternal/FileSystem.h"
@@ -47,6 +48,28 @@ namespace Keire
 {
     namespace
     {
+        struct NativeAnimatorState
+        {
+            float Speed = 1.0F;
+            float NormalizedTime = 0.0F;
+            std::uint8_t Playing = 0;
+            std::uint8_t Paused = 0;
+        };
+
+        struct NativeAudioSourceProperties
+        {
+            std::uint64_t ClipHigh = 0;
+            std::uint64_t ClipLow = 0;
+            float Gain = 1.0F;
+            float Pitch = 1.0F;
+            float PositionSeconds = 0.0F;
+            float DurationSeconds = 0.0F;
+            std::uint32_t Priority = 128;
+            std::uint8_t Loop = 0;
+            std::uint8_t Spatial = 0;
+            std::uint8_t PlaybackState = 0;
+        };
+
         [[nodiscard]] std::string PathText(const std::filesystem::path& path)
         {
             const auto value = path.generic_u8string();
@@ -1919,6 +1942,128 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t RuntimePlayAnimator(const std::uint64_t world, const std::uint64_t high,
+                                                              const std::uint64_t low, const Coral::String state,
+                                                              const Coral::String layer,
+                                                              const float normalizedTime) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->Play(static_cast<std::string>(state), static_cast<std::string>(layer), normalizedTime);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeCrossFadeAnimator(const std::uint64_t world, const std::uint64_t high,
+                                                                   const std::uint64_t low, const Coral::String state,
+                                                                   const Coral::String layer, const float duration,
+                                                                   const float normalizedTime) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->CrossFade(static_cast<std::string>(state), duration, static_cast<std::string>(layer),
+                                    normalizedTime);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimePauseAnimator(const std::uint64_t world, const std::uint64_t high,
+                                                               const std::uint64_t low,
+                                                               const std::uint8_t paused) noexcept
+        {
+            const auto animator = RuntimeAnimator(world, high, low);
+            if (!animator)
+                return 0;
+            animator->SetPaused(paused != 0);
+            return 1;
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeStopAnimator(const std::uint64_t world, const std::uint64_t high,
+                                                              const std::uint64_t low) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->Stop();
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorSpeed(const std::uint64_t world, const std::uint64_t high,
+                                                                  const std::uint64_t low, const float speed) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                animator->SetSpeed(speed);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeGetAnimatorState(const std::uint64_t world, const std::uint64_t high,
+                                                                  const std::uint64_t low,
+                                                                  NativeAnimatorState* state) noexcept
+        {
+            if (!state)
+                return 0;
+            const auto animator = RuntimeAnimator(world, high, low);
+            if (!animator)
+                return 0;
+            state->Speed = animator->Speed();
+            state->NormalizedTime = animator->NormalizedTime();
+            state->Playing = animator->RuntimePlaying() ? 1 : 0;
+            state->Paused = animator->Paused() ? 1 : 0;
+            return 1;
+        }
+
+        [[nodiscard]] static std::int32_t RuntimeGetAnimatorStateName(const std::uint64_t world,
+                                                                      const std::uint64_t high, const std::uint64_t low,
+                                                                      char* destination,
+                                                                      const std::int32_t capacity) noexcept
+        {
+            try
+            {
+                const auto animator = RuntimeAnimator(world, high, low);
+                if (!animator)
+                    return 0;
+                const auto name = animator->CurrentState();
+                if (destination && capacity > 0)
+                    std::memcpy(destination, name.data(), std::min<std::size_t>(name.size(), capacity));
+                return static_cast<std::int32_t>(
+                    std::min<std::size_t>(name.size(), std::numeric_limits<std::int32_t>::max()));
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static std::uint8_t
         RuntimeSetAnimatorTwoBoneIk(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
                                     const Coral::String goal, const Coral::String root, const Coral::String middle,
@@ -2415,11 +2560,14 @@ namespace Keire
             }
         }
 
-        [[nodiscard]] static std::uint8_t RuntimePlayAudioAdvanced(
-            const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
-            const std::uint64_t clipHigh, const std::uint64_t clipLow, const Coral::String bus, const float gain,
-            const float pitch, const std::uint32_t priority, const std::uint8_t loop, const std::uint8_t spatial,
-            const float minimumDistance, const float maximumDistance) noexcept
+        [[nodiscard]] static std::uint8_t
+        RuntimePlayAudioAdvanced(const std::uint64_t world, const std::uint64_t entityHigh,
+                                 const std::uint64_t entityLow, const std::uint64_t clipHigh,
+                                 const std::uint64_t clipLow, const std::uint64_t mixerHigh,
+                                 const std::uint64_t mixerLow, const std::uint64_t busHigh, const std::uint64_t busLow,
+                                 const Coral::String bus, const float gain, const float pitch,
+                                 const std::uint32_t priority, const std::uint8_t loop, const std::uint8_t spatial,
+                                 const float minimumDistance, const float maximumDistance) noexcept
         {
             if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
                 return 0;
@@ -2436,7 +2584,9 @@ namespace Keire
                                       .Loop = loop != 0,
                                       .Spatial = spatial != 0,
                                       .MinimumDistance = minimumDistance,
-                                      .MaximumDistance = maximumDistance})
+                                      .MaximumDistance = maximumDistance,
+                                      .Mixer = AssetId(mixerHigh, mixerLow),
+                                      .BusId = AssetId(busHigh, busLow)})
                            ? 1
                            : 0;
             }
@@ -2457,6 +2607,191 @@ namespace Keire
                 return entity && CurrentRuntime->Specification.RuntimeServices->StopManagedAudio(entity.Id().Value())
                            ? 1
                            : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimePlayAudioSource(const std::uint64_t world,
+                                                                 const std::uint64_t entityHigh,
+                                                                 const std::uint64_t entityLow) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto source = entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
+                if (!source || !source->Clip())
+                    return 0;
+                ManagedAudioPlayback playback;
+                playback.Entity = entity.Id().Value();
+                playback.Clip = source->Clip();
+                playback.Bus = source->Bus();
+                playback.Gain = source->Gain();
+                playback.Pitch = source->Pitch();
+                playback.Priority = source->Priority();
+                playback.Loop = source->Loop();
+                playback.Spatial = source->Spatial();
+                playback.MinimumDistance = source->MinimumDistance();
+                playback.MaximumDistance = source->MaximumDistance();
+                playback.Mixer = source->Mixer();
+                playback.BusId = source->BusId();
+                playback.Attenuation = source->Attenuation();
+                return CurrentRuntime->Specification.RuntimeServices->PlayManagedAudio(playback) ? 1 : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimePauseAudio(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                            const std::uint64_t entityLow,
+                                                            const std::uint8_t paused) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->PauseManagedAudio(entity.Id().Value(),
+                                                                                                  paused != 0)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSeekAudio(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                           const std::uint64_t entityLow,
+                                                           const float positionSeconds) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->SeekManagedAudio(entity.Id().Value(),
+                                                                                                 positionSeconds)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetAudioSourceProperties(const std::uint64_t world, const std::uint64_t entityHigh,
+                                        const std::uint64_t entityLow, NativeAudioSourceProperties* properties) noexcept
+        {
+            if (!properties)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto source = entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
+                if (!source)
+                    return 0;
+                const auto clip = source->Clip();
+                properties->ClipHigh = clip.High();
+                properties->ClipLow = clip.Low();
+                properties->Gain = source->Gain();
+                properties->Pitch = source->Pitch();
+                properties->Priority = source->Priority();
+                properties->Loop = source->Loop() ? 1 : 0;
+                properties->Spatial = source->Spatial() ? 1 : 0;
+                if (CurrentRuntime && CurrentRuntime->Specification.RuntimeServices)
+                {
+                    const auto status =
+                        CurrentRuntime->Specification.RuntimeServices->ManagedAudioStatus(entity.Id().Value());
+                    properties->PositionSeconds = status.PositionSeconds;
+                    properties->DurationSeconds = status.DurationSeconds;
+                    properties->PlaybackState = static_cast<std::uint8_t>(status.State);
+                }
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAudioSourceClip(const std::uint64_t world,
+                                                                    const std::uint64_t entityHigh,
+                                                                    const std::uint64_t entityLow,
+                                                                    const std::uint64_t clipHigh,
+                                                                    const std::uint64_t clipLow) noexcept
+        {
+            try
+            {
+                auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                if (!entity)
+                    return 0;
+                auto source = entity.GetComponent<AudioSourceComponent>();
+                if (!source)
+                    source = entity.AddComponent<AudioSourceComponent>();
+                source->SetClip(AssetId(clipHigh, clipLow));
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAudioSourceScalar(const std::uint64_t world,
+                                                                      const std::uint64_t entityHigh,
+                                                                      const std::uint64_t entityLow,
+                                                                      const std::uint8_t property,
+                                                                      const float value) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto source = entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
+                if (!source)
+                    return 0;
+                if (property == 0)
+                    source->SetGain(value);
+                else if (property == 1)
+                    source->SetPitch(value);
+                else
+                    return 0;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetAudioSourceFlag(const std::uint64_t world,
+                                                                    const std::uint64_t entityHigh,
+                                                                    const std::uint64_t entityLow,
+                                                                    const std::uint8_t property,
+                                                                    const std::uint8_t value) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto source = entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
+                if (!source)
+                    return 0;
+                if (property == 0)
+                    source->SetLoop(value != 0);
+                else if (property == 1)
+                    source->SetSpatial(value != 0);
+                else
+                    return 0;
+                return 1;
             }
             catch (...)
             {
@@ -3581,6 +3916,20 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorTrigger));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorLayerWeightIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorLayerWeight));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PlayAnimatorIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePlayAnimator));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "CrossFadeAnimatorIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeCrossFadeAnimator));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PauseAnimatorIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePauseAnimator));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "StopAnimatorIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeStopAnimator));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorSpeedIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorSpeed));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorStateIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetAnimatorState));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorStateNameIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetAnimatorStateName));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorTwoBoneIkIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorTwoBoneIk));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFabrikIkIcall",
@@ -3643,6 +3992,20 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimePlayAudioAdvanced));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "StopAudioIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeStopAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PlayAudioSourceIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePlayAudioSource));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "PauseAudioIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimePauseAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SeekAudioIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSeekAudio));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetAudioSourcePropertiesIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetAudioSourceProperties));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceClipIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceClip));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceScalarIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceScalar));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAudioSourceFlagIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAudioSourceFlag));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "PlayVfxIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimePlayVfx));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "StopVfxIcall",

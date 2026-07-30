@@ -41,6 +41,48 @@ internal struct NativeRaycastHit
     internal float Distance;
 }
 
+internal enum AudioSourceScalarProperty : byte
+{
+    Gain,
+    Pitch
+}
+
+internal enum AudioSourceFlagProperty : byte
+{
+    Loop,
+    Spatial
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeAudioSourceProperties
+{
+    internal ulong ClipHigh;
+    internal ulong ClipLow;
+    internal float Gain;
+    internal float Pitch;
+    internal float PositionSeconds;
+    internal float DurationSeconds;
+    internal uint Priority;
+    internal byte LoopValue;
+    internal byte SpatialValue;
+    internal byte PlaybackState;
+
+    internal readonly AssetId Clip => new(ClipHigh, ClipLow);
+    internal readonly bool Loop => LoopValue != 0;
+    internal readonly bool Spatial => SpatialValue != 0;
+    internal readonly AudioSourceStatus Status =>
+        new((AudioPlaybackState)PlaybackState, PositionSeconds, DurationSeconds);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeAnimatorState
+{
+    internal float Speed;
+    internal float NormalizedTime;
+    internal byte Playing;
+    internal byte Paused;
+}
+
 internal static unsafe class NativeRuntime
 {
     private static readonly object ManagedAssetGate = new();
@@ -217,6 +259,14 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte, byte> SetAnimatorBooleanIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte, byte> SetAnimatorTriggerIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float, byte> SetAnimatorLayerWeightIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, float, byte> PlayAnimatorIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, float, float, byte>
+        CrossFadeAnimatorIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseAnimatorIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopAnimatorIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SetAnimatorSpeedIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeAnimatorState*, byte> GetAnimatorStateIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte*, int, int> GetAnimatorStateNameIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, NativeString, NativeString,
         Vector3, Vector3, float, byte, byte> SetAnimatorTwoBoneIkIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, Vector3, float, uint, float,
@@ -249,9 +299,17 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, Vector3, Vector3, float, uint, ulong, ulong, NativeRaycastHit*, byte>
         RaycastIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, float, byte> PlayAudioIcall;
-    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, NativeString, float, float, uint, byte, byte,
-        float, float, byte> PlayAudioAdvancedIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, ulong, ulong, ulong, ulong, NativeString,
+        float, float, uint, byte, byte, float, float, byte> PlayAudioAdvancedIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopAudioIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> PlayAudioSourceIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseAudioIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> SeekAudioIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeAudioSourceProperties*, byte>
+        GetAudioSourcePropertiesIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte> SetAudioSourceClipIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, float, byte> SetAudioSourceScalarIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte, byte> SetAudioSourceFlagIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, byte, byte> PlayVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseVfxIcall;
@@ -432,6 +490,52 @@ internal static unsafe class NativeRuntime
                                                            value));
     }
 
+    internal static void PlayAnimator(Entity entity, string state, string layer, float normalizedTime)
+    {
+        using NativeString nativeState = state;
+        using NativeString nativeLayer = layer;
+        RequireAnimatorResult(PlayAnimatorIcall(entity.World, entity.Id.High, entity.Id.Low, nativeState, nativeLayer,
+                                                normalizedTime));
+    }
+
+    internal static void CrossFadeAnimator(Entity entity, string state, string layer, float duration,
+                                           float normalizedTime)
+    {
+        using NativeString nativeState = state;
+        using NativeString nativeLayer = layer;
+        RequireAnimatorResult(CrossFadeAnimatorIcall(entity.World, entity.Id.High, entity.Id.Low, nativeState,
+                                                     nativeLayer, duration, normalizedTime));
+    }
+
+    internal static void PauseAnimator(Entity entity, bool paused) =>
+        RequireAnimatorResult(PauseAnimatorIcall(entity.World, entity.Id.High, entity.Id.Low, paused ? (byte)1 : (byte)0));
+
+    internal static void StopAnimator(Entity entity) =>
+        RequireAnimatorResult(StopAnimatorIcall(entity.World, entity.Id.High, entity.Id.Low));
+
+    internal static void SetAnimatorSpeed(Entity entity, float speed) =>
+        RequireAnimatorResult(SetAnimatorSpeedIcall(entity.World, entity.Id.High, entity.Id.Low, speed));
+
+    internal static AnimatorStateInfo GetAnimatorState(Entity entity)
+    {
+        NativeAnimatorState state = default;
+        RequireAnimatorResult(GetAnimatorStateIcall(entity.World, entity.Id.High, entity.Id.Low, &state));
+        int length = GetAnimatorStateNameIcall(entity.World, entity.Id.High, entity.Id.Low, null, 0);
+        string name = string.Empty;
+        if (length > 0)
+        {
+            byte[] bytes = new byte[length];
+            fixed (byte* destination = bytes)
+            {
+                int copied = GetAnimatorStateNameIcall(entity.World, entity.Id.High, entity.Id.Low, destination,
+                                                       bytes.Length);
+                if (copied >= 0)
+                    name = Encoding.UTF8.GetString(bytes);
+            }
+        }
+        return new AnimatorStateInfo(name, state.NormalizedTime, state.Playing != 0, state.Paused != 0, state.Speed);
+    }
+
     internal static void SetAnimatorTwoBoneIk(Entity entity, string goal, string rootBone, string middleBone,
                                               string endBone, Vector3 target, Vector3 pole, float weight,
                                               AnimatorIkSpace space)
@@ -533,14 +637,51 @@ internal static unsafe class NativeRuntime
     internal static bool PlayAudio(Entity entity, AssetId clip, AudioPlaybackOptions options)
     {
         using NativeString bus = options.Bus;
-        return PlayAudioAdvancedIcall(entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low, bus,
-                                      options.Gain, options.Pitch, options.Priority, options.Loop ? (byte)1 : (byte)0,
-                                      options.Spatial ? (byte)1 : (byte)0, options.MinimumDistance,
-                                      options.MaximumDistance) != 0;
+        return PlayAudioAdvancedIcall(
+            entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low, options.Mixer.Id.High,
+            options.Mixer.Id.Low, options.BusId.High, options.BusId.Low, bus, options.Gain, options.Pitch,
+            options.Priority, options.Loop ? (byte)1 : (byte)0, options.Spatial ? (byte)1 : (byte)0,
+            options.MinimumDistance, options.MaximumDistance) != 0;
     }
 
     internal static bool StopAudio(Entity entity) =>
         StopAudioIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+
+    internal static bool PlayAudioSource(Entity entity) =>
+        PlayAudioSourceIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+
+    internal static bool PauseAudio(Entity entity, bool paused) =>
+        PauseAudioIcall(entity.World, entity.Id.High, entity.Id.Low, paused ? (byte)1 : (byte)0) != 0;
+
+    internal static bool SeekAudio(Entity entity, float time) =>
+        SeekAudioIcall(entity.World, entity.Id.High, entity.Id.Low, time) != 0;
+
+    internal static NativeAudioSourceProperties GetAudioSourceProperties(Entity entity)
+    {
+        NativeAudioSourceProperties properties = default;
+        if (GetAudioSourcePropertiesIcall(entity.World, entity.Id.High, entity.Id.Low, &properties) == 0)
+            throw new InvalidOperationException("The Audio Source is unavailable.");
+        return properties;
+    }
+
+    internal static void SetAudioSourceClip(Entity entity, AssetId clip)
+    {
+        if (SetAudioSourceClipIcall(entity.World, entity.Id.High, entity.Id.Low, clip.High, clip.Low) == 0)
+            throw new InvalidOperationException("The Audio Source clip could not be changed.");
+    }
+
+    internal static void SetAudioSourceScalar(Entity entity, AudioSourceScalarProperty property, float value)
+    {
+        if (SetAudioSourceScalarIcall(entity.World, entity.Id.High, entity.Id.Low, (byte)property, value) == 0)
+            throw new InvalidOperationException("The Audio Source value could not be changed.");
+    }
+
+    internal static void SetAudioSourceFlag(Entity entity, AudioSourceFlagProperty property, bool value)
+    {
+        if (SetAudioSourceFlagIcall(entity.World, entity.Id.High, entity.Id.Low, (byte)property,
+                                    value ? (byte)1 : (byte)0) == 0)
+            throw new InvalidOperationException("The Audio Source flag could not be changed.");
+    }
 
     internal static bool PlayVfx(Entity entity, AssetId effect, bool restart) =>
         PlayVfxIcall(entity.World, entity.Id.High, entity.Id.Low, effect.High, effect.Low, restart ? (byte)1 : (byte)0) !=

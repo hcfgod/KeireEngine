@@ -167,6 +167,7 @@ namespace Keire
             AudioVoiceId Id;
             AudioVoiceSpecification Specification;
             double Frame = 0.0;
+            bool Paused = false;
             bool Virtualized = false;
             std::unique_ptr<Native> Device;
         };
@@ -635,6 +636,52 @@ namespace Keire
         return true;
     }
 
+    bool AudioSystem::Pause(const AudioVoiceId voice, const bool paused)
+    {
+        m_Impl->RequireOwner("Pause");
+        if (!voice)
+            return false;
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->Voices.find(voice);
+        if (found == m_Impl->Voices.end())
+            return false;
+        auto& runtime = found->second;
+        if (runtime.Paused == paused)
+            return true;
+        if (runtime.Device && runtime.Device->SoundOpen)
+        {
+            const auto result = paused ? ma_sound_stop(&runtime.Device->Sound) : ma_sound_start(&runtime.Device->Sound);
+            if (result != MA_SUCCESS)
+                throw std::runtime_error(paused ? "miniaudio voice pause failed." : "miniaudio voice resume failed.");
+        }
+        runtime.Paused = paused;
+        return true;
+    }
+
+    bool AudioSystem::Seek(const AudioVoiceId voice, const std::uint64_t frame)
+    {
+        m_Impl->RequireOwner("Seek");
+        if (!voice)
+            return false;
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->Voices.find(voice);
+        if (found == m_Impl->Voices.end())
+            return false;
+        auto& runtime = found->second;
+        const auto frames = runtime.Specification.Clip->Frames == 0
+                                ? runtime.Specification.Clip->Samples.size() / runtime.Specification.Clip->Channels
+                                : runtime.Specification.Clip->Frames;
+        if (frame > frames)
+            throw std::out_of_range("Audio seek frame exceeds the clip duration.");
+        if (runtime.Device && runtime.Device->SoundOpen &&
+            ma_sound_seek_to_pcm_frame(&runtime.Device->Sound, frame) != MA_SUCCESS)
+        {
+            throw std::runtime_error("miniaudio voice seek failed.");
+        }
+        runtime.Frame = static_cast<double>(frame);
+        return true;
+    }
+
     bool AudioSystem::SetVoice(const AudioVoiceId voice, AudioVoiceSpecification specification)
     {
         m_Impl->RequireOwner("SetVoice");
@@ -778,7 +825,7 @@ namespace Keire
         for (auto iterator = m_Impl->Voices.begin(); iterator != m_Impl->Voices.end();)
         {
             auto& voice = iterator->second;
-            if (voice.Device && voice.Device->SoundOpen)
+            if (voice.Device && voice.Device->SoundOpen && !voice.Paused)
             {
                 ma_uint64 cursor = 0;
                 (void)ma_sound_get_cursor_in_pcm_frames(&voice.Device->Sound, &cursor);
@@ -813,6 +860,8 @@ namespace Keire
         for (auto& [id, voice] : m_Impl->Voices)
         {
             (void)id;
+            if (voice.Paused)
+                continue;
             const auto& clip = *voice.Specification.Clip;
             std::vector<float> streamedSamples;
             const std::vector<float>* samples = &clip.Samples;
@@ -912,7 +961,7 @@ namespace Keire
                               voice.Specification.Clip->Frames == 0
                                   ? voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels
                                   : voice.Specification.Clip->Frames;
-                          if (!voice.Specification.Loop && voice.Frame >= static_cast<double>(frames))
+                          if (!voice.Paused && !voice.Specification.Loop && voice.Frame >= static_cast<double>(frames))
                           {
                               implementation->DestroyVoice(voice);
                               return true;
@@ -922,6 +971,29 @@ namespace Keire
         return output;
     }
 
+    std::optional<AudioVoiceInfo> AudioSystem::Voice(const AudioVoiceId voice) const
+    {
+        m_Impl->RequireOwner("Voice");
+        if (!voice)
+            return std::nullopt;
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->Voices.find(voice);
+        if (found == m_Impl->Voices.end())
+            return std::nullopt;
+        const auto& runtime = found->second;
+        const auto frames = runtime.Specification.Clip->Frames == 0
+                                ? runtime.Specification.Clip->Samples.size() / runtime.Specification.Clip->Channels
+                                : runtime.Specification.Clip->Frames;
+        return AudioVoiceInfo{voice,
+                              runtime.Specification.Bus,
+                              static_cast<std::uint64_t>(runtime.Frame),
+                              frames,
+                              runtime.Specification.Priority,
+                              !runtime.Paused,
+                              runtime.Paused,
+                              runtime.Virtualized};
+    }
+
     std::vector<AudioVoiceInfo> AudioSystem::Voices() const
     {
         m_Impl->RequireOwner("Voices");
@@ -929,8 +1001,13 @@ namespace Keire
         std::vector<AudioVoiceInfo> result;
         result.reserve(m_Impl->Voices.size());
         for (const auto& [id, voice] : m_Impl->Voices)
-            result.push_back({id, voice.Specification.Bus, static_cast<std::uint64_t>(voice.Frame),
-                              voice.Specification.Priority, true, voice.Virtualized});
+        {
+            const auto frames = voice.Specification.Clip->Frames == 0
+                                    ? voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels
+                                    : voice.Specification.Clip->Frames;
+            result.push_back({id, voice.Specification.Bus, static_cast<std::uint64_t>(voice.Frame), frames,
+                              voice.Specification.Priority, !voice.Paused, voice.Paused, voice.Virtualized});
+        }
         return result;
     }
 
@@ -942,7 +1019,8 @@ namespace Keire
         result.Voices = m_Impl->Voices.size();
         result.VirtualVoices =
             std::ranges::count_if(m_Impl->Voices, [](const auto& item) { return item.second.Virtualized; });
-        result.AudibleVoices = result.Voices - result.VirtualVoices;
+        result.AudibleVoices = std::ranges::count_if(m_Impl->Voices, [](const auto& item)
+                                                     { return !item.second.Virtualized && !item.second.Paused; });
         result.RenderedFrames = m_Impl->RenderedFrames;
         result.Underruns = m_Impl->Underruns;
         return result;

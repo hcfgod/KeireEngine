@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <map>
 #include <ranges>
@@ -30,6 +31,7 @@ namespace Keire
             AudioVoiceId Voice;
             bool ManualPlayRequested = false;
             bool PlayOnAwakeConsumed = false;
+            bool Paused = false;
         };
 
         Impl(Ref<AssetSystem> assets, Ref<AudioSystem> audio, const std::size_t maximumUiElements)
@@ -248,6 +250,7 @@ namespace Keire
                 }
             }
             state.Voice = {};
+            state.Paused = false;
         }
 
         void SynchronizeAudio(const Ref<Scene>& scene, const bool playing)
@@ -321,6 +324,7 @@ namespace Keire
                 state.Voice = Audio->Play(std::move(specification));
                 if (state.Voice)
                 {
+                    state.Paused = false;
                     state.ManualPlayRequested = false;
                     state.PlayOnAwakeConsumed = state.PlayOnAwakeConsumed || source->PlayOnAwake();
                 }
@@ -435,6 +439,35 @@ namespace Keire
         return false;
     }
 
+    bool ScenePresentationRuntime::Pause(const EntityId source)
+    {
+        const auto found = m_Impl->AudioSources.find(source);
+        if (found == m_Impl->AudioSources.end() || !found->second.Voice || found->second.Paused)
+            return found != m_Impl->AudioSources.end() && found->second.Paused;
+        if (!m_Impl->Audio->Pause(found->second.Voice))
+        {
+            found->second.Voice = {};
+            return false;
+        }
+        found->second.Paused = true;
+        return true;
+    }
+
+    bool ScenePresentationRuntime::Resume(const EntityId source)
+    {
+        const auto found = m_Impl->AudioSources.find(source);
+        if (found == m_Impl->AudioSources.end() || !found->second.Voice || !found->second.Paused)
+            return false;
+        if (!m_Impl->Audio->Pause(found->second.Voice, false))
+        {
+            found->second.Voice = {};
+            found->second.Paused = false;
+            return false;
+        }
+        found->second.Paused = false;
+        return true;
+    }
+
     bool ScenePresentationRuntime::Stop(const EntityId source)
     {
         if (const auto found = m_Impl->AudioSources.find(source); found != m_Impl->AudioSources.end())
@@ -445,6 +478,43 @@ namespace Keire
             return true;
         }
         return false;
+    }
+
+    bool ScenePresentationRuntime::Seek(const EntityId source, const float positionSeconds)
+    {
+        if (!std::isfinite(positionSeconds) || positionSeconds < 0.0F)
+            throw std::invalid_argument("Audio source seek position must be finite and non-negative.");
+        const auto found = m_Impl->AudioSources.find(source);
+        if (found == m_Impl->AudioSources.end() || !found->second.Voice || !found->second.LoadedClip)
+            return false;
+        const auto& clip = *found->second.LoadedClip;
+        const auto duration = clip.SampleRate == 0 ? 0.0F : static_cast<float>(clip.Frames) / clip.SampleRate;
+        if (positionSeconds > duration)
+            throw std::out_of_range("Audio source seek position exceeds the clip duration.");
+        const auto frame = static_cast<std::uint64_t>(std::min(
+            static_cast<double>(clip.Frames), std::round(static_cast<double>(positionSeconds) * clip.SampleRate)));
+        return m_Impl->Audio->Seek(found->second.Voice, frame);
+    }
+
+    AudioSourcePlaybackInfo ScenePresentationRuntime::Playback(const EntityId source) const
+    {
+        AudioSourcePlaybackInfo result;
+        const auto found = m_Impl->AudioSources.find(source);
+        if (found == m_Impl->AudioSources.end())
+            return result;
+        if (found->second.LoadedClip && found->second.LoadedClip->SampleRate != 0)
+        {
+            result.DurationSeconds =
+                static_cast<float>(found->second.LoadedClip->Frames) / found->second.LoadedClip->SampleRate;
+        }
+        const auto voice = m_Impl->Audio && found->second.Voice ? m_Impl->Audio->Voice(found->second.Voice)
+                                                                : std::optional<AudioVoiceInfo>{};
+        if (!voice)
+            return result;
+        if (found->second.LoadedClip && found->second.LoadedClip->SampleRate != 0)
+            result.PositionSeconds = static_cast<float>(voice->Frame) / found->second.LoadedClip->SampleRate;
+        result.State = voice->Paused ? AudioSourcePlaybackState::Paused : AudioSourcePlaybackState::Playing;
+        return result;
     }
 
     bool ScenePresentationRuntime::SetFocus(const EntityId entity)

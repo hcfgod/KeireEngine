@@ -70,6 +70,11 @@ Managed gameplay code controls typed parameters and named IK goals:
 ```csharp
 using Keire;
 
+AnimatorHandle animator = Entity.Animator;
+animator.Speed = 1.25f;
+animator.Play("Locomotion");
+animator.CrossFade("Jump", duration: 0.15f);
+
 Animator.SetFloat(Entity, "Speed", velocity.Length);
 Animator.SetTwoBoneIK(Entity, "LeftHand", "LeftUpperArm", "LeftLowerArm", "LeftHand",
                       handTarget, elbowPole, 1.0f);
@@ -80,6 +85,12 @@ Animator.SetFabrikIK(Entity, "SpineAim",
 // Remove a persistent goal when it is no longer needed.
 Animator.ClearIK(Entity, "LeftHand");
 ```
+
+`Play` and `CrossFade` accept a controller state name, optional layer name, and normalized start time. The handle also
+supports `Pause`, `Resume`, and `Stop`, and reports the current state, normalized time, speed, and playback flags.
+`AssetReference<AnimationClip>` and `AssetReference<AnimatorController>` fields are supported serialized references;
+explicit playback selects controller states so transitions, layers, masks, blend trees, events, and root motion remain
+coherent.
 
 IK goals persist by name until replaced or cleared. World-space goals are converted to model space at the animation
 boundary. Invalid entities, missing Animator components, stale Play generations, missing bones, and invalid solver

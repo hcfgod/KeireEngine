@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/AssetBrowserFolderCache.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
@@ -164,6 +165,37 @@ namespace
         return result;
     }
 } // namespace
+
+TEST_CASE("asset browser folder snapshots avoid steady-state filesystem traversal")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-AssetBrowserFolderCache-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "Materials", error);
+    REQUIRE_FALSE(error);
+    std::filesystem::create_directories(root / "Scripts" / "Runtime", error);
+    REQUIRE_FALSE(error);
+
+    KeireEditor::AssetBrowserFolderCache cache;
+    REQUIRE(cache.Refresh(root));
+    const std::vector<std::filesystem::path> expected{std::filesystem::path("Materials"),
+                                                      std::filesystem::path("Scripts"),
+                                                      std::filesystem::path("Scripts") / "Runtime"};
+    CHECK(std::ranges::equal(cache.Folders(), expected));
+
+    std::filesystem::remove_all(root / "Materials", error);
+    REQUIRE_FALSE(error);
+    CHECK(std::ranges::equal(cache.Folders(), expected));
+    REQUIRE(cache.Refresh(root));
+    const std::vector<std::filesystem::path> afterRemoval{std::filesystem::path("Scripts"),
+                                                          std::filesystem::path("Scripts") / "Runtime"};
+    CHECK(std::ranges::equal(cache.Folders(), afterRemoval));
+
+    std::filesystem::remove_all(root, error);
+    REQUIRE_FALSE(error);
+    CHECK_FALSE(cache.Refresh(root));
+    CHECK(std::ranges::equal(cache.Folders(), afterRemoval));
+}
 
 TEST_CASE("editor command router centralizes availability and execution")
 {

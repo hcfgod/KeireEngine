@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -269,5 +270,48 @@ TEST_CASE("Audio meter snapshots are owner-thread affine, ordered, and bounded")
     worker.join();
     CHECK(rejected.load());
 
+    audio->Close();
+}
+
+TEST_CASE("Audio voices pause, seek, resume, and report deterministic playback state")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48'000;
+    clip->Channels = 1;
+    clip->Frames = 8;
+    clip->Samples.assign(8, 0.5F);
+    Keire::AudioPlaybackRequest request;
+    request.Clip = clip;
+    request.Spatial = false;
+    const auto voice = audio->Play(std::move(request));
+    REQUIRE(voice);
+
+    (void)audio->RenderVoicesOffline(2);
+    REQUIRE(audio->Voice(voice));
+    CHECK(audio->Voice(voice)->Frame == 2);
+    CHECK(audio->Voice(voice)->DurationFrames == 8);
+    CHECK(audio->Voice(voice)->Playing);
+    CHECK_FALSE(audio->Voice(voice)->Paused);
+
+    CHECK(audio->Pause(voice));
+    (void)audio->RenderVoicesOffline(3);
+    REQUIRE(audio->Voice(voice));
+    CHECK(audio->Voice(voice)->Frame == 2);
+    CHECK_FALSE(audio->Voice(voice)->Playing);
+    CHECK(audio->Voice(voice)->Paused);
+    CHECK(audio->Statistics().AudibleVoices == 0);
+
+    CHECK(audio->Seek(voice, 6));
+    CHECK(audio->Voice(voice)->Frame == 6);
+    CHECK_THROWS_AS((void)audio->Seek(voice, 9), std::out_of_range);
+    CHECK(audio->Pause(voice, false));
+    (void)audio->RenderVoicesOffline(1);
+    CHECK(audio->Voice(voice)->Frame == 7);
+    CHECK(audio->Stop(voice));
+    CHECK_FALSE(audio->Voice(voice));
     audio->Close();
 }

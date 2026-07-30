@@ -43,6 +43,7 @@ public readonly record struct Entity(ulong World, EntityId Id)
 
     public IReadOnlyList<Entity> Children => NativeRuntime.GetEntityChildren(this);
     public TransformHandle Transform => new(this);
+    public AnimatorHandle Animator => new(this);
     public ComponentHandle GetComponent(ComponentTypeId type) =>
         NativeRuntime.ComponentExists(this, type) ? new ComponentHandle(this, type) : default;
     public ComponentHandle GetComponent<T>() => GetComponent(ComponentType.Of<T>());

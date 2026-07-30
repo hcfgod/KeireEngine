@@ -155,8 +155,67 @@ public enum AnimatorIkSpace : byte
     World
 }
 
+[StableAssetTypeId("4b454952-4541-4e49-4d43-4c4950000001")]
+public sealed class AnimationClip;
+
+[StableAssetTypeId("4b454952-4541-4e49-4d47-524150480001")]
+public sealed class AnimatorController;
+
+public readonly record struct AnimatorStateInfo(string State, float NormalizedTime, bool IsPlaying, bool IsPaused,
+                                                float Speed);
+
+public readonly record struct AnimatorHandle(Entity Entity)
+{
+    public bool IsValid => Entity.HasComponent<AnimatorComponent>();
+    public bool IsPlaying => IsValid && NativeRuntime.GetAnimatorState(Entity).IsPlaying;
+    public bool IsPaused => IsValid && NativeRuntime.GetAnimatorState(Entity).IsPaused;
+    public string CurrentState => IsValid ? NativeRuntime.GetAnimatorState(Entity).State : string.Empty;
+    public float NormalizedTime => IsValid ? NativeRuntime.GetAnimatorState(Entity).NormalizedTime : 0.0f;
+    public float Speed
+    {
+        get => NativeRuntime.GetAnimatorState(Entity).Speed;
+        set => Animator.SetSpeed(Entity, value);
+    }
+
+    public AnimatorStateInfo StateInfo => NativeRuntime.GetAnimatorState(Entity);
+    public void Play(string state, float normalizedTime = 0.0f, string? layer = null) =>
+        Animator.Play(Entity, state, normalizedTime, layer);
+    public void CrossFade(string state, float duration, float normalizedTime = 0.0f, string? layer = null) =>
+        Animator.CrossFade(Entity, state, duration, normalizedTime, layer);
+    public void Pause() => Animator.Pause(Entity);
+    public void Resume() => Animator.Resume(Entity);
+    public void Stop() => Animator.Stop(Entity);
+}
+
 public static class Animator
 {
+    public static void Play(Entity entity, string state, float normalizedTime = 0.0f, string? layer = null)
+    {
+        ValidatePlayback(entity, state, normalizedTime);
+        NativeRuntime.PlayAnimator(entity, state, layer ?? string.Empty, normalizedTime);
+    }
+
+    public static void CrossFade(Entity entity, string state, float duration, float normalizedTime = 0.0f,
+                                 string? layer = null)
+    {
+        ValidatePlayback(entity, state, normalizedTime);
+        if (!float.IsFinite(duration) || duration < 0.0f || duration > 60.0f)
+            throw new ArgumentOutOfRangeException(nameof(duration),
+                "Animator cross-fade duration must be between zero and sixty seconds.");
+        NativeRuntime.CrossFadeAnimator(entity, state, layer ?? string.Empty, duration, normalizedTime);
+    }
+
+    public static void Pause(Entity entity) => NativeRuntime.PauseAnimator(entity, true);
+    public static void Resume(Entity entity) => NativeRuntime.PauseAnimator(entity, false);
+    public static void Stop(Entity entity) => NativeRuntime.StopAnimator(entity);
+    public static void SetSpeed(Entity entity, float speed)
+    {
+        if (!float.IsFinite(speed) || speed < 0.0f || speed > 8.0f)
+            throw new ArgumentOutOfRangeException(nameof(speed), "Animator speed must be between zero and eight.");
+        NativeRuntime.SetAnimatorSpeed(entity, speed);
+    }
+    public static AnimatorStateInfo GetStateInfo(Entity entity) => NativeRuntime.GetAnimatorState(entity);
+
     public static void SetFloat(Entity entity, string parameter, float value) =>
         NativeRuntime.SetAnimatorFloat(entity, parameter, value);
     public static void SetInteger(Entity entity, string parameter, int value) =>
@@ -210,16 +269,46 @@ public static class Animator
 
     public static bool TryGetLayerWeight(Entity entity, string layer, out float value) =>
         NativeRuntime.TryGetAnimatorLayerWeight(entity, layer, out value);
+
+    private static void ValidatePlayback(Entity entity, string state, float normalizedTime)
+    {
+        if (!entity.IsValid)
+            throw new ArgumentException("Animator playback requires a valid entity.", nameof(entity));
+        if (string.IsNullOrWhiteSpace(state) || state.Length > 256)
+            throw new ArgumentException("Animator state names must contain between 1 and 256 characters.",
+                                        nameof(state));
+        if (!float.IsFinite(normalizedTime) || normalizedTime < 0.0f || normalizedTime > 1.0f)
+            throw new ArgumentOutOfRangeException(nameof(normalizedTime),
+                "Animator normalized time must be between zero and one.");
+    }
 }
 
 [StableAssetTypeId("4b454952-4541-5544-494f-434c49500001")]
 public sealed class AudioClip;
+
+[StableAssetTypeId("4b454952-4541-5544-4d49-584552303031")]
+public sealed class AudioMixer;
+
+public enum AudioPlaybackState : byte
+{
+    Stopped,
+    Playing,
+    Paused
+}
+
+public readonly record struct AudioSourceStatus(AudioPlaybackState State, float Time, float Duration)
+{
+    public bool IsPlaying => State == AudioPlaybackState.Playing;
+    public bool IsPaused => State == AudioPlaybackState.Paused;
+}
 
 public readonly record struct AudioPlaybackOptions
 {
     public AudioPlaybackOptions()
     {
         Bus = "SFX";
+        Mixer = default;
+        BusId = default;
         Gain = 1.0f;
         Pitch = 1.0f;
         Priority = 128;
@@ -230,6 +319,8 @@ public readonly record struct AudioPlaybackOptions
     }
 
     public string Bus { get; init; }
+    public AssetReference<AudioMixer> Mixer { get; init; }
+    public AssetId BusId { get; init; }
     public float Gain { get; init; }
     public float Pitch { get; init; }
     public uint Priority { get; init; }
@@ -242,13 +333,58 @@ public readonly record struct AudioPlaybackOptions
 public readonly record struct AudioSourceHandle(Entity Entity)
 {
     public bool IsValid => Entity.HasComponent<AudioSourceComponent>();
+    public AssetReference<AudioClip> Clip
+    {
+        get => new(NativeRuntime.GetAudioSourceProperties(Entity).Clip);
+        set => NativeRuntime.SetAudioSourceClip(Entity, value.Id);
+    }
+    public float Volume
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).Gain;
+        set => NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Gain, value);
+    }
+    public float Pitch
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).Pitch;
+        set => NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Pitch, value);
+    }
+    public bool Loop
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).Loop;
+        set => NativeRuntime.SetAudioSourceFlag(Entity, AudioSourceFlagProperty.Loop, value);
+    }
+    public bool Spatial
+    {
+        get => NativeRuntime.GetAudioSourceProperties(Entity).Spatial;
+        set => NativeRuntime.SetAudioSourceFlag(Entity, AudioSourceFlagProperty.Spatial, value);
+    }
+    public AudioSourceStatus Status => NativeRuntime.GetAudioSourceProperties(Entity).Status;
+    public AudioPlaybackState State => Status.State;
+    public bool IsPlaying => Status.IsPlaying;
+    public bool IsPaused => Status.IsPaused;
+    public float Time
+    {
+        get => Status.Time;
+        set => Seek(value);
+    }
+    public float Duration => Status.Duration;
+    public bool Play() => Audio.Play(Entity);
     public bool Play(AssetReference<AudioClip> clip) => Audio.Play(Entity, clip);
     public bool Play(AssetReference<AudioClip> clip, AudioPlaybackOptions options) => Audio.Play(Entity, clip, options);
+    public bool Pause() => Audio.Pause(Entity);
+    public bool Resume() => Audio.Resume(Entity);
+    public bool Seek(float time) => Audio.Seek(Entity, time);
     public bool Stop() => Audio.Stop(Entity);
 }
 
 public static class Audio
 {
+    public static bool Play(Entity entity)
+    {
+        ValidateEntity(entity);
+        return NativeRuntime.PlayAudioSource(entity);
+    }
+
     public static bool Play(Entity entity, AssetId clip, float volume = 1.0f) =>
         Play(entity, clip, new AudioPlaybackOptions { Gain = volume });
 
@@ -278,6 +414,26 @@ public static class Audio
     }
 
     public static bool Stop(Entity entity) => NativeRuntime.StopAudio(entity);
+    public static bool Pause(Entity entity) => NativeRuntime.PauseAudio(entity, true);
+    public static bool Resume(Entity entity) => NativeRuntime.PauseAudio(entity, false);
+    public static bool Seek(Entity entity, float time)
+    {
+        ValidateEntity(entity);
+        if (!float.IsFinite(time) || time < 0.0f)
+            throw new ArgumentOutOfRangeException(nameof(time), "Audio playback time must be finite and non-negative.");
+        return NativeRuntime.SeekAudio(entity, time);
+    }
+    public static AudioSourceStatus GetStatus(Entity entity)
+    {
+        ValidateEntity(entity);
+        return NativeRuntime.GetAudioSourceProperties(entity).Status;
+    }
+
+    private static void ValidateEntity(Entity entity)
+    {
+        if (!entity.IsValid)
+            throw new ArgumentException("Audio playback requires a valid entity.", nameof(entity));
+    }
 }
 
 [StableAssetTypeId("4b454952-4556-4658-4546-464543540001")]

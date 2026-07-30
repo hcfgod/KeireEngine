@@ -1492,6 +1492,101 @@ namespace Keire
         return std::ranges::find(m_Layers, layerDefinition->Id, &RuntimeLayer::Id)->Weight;
     }
 
+    void AnimatorInstance::Play(const std::string_view state, const std::string_view layer, const float normalizedTime)
+    {
+        if (state.empty() || !std::isfinite(normalizedTime) || normalizedTime < 0.0F || normalizedTime > 1.0F)
+            throw std::invalid_argument("Animator play request is invalid.");
+        const auto& definition = m_Graph->Definition();
+        const auto* layerDefinition =
+            layer.empty() ? (definition.Layers.empty() ? nullptr : std::addressof(definition.Layers.front()))
+                          : [&]() -> const AnimationLayerDefinition*
+        {
+            const auto found = std::ranges::find_if(definition.Layers, [&](const auto& candidate)
+                                                    { return candidate.Id == layer || candidate.Name == layer; });
+            return found == definition.Layers.end() ? nullptr : std::addressof(*found);
+        }();
+        if (!layerDefinition)
+            throw std::invalid_argument("Animator layer is unavailable.");
+        const auto stateDefinition = std::ranges::find_if(layerDefinition->States, [&](const auto& candidate)
+                                                          { return candidate.Id == state || candidate.Name == state; });
+        if (stateDefinition == layerDefinition->States.end())
+            throw std::invalid_argument("Animator state is unavailable.");
+        const auto runtime = std::ranges::find(m_Layers, layerDefinition->Id, &RuntimeLayer::Id);
+        if (runtime == m_Layers.end())
+            throw std::logic_error("Animator runtime layer is unavailable.");
+        const auto floatParameter = [&](const std::string_view id)
+        {
+            const auto* parameter = FindParameterById(definition, id);
+            if (!parameter || parameter->Type != AnimationParameterType::Float)
+                throw std::logic_error("Animation blend tree references an unavailable float parameter.");
+            return m_Parameters.at(parameter->Name).FloatValue;
+        };
+        const auto clips = ResolveMotion(*stateDefinition, floatParameter, m_Resolver);
+        runtime->StateId = stateDefinition->Id;
+        runtime->Time = MotionDuration(clips) * normalizedTime;
+        runtime->NormalizedTime = normalizedTime;
+        runtime->BlendWeights.clear();
+        runtime->Transition.reset();
+        m_Playing = true;
+        m_HasPreviousRootRotation = false;
+        PublishDebugSnapshot();
+    }
+
+    void AnimatorInstance::CrossFade(const std::string_view state, const float duration, const std::string_view layer,
+                                     const float normalizedTime)
+    {
+        if (!std::isfinite(duration) || duration < 0.0F || duration > 60.0F)
+            throw std::invalid_argument("Animator cross-fade duration is invalid.");
+        const auto& definition = m_Graph->Definition();
+        const auto* layerDefinition =
+            layer.empty() ? (definition.Layers.empty() ? nullptr : std::addressof(definition.Layers.front()))
+                          : [&]() -> const AnimationLayerDefinition*
+        {
+            const auto found = std::ranges::find_if(definition.Layers, [&](const auto& candidate)
+                                                    { return candidate.Id == layer || candidate.Name == layer; });
+            return found == definition.Layers.end() ? nullptr : std::addressof(*found);
+        }();
+        if (!layerDefinition)
+            throw std::invalid_argument("Animator layer is unavailable.");
+        const auto destination = std::ranges::find_if(layerDefinition->States, [&](const auto& candidate)
+                                                      { return candidate.Id == state || candidate.Name == state; });
+        if (destination == layerDefinition->States.end())
+            throw std::invalid_argument("Animator state is unavailable.");
+        const auto runtime = std::ranges::find(m_Layers, layerDefinition->Id, &RuntimeLayer::Id);
+        if (runtime == m_Layers.end())
+            throw std::logic_error("Animator runtime layer is unavailable.");
+        if (!m_Playing || duration == 0.0F)
+        {
+            Play(state, layer, normalizedTime);
+            return;
+        }
+        const auto floatParameter = [&](const std::string_view id)
+        {
+            const auto* parameter = FindParameterById(definition, id);
+            if (!parameter || parameter->Type != AnimationParameterType::Float)
+                throw std::logic_error("Animation blend tree references an unavailable float parameter.");
+            return m_Parameters.at(parameter->Name).FloatValue;
+        };
+        const auto destinationClips = ResolveMotion(*destination, floatParameter, m_Resolver);
+        const auto destinationTime = MotionDuration(destinationClips) * normalizedTime;
+        runtime->Transition =
+            RuntimeTransition{runtime->StateId, destination->Id, runtime->Time, destinationTime, 0.0F, duration, {}};
+        runtime->StateId = destination->Id;
+        m_Playing = true;
+        PublishDebugSnapshot();
+    }
+
+    void AnimatorInstance::Stop()
+    {
+        m_Playing = false;
+        m_State.clear();
+        m_Time = 0.0F;
+        m_HasPreviousRootRotation = false;
+        for (auto& layer : m_Layers)
+            layer.Transition.reset();
+        PublishDebugSnapshot();
+    }
+
     AnimatorSample AnimatorInstance::Update(const float deltaSeconds)
     {
         if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0F || deltaSeconds > 10.0F)
@@ -1527,7 +1622,7 @@ namespace Keire
         result.LocalPose.reserve(m_Skeleton->Bones().size());
         for (const auto& bone : m_Skeleton->Bones())
             result.LocalPose.push_back(bone.BindPose);
-        if (m_Layers.empty())
+        if (m_Layers.empty() || !m_Playing)
         {
             m_State.clear();
             m_Time = 0.0F;
@@ -1876,6 +1971,7 @@ namespace Keire
             m_State = entry ? entry->Name : std::string{};
         }
         m_Time = 0.0F;
+        m_Playing = true;
         m_PreviousRoot = {};
         m_HasPreviousRootRotation = false;
         m_RecentEvents.clear();

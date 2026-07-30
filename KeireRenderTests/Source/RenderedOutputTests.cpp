@@ -174,6 +174,7 @@ namespace
         std::vector<std::uint64_t> MaterialBindingBuilds;
         std::vector<std::uint64_t> SkinningStaticBuilds;
         std::vector<std::uint64_t> SkinningOutputBuilds;
+        std::vector<float> SkinningPreparationMilliseconds;
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
     };
@@ -725,6 +726,11 @@ namespace
 
         void OnDetach() noexcept override
         {
+            if (Owner().Renderer())
+            {
+                m_Results->Statistics = Owner().Renderer()->Statistics();
+                m_Results->HasStatistics = true;
+            }
             if (m_Scene)
                 m_Scene->Close();
             m_Animator.Reset();
@@ -741,6 +747,8 @@ namespace
                     Keire::RenderSystemInternalAccess::SkinningStaticBuildCount(*Owner().Renderer()));
                 m_Results->SkinningOutputBuilds.push_back(
                     Keire::RenderSystemInternalAccess::SkinningOutputBuildCount(*Owner().Renderer()));
+                m_Results->SkinningPreparationMilliseconds.push_back(
+                    Owner().Renderer()->Statistics().SkinningPreparationMilliseconds);
                 auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
                 const auto left = GreenDominance(pixels, true);
                 const auto right = GreenDominance(pixels, false);
@@ -778,7 +786,7 @@ namespace
         void SetPaletteTranslation(const float translation)
         {
             const std::array palette{Keire::Math::ComposeTransform({translation, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F})};
-            m_Animator->SetRuntimePose("Test", palette);
+            m_Animator->SetRuntimePose("Test", 0.0F, true, palette);
         }
 
         Keire::AssetId m_Mesh;
@@ -1612,6 +1620,11 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(results->Statistics.TransientResourceAllocations > 0);
     CHECK(results->Statistics.RendererQueueHighWaterMark > 0);
     CHECK(results->Statistics.InstanceBatches == 1);
+    CHECK(results->Statistics.FrameUploadSubmissions == 0);
+    CHECK(results->Statistics.AllowedFramesInFlight == 1);
+    CHECK(results->Statistics.DrawPreparationMilliseconds > 0.0F);
+    CHECK(results->Statistics.DepthPassMilliseconds > 0.0F);
+    CHECK(results->Statistics.CommandRecordingUnattributedMilliseconds >= 0.0F);
     CHECK(results->Statistics.DrawCalls < 25);
     CHECK(results->Statistics.CpuPreparationP95Milliseconds >= 0.0F);
     CHECK(results->Statistics.RendererLatencyMilliseconds >= 0.0F);
@@ -1645,6 +1658,11 @@ TEST_CASE("skinned asset vertices follow bounded palette deformation")
     CHECK(results->SkinningOutputBuilds.back() == 3);
     CHECK(results->SkinningOutputBuilds[results->SkinningOutputBuilds.size() - 2] ==
           results->SkinningOutputBuilds.back());
+    REQUIRE(results->HasStatistics);
+    CHECK(results->Statistics.AllowedFramesInFlight == 3);
+    CHECK(std::ranges::any_of(results->SkinningPreparationMilliseconds,
+                              [](const float milliseconds) { return milliseconds > 0.0F; }));
+    CHECK(results->Statistics.CommandRecordingUnattributedMilliseconds >= 0.0F);
 }
 
 TEST_CASE("directional shadow maps occlude a separate receiving mesh")

@@ -456,6 +456,48 @@ namespace
             }
         }
 
+        [[nodiscard]] bool PauseManagedAudio(const Keire::AssetId entity, const bool paused) noexcept override
+        {
+            try
+            {
+                return m_Presentation && (paused ? m_Presentation->Pause(Keire::EntityId(entity))
+                                                 : m_Presentation->Resume(Keire::EntityId(entity)));
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool SeekManagedAudio(const Keire::AssetId entity, const float positionSeconds) noexcept override
+        {
+            try
+            {
+                return m_Presentation && m_Presentation->Seek(Keire::EntityId(entity), positionSeconds);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] Keire::ManagedAudioSourceStatus
+        ManagedAudioStatus(const Keire::AssetId entity) const noexcept override
+        {
+            try
+            {
+                if (!m_Presentation)
+                    return {};
+                const auto state = m_Presentation->Playback(Keire::EntityId(entity));
+                return {static_cast<Keire::ManagedAudioPlaybackState>(state.State), state.PositionSeconds,
+                        state.DurationSeconds};
+            }
+            catch (...)
+            {
+                return {};
+            }
+        }
+
         [[nodiscard]] bool SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept override
         {
             try

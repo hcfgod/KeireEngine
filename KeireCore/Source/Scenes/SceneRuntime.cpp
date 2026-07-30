@@ -239,6 +239,15 @@ namespace Keire
                 case AnimatorCommandType::SetLayerWeight:
                     instance.SetLayerWeight(command.Name, command.FloatValue);
                     break;
+                case AnimatorCommandType::Play:
+                    instance.Play(command.Name, command.Layer, command.FloatValue);
+                    break;
+                case AnimatorCommandType::CrossFade:
+                    instance.CrossFade(command.Name, command.SecondaryFloatValue, command.Layer, command.FloatValue);
+                    break;
+                case AnimatorCommandType::Stop:
+                    instance.Stop();
+                    break;
                 }
             }
         }
@@ -469,7 +478,7 @@ namespace Keire
                 const float speed = std::max(animator->Speed(), 0.0F);
                 if (animator->Speed() < 0.0F)
                     animator->SetRuntimeDiagnostic("Negative Animator speed is not supported and is treated as zero.");
-                auto sample = state->Instance->Update(deltaSeconds * speed);
+                auto sample = state->Instance->Update(animator->Paused() ? 0.0F : deltaSeconds * speed);
                 if (const auto ikDiagnostic =
                         ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices);
                     !ikDiagnostic.empty())
@@ -477,7 +486,7 @@ namespace Keire
                     animator->SetRuntimeDiagnostic(ikDiagnostic);
                 }
                 const auto palette = SkinPalette(*skeleton, sample.LocalPose);
-                animator->SetRuntimePose(sample.State, palette);
+                animator->SetRuntimePose(sample.State, sample.NormalizedTime, state->Instance->Playing(), palette);
                 animator->SetRuntimeDebugSnapshot(state->Instance->DebugSnapshot());
                 ApplyRootMotion(entity, sample, *animator);
                 for (const auto& event : sample.Events)

@@ -143,7 +143,11 @@ searchable asset picker for custom HDR, equirectangular, cross-atlas, and strip-
 Scene and Game surfaces render through the private frame graph into RGBA16F, resolve with fitted ACES, upload bounded
 Forward+ tile lists, and instance compatible opaque objects on a dedicated renderer submission thread. Renderer
 statistics expose graph transitions, transient allocation slots, instance batches, queue high-water mark, and CPU
-preparation p95 for scalability captures.
+preparation p95 for scalability captures. Steady-state skinning, instance, and Forward+ transfers share the frame
+command buffer; the upload-submission counter identifies fallback resource-publication work. Command-recording
+statistics separate skinning, VFX, draw preparation, shadow, Forward+, scene, sampled-depth, tone-map, and residual
+costs. The configured frames-in-flight value is applied to SDL's bounded GPU presentation queue and reported alongside
+swapchain wait time; higher applied values favor throughput at the cost of additional presentation latency.
 
 ## Gameplay-Production Foundations
 
@@ -201,6 +205,12 @@ protected override void Start()
         _target.AddComponent<ColliderComponent>();
 }
 ```
+
+Managed audio and animation are stateful as well as reference-safe. `AssetReference<AudioClip>`,
+`AssetReference<AudioMixer>`, `AssetReference<AnimationClip>`, and `AssetReference<AnimatorController>` fields serialize
+through the normal asset pipeline. `Entity.AudioSource` supports play, pause, resume, seek, stop, live volume/pitch and
+playback status; `Entity.Animator` supports play, cross-fade, pause, resume, stop, speed, and current-state inspection.
+See [Managed Scripting](docs/ManagedScripting.md) and [Animation And Rigging](docs/AnimationRigging.md) for examples.
 
 Managed entity, hierarchy, component, and Behaviour operations use generation-checked value handles. Stale worlds,
 destroyed entities, incompatible component types, and retired script generations are rejected at the native boundary;

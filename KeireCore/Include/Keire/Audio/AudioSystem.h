@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -151,8 +152,10 @@ namespace Keire
         AudioVoiceId Id;
         std::string Bus;
         std::uint64_t Frame = 0;
+        std::uint64_t DurationFrames = 0;
         std::uint32_t Priority = 0;
         bool Playing = false;
+        bool Paused = false;
         bool Virtualized = false;
     };
 
@@ -206,6 +209,8 @@ namespace Keire
                                                        std::uint64_t frameCount) const;
         [[nodiscard]] AudioVoiceId Play(AudioPlaybackRequest request);
         [[nodiscard]] bool Stop(AudioVoiceId voice);
+        [[nodiscard]] bool Pause(AudioVoiceId voice, bool paused = true);
+        [[nodiscard]] bool Seek(AudioVoiceId voice, std::uint64_t frame);
         [[nodiscard]] bool SetVoice(AudioVoiceId voice, AudioPlaybackRequest request);
         [[nodiscard]] std::size_t StopAll(std::string_view bus = {});
         void SetBusGain(std::string bus, float gain);
@@ -215,6 +220,7 @@ namespace Keire
         void SubmitSnapshot(const AudioMixerSnapshot& snapshot);
         void Update(std::chrono::duration<float> elapsed);
         [[nodiscard]] std::vector<float> RenderVoicesOffline(std::uint64_t frameCount);
+        [[nodiscard]] std::optional<AudioVoiceInfo> Voice(AudioVoiceId voice) const;
         [[nodiscard]] std::vector<AudioVoiceInfo> Voices() const;
         [[nodiscard]] AudioSystemStatistics Statistics() const;
         void SubmitMeterSnapshot(AudioMeterSnapshot snapshot);

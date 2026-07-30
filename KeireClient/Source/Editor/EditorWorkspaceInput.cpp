@@ -205,6 +205,56 @@ bool EditorWorkspaceLayer::StopManagedAudio(const Keire::AssetId entity) noexcep
     }
 }
 
+bool EditorWorkspaceLayer::PauseManagedAudio(const Keire::AssetId entity, const bool paused) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        return presentation &&
+               (paused ? presentation->Pause(Keire::EntityId(entity)) : presentation->Resume(Keire::EntityId(entity)));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::SeekManagedAudio(const Keire::AssetId entity, const float positionSeconds) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        return presentation && presentation->Seek(Keire::EntityId(entity), positionSeconds);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
+Keire::ManagedAudioSourceStatus EditorWorkspaceLayer::ManagedAudioStatus(const Keire::AssetId entity) const noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const auto presentation = session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{};
+        if (!presentation)
+            return {};
+        const auto state = presentation->Playback(Keire::EntityId(entity));
+        return {static_cast<Keire::ManagedAudioPlaybackState>(state.State), state.PositionSeconds,
+                state.DurationSeconds};
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
 bool EditorWorkspaceLayer::PlayManagedVfx(const Keire::AssetId entity, const Keire::AssetId effect,
                                           const bool restart) noexcept
 {
