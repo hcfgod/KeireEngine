@@ -1,5 +1,8 @@
 # Changelog
 
+- Added a comprehensive C# scripting documentation section covering managed assemblies, lifecycle and reload,
+  serialization, entities and components, assets and ScriptableObjects, gameplay services, audio, animation, UI and
+  events, async diagnostics, troubleshooting, and managed API lookup.
 - Added typed managed audio mixer, animation clip, and Animator Controller references; stateful Audio Source
   play/pause/resume/seek/status and live properties; and Animator play/cross-fade/stop/pause/speed/state controls.
 - Matched SDL's GPU presentation queue to Kéire's configured frames-in-flight policy and split command-recording

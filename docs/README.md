@@ -6,6 +6,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | Guide | Purpose | Primary audience |
 | --- | --- | --- |
 | [Getting Started](GettingStarted.md) | Clone, bootstrap, generate, build, run, clean, and diagnose a workstation | New contributors and integrators |
+| [C# Scripting](Scripting/README.md) | Managed assemblies, Behaviours, Inspector data, entities, assets, gameplay services, audio, animation, UI, reload, and API lookup | Gameplay programmers and technical designers |
 | [Architecture](Architecture.md) | System boundaries, ownership, implementation strategy, and release shape | Engine maintainers |
 | [Runtime Lifecycle](RuntimeLifecycle.md) | Startup, frame order, threading, layer mutation, events, time, UI, and shutdown | Runtime and layer authors |
 | [Gameplay Foundations](GameplayFoundations.md) | Prefabs, managed builds, physics, audio graphs, navigation, profiling, and current adapter scope | Gameplay and subsystem authors |

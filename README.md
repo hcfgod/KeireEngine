@@ -131,9 +131,9 @@ only the supported `Keire::Core` package target.
 
 ## Documentation
 
-The [documentation index](docs/README.md) links focused guides for projects, Project Settings, the Hub, scene runtime/authoring, rendering,
-shaders/materials, undo/redo, input debugging, architecture, runtime lifecycle, the UI workspace, and testing/release
-workflows.
+The [documentation index](docs/README.md) links focused guides for projects, Project Settings, the Hub, scene
+runtime/authoring, rendering, shaders/materials, undo/redo, input debugging, architecture, runtime lifecycle, the UI
+workspace, testing/release workflows, and the comprehensive [C# scripting guide set](docs/Scripting/README.md).
 
 The Scene view uses the selected runtime Camera's clear color while retaining its independent editor viewpoint. Its
 `Q/W/E/R` View/Move/Rotate/Scale tools support Local/Global handles, configurable position/rotation/scale snapping, and
@@ -210,7 +210,7 @@ Managed audio and animation are stateful as well as reference-safe. `AssetRefere
 `AssetReference<AudioMixer>`, `AssetReference<AnimationClip>`, and `AssetReference<AnimatorController>` fields serialize
 through the normal asset pipeline. `Entity.AudioSource` supports play, pause, resume, seek, stop, live volume/pitch and
 playback status; `Entity.Animator` supports play, cross-fade, pause, resume, stop, speed, and current-state inspection.
-See [Managed Scripting](docs/ManagedScripting.md) and [Animation And Rigging](docs/AnimationRigging.md) for examples.
+See [C# Scripting](docs/Scripting/README.md) and [Animation And Rigging](docs/AnimationRigging.md) for examples.
 
 Managed entity, hierarchy, component, and Behaviour operations use generation-checked value handles. Stale worlds,
 destroyed entities, incompatible component types, and retired script generations are rejected at the native boundary;
