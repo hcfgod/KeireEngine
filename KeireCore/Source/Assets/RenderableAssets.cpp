@@ -7,6 +7,7 @@
 #include <assimp/Importer.hpp>
 #include <assimp/config.h>
 #include <assimp/material.h>
+#include <assimp/matrix3x3.h>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 #include <nlohmann/json.hpp>
@@ -69,6 +70,16 @@ namespace Keire
             return {{translation.x, translation.y, translation.z},
                     Math::Normalize({rotation.x, rotation.y, rotation.z, rotation.w}),
                     {scale.x, scale.y, scale.z}};
+        }
+
+        [[nodiscard]] bool ApproximatelyEqual(const aiMatrix4x4& left, const aiMatrix4x4& right) noexcept
+        {
+            const auto leftMatrix = ConvertMatrix(left);
+            const auto rightMatrix = ConvertMatrix(right);
+            for (std::size_t index = 0; index < leftMatrix.Elements.size(); ++index)
+                if (std::abs(leftMatrix.Elements[index] - rightMatrix.Elements[index]) > 1.0e-4F)
+                    return false;
+            return true;
         }
 
         template <typename Unsigned> void AppendUnsigned(std::vector<std::byte>& bytes, Unsigned value)
@@ -1120,7 +1131,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 8;
+        result.Version = 12;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1153,9 +1164,8 @@ namespace Keire
             Assimp::Importer importer;
             AssetImportOutput output;
             importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, true);
-            constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices |
-                                           aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
-                                           aiProcess_ImproveCacheLocality | aiProcess_SortByPType |
+            constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals |
+                                           aiProcess_CalcTangentSpace | aiProcess_SortByPType |
                                            aiProcess_ValidateDataStructure | aiProcess_MakeLeftHanded |
                                            aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
             auto extension = context.SourcePath.extension().string();
@@ -1177,7 +1187,8 @@ namespace Keire
             const bool animated = useEmbeddedSkinning || generateRig;
             if (!animated && !animationSource)
             {
-                scene = importer.ApplyPostProcessing(aiProcess_PreTransformVertices);
+                scene = importer.ApplyPostProcessing(aiProcess_PreTransformVertices | aiProcess_JoinIdenticalVertices |
+                                                     aiProcess_ImproveCacheLocality);
                 if (!scene)
                     throw std::invalid_argument(std::string("Static mesh transform baking failed: ") +
                                                 importer.GetErrorString());
@@ -1460,6 +1471,36 @@ namespace Keire
             std::vector<SkinVertexInfluence8> skinInfluences8;
             SkinningMethod skinningMethod =
                 requestedSkinning == "dualQuaternion" ? SkinningMethod::DualQuaternion : SkinningMethod::LinearBlend;
+            std::vector<aiMatrix4x4> meshTransforms(scene->mNumMeshes);
+            std::vector<bool> meshTransformAssigned(scene->mNumMeshes);
+            std::unordered_map<const aiNode*, aiMatrix4x4> nodeGlobalTransforms;
+            if (animated || animationSource)
+            {
+                const auto collectTransforms = [&](const auto& self, const aiNode& node,
+                                                   const aiMatrix4x4& parentTransform) -> void
+                {
+                    const auto globalTransform = parentTransform * node.mTransformation;
+                    nodeGlobalTransforms.insert_or_assign(&node, globalTransform);
+                    for (unsigned int index = 0; index < node.mNumMeshes; ++index)
+                    {
+                        const auto meshIndex = node.mMeshes[index];
+                        if (meshIndex >= meshTransforms.size())
+                            throw std::invalid_argument("Animated model hierarchy references an unavailable mesh.");
+                        if (meshTransformAssigned[meshIndex] &&
+                            !ApproximatelyEqual(meshTransforms[meshIndex], globalTransform))
+                            throw std::invalid_argument(
+                                "Animated model instantiates one mesh under incompatible hierarchy transforms.");
+                        meshTransforms[meshIndex] = globalTransform;
+                        meshTransformAssigned[meshIndex] = true;
+                    }
+                    for (unsigned int child = 0; child < node.mNumChildren; ++child)
+                        if (node.mChildren[child])
+                            self(self, *node.mChildren[child], globalTransform);
+                };
+                collectTransforms(collectTransforms, *scene->mRootNode, aiMatrix4x4{});
+                if (std::ranges::any_of(meshTransformAssigned, [](const bool assigned) { return !assigned; }))
+                    throw std::invalid_argument("Animated model contains a mesh outside its scene hierarchy.");
+            }
             if (useEmbeddedHierarchy)
             {
                 if (!context.ResolveSubAssetId)
@@ -1477,10 +1518,16 @@ namespace Keire
                         if (!bone || bone->mName.length == 0)
                             throw std::invalid_argument("Animated mesh contains an unnamed bone.");
                         const std::string name = bone->mName.C_Str();
+                        auto inverseMeshTransform = meshTransforms[meshIndex];
+                        if (std::abs(inverseMeshTransform.Determinant()) <= 1.0e-8F)
+                            throw std::invalid_argument("Animated mesh hierarchy contains a singular transform.");
+                        inverseMeshTransform.Inverse();
+                        const auto normalizedInverseBind = bone->mOffsetMatrix * inverseMeshTransform;
                         if (const auto existing = inverseBindPoses.find(name);
-                            existing != inverseBindPoses.end() && existing->second != bone->mOffsetMatrix)
+                            existing != inverseBindPoses.end() &&
+                            !ApproximatelyEqual(existing->second, normalizedInverseBind))
                             throw std::invalid_argument("Animated meshes disagree on a bone inverse bind pose.");
-                        inverseBindPoses.insert_or_assign(name, bone->mOffsetMatrix);
+                        inverseBindPoses.insert_or_assign(name, normalizedInverseBind);
                         const auto* node = scene->mRootNode->FindNode(bone->mName);
                         if (!node)
                             throw std::invalid_argument("Animated mesh bone is absent from the scene hierarchy.");
@@ -1529,10 +1576,6 @@ namespace Keire
                         bone.Name = name;
                         bone.Parent = parent;
                         bone.BindPose = ConvertTransform(node.mTransformation);
-                        if (const auto inverse = inverseBindPoses.find(name); inverse != inverseBindPoses.end())
-                            bone.InverseBindPose = ConvertMatrix(inverse->second);
-                        else
-                            bone.InverseBindPose = Math::Inverse(ConvertMatrix(node.mTransformation));
                         skeletonBones.push_back(std::move(bone));
                         nextParent = index;
                     }
@@ -1541,6 +1584,22 @@ namespace Keire
                             self(self, *node.mChildren[child], nextParent);
                 };
                 appendBone(appendBone, *scene->mRootNode, -1);
+                std::vector<Matrix4> bindWorld(skeletonBones.size());
+                for (std::size_t index = 0; index < skeletonBones.size(); ++index)
+                {
+                    auto& bone = skeletonBones[index];
+                    const auto local =
+                        Math::ComposeTransform(bone.BindPose.Translation, bone.BindPose.Rotation, bone.BindPose.Scale);
+                    bindWorld[index] = bone.Parent < 0
+                                           ? local
+                                           : Math::Multiply(bindWorld[static_cast<std::size_t>(bone.Parent)], local);
+                    const auto importedInverseBind = inverseBindPoses.find(bone.Name);
+                    bone.InverseBindPose = importedInverseBind == inverseBindPoses.end()
+                                               ? Math::Inverse(bindWorld[index])
+                                               : ConvertMatrix(importedInverseBind->second);
+                    if (!Math::IsFinite(bone.InverseBindPose))
+                        throw std::invalid_argument("Animated skeleton produced a non-finite inverse bind pose.");
+                }
                 ValidateSkeleton(skeletonBones);
                 skeletonId = context.ResolveSubAssetId("skeleton/default");
                 output.SubAssets.push_back({skeletonId, SkeletonAsset::StaticType(), "skeleton/default", "Skeleton",
@@ -1694,7 +1753,8 @@ namespace Keire
                 while (orderedOffset < orderedMeshes.size() &&
                        orderedMeshes[orderedOffset].Lod == lodValues[lodPosition])
                 {
-                    const auto* mesh = scene->mMeshes[orderedMeshes[orderedOffset++].Index];
+                    const auto meshIndex = orderedMeshes[orderedOffset++].Index;
+                    const auto* mesh = scene->mMeshes[meshIndex];
                     if (!mesh || (mesh->mPrimitiveTypes & ~aiPrimitiveType_TRIANGLE) != 0)
                         throw std::invalid_argument("Mesh import rejects non-triangle primitives.");
                     if (vertices.size() > std::numeric_limits<std::uint32_t>::max() - mesh->mNumVertices)
@@ -1704,8 +1764,19 @@ namespace Keire
                     const auto firstVertex = vertices.size();
                     for (unsigned int vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex)
                     {
-                        const auto position = mesh->mVertices[vertexIndex];
-                        const auto normal = mesh->mNormals ? mesh->mNormals[vertexIndex] : aiVector3D{0.0F, 1.0F, 0.0F};
+                        auto position = mesh->mVertices[vertexIndex];
+                        auto normal = mesh->mNormals ? mesh->mNormals[vertexIndex] : aiVector3D{0.0F, 1.0F, 0.0F};
+                        if (animated)
+                        {
+                            position = meshTransforms[meshIndex] * position;
+                            aiMatrix3x3 normalTransform(meshTransforms[meshIndex]);
+                            if (std::abs(normalTransform.Determinant()) <= 1.0e-8F)
+                                throw std::invalid_argument("Animated mesh hierarchy contains a singular transform.");
+                            normalTransform.Inverse().Transpose();
+                            normal = normalTransform * normal;
+                            if (normal.SquareLength() > 1.0e-12F)
+                                normal.Normalize();
+                        }
                         const auto uv = mesh->mTextureCoords[0] ? mesh->mTextureCoords[0][vertexIndex] : aiVector3D{};
                         const auto color = mesh->mColors[0] ? mesh->mColors[0][vertexIndex] : aiColor4D{};
                         vertices.push_back({{position.x, position.y, position.z},

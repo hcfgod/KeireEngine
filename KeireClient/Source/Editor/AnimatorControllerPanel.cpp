@@ -2,13 +2,21 @@
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
+#include "KeireClient/Editor/SceneDocument.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
+#include <map>
+#include <memory>
+#include <optional>
 #include <ranges>
+#include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -176,8 +184,16 @@ namespace KeireEditor
                               [&](const auto& transition) { return transition.DestinationId == state; });
         }
 
+        [[nodiscard]] float TimelineFraction(const float normalizedTime) noexcept
+        {
+            if (!std::isfinite(normalizedTime) || normalizedTime <= 0.0F)
+                return 0.0F;
+            return std::fmod(normalizedTime, 1.0F);
+        }
+
         void DrawStateGraph(Keire::UiFrame& ui, const Keire::AnimationLayerDefinition& layer,
-                            const std::string_view selectedState, const Keire::UiThemeDefinition& theme)
+                            const std::string_view selectedState, const Keire::AnimatorLayerDebugState* playback,
+                            const Keire::UiThemeDefinition& theme)
         {
             const auto canvas = ui.ContentRect();
             ui.DrawFilledRectangle(canvas, {0.055F, 0.065F, 0.078F, 1.0F}, 5.0F);
@@ -218,18 +234,434 @@ namespace KeireEditor
                 const auto rectangle = nodeRect(state, index);
                 const bool entry = state.Id == layer.EntryStateId;
                 const bool selected = state.Id == selectedState;
-                const Keire::UiColor fill = selected ? Keire::UiColor{0.10F, 0.34F, 0.52F, 1.0F}
-                                            : entry  ? Keire::UiColor{0.10F, 0.31F, 0.22F, 1.0F}
-                                                     : Keire::UiColor{0.12F, 0.14F, 0.18F, 1.0F};
+                const bool active = playback && state.Id == playback->StateId;
+                const Keire::UiColor fill = active     ? Keire::UiColor{0.08F, 0.37F, 0.29F, 1.0F}
+                                            : selected ? Keire::UiColor{0.10F, 0.34F, 0.52F, 1.0F}
+                                            : entry    ? Keire::UiColor{0.10F, 0.31F, 0.22F, 1.0F}
+                                                       : Keire::UiColor{0.12F, 0.14F, 0.18F, 1.0F};
                 ui.DrawFilledRectangle(rectangle, fill, 7.0F);
-                ui.DrawRectangle(rectangle, selected ? theme.Accent : theme.MutedText, selected ? 2.0F : 1.0F, 7.0F);
+                const auto outline = active     ? Keire::UiColor{0.20F, 0.92F, 0.62F, 1.0F}
+                                     : selected ? theme.Accent
+                                                : theme.MutedText;
+                ui.DrawRectangle(rectangle, outline, active || selected ? 2.0F : 1.0F, 7.0F);
                 ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 10.0F}, {1, 1, 1, 1},
                                    state.Name);
-                ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 32.0F}, theme.MutedText,
-                                   entry ? "ENTRY" : MotionTypeNames[static_cast<std::size_t>(state.Motion.Type)]);
+                const auto status =
+                    active ? "PLAYING " +
+                                 std::to_string(static_cast<int>(TimelineFraction(playback->NormalizedTime) * 100.0F)) +
+                                 "%"
+                    : entry ? std::string("ENTRY")
+                            : std::string(MotionTypeNames[static_cast<std::size_t>(state.Motion.Type)]);
+                ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 32.0F},
+                                   active ? Keire::UiColor{0.55F, 1.0F, 0.77F, 1.0F} : theme.MutedText, status);
+                if (active)
+                {
+                    const float width =
+                        (rectangle.Maximum.X - rectangle.Minimum.X - 8.0F) * TimelineFraction(playback->NormalizedTime);
+                    const Keire::UiItemRect progress{{rectangle.Minimum.X + 4.0F, rectangle.Maximum.Y - 5.0F},
+                                                     {rectangle.Minimum.X + 4.0F + width, rectangle.Maximum.Y - 2.0F}};
+                    ui.DrawFilledRectangle(progress, {0.20F, 0.92F, 0.62F, 1.0F}, 2.0F);
+                }
             }
         }
     } // namespace
+
+    struct AnimatorControllerPanel::PreviewState final
+    {
+        struct RetargetedClip final
+        {
+            Keire::AssetId SourceSkeleton;
+            Keire::AssetHandle<Keire::SkeletonAsset> SourceSkeletonHandle;
+            Keire::Ref<const Keire::AnimationClipAsset> Clip;
+            std::uint64_t ClipRevision = 0;
+            std::uint64_t SourceSkeletonRevision = 0;
+            std::uint64_t TargetSkeletonRevision = 0;
+        };
+
+        bool Active = false;
+        bool Playing = false;
+        bool RestartRequested = true;
+        std::optional<float> SeekRequested;
+        float NormalizedTime = 0.0F;
+        std::chrono::steady_clock::time_point LastTick;
+        Keire::Ref<Keire::Scene> Scene;
+        Keire::EntityId Entity;
+        Keire::AssetId Graph;
+        Keire::AssetId Skeleton;
+        Keire::AssetId Skin;
+        Keire::AssetHandle<Keire::SkeletonAsset> SkeletonHandle;
+        Keire::AssetHandle<Keire::SkinnedMeshAsset> SkinHandle;
+        std::map<Keire::AssetId, Keire::AssetHandle<Keire::AnimationClipAsset>> Clips;
+        std::map<Keire::AssetId, RetargetedClip> RetargetedClips;
+        std::map<Keire::AssetId, Keire::AssetHandle<Keire::AvatarMaskAsset>> Masks;
+        Keire::Ref<const Keire::AnimationGraphAsset> GraphAsset;
+        std::unique_ptr<Keire::AnimatorInstance> Instance;
+        std::uint64_t SkeletonRevision = 0;
+        std::string Diagnostic;
+
+        static Keire::RigDefinition BestRig(const Keire::SkeletonAsset& skeleton)
+        {
+            auto humanoid = Keire::InferRigDefinition(skeleton, Keire::RigProfileType::Humanoid);
+            auto quadruped = Keire::InferRigDefinition(skeleton, Keire::RigProfileType::Quadruped);
+            const auto semanticCount = [](const Keire::RigDefinition& rig)
+            {
+                return std::ranges::count_if(rig.Bones, [](const auto& bone)
+                                             { return bone.Semantic != Keire::RigBoneSemantic::None; });
+            };
+            return semanticCount(quadruped) > semanticCount(humanoid) ? std::move(quadruped) : std::move(humanoid);
+        }
+
+        static std::vector<Keire::Matrix4> BuildPalette(const Keire::SkeletonAsset& skeleton,
+                                                        const std::span<const Keire::BoneTransform> localPose)
+        {
+            if (localPose.size() != skeleton.Bones().size())
+                throw std::runtime_error("Animator preview pose does not match its target skeleton.");
+            std::vector<Keire::Matrix4> world(localPose.size());
+            std::vector<Keire::Matrix4> palette(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& transform = localPose[index];
+                const auto local =
+                    Keire::Math::ComposeTransform(transform.Translation, transform.Rotation, transform.Scale);
+                const auto parent = skeleton.Bones()[index].Parent;
+                world[index] =
+                    parent < 0 ? local : Keire::Math::Multiply(world[static_cast<std::size_t>(parent)], local);
+                palette[index] = Keire::Math::Multiply(world[index], skeleton.Bones()[index].InverseBindPose);
+            }
+            return palette;
+        }
+
+        void ClearPose() noexcept
+        {
+            if (Scene && Scene->IsOpen() && Entity)
+            {
+                if (const auto entity = Scene->FindEntity(Entity); entity)
+                    if (const auto animator = entity.GetComponent<Keire::AnimatorComponent>(); animator)
+                        animator->ClearRuntimePose();
+            }
+        }
+
+        void Invalidate() noexcept
+        {
+            Instance.reset();
+            GraphAsset = {};
+            Clips.clear();
+            RetargetedClips.clear();
+            Masks.clear();
+            SkeletonRevision = 0;
+            RestartRequested = true;
+            NormalizedTime = 0.0F;
+        }
+
+        void Stop() noexcept
+        {
+            ClearPose();
+            Active = false;
+            Playing = false;
+            SeekRequested.reset();
+            Diagnostic.clear();
+            Scene = {};
+            Entity = {};
+            Graph = {};
+            Skeleton = {};
+            Skin = {};
+            SkeletonHandle = {};
+            SkinHandle = {};
+            Invalidate();
+        }
+
+        void Restart() noexcept
+        {
+            Active = true;
+            Playing = true;
+            RestartRequested = true;
+            SeekRequested.reset();
+            LastTick = std::chrono::steady_clock::now();
+        }
+
+        void Seek(const float normalizedTime) noexcept
+        {
+            Active = true;
+            Playing = false;
+            SeekRequested = std::clamp(normalizedTime, 0.0F, 1.0F);
+        }
+
+        [[nodiscard]] Keire::Ref<const Keire::AnimationClipAsset>
+        ResolveClip(const Keire::AssetId id, const Keire::Ref<Keire::AssetSystem>& assets)
+        {
+            if (!id)
+                return {};
+            if (assets->TryGetType(id) != Keire::AnimationClipAsset::StaticType())
+            {
+                Clips.erase(id);
+                RetargetedClips.erase(id);
+                Diagnostic =
+                    "Preview cannot load an animation clip because the graph references a missing or incompatible "
+                    "asset. Reassign the state's Animation Clip.";
+                return {};
+            }
+            auto [iterator, inserted] = Clips.try_emplace(id);
+            if (inserted)
+                iterator->second = assets->Load<Keire::AnimationClipAsset>(id, Keire::AssetPriority::High);
+            const auto clip = iterator->second.TryGetLoaded();
+            if (!clip || clip->Skeleton() == Skeleton)
+                return clip;
+
+            auto& retargeted = RetargetedClips[id];
+            if (retargeted.SourceSkeleton != clip->Skeleton())
+            {
+                retargeted = {};
+                retargeted.SourceSkeleton = clip->Skeleton();
+                if (assets->TryGetType(retargeted.SourceSkeleton) != Keire::SkeletonAsset::StaticType())
+                {
+                    Diagnostic =
+                        "Preview cannot load the clip's source skeleton. Reimport the animation source or reassign "
+                        "the state's Animation Clip.";
+                    return {};
+                }
+                retargeted.SourceSkeletonHandle =
+                    assets->Load<Keire::SkeletonAsset>(retargeted.SourceSkeleton, Keire::AssetPriority::High);
+            }
+            const auto sourceSkeleton = retargeted.SourceSkeletonHandle.TryGetLoaded();
+            const auto targetSkeleton = SkeletonHandle.TryGetLoaded();
+            if (!sourceSkeleton || !targetSkeleton)
+                return {};
+
+            const auto clipRevision = iterator->second.Revision();
+            const auto sourceRevision = retargeted.SourceSkeletonHandle.Revision();
+            const auto targetRevision = SkeletonHandle.Revision();
+            if (!retargeted.Clip || retargeted.ClipRevision != clipRevision ||
+                retargeted.SourceSkeletonRevision != sourceRevision ||
+                retargeted.TargetSkeletonRevision != targetRevision)
+            {
+                try
+                {
+                    const auto sourceRig = BestRig(*sourceSkeleton);
+                    const auto targetRig = BestRig(*targetSkeleton);
+                    retargeted.Clip = Keire::RetargetAnimationClip(*sourceSkeleton, sourceRig, *clip, Skeleton,
+                                                                   *targetSkeleton, targetRig);
+                    retargeted.ClipRevision = clipRevision;
+                    retargeted.SourceSkeletonRevision = sourceRevision;
+                    retargeted.TargetSkeletonRevision = targetRevision;
+                }
+                catch (const std::exception& error)
+                {
+                    Diagnostic = "Preview clip is incompatible with the target skeleton: " + std::string(error.what());
+                    retargeted.Clip = {};
+                    return {};
+                }
+            }
+            return retargeted.Clip;
+        }
+
+        [[nodiscard]] Keire::Ref<const Keire::AvatarMaskAsset> ResolveMask(const Keire::AssetId id,
+                                                                           const Keire::Ref<Keire::AssetSystem>& assets)
+        {
+            if (!id)
+                return {};
+            if (assets->TryGetType(id) != Keire::AvatarMaskAsset::StaticType())
+            {
+                Masks.erase(id);
+                Diagnostic =
+                    "Preview cannot load an avatar mask because the graph references a missing or incompatible asset.";
+                return {};
+            }
+            auto [iterator, inserted] = Masks.try_emplace(id);
+            if (inserted)
+                iterator->second = assets->Load<Keire::AvatarMaskAsset>(id, Keire::AssetPriority::High);
+            return iterator->second.TryGetLoaded();
+        }
+
+        [[nodiscard]] bool DependenciesReady(const Keire::AnimationGraphAsset& graph,
+                                             const Keire::Ref<Keire::AssetSystem>& assets)
+        {
+            Diagnostic.clear();
+            bool ready = true;
+            for (const auto& layer : graph.Definition().Layers)
+            {
+                if (layer.AvatarMask && !ResolveMask(layer.AvatarMask, assets))
+                    ready = false;
+                for (const auto& state : layer.States)
+                {
+                    const auto clip = state.Motion.Clip ? state.Motion.Clip : state.Clip;
+                    if (clip && !ResolveClip(clip, assets))
+                        ready = false;
+                    for (const auto& child : state.Motion.Children)
+                        if (child.Clip && !ResolveClip(child.Clip, assets))
+                            ready = false;
+                }
+            }
+            if (!ready && Diagnostic.empty())
+                Diagnostic = "Preview is waiting for animation dependencies to load.";
+            return ready;
+        }
+
+        [[nodiscard]] float CurrentClipDuration(const Keire::AnimationGraphDefinition& graph,
+                                                const Keire::Ref<Keire::AssetSystem>& assets)
+        {
+            if (graph.Layers.empty())
+                return 1.0F;
+            const auto& layer = graph.Layers.front();
+            std::string_view stateId = layer.EntryStateId;
+            if (Instance)
+            {
+                if (const auto snapshot = Instance->DebugSnapshot(); snapshot && !snapshot->Layers.empty())
+                    stateId = snapshot->Layers.front().StateId;
+            }
+            auto state = std::ranges::find(layer.States, stateId, &Keire::AnimationStateDefinition::Id);
+            if (state == layer.States.end() && !layer.States.empty())
+                state = layer.States.begin();
+            if (state == layer.States.end())
+                return 1.0F;
+            auto clipId = state->Motion.Clip ? state->Motion.Clip : state->Clip;
+            if (!clipId && !state->Motion.Children.empty())
+                clipId = state->Motion.Children.front().Clip;
+            if (const auto clip = ResolveClip(clipId, assets); clip)
+                return std::max(clip->Duration(), 0.001F);
+            return 1.0F;
+        }
+
+        void Synchronize(SceneDocument& sceneDocument, const AnimatorControllerDocument& controller,
+                         const Keire::Ref<Keire::AssetSystem>& assets)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            const float deltaSeconds =
+                LastTick.time_since_epoch().count() == 0
+                    ? 0.0F
+                    : std::clamp(std::chrono::duration<float>(now - LastTick).count(), 0.0F, 0.1F);
+            LastTick = now;
+
+            const auto scene = sceneDocument.EditingScene();
+            const auto selection = sceneDocument.Selection();
+            if (!scene || !selection)
+            {
+                ClearPose();
+                Diagnostic = "Select a scene entity with an Animator to preview this controller.";
+                return;
+            }
+            const Keire::EntityId entityId(selection);
+            if (Scene != scene || Entity != entityId)
+            {
+                ClearPose();
+                Scene = scene;
+                Entity = entityId;
+                Invalidate();
+            }
+            const auto entity = scene->FindEntity(entityId);
+            const auto animator =
+                entity ? entity.GetComponent<Keire::AnimatorComponent>() : Keire::Ref<Keire::AnimatorComponent>{};
+            if (!animator)
+            {
+                Diagnostic = "The selected entity does not have an Animator component.";
+                return;
+            }
+            if (animator->Graph() != controller.Asset())
+            {
+                Diagnostic = "Assign this controller to the selected Animator before previewing it.";
+                return;
+            }
+            if (!animator->SkinnedMesh())
+            {
+                Diagnostic = "Assign a skinned mesh to the selected Animator before previewing it.";
+                return;
+            }
+            if (!assets)
+            {
+                Diagnostic = "The asset system is unavailable.";
+                return;
+            }
+
+            if (Skin != animator->SkinnedMesh())
+            {
+                Invalidate();
+                Skin = animator->SkinnedMesh();
+                SkinHandle = assets->Load<Keire::SkinnedMeshAsset>(Skin, Keire::AssetPriority::High);
+            }
+            const auto skin = SkinHandle.TryGetLoaded();
+            if (!skin)
+            {
+                Diagnostic = "Preview is waiting for the skinned mesh to load.";
+                return;
+            }
+
+            const auto targetSkeleton = skin->Skeleton();
+            if (!targetSkeleton)
+            {
+                Diagnostic = "The assigned skinned mesh does not reference a skeleton.";
+                return;
+            }
+            if (animator->Skeleton() != targetSkeleton)
+                animator->SetSkeleton(targetSkeleton);
+            if (Graph != controller.Asset() || Skeleton != targetSkeleton)
+            {
+                Invalidate();
+                Graph = controller.Asset();
+                Skeleton = targetSkeleton;
+                SkeletonHandle = assets->Load<Keire::SkeletonAsset>(Skeleton, Keire::AssetPriority::High);
+            }
+
+            const auto skeleton = SkeletonHandle.TryGetLoaded();
+            if (!skeleton)
+            {
+                Diagnostic = "Preview is waiting for the target skeleton to load.";
+                return;
+            }
+            if (Instance && SkeletonRevision != SkeletonHandle.Revision())
+                Invalidate();
+            if (!GraphAsset)
+                GraphAsset = Keire::CreateRef<Keire::AnimationGraphAsset>(controller.Definition());
+            if (!DependenciesReady(*GraphAsset, assets))
+                return;
+            if (!Instance)
+            {
+                Instance = std::make_unique<Keire::AnimatorInstance>(
+                    skeleton, GraphAsset, [this, assets](const Keire::AssetId id) { return ResolveClip(id, assets); },
+                    [this, assets](const Keire::AssetId id) { return ResolveMask(id, assets); });
+                SkeletonRevision = SkeletonHandle.Revision();
+                RestartRequested = true;
+            }
+
+            Keire::AnimatorSample sample;
+            bool sampled = false;
+            if (RestartRequested)
+            {
+                Instance->Reset();
+                sample = Instance->Update(0.0F);
+                RestartRequested = false;
+                NormalizedTime = 0.0F;
+                sampled = true;
+            }
+            if (SeekRequested)
+            {
+                Instance->Reset();
+                const float duration = CurrentClipDuration(controller.Definition(), assets);
+                sample = Instance->Update(duration * std::min(*SeekRequested, 0.999999F));
+                SeekRequested.reset();
+                sampled = true;
+            }
+            else if (Playing)
+            {
+                sample = Instance->Update(deltaSeconds * std::max(animator->Speed(), 0.0F));
+                sampled = true;
+            }
+            if (!sampled)
+                return;
+
+            const auto palette = BuildPalette(*skeleton, sample.LocalPose);
+            animator->SetRuntimePose(sample.State, palette);
+            animator->SetRuntimeDebugSnapshot(Instance->DebugSnapshot());
+            animator->SetRuntimeDiagnostic({});
+            NormalizedTime = TimelineFraction(sample.NormalizedTime);
+            Diagnostic.clear();
+        }
+    };
+
+    AnimatorControllerPanel::AnimatorControllerPanel(IAnimatorControllerPanelController& controller) noexcept
+        : m_Controller(controller), m_Preview(std::make_unique<PreviewState>())
+    {
+    }
+
+    AnimatorControllerPanel::~AnimatorControllerPanel() { m_Preview->Stop(); }
 
     void AnimatorControllerPanel::Attach(Keire::UiWorkspace& workspace)
     {
@@ -238,6 +670,7 @@ namespace KeireEditor
 
     void AnimatorControllerPanel::ResetTransientState() noexcept
     {
+        m_Preview->Stop();
         m_SelectedTransition.clear();
         m_Message.clear();
     }
@@ -246,12 +679,16 @@ namespace KeireEditor
     {
         auto panel = ui.BeginPanel(m_Registration);
         if (!panel)
+        {
+            m_Preview->Stop();
             return;
+        }
 
         auto& document = m_Controller.AnimatorControllerState();
         const auto& theme = m_Controller.AnimatorControllerTheme();
         const auto database = m_Controller.AnimatorControllerDatabase();
         const auto assets = m_Controller.AnimatorControllerAssets();
+        auto& sceneDocument = m_Controller.AnimatorControllerSceneDocument();
         if (ui.WindowFocused())
             m_Controller.ActivateAnimatorControllerHistory();
         if (!document.Asset())
@@ -284,6 +721,7 @@ namespace KeireEditor
         {
             try
             {
+                m_Preview->Invalidate();
                 m_Controller.ReloadAnimatorControllerDocument(document.Asset());
                 return;
             }
@@ -298,6 +736,7 @@ namespace KeireEditor
         {
             if (ui.Button("Undo"))
             {
+                m_Preview->Invalidate();
                 m_Controller.UndoAnimatorControllerEdit();
                 return;
             }
@@ -307,6 +746,7 @@ namespace KeireEditor
         {
             if (ui.Button("Redo"))
             {
+                m_Preview->Invalidate();
                 m_Controller.RedoAnimatorControllerEdit();
                 return;
             }
@@ -327,6 +767,85 @@ namespace KeireEditor
         }
         if (!m_Message.empty())
             ui.TextColored(theme.MutedText, m_Message);
+        ui.Separator();
+
+        const bool playMode =
+            sceneDocument.PlaySession() && sceneDocument.PlaySession()->State() != Keire::ScenePlayState::Stopped;
+        if (playMode)
+            m_Preview->Stop();
+        else if (m_Preview->Active)
+        {
+            try
+            {
+                m_Preview->Synchronize(sceneDocument, document, assets);
+            }
+            catch (const std::exception& error)
+            {
+                m_Preview->Playing = false;
+                m_Preview->Diagnostic = error.what();
+            }
+        }
+
+        const auto playbackScene = sceneDocument.ActiveScene();
+        const auto playbackEntity = playbackScene && sceneDocument.Selection()
+                                        ? playbackScene->FindEntity(Keire::EntityId(sceneDocument.Selection()))
+                                        : Keire::Entity{};
+        const auto playbackAnimator = playbackEntity ? playbackEntity.GetComponent<Keire::AnimatorComponent>()
+                                                     : Keire::Ref<Keire::AnimatorComponent>{};
+        const bool controllerMatches = playbackAnimator && playbackAnimator->Graph() == document.Asset();
+        const auto playbackSnapshot = controllerMatches ? playbackAnimator->RuntimeDebugSnapshot()
+                                                        : std::shared_ptr<const Keire::AnimatorDebugSnapshot>{};
+        std::string playbackDiagnostic;
+        if (!playbackAnimator)
+            playbackDiagnostic = "Select an entity with an Animator component.";
+        else if (!controllerMatches)
+            playbackDiagnostic = "The selected Animator uses a different controller.";
+        else if (!playbackAnimator->RuntimeDiagnostic().empty())
+            playbackDiagnostic = playbackAnimator->RuntimeDiagnostic();
+        else if (!playMode)
+            playbackDiagnostic = m_Preview->Diagnostic;
+
+        ui.TextColored(theme.Accent, playMode ? "LIVE PLAYBACK" : "EDIT MODE PREVIEW");
+        if (!playMode)
+        {
+            const bool canPreview = controllerMatches && playbackAnimator->SkinnedMesh() && assets;
+            if (auto disabled = ui.BeginDisabled(!canPreview); disabled)
+            {
+                if (ui.Button(m_Preview->Playing ? "Pause" : "Preview"))
+                {
+                    if (!m_Preview->Active)
+                        m_Preview->Restart();
+                    else
+                        m_Preview->Playing = !m_Preview->Playing;
+                    m_Preview->LastTick = std::chrono::steady_clock::now();
+                }
+                ui.SameLine();
+                if (ui.Button("Restart"))
+                    m_Preview->Restart();
+                ui.SameLine();
+                if (ui.Button("Stop"))
+                    m_Preview->Stop();
+            }
+        }
+
+        const Keire::AnimatorLayerDebugState* primaryPlayback = nullptr;
+        if (playbackSnapshot && !playbackSnapshot->Layers.empty())
+            primaryPlayback = &playbackSnapshot->Layers.front();
+        const float progress =
+            primaryPlayback ? TimelineFraction(primaryPlayback->NormalizedTime) : m_Preview->NormalizedTime;
+        const std::string stateName =
+            primaryPlayback && !primaryPlayback->State.empty() ? primaryPlayback->State : "Waiting for first sample";
+        const auto progressLabel =
+            stateName + "  " + std::to_string(static_cast<int>(std::clamp(progress, 0.0F, 1.0F) * 100.0F)) + "%";
+        ui.ProgressBar(progress, {0.0F, 18.0F}, progressLabel);
+        if (!playMode && m_Preview->Active)
+        {
+            float timeline = progress;
+            if (ui.SliderFloat("Timeline", timeline, 0.0F, 1.0F))
+                m_Preview->Seek(timeline);
+        }
+        if (!playbackDiagnostic.empty())
+            ui.TextColored(theme.MutedText, playbackDiagnostic);
         ui.Separator();
 
         auto graph = document.Definition();
@@ -473,7 +992,17 @@ namespace KeireEditor
 
             const auto canvas = ui.ContentRect();
             if (layer)
-                DrawStateGraph(ui, *layer, selectedState, theme);
+            {
+                const Keire::AnimatorLayerDebugState* layerPlayback = nullptr;
+                if (playbackSnapshot)
+                {
+                    const auto found =
+                        std::ranges::find(playbackSnapshot->Layers, layer->Id, &Keire::AnimatorLayerDebugState::Id);
+                    if (found != playbackSnapshot->Layers.end())
+                        layerPlayback = &*found;
+                }
+                DrawStateGraph(ui, *layer, selectedState, layerPlayback, theme);
+            }
             else
             {
                 ui.DrawFilledRectangle(canvas, {0.055F, 0.065F, 0.078F, 1.0F}, 5.0F);
@@ -953,6 +1482,7 @@ namespace KeireEditor
         {
             document.ReplaceDefinition(std::move(graph));
             document.RecordApplied(editName.empty() ? "Edit Animator Controller" : editName, std::move(before));
+            m_Preview->Invalidate();
         }
         if (!selectedParameter.empty())
             document.SelectParameter(std::move(selectedParameter));

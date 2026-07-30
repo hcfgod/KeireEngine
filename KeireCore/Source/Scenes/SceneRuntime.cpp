@@ -44,6 +44,7 @@ namespace Keire
 
             AssetId Graph;
             AssetId Skeleton;
+            AssetId Skin;
             AssetHandle<AnimationGraphAsset> GraphHandle;
             AssetHandle<SkeletonAsset> SkeletonHandle;
             std::map<AssetId, AssetHandle<AnimationClipAsset>> Clips;
@@ -52,6 +53,7 @@ namespace Keire
             std::map<std::string, std::uint32_t, std::less<>> BoneIndices;
             std::unique_ptr<AnimatorInstance> Instance;
             std::uint64_t GraphRevision = 0;
+            std::uint64_t DependencyGraphRevision = 0;
             std::uint64_t SkeletonRevision = 0;
             std::string DependencyDiagnostic;
         };
@@ -374,11 +376,33 @@ namespace Keire
                 auto& state = Animators[entity.Id()];
                 if (!state)
                     state = std::make_unique<AnimationRuntimeState>();
-                if (state->Graph != animator->Graph() || state->Skeleton != animator->Skeleton())
+
+                const auto skinId = animator->SkinnedMesh();
+                auto targetSkeleton = animator->Skeleton();
+                if (skinId)
+                {
+                    const auto skin = Assets->Load<SkinnedMeshAsset>(skinId, AssetPriority::High).TryGetLoaded();
+                    if (!skin)
+                    {
+                        animator->SetRuntimeDiagnostic("Animator is waiting for the assigned skinned mesh to load.");
+                        continue;
+                    }
+                    targetSkeleton = skin->Skeleton();
+                    if (!targetSkeleton)
+                    {
+                        animator->SetRuntimeDiagnostic("The assigned skinned mesh does not reference a skeleton.");
+                        continue;
+                    }
+                    if (animator->Skeleton() != targetSkeleton)
+                        animator->SetSkeleton(targetSkeleton);
+                }
+
+                if (state->Graph != animator->Graph() || state->Skeleton != targetSkeleton || state->Skin != skinId)
                 {
                     *state = {};
                     state->Graph = animator->Graph();
-                    state->Skeleton = animator->Skeleton();
+                    state->Skeleton = targetSkeleton;
+                    state->Skin = skinId;
                     if (state->Graph)
                         state->GraphHandle = Assets->Load<AnimationGraphAsset>(state->Graph, AssetPriority::High);
                     if (state->Skeleton)
@@ -394,7 +418,22 @@ namespace Keire
                 }
                 const auto graph = state->GraphHandle.TryGetLoaded();
                 const auto skeleton = state->SkeletonHandle.TryGetLoaded();
-                if (!graph || !skeleton || !DependenciesReady(*state, *graph))
+                if (!graph || !skeleton)
+                {
+                    animator->SetRuntimeDiagnostic("Animator is waiting for controller dependencies to load.");
+                    continue;
+                }
+
+                const auto graphRevision = state->GraphHandle.Revision();
+                if (state->DependencyGraphRevision != graphRevision)
+                {
+                    state->Clips.clear();
+                    state->RetargetedClips.clear();
+                    state->Masks.clear();
+                    state->DependencyDiagnostic.clear();
+                    state->DependencyGraphRevision = graphRevision;
+                }
+                if (!DependenciesReady(*state, *graph))
                 {
                     animator->SetRuntimeDiagnostic(state->DependencyDiagnostic.empty()
                                                        ? "Animator is waiting for controller dependencies to load."
@@ -402,7 +441,6 @@ namespace Keire
                     continue;
                 }
 
-                const auto graphRevision = state->GraphHandle.Revision();
                 const auto skeletonRevision = state->SkeletonHandle.Revision();
                 if (!state->Instance || state->SkeletonRevision != skeletonRevision)
                 {

@@ -18,6 +18,7 @@
 #include "KeireClient/Editor/SelectionRange.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClient/Editor/ViewportInputRouting.h"
 
 #include <doctest/doctest.h>
 
@@ -1042,6 +1043,31 @@ TEST_CASE("scene camera state and entity locking persist without a workspace lay
     CHECK(restored.State().Projection == Keire::Detail::EditorCameraProjection::Orthographic);
     CHECK(std::ranges::equal(restored.LockedEntities(), locked));
     std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("scene and game viewports keep camera and input ownership separate during play")
+{
+    KeireEditor::SceneCameraController camera;
+    auto state = camera.State();
+    state.Focus = {3.0F, 4.0F, 5.0F};
+    state.YawDegrees = 25.0F;
+    state.PitchDegrees = -10.0F;
+    camera.SetState(state);
+
+    constexpr float aspect = 16.0F / 9.0F;
+    const auto renderCamera = camera.RenderCamera(aspect);
+    const auto expectedView = camera.ViewMatrix();
+    const auto expectedProjection = camera.ProjectionMatrix(aspect);
+    for (std::size_t index = 0; index < renderCamera.View.Elements.size(); ++index)
+    {
+        CHECK(renderCamera.View.Elements[index] == doctest::Approx(expectedView.Elements[index]));
+        CHECK(renderCamera.Projection.Elements[index] == doctest::Approx(expectedProjection.Elements[index]));
+    }
+
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false));
 }
 
 TEST_CASE("scene camera single F frames and double F locks the selected entity")

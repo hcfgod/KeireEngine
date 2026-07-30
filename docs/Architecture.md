@@ -250,6 +250,10 @@ snapshots, and named commands through narrow contracts; none retain, friend, or 
 `UiPanelRegistration` supplies a common session-local view lock. The UI boundary prevents locked panels from moving,
 resizing, or collapsing, while selection-driven client panels retain only stable entity or asset IDs and validate them
 before each draw.
+During Play Mode, Scene and Game retain separate camera and input ownership: Scene always renders through its persistent
+editor camera, while managed runtime input and cursor capture are active only when the Game image is both focused and
+hovered. Hovering Scene therefore routes navigation exclusively to the editor camera without mutating runtime camera
+state.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
 All authoring mutations, including menu primitives and viewport mesh/material drops, cross `SceneDocument`; workspace

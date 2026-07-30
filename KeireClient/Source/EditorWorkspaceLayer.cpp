@@ -828,6 +828,18 @@ void EditorWorkspaceLayer::OnAttach()
             const auto catalog = project->AssetCatalog();
             std::error_code catalogError;
             bool requiresSynchronousImport = !std::filesystem::is_regular_file(catalog, catalogError) || catalogError;
+            if (!requiresSynchronousImport)
+            {
+                requiresSynchronousImport =
+                    std::ranges::any_of(m_AssetRecords,
+                                        [this](const Keire::AssetSourceRecord& record)
+                                        {
+                                            const auto importer =
+                                                m_AssetDatabase->FindImporterForPath(record.RelativePath);
+                                            return importer && importer->Name == record.Importer &&
+                                                   importer->Version > record.ImporterVersion;
+                                        });
+            }
             if (!requiresSynchronousImport && project->Descriptor().StartupScene)
             {
                 const auto startup = m_AssetDatabase->Find(project->Descriptor().StartupScene);

@@ -23,6 +23,7 @@ namespace KeireEditor
         void SetState(const Keire::Detail::EditorCameraState& state) { m_Camera.SetState(state); }
         [[nodiscard]] Keire::Matrix4 ViewMatrix() const noexcept { return m_Camera.ViewMatrix(); }
         [[nodiscard]] Keire::Matrix4 ProjectionMatrix(float aspect) const { return m_Camera.ProjectionMatrix(aspect); }
+        [[nodiscard]] Keire::RenderCamera RenderCamera(float aspect) const;
         [[nodiscard]] bool Update(const Keire::Detail::EditorCameraInput& input) { return m_Camera.Update(input); }
         void ToggleProjection() noexcept { m_Camera.ToggleProjection(); }
         void Snap(Keire::Detail::EditorCameraAxis axis) noexcept { m_Camera.Snap(axis); }

@@ -1,6 +1,6 @@
 {
   "dependencies": [],
-  "id": "b39a5ed3-81e2-41f8-bd7c-e723073bdd7e",
+  "id": "51cd8956-a6c4-4d63-b990-7d86829f92ff",
   "importSettings": {
     "contentType": "model",
     "maximumInfluences": "8",
@@ -9,14 +9,14 @@
     "skinningMethod": "linearBlend"
   },
   "importer": "Keire.Mesh",
-  "importerVersion": 8,
+  "importerVersion": 12,
   "schemaVersion": 1,
   "subAssets": [
-    "3f991ecd-4ce9-59ca-9945-2ee070ad7ea7",
-    "75fb9e03-716f-53d6-9c2c-884ada261f35",
-    "b14b5b84-3193-5137-94f6-4f32836430c4",
-    "2e570c2c-cc91-5b6a-b540-f73e6e994c31",
-    "d7d090b5-a591-5b1a-8c88-eaaa6b282147"
+    "89e86ecc-863b-5daf-853f-06227914c107",
+    "c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08",
+    "07b8e1f6-2da6-59fb-85a1-17c541f4807e",
+    "d9908146-8136-5fcb-8eef-d28d2fdab1da",
+    "78c8dbe3-2951-54b9-b34e-9221c49c506b"
   ],
   "type": "4b454952-454d-4553-4841-535345540001"
 }

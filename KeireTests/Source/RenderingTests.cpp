@@ -475,10 +475,9 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 8);
+    CHECK(importer.Version == 12);
     const auto content =
-        std::ranges::find(importer.ImportOptions, std::string("contentType"),
-                          &Keire::AssetImportOptionDescriptor::Key);
+        std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
     CHECK(content->Kind == Keire::AssetImportOptionKind::Choice);
     CHECK(std::get<std::string>(content->DefaultValue) == "model");

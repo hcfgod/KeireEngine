@@ -1,6 +1,8 @@
+#include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Application.h"
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
@@ -120,6 +122,26 @@ namespace
         return result;
     }
 
+    [[nodiscard]] float GreenDominance(const std::vector<std::uint8_t>& pixels, const bool left)
+    {
+        REQUIRE(pixels.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
+        const auto minimumX = left ? 0U : SurfaceSize / 2U;
+        const auto maximumX = left ? SurfaceSize / 2U : SurfaceSize;
+        float result = 0.0F;
+        for (std::uint32_t y = 0; y < SurfaceSize; ++y)
+        {
+            for (std::uint32_t x = minimumX; x < maximumX; ++x)
+            {
+                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                const auto red = static_cast<float>(pixels[offset]) / 255.0F;
+                const auto green = static_cast<float>(pixels[offset + 1]) / 255.0F;
+                const auto blue = static_cast<float>(pixels[offset + 2]) / 255.0F;
+                result += std::max(green - std::max(red, blue), 0.0F);
+            }
+        }
+        return result / static_cast<float>(SurfaceSize * SurfaceSize / 2U);
+    }
+
     [[nodiscard]] float MaximumDarkening(const std::vector<std::uint8_t>& unshadowed,
                                          const std::vector<std::uint8_t>& shadowed)
     {
@@ -150,6 +172,8 @@ namespace
         std::vector<std::vector<std::uint8_t>> Frames;
         std::vector<std::vector<float>> ShadowDepth;
         std::vector<std::uint64_t> MaterialBindingBuilds;
+        std::vector<std::uint64_t> SkinningStaticBuilds;
+        std::vector<std::uint64_t> SkinningOutputBuilds;
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
     };
@@ -189,6 +213,12 @@ namespace
             const auto meshImporter = Keire::CreateMeshAssetImporter();
             const auto shaderImporter = Keire::CreateShaderAssetImporter();
             const auto materialImporter = Keire::CreateMaterialAssetImporter();
+            Keire::AssetImporterRegistration skinImporter;
+            skinImporter.Name = "KeireTests.SkinnedMesh";
+            skinImporter.Type = Keire::SkinnedMeshAsset::StaticType();
+            skinImporter.Extensions = {".keireskin"};
+            skinImporter.Import = [](const std::span<const std::byte> bytes)
+            { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
             Keire::AssetImporterRegistration textureImporter;
             textureImporter.Name = "KeireTests.Texture";
             textureImporter.Type = Keire::Texture2DAsset::StaticType();
@@ -197,14 +227,25 @@ namespace
             { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
             Database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
                 .ProjectRoot = Root,
-                .Importers = std::vector<Keire::AssetImporterRegistration>{meshImporter, shaderImporter,
-                                                                           materialImporter, textureImporter}});
+                .Importers = std::vector<Keire::AssetImporterRegistration>{
+                    meshImporter, shaderImporter, materialImporter, skinImporter, textureImporter}});
             const std::array vertices{Keire::MeshVertex{{-0.9F, -0.8F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}},
                                       Keire::MeshVertex{{0.9F, -0.8F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}},
                                       Keire::MeshVertex{{0.0F, 0.9F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}}};
             const std::array<std::uint32_t, 3> indices{0, 1, 2};
             Mesh =
                 Database->CreateAsset("Triangle.keiremesh", meshImporter, Keire::MeshAsset::Encode(vertices, indices));
+            Skeleton = Keire::AssetId::Generate();
+            std::array<Keire::SkinVertexInfluence8, 3> skinInfluences;
+            for (auto& influence : skinInfluences)
+            {
+                influence.Bones[0] = 0;
+                influence.Weights[0] = 1.0F;
+                influence.Count = 1;
+            }
+            Skin = Database->CreateAsset(
+                "Triangle.keireskin", skinImporter,
+                Keire::SkinnedMeshAsset::Encode(Mesh, Skeleton, skinInfluences, Keire::SkinningMethod::LinearBlend));
             const auto builtInCube = Keire::MeshAsset::Cube();
             CubeMesh = Database->CreateAsset("Cube.keiremesh", meshImporter,
                                              Keire::MeshAsset::Encode(builtInCube->Vertices(), builtInCube->Indices()));
@@ -350,6 +391,8 @@ namespace
         std::filesystem::path ShaderSourcePath;
         Keire::Ref<Keire::AssetDatabase> Database;
         Keire::AssetId Mesh;
+        Keire::AssetId Skeleton;
+        Keire::AssetId Skin;
         Keire::AssetId CubeMesh;
         Keire::AssetId Material;
         Keire::AssetId Shader;
@@ -639,6 +682,116 @@ namespace
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         bool m_Submitted = false;
+    };
+
+    class SkinnedMeshCaptureLayer final : public Keire::Layer
+    {
+      public:
+        SkinnedMeshCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material, const Keire::AssetId skeleton,
+                                const Keire::AssetId skin, std::shared_ptr<CaptureResults> results)
+            : Layer("Skinned mesh capture"), m_Mesh(mesh), m_Material(material), m_Skeleton(skeleton), m_Skin(skin),
+              m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000009"),
+                                                     Keire::SceneAsset::EmptyDefinition("Skinned mesh tests"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto object = m_Scene->CreateEntity("Skinned asset mesh");
+            const auto renderer = object.AddComponent<Keire::MeshRendererComponent>();
+            renderer->SetMesh(m_Mesh);
+            renderer->SetMaterial(m_Material);
+            m_Animator = object.AddComponent<Keire::AnimatorComponent>();
+            m_Animator->SetSkeleton(m_Skeleton);
+            m_Animator->SetSkinnedMesh(m_Skin);
+            SetPaletteTranslation(-0.65F);
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Skinned mesh tests";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_Animator.Reset();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            bool complete = false;
+            if (m_Submitted)
+            {
+                m_Results->SkinningStaticBuilds.push_back(
+                    Keire::RenderSystemInternalAccess::SkinningStaticBuildCount(*Owner().Renderer()));
+                m_Results->SkinningOutputBuilds.push_back(
+                    Keire::RenderSystemInternalAccess::SkinningOutputBuildCount(*Owner().Renderer()));
+                auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                const auto left = GreenDominance(pixels, true);
+                const auto right = GreenDominance(pixels, false);
+                if (m_Results->Frames.empty() && right > left + MinimumBehaviorDelta)
+                {
+                    m_Results->Frames.push_back(std::move(pixels));
+                    SetPaletteTranslation(0.65F);
+                }
+                else if (m_Results->Frames.size() == 1 && left > right + MinimumBehaviorDelta)
+                {
+                    m_Results->Frames.push_back(std::move(pixels));
+                    m_DeformationCaptured = true;
+                }
+            }
+
+            if (m_DeformationCaptured && m_Frames >= 8)
+                complete = true;
+            if (++m_Frames >= 120)
+                complete = true;
+            if (complete)
+            {
+                Owner().RequestExit();
+                return;
+            }
+
+            Keire::RenderEnvironmentSettings environment;
+            environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+            environment.AmbientIntensity = 1.0F;
+            environment.SkyVisible = false;
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            m_Submitted = true;
+        }
+
+      private:
+        void SetPaletteTranslation(const float translation)
+        {
+            const std::array palette{Keire::Math::ComposeTransform({translation, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F})};
+            m_Animator->SetRuntimePose("Test", palette);
+        }
+
+        Keire::AssetId m_Mesh;
+        Keire::AssetId m_Material;
+        Keire::AssetId m_Skeleton;
+        Keire::AssetId m_Skin;
+        std::shared_ptr<CaptureResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::AnimatorComponent> m_Animator;
+        std::uint32_t m_Frames = 0;
+        bool m_Submitted = false;
+        bool m_DeformationCaptured = false;
     };
 
     class ShadowCaptureLayer final : public Keire::Layer
@@ -1462,6 +1615,36 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(results->Statistics.DrawCalls < 25);
     CHECK(results->Statistics.CpuPreparationP95Milliseconds >= 0.0F);
     CHECK(results->Statistics.RendererLatencyMilliseconds >= 0.0F);
+}
+
+TEST_CASE("skinned asset vertices follow bounded palette deformation")
+{
+    RenderAssetFixture assets;
+    const auto results = std::make_shared<CaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    specification.Render.MaximumFramesInFlight = 3;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<SkinnedMeshCaptureLayer>(assets.Mesh, assets.Material,
+                                                                              assets.Skeleton, assets.Skin, results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE(results->Frames.size() == 2);
+    CHECK(GreenDominance(results->Frames[0], false) > GreenDominance(results->Frames[0], true) + MinimumBehaviorDelta);
+    CHECK(GreenDominance(results->Frames[1], true) > GreenDominance(results->Frames[1], false) + MinimumBehaviorDelta);
+    REQUIRE(results->SkinningStaticBuilds.size() >= 8);
+    const auto firstStaticBuild =
+        std::ranges::find_if(results->SkinningStaticBuilds, [](const std::uint64_t count) { return count != 0; });
+    REQUIRE(firstStaticBuild != results->SkinningStaticBuilds.end());
+    CHECK(std::ranges::all_of(firstStaticBuild, results->SkinningStaticBuilds.end(),
+                              [](const std::uint64_t count) { return count == 1; }));
+    REQUIRE(results->SkinningOutputBuilds.size() == results->SkinningStaticBuilds.size());
+    CHECK(results->SkinningOutputBuilds.back() == 3);
+    CHECK(results->SkinningOutputBuilds[results->SkinningOutputBuilds.size() - 2] ==
+          results->SkinningOutputBuilds.back());
 }
 
 TEST_CASE("directional shadow maps occlude a separate receiving mesh")

@@ -906,6 +906,37 @@ namespace Keire
         for (std::uint32_t index = 0; index < targetRig.Bones.size(); ++index)
             if (targetRig.Bones[index].Semantic != RigBoneSemantic::None)
                 targetBySemantic.emplace(targetRig.Bones[index].Semantic, index);
+        std::unordered_map<std::string_view, std::uint32_t> targetByName;
+        targetByName.reserve(targetSkeleton.Bones().size());
+        for (std::uint32_t index = 0; index < targetSkeleton.Bones().size(); ++index)
+            targetByName.emplace(targetSkeleton.Bones()[index].Name, index);
+
+        const auto nearlyEqual = [](const float left, const float right)
+        {
+            const auto scale = std::max({1.0F, std::abs(left), std::abs(right)});
+            return std::abs(left - right) <= scale * 0.0001F;
+        };
+        const auto matchingVector = [&nearlyEqual](const Vector3 left, const Vector3 right)
+        { return nearlyEqual(left.X, right.X) && nearlyEqual(left.Y, right.Y) && nearlyEqual(left.Z, right.Z); };
+        const auto matchingRotation = [](const Quaternion left, const Quaternion right)
+        {
+            const auto normalizedLeft = Normalize(left);
+            const auto normalizedRight = Normalize(right);
+            return std::abs(normalizedLeft.X * normalizedRight.X + normalizedLeft.Y * normalizedRight.Y +
+                            normalizedLeft.Z * normalizedRight.Z + normalizedLeft.W * normalizedRight.W) >= 0.9999F;
+        };
+        const auto matchingHierarchy =
+            [&sourceSkeleton, &targetSkeleton](const std::uint32_t source, const std::uint32_t target)
+        {
+            const auto sourceParent = sourceSkeleton.Bones()[source].Parent;
+            const auto targetParent = targetSkeleton.Bones()[target].Parent;
+            if (sourceParent < 0 || targetParent < 0)
+                return sourceParent < 0 && targetParent < 0;
+            return sourceSkeleton.Bones()[static_cast<std::size_t>(sourceParent)].Name ==
+                   targetSkeleton.Bones()[static_cast<std::size_t>(targetParent)].Name;
+        };
+        const auto isAssimpFbxRotationHelper = [](const std::string_view name) noexcept
+        { return name.ends_with("_$AssimpFbx$_Rotation"); };
 
         std::vector<AnimationTrack> tracks;
         tracks.reserve(sourceClip.Tracks().size());
@@ -913,32 +944,60 @@ namespace Keire
         {
             if (sourceTrack.Bone >= sourceRig.Bones.size())
                 continue;
-            const auto target = targetBySemantic.find(sourceRig.Bones[sourceTrack.Bone].Semantic);
-            if (target == targetBySemantic.end())
+            std::optional<std::uint32_t> targetIndex;
+            bool exactNameMatch = false;
+            if (const auto exact = targetByName.find(sourceSkeleton.Bones()[sourceTrack.Bone].Name);
+                exact != targetByName.end())
+            {
+                targetIndex = exact->second;
+                exactNameMatch = true;
+            }
+            else if (const auto semantic = targetBySemantic.find(sourceRig.Bones[sourceTrack.Bone].Semantic);
+                     semantic != targetBySemantic.end())
+            {
+                targetIndex = semantic->second;
+            }
+            if (!targetIndex)
                 continue;
-            const auto& sourceBind = sourceRig.Bones[sourceTrack.Bone].BindPose;
-            const auto& targetBind = targetRig.Bones[target->second].BindPose;
+            const auto& sourceBind = sourceSkeleton.Bones()[sourceTrack.Bone].BindPose;
+            const auto& targetBind = targetSkeleton.Bones()[*targetIndex].BindPose;
             const auto sourceLength = Length(sourceBind.Translation);
             const auto targetLength = Length(targetBind.Translation);
             const auto translationScale = sourceLength > Epsilon ? targetLength / sourceLength : 1.0F;
+            const auto preserveAuthoredLocalTrack =
+                exactNameMatch && matchingHierarchy(sourceTrack.Bone, *targetIndex) &&
+                (isAssimpFbxRotationHelper(sourceSkeleton.Bones()[sourceTrack.Bone].Name) ||
+                 (matchingVector(sourceBind.Translation, targetBind.Translation) &&
+                  matchingRotation(sourceBind.Rotation, targetBind.Rotation) &&
+                  matchingVector(sourceBind.Scale, targetBind.Scale)));
             AnimationTrack track;
-            track.Bone = target->second;
+            track.Bone = *targetIndex;
             track.Keys.reserve(sourceTrack.Keys.size());
             for (const auto& key : sourceTrack.Keys)
             {
                 auto value = key.Value;
-                value.Translation =
-                    Add(targetBind.Translation,
-                        Multiply(Subtract(value.Translation, sourceBind.Translation), translationScale));
-                const auto sourceRotation = Normalize(sourceBind.Rotation);
-                const auto targetRotation = Normalize(targetBind.Rotation);
-                const auto rotationDelta = Multiply(Normalize(value.Rotation), Conjugate(sourceRotation));
-                value.Rotation = Normalize(Multiply(rotationDelta, targetRotation));
-                const auto retargetScale = [](const float animated, const float source, const float target)
-                { return std::abs(source) > Epsilon ? target * (animated / source) : target; };
-                value.Scale = {retargetScale(value.Scale.X, sourceBind.Scale.X, targetBind.Scale.X),
-                               retargetScale(value.Scale.Y, sourceBind.Scale.Y, targetBind.Scale.Y),
-                               retargetScale(value.Scale.Z, sourceBind.Scale.Z, targetBind.Scale.Z)};
+                if (!preserveAuthoredLocalTrack)
+                {
+                    value.Translation =
+                        Add(targetBind.Translation,
+                            Multiply(Subtract(value.Translation, sourceBind.Translation), translationScale));
+                    const auto sourceRotation = Normalize(sourceBind.Rotation);
+                    const auto targetRotation = Normalize(targetBind.Rotation);
+                    const auto rotationDelta = Multiply(Conjugate(sourceRotation), Normalize(value.Rotation));
+                    value.Rotation = Normalize(Multiply(targetRotation, rotationDelta));
+                    const auto retargetScale = [](const float animated, const float source, const float target)
+                    {
+                        if (std::abs(source) <= Epsilon)
+                            return target;
+                        const auto relative = animated / source;
+                        if (!std::isfinite(relative) || relative < 0.125F || relative > 8.0F)
+                            return target;
+                        return target * relative;
+                    };
+                    value.Scale = {retargetScale(value.Scale.X, sourceBind.Scale.X, targetBind.Scale.X),
+                                   retargetScale(value.Scale.Y, sourceBind.Scale.Y, targetBind.Scale.Y),
+                                   retargetScale(value.Scale.Z, sourceBind.Scale.Z, targetBind.Scale.Z)};
+                }
                 track.Keys.push_back({key.Time, value});
             }
             tracks.push_back(std::move(track));

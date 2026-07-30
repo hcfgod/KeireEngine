@@ -1,5 +1,35 @@
 # Changelog
 
+- Restored independent Scene and Game viewport camera ownership during Play Mode: Scene keeps its persistent editor
+  camera and navigation, while managed gameplay input and cursor capture require the focused, hovered Game viewport.
+- Fixed animated GPU skinning corruption by using renderer-private, 16-byte-aligned vertex storage layouts across
+  uploads, compute deformation, shadows, fallback rendering, and material pipelines.
+- Fixed animation controllers retaining obsolete generated clip handles after model or animation-source reimport.
+  Catalog publication now reloads changed subassets and loaded reverse dependents, while live Animators invalidate their
+  dependency caches once per controller revision so regenerated clips resume without restarting the editor.
+- Fixed GPU skeletal skinning corruption by defining the palette as explicit matrix columns and rejecting out-of-range
+  bone influences before palette access.
+- Fixed animation previews waiting indefinitely when a controller references a missing clip, skeleton, or avatar mask;
+  missing dependencies now report an actionable reassignment or reimport diagnostic.
+- Fixed imported skeletal deformation by preserving Assimp's mesh-space inverse bind matrices and preferring exact bone
+  names when retargeting compatible animation and model skeletons.
+- Validated and enabled D3D12 compute skinning with strict buffer-layout and palette guards, avoiding the per-frame
+  Debug-build CPU deformation cost while retaining bounded CPU fallback behavior.
+- Cached validated skin influences by asset revision and retained fence-safe per-entity deformation buffers across
+  frames, removing full-mesh influence uploads and GPU buffer allocation from steady-state animation playback.
+- Fixed CPU-skinned material draws by retaining render-thread upload transfers through GPU submission and binding the
+  single-instance storage record required by instancing-capable material shaders.
+- Fixed Mixamo arm offsets when retargeting Assimp FBX rotation-helper tracks onto a separately imported model.
+
+- Rebuilt imported inverse bind poses from the normalized runtime hierarchy and bounded retargeted scale ratios,
+  preventing animated FBX unit conversions from expanding skinned meshes into screen-filling triangles.
+- Fixed Animator playback when a source-animation skeleton was assigned beside a different target skinned mesh, and
+  added live state progress plus transient Edit Mode preview controls to the Animator Controller.
+- Fixed embedded skeletal imports by normalizing merged mesh vertices and inverse bind poses into one model space,
+  preventing mesh-node transforms from producing explosive deformation when an Animator skin is assigned.
+- Project open now invalidates development catalogs produced by older importer versions instead of silently retaining
+  stale model, animation, audio, or other derived asset data.
+
 - Fixed Animator asset fields so generated skeleton and skinned-mesh subassets can be selected directly from imported
   models, added cached bind-pose-aware retargeting for separately imported clips, rejected incompatible GPU skin data,
   and reduced audio import publication time with bounded media probing and parallel fast development cooking.
@@ -208,6 +238,13 @@ All notable template changes are documented here. The format follows Keep a Chan
 
 ## Unreleased
 
+- Fixed animated mesh corruption by retaining same-frame GPU upload transfer buffers until the consuming frame fence
+  completes, with safe failure/shutdown cleanup and bounded CPU skin deformation.
+- Preserved authored animation tracks for bind-compatible exact-name skeletons and restored GPU skinning on D3D12,
+  avoiding unnecessary bind-space retargeting and per-frame CPU vertex deformation.
+- Fixed skinned model imports by preventing Assimp vertex joining from discarding distinct bone-weight sets, and
+  corrected local-space quaternion composition when retargeting different bind poses. Mesh importer v12 regenerates
+  affected skins while static models retain vertex joining and cache-locality optimization.
 - Fixed external model imports with explicit rig settings borrowing a destroyed JSON document, and report crashed
   asset workers without attempting to parse a missing result file.
 

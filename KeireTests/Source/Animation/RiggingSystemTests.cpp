@@ -117,6 +117,86 @@ TEST_CASE("Animation retargeting applies source deltas to the target bind pose")
     CHECK((retargeted->Tracks().front().Keys.front().Value.Translation == Keire::Vector3{3.0F, 1.0F, 0.0F}));
 }
 
+TEST_CASE("Animation retargeting rejects pathological source scale ratios")
+{
+    const std::vector<Keire::SkeletonBone> sourceBones{
+        {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"Hips", 0, {{0.0F, 1.0F, 0.0F}, {}, {0.01F, 0.01F, 0.01F}}, {}}};
+    const std::vector<Keire::SkeletonBone> targetBones{{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                       {"Pelvis", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset sourceSkeleton(sourceBones);
+    const Keire::SkeletonAsset targetSkeleton(targetBones);
+    const auto sourceRig = Keire::InferRigDefinition(sourceSkeleton);
+    const auto targetRig = Keire::InferRigDefinition(targetSkeleton);
+    const auto sourceSkeletonId = Keire::AssetId::Generate();
+    const auto targetSkeletonId = Keire::AssetId::Generate();
+    const Keire::AnimationClipAsset sourceClip(sourceSkeletonId, 1.0F,
+                                               {{1, {{0.0F, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}}}}});
+
+    const auto retargeted = Keire::RetargetAnimationClip(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
+                                                         targetSkeleton, targetRig);
+
+    REQUIRE(retargeted);
+    REQUIRE(retargeted->Tracks().size() == 1);
+    CHECK((retargeted->Tracks().front().Keys.front().Value.Scale == Keire::Vector3{1.0F, 1.0F, 1.0F}));
+}
+
+TEST_CASE("Animation retargeting prefers exact bone names without semantic mappings")
+{
+    const std::vector<Keire::SkeletonBone> sourceBones{
+        {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"SharedBone", 0, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const std::vector<Keire::SkeletonBone> targetBones{
+        {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"SharedBone", 0, {{0.0F, 4.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset sourceSkeleton(sourceBones);
+    const Keire::SkeletonAsset targetSkeleton(targetBones);
+    const auto sourceRig = Keire::InferRigDefinition(sourceSkeleton);
+    const auto targetRig = Keire::InferRigDefinition(targetSkeleton);
+    const auto sourceSkeletonId = Keire::AssetId::Generate();
+    const auto targetSkeletonId = Keire::AssetId::Generate();
+    const Keire::AnimationClipAsset sourceClip(sourceSkeletonId, 1.0F,
+                                               {{1, {{0.0F, {{0.0F, 3.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}}}}});
+
+    const auto retargeted = Keire::RetargetAnimationClip(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
+                                                         targetSkeleton, targetRig);
+
+    REQUIRE(retargeted);
+    REQUIRE(retargeted->Tracks().size() == 1);
+    CHECK(retargeted->Tracks().front().Bone == 1);
+    CHECK((retargeted->Tracks().front().Keys.front().Value.Translation == Keire::Vector3{0.0F, 6.0F, 0.0F}));
+}
+
+TEST_CASE("Animation retargeting preserves authored Assimp FBX rotation helper tracks")
+{
+    const Keire::Quaternion sourceBindRotation{0.0F, 0.0F, 0.3826834F, 0.9238795F};
+    const Keire::Quaternion authoredRotation{0.0F, 0.0F, 0.1305262F, 0.9914449F};
+    const std::vector<Keire::SkeletonBone> sourceBones{
+        {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftArm_$AssimpFbx$_Rotation", 0, {{}, sourceBindRotation, {1.0F, 1.0F, 1.0F}}, {}}};
+    const std::vector<Keire::SkeletonBone> targetBones{
+        {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"mixamorig:LeftArm_$AssimpFbx$_Rotation", 0, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset sourceSkeleton(sourceBones);
+    const Keire::SkeletonAsset targetSkeleton(targetBones);
+    const auto sourceRig = Keire::InferRigDefinition(sourceSkeleton);
+    const auto targetRig = Keire::InferRigDefinition(targetSkeleton);
+    const Keire::AnimationClipAsset sourceClip(Keire::AssetId::Generate(), 1.0F,
+                                               {{1, {{0.0F, {{}, authoredRotation, {1.0F, 1.0F, 1.0F}}}}}});
+
+    const auto retargeted = Keire::RetargetAnimationClip(sourceSkeleton, sourceRig, sourceClip,
+                                                         Keire::AssetId::Generate(), targetSkeleton, targetRig);
+
+    REQUIRE(retargeted);
+    REQUIRE(retargeted->Tracks().size() == 1);
+    REQUIRE(retargeted->Tracks().front().Keys.size() == 1);
+    const auto rotation = retargeted->Tracks().front().Keys.front().Value.Rotation;
+    CHECK(rotation.X == doctest::Approx(authoredRotation.X));
+    CHECK(rotation.Y == doctest::Approx(authoredRotation.Y));
+    CHECK(rotation.Z == doctest::Approx(authoredRotation.Z));
+    CHECK(rotation.W == doctest::Approx(authoredRotation.W));
+}
+
 TEST_CASE("Two bone and FABRIK solvers reject malformed chains and move valid chains toward targets")
 {
     const std::vector<Keire::SkeletonBone> bones{{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},

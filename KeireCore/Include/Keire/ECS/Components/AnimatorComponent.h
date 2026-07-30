@@ -104,6 +104,7 @@ namespace Keire
         void SetRuntimePose(std::string state, std::span<const Matrix4> skinPalette);
         void SetRuntimeDebugSnapshot(std::shared_ptr<const AnimatorDebugSnapshot> snapshot) noexcept;
         void SetRuntimeDiagnostic(std::string diagnostic) noexcept;
+        void ClearRuntimePose() noexcept;
 
       private:
         void QueueCommand(AnimatorCommand command);

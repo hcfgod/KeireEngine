@@ -88,7 +88,7 @@ Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view act
 {
     try
     {
-        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession())
+        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
             return {};
         if (!m_GameplayInputContext->EnableMap("Player"))
             return {};
@@ -115,7 +115,7 @@ Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::
 {
     try
     {
-        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession())
+        if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
             return Keire::ManagedInputState::None;
         if (!m_GameplayInputContext->EnableMap("Player"))
             return Keire::ManagedInputState::None;
@@ -331,12 +331,15 @@ void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
         if (!windows || !window)
             return;
 
-        const auto mode = m_ManagedCursorLocked
-                              ? Keire::CursorMode::RelativeLocked
-                              : (m_ManagedCursorVisible ? Keire::CursorMode::Normal : Keire::CursorMode::Hidden);
-        const auto previousMode = windows->GetCursorMode(window->Id());
         const bool playActive = m_SceneDocument && m_SceneDocument->PlaySession() &&
                                 m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped;
+        const bool runtimeInputActive = playActive && m_GameViewportInputActive;
+        const auto mode = runtimeInputActive
+                              ? (m_ManagedCursorLocked
+                                     ? Keire::CursorMode::RelativeLocked
+                                     : (m_ManagedCursorVisible ? Keire::CursorMode::Normal : Keire::CursorMode::Hidden))
+                              : Keire::CursorMode::Normal;
+        const auto previousMode = windows->GetCursorMode(window->Id());
         auto viewport = playActive ? m_GameViewportRect : m_SceneViewportPanel->ViewportRect();
         if (viewport.Size().Width <= 0.0F || viewport.Size().Height <= 0.0F)
             viewport = playActive ? m_SceneViewportPanel->ViewportRect() : m_GameViewportRect;
@@ -361,6 +364,14 @@ void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
     catch (...)
     {
     }
+}
+
+void EditorWorkspaceLayer::SetGameViewportInputActive(const bool active) noexcept
+{
+    if (m_GameViewportInputActive == active)
+        return;
+    m_GameViewportInputActive = active;
+    ApplyManagedCursorMode();
 }
 
 void EditorWorkspaceLayer::SetManagedCursorVisible(const bool visible) noexcept

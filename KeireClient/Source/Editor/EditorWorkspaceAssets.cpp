@@ -758,14 +758,51 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
         {
             (void)assets->Unmount(result.CatalogPath);
             assets->Mount({result.CatalogPath, 0, true});
-            if (reloadLoadedAssets)
+
+            std::set<Keire::AssetId> affected;
+            const auto includeRecord = [&affected](const Keire::AssetSourceRecord& record)
             {
-                if (reloadAsset)
-                    (void)assets->Reload(reloadAsset, Keire::AssetPriority::Background);
-                else
-                    for (const auto& record : m_AssetRecords)
-                        (void)assets->Reload(record.Id, Keire::AssetPriority::Background);
+                affected.insert(record.Id);
+                affected.insert(record.SubAssets.begin(), record.SubAssets.end());
+            };
+            for (const auto& status : result.Statuses)
+            {
+                if (status.State != Keire::AssetImportState::Imported)
+                    continue;
+                affected.insert(status.Id);
+                if (const auto record = m_AssetDatabase->Find(status.Id))
+                    includeRecord(*record);
             }
+            if (reloadAsset)
+            {
+                affected.insert(reloadAsset);
+                if (const auto record = m_AssetDatabase->Find(reloadAsset))
+                    includeRecord(*record);
+            }
+            if (reloadLoadedAssets && !reloadAsset)
+            {
+                for (const auto& record : m_AssetRecords)
+                    includeRecord(record);
+            }
+
+            bool expanded = true;
+            while (expanded)
+            {
+                expanded = false;
+                for (const auto& record : m_AssetRecords)
+                {
+                    if (affected.contains(record.Id) ||
+                        !std::ranges::any_of(record.Dependencies, [&affected](const Keire::AssetId dependency)
+                                             { return affected.contains(dependency); }))
+                    {
+                        continue;
+                    }
+                    includeRecord(record);
+                    expanded = true;
+                }
+            }
+            for (const auto asset : affected)
+                (void)assets->Reload(asset, Keire::AssetPriority::Background);
         }
     }
     for (const auto& importStatus : result.Statuses)
@@ -1726,6 +1763,11 @@ Keire::Ref<Keire::AssetDatabase> EditorWorkspaceLayer::AnimatorControllerDatabas
 Keire::Ref<Keire::AssetSystem> EditorWorkspaceLayer::AnimatorControllerAssets() const noexcept
 {
     return Owner().Assets();
+}
+
+KeireEditor::SceneDocument& EditorWorkspaceLayer::AnimatorControllerSceneDocument() noexcept
+{
+    return *m_SceneDocument;
 }
 
 void EditorWorkspaceLayer::ActivateAnimatorControllerHistory() noexcept

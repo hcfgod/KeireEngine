@@ -12,6 +12,14 @@
 
 namespace KeireEditor
 {
+    Keire::RenderCamera SceneCameraController::RenderCamera(const float aspect) const
+    {
+        Keire::RenderCamera camera;
+        camera.View = ViewMatrix();
+        camera.Projection = ProjectionMatrix(aspect);
+        return camera;
+    }
+
     SceneFocusShortcutAction SceneCameraController::ApplyFocusShortcut(const Keire::EntityId selection,
                                                                        const Keire::TimeStep timestamp) noexcept
     {

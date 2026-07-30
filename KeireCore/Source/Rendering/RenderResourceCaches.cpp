@@ -27,6 +27,8 @@ namespace Keire::RenderBackend
                 ReleaseResources(retired);
             for (auto& retired : frame.RetiredMeshes)
                 ReleaseMeshResources(retired);
+            for (auto& retired : frame.RetiredSkins)
+                ReleaseGpuSkinResources(retired);
             for (auto& retired : frame.RetiredTextures)
                 ReleaseTextureResources(retired);
             for (auto* retired : frame.RetiredPipelines)
@@ -35,6 +37,8 @@ namespace Keire::RenderBackend
                 ReleaseForwardPlusResources(retired);
             for (auto* transient : frame.TransientBuffers)
                 SDL_ReleaseGPUBuffer(Device, transient);
+            for (auto* transient : frame.TransientTransferBuffers)
+                SDL_ReleaseGPUTransferBuffer(Device, transient);
             SDL_ReleaseGPUFence(Device, frame.Fence);
         }
         if (InFlight.size() < Specification.MaximumFramesInFlight)
@@ -93,6 +97,35 @@ namespace Keire::RenderBackend
             ++iterator;
         }
         Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
+        const auto skinRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
+        for (auto cacheIterator = SkinCache.begin(); cacheIterator != SkinCache.end();)
+        {
+            auto& entry = cacheIterator->second;
+            if (entry.LastRequestedFrame != 0 && Statistics.Frame > entry.LastRequestedFrame &&
+                Statistics.Frame - entry.LastRequestedFrame > skinRetirementAge)
+            {
+                Retire(std::move(entry.Resources));
+                cacheIterator = SkinCache.erase(cacheIterator);
+                continue;
+            }
+
+            for (auto instanceIterator = entry.Resources.Instances.begin();
+                 instanceIterator != entry.Resources.Instances.end();)
+            {
+                if (instanceIterator->second.LastPreparedFrame != 0 &&
+                    Statistics.Frame > instanceIterator->second.LastPreparedFrame &&
+                    Statistics.Frame - instanceIterator->second.LastPreparedFrame > skinRetirementAge)
+                {
+                    GpuSkinResources retired;
+                    retired.Instances.emplace(instanceIterator->first, std::move(instanceIterator->second));
+                    Retire(std::move(retired));
+                    instanceIterator = entry.Resources.Instances.erase(instanceIterator);
+                    continue;
+                }
+                ++instanceIterator;
+            }
+            ++cacheIterator;
+        }
         for (const auto& surface : LiveSurfaces())
         {
             surface->Submitted = false;
@@ -178,6 +211,7 @@ namespace Keire::RenderBackend
         surface.Submitted = true;
         surface.FrameClearColor = camera.ClearColor;
         SceneRenderPacket packet;
+        packet.Scene = request.Scene->Asset();
         packet.Camera = camera;
         packet.Environment = request.Environment;
         packet.Lighting = ResolveLighting(request.Scene);

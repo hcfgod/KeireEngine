@@ -26,6 +26,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -211,15 +212,19 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool Empty() const noexcept { return !Texture && !Sampler; }
     };
 
+    struct GpuSkinResources;
+
     struct InFlightFrame final
     {
         SDL_GPUFence* Fence = nullptr;
         std::vector<SurfaceResources> Retired;
         std::vector<GpuMeshResources> RetiredMeshes;
+        std::vector<GpuSkinResources> RetiredSkins;
         std::vector<GpuTextureResources> RetiredTextures;
         std::vector<SDL_GPUGraphicsPipeline*> RetiredPipelines;
         std::vector<ForwardPlusGpuResources> RetiredForwardPlus;
         std::vector<SDL_GPUBuffer*> TransientBuffers;
+        std::vector<SDL_GPUTransferBuffer*> TransientTransferBuffers;
     };
 
     struct GpuTextureEntry final
@@ -278,12 +283,111 @@ namespace Keire::RenderBackend
         std::uint64_t LastAttemptedRevision = 0;
     };
 
+    struct GpuSkinInstanceKey final
+    {
+        AssetId Scene;
+        EntityId Entity;
+
+        [[nodiscard]] bool operator==(const GpuSkinInstanceKey&) const noexcept = default;
+    };
+
+    struct GpuSkinInstanceKeyHash final
+    {
+        [[nodiscard]] std::size_t operator()(const GpuSkinInstanceKey& value) const noexcept
+        {
+            auto result = std::hash<AssetId>{}(value.Scene);
+            result ^= std::hash<EntityId>{}(value.Entity) + 0x9e3779b9U + (result << 6U) + (result >> 2U);
+            return result;
+        }
+    };
+
+    struct GpuSkinOutputResources final
+    {
+        SDL_GPUBuffer* AssetVertices = nullptr;
+        SDL_GPUBuffer* BuiltinVertices = nullptr;
+
+        [[nodiscard]] bool Empty() const noexcept { return !AssetVertices && !BuiltinVertices; }
+    };
+
+    struct GpuSkinInstanceResources final
+    {
+        std::vector<GpuSkinOutputResources> Outputs;
+        std::uint64_t LastPreparedFrame = 0;
+    };
+
+    struct GpuSkinResources final
+    {
+        SDL_GPUBuffer* Influences = nullptr;
+        std::unordered_map<GpuSkinInstanceKey, GpuSkinInstanceResources, GpuSkinInstanceKeyHash> Instances;
+        std::uint32_t VertexCount = 0;
+        std::uint32_t MaximumBoneIndex = 0;
+        std::uint32_t MaximumInfluences = 0;
+        bool Valid = false;
+
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            if (Influences)
+                return false;
+            for (const auto& [key, instance] : Instances)
+            {
+                (void)key;
+                for (const auto& output : instance.Outputs)
+                    if (!output.Empty())
+                        return false;
+            }
+            return true;
+        }
+    };
+
+    struct GpuSkinEntry final
+    {
+        Ref<const SkinnedMeshAsset> Skin;
+        Ref<const MeshAsset> Mesh;
+        GpuSkinResources Resources;
+        std::uint64_t LoadedDependencyStamp = 0;
+        std::uint64_t LastAttemptedDependencyStamp = 0;
+        std::uint64_t LastRequestedFrame = 0;
+    };
+
+    [[nodiscard]] constexpr std::size_t SkinningOutputSlot(const std::uint64_t frame,
+                                                           const std::size_t maximumFramesInFlight) noexcept
+    {
+        return frame == 0 || maximumFramesInFlight == 0 ? 0 : (frame - 1U) % maximumFramesInFlight;
+    }
+
     struct RenderVertex final
     {
         Vector3 Position;
         Vector3 Color;
         Vector3 Normal;
     };
+
+    struct alignas(16) GpuRenderVertex final
+    {
+        Vector4 Position;
+        Vector4 Color;
+        Vector4 Normal;
+    };
+
+    struct alignas(16) GpuMeshVertex final
+    {
+        Vector4 Position;
+        Vector4 Normal;
+        Vector4 UV0;
+        Vector4 VertexColor;
+        Vector4 Tangent;
+    };
+
+    static_assert(sizeof(GpuRenderVertex) == 48);
+    static_assert(alignof(GpuRenderVertex) == 16);
+    static_assert(sizeof(GpuMeshVertex) == 80);
+    static_assert(alignof(GpuMeshVertex) == 16);
+
+    [[nodiscard]] constexpr bool SupportsComputeSkinning(const std::string_view driver,
+                                                         const SkinningMethod method) noexcept
+    {
+        return !driver.empty() && method == SkinningMethod::LinearBlend;
+    }
 
     struct ObjectUniforms final
     {
@@ -451,6 +555,7 @@ namespace Keire::RenderBackend
 
     struct SceneRenderPacket final
     {
+        AssetId Scene;
         RenderCamera Camera;
         RenderEnvironmentSettings Environment;
         SceneLighting Lighting;
@@ -635,6 +740,7 @@ namespace Keire::RenderBackend
         void EnsureFrameUploadContext();
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
+        [[nodiscard]] SDL_GPUBuffer* UploadMeshVertexBuffer(std::span<const MeshVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
         [[nodiscard]] GpuTextureResources CreateTextureResources(const Texture2DAsset& asset);
         [[nodiscard]] GpuMeshResources CreateMeshResources(const MeshAsset& mesh);
@@ -674,11 +780,13 @@ namespace Keire::RenderBackend
 
         void CreateGeometryResources();
         void ReleaseMeshResources(GpuMeshResources& resources) noexcept;
+        void ReleaseGpuSkinResources(GpuSkinResources& resources) noexcept;
         void ReleaseTextureResources(GpuTextureResources& resources) noexcept;
         void ReleaseForwardPlusResources(ForwardPlusGpuResources& resources) noexcept;
         void Retire(GpuTextureResources resources) noexcept;
         void Retire(SDL_GPUGraphicsPipeline* pipeline) noexcept;
         void Retire(GpuMeshResources resources) noexcept;
+        void Retire(GpuSkinResources resources) noexcept;
         void Retire(SurfaceResources resources) noexcept;
         void Retire(ForwardPlusGpuResources resources) noexcept;
         void RetireSurface(RenderSurfaceState& surface) noexcept;
@@ -730,6 +838,7 @@ namespace Keire::RenderBackend
         GpuTextureResources BlackDataTexture;
         GpuTextureResources WhiteDataTexture;
         std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
+        std::unordered_map<AssetId, GpuSkinEntry> SkinCache;
         std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
         std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
         std::uint64_t MaterialBindingBuilds = 0;
@@ -740,6 +849,7 @@ namespace Keire::RenderBackend
         std::vector<QueuedSceneRequest> Requests;
         std::vector<SurfaceResources> PendingRetired;
         std::vector<GpuMeshResources> PendingRetiredMeshes;
+        std::vector<GpuSkinResources> PendingRetiredSkins;
         std::vector<GpuTextureResources> PendingRetiredTextures;
         std::vector<SDL_GPUGraphicsPipeline*> PendingRetiredPipelines;
         std::vector<ForwardPlusGpuResources> PendingRetiredForwardPlus;
@@ -765,11 +875,16 @@ namespace Keire::RenderBackend
         std::condition_variable RenderQueueSpace;
         std::deque<std::function<void()>> RenderQueue;
         std::deque<float> PreparationSamples;
+        std::uint64_t SkinningStaticBuilds = 0;
+        std::uint64_t SkinningOutputBuilds = 0;
+        std::uint64_t GpuSubmissionSerial = 0;
+        std::uint64_t ActiveGpuSubmissionSerial = 0;
         std::jthread RenderThread;
         bool StopRenderQueue = false;
         std::atomic<bool> InjectDeviceLossAtNextFrame{false};
         bool WindowClaimed = false;
         bool FrameActive = false;
+        bool FrameExecutionActive = false;
         bool Open = true;
     };
 } // namespace Keire::RenderBackend

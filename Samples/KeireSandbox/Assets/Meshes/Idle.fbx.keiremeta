@@ -1,6 +1,6 @@
 {
   "dependencies": [],
-  "id": "800c5359-0f82-4d8c-a20f-17f179518d68",
+  "id": "51116f66-15b6-4dee-acdf-653223e2f491",
   "importSettings": {
     "contentType": "animation",
     "maximumInfluences": "8",
@@ -9,12 +9,12 @@
     "skinningMethod": "linearBlend"
   },
   "importer": "Keire.Mesh",
-  "importerVersion": 8,
+  "importerVersion": 12,
   "schemaVersion": 1,
   "subAssets": [
-    "61cb7f35-59ef-579c-8282-c4108a8a4b87",
-    "8557a0b6-43ac-577b-9dc5-42e9b6ddb0f7",
-    "5bee8e3e-1754-5b30-8b07-301a005256f2"
+    "8adcdb2f-8d06-5759-b760-29028f06cdf4",
+    "510b7858-6218-57bf-8ef0-f988f6ba30e5",
+    "803c0e5b-d937-521c-821e-92de5a986179"
   ],
   "type": "4b454952-4541-4e49-4d53-4f5552434501"
 }

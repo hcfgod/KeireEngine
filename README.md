@@ -168,7 +168,8 @@ Managed Behaviours can write retained editor Console entries through `Debug.Log`
 `Debug.LogException`, and `Debug.Assert`. The sample `FirstPersonCamera` Behaviour uses the project `Player/Move` and
 `Player/Look` input actions and exposes movement, look, pitch, and smoothing settings in the Inspector.
 During Play Mode, gameplay temporarily overrides editor UI capture for the `Player` action map and releases that
-override on exit, allowing the focused Game view to receive keyboard and mouse controls without leaking them afterward.
+override on exit. Managed keyboard, mouse, and cursor capture are active only while the Game image is focused and
+hovered; the Scene viewport retains its independent editor camera and navigation throughout Play Mode.
 Use **Build > Build Scripts** or `Ctrl+Shift+B` to compile gameplay assemblies immediately. The editor also schedules
 an initial script build when opening a project and writes compiler diagnostics to the Console.
 Source checkouts compile `Keire.Managed` into the same immutable script generation before gameplay assemblies; packaged
@@ -272,6 +273,9 @@ dockable state-machine editor, then drag imported clips, Animation Sources, or a
 and model drops expand their generated clip subassets into states. Parameters, layers, entry states,
 transitions, conditions, blend trees, avatar masks, node layout, validation, and undo/redo are authored without editing
 JSON. Managed scripts can set or query typed parameters and layer weights and submit named IK goals through `Animator`.
+Select a scene object using the controller to inspect live state and normalized progress. Outside Play Mode, the
+controller toolbar can preview, pause, restart, stop, and scrub the animation directly on that object. Preview poses are
+transient; the assigned skinned mesh determines the compatible target skeleton for playback and retargeting.
 The sample project includes a
 `.keireasm` gameplay assembly, reload-aware third-person and navigation scripts, and base/variant prefab assets;
 `AssetTool cook` compiles and publishes those DLLs before writing the runtime manifest.

@@ -58,6 +58,13 @@ models into the graph; container assets expand their generated clip subassets in
 transitions, masks, and blend trees, then assign the controller to an Animator component. Runtime sampling,
 events, root motion, transitions, and skinning occur in scene-safe order.
 
+Select the animated scene object while its controller is open to use the controller transport. In Edit Mode, Preview,
+Pause, Restart, Stop, and Timeline scrub evaluate the graph on the selected object without serializing the preview pose.
+In Play Mode, the same strip reports the live state and normalized progress, and the active graph state is highlighted.
+The skinned mesh is authoritative for the target skeleton; source clips from another compatible rig are retargeted to
+that skeleton. Embedded imports rebuild inverse binds from the normalized runtime hierarchy, and retargeting discards
+pathological unit-conversion scale ratios instead of allowing them to corrupt the skin palette.
+
 Managed gameplay code controls typed parameters and named IK goals:
 
 ```csharp
@@ -80,9 +87,11 @@ limits are rejected without exposing native pointers.
 
 ## Deformation And Performance
 
-Linear-blend skinning uses an SDL_GPU compute skin cache where compute is supported. Dual-quaternion skinning and
-unsupported compute devices use the deterministic CPU path. The deformed stream is reused by scene, depth, and shadow
-passes during the frame. Import settings determine whether four or eight influences are retained; weights are sorted,
+Linear-blend skinning uses an SDL_GPU compute skin cache where compute is supported. Validated influence data is
+uploaded once per asset revision, and per-entity deformation buffers are retained in a frames-in-flight ring; animation
+playback uploads only the current bone palette in steady state. Dual-quaternion skinning and unsupported compute devices
+use the deterministic CPU path. The deformed stream is reused by scene, depth, and shadow passes during the frame.
+Import settings determine whether four or eight influences are retained; weights are sorted,
 bounded, and normalized deterministically.
 
 Use four influences for crowds and distant characters. Use eight where deformation quality requires it. Use

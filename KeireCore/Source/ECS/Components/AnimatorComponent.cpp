@@ -207,6 +207,14 @@ namespace Keire
         m_RuntimeDiagnostic = std::move(diagnostic);
     }
 
+    void AnimatorComponent::ClearRuntimePose() noexcept
+    {
+        m_CurrentState.clear();
+        m_SkinPalette.clear();
+        m_DebugSnapshot.reset();
+        m_RuntimeDiagnostic.clear();
+    }
+
     ComponentRegistration CreateAnimatorComponentRegistration()
     {
         ComponentRegistration result;

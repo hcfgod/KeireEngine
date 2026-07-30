@@ -161,6 +161,27 @@ namespace Keire::RenderBackend
         resources = {};
     }
 
+    void RenderSharedState::ReleaseGpuSkinResources(GpuSkinResources& resources) noexcept
+    {
+        if (Device)
+        {
+            for (auto& [key, instance] : resources.Instances)
+            {
+                (void)key;
+                for (auto& output : instance.Outputs)
+                {
+                    if (output.BuiltinVertices)
+                        SDL_ReleaseGPUBuffer(Device, output.BuiltinVertices);
+                    if (output.AssetVertices)
+                        SDL_ReleaseGPUBuffer(Device, output.AssetVertices);
+                }
+            }
+            if (resources.Influences)
+                SDL_ReleaseGPUBuffer(Device, resources.Influences);
+        }
+        resources = {};
+    }
+
     void RenderSharedState::ReleaseTextureResources(GpuTextureResources& resources) noexcept
     {
         if (Device && resources.Texture)
@@ -236,6 +257,23 @@ namespace Keire::RenderBackend
             InFlight.back().RetiredMeshes.push_back(resources);
         else
             ReleaseMeshResources(resources);
+    }
+
+    void RenderSharedState::Retire(GpuSkinResources resources) noexcept
+    {
+        if (resources.Empty())
+            return;
+        if (!Open || !Device)
+        {
+            ReleaseGpuSkinResources(resources);
+            return;
+        }
+        if (FrameActive || FrameExecutionActive)
+            PendingRetiredSkins.push_back(std::move(resources));
+        else if (!InFlight.empty())
+            InFlight.back().RetiredSkins.push_back(std::move(resources));
+        else
+            ReleaseGpuSkinResources(resources);
     }
 
     void RenderSharedState::Retire(SurfaceResources resources) noexcept
@@ -438,22 +476,22 @@ namespace Keire::RenderBackend
 
             SDL_GPUVertexBufferDescription vertexBuffer{};
             vertexBuffer.slot = 0;
-            vertexBuffer.pitch = sizeof(RenderVertex);
+            vertexBuffer.pitch = sizeof(GpuRenderVertex);
             vertexBuffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
             std::array<SDL_GPUVertexAttribute, 3> attributes{};
             attributes[0].location = 0;
             attributes[0].buffer_slot = 0;
             attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[0].offset = offsetof(RenderVertex, Position);
+            attributes[0].offset = offsetof(GpuRenderVertex, Position);
             attributes[1].location = 1;
             attributes[1].buffer_slot = 0;
             attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[1].offset = offsetof(RenderVertex, Color);
+            attributes[1].offset = offsetof(GpuRenderVertex, Color);
             attributes[2].location = 2;
             attributes[2].buffer_slot = 0;
             attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[2].offset = offsetof(RenderVertex, Normal);
+            attributes[2].offset = offsetof(GpuRenderVertex, Normal);
 
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
@@ -544,10 +582,10 @@ namespace Keire::RenderBackend
             fragment = CreateShadowShader(false);
             SDL_GPUVertexBufferDescription buffer{};
             buffer.slot = 0;
-            buffer.pitch = sizeof(MeshVertex);
+            buffer.pitch = sizeof(GpuMeshVertex);
             buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
             const SDL_GPUVertexAttribute position{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,
-                                                  offsetof(MeshVertex, Position)};
+                                                  offsetof(GpuMeshVertex, Position)};
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
             information.fragment_shader = fragment;
@@ -721,14 +759,14 @@ namespace Keire::RenderBackend
 
             SDL_GPUVertexBufferDescription buffer{};
             buffer.slot = 0;
-            buffer.pitch = sizeof(MeshVertex);
+            buffer.pitch = sizeof(GpuMeshVertex);
             buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
             const std::array attributes{
-                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(MeshVertex, Position)},
-                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(MeshVertex, Normal)},
-                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(MeshVertex, UV0)},
-                SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(MeshVertex, VertexColor)},
-                SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(MeshVertex, Tangent)}};
+                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuMeshVertex, Position)},
+                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuMeshVertex, Normal)},
+                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(GpuMeshVertex, UV0)},
+                SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, VertexColor)},
+                SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, Tangent)}};
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
             information.fragment_shader = fragment;

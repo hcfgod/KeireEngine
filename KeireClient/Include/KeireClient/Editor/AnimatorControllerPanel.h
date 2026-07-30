@@ -2,11 +2,13 @@
 
 #include "Keire/Core.h"
 
+#include <memory>
 #include <string>
 
 namespace KeireEditor
 {
     class AnimatorControllerDocument;
+    class SceneDocument;
 
     class IAnimatorControllerPanelController
     {
@@ -16,6 +18,7 @@ namespace KeireEditor
         [[nodiscard]] virtual const Keire::UiThemeDefinition& AnimatorControllerTheme() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> AnimatorControllerDatabase() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> AnimatorControllerAssets() const noexcept = 0;
+        [[nodiscard]] virtual SceneDocument& AnimatorControllerSceneDocument() noexcept = 0;
         virtual void ActivateAnimatorControllerHistory() noexcept = 0;
         virtual void SaveAnimatorControllerDocument() = 0;
         virtual void ReloadAnimatorControllerDocument(Keire::AssetId asset) = 0;
@@ -27,10 +30,8 @@ namespace KeireEditor
     class AnimatorControllerPanel final
     {
       public:
-        explicit AnimatorControllerPanel(IAnimatorControllerPanelController& controller) noexcept
-            : m_Controller(controller)
-        {
-        }
+        explicit AnimatorControllerPanel(IAnimatorControllerPanelController& controller) noexcept;
+        ~AnimatorControllerPanel();
 
         void Attach(Keire::UiWorkspace& workspace);
         void Draw(Keire::UiFrame& ui);
@@ -39,8 +40,11 @@ namespace KeireEditor
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
+        struct PreviewState;
+
         IAnimatorControllerPanelController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
+        std::unique_ptr<PreviewState> m_Preview;
         std::string m_SelectedTransition;
         std::string m_Message;
     };

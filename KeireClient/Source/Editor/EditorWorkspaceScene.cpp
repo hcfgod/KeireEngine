@@ -20,6 +20,7 @@
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClient/Editor/ViewportInputRouting.h"
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
@@ -547,7 +548,8 @@ void EditorWorkspaceLayer::BeginPlayMode()
     m_SceneDocument->BeginPlay(std::move(playUndo), Owner().Assets(), Owner().Audio(), Owner().Physics());
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
-    m_SceneViewportPanel->Registration().RequestFocus();
+    m_GameViewportInputActive = false;
+    m_Game.RequestFocus();
 }
 
 void EditorWorkspaceLayer::RequestStopPlayMode()
@@ -972,11 +974,13 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         const auto scene = RenderedScene(m_SceneDocument->EditingScene(), m_SceneDocument->PlaySession());
         if (!scene)
         {
+            SetGameViewportInputActive(false);
             DrawEmptyState(ui, "GAME", "No scene is loaded.", "Open a scene to preview its active primary camera.");
             return;
         }
         if (!m_GameRenderView)
         {
+            SetGameViewportInputActive(false);
             DrawEmptyState(ui, "GAME", "The renderer is disabled.",
                            "Enable rendered or headless rendering in the application specification.");
             return;
@@ -985,6 +989,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         const auto selected = SelectGameCamera(scene);
         if (!selected)
         {
+            SetGameViewportInputActive(false);
             DrawEmptyState(ui, "GAME", "No active primary camera.",
                            "Add an enabled Camera component and mark it Primary.");
             return;
@@ -1024,12 +1029,15 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
         Owner().Renderer()->Submit(std::move(renderRequest));
         ui.Image(m_GameRenderView->Surface(), size);
+        const auto imageState = ui.LastItemState();
         const auto imageRect = ui.LastItemRect();
         m_GameViewportRect = imageRect;
 
         Keire::Ref<Keire::ScenePresentationRuntime> presentation;
         const auto playSession = m_SceneDocument->PlaySession();
         const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
+        SetGameViewportInputActive(
+            KeireEditor::GameViewportOwnsRuntimeInput(playActive, ui.WindowFocused(), imageState.Hovered));
         if (playActive)
         {
             playSession->SetPresentationViewport(size.Width, size.Height);
@@ -1080,7 +1088,9 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         }
         if (playActive)
             DrawPerformanceOverlay(ui, imageRect, "GAME");
+        return;
     }
+    SetGameViewportInputActive(false);
 }
 
 void EditorWorkspaceLayer::DrawPerformanceOverlay(Keire::UiFrame& ui, const Keire::UiItemRect viewport,

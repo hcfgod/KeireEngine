@@ -293,6 +293,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] const Keire::UiThemeDefinition& AnimatorControllerTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AnimatorControllerDatabase() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> AnimatorControllerAssets() const noexcept override;
+    [[nodiscard]] KeireEditor::SceneDocument& AnimatorControllerSceneDocument() noexcept override;
     void ActivateAnimatorControllerHistory() noexcept override;
     void SaveAnimatorControllerDocument() override;
     void ReloadAnimatorControllerDocument(Keire::AssetId asset) override;
@@ -413,6 +414,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RequestStopPlayMode();
     void FinishPlayMode(bool apply);
     void ApplyManagedCursorMode() noexcept;
+    void SetGameViewportInputActive(bool active) noexcept;
     void DrawPlayChanges(Keire::UiFrame& ui);
     void FinalizePendingPlayEditorMutation();
     void UndoSceneEdit();
@@ -500,6 +502,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;
+    bool m_GameViewportInputActive = false;
     std::uint32_t m_SuppressManagedLookFrames = 0;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;

@@ -81,7 +81,9 @@ Scene view uses a nonserialized editor camera for navigation and draws a depth-t
 from the edit scene, or the runtime clone while playing. An authored Camera chooses **Skybox** or **Solid Color** for
 Game view, its Scene camera preview, and standalone runtime. Solid Color uses that Camera's linear clear color; Skybox
 uses the project environment. Scene view retains its independent editor viewpoint but follows the active authored
-Camera's background choice so authoring and Game previews agree. Its controls are:
+Camera's background choice so authoring and Game previews agree. This remains true during Play Mode: hovering Scene
+drives only the editor camera, while the focused and hovered Game view owns managed gameplay input and its authored
+primary camera. Its controls are:
 
 - `F`: frame the selected entity's full imported bounds with visible padding; double-`F` locks the view to it.
 - `Shift+F`: lock or unlock the view pivot to the selected entity.

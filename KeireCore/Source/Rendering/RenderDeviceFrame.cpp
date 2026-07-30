@@ -417,7 +417,7 @@ namespace Keire::RenderBackend
 
             SDL_GPUTransferBufferLocation source{transfer, 0};
             SDL_GPUBufferRegion destination{buffer, 0, byteSize};
-            if (FrameActive && !FrameUploadPass)
+            if (FrameExecutionActive && !FrameUploadPass)
                 EnsureFrameUploadContext();
             if (FrameUploadPass)
             {
@@ -455,7 +455,35 @@ namespace Keire::RenderBackend
 
     SDL_GPUBuffer* RenderSharedState::UploadVertexBuffer(const std::span<const RenderVertex> vertices)
     {
-        return UploadBuffer(std::as_bytes(vertices), SDL_GPU_BUFFERUSAGE_VERTEX);
+        std::vector<GpuRenderVertex> gpuVertices;
+        gpuVertices.reserve(vertices.size());
+        for (const auto& vertex : vertices)
+        {
+            gpuVertices.push_back({
+                {vertex.Position.X, vertex.Position.Y, vertex.Position.Z, 1.0F},
+                {vertex.Color.X, vertex.Color.Y, vertex.Color.Z, 1.0F},
+                {vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z, 0.0F},
+            });
+        }
+        return UploadBuffer(std::as_bytes(std::span(gpuVertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
+    }
+
+    SDL_GPUBuffer* RenderSharedState::UploadMeshVertexBuffer(const std::span<const MeshVertex> vertices)
+    {
+        std::vector<GpuMeshVertex> gpuVertices;
+        gpuVertices.reserve(vertices.size());
+        for (const auto& vertex : vertices)
+        {
+            gpuVertices.push_back({
+                {vertex.Position.X, vertex.Position.Y, vertex.Position.Z, 1.0F},
+                {vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z, 0.0F},
+                {vertex.UV0.X, vertex.UV0.Y, 0.0F, 0.0F},
+                {vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue, vertex.VertexColor.Alpha},
+                vertex.Tangent,
+            });
+        }
+        return UploadBuffer(std::as_bytes(std::span(gpuVertices)),
+                            SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
     }
 
     SDL_GPUSampler* RenderSharedState::ResolveSampler(const SamplerDescription& description)
@@ -617,8 +645,7 @@ namespace Keire::RenderBackend
         try
         {
             result.Vertices = UploadVertexBuffer(vertices);
-            result.AssetVertices = UploadBuffer(std::as_bytes(mesh.Vertices()),
-                                                SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
+            result.AssetVertices = UploadMeshVertexBuffer(mesh.Vertices());
             result.Indices = UploadBuffer(std::as_bytes(mesh.Indices()), SDL_GPU_BUFFERUSAGE_INDEX);
             result.IndexCount = static_cast<std::uint32_t>(mesh.Indices().size());
             result.Submeshes.assign(mesh.Submeshes().begin(), mesh.Submeshes().end());
