@@ -294,17 +294,21 @@ The sample project includes a
 `.keireasm` gameplay assembly, reload-aware third-person and navigation scripts, and base/variant prefab assets;
 `AssetTool cook` compiles and publishes those DLLs before writing the runtime manifest.
 
-`.keirevfx` assets use a bounded modular emitter stack for rate/burst spawning, point/box/sphere/cone/mesh/volume
-shapes, initialization, forces, size curves, color gradients, collision, and sprite/mesh output. A scene-owned
-`VfxWorld` supplies generation-safe handles, fixed global/effect budgets, pooled steady-state simulation, revision-aware
-reload, diagnostics, and immutable debug/render snapshots. The deterministic CPU path is active on every backend;
+`.keirevfx` assets use an explicit schema-v3 execution source: new Graph assets schedule referenced module payloads
+through typed `ParticleStream` cables, while older effects retain a `LegacyModules` compatibility path until the user
+converts them. The graph binds stable-ID Blackboard parameters to canonical module properties and bounded Portable
+Custom HLSL inputs; defaults, serialized component overrides, activation overrides, and live native parameter changes
+resolve through the same typed compiler on CPU and GPU. A scene-owned `VfxWorld` supplies generation-safe handles,
+fixed global/effect budgets, pooled steady-state simulation, revision-aware reload, diagnostics, and immutable
+debug/render snapshots.
 GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
 Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed. GPU compute
-simulation and indirect sprite output are active; ribbons, decals, mesh particles, and volumetrics remain explicit
-advanced-output slices. Double-click a VFX asset to open the dockable Graph, Runtime Modules, Blackboard, and Effect
-Settings workflows. The authoring preview defaults to the stable CPU backend and can switch to the runtime GPU backend.
-In a scene, enable **Preview In Edit Mode** on a VFX Emitter to synchronize its assigned effect, revision, seed,
-simulation speed, enabled state, and world position/rotation without entering Play Mode or dirtying the scene.
+simulation and indirect sprite output are active; Events, multiple executable graph systems, ribbons, decals, mesh
+particles, and volumetrics remain explicit future slices. Double-click a VFX asset to open the dockable Graph, Runtime
+Modules, Blackboard, and Effect Settings workflows. The authoring preview defaults to the stable CPU backend and can
+switch to the runtime GPU backend. In a scene, enable **Preview In Edit Mode** on a VFX Emitter to synchronize its
+assigned effect, revision, compatible parameter overrides, seed, simulation speed, enabled state, and world
+position/rotation without entering Play Mode or dirtying the scene.
 The [VFX Authoring And Runtime guide](docs/Vfx.md) covers the complete graph workflow, Runtime Modules, visual
 diagrams, scene setup, C++ and C# control, backend differences, recipes, and troubleshooting.
 
@@ -312,24 +316,29 @@ diagrams, scene setup, C++ and C# control, backend differences, recipes, and tro
 
 ### GPU VFX runtime
 
-VFX effects publish schema-v2 graph documents with stable systems, nodes, pins, connections, contexts, and typed
-blackboard parameters. Opening or previewing a schema-v1 module effect is non-destructive; the compatibility adapter
-publishes schema v2 only when the user saves. Render-capable scene sessions use persistent structure-of-arrays GPU
-buffers, free/alive lists, compute spawn/update/compaction, Local-space transform following, generation-qualified
-per-handle retirement, and indirect sprite draws. Stopping or restarting one GPU effect preserves unrelated emitters;
-`VfxWorld::Clear` remains the explicit world-wide reset. Headless sessions and unsupported features use the
-deterministic bounded CPU backend and report degradation instead of silently changing behavior.
+VFX effects publish schema-v3 documents with explicit `legacyModules` or `graph` execution. Schema 1/2 effects always
+open in compatibility mode; Save publishes schema 3 without changing behavior, while the undoable conversion command
+replaces presentation systems with one deterministic executable particle graph. Graph compilation validates canonical
+Context, Module, Parameter, and Custom HLSL nodes; same-typed single-driver cables; acyclic forward
+Spawn-to-Output flow; stable-ID references; and a connected emission/renderer path.
 
-The VFX Effect panel authors systems, draggable context cards, typed pins and links, custom HLSL source, and typed
-blackboard defaults with stable IDs, undo/redo, automatic incident-link cleanup, and truthful CPU/GPU compile
-diagnostics. Context cards also summarize the executable modular stack, which remains the runtime behavior source for
-this milestone. The toolbar provides restart, pause/resume, looping, backend, speed, active-particle, and dropped-particle
-controls. `VfxEmitterComponent` provides quality, culling, bounds, seed, speed, Play On Awake, Edit Mode preview, and
-auto-destroy authoring. Managed scripts can control emitters through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, and
-`Vfx.Stop`; entity-scoped `VfxEmitterHandle` values also provide `Restart`. Native `VfxHandle` values are
-generation-safe. Operator catalogs, executable cable
-semantics, subgraphs, events, ribbons, trails, decals, and volumetric outputs remain later compiler/runtime milestones;
-the editor does not present stored topology as executable behavior.
+Render-capable scene sessions use persistent structure-of-arrays GPU buffers, free/alive lists, compute
+spawn/update/compaction, Local-space transform following, generation-qualified per-handle retirement, and indirect
+sprite draws. Portable Custom HLSL lowers to at most eight verified assignment instructions shared by CPU and GPU;
+the GPU executes cable-ordered Module and Custom HLSL operations together in the relevant per-emitter spawn or
+handle-filtered, capacity-wide simulation dispatch. Stopping or restarting one GPU effect preserves unrelated emitters,
+and `VfxWorld::Clear` remains the explicit world-wide reset.
+
+The VFX Effect panel authors draggable executable nodes and cables, module payloads, typed Blackboard defaults, portable
+custom statements, stable IDs, undo/redo, automatic incident-link cleanup, and CPU/GPU compile diagnostics. The toolbar
+provides restart, pause/resume, looping, backend, speed, active-particle, and dropped-particle controls.
+`VfxEmitterComponent` provides quality, culling, bounds, seed, speed, Play On Awake, Edit Mode preview, auto-destroy,
+and serialized stable-ID parameter overrides. The scene Inspector resolves the assigned effect and provides typed
+controls for exposed parameters, default reset, and stale-override cleanup. Native `VfxActivation`, `VfxWorld::SetParameter`,
+`SetParameterOverrides`, and `ResetParameter` provide typed per-handle control. Managed scripts can control playback
+through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, and `Vfx.Stop`; managed Blackboard mutation, Event contexts, multiple
+executable systems, general operator catalogs, subgraphs, ribbons, trails, decals, and volumetric outputs remain later
+compiler/runtime milestones.
 
 Animation-only FBX/glTF imports now publish `AnimationSourceAsset` as their effective primary type and retain stable
 skeleton, rig, and clip subasset IDs. They never pass through mesh vertex validation. Reimport changes metadata,

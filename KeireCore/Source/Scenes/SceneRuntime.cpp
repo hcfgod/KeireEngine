@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -27,6 +28,52 @@
 
 namespace Keire
 {
+    namespace
+    {
+        [[nodiscard]] bool VfxOverrideMatches(const VfxValueType type, const VfxParameterValue& value) noexcept
+        {
+            switch (type)
+            {
+            case VfxValueType::Boolean:
+                return std::holds_alternative<bool>(value);
+            case VfxValueType::Integer:
+                return std::holds_alternative<std::int64_t>(value);
+            case VfxValueType::Scalar:
+                return std::holds_alternative<float>(value);
+            case VfxValueType::Vector2:
+                return std::holds_alternative<Vector2>(value);
+            case VfxValueType::Vector3:
+                return std::holds_alternative<Vector3>(value);
+            case VfxValueType::Color:
+                return std::holds_alternative<Color>(value);
+            case VfxValueType::Texture:
+            case VfxValueType::Mesh:
+            case VfxValueType::Asset:
+                return std::holds_alternative<AssetId>(value);
+            case VfxValueType::ParticleStream:
+                return false;
+            }
+            return false;
+        }
+
+        [[nodiscard]] std::vector<VfxParameterOverride>
+        CompatibleVfxOverrides(const VfxEffectDefinition& definition,
+                               const std::span<const VfxParameterOverride> authored)
+        {
+            std::vector<VfxParameterOverride> result;
+            result.reserve(authored.size());
+            for (const auto& overrideValue : authored)
+            {
+                const auto parameter =
+                    std::ranges::find(definition.Blackboard, overrideValue.Parameter, &VfxBlackboardParameter::Id);
+                if (parameter != definition.Blackboard.end() && parameter->Exposed &&
+                    VfxOverrideMatches(parameter->Type, overrideValue.Value))
+                    result.push_back(overrideValue);
+            }
+            return result;
+        }
+    } // namespace
+
     class SceneRuntimeSession::Impl final
     {
       public:
@@ -83,6 +130,7 @@ namespace Keire
             AssetHandle<VfxEffectAsset> EffectHandle;
             VfxHandle Handle;
             std::uint64_t Revision = 0;
+            std::vector<VfxParameterOverride> Overrides;
         };
 
         Impl(Ref<Scene> scene, Ref<AssetSystem> assets, Ref<AudioSystem> audio, Ref<PhysicsSystem> physics)
@@ -566,6 +614,7 @@ namespace Keire
                 const auto effect = state.EffectHandle.TryGetLoaded();
                 if (!effect)
                     continue;
+                const auto overrides = CompatibleVfxOverrides(effect->Definition(), emitter->ParameterOverrides());
                 Vector3 position;
                 Quaternion rotation;
                 Vector3 scale;
@@ -574,16 +623,25 @@ namespace Keire
                 const auto revision = state.EffectHandle.Revision();
                 if (!state.Handle || !VfxWorldService->IsAlive(state.Handle))
                 {
-                    state.Handle =
-                        VfxWorldService->Activate({effect, revision, position, rotation, emitter->SeedOffset()});
+                    state.Handle = VfxWorldService->Activate(
+                        {effect, revision, position, rotation, emitter->SeedOffset(), overrides});
                     state.Revision = revision;
+                    state.Overrides = overrides;
                 }
                 else
                 {
                     if (revision != state.Revision)
                     {
+                        const auto reloadOverrides = CompatibleVfxOverrides(effect->Definition(), state.Overrides);
                         (void)VfxWorldService->Reload(state.Handle, effect, revision);
                         state.Revision = revision;
+                        if (overrides == reloadOverrides)
+                            state.Overrides = overrides;
+                    }
+                    if (state.Overrides != overrides)
+                    {
+                        VfxWorldService->SetParameterOverrides(state.Handle, overrides);
+                        state.Overrides = overrides;
                     }
                     VfxWorldService->SetTransform(state.Handle, position, rotation);
                 }

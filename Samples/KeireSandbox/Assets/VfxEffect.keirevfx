@@ -3,6 +3,7 @@
   "capacity": 2979,
   "duration": 5.409999847412109,
   "emitterId": "56465844-4546-4155-0000-000000000001",
+  "executionSource": "legacyModules",
   "loop": true,
   "modules": [
     {
@@ -97,7 +98,7 @@
     }
   ],
   "name": "VFX Effect",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "seed": 83,
   "space": "world",
   "systems": [
@@ -110,44 +111,52 @@
           "context": "spawn",
           "customHlsl": "",
           "id": "56465844-4546-4155-0000-000000000009",
+          "kind": "context",
           "pins": [],
           "position": [
-            -24.801855087280273,
-            23.030303955078125
+            -51.201839447021484,
+            19.730302810668945
           ],
+          "reference": "",
           "type": "Spawn Context"
         },
         {
           "context": "initialize",
           "customHlsl": "",
           "id": "56465844-4546-4155-0000-00000000000a",
+          "kind": "context",
           "pins": [],
           "position": [
             265.827392578125,
             21.258731842041016
           ],
+          "reference": "",
           "type": "Initialize Context"
         },
         {
           "context": "update",
           "customHlsl": "",
           "id": "56465844-4546-4155-0000-00000000000b",
+          "kind": "context",
           "pins": [],
           "position": [
             560.0,
             0.0
           ],
+          "reference": "",
           "type": "Update Context"
         },
         {
           "context": "output",
           "customHlsl": "",
           "id": "56465844-4546-4155-0000-00000000000c",
+          "kind": "context",
           "pins": [],
           "position": [
             840.0,
             0.0
           ],
+          "reference": "",
           "type": "Output Context"
         }
       ]

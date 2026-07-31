@@ -34,7 +34,35 @@ cbuffer VfxDispatch : register(b0, space2)
     float4 PreviousEmitterPosition;
     float4 PreviousEmitterRotation;
     uint4 EmitterIdentity;
+    uint4 CustomInstructionMetadata;
+    uint4 CustomInstructionControls[8];
+    float4 CustomInstructionOperands[8];
+    uint4 ParticleOperationMetadata;
+    uint4 ParticleOperationControls[15];
 };
+
+static const uint VfxContextSpawn = 0;
+static const uint VfxContextInitialize = 1;
+static const uint VfxContextUpdate = 2;
+static const uint VfxContextOutput = 3;
+static const uint VfxTargetPosition = 0;
+static const uint VfxTargetVelocity = 1;
+static const uint VfxTargetRotation = 2;
+static const uint VfxTargetTint = 3;
+static const uint VfxTargetSize = 4;
+static const uint VfxOperationAssign = 0;
+static const uint VfxOperationAdd = 1;
+static const uint VfxOperationMultiply = 2;
+static const uint MaximumCustomInstructions = 8;
+static const uint VfxParticleOperationShape = 0;
+static const uint VfxParticleOperationInitialize = 1;
+static const uint VfxParticleOperationForce = 2;
+static const uint VfxParticleOperationSize = 3;
+static const uint VfxParticleOperationColor = 4;
+static const uint VfxParticleOperationCollision = 5;
+static const uint VfxParticleOperationRenderer = 6;
+static const uint VfxParticleOperationCustomHlsl = 7;
+static const uint MaximumParticleOperations = 15;
 
 uint Hash(uint value)
 {
@@ -90,6 +118,150 @@ void AppendAlive(uint particleIndex)
     Counters.InterlockedAdd(4, 1, destination);
     if (destination < ParticleCapacity)
         AliveIndices[destination] = particleIndex;
+}
+
+float ApplyCustomScalar(float value, float operand, uint operation)
+{
+    if (operation == VfxOperationAssign)
+        return operand;
+    if (operation == VfxOperationAdd)
+        return value + operand;
+    if (operation == VfxOperationMultiply)
+        return value * operand;
+    return value;
+}
+
+float3 ApplyCustomVector(float3 value, float3 operand, uint operation)
+{
+    if (operation == VfxOperationAssign)
+        return operand;
+    if (operation == VfxOperationAdd)
+        return value + operand;
+    if (operation == VfxOperationMultiply)
+        return value * operand;
+    return value;
+}
+
+float4 ApplyCustomVector(float4 value, float4 operand, uint operation)
+{
+    if (operation == VfxOperationAssign)
+        return operand;
+    if (operation == VfxOperationAdd)
+        return value + operand;
+    if (operation == VfxOperationMultiply)
+        return value * operand;
+    return value;
+}
+
+void ApplyCustomInstruction(inout GpuParticle particle, uint instructionIndex, float contextDeltaSeconds)
+{
+    const uint4 control = CustomInstructionControls[instructionIndex];
+    const float scale = control.w != 0 ? contextDeltaSeconds : 1.0F;
+    const float4 operand = CustomInstructionOperands[instructionIndex] * scale;
+    if (control.y == VfxTargetPosition)
+    {
+        if (asuint(SizeParameters.z) == 0)
+        {
+            const float4 inverseEmitterRotation = float4(-EmitterRotation.xyz, EmitterRotation.w);
+            float3 localPosition =
+                RotateByQuaternion(particle.PositionAge.xyz - EmitterPosition.xyz, inverseEmitterRotation);
+            localPosition = ApplyCustomVector(localPosition, operand.xyz, control.z);
+            particle.PositionAge.xyz = EmitterPosition.xyz + RotateByQuaternion(localPosition, EmitterRotation);
+        }
+        else
+        {
+            particle.PositionAge.xyz = ApplyCustomVector(particle.PositionAge.xyz, operand.xyz, control.z);
+        }
+    }
+    else if (control.y == VfxTargetVelocity)
+    {
+        if (asuint(SizeParameters.z) == 0)
+        {
+            const float4 inverseEmitterRotation = float4(-EmitterRotation.xyz, EmitterRotation.w);
+            float3 localVelocity = RotateByQuaternion(particle.VelocityLifetime.xyz, inverseEmitterRotation);
+            localVelocity = ApplyCustomVector(localVelocity, operand.xyz, control.z);
+            particle.VelocityLifetime.xyz = RotateByQuaternion(localVelocity, EmitterRotation);
+        }
+        else
+        {
+            particle.VelocityLifetime.xyz = ApplyCustomVector(particle.VelocityLifetime.xyz, operand.xyz, control.z);
+        }
+    }
+    else if (control.y == VfxTargetRotation)
+        particle.SizeRotation.z = ApplyCustomScalar(particle.SizeRotation.z, operand.x, control.z);
+    else if (control.y == VfxTargetTint)
+        particle.Tint = ApplyCustomVector(particle.Tint, operand, control.z);
+    else if (control.y == VfxTargetSize)
+        particle.SizeRotation.x = ApplyCustomScalar(particle.SizeRotation.x, operand.x, control.z);
+}
+
+void ApplyParticleOperation(inout GpuParticle particle, uint operationIndex, float normalizedAge,
+                            float contextDeltaSeconds, inout uint random, inout bool moved)
+{
+    const uint4 operation = ParticleOperationControls[operationIndex];
+    if (operation.y == VfxParticleOperationShape)
+    {
+        float3 localPosition = 0.0F.xxx;
+        const uint shape = asuint(AccelerationShape.w);
+        if (shape == 1)
+        {
+            localPosition =
+                (float3(Random01(random), Random01(random), Random01(random)) * 2.0F - 1.0F) *
+                ShapeExtentRadius.xyz;
+        }
+        else if (shape == 2 || shape == 3)
+        {
+            const float3 direction =
+                normalize(float3(Random01(random), Random01(random), Random01(random)) * 2.0F - 1.0F + 0.0001F);
+            localPosition = direction * (pow(Random01(random), 1.0F / 3.0F) * ShapeExtentRadius.w);
+        }
+        particle.PositionAge.xyz = EmitterPosition.xyz + RotateByQuaternion(localPosition, EmitterRotation);
+    }
+    else if (operation.y == VfxParticleOperationInitialize)
+    {
+        const float3 localVelocity =
+            lerp(VelocityMinimumLifetime.xyz, VelocityMaximumLifetime.xyz,
+                 float3(Random01(random), Random01(random), Random01(random)));
+        const float lifetime =
+            lerp(VelocityMinimumLifetime.w, VelocityMaximumLifetime.w, Random01(random));
+        particle.VelocityLifetime = float4(RotateByQuaternion(localVelocity, EmitterRotation),
+                                           max(lifetime, 0.0001F));
+    }
+    else if (operation.y == VfxParticleOperationForce)
+        particle.VelocityLifetime.xyz += particle.AccelerationSizeEnd.xyz * contextDeltaSeconds;
+    else if (operation.y == VfxParticleOperationSize)
+        particle.SizeRotation.x = lerp(particle.SizeRotation.y, particle.AccelerationSizeEnd.w, normalizedAge);
+    else if (operation.y == VfxParticleOperationColor)
+        particle.Tint = lerp(particle.ColorStart, particle.ColorEnd, normalizedAge);
+    else if (operation.y == VfxParticleOperationCollision)
+    {
+        particle.PositionAge.xyz += particle.VelocityLifetime.xyz * contextDeltaSeconds;
+        moved = true;
+    }
+    else if (operation.y == VfxParticleOperationCustomHlsl &&
+             operation.z < min(CustomInstructionMetadata.x, MaximumCustomInstructions))
+    {
+        ApplyCustomInstruction(particle, operation.z, contextDeltaSeconds);
+    }
+}
+
+void ApplyParticleContext(inout GpuParticle particle, uint context, float normalizedAge,
+                          float contextDeltaSeconds, inout uint random, inout bool moved)
+{
+    const uint operationCount = min(ParticleOperationMetadata.x, MaximumParticleOperations);
+    for (uint operationIndex = 0; operationIndex < operationCount; ++operationIndex)
+    {
+        if (ParticleOperationControls[operationIndex].x == context)
+            ApplyParticleOperation(particle, operationIndex, normalizedAge, contextDeltaSeconds, random, moved);
+    }
+}
+
+bool IsFiniteParticle(GpuParticle particle)
+{
+    return all(isfinite(particle.PositionAge)) && all(isfinite(particle.VelocityLifetime)) &&
+           all(isfinite(particle.Tint)) && all(isfinite(particle.SizeRotation)) &&
+           all(isfinite(particle.AccelerationSizeEnd)) && all(isfinite(particle.ColorStart)) &&
+           all(isfinite(particle.ColorEnd));
 }
 
 [numthreads(256, 1, 1)]
@@ -166,9 +338,14 @@ void CSSimulate(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (index >= ParticleCapacity)
         return;
     GpuParticle particle = Particles[index];
-    if (particle.PositionAge.w < 0.0F)
+    if (particle.PositionAge.w < 0.0F || any(particle.Identity.xy != EmitterIdentity.xy))
         return;
 
+    if (DeltaSeconds <= 0.0F)
+    {
+        AppendAlive(index);
+        return;
+    }
     particle.PositionAge.w += DeltaSeconds;
     if (particle.PositionAge.w >= particle.VelocityLifetime.w)
     {
@@ -180,11 +357,23 @@ void CSSimulate(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    particle.VelocityLifetime.xyz += particle.AccelerationSizeEnd.xyz * DeltaSeconds;
-    particle.PositionAge.xyz += particle.VelocityLifetime.xyz * DeltaSeconds;
     const float age = saturate(particle.PositionAge.w / max(particle.VelocityLifetime.w, 0.0001F));
-    particle.Tint = lerp(particle.ColorStart, particle.ColorEnd, age);
-    particle.SizeRotation.x = lerp(particle.SizeRotation.y, particle.AccelerationSizeEnd.w, age);
+    uint random = Hash(index ^ EmitterIdentity.x ^ EmitterIdentity.y);
+    bool moved = false;
+    ApplyParticleContext(particle, VfxContextUpdate, age, DeltaSeconds, random, moved);
+    if (!moved)
+        particle.PositionAge.xyz += particle.VelocityLifetime.xyz * DeltaSeconds;
+    bool outputMoved = false;
+    ApplyParticleContext(particle, VfxContextOutput, age, DeltaSeconds, random, outputMoved);
+    if (!IsFiniteParticle(particle))
+    {
+        particle.PositionAge.w = -1.0F;
+        Particles[index] = particle;
+        PushFreeIndex(index);
+        uint ignored = 0;
+        Counters.InterlockedAdd(12, 1, ignored);
+        return;
+    }
     Particles[index] = particle;
     AppendAlive(index);
 }
@@ -203,30 +392,9 @@ void CSSpawn(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    uint random = Hash(RandomSeed ^ spawnIndex ^ EmitterIdentity.z);
-    float3 localPosition = 0.0F.xxx;
-    const uint shape = asuint(AccelerationShape.w);
-    if (shape == 1)
-    {
-        localPosition =
-            (float3(Random01(random), Random01(random), Random01(random)) * 2.0F - 1.0F) * ShapeExtentRadius.xyz;
-    }
-    else if (shape == 2 || shape == 3)
-    {
-        const float3 direction =
-            normalize(float3(Random01(random), Random01(random), Random01(random)) * 2.0F - 1.0F + 0.0001F);
-        localPosition = direction * (pow(Random01(random), 1.0F / 3.0F) * ShapeExtentRadius.w);
-    }
-    const float3 localVelocity =
-        lerp(VelocityMinimumLifetime.xyz, VelocityMaximumLifetime.xyz,
-             float3(Random01(random), Random01(random), Random01(random)));
-    const float lifetime =
-        lerp(VelocityMinimumLifetime.w, VelocityMaximumLifetime.w, Random01(random));
-
     GpuParticle particle = (GpuParticle)0;
-    particle.PositionAge = float4(EmitterPosition.xyz + RotateByQuaternion(localPosition, EmitterRotation), 0.0F);
-    particle.VelocityLifetime =
-        float4(RotateByQuaternion(localVelocity, EmitterRotation), max(lifetime, 0.0001F));
+    particle.PositionAge = float4(EmitterPosition.xyz, 0.0F);
+    particle.VelocityLifetime = float4(0.0F, 0.0F, 0.0F, 1.0F);
     particle.Tint = ColorStart;
     particle.SizeRotation =
         float4(max(SizeParameters.x, 0.0F), max(SizeParameters.x, 0.0F), 0.0F, 0.0F);
@@ -237,6 +405,20 @@ void CSSpawn(uint3 dispatchThreadId : SV_DispatchThreadID)
     particle.ColorStart = ColorStart;
     particle.ColorEnd = ColorEnd;
     particle.Identity = EmitterIdentity;
+    uint random = Hash(RandomSeed ^ spawnIndex ^ EmitterIdentity.z);
+    bool moved = false;
+    ApplyParticleContext(particle, VfxContextSpawn, 0.0F, 0.0F, random, moved);
+    ApplyParticleContext(particle, VfxContextInitialize, 0.0F, 0.0F, random, moved);
+    ApplyParticleContext(particle, VfxContextOutput, 0.0F, 0.0F, random, moved);
+    if (!IsFiniteParticle(particle))
+    {
+        particle.PositionAge.w = -1.0F;
+        Particles[particleIndex] = particle;
+        PushFreeIndex(particleIndex);
+        uint invalidIgnored = 0;
+        Counters.InterlockedAdd(16, 1, invalidIgnored);
+        return;
+    }
     Particles[particleIndex] = particle;
     AppendAlive(particleIndex);
     uint ignored = 0;
@@ -274,9 +456,15 @@ VfxVertexOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_Instanc
         float2(-0.5F, -0.5F), float2(0.5F, 0.5F), float2(-0.5F, 0.5F)};
     const GpuParticle particle = RenderParticles[RenderAliveIndices[instanceId]];
     const float2 corner = corners[vertexId];
+    const float angle = particle.SizeRotation.z * 0.01745329251994329577F;
+    float sine = 0.0F;
+    float cosine = 0.0F;
+    sincos(angle, sine, cosine);
+    const float2 rotatedCorner =
+        float2(corner.x * cosine - corner.y * sine, corner.x * sine + corner.y * cosine);
     const float3 world =
         particle.PositionAge.xyz +
-        (CameraRight.xyz * corner.x + CameraUp.xyz * corner.y) * max(particle.SizeRotation.x, 0.0F);
+        (CameraRight.xyz * rotatedCorner.x + CameraUp.xyz * rotatedCorner.y) * max(particle.SizeRotation.x, 0.0F);
     VfxVertexOutput output;
     output.Position = mul(ViewProjection, float4(world, 1.0F));
     output.Tint = particle.Tint;

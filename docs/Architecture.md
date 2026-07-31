@@ -69,19 +69,37 @@ that immutable pair transactionally rather than resolving a process-global API a
 
 `VfxWorld` remains the backend-neutral scene facade. Render-capable scene sessions select the GPU backend; headless
 tests and explicit compatibility policy select deterministic CPU simulation. GPU snapshots contain only immutable
-per-emitter work descriptors, cumulative spawn sequences, per-handle simulation revisions, a world reset revision, and
-aggregate limits. They never contain per-particle CPU snapshots. The renderer owns persistent particle, free-list,
-alive-list, counter, event, dispatch, and indirect-draw buffers and mutates them only inside an active render frame.
+per-emitter work descriptors, cumulative spawn sequences, per-handle simulation revisions, a world simulation-step
+revision, a world reset revision, and aggregate limits, including resolved bounded custom instructions. They never
+contain per-particle CPU snapshots. The renderer owns persistent particle, free-list, alive-list, counter, event,
+dispatch, and indirect-draw buffers and mutates them only inside an active render frame.
 Generation-qualified kill passes retire particles for one stopped, restarted, naturally completed, or incompatibly
 reloaded handle without clearing unrelated emitters. A transform pass applies Local-space emitter position/rotation
 deltas to that handle's existing position, velocity, and acceleration state. Only `VfxWorld::Clear` advances the
 world-wide reset revision. Compute world initialization, handle retirement, Local transforms, alive-list reset,
-simulation, spawn, compaction, and indirect argument finalization precede one indirect output draw. Shutdown releases
-pipelines before the device and treats repeated close as inert.
+handle-filtered per-emitter simulation, spawn, compaction, and indirect argument finalization precede one indirect
+output draw. Cable-ordered Module and Custom operations execute together in the relevant emitter spawn or simulation
+dispatch. Each active emitter adds one filtered dispatch over the world particle capacity; this explicit cost avoids
+effect-specific pipeline creation while retaining deterministic cross-backend semantics. Shutdown releases pipelines
+before the device and treats repeated close as inert.
 
-Schema-v2 `.keirevfx` documents contain stable systems, contexts, nodes, typed pins, connections, and blackboard
-parameters. The canonical compiler validates stable identity and pin types before producing backend-specific programs.
-Schema-v1 module documents remain readable and are adapted in memory; only Save publishes schema v2. CPU-incompatible
+Schema-v3 `.keirevfx` documents make execution explicit with `LegacyModules` or `Graph`. The graph compiler accepts one
+particle system with canonical Spawn, Initialize, Update, and Output contexts; stable-ID Module and Parameter
+references; typed, single-driver, forward `ParticleStream` flow; and a directed acyclic topology. Module nodes reference
+payload records rather than copying them, so only connected enabled references enter the Graph schedule. Blackboard
+parameters lower into stable-ID-sorted typed slots, and cables bind those slots to canonical module properties or
+Portable Custom HLSL inputs. Activation, component, and live-world overrides are resolved transactionally per handle;
+unknown, hidden, duplicate, or type-mismatched values cannot partially replace the previous state.
+
+Portable Custom HLSL is a bounded backend-neutral instruction language, not arbitrary shader compilation. The compiler
+accepts at most eight verified assignments to Position, Velocity, billboard Rotation, Tint, or Size using `=`, `+=`,
+or `*=`, a literal or typed parameter operand, and optional trailing `* DeltaTime`. Both simulation backends consume
+the lowered instruction array. Event contexts, multiple executable systems, arbitrary resources, branches, loops, and
+general expression graphs remain outside this boundary.
+
+Schema 1/2 module documents remain readable and always decode as `LegacyModules`. Save publishes schema 3 without
+changing their execution source; the explicit deterministic conversion operation replaces previous presentation
+systems with one canonical graph while preserving emitter, payload, and Blackboard stable IDs. CPU-incompatible
 features produce diagnostics rather than implicit substitutions. Managed VFX calls cross `IScriptRuntimeServices`,
 validate entity/world/script generations, and enqueue component state for the scene-safe render boundary.
 
@@ -576,24 +594,40 @@ or closing the document cannot create hidden scene state.
 and revision-aware replacement preserves bounded lifecycle behavior. Non-looping GPU effects advance through their
 particle-drain interval after emission stops so generation-safe handles release at the actual last-death time. The CPU
 path publishes immutable sprite/mesh render packets into the transparent pass and records explicit diagnostics when GPU
-depth or scene-physics requests select CPU simulation.
+depth or scene-physics requests select CPU simulation. Each activation compiles the selected execution source, resolves
+typed Blackboard defaults and stable-ID overrides, materializes only the scheduled module payloads, applies canonical
+property bindings, and resolves portable custom operands. `SetParameterOverrides` swaps the complete resolved value set
+transactionally; `SetParameter` and `ResetParameter` are single-value conveniences. Reload preserves compatible
+same-ID/type exposed overrides and reports rejected values without compromising unrelated handles. GPU Force,
+Size, Color, and Renderer state is baked per particle; a live change advances only that handle's simulation revision so
+old baked state is retired without clearing the shared world. Portable Update/Output operand changes remain live.
+Immutable render snapshots publish separate document and simulation-step revisions. GPU resources apply mutation-only
+snapshots for lifecycle, transform, restart, and spawn sequencing, while consuming each positive world update at most
+once. Newer mutation-only snapshots rebuild visible alive indices with a zero simulation delta; equal or stale
+snapshots leave the newer persistent buffers and indirect arguments unchanged.
 
-`VfxEffectDocument` owns transactional systems, nodes, pins, connections, blackboard properties, the ordered executable
-module stack, curves, and gradients without exposing ImGui. All graph edits preserve stable IDs; removing a node or pin
+`VfxEffectDocument` owns transactional systems, nodes, pins, connections, blackboard properties, module payload
+records, curves, and gradients without exposing ImGui. All graph edits preserve stable IDs; removing a node or pin
 removes its incident links in the same validated undo command. The panel projects those values into a context-colored
-node canvas and commits graph positions only when a drag finishes. Stored topology is validated and compiled to
-canonical IR, but the modular stack remains the runtime behavior source until a typed operator compiler is introduced.
+node canvas and commits graph positions only when a drag finishes. New documents use schema-v3 Graph execution.
+Legacy documents display their compatibility execution source until the user invokes the undoable deterministic
+conversion. In Graph mode, `ParticleStream` topology supplies the module/custom schedule, Module nodes retain stable
+payload references, Parameter nodes retain stable Blackboard references, and Portable Custom HLSL lowers to bounded
+CPU/GPU instructions. Built-in module types retain canonical stage semantics while cable topology defines deterministic
+Module/Custom order within those stages. The separate Runtime Modules tab is a payload editor, not an alternate
+implicit schedule.
 
 The editor owns one shared, transient `VfxWorld` for asset-authoring and scene edit-mode previews. It defaults to CPU
 for deterministic authoring and can be rebuilt for GPU runtime inspection. Checked `VfxEmitterComponent` instances are
-synchronized by edit-scene identity, entity, effect/revision, seed, enabled state, simulation speed, and decomposed
-world position/rotation. When an open draft matches an eligible scene emitter, its transient handle replaces one
-selected or deterministic matching scene handle and is routed to that emitter transform. This preserves unsaved draft
-preview while preventing a second copy at world origin; unrelated emitters retain independent handles. World-space
-editor previews restart after authored gizmo relocation so old particle history is not displayed beside the new
-emitter position, while runtime World-space semantics remain unchanged. GPU retirement is generation-qualified, so
-restarting that editor handle preserves the particles and spawn progress of unrelated preview emitters. Local-space
-particles follow synchronized position/rotation changes on both CPU and GPU. Asset preview pause affects only its
-handle; scene emitters continue advancing. Handles are stopped on uncheck, disable, deletion, scene replacement, Play
-transition, panel close where applicable, and shutdown. Capturing that world for the Scene viewport never creates
-entities or mutates authored scene state.
+synchronized by edit-scene identity, entity, effect/revision, compatible serialized parameter overrides, seed, enabled
+state, simulation speed, and decomposed world position/rotation. When an open draft matches an eligible scene emitter,
+its transient handle replaces one selected or deterministic matching scene handle and is routed to that emitter
+transform and compatible override set. This preserves unsaved draft preview while preventing a second copy at world
+origin; unrelated emitters retain independent handles. World-space editor previews restart after authored gizmo
+relocation so old particle history is not displayed beside the new emitter position, while runtime World-space
+semantics remain unchanged. GPU retirement is generation-qualified, so restarting that editor handle preserves the
+particles and spawn progress of unrelated preview emitters. Local-space particles follow synchronized
+position/rotation changes on both CPU and GPU. Asset preview pause affects only its handle; scene emitters continue
+advancing. Handles are stopped on uncheck, disable, deletion, scene replacement, Play transition, panel close where
+applicable, and shutdown. Capturing that world for the Scene viewport never creates entities or mutates authored scene
+state.

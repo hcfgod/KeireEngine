@@ -131,6 +131,25 @@ namespace Keire
             }
         }
 
+        void CollectVfxParameterOverrideDependencies(const std::string& source, std::set<AssetId>& dependencies)
+        {
+            const auto document = Json::parse(source.empty() ? "[]" : source);
+            if (!document.is_array())
+                throw std::invalid_argument("VFX parameter overrides must be an array.");
+            for (const auto& entry : document)
+            {
+                const auto* kind = FindMember(entry, "kind");
+                const auto* value = FindMember(entry, "value");
+                if (kind && value && kind->is_string() && kind->get_ref<const std::string&>() == "asset" &&
+                    value->is_string())
+                {
+                    const auto text = value->get_ref<const std::string&>();
+                    if (!text.empty())
+                        InsertDependency(dependencies, AssetId::Parse(text));
+                }
+            }
+        }
+
         void CollectComponentDependencies(const SceneComponentDefinition& component, std::set<AssetId>& dependencies)
         {
             const auto data = Json::parse(component.Data);
@@ -168,6 +187,12 @@ namespace Keire
             else if (component.Type == VfxEmitterComponent::StaticType())
             {
                 CollectSerializedAsset(data, "effect", dependencies);
+                if (const auto* overrides = FindMember(data, "parameterOverrides"); overrides)
+                {
+                    if (!overrides->is_string())
+                        throw std::invalid_argument("VFX parameter overrides must be serialized as text.");
+                    CollectVfxParameterOverrideDependencies(overrides->get_ref<const std::string&>(), dependencies);
+                }
             }
             CollectManagedStateDependencies(data, dependencies);
         }
@@ -187,6 +212,13 @@ namespace Keire
                     std::holds_alternative<AssetId>(overrideValue.Value))
                 {
                     InsertDependency(dependencies, std::get<AssetId>(overrideValue.Value));
+                }
+                if (overrideValue.Kind == PrefabOverrideKind::SetComponentProperty &&
+                    overrideValue.Component == VfxEmitterComponent::StaticType() &&
+                    overrideValue.Property == "parameterOverrides" &&
+                    std::holds_alternative<std::string>(overrideValue.Value))
+                {
+                    CollectVfxParameterOverrideDependencies(std::get<std::string>(overrideValue.Value), dependencies);
                 }
                 if (overrideValue.AddedComponent)
                     CollectComponentDependencies(*overrideValue.AddedComponent, dependencies);
