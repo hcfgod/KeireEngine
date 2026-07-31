@@ -116,30 +116,7 @@ namespace KeireEditor
                                    const std::span<const Keire::VfxParameterOverride> authored)
     {
         const auto matches = [](const Keire::VfxValueType type, const Keire::VfxParameterValue& value) noexcept
-        {
-            switch (type)
-            {
-            case Keire::VfxValueType::Boolean:
-                return std::holds_alternative<bool>(value);
-            case Keire::VfxValueType::Integer:
-                return std::holds_alternative<std::int64_t>(value);
-            case Keire::VfxValueType::Scalar:
-                return std::holds_alternative<float>(value);
-            case Keire::VfxValueType::Vector2:
-                return std::holds_alternative<Keire::Vector2>(value);
-            case Keire::VfxValueType::Vector3:
-                return std::holds_alternative<Keire::Vector3>(value);
-            case Keire::VfxValueType::Color:
-                return std::holds_alternative<Keire::Color>(value);
-            case Keire::VfxValueType::Texture:
-            case Keire::VfxValueType::Mesh:
-            case Keire::VfxValueType::Asset:
-                return std::holds_alternative<Keire::AssetId>(value);
-            case Keire::VfxValueType::ParticleStream:
-                return false;
-            }
-            return false;
-        };
+        { return Keire::VfxValueMatchesType(type, value) && Keire::IsFiniteVfxValue(value); };
 
         std::vector<Keire::VfxParameterOverride> result;
         result.reserve(authored.size());

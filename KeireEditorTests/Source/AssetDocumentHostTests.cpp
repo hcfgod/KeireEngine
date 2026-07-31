@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -123,5 +124,88 @@ TEST_CASE("Asset document undo history becomes unavailable after close and destr
     CHECK_FALSE(undo->CanUndo());
     CHECK_FALSE(undo->Undo());
     CHECK_FALSE(undo->CanRedo());
+    undoService->Close();
+}
+
+TEST_CASE("Asset document host can estimate undo storage without encoding an intermediate draft")
+{
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "Estimated asset history"});
+    std::size_t encodes = 0;
+    std::size_t estimates = 0;
+    std::size_t persists = 0;
+    KeireEditor::AssetDocumentHost<TestDefinition> document(
+        {.Validate = [](const TestDefinition&) {},
+         .Encode =
+             [&](const TestDefinition&)
+         {
+             ++encodes;
+             return std::vector<std::byte>{std::byte{1}};
+         },
+         .EstimateSize =
+             [&](const TestDefinition& definition)
+         {
+             ++estimates;
+             return sizeof(definition) + definition.Label.size();
+         },
+         .Persist = [&](const Keire::AssetId, const std::span<const std::byte>) { ++persists; }});
+
+    document.Open(TestAsset(5), {1, "baseline"}, 1, undo);
+    REQUIRE(document.Edit("Intermediate authoring state", {2, "not yet publishable"}));
+    CHECK(estimates == 2);
+    CHECK(undo->EstimatedBytes() ==
+          sizeof(TestDefinition) * 2 + std::string("baseline").size() + std::string("not yet publishable").size());
+    CHECK(encodes == 0);
+    CHECK(document.Undo());
+    CHECK(document.Redo());
+    CHECK(estimates == 2);
+    CHECK(encodes == 0);
+
+    document.Save();
+    CHECK(encodes == 1);
+    CHECK(persists == 1);
+    undoService->Close();
+}
+
+TEST_CASE("Asset document undo limits account for both captured snapshots")
+{
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "Bounded asset history", .MaximumBytes = 96});
+    KeireEditor::AssetDocumentHost<TestDefinition> document(
+        {.Validate = [](const TestDefinition&) {},
+         .Encode = [](const TestDefinition&) { return std::vector<std::byte>{std::byte{1}}; },
+         .EstimateSize = [](const TestDefinition&) { return std::size_t{64}; },
+         .Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+
+    document.Open(TestAsset(6), {1, "before"}, 1, undo);
+    REQUIRE(document.Edit("Oversized snapshots", {2, "after"}));
+    CHECK(document.Draft() == TestDefinition{2, "after"});
+    CHECK_FALSE(undo->CanUndo());
+    CHECK(undo->EstimatedBytes() == 0);
+
+    document.Close();
+    undoService->Close();
+}
+
+TEST_CASE("Asset document undo snapshot accounting saturates instead of overflowing")
+{
+    constexpr auto maximum = std::numeric_limits<std::size_t>::max();
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "Saturated asset history", .MaximumBytes = maximum});
+    KeireEditor::AssetDocumentHost<TestDefinition> document(
+        {.Validate = [](const TestDefinition&) {},
+         .Encode = [](const TestDefinition&) { return std::vector<std::byte>{std::byte{1}}; },
+         .EstimateSize = [](const TestDefinition& definition)
+         { return definition.Value == 1 ? std::numeric_limits<std::size_t>::max() - 8 : std::size_t{32}; },
+         .Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+
+    document.Open(TestAsset(7), {1, "before"}, 1, undo);
+    REQUIRE(document.Edit("Saturated snapshots", {2, "after"}));
+    CHECK(undo->CanUndo());
+    CHECK(undo->EstimatedBytes() == maximum);
+    CHECK(document.Undo());
+    CHECK(document.Draft() == TestDefinition{1, "before"});
+
+    document.Close();
     undoService->Close();
 }

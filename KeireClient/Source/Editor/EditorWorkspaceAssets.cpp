@@ -2298,8 +2298,14 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
 
 void EditorWorkspaceLayer::RestartVfxEffectPreview()
 {
-    if (!m_VfxEffectDocument || !m_VfxEffectDocument->IsOpen())
+    if (!m_VfxEffectDocument || !m_VfxEffectDocument->IsOpen() || !m_VfxEffectDocument->Publishable())
         return;
+    const auto compiled = Keire::CompileVfxEffect(m_VfxEffectDocument->Definition(), m_VfxEffectPreviewBackend);
+    if (!compiled.Valid)
+    {
+        throw std::runtime_error(compiled.Diagnostics.empty() ? "VFX preview compilation failed."
+                                                              : compiled.Diagnostics.front().Message);
+    }
     const auto paused = m_VfxEffectPreviewPaused;
     const auto autoRestart = m_VfxEffectPreviewAutoRestart;
     const auto speed = m_VfxEffectPreviewSpeed;
@@ -2352,6 +2358,17 @@ void EditorWorkspaceLayer::SetVfxEffectPreviewBackend(const Keire::VfxBackend ba
         throw std::invalid_argument("VFX preview backend is unsupported.");
     if (m_VfxEffectPreviewBackend == backend)
         return;
+    if (m_VfxEffectDocument && m_VfxEffectDocument->IsOpen())
+    {
+        if (!m_VfxEffectDocument->Publishable())
+            throw std::logic_error("Repair the VFX graph before changing the preview backend.");
+        const auto compiled = Keire::CompileVfxEffect(m_VfxEffectDocument->Definition(), backend);
+        if (!compiled.Valid)
+        {
+            throw std::runtime_error(compiled.Diagnostics.empty() ? "VFX preview compilation failed."
+                                                                  : compiled.Diagnostics.front().Message);
+        }
+    }
     m_VfxEffectPreviewBackend = backend;
     ResetEditorVfxPreviewWorld();
     RestartVfxEffectPreview();

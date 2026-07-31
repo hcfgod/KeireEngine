@@ -1028,7 +1028,8 @@
             ],
             "culling": 0,
             "editModePreview": true,
-            "effect": "87bb30db-3865-429e-8a4b-b3b5f9dc5a03",
+            "effect": "518e44da-1d18-4197-8ebd-ca805295869e",
+            "parameterOverrides": "[]",
             "playOnAwake": true,
             "quality": 2,
             "seedOffset": 0,
@@ -1036,7 +1037,7 @@
           },
           "enabled": true,
           "type": "4b454952-4556-4658-454d-495454455201",
-          "version": 1
+          "version": 2
         }
       ],
       "id": "7a2f2b21-84a6-4790-b1a9-529da68fe10b",

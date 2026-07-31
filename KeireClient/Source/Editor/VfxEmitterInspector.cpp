@@ -18,28 +18,7 @@ namespace KeireEditor
     {
         [[nodiscard]] bool ValueMatches(const Keire::VfxValueType type, const Keire::VfxParameterValue& value) noexcept
         {
-            switch (type)
-            {
-            case Keire::VfxValueType::Boolean:
-                return std::holds_alternative<bool>(value);
-            case Keire::VfxValueType::Integer:
-                return std::holds_alternative<std::int64_t>(value);
-            case Keire::VfxValueType::Scalar:
-                return std::holds_alternative<float>(value);
-            case Keire::VfxValueType::Vector2:
-                return std::holds_alternative<Keire::Vector2>(value);
-            case Keire::VfxValueType::Vector3:
-                return std::holds_alternative<Keire::Vector3>(value);
-            case Keire::VfxValueType::Color:
-                return std::holds_alternative<Keire::Color>(value);
-            case Keire::VfxValueType::Texture:
-            case Keire::VfxValueType::Mesh:
-            case Keire::VfxValueType::Asset:
-                return std::holds_alternative<Keire::AssetId>(value);
-            case Keire::VfxValueType::ParticleStream:
-                return false;
-            }
-            return false;
+            return Keire::VfxValueMatchesType(type, value) && Keire::IsFiniteVfxValue(value);
         }
 
         [[nodiscard]] std::string TypeName(const Keire::VfxValueType type)
@@ -50,12 +29,18 @@ namespace KeireEditor
                 return "Boolean";
             case Keire::VfxValueType::Integer:
                 return "Integer";
+            case Keire::VfxValueType::UnsignedInteger:
+                return "Unsigned Integer";
             case Keire::VfxValueType::Scalar:
                 return "Scalar";
             case Keire::VfxValueType::Vector2:
                 return "Vector2";
             case Keire::VfxValueType::Vector3:
                 return "Vector3";
+            case Keire::VfxValueType::Vector4:
+                return "Vector4";
+            case Keire::VfxValueType::Quaternion:
+                return "Quaternion";
             case Keire::VfxValueType::Color:
                 return "Color";
             case Keire::VfxValueType::Texture:
@@ -64,6 +49,38 @@ namespace KeireEditor
                 return "Mesh";
             case Keire::VfxValueType::Asset:
                 return "Asset";
+            case Keire::VfxValueType::Matrix:
+                return "Matrix4";
+            case Keire::VfxValueType::Curve:
+                return "Curve";
+            case Keire::VfxValueType::Gradient:
+                return "Gradient";
+            case Keire::VfxValueType::ScalarRange:
+                return "Scalar Range";
+            case Keire::VfxValueType::IntegerRange:
+                return "Integer Range";
+            case Keire::VfxValueType::UnsignedIntegerRange:
+                return "Unsigned Integer Range";
+            case Keire::VfxValueType::Vector2Range:
+                return "Vector2 Range";
+            case Keire::VfxValueType::Vector3Range:
+                return "Vector3 Range";
+            case Keire::VfxValueType::Vector4Range:
+                return "Vector4 Range";
+            case Keire::VfxValueType::ColorRange:
+                return "Color Range";
+            case Keire::VfxValueType::Texture2DArray:
+                return "Texture2D Array";
+            case Keire::VfxValueType::Texture3D:
+                return "Texture3D";
+            case Keire::VfxValueType::TextureCube:
+                return "Texture Cube";
+            case Keire::VfxValueType::Buffer:
+                return "Buffer";
+            case Keire::VfxValueType::PointCache:
+                return "Point Cache";
+            case Keire::VfxValueType::SignedDistanceField:
+                return "Signed Distance Field";
             case Keire::VfxValueType::ParticleStream:
                 return "Particle Stream";
             }
@@ -80,6 +97,8 @@ namespace KeireEditor
                         return std::string(item ? "On" : "Off");
                     else if constexpr (std::same_as<T, std::int64_t>)
                         return std::to_string(item);
+                    else if constexpr (std::same_as<T, std::uint64_t>)
+                        return std::to_string(item);
                     else if constexpr (std::same_as<T, Keire::AssetId>)
                         return item ? item.ToString() : std::string("None");
                     else
@@ -91,9 +110,22 @@ namespace KeireEditor
                             result << '(' << item.X << ", " << item.Y << ')';
                         else if constexpr (std::same_as<T, Keire::Vector3>)
                             result << '(' << item.X << ", " << item.Y << ", " << item.Z << ')';
+                        else if constexpr (std::same_as<T, Keire::Vector4> || std::same_as<T, Keire::Quaternion>)
+                            result << '(' << item.X << ", " << item.Y << ", " << item.Z << ", " << item.W << ')';
                         else if constexpr (std::same_as<T, Keire::Color>)
                             result << '(' << item.Red << ", " << item.Green << ", " << item.Blue << ", " << item.Alpha
                                    << ')';
+                        else if constexpr (std::same_as<T, Keire::Matrix4>)
+                            result << "Matrix4";
+                        else if constexpr (std::same_as<T, Keire::Curve1D>)
+                            result << item.Keys().size() << " curve keys";
+                        else if constexpr (std::same_as<T, Keire::ColorGradient>)
+                            result << item.Keys().size() << " gradient keys";
+                        else if constexpr (requires {
+                                               item.Minimum;
+                                               item.Maximum;
+                                           })
+                            result << "Range";
                         return result.str();
                     }
                 },
@@ -119,6 +151,14 @@ namespace KeireEditor
                 return editor.EditBoolean(label, std::get<bool>(value));
             case Keire::VfxValueType::Integer:
                 return editor.EditInteger(label, std::get<std::int64_t>(value), 1.0, {}, {});
+            case Keire::VfxValueType::UnsignedInteger:
+            {
+                double scalar = static_cast<double>(std::get<std::uint64_t>(value));
+                if (!editor.EditScalar(label, scalar, 1.0, 0.0, {}))
+                    return false;
+                value = static_cast<std::uint64_t>(scalar);
+                return true;
+            }
             case Keire::VfxValueType::Scalar:
             {
                 double scalar = std::get<float>(value);
@@ -131,6 +171,10 @@ namespace KeireEditor
                 return editor.EditVector2(label, std::get<Keire::Vector2>(value), 0.05);
             case Keire::VfxValueType::Vector3:
                 return editor.EditVector3(label, std::get<Keire::Vector3>(value), 0.05);
+            case Keire::VfxValueType::Vector4:
+                return editor.EditVector4(label, std::get<Keire::Vector4>(value), 0.05);
+            case Keire::VfxValueType::Quaternion:
+                return editor.EditQuaternion(label, std::get<Keire::Quaternion>(value), 0.05);
             case Keire::VfxValueType::Color:
                 return editor.EditColor(label, std::get<Keire::Color>(value));
             case Keire::VfxValueType::Texture:
@@ -138,6 +182,86 @@ namespace KeireEditor
             case Keire::VfxValueType::Mesh:
                 return editor.EditAsset(label, std::get<Keire::AssetId>(value), Keire::MeshAsset::StaticType());
             case Keire::VfxValueType::Asset:
+                return editor.EditAsset(label, std::get<Keire::AssetId>(value), {});
+            case Keire::VfxValueType::Matrix:
+            {
+                auto& matrix = std::get<Keire::Matrix4>(value);
+                bool changed = false;
+                for (std::size_t row = 0; row < 4; ++row)
+                {
+                    Keire::Vector4 values{matrix.Elements[row * 4], matrix.Elements[row * 4 + 1],
+                                          matrix.Elements[row * 4 + 2], matrix.Elements[row * 4 + 3]};
+                    if (editor.EditVector4(label + " Row " + std::to_string(row + 1), values, 0.05))
+                    {
+                        matrix.Elements[row * 4] = values.X;
+                        matrix.Elements[row * 4 + 1] = values.Y;
+                        matrix.Elements[row * 4 + 2] = values.Z;
+                        matrix.Elements[row * 4 + 3] = values.W;
+                        changed = true;
+                    }
+                }
+                return changed;
+            }
+            case Keire::VfxValueType::Curve:
+                return editor.EditCurve(label, std::get<Keire::Curve1D>(value));
+            case Keire::VfxValueType::Gradient:
+                return editor.EditGradient(label, std::get<Keire::ColorGradient>(value));
+            case Keire::VfxValueType::ScalarRange:
+            {
+                auto& range = std::get<Keire::VfxScalarRange>(value);
+                double minimum = range.Minimum;
+                double maximum = range.Maximum;
+                const bool changed = editor.EditScalar(label + " Min", minimum, 0.05, {}, {}) |
+                                     editor.EditScalar(label + " Max", maximum, 0.05, {}, {});
+                range = {static_cast<float>(minimum), static_cast<float>(maximum)};
+                return changed;
+            }
+            case Keire::VfxValueType::IntegerRange:
+            {
+                auto& range = std::get<Keire::VfxIntegerRange>(value);
+                return editor.EditInteger(label + " Min", range.Minimum, 1.0, {}, {}) |
+                       editor.EditInteger(label + " Max", range.Maximum, 1.0, {}, {});
+            }
+            case Keire::VfxValueType::UnsignedIntegerRange:
+            {
+                auto& range = std::get<Keire::VfxUnsignedIntegerRange>(value);
+                double minimum = static_cast<double>(range.Minimum);
+                double maximum = static_cast<double>(range.Maximum);
+                const bool changed = editor.EditScalar(label + " Min", minimum, 1.0, 0.0, {}) |
+                                     editor.EditScalar(label + " Max", maximum, 1.0, 0.0, {});
+                range = {static_cast<std::uint64_t>(minimum), static_cast<std::uint64_t>(maximum)};
+                return changed;
+            }
+            case Keire::VfxValueType::Vector2Range:
+            {
+                auto& range = std::get<Keire::VfxVector2Range>(value);
+                return editor.EditVector2(label + " Min", range.Minimum, 0.05) |
+                       editor.EditVector2(label + " Max", range.Maximum, 0.05);
+            }
+            case Keire::VfxValueType::Vector3Range:
+            {
+                auto& range = std::get<Keire::VfxVector3Range>(value);
+                return editor.EditVector3(label + " Min", range.Minimum, 0.05) |
+                       editor.EditVector3(label + " Max", range.Maximum, 0.05);
+            }
+            case Keire::VfxValueType::Vector4Range:
+            {
+                auto& range = std::get<Keire::VfxVector4Range>(value);
+                return editor.EditVector4(label + " Min", range.Minimum, 0.05) |
+                       editor.EditVector4(label + " Max", range.Maximum, 0.05);
+            }
+            case Keire::VfxValueType::ColorRange:
+            {
+                auto& range = std::get<Keire::VfxColorRange>(value);
+                return editor.EditColor(label + " Min", range.Minimum) |
+                       editor.EditColor(label + " Max", range.Maximum);
+            }
+            case Keire::VfxValueType::Texture2DArray:
+            case Keire::VfxValueType::Texture3D:
+            case Keire::VfxValueType::TextureCube:
+            case Keire::VfxValueType::Buffer:
+            case Keire::VfxValueType::PointCache:
+            case Keire::VfxValueType::SignedDistanceField:
                 return editor.EditAsset(label, std::get<Keire::AssetId>(value), {});
             case Keire::VfxValueType::ParticleStream:
                 throw std::invalid_argument("Particle streams cannot be exposed as VFX Blackboard overrides.");

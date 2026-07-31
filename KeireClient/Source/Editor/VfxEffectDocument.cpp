@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <ranges>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -37,6 +39,22 @@ namespace KeireEditor
             return *found;
         }
 
+        [[nodiscard]] Keire::VfxGraphNode& RequireContext(Keire::VfxGraphSystem& system, const Keire::AssetId context)
+        {
+            auto& node = RequireNode(system, context);
+            if (node.Kind != Keire::VfxGraphNodeKind::Context)
+                throw std::invalid_argument("VFX Blocks can only be authored inside Context nodes.");
+            return node;
+        }
+
+        [[nodiscard]] Keire::VfxGraphBlock& RequireBlock(Keire::VfxGraphNode& context, const Keire::AssetId block)
+        {
+            const auto found = std::ranges::find(context.Blocks, block, &Keire::VfxGraphBlock::Id);
+            if (found == context.Blocks.end())
+                throw std::invalid_argument("VFX Context Block is unavailable.");
+            return *found;
+        }
+
         template <typename Values> [[nodiscard]] std::vector<Keire::AssetId> SortedIds(const Values& values)
         {
             std::vector<Keire::AssetId> result;
@@ -47,10 +65,157 @@ namespace KeireEditor
             return result;
         }
 
-        void RequireStableNodeIds(const Keire::VfxGraphNode& before, const Keire::VfxGraphNode& after)
+        void AddEstimatedBytes(std::size_t& total, const std::size_t bytes) noexcept
+        {
+            total = bytes > std::numeric_limits<std::size_t>::max() - total ? std::numeric_limits<std::size_t>::max()
+                                                                            : total + bytes;
+        }
+
+        template <typename Value> void AddEstimatedElements(std::size_t& total, const std::size_t count) noexcept
+        {
+            if (count > std::numeric_limits<std::size_t>::max() / sizeof(Value))
+            {
+                total = std::numeric_limits<std::size_t>::max();
+                return;
+            }
+            AddEstimatedBytes(total, count * sizeof(Value));
+        }
+
+        void AddEstimatedProperties(std::size_t& total,
+                                    const std::span<const Keire::VfxGraphProperty> properties) noexcept
+        {
+            AddEstimatedElements<Keire::VfxGraphProperty>(total, properties.size());
+            for (const auto& property : properties)
+            {
+                AddEstimatedBytes(total, property.Name.size());
+                if (const auto* text = std::get_if<std::string>(&property.Value))
+                    AddEstimatedBytes(total, text->size());
+            }
+        }
+
+        [[nodiscard]] std::size_t EstimateDefinitionSize(const Keire::VfxEffectDefinition& definition) noexcept
+        {
+            std::size_t result = sizeof(definition);
+            AddEstimatedBytes(result, definition.Name.size());
+            AddEstimatedElements<Keire::VfxModuleDefinition>(result, definition.Modules.size());
+            for (const auto& module : definition.Modules)
+            {
+                std::visit(
+                    [&result](const auto& payload)
+                    {
+                        using Payload = std::decay_t<decltype(payload)>;
+                        if constexpr (std::is_same_v<Payload, Keire::VfxSizeOverLifetimeModule>)
+                            AddEstimatedElements<Keire::CurveKey>(result, payload.Size.Keys().size());
+                        else if constexpr (std::is_same_v<Payload, Keire::VfxColorOverLifetimeModule>)
+                            AddEstimatedElements<Keire::ColorGradientKey>(result, payload.Color.Keys().size());
+                    },
+                    module.Payload);
+            }
+            AddEstimatedElements<Keire::VfxBlackboardParameter>(result, definition.Blackboard.size());
+            for (const auto& parameter : definition.Blackboard)
+                AddEstimatedBytes(result, parameter.Name.size());
+            AddEstimatedElements<Keire::VfxGraphSystem>(result, definition.Systems.size());
+            for (const auto& system : definition.Systems)
+            {
+                AddEstimatedBytes(result, system.Name.size());
+                AddEstimatedElements<Keire::VfxGraphNode>(result, system.Nodes.size());
+                AddEstimatedElements<Keire::VfxGraphConnection>(result, system.Connections.size());
+                for (const auto& node : system.Nodes)
+                {
+                    AddEstimatedBytes(result, node.Type.size());
+                    AddEstimatedBytes(result, node.TypeId.Value.size());
+                    AddEstimatedBytes(result, node.CustomHlsl.size());
+                    AddEstimatedProperties(result, node.Properties);
+                    AddEstimatedElements<Keire::VfxGraphPin>(result, node.Pins.size());
+                    for (const auto& pin : node.Pins)
+                    {
+                        AddEstimatedBytes(result, pin.Name.size());
+                        AddEstimatedBytes(result, pin.Semantic.size());
+                    }
+                    AddEstimatedElements<Keire::VfxGraphBlock>(result, node.Blocks.size());
+                    for (const auto& block : node.Blocks)
+                    {
+                        AddEstimatedBytes(result, block.Type.size());
+                        AddEstimatedBytes(result, block.TypeId.Value.size());
+                        AddEstimatedProperties(result, block.Properties);
+                        AddEstimatedElements<Keire::VfxGraphPin>(result, block.Pins.size());
+                        for (const auto& pin : block.Pins)
+                        {
+                            AddEstimatedBytes(result, pin.Name.size());
+                            AddEstimatedBytes(result, pin.Semantic.size());
+                        }
+                    }
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] bool ContainsStableId(const Keire::VfxEffectDefinition& definition,
+                                            const Keire::AssetId id) noexcept
+        {
+            if (definition.EmitterId == id ||
+                std::ranges::any_of(definition.Modules, [id](const auto& module) { return module.Id == id; }) ||
+                std::ranges::any_of(definition.Blackboard, [id](const auto& parameter) { return parameter.Id == id; }))
+            {
+                return true;
+            }
+            for (const auto& system : definition.Systems)
+            {
+                if (system.Id == id ||
+                    std::ranges::any_of(system.Connections, [id](const Keire::VfxGraphConnection& connection)
+                                        { return connection.Id == id; }))
+                {
+                    return true;
+                }
+                for (const auto& node : system.Nodes)
+                {
+                    if (node.Id == id ||
+                        std::ranges::any_of(node.Pins, [id](const Keire::VfxGraphPin& pin) { return pin.Id == id; }))
+                    {
+                        return true;
+                    }
+                    for (const auto& block : node.Blocks)
+                    {
+                        if (block.Id == id || std::ranges::any_of(block.Pins, [id](const Keire::VfxGraphPin& pin)
+                                                                  { return pin.Id == id; }))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        [[nodiscard]] Keire::AssetId ConnectionProbeId(const Keire::VfxEffectDefinition& definition) noexcept
+        {
+            constexpr std::uint64_t probeNamespace = 0x5646584c494e4b50ULL;
+            std::uint64_t value = 1;
+            while (ContainsStableId(definition, Keire::AssetId(probeNamespace, value)))
+                ++value;
+            return Keire::AssetId(probeNamespace, value);
+        }
+
+        void RequireStableBlockIds(const Keire::VfxGraphBlock& before, const Keire::VfxGraphBlock& after)
         {
             if (after.Id != before.Id || SortedIds(after.Pins) != SortedIds(before.Pins))
+                throw std::invalid_argument("VFX Block edits cannot replace stable Block or pin IDs.");
+        }
+
+        void RequireStableNodeIds(const Keire::VfxGraphNode& before, const Keire::VfxGraphNode& after)
+        {
+            if (after.Id != before.Id || SortedIds(after.Pins) != SortedIds(before.Pins) ||
+                SortedIds(after.Blocks) != SortedIds(before.Blocks))
+            {
                 throw std::invalid_argument("VFX graph node edits cannot replace stable node or pin IDs.");
+            }
+            for (const auto& block : before.Blocks)
+            {
+                const auto found = std::ranges::find(after.Blocks, block.Id, &Keire::VfxGraphBlock::Id);
+                if (found == after.Blocks.end())
+                    throw std::invalid_argument("VFX graph node edits cannot replace stable Block IDs.");
+                RequireStableBlockIds(block, *found);
+            }
         }
 
         void RequireStableSystemIds(const Keire::VfxGraphSystem& before, const Keire::VfxGraphSystem& after)
@@ -69,39 +234,22 @@ namespace KeireEditor
             }
         }
 
-        [[nodiscard]] const Keire::VfxGraphPin*
-        FindPin(const Keire::VfxGraphSystem& system, const Keire::AssetId nodeId, const Keire::AssetId pinId) noexcept
+        [[nodiscard]] const Keire::VfxGraphPin* FindPin(const Keire::VfxGraphSystem& system,
+                                                        const Keire::VfxGraphEndpoint endpoint) noexcept
         {
-            const auto node = std::ranges::find(system.Nodes, nodeId, &Keire::VfxGraphNode::Id);
+            const auto node = std::ranges::find(system.Nodes, endpoint.Node, &Keire::VfxGraphNode::Id);
             if (node == system.Nodes.end())
                 return nullptr;
-            const auto pin = std::ranges::find(node->Pins, pinId, &Keire::VfxGraphPin::Id);
-            return pin == node->Pins.end() ? nullptr : std::addressof(*pin);
-        }
-
-        [[nodiscard]] std::uint8_t ContextOrder(const Keire::VfxContextType context) noexcept
-        {
-            switch (context)
+            if (endpoint.Block)
             {
-            case Keire::VfxContextType::Spawn:
-                return 0;
-            case Keire::VfxContextType::Initialize:
-                return 1;
-            case Keire::VfxContextType::Update:
-                return 2;
-            case Keire::VfxContextType::Output:
-                return 3;
-            case Keire::VfxContextType::Event:
-                return 4;
+                const auto block = std::ranges::find(node->Blocks, endpoint.Block, &Keire::VfxGraphBlock::Id);
+                if (block == node->Blocks.end())
+                    return nullptr;
+                const auto pin = std::ranges::find(block->Pins, endpoint.Pin, &Keire::VfxGraphPin::Id);
+                return pin == block->Pins.end() ? nullptr : std::addressof(*pin);
             }
-            return 4;
-        }
-
-        [[nodiscard]] const Keire::VfxGraphNode* FindNode(const Keire::VfxGraphSystem& system,
-                                                          const Keire::AssetId node) noexcept
-        {
-            const auto found = std::ranges::find(system.Nodes, node, &Keire::VfxGraphNode::Id);
-            return found == system.Nodes.end() ? nullptr : std::addressof(*found);
+            const auto pin = std::ranges::find(node->Pins, endpoint.Pin, &Keire::VfxGraphPin::Id);
+            return pin == node->Pins.end() ? nullptr : std::addressof(*pin);
         }
 
         [[nodiscard]] const Keire::VfxGraphPin* FindFlowPin(const Keire::VfxGraphNode& node, const bool input) noexcept
@@ -110,51 +258,6 @@ namespace KeireEditor
                 std::ranges::find_if(node.Pins, [input](const Keire::VfxGraphPin& pin)
                                      { return pin.Input == input && pin.Type == Keire::VfxValueType::ParticleStream; });
             return found == node.Pins.end() ? nullptr : std::addressof(*found);
-        }
-
-        void InsertExecutableNode(Keire::VfxGraphSystem& system, Keire::VfxGraphNode node)
-        {
-            const auto* nodeInput = FindFlowPin(node, true);
-            const auto* nodeOutput = FindFlowPin(node, false);
-            if (!nodeInput || !nodeOutput)
-                throw std::invalid_argument("Executable VFX nodes require particle-stream input and output pins.");
-
-            std::vector<std::size_t> insertionCandidates;
-            for (std::size_t index = 0; index < system.Connections.size(); ++index)
-            {
-                const auto& connection = system.Connections[index];
-                const auto* source = FindNode(system, connection.OutputNode);
-                const auto* target = FindNode(system, connection.InputNode);
-                const auto* sourcePin = FindPin(system, connection.OutputNode, connection.OutputPin);
-                const auto* targetPin = FindPin(system, connection.InputNode, connection.InputPin);
-                if (!source || !target || !sourcePin || !targetPin ||
-                    sourcePin->Type != Keire::VfxValueType::ParticleStream ||
-                    targetPin->Type != Keire::VfxValueType::ParticleStream)
-                {
-                    continue;
-                }
-
-                const bool crossesNextContext = ContextOrder(source->Context) == ContextOrder(node.Context) &&
-                                                ContextOrder(target->Context) > ContextOrder(node.Context);
-                const bool entersOutputContext = node.Context == Keire::VfxContextType::Output &&
-                                                 target->Kind == Keire::VfxGraphNodeKind::Context &&
-                                                 target->Context == Keire::VfxContextType::Output;
-                if (crossesNextContext || entersOutputContext)
-                    insertionCandidates.push_back(index);
-            }
-            if (insertionCandidates.size() != 1)
-            {
-                throw std::invalid_argument(
-                    "VFX node insertion requires one unambiguous particle-stream cable at its context boundary.");
-            }
-
-            auto& insertion = system.Connections[insertionCandidates.front()];
-            const auto targetNode = insertion.InputNode;
-            const auto targetPin = insertion.InputPin;
-            insertion.InputNode = node.Id;
-            insertion.InputPin = nodeInput->Id;
-            system.Connections.push_back({Keire::AssetId::Generate(), node.Id, nodeOutput->Id, targetNode, targetPin});
-            system.Nodes.push_back(std::move(node));
         }
 
         void RemoveNodeAndReconnect(Keire::VfxGraphSystem& system, const Keire::AssetId nodeId,
@@ -173,29 +276,27 @@ namespace KeireEditor
             {
                 const auto* input = FindFlowPin(*found, true);
                 const auto* output = FindFlowPin(*found, false);
-                if (!input || !output)
-                    throw std::invalid_argument("Executable VFX node flow pins are malformed.");
-
-                std::vector<std::size_t> incoming;
-                std::vector<std::size_t> outgoing;
-                for (std::size_t index = 0; index < system.Connections.size(); ++index)
+                if (input && output)
                 {
-                    const auto& connection = system.Connections[index];
-                    if (connection.InputNode == nodeId && connection.InputPin == input->Id)
-                        incoming.push_back(index);
-                    if (connection.OutputNode == nodeId && connection.OutputPin == output->Id)
-                        outgoing.push_back(index);
+                    std::vector<std::size_t> incoming;
+                    std::vector<std::size_t> outgoing;
+                    for (std::size_t index = 0; index < system.Connections.size(); ++index)
+                    {
+                        const auto& connection = system.Connections[index];
+                        if (connection.InputNode == nodeId && connection.InputPin == input->Id)
+                            incoming.push_back(index);
+                        if (connection.OutputNode == nodeId && connection.OutputPin == output->Id)
+                            outgoing.push_back(index);
+                    }
+                    if (incoming.size() == 1 && outgoing.size() == 1)
+                    {
+                        auto& bridge = system.Connections[incoming.front()];
+                        const auto& destination = system.Connections[outgoing.front()];
+                        bridge.InputNode = destination.InputNode;
+                        bridge.InputBlock = destination.InputBlock;
+                        bridge.InputPin = destination.InputPin;
+                    }
                 }
-                if (incoming.size() != 1 || outgoing.size() != 1)
-                {
-                    throw std::invalid_argument(
-                        "Deleting this VFX node requires one incoming and one outgoing particle-stream cable.");
-                }
-
-                auto& bridge = system.Connections[incoming.front()];
-                const auto& destination = system.Connections[outgoing.front()];
-                bridge.InputNode = destination.InputNode;
-                bridge.InputPin = destination.InputPin;
             }
 
             std::erase_if(system.Connections, [nodeId](const Keire::VfxGraphConnection& connection)
@@ -205,71 +306,146 @@ namespace KeireEditor
 
         void SynchronizeModuleNodes(Keire::VfxEffectDefinition& definition, const Keire::VfxModuleDefinition& module)
         {
-            const auto canonical = Keire::CreateVfxGraphModuleNode(module, {});
+            const auto canonicalNode = Keire::CreateVfxGraphModuleNode(module, {});
+            const auto canonicalBlock = Keire::CreateVfxGraphBlock(module);
             for (auto& system : definition.Systems)
             {
                 for (auto& node : system.Nodes)
                 {
-                    if (node.Kind != Keire::VfxGraphNodeKind::Module || node.Reference != module.Id)
-                        continue;
-
-                    const bool topologyMatches =
-                        node.Pins.size() == canonical.Pins.size() &&
-                        std::ranges::all_of(canonical.Pins,
-                                            [&](const Keire::VfxGraphPin& canonicalPin)
-                                            {
-                                                return std::ranges::count_if(
-                                                           node.Pins,
-                                                           [&](const Keire::VfxGraphPin& pin)
-                                                           {
-                                                               return pin.Input == canonicalPin.Input &&
-                                                                      pin.Type == canonicalPin.Type &&
-                                                                      pin.Semantic == canonicalPin.Semantic;
-                                                           }) == 1;
-                                            });
-                    if (!topologyMatches)
+                    if (node.Kind == Keire::VfxGraphNodeKind::Module && node.Reference == module.Id)
                     {
-                        std::erase_if(system.Connections,
-                                      [nodeId = node.Id](const Keire::VfxGraphConnection& connection)
-                                      { return connection.OutputNode == nodeId || connection.InputNode == nodeId; });
-                        auto replacement = Keire::CreateVfxGraphModuleNode(module, node.EditorPosition);
-                        replacement.Id = node.Id;
-                        node = std::move(replacement);
-                        continue;
+                        const bool topologyMatches =
+                            node.Pins.size() == canonicalNode.Pins.size() &&
+                            std::ranges::all_of(canonicalNode.Pins,
+                                                [&](const Keire::VfxGraphPin& canonicalPin)
+                                                {
+                                                    return std::ranges::count_if(
+                                                               node.Pins,
+                                                               [&](const Keire::VfxGraphPin& pin)
+                                                               {
+                                                                   return pin.Input == canonicalPin.Input &&
+                                                                          pin.Type == canonicalPin.Type &&
+                                                                          pin.Semantic == canonicalPin.Semantic;
+                                                               }) == 1;
+                                                });
+                        if (!topologyMatches)
+                        {
+                            std::erase_if(
+                                system.Connections, [nodeId = node.Id](const Keire::VfxGraphConnection& connection)
+                                { return connection.OutputNode == nodeId || connection.InputNode == nodeId; });
+                            auto replacement = Keire::CreateVfxGraphModuleNode(module, node.EditorPosition);
+                            replacement.Id = node.Id;
+                            node = std::move(replacement);
+                        }
+                        else
+                        {
+                            node.Type = canonicalNode.Type;
+                            node.TypeId = canonicalNode.TypeId;
+                            node.DefinitionVersion = canonicalNode.DefinitionVersion;
+                            node.Context = canonicalNode.Context;
+                            node.CustomHlsl.clear();
+                            for (const auto& canonicalPin : canonicalNode.Pins)
+                            {
+                                const auto pin =
+                                    std::ranges::find_if(node.Pins,
+                                                         [&](const Keire::VfxGraphPin& candidate)
+                                                         {
+                                                             return candidate.Input == canonicalPin.Input &&
+                                                                    candidate.Type == canonicalPin.Type &&
+                                                                    candidate.Semantic == canonicalPin.Semantic;
+                                                         });
+                                pin->Name = canonicalPin.Name;
+                                pin->DefaultValue = canonicalPin.DefaultValue;
+                            }
+                        }
                     }
 
-                    node.Type = canonical.Type;
-                    node.Context = canonical.Context;
-                    node.CustomHlsl.clear();
-                    for (const auto& canonicalPin : canonical.Pins)
+                    for (auto& block : node.Blocks)
                     {
-                        const auto pin = std::ranges::find_if(node.Pins,
-                                                              [&](const Keire::VfxGraphPin& candidate)
-                                                              {
-                                                                  return candidate.Input == canonicalPin.Input &&
-                                                                         candidate.Type == canonicalPin.Type &&
-                                                                         candidate.Semantic == canonicalPin.Semantic;
-                                                              });
-                        pin->Name = canonicalPin.Name;
-                        pin->DefaultValue = canonicalPin.DefaultValue;
+                        if (block.Reference != module.Id)
+                            continue;
+                        const bool topologyMatches =
+                            block.Pins.size() == canonicalBlock.Pins.size() &&
+                            std::ranges::all_of(canonicalBlock.Pins,
+                                                [&](const Keire::VfxGraphPin& canonicalPin)
+                                                {
+                                                    return std::ranges::count_if(
+                                                               block.Pins,
+                                                               [&](const Keire::VfxGraphPin& pin)
+                                                               {
+                                                                   return pin.Input == canonicalPin.Input &&
+                                                                          pin.Type == canonicalPin.Type &&
+                                                                          pin.Semantic == canonicalPin.Semantic;
+                                                               }) == 1;
+                                                });
+                        if (!topologyMatches)
+                        {
+                            std::erase_if(
+                                system.Connections,
+                                [nodeId = node.Id, blockId = block.Id](const Keire::VfxGraphConnection& connection)
+                                {
+                                    return (connection.OutputNode == nodeId && connection.OutputBlock == blockId) ||
+                                           (connection.InputNode == nodeId && connection.InputBlock == blockId);
+                                });
+                            auto replacement = Keire::CreateVfxGraphBlock(module);
+                            replacement.Id = block.Id;
+                            replacement.Enabled = block.Enabled;
+                            block = std::move(replacement);
+                            continue;
+                        }
+
+                        block.Type = canonicalBlock.Type;
+                        block.TypeId = canonicalBlock.TypeId;
+                        block.DefinitionVersion = canonicalBlock.DefinitionVersion;
+                        for (const auto& canonicalPin : canonicalBlock.Pins)
+                        {
+                            const auto pin =
+                                std::ranges::find_if(block.Pins,
+                                                     [&](const Keire::VfxGraphPin& candidate)
+                                                     {
+                                                         return candidate.Input == canonicalPin.Input &&
+                                                                candidate.Type == canonicalPin.Type &&
+                                                                candidate.Semantic == canonicalPin.Semantic;
+                                                     });
+                            pin->Name = canonicalPin.Name;
+                            pin->DefaultValue = canonicalPin.DefaultValue;
+                        }
                     }
                 }
             }
         }
 
-        void RemoveReferencedNodes(Keire::VfxEffectDefinition& definition, const Keire::VfxGraphNodeKind kind,
-                                   const Keire::AssetId reference)
+        void RemoveReferencedExecutables(Keire::VfxEffectDefinition& definition, const Keire::VfxGraphNodeKind kind,
+                                         const Keire::AssetId reference)
         {
             for (auto& system : definition.Systems)
             {
-                std::vector<Keire::AssetId> removed;
+                for (auto& context : system.Nodes)
+                {
+                    std::vector<Keire::AssetId> removedBlocks;
+                    for (const auto& block : context.Blocks)
+                        if (block.Reference == reference)
+                            removedBlocks.push_back(block.Id);
+                    if (removedBlocks.empty())
+                        continue;
+                    std::erase_if(
+                        system.Connections,
+                        [&](const Keire::VfxGraphConnection& connection)
+                        {
+                            return (connection.OutputNode == context.Id &&
+                                    std::ranges::find(removedBlocks, connection.OutputBlock) != removedBlocks.end()) ||
+                                   (connection.InputNode == context.Id &&
+                                    std::ranges::find(removedBlocks, connection.InputBlock) != removedBlocks.end());
+                        });
+                    std::erase_if(context.Blocks, [reference](const Keire::VfxGraphBlock& block)
+                                  { return block.Reference == reference; });
+                }
+
+                std::vector<Keire::AssetId> removedNodes;
                 for (const auto& node : system.Nodes)
                     if (node.Kind == kind && node.Reference == reference)
-                        removed.push_back(node.Id);
-                if (removed.empty())
-                    continue;
-
-                for (const auto node : removed)
+                        removedNodes.push_back(node.Id);
+                for (const auto node : removedNodes)
                     RemoveNodeAndReconnect(system, node,
                                            definition.ExecutionSource == Keire::VfxExecutionSource::Graph);
             }
@@ -277,13 +453,30 @@ namespace KeireEditor
     } // namespace
 
     VfxEffectDocument::VfxEffectDocument(VfxEffectDocumentSpecification specification)
-        : m_Host(
-              {.Validate = [](const Keire::VfxEffectDefinition& definition) { Keire::ValidateVfxEffect(definition); },
-               .Encode = [](const Keire::VfxEffectDefinition& definition)
-               { return Keire::VfxEffectAsset::Encode(definition); },
-               .Preview = std::move(specification.Preview),
-               .CancelPreview = std::move(specification.StopPreview),
-               .Persist = std::move(specification.Persist)})
+        : m_Host({.Validate = [](const Keire::VfxEffectDefinition& definition)
+                  { Keire::ValidateVfxEffectAuthoring(definition); },
+                  .Encode = [](const Keire::VfxEffectDefinition& definition)
+                  { return Keire::VfxEffectAsset::Encode(definition); },
+                  .EstimateSize = EstimateDefinitionSize,
+                  .Preview =
+                      [this, preview = std::move(specification.Preview)](const Keire::AssetId asset,
+                                                                         const Keire::VfxEffectDefinition& definition)
+                  {
+                      try
+                      {
+                          Keire::ValidateVfxEffect(definition);
+                      }
+                      catch (const std::invalid_argument& error)
+                      {
+                          m_GraphDiagnostic = error.what();
+                          return;
+                      }
+                      m_GraphDiagnostic.clear();
+                      if (preview)
+                          preview(asset, definition);
+                  },
+                  .CancelPreview = std::move(specification.StopPreview),
+                  .Persist = std::move(specification.Persist)})
     {
     }
 
@@ -296,18 +489,29 @@ namespace KeireEditor
     void VfxEffectDocument::Open(const Keire::AssetId asset, Keire::VfxEffectDefinition definition,
                                  const std::uint64_t revision, Keire::Ref<Keire::UndoContext> undo)
     {
+        Keire::ValidateVfxEffect(definition);
         m_Host.Open(asset, std::move(definition), revision, std::move(undo));
     }
 
     void VfxEffectDocument::Create(const Keire::AssetId asset, Keire::VfxEffectDefinition definition,
                                    Keire::Ref<Keire::UndoContext> undo)
     {
+        Keire::ValidateVfxEffect(definition);
         m_Host.Create(asset, std::move(definition), std::move(undo));
     }
 
-    void VfxEffectDocument::Save() { m_Host.Save(); }
+    void VfxEffectDocument::Save()
+    {
+        Keire::ValidateVfxEffect(m_Host.Draft());
+        m_Host.Save();
+    }
 
-    void VfxEffectDocument::Discard() { m_Host.Discard(); }
+    void VfxEffectDocument::Discard()
+    {
+        m_Host.Discard();
+        if (!m_Host.IsOpen())
+            m_GraphDiagnostic.clear();
+    }
 
     AssetDocumentReloadResult VfxEffectDocument::Reload(const std::span<const std::byte> bytes,
                                                         const std::uint64_t revision)
@@ -318,6 +522,7 @@ namespace KeireEditor
     AssetDocumentReloadResult VfxEffectDocument::Reload(Keire::VfxEffectDefinition definition,
                                                         const std::uint64_t revision)
     {
+        Keire::ValidateVfxEffect(definition);
         if (definition == m_Host.Draft())
         {
             m_Host.AcknowledgeRevision(revision);
@@ -330,7 +535,16 @@ namespace KeireEditor
 
     bool VfxEffectDocument::Redo() { return m_Host.Redo(); }
 
-    void VfxEffectDocument::Close() noexcept { m_Host.Close(); }
+    void VfxEffectDocument::Close() noexcept
+    {
+        m_Host.Close();
+        m_GraphDiagnostic.clear();
+    }
+
+    std::string_view VfxEffectDocument::Diagnostic() const noexcept
+    {
+        return m_Host.Diagnostic().empty() ? std::string_view(m_GraphDiagnostic) : m_Host.Diagnostic();
+    }
 
     bool VfxEffectDocument::Edit(const std::string_view name,
                                  const std::function<void(Keire::VfxEffectDefinition&)>& operation)
@@ -384,7 +598,7 @@ namespace KeireEditor
                         if (found == definition.Modules.end())
                             throw std::invalid_argument("VFX module is unavailable.");
                         definition.Modules.erase(found);
-                        RemoveReferencedNodes(definition, Keire::VfxGraphNodeKind::Module, module);
+                        RemoveReferencedExecutables(definition, Keire::VfxGraphNodeKind::Module, module);
                     });
     }
 
@@ -446,15 +660,7 @@ namespace KeireEditor
     {
         return Edit("Add VFX graph node",
                     [system, node = std::move(node)](Keire::VfxEffectDefinition& definition) mutable
-                    {
-                        auto& graph = RequireSystem(definition, system);
-                        const bool executable = node.Kind == Keire::VfxGraphNodeKind::Module ||
-                                                node.Kind == Keire::VfxGraphNodeKind::CustomHlsl;
-                        if (definition.ExecutionSource == Keire::VfxExecutionSource::Graph && executable)
-                            InsertExecutableNode(graph, std::move(node));
-                        else
-                            graph.Nodes.push_back(std::move(node));
-                    });
+                    { RequireSystem(definition, system).Nodes.push_back(std::move(node)); });
     }
 
     bool VfxEffectDocument::EditNode(const Keire::AssetId system, const Keire::AssetId node,
@@ -480,6 +686,157 @@ namespace KeireEditor
                         auto& graph = RequireSystem(definition, system);
                         RemoveNodeAndReconnect(graph, node,
                                                definition.ExecutionSource == Keire::VfxExecutionSource::Graph);
+                    });
+    }
+
+    bool VfxEffectDocument::AddBlock(const Keire::AssetId system, const Keire::AssetId context,
+                                     Keire::VfxGraphBlock block)
+    {
+        return Edit("Add VFX Context Block",
+                    [system, context, block = std::move(block)](Keire::VfxEffectDefinition& definition) mutable
+                    {
+                        auto& graph = RequireSystem(definition, system);
+                        auto& blocks = RequireContext(graph, context).Blocks;
+                        if (std::ranges::find(blocks, block.Id, &Keire::VfxGraphBlock::Id) != blocks.end())
+                            throw std::invalid_argument("VFX Context Block stable ID is already in use.");
+                        blocks.push_back(std::move(block));
+                    });
+    }
+
+    bool VfxEffectDocument::EditBlock(const Keire::AssetId system, const Keire::AssetId context,
+                                      const Keire::AssetId block,
+                                      const std::function<void(Keire::VfxGraphBlock&)>& operation)
+    {
+        if (!operation)
+            throw std::invalid_argument("VFX Context Block edits require an operation.");
+        return Edit("Edit VFX Context Block",
+                    [system, context, block, operation](Keire::VfxEffectDefinition& definition)
+                    {
+                        auto& found = RequireBlock(RequireContext(RequireSystem(definition, system), context), block);
+                        const auto before = found;
+                        operation(found);
+                        RequireStableBlockIds(before, found);
+                    });
+    }
+
+    bool VfxEffectDocument::SetBlockEnabled(const Keire::AssetId system, const Keire::AssetId context,
+                                            const Keire::AssetId block, const bool enabled)
+    {
+        return Edit(
+            "Set VFX Context Block state", [system, context, block, enabled](Keire::VfxEffectDefinition& definition)
+            { RequireBlock(RequireContext(RequireSystem(definition, system), context), block).Enabled = enabled; });
+    }
+
+    bool VfxEffectDocument::RemoveBlock(const Keire::AssetId system, const Keire::AssetId context,
+                                        const Keire::AssetId block)
+    {
+        return Edit("Remove VFX Context Block",
+                    [system, context, block](Keire::VfxEffectDefinition& definition)
+                    {
+                        auto& graph = RequireSystem(definition, system);
+                        auto& blocks = RequireContext(graph, context).Blocks;
+                        const auto found = std::ranges::find(blocks, block, &Keire::VfxGraphBlock::Id);
+                        if (found == blocks.end())
+                            throw std::invalid_argument("VFX Context Block is unavailable.");
+                        std::erase_if(graph.Connections,
+                                      [context, block](const Keire::VfxGraphConnection& connection)
+                                      {
+                                          return (connection.OutputNode == context &&
+                                                  connection.OutputBlock == block) ||
+                                                 (connection.InputNode == context && connection.InputBlock == block);
+                                      });
+                        blocks.erase(found);
+                    });
+    }
+
+    bool VfxEffectDocument::MoveBlock(const Keire::AssetId system, const Keire::AssetId context,
+                                      const Keire::AssetId block, const std::size_t destination)
+    {
+        return Edit("Reorder VFX Context Block",
+                    [system, context, block, destination](Keire::VfxEffectDefinition& definition)
+                    {
+                        auto& blocks = RequireContext(RequireSystem(definition, system), context).Blocks;
+                        if (destination >= blocks.size())
+                            throw std::invalid_argument("VFX Context Block destination is out of range.");
+                        const auto found = std::ranges::find(blocks, block, &Keire::VfxGraphBlock::Id);
+                        if (found == blocks.end())
+                            throw std::invalid_argument("VFX Context Block is unavailable.");
+                        const auto source = static_cast<std::size_t>(std::distance(blocks.begin(), found));
+                        if (source == destination)
+                            return;
+                        auto moved = std::move(*found);
+                        blocks.erase(found);
+                        blocks.insert(std::next(blocks.begin(), static_cast<std::ptrdiff_t>(destination)),
+                                      std::move(moved));
+                    });
+    }
+
+    bool VfxEffectDocument::AddBlockPin(const Keire::AssetId system, const Keire::AssetId context,
+                                        const Keire::AssetId block, Keire::VfxGraphPin pin)
+    {
+        return Edit("Add VFX Context Block pin",
+                    [system, context, block, pin = std::move(pin)](Keire::VfxEffectDefinition& definition) mutable
+                    {
+                        auto& pins =
+                            RequireBlock(RequireContext(RequireSystem(definition, system), context), block).Pins;
+                        if (std::ranges::find(pins, pin.Id, &Keire::VfxGraphPin::Id) != pins.end())
+                            throw std::invalid_argument("VFX Context Block pin stable ID is already in use.");
+                        pins.push_back(std::move(pin));
+                    });
+    }
+
+    bool VfxEffectDocument::EditBlockPin(const Keire::AssetId system, const Keire::AssetId context,
+                                         const Keire::AssetId block, const Keire::AssetId pin,
+                                         const std::function<void(Keire::VfxGraphPin&)>& operation)
+    {
+        if (!operation)
+            throw std::invalid_argument("VFX Context Block pin edits require an operation.");
+        return Edit("Edit VFX Context Block pin",
+                    [system, context, block, pin, operation](Keire::VfxEffectDefinition& definition)
+                    {
+                        auto& graph = RequireSystem(definition, system);
+                        auto& blockValue = RequireBlock(RequireContext(graph, context), block);
+                        auto found = std::ranges::find(blockValue.Pins, pin, &Keire::VfxGraphPin::Id);
+                        if (found == blockValue.Pins.end())
+                            throw std::invalid_argument("VFX Context Block pin is unavailable.");
+                        const auto before = *found;
+                        operation(*found);
+                        if (found->Id != pin)
+                            throw std::invalid_argument("VFX Context Block pin edits cannot replace the stable ID.");
+                        if (found->Type != before.Type || found->Input != before.Input)
+                        {
+                            std::erase_if(graph.Connections,
+                                          [context, block, pin](const Keire::VfxGraphConnection& connection)
+                                          {
+                                              return (connection.OutputNode == context &&
+                                                      connection.OutputBlock == block && connection.OutputPin == pin) ||
+                                                     (connection.InputNode == context &&
+                                                      connection.InputBlock == block && connection.InputPin == pin);
+                                          });
+                        }
+                    });
+    }
+
+    bool VfxEffectDocument::RemoveBlockPin(const Keire::AssetId system, const Keire::AssetId context,
+                                           const Keire::AssetId block, const Keire::AssetId pin)
+    {
+        return Edit("Remove VFX Context Block pin",
+                    [system, context, block, pin](Keire::VfxEffectDefinition& definition)
+                    {
+                        auto& graph = RequireSystem(definition, system);
+                        auto& pins = RequireBlock(RequireContext(graph, context), block).Pins;
+                        const auto found = std::ranges::find(pins, pin, &Keire::VfxGraphPin::Id);
+                        if (found == pins.end())
+                            throw std::invalid_argument("VFX Context Block pin is unavailable.");
+                        std::erase_if(graph.Connections,
+                                      [context, block, pin](const Keire::VfxGraphConnection& connection)
+                                      {
+                                          return (connection.OutputNode == context && connection.OutputBlock == block &&
+                                                  connection.OutputPin == pin) ||
+                                                 (connection.InputNode == context && connection.InputBlock == block &&
+                                                  connection.InputPin == pin);
+                                      });
+                        pins.erase(found);
                     });
     }
 
@@ -527,18 +884,22 @@ namespace KeireEditor
 
     bool VfxEffectDocument::AddConnection(const Keire::AssetId system, Keire::VfxGraphConnection connection)
     {
-        return Edit(
-            "Add VFX graph connection",
-            [system, connection = std::move(connection)](Keire::VfxEffectDefinition& definition) mutable
-            {
-                auto& connections = RequireSystem(definition, system).Connections;
-                if (std::ranges::find(connections, connection.Id, &Keire::VfxGraphConnection::Id) != connections.end())
-                    throw std::invalid_argument("VFX graph connection stable ID is already in use.");
-                std::erase_if(
-                    connections, [&](const Keire::VfxGraphConnection& existing)
-                    { return existing.InputNode == connection.InputNode && existing.InputPin == connection.InputPin; });
-                connections.push_back(std::move(connection));
-            });
+        return Edit("Add VFX graph connection",
+                    [system, connection = std::move(connection)](Keire::VfxEffectDefinition& definition) mutable
+                    {
+                        auto& connections = RequireSystem(definition, system).Connections;
+                        if (std::ranges::find(connections, connection.Id, &Keire::VfxGraphConnection::Id) !=
+                            connections.end())
+                            throw std::invalid_argument("VFX graph connection stable ID is already in use.");
+                        std::erase_if(connections,
+                                      [&](const Keire::VfxGraphConnection& existing)
+                                      {
+                                          return existing.InputNode == connection.InputNode &&
+                                                 existing.InputBlock == connection.InputBlock &&
+                                                 existing.InputPin == connection.InputPin;
+                                      });
+                        connections.push_back(std::move(connection));
+                    });
     }
 
     bool VfxEffectDocument::EditConnection(const Keire::AssetId system, const Keire::AssetId connection,
@@ -557,13 +918,15 @@ namespace KeireEditor
                         if (found->Id != connection)
                             throw std::invalid_argument("VFX graph connection edits cannot replace the stable ID.");
                         const auto inputNode = found->InputNode;
+                        const auto inputBlock = found->InputBlock;
                         const auto inputPin = found->InputPin;
-                        std::erase_if(connections,
-                                      [connection, inputNode, inputPin](const Keire::VfxGraphConnection& candidate)
-                                      {
-                                          return candidate.Id != connection && candidate.InputNode == inputNode &&
-                                                 candidate.InputPin == inputPin;
-                                      });
+                        std::erase_if(
+                            connections,
+                            [connection, inputNode, inputBlock, inputPin](const Keire::VfxGraphConnection& candidate)
+                            {
+                                return candidate.Id != connection && candidate.InputNode == inputNode &&
+                                       candidate.InputBlock == inputBlock && candidate.InputPin == inputPin;
+                            });
                     });
     }
 
@@ -578,6 +941,134 @@ namespace KeireEditor
                             throw std::invalid_argument("VFX graph connection is unavailable.");
                         connections.erase(found);
                     });
+    }
+
+    VfxGraphConnectionCheck VfxEffectDocument::CheckConnection(const Keire::AssetId system,
+                                                               const Keire::AssetId outputNode,
+                                                               const Keire::AssetId outputPin,
+                                                               const Keire::AssetId inputNode,
+                                                               const Keire::AssetId inputPin) const
+    {
+        return CheckConnection(system, {outputNode, {}, outputPin}, {inputNode, {}, inputPin});
+    }
+
+    VfxGraphConnectionCheck VfxEffectDocument::CheckConnection(const Keire::AssetId system,
+                                                               const Keire::VfxGraphEndpoint outputEndpoint,
+                                                               const Keire::VfxGraphEndpoint inputEndpoint) const
+    {
+        VfxGraphConnectionCheck result;
+        const auto graph = std::ranges::find(m_Host.Draft().Systems, system, &Keire::VfxGraphSystem::Id);
+        if (graph == m_Host.Draft().Systems.end())
+        {
+            result.Diagnostic = "VFX graph system is unavailable.";
+            return result;
+        }
+
+        const auto* output = FindPin(*graph, outputEndpoint);
+        const auto* input = FindPin(*graph, inputEndpoint);
+        if (!output || !input)
+        {
+            result.Diagnostic = "VFX graph connection references an unavailable pin.";
+            return result;
+        }
+        if (output->Input || !input->Input)
+        {
+            result.Diagnostic = "Connect an output pin to an input pin.";
+            return result;
+        }
+        if (output->Type != input->Type)
+        {
+            result.Diagnostic = "VFX graph pin types do not match.";
+            return result;
+        }
+        if (input->Type != Keire::VfxValueType::ParticleStream)
+        {
+            const auto outputNode = std::ranges::find(graph->Nodes, outputEndpoint.Node, &Keire::VfxGraphNode::Id);
+            const auto inputNode = std::ranges::find(graph->Nodes, inputEndpoint.Node, &Keire::VfxGraphNode::Id);
+            if (outputNode == graph->Nodes.end() || inputNode == graph->Nodes.end())
+            {
+                result.Diagnostic = "VFX graph connection references an unavailable node.";
+                return result;
+            }
+
+            const Keire::VfxGraphBlock* inputBlock = nullptr;
+            if (inputEndpoint.Block)
+            {
+                const auto block = std::ranges::find(inputNode->Blocks, inputEndpoint.Block, &Keire::VfxGraphBlock::Id);
+                if (block == inputNode->Blocks.end())
+                {
+                    result.Diagnostic = "VFX graph connection references an unavailable Block.";
+                    return result;
+                }
+                inputBlock = std::addressof(*block);
+            }
+
+            const bool portableInput = (inputBlock && inputBlock->TypeId.View() == "keire.block.portable-hlsl") ||
+                                       (!inputBlock && inputNode->Kind == Keire::VfxGraphNodeKind::CustomHlsl);
+            if (portableInput && outputNode->Kind != Keire::VfxGraphNodeKind::Parameter)
+            {
+                result.Diagnostic = "Portable Custom HLSL inputs may only bind Blackboard parameters.";
+                return result;
+            }
+
+            const bool moduleInput = (inputBlock && inputBlock->TypeId.View() != "keire.block.portable-hlsl") ||
+                                     (!inputBlock && inputNode->Kind == Keire::VfxGraphNodeKind::Module);
+            if (moduleInput && outputNode->Kind != Keire::VfxGraphNodeKind::Parameter &&
+                outputNode->Kind != Keire::VfxGraphNodeKind::Operator)
+            {
+                result.Diagnostic = "VFX module properties require a Blackboard or executable Operator source.";
+                return result;
+            }
+        }
+        if (std::ranges::any_of(graph->Connections,
+                                [&](const Keire::VfxGraphConnection& connection)
+                                {
+                                    return connection.OutputEndpoint() == outputEndpoint &&
+                                           connection.InputEndpoint() == inputEndpoint;
+                                }))
+        {
+            result.Diagnostic = "This VFX graph cable already exists.";
+            return result;
+        }
+
+        auto candidate = m_Host.Draft();
+        auto& candidateGraph = RequireSystem(candidate, system);
+        result.ReplacesInput =
+            std::ranges::any_of(candidateGraph.Connections, [&](const Keire::VfxGraphConnection& connection)
+                                { return connection.InputEndpoint() == inputEndpoint; });
+        std::erase_if(candidateGraph.Connections, [&](const Keire::VfxGraphConnection& connection)
+                      { return connection.InputEndpoint() == inputEndpoint; });
+        Keire::VfxGraphConnection probe;
+        probe.Id = ConnectionProbeId(candidate);
+        probe.OutputNode = outputEndpoint.Node;
+        probe.OutputPin = outputEndpoint.Pin;
+        probe.InputNode = inputEndpoint.Node;
+        probe.InputPin = inputEndpoint.Pin;
+        probe.OutputBlock = outputEndpoint.Block;
+        probe.InputBlock = inputEndpoint.Block;
+        candidateGraph.Connections.push_back(std::move(probe));
+
+        try
+        {
+            Keire::ValidateVfxEffectAuthoring(candidate);
+        }
+        catch (const std::invalid_argument& error)
+        {
+            result.Diagnostic = error.what();
+            return result;
+        }
+
+        try
+        {
+            Keire::ValidateVfxEffect(candidate);
+            result.Status = VfxGraphConnectionStatus::Accepted;
+        }
+        catch (const std::invalid_argument& error)
+        {
+            result.Status = VfxGraphConnectionStatus::AcceptedWithWarning;
+            result.Diagnostic = error.what();
+        }
+        return result;
     }
 
     bool VfxEffectDocument::AddBlackboardParameter(Keire::VfxBlackboardParameter parameter)
@@ -633,10 +1124,8 @@ namespace KeireEditor
                                               if (std::ranges::find(parameterNodes, connection.OutputNode) ==
                                                   parameterNodes.end())
                                                   return false;
-                                              const auto* output =
-                                                  FindPin(system, connection.OutputNode, connection.OutputPin);
-                                              const auto* input =
-                                                  FindPin(system, connection.InputNode, connection.InputPin);
+                                              const auto* output = FindPin(system, connection.OutputEndpoint());
+                                              const auto* input = FindPin(system, connection.InputEndpoint());
                                               return !output || !input || output->Type != input->Type;
                                           });
                         }
@@ -652,7 +1141,7 @@ namespace KeireEditor
                             std::ranges::find(definition.Blackboard, parameter, &Keire::VfxBlackboardParameter::Id);
                         if (found == definition.Blackboard.end())
                             throw std::invalid_argument("VFX blackboard parameter is unavailable.");
-                        RemoveReferencedNodes(definition, Keire::VfxGraphNodeKind::Parameter, parameter);
+                        RemoveReferencedExecutables(definition, Keire::VfxGraphNodeKind::Parameter, parameter);
                         definition.Blackboard.erase(found);
                     });
     }

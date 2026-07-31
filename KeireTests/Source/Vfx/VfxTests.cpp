@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -14,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -67,27 +69,151 @@ namespace
                           Keire::VfxParameterValue value)
     {
         auto& system = definition.Systems.front();
-        const auto module =
-            std::ranges::find(system.Nodes, moduleId, [](const Keire::VfxGraphNode& node) { return node.Reference; });
-        if (module == system.Nodes.end())
-            throw std::logic_error("Test graph module node was not found.");
-        const auto input = std::ranges::find(module->Pins, semantic, &Keire::VfxGraphPin::Semantic);
-        if (input == module->Pins.end())
-            throw std::logic_error("Test graph module input was not found.");
-        const auto moduleNodeId = module->Id;
+        const auto context = std::ranges::find_if(
+            system.Nodes,
+            [moduleId](const Keire::VfxGraphNode& node)
+            {
+                return std::ranges::find(node.Blocks, moduleId, &Keire::VfxGraphBlock::Reference) != node.Blocks.end();
+            });
+        if (context == system.Nodes.end())
+            throw std::logic_error("Test graph Block was not found.");
+        const auto block = std::ranges::find(context->Blocks, moduleId, &Keire::VfxGraphBlock::Reference);
+        const auto input = std::ranges::find(block->Pins, semantic, &Keire::VfxGraphPin::Semantic);
+        if (input == block->Pins.end())
+            throw std::logic_error("Test graph Block input was not found.");
+        const auto moduleNodeId = context->Id;
+        const auto moduleBlockId = block->Id;
         const auto moduleInputId = input->Id;
 
         definition.Blackboard.push_back(
             {Id(idBase), "Bound default " + std::to_string(idBase), type, std::move(value), true});
         system.Nodes.push_back({Id(idBase + 1),
                                 "Bound default",
-                                module->Context,
+                                context->Context,
                                 {},
                                 {{Id(idBase + 2), "Value", type, false, "value", std::nullopt}},
                                 {},
                                 Keire::VfxGraphNodeKind::Parameter,
-                                Id(idBase)});
-        system.Connections.push_back({Id(idBase + 3), Id(idBase + 1), Id(idBase + 2), moduleNodeId, moduleInputId});
+                                Id(idBase),
+                                {"keire.parameter"}});
+        Keire::VfxGraphConnection connection;
+        connection.Id = Id(idBase + 3);
+        connection.OutputNode = Id(idBase + 1);
+        connection.OutputPin = Id(idBase + 2);
+        connection.InputNode = moduleNodeId;
+        connection.InputPin = moduleInputId;
+        connection.InputBlock = moduleBlockId;
+        system.Connections.push_back(connection);
+    }
+
+    void ConvertBlocksToSchemaThreeFlowNodes(Keire::VfxEffectDefinition& definition)
+    {
+        struct Stage
+        {
+            Keire::AssetId Context;
+            Keire::AssetId InputPin;
+            Keire::AssetId OutputPin;
+            std::vector<Keire::VfxGraphNode> Modules;
+        };
+
+        auto& system = definition.Systems.front();
+        const std::array contexts{Keire::VfxContextType::Spawn, Keire::VfxContextType::Initialize,
+                                  Keire::VfxContextType::Update, Keire::VfxContextType::Output};
+        std::array<Stage, 4> stages;
+        std::uint64_t nextId = 5'000;
+        for (std::size_t stageIndex = 0; stageIndex < contexts.size(); ++stageIndex)
+        {
+            auto context =
+                std::ranges::find_if(system.Nodes, [type = contexts[stageIndex]](const auto& node)
+                                     { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == type; });
+            REQUIRE(context != system.Nodes.end());
+            auto& stage = stages[stageIndex];
+            stage.Context = context->Id;
+            if (const auto input =
+                    std::ranges::find_if(context->Pins, [](const auto& pin)
+                                         { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+                input != context->Pins.end())
+            {
+                stage.InputPin = input->Id;
+            }
+            if (const auto output =
+                    std::ranges::find_if(context->Pins, [](const auto& pin)
+                                         { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+                output != context->Pins.end())
+            {
+                stage.OutputPin = output->Id;
+            }
+            for (const auto& block : context->Blocks)
+            {
+                const auto module =
+                    std::ranges::find(definition.Modules, block.Reference, &Keire::VfxModuleDefinition::Id);
+                REQUIRE(module != definition.Modules.end());
+                auto node = Keire::CreateVfxGraphModuleNode(*module, context->EditorPosition);
+                node.Id = block.Id;
+                node.Pins.clear();
+                node.Pins.push_back(
+                    {Id(nextId++), "Particles", Keire::VfxValueType::ParticleStream, true, "particles"});
+                node.Pins.insert(node.Pins.end(), block.Pins.begin(), block.Pins.end());
+                node.Pins.push_back(
+                    {Id(nextId++), "Particles", Keire::VfxValueType::ParticleStream, false, "particles"});
+                stage.Modules.push_back(std::move(node));
+            }
+            context->Blocks.clear();
+        }
+
+        std::erase_if(system.Connections,
+                      [&system](const Keire::VfxGraphConnection& connection)
+                      {
+                          const auto node =
+                              std::ranges::find(system.Nodes, connection.OutputNode, &Keire::VfxGraphNode::Id);
+                          if (node == system.Nodes.end())
+                              return false;
+                          const auto pin = std::ranges::find(node->Pins, connection.OutputPin, &Keire::VfxGraphPin::Id);
+                          return pin != node->Pins.end() && pin->Type == Keire::VfxValueType::ParticleStream;
+                      });
+        for (auto& connection : system.Connections)
+        {
+            if (!connection.InputBlock)
+                continue;
+            connection.InputNode = connection.InputBlock;
+            connection.InputBlock = {};
+        }
+
+        auto previousNode = stages.front().Context;
+        auto previousPin = stages.front().OutputPin;
+        for (std::size_t stageIndex = 0; stageIndex < stages.size(); ++stageIndex)
+        {
+            if (stageIndex > 0 && stageIndex < stages.size() - 1)
+            {
+                system.Connections.push_back(
+                    {Id(nextId++), previousNode, previousPin, stages[stageIndex].Context, stages[stageIndex].InputPin});
+                previousNode = stages[stageIndex].Context;
+                previousPin = stages[stageIndex].OutputPin;
+            }
+            for (const auto& module : stages[stageIndex].Modules)
+            {
+                const auto input =
+                    std::ranges::find_if(module.Pins, [](const auto& pin)
+                                         { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+                const auto output =
+                    std::ranges::find_if(module.Pins, [](const auto& pin)
+                                         { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+                REQUIRE(input != module.Pins.end());
+                REQUIRE(output != module.Pins.end());
+                system.Connections.push_back({Id(nextId++), previousNode, previousPin, module.Id, input->Id});
+                previousNode = module.Id;
+                previousPin = output->Id;
+            }
+            if (stageIndex == stages.size() - 1)
+            {
+                system.Connections.push_back(
+                    {Id(nextId++), previousNode, previousPin, stages[stageIndex].Context, stages[stageIndex].InputPin});
+            }
+        }
+        for (auto& stage : stages)
+            for (auto& module : stage.Modules)
+                system.Nodes.push_back(std::move(module));
+        definition.SchemaVersion = 3;
     }
 
     struct HeadlessRenderProbe final
@@ -173,7 +299,7 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     const auto encoded = Keire::VfxEffectAsset::Encode(definition);
     const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
     REQUIRE(decoded);
-    CHECK(decoded->Definition().SchemaVersion == 3);
+    CHECK(decoded->Definition().SchemaVersion == Keire::CurrentVfxSchemaVersion);
     CHECK(decoded->Definition().ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
     CHECK(decoded->Definition().EmitterId == Id(1));
     CHECK(decoded->Definition().Name == "Sparks");
@@ -192,7 +318,131 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     CHECK(renamed->Definition().Modules[0].Id == Id(2));
 }
 
-TEST_CASE("VFX schema one definitions publish as schema three legacy programs without mutating the source")
+TEST_CASE("VFX schema four round trips every persisted value property block and endpoint field")
+{
+    auto definition = EffectDefinition();
+    std::uint64_t parameterId = 2000;
+    const auto addParameter =
+        [&](const std::string& name, const Keire::VfxValueType type, Keire::VfxParameterValue value)
+    { definition.Blackboard.push_back({Id(parameterId++), name, type, std::move(value), true}); };
+
+    Keire::Matrix4 matrix;
+    for (std::size_t index = 0; index < matrix.Elements.size(); ++index)
+        matrix.Elements[index] = static_cast<float>(index) + 0.25F;
+    const Keire::Curve1D curve({{0.0F, -1.0F, 0.0F, 2.0F, Keire::CurveInterpolation::Cubic},
+                                {1.0F, 3.0F, -2.0F, 0.0F, Keire::CurveInterpolation::Linear}});
+    const Keire::ColorGradient gradient({{0.0F, {0.1F, 0.2F, 0.3F, 0.4F}}, {1.0F, {0.9F, 0.8F, 0.7F, 0.6F}}},
+                                        Keire::GradientInterpolation::Constant);
+
+    addParameter("Boolean", Keire::VfxValueType::Boolean, true);
+    addParameter("Integer", Keire::VfxValueType::Integer, std::int64_t{-42});
+    addParameter("Scalar", Keire::VfxValueType::Scalar, 3.25F);
+    addParameter("Vector2", Keire::VfxValueType::Vector2, Keire::Vector2{1.0F, 2.0F});
+    addParameter("Vector3", Keire::VfxValueType::Vector3, Keire::Vector3{1.0F, 2.0F, 3.0F});
+    addParameter("Color", Keire::VfxValueType::Color, Keire::Color{0.1F, 0.2F, 0.3F, 0.4F});
+    addParameter("Texture", Keire::VfxValueType::Texture, Id(2100));
+    addParameter("Mesh", Keire::VfxValueType::Mesh, Id(2101));
+    addParameter("Asset", Keire::VfxValueType::Asset, Id(2102));
+    addParameter("Unsigned Integer", Keire::VfxValueType::UnsignedInteger, std::uint64_t{0xfedcba9876543210ULL});
+    addParameter("Vector4", Keire::VfxValueType::Vector4, Keire::Vector4{1.0F, 2.0F, 3.0F, 4.0F});
+    addParameter("Quaternion", Keire::VfxValueType::Quaternion, Keire::Quaternion{0.1F, 0.2F, 0.3F, 0.9F});
+    addParameter("Matrix", Keire::VfxValueType::Matrix, matrix);
+    addParameter("Curve", Keire::VfxValueType::Curve, curve);
+    addParameter("Gradient", Keire::VfxValueType::Gradient, gradient);
+    addParameter("Scalar Range", Keire::VfxValueType::ScalarRange, Keire::VfxScalarRange{-1.0F, 2.0F});
+    addParameter("Integer Range", Keire::VfxValueType::IntegerRange, Keire::VfxIntegerRange{-10, 20});
+    addParameter("Unsigned Integer Range", Keire::VfxValueType::UnsignedIntegerRange,
+                 Keire::VfxUnsignedIntegerRange{10, 20});
+    addParameter("Vector2 Range", Keire::VfxValueType::Vector2Range,
+                 Keire::VfxVector2Range{{-1.0F, -2.0F}, {3.0F, 4.0F}});
+    addParameter("Vector3 Range", Keire::VfxValueType::Vector3Range,
+                 Keire::VfxVector3Range{{-1.0F, -2.0F, -3.0F}, {4.0F, 5.0F, 6.0F}});
+    addParameter("Vector4 Range", Keire::VfxValueType::Vector4Range,
+                 Keire::VfxVector4Range{{-1.0F, -2.0F, -3.0F, -4.0F}, {5.0F, 6.0F, 7.0F, 8.0F}});
+    addParameter("Color Range", Keire::VfxValueType::ColorRange,
+                 Keire::VfxColorRange{{0.1F, 0.2F, 0.3F, 0.4F}, {0.5F, 0.6F, 0.7F, 0.8F}});
+    addParameter("Texture 2D Array", Keire::VfxValueType::Texture2DArray, Id(2103));
+    addParameter("Texture 3D", Keire::VfxValueType::Texture3D, Id(2104));
+    addParameter("Texture Cube", Keire::VfxValueType::TextureCube, Id(2105));
+    addParameter("Buffer", Keire::VfxValueType::Buffer, Id(2106));
+    addParameter("Point Cache", Keire::VfxValueType::PointCache, Id(2107));
+    addParameter("Signed Distance Field", Keire::VfxValueType::SignedDistanceField, Id(2108));
+
+    Keire::VfxGraphNode source;
+    source.Id = Id(2200);
+    source.TypeId.Value = "keire.context.spawn";
+    source.Type = "Schema Source";
+    source.Context = Keire::VfxContextType::Spawn;
+    source.Pins = {{Id(2201), "Dynamic Input", Keire::VfxValueType::Scalar, true, "dynamic", 1.0F},
+                   {Id(2202), "Value", Keire::VfxValueType::Scalar, false, "value", std::nullopt}};
+    source.Kind = Keire::VfxGraphNodeKind::Context;
+    source.DefinitionVersion = 7;
+    source.ResolvedSignature = {Keire::VfxValueType::Scalar, Keire::VfxValueType::Vector4};
+    source.DynamicPinOrder = {Id(2201)};
+    source.Properties = {{"Boolean", true},
+                         {"Integer", std::int64_t{-4}},
+                         {"Unsigned Integer", std::uint64_t{0xf000000000000000ULL}},
+                         {"Scalar", 2.5F},
+                         {"String", std::string("typed")},
+                         {"Vector2", Keire::Vector2{1.0F, 2.0F}},
+                         {"Vector3", Keire::Vector3{1.0F, 2.0F, 3.0F}},
+                         {"Vector4", Keire::Vector4{1.0F, 2.0F, 3.0F, 4.0F}},
+                         {"Quaternion", Keire::Quaternion{0.0F, 0.0F, 0.0F, 1.0F}},
+                         {"Color", Keire::Color{0.1F, 0.2F, 0.3F, 0.4F}},
+                         {"Matrix", matrix},
+                         {"Asset", Id(2203)}};
+
+    Keire::VfxGraphBlock block;
+    block.Id = Id(2210);
+    block.TypeId.Value = "keire.block.force";
+    block.Type = "Schema Block";
+    block.Enabled = false;
+    block.Pins = {{Id(2211), "Input", Keire::VfxValueType::Scalar, true, "input", 0.5F},
+                  {Id(2212), "Output", Keire::VfxValueType::Scalar, false, "output", std::nullopt}};
+    block.Properties = {{"Mode", std::string("schema")}};
+    block.DefinitionVersion = 3;
+    block.Reference = Id(6);
+
+    Keire::VfxGraphNode context;
+    context.Id = Id(2220);
+    context.TypeId.Value = "keire.context.update";
+    context.Type = "Schema Context";
+    context.Context = Keire::VfxContextType::Update;
+    context.Kind = Keire::VfxGraphNodeKind::Context;
+    context.Blocks.push_back(block);
+
+    Keire::VfxGraphNode sink;
+    sink.Id = Id(2230);
+    sink.TypeId.Value = "keire.context.output";
+    sink.Type = "Schema Sink";
+    sink.Context = Keire::VfxContextType::Output;
+    sink.Pins = {{Id(2231), "Value", Keire::VfxValueType::Scalar, true, "value", 0.0F}};
+    sink.Kind = Keire::VfxGraphNodeKind::Context;
+
+    Keire::VfxGraphSystem system;
+    system.Id = Id(2240);
+    system.Name = "Schema Four";
+    system.Nodes = {source, context, sink};
+    system.Connections = {{Id(2241), source.Id, Id(2202), context.Id, Id(2211), {}, block.Id},
+                          {Id(2242), context.Id, Id(2212), sink.Id, Id(2231), block.Id, {}}};
+    definition.Systems.push_back(std::move(system));
+
+    const auto encoded = Keire::VfxEffectAsset::Encode(definition);
+    const auto document = nlohmann::json::parse(reinterpret_cast<const char*>(encoded.data()),
+                                                reinterpret_cast<const char*>(encoded.data() + encoded.size()));
+    CHECK(document.at("schemaVersion") == Keire::CurrentVfxSchemaVersion);
+    CHECK(document.at("blackboard").at(9).at("default").get<std::uint64_t>() == 0xfedcba9876543210ULL);
+    CHECK(document.at("systems").at(0).at("nodes").at(0).at("properties").at(1).at("type") == "integer");
+    CHECK(document.at("systems").at(0).at("nodes").at(1).at("blocks").at(0).at("typeId") == "keire.block.force");
+    CHECK(document.at("systems").at(0).at("connections").at(0).at("inputBlock") == Id(2210).ToString());
+
+    const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
+    REQUIRE(decoded);
+    CHECK(decoded->Definition() == definition);
+    CHECK(Keire::VfxEffectAsset::Encode(decoded->Definition()) == encoded);
+}
+
+TEST_CASE("VFX schema one definitions publish as schema four legacy programs without mutating the source")
 {
     auto legacy = EffectDefinition();
     legacy.SchemaVersion = 1;
@@ -202,23 +452,189 @@ TEST_CASE("VFX schema one definitions publish as schema three legacy programs wi
     const auto published = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(legacy));
     CHECK(legacy.SchemaVersion == 1);
     CHECK(legacy.Systems.empty());
-    CHECK(published->Definition().SchemaVersion == 3);
+    CHECK(published->Definition().SchemaVersion == Keire::CurrentVfxSchemaVersion);
     CHECK(published->Definition().ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
     CHECK(published->Definition().Systems.empty());
+}
+
+TEST_CASE("Historical VFX schema fixtures migrate to schema four without replacing stable identities")
+{
+    const std::string header =
+        R"("emitterId":"56465854-4553-5449-0000-000000000001","name":"Golden","loop":false,"duration":1.0,"space":"world","seed":7,"capacity":32,"modules":[{"id":"56465854-4553-5449-0000-000000000002","enabled":true,"type":"emissionRate","particlesPerSecond":1.0},{"id":"56465854-4553-5449-0000-000000000003","enabled":true,"type":"renderer","renderer":"sprite","sprite":"","mesh":""}])";
+    const auto schemaOne = Bytes("{\"schemaVersion\":1," + header + "}");
+    const auto schemaTwo = Bytes(
+        "{\"schemaVersion\":2," + header +
+        R"(,"systems":[{"id":"56465854-4553-5449-0000-000000000010","name":"Legacy Two","nodes":[{"id":"56465854-4553-5449-0000-000000000011","type":"Spawn Context","context":"spawn","position":[12.0,34.0],"pins":[],"customHlsl":""}],"connections":[]}],"blackboard":[]})");
+    const auto schemaThree = Bytes(
+        "{\"schemaVersion\":3," + header +
+        R"(,"executionSource":"legacyModules","systems":[{"id":"56465854-4553-5449-0000-000000000020","name":"Legacy Three","nodes":[{"id":"56465854-4553-5449-0000-000000000021","type":"Emission Rate","context":"spawn","position":[56.0,78.0],"pins":[],"customHlsl":"","kind":"module","reference":"56465854-4553-5449-0000-000000000002"}],"connections":[]}],"blackboard":[]})");
+
+    const auto one = Keire::VfxEffectAsset::Decode(schemaOne)->Definition();
+    const auto two = Keire::VfxEffectAsset::Decode(schemaTwo)->Definition();
+    const auto three = Keire::VfxEffectAsset::Decode(schemaThree)->Definition();
+    CHECK(one.SchemaVersion == Keire::CurrentVfxSchemaVersion);
+    CHECK(two.SchemaVersion == Keire::CurrentVfxSchemaVersion);
+    CHECK(three.SchemaVersion == Keire::CurrentVfxSchemaVersion);
+    CHECK(one.ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
+    CHECK(two.ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
+    CHECK(three.ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
+    REQUIRE(two.Systems.size() == 1);
+    REQUIRE(two.Systems.front().Nodes.size() == 1);
+    CHECK(two.Systems.front().Id == Id(16));
+    CHECK(two.Systems.front().Nodes.front().Id == Id(17));
+    CHECK(two.Systems.front().Nodes.front().TypeId.Value == "keire.context.spawn");
+    CHECK(two.Systems.front().Nodes.front().Blocks.empty());
+    REQUIRE(three.Systems.size() == 1);
+    REQUIRE(three.Systems.front().Nodes.size() == 1);
+    CHECK(three.Systems.front().Id == Id(32));
+    CHECK(three.Systems.front().Nodes.front().Id == Id(33));
+    CHECK(three.Systems.front().Nodes.front().Reference == Id(2));
+    CHECK(three.Systems.front().Nodes.front().TypeId.Value == "keire.block.emission-rate");
+
+    auto historical = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+    historical.SchemaVersion = 3;
+    historical.Systems.front().Nodes.push_back(
+        {.Id = Id(2400), .Type = "Legacy Parameter", .Kind = Keire::VfxGraphNodeKind::Parameter});
+    historical.Systems.front().Nodes.push_back(
+        {.Id = Id(2401), .Type = "Legacy HLSL", .Kind = Keire::VfxGraphNodeKind::CustomHlsl});
+    historical.Systems.front().Nodes.push_back(
+        {.Id = Id(2402), .Type = "Add", .Kind = Keire::VfxGraphNodeKind::Operator});
+    const auto migrated = Keire::MigrateVfxEffectToSchema4(historical);
+    CHECK(historical.SchemaVersion == 3);
+    CHECK(migrated.SchemaVersion == Keire::CurrentVfxSchemaVersion);
+    CHECK(migrated.EmitterId == historical.EmitterId);
+    CHECK(migrated.Systems.front().Id == historical.Systems.front().Id);
+    CHECK(migrated.Systems.front().Connections == historical.Systems.front().Connections);
+    const auto parameterNode = std::ranges::find(migrated.Systems.front().Nodes, Id(2400), &Keire::VfxGraphNode::Id);
+    const auto hlslNode = std::ranges::find(migrated.Systems.front().Nodes, Id(2401), &Keire::VfxGraphNode::Id);
+    const auto operatorNode = std::ranges::find(migrated.Systems.front().Nodes, Id(2402), &Keire::VfxGraphNode::Id);
+    REQUIRE(parameterNode != migrated.Systems.front().Nodes.end());
+    REQUIRE(hlslNode != migrated.Systems.front().Nodes.end());
+    REQUIRE(operatorNode != migrated.Systems.front().Nodes.end());
+    CHECK(parameterNode->TypeId.Value == "keire.parameter");
+    CHECK(hlslNode->TypeId.Value == "keire.operator.portable-hlsl");
+    CHECK(operatorNode->TypeId.Value == "keire.operator.add");
+    CHECK(Keire::MigrateVfxEffectToSchema4(migrated) == migrated);
+
+    auto unsupported = migrated;
+    unsupported.SchemaVersion = Keire::CurrentVfxSchemaVersion + 1;
+    CHECK_THROWS_WITH_AS((void)Keire::MigrateVfxEffectToSchema4(unsupported),
+                         "VFX effect migration source schema is unsupported.", std::invalid_argument);
+}
+
+TEST_CASE("schema-three flow Modules migrate to ordered Context Blocks without changing executable identity")
+{
+    auto historical = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+    BindGraphDefault(historical, 2'500, Id(6), "gravityMultiplier", Keire::VfxValueType::Scalar, 2.0F);
+    const auto originalModuleCount = historical.Modules.size();
+    ConvertBlocksToSchemaThreeFlowNodes(historical);
+
+    const auto forceNode = std::ranges::find(historical.Systems.front().Nodes, Id(6), &Keire::VfxGraphNode::Reference);
+    REQUIRE(forceNode != historical.Systems.front().Nodes.end());
+    const auto forceBlockId = forceNode->Id;
+    const auto gravityPin =
+        std::ranges::find(forceNode->Pins, std::string("gravityMultiplier"), &Keire::VfxGraphPin::Semantic);
+    REQUIRE(gravityPin != forceNode->Pins.end());
+    const auto gravityPinId = gravityPin->Id;
+    const auto historicalProgram = Keire::CompileVfxEffect(historical, Keire::VfxBackend::Cpu);
+    REQUIRE(historicalProgram.Valid);
+
+    const auto migrated = Keire::MigrateVfxEffectToSchema4(historical);
+    CHECK(historical.SchemaVersion == 3);
+    CHECK(migrated.SchemaVersion == Keire::CurrentVfxSchemaVersion);
+    REQUIRE(migrated.Systems.size() == 1);
+    const auto& system = migrated.Systems.front();
+    CHECK(std::ranges::none_of(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Module || node.Kind == Keire::VfxGraphNodeKind::CustomHlsl; }));
+    const auto blockCount =
+        std::accumulate(system.Nodes.begin(), system.Nodes.end(), std::size_t{0},
+                        [](const std::size_t count, const auto& node) { return count + node.Blocks.size(); });
+    CHECK(blockCount == originalModuleCount);
+
+    const auto update = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(update != system.Nodes.end());
+    const auto forceBlock = std::ranges::find(update->Blocks, forceBlockId, &Keire::VfxGraphBlock::Id);
+    REQUIRE(forceBlock != update->Blocks.end());
+    CHECK(forceBlock->Reference == Id(6));
+    CHECK(std::ranges::find(forceBlock->Pins, gravityPinId, &Keire::VfxGraphPin::Id) != forceBlock->Pins.end());
+
+    const auto binding = std::ranges::find(system.Connections, Id(2'503), &Keire::VfxGraphConnection::Id);
+    REQUIRE(binding != system.Connections.end());
+    CHECK(binding->InputNode == update->Id);
+    CHECK(binding->InputBlock == forceBlockId);
+    CHECK(binding->InputPin == gravityPinId);
+
+    Keire::ValidateVfxEffect(migrated);
+    const auto migratedProgram = Keire::CompileVfxEffect(migrated, Keire::VfxBackend::Cpu);
+    REQUIRE(migratedProgram.Valid);
+    CHECK(migratedProgram.Hash == historicalProgram.Hash);
+    CHECK(migratedProgram.CanonicalIr == historicalProgram.CanonicalIr);
+    CHECK(Keire::MigrateVfxEffectToSchema4(migrated) == migrated);
+}
+
+TEST_CASE("VFX schema four rejects unknown type IDs and malformed typed fields")
+{
+    auto definition = EffectDefinition();
+    Keire::Matrix4 matrix;
+    definition.Systems = {{.Id = Id(2300),
+                           .Name = "Malformed Schema Probe",
+                           .Nodes = {{.Id = Id(2301),
+                                      .Type = "Source",
+                                      .Context = Keire::VfxContextType::Spawn,
+                                      .Pins = {{Id(2302), "Value", Keire::VfxValueType::Matrix, false}},
+                                      .Kind = Keire::VfxGraphNodeKind::Context,
+                                      .TypeId = {"keire.context.spawn"},
+                                      .Properties = {{"Strength", 1.0F}}},
+                                     {.Id = Id(2303),
+                                      .Type = "Sink",
+                                      .Context = Keire::VfxContextType::Output,
+                                      .Pins = {{Id(2304), "Value", Keire::VfxValueType::Matrix, true, "value", matrix}},
+                                      .Kind = Keire::VfxGraphNodeKind::Context,
+                                      .TypeId = {"keire.context.output"}}},
+                           .Connections = {{Id(2305), Id(2301), Id(2302), Id(2303), Id(2304)}}}};
+    const auto encoded = Keire::VfxEffectAsset::Encode(definition);
+    const auto valid = nlohmann::json::parse(reinterpret_cast<const char*>(encoded.data()),
+                                             reinterpret_cast<const char*>(encoded.data() + encoded.size()));
+
+    auto unknownProperty = valid;
+    unknownProperty["systems"][0]["nodes"][0]["properties"][0]["type"] = "unknown";
+    CHECK_THROWS_AS((void)Keire::VfxEffectAsset::Decode(Bytes(unknownProperty.dump())), std::runtime_error);
+
+    auto malformedMatrix = valid;
+    malformedMatrix["systems"][0]["nodes"][1]["pins"][0]["default"].erase(15);
+    CHECK_THROWS_WITH_AS((void)Keire::VfxEffectAsset::Decode(Bytes(malformedMatrix.dump())),
+                         "VFX matrix values must contain exactly sixteen scalars.", std::runtime_error);
+
+    auto missingEndpoint = valid;
+    missingEndpoint["systems"][0]["connections"][0].erase("inputBlock");
+    CHECK_THROWS_WITH_AS((void)Keire::VfxEffectAsset::Decode(Bytes(missingEndpoint.dump())),
+                         "VFX schema-four connection block endpoints are required.", std::runtime_error);
+
+    auto unknownTypeId = valid;
+    unknownTypeId["executionSource"] = "graph";
+    unknownTypeId["systems"][0]["nodes"][0]["kind"] = "operator";
+    unknownTypeId["systems"][0]["nodes"][0]["typeId"] = "keire.operator.unknown-schema-probe";
+    CHECK_THROWS_AS((void)Keire::VfxEffectAsset::Decode(Bytes(unknownTypeId.dump())), std::invalid_argument);
 }
 
 TEST_CASE("Default VFX effects expose a connected authoring context graph")
 {
     const auto definition = Keire::VfxEffectAsset::DefaultDefinition();
-    CHECK(definition.SchemaVersion == 3);
+    CHECK(definition.SchemaVersion == Keire::CurrentVfxSchemaVersion);
     CHECK(definition.ExecutionSource == Keire::VfxExecutionSource::Graph);
     REQUIRE(definition.Systems.size() == 1);
     const auto& system = definition.Systems.front();
-    CHECK(system.Nodes.size() == definition.Modules.size() + 4);
-    CHECK(system.Connections.size() == definition.Modules.size() + 3);
+    CHECK(system.Nodes.size() == 4);
+    CHECK(system.Connections.size() == 3);
     CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Context, &Keire::VfxGraphNode::Kind) == 4);
-    CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Module, &Keire::VfxGraphNode::Kind) ==
-          definition.Modules.size());
+    CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Module, &Keire::VfxGraphNode::Kind) == 0);
+    std::size_t blockCount = 0;
+    for (const auto& node : system.Nodes)
+        blockCount += node.Blocks.size();
+    CHECK(blockCount == definition.Modules.size());
 
     const auto cpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
     const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
@@ -228,7 +644,7 @@ TEST_CASE("Default VFX effects expose a connected authoring context graph")
     CHECK(cpu.CanonicalIr == gpu.CanonicalIr);
 }
 
-TEST_CASE("VFX legacy conversion produces deterministic executable schema-three topology")
+TEST_CASE("VFX legacy conversion produces deterministic executable schema-four topology")
 {
     const auto first = Keire::ConvertVfxEffectToGraph(EffectDefinition());
     const auto second = Keire::ConvertVfxEffectToGraph(EffectDefinition());
@@ -271,17 +687,29 @@ TEST_CASE("VFX graph compiler lowers Blackboard bindings and bounded Portable Cu
                             {{Id(202), "Gravity", Keire::VfxValueType::Scalar, false, "value", std::nullopt}},
                             {},
                             Keire::VfxGraphNodeKind::Parameter,
-                            Id(200)});
+                            Id(200),
+                            {"keire.parameter"}});
 
-    const auto forceNode =
-        std::ranges::find(system.Nodes, Id(6), [](const Keire::VfxGraphNode& node) { return node.Reference; });
-    REQUIRE(forceNode != system.Nodes.end());
+    const auto forceContext = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return std::ranges::find(node.Blocks, Id(6), &Keire::VfxGraphBlock::Reference) != node.Blocks.end(); });
+    REQUIRE(forceContext != system.Nodes.end());
+    const auto forceBlock = std::ranges::find(forceContext->Blocks, Id(6), &Keire::VfxGraphBlock::Reference);
+    REQUIRE(forceBlock != forceContext->Blocks.end());
     const auto gravityPin =
-        std::ranges::find(forceNode->Pins, std::string("gravityMultiplier"), &Keire::VfxGraphPin::Semantic);
-    REQUIRE(gravityPin != forceNode->Pins.end());
-    const auto forceNodeId = forceNode->Id;
+        std::ranges::find(forceBlock->Pins, std::string("gravityMultiplier"), &Keire::VfxGraphPin::Semantic);
+    REQUIRE(gravityPin != forceBlock->Pins.end());
+    const auto forceNodeId = forceContext->Id;
+    const auto forceBlockId = forceBlock->Id;
     const auto gravityPinId = gravityPin->Id;
-    system.Connections.push_back({Id(203), Id(201), Id(202), forceNodeId, gravityPinId});
+    Keire::VfxGraphConnection gravityConnection;
+    gravityConnection.Id = Id(203);
+    gravityConnection.OutputNode = Id(201);
+    gravityConnection.OutputPin = Id(202);
+    gravityConnection.InputNode = forceNodeId;
+    gravityConnection.InputPin = gravityPinId;
+    gravityConnection.InputBlock = forceBlockId;
+    system.Connections.push_back(gravityConnection);
 
     const auto updateContext = std::ranges::find_if(
         system.Nodes, [](const Keire::VfxGraphNode& node)
@@ -301,7 +729,8 @@ TEST_CASE("VFX graph compiler lowers Blackboard bindings and bounded Portable Cu
           {Id(206), "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt}},
          "Velocity += float3(0.0, 1.0, 0.0) * DeltaTime;\nSize *= 0.5;",
          Keire::VfxGraphNodeKind::CustomHlsl,
-         {}});
+         {},
+         {"keire.operator.portable-hlsl"}});
     updateCable->InputNode = Id(204);
     updateCable->InputPin = Id(205);
     system.Connections.push_back({Id(207), Id(204), Id(206), previousInputNode, previousInputPin});
@@ -318,7 +747,14 @@ TEST_CASE("VFX graph compiler lowers Blackboard bindings and bounded Portable Cu
     CHECK(compiled.CustomInstructions[1].Target == Keire::VfxCustomTarget::Size);
 
     auto duplicateDriver = definition;
-    duplicateDriver.Systems.front().Connections.push_back({Id(208), Id(201), Id(202), forceNodeId, gravityPinId});
+    Keire::VfxGraphConnection duplicateConnection;
+    duplicateConnection.Id = Id(208);
+    duplicateConnection.OutputNode = Id(201);
+    duplicateConnection.OutputPin = Id(202);
+    duplicateConnection.InputNode = forceNodeId;
+    duplicateConnection.InputBlock = forceBlockId;
+    duplicateConnection.InputPin = gravityPinId;
+    duplicateDriver.Systems.front().Connections.push_back(duplicateConnection);
     CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(duplicateDriver), "VFX graph input pins may have at most one cable.",
                          std::invalid_argument);
 
@@ -423,13 +859,36 @@ TEST_CASE("VFX importer canonicalizes source and extracts sorted dependencies")
     shape.Volume = Id(99);
     auto& renderer = std::get<Keire::VfxRendererModule>(definition.Modules.back().Payload);
     renderer.Sprite = Id(100);
+
+    Keire::VfxGraphNode context;
+    context.Id = Id(300);
+    context.TypeId.Value = "keire.context.update";
+    context.Type = "Dependency Context";
+    context.Kind = Keire::VfxGraphNodeKind::Context;
+    context.Properties = {{"Node Asset", Id(101)}};
+    context.Pins = {{Id(301), "Texture", Keire::VfxValueType::Texture, true, "texture", Id(102)}};
+    context.Blocks = {{.Id = Id(302),
+                       .TypeId = {"keire.block.force"},
+                       .Type = "Dependency Block",
+                       .Pins = {{Id(303), "Buffer", Keire::VfxValueType::Buffer, true, "buffer", Id(103)}},
+                       .Properties = {{"Block Asset", Id(104)}}}};
+    Keire::VfxGraphNode subgraph;
+    subgraph.Id = Id(304);
+    subgraph.TypeId.Value = "keire.subgraph.dependency";
+    subgraph.Type = "Dependency Subgraph";
+    subgraph.Kind = Keire::VfxGraphNodeKind::Subgraph;
+    subgraph.Reference = Id(105);
+    definition.Systems = {{.Id = Id(305), .Name = "Dependencies", .Nodes = {context, subgraph}}};
+    definition.Blackboard.push_back({Id(306), "Volume Texture", Keire::VfxValueType::Texture3D, Id(106), true});
+
     const auto dependencies = Keire::VfxEffectDependencies(definition);
-    CHECK(dependencies == std::vector<Keire::AssetId>{Id(99), Id(100)});
+    CHECK(dependencies ==
+          std::vector<Keire::AssetId>{Id(99), Id(100), Id(101), Id(102), Id(103), Id(104), Id(105), Id(106)});
 
     const auto source = Keire::VfxEffectAsset::Encode(definition);
     const auto importer = Keire::CreateVfxEffectAssetImporter();
     CHECK(importer.Name == "Keire.VfxEffect");
-    CHECK(importer.Version == 3);
+    CHECK(importer.Version == Keire::CurrentVfxSchemaVersion);
     CHECK(importer.Type == Keire::VfxEffectAsset::StaticType());
     CHECK(importer.Extensions == std::vector<std::string>{".keirevfx"});
     REQUIRE(importer.Import);
@@ -866,7 +1325,7 @@ TEST_CASE("VFX reload restarts CPU and GPU state when space seed or renderer rep
     }
 }
 
-TEST_CASE("GPU stored-state parameter changes restart a draining non-looping effect coherently")
+TEST_CASE("GPU live Force parameters preserve a draining non-looping effect")
 {
     auto definition = EffectDefinition();
     definition.Loop = false;
@@ -894,20 +1353,22 @@ TEST_CASE("GPU stored-state parameter changes restart a draining non-looping eff
     CHECK(debug.Effects[0].ElapsedSeconds == doctest::Approx(0.25F));
 
     world->SetParameter(handle, Id(700), Keire::Vector3{0.0F, 2.0F, 0.0F});
-    const auto restarted = world->CaptureRenderSnapshot();
-    REQUIRE(restarted.GpuEmitters().size() == 1);
-    CHECK(restarted.GpuEmitters().front().SimulationRevision != simulationRevision);
-    CHECK(restarted.GpuEmitters().front().SpawnSequence == 0);
+    const auto updated = world->CaptureRenderSnapshot();
+    REQUIRE(updated.GpuEmitters().size() == 1);
+    CHECK(updated.GpuEmitters().front().SimulationRevision == simulationRevision);
+    CHECK(updated.GpuEmitters().front().SpawnSequence == before.GpuEmitters().front().SpawnSequence);
+    CHECK(updated.GpuEmitters().front().Acceleration.Y ==
+          doctest::Approx(before.GpuEmitters().front().Acceleration.Y + 1.0F));
     debug = world->CaptureDebugSnapshot();
     REQUIRE(debug.EffectCount == 1);
-    CHECK(debug.Effects[0].ElapsedSeconds == doctest::Approx(0.0F));
-    CHECK(debug.Effects[0].ActiveParticles == 0);
-    CHECK(debug.Effects[0].Emitting);
+    CHECK(debug.Effects[0].ElapsedSeconds == doctest::Approx(0.25F));
+    CHECK(debug.Effects[0].ActiveParticles > 0);
+    CHECK_FALSE(debug.Effects[0].Emitting);
 
     world->Update(0.25F);
-    const auto replayed = world->CaptureRenderSnapshot();
-    REQUIRE(replayed.GpuEmitters().size() == 1);
-    CHECK(replayed.GpuEmitters().front().SpawnSequence == before.GpuEmitters().front().SpawnSequence);
+    const auto draining = world->CaptureRenderSnapshot();
+    REQUIRE(draining.GpuEmitters().size() == 1);
+    CHECK(draining.GpuEmitters().front().SpawnSequence == before.GpuEmitters().front().SpawnSequence);
     CHECK(world->IsAlive(handle));
 }
 
@@ -993,4 +1454,18 @@ TEST_CASE("VFX Emitter component schema exposes typed effect authoring")
     CHECK(std::get<Keire::AssetId>(registration.Serialize(*component).at("effect")) == Id(100));
     CHECK_THROWS_WITH_AS(registration.Deserialize(*component, {}, 3),
                          "Unsupported VFX Emitter component schema version.", std::invalid_argument);
+
+    auto& mutableEmitter = dynamic_cast<Keire::VfxEmitterComponent&>(*component);
+    CHECK_THROWS_WITH_AS(mutableEmitter.SetParameterOverride({Id(101), Keire::VfxScalarRange{2.0F, 1.0F}}),
+                         "VFX Emitter parameter override is invalid.", std::invalid_argument);
+
+    auto malformedValues = registration.Serialize(*component);
+    const nlohmann::json malformedOverrides =
+        nlohmann::json::array({{{"parameter", Id(102).ToString()},
+                                {"kind", "vector3Range"},
+                                {"value", nlohmann::json::array({nlohmann::json::array({0.0F, 1.0F, 2.0F, 3.0F}),
+                                                                 nlohmann::json::array({4.0F, 5.0F, 6.0F})})}}});
+    malformedValues["parameterOverrides"] = malformedOverrides.dump();
+    CHECK_THROWS_AS(registration.Deserialize(*component, malformedValues, 2), std::invalid_argument);
+    CHECK(mutableEmitter.ParameterOverrides().empty());
 }

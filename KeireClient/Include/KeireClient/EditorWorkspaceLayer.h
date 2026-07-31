@@ -397,6 +397,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool StopManagedVfx(Keire::AssetId entity) noexcept override;
     [[nodiscard]] bool PauseManagedVfx(Keire::AssetId entity, bool paused) noexcept override;
     [[nodiscard]] bool IsManagedVfxAlive(Keire::AssetId entity) const noexcept override;
+    [[nodiscard]] bool SetManagedVfxParameter(Keire::AssetId entity,
+                                              const Keire::VfxParameterOverride& value) noexcept override;
     [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
     [[nodiscard]] bool ConsumeManagedUiClick(Keire::AssetId entity) noexcept override;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,

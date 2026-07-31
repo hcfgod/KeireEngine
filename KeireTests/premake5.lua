@@ -24,7 +24,8 @@ project(ProjectConfig.TESTS_TARGET)
     {
         VendorIncludeDirs.doctest,
         VendorIncludeDirs.spdlog,
-        VendorIncludeDirs.imgui
+        VendorIncludeDirs.imgui,
+        VendorIncludeDirs.json
     }
 
     LinkKeireCore()

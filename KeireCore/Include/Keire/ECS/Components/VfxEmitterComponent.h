@@ -10,6 +10,8 @@
 
 namespace Keire
 {
+    class SceneRuntimeSession;
+
     /// Authored quality preference. The field is serialized for future policy integration and is not currently
     /// consumed by VfxWorld.
     enum class VfxQualityTier : std::uint8_t
@@ -94,6 +96,9 @@ namespace Keire
 
       private:
         friend ComponentRegistration CreateVfxEmitterComponentRegistration();
+        friend class SceneRuntimeSession;
+
+        void CommitRuntimeParameterOverrides(std::vector<VfxParameterOverride> values) noexcept;
 
         AssetId m_Effect;
         bool m_PlayOnAwake = true;

@@ -312,6 +312,21 @@ bool EditorWorkspaceLayer::IsManagedVfxAlive(const Keire::AssetId entity) const 
     }
 }
 
+bool EditorWorkspaceLayer::SetManagedVfxParameter(const Keire::AssetId entity,
+                                                  const Keire::VfxParameterOverride& value) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return session && session->SetVfxParameter(Keire::EntityId(entity), value);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 bool EditorWorkspaceLayer::SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept
 {
     try

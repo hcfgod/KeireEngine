@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <ranges>
 #include <span>
 #include <stdexcept>
@@ -30,9 +31,16 @@ namespace
             const auto previous = result.Modules[index].Id;
             result.Modules[index].Id = Id(index + 2);
             for (auto& system : result.Systems)
+            {
                 for (auto& node : system.Nodes)
+                {
                     if (node.Kind == Keire::VfxGraphNodeKind::Module && node.Reference == previous)
                         node.Reference = result.Modules[index].Id;
+                    for (auto& block : node.Blocks)
+                        if (block.Reference == previous)
+                            block.Reference = result.Modules[index].Id;
+                }
+            }
         }
         return result;
     }
@@ -219,6 +227,7 @@ TEST_CASE("VFX effect document authors graph systems nodes connections and black
                 {Id(32), "Value", Keire::VfxValueType::Scalar, false},
                 {Id(33), "Alternate", Keire::VfxValueType::Scalar, false},
             },
+        .TypeId = {"keire.context.update"},
     };
     const Keire::VfxGraphNode input{
         .Id = Id(34),
@@ -230,6 +239,7 @@ TEST_CASE("VFX effect document authors graph systems nodes connections and black
                 {Id(35), "Value", Keire::VfxValueType::Scalar, true},
                 {Id(36), "Alternate", Keire::VfxValueType::Scalar, true},
             },
+        .TypeId = {"keire.context.update"},
     };
     CHECK(document.AddNode(system.Id, output));
     CHECK(document.AddNode(system.Id, input));
@@ -322,6 +332,946 @@ TEST_CASE("VFX effect document authors graph systems nodes connections and black
     undoService->Close();
 }
 
+TEST_CASE("VFX Context Blocks author ordered module and portable HLSL execution transactionally")
+{
+    auto authored = Definition();
+    const auto& authoredSystem = authored.Systems.front();
+    const auto authoredUpdate = std::ranges::find_if(
+        authoredSystem.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(authoredUpdate != authoredSystem.Nodes.end());
+    CHECK(std::ranges::none_of(authoredSystem.Nodes, [](const Keire::VfxGraphNode& node)
+                               { return node.Kind == Keire::VfxGraphNodeKind::Module; }));
+    const auto systemId = authoredSystem.Id;
+    const auto updateId = authoredUpdate->Id;
+    const auto originalBlockCount = authoredUpdate->Blocks.size();
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "VFX Context Blocks"});
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(399), authored, 1, undo);
+
+    const Keire::VfxModuleDefinition forceModule{
+        .Id = Id(400),
+        .Payload = Keire::VfxForceModule{.Force = {0.0F, 4.0F, 0.0F}, .GravityMultiplier = 0.25F},
+    };
+    REQUIRE(document.AddModule(forceModule));
+    auto forceBlock = Keire::CreateVfxGraphBlock(forceModule);
+    forceBlock.Id = Id(401);
+    for (std::size_t index = 0; index < forceBlock.Pins.size(); ++index)
+        forceBlock.Pins[index].Id = Id(402 + index);
+    REQUIRE(document.AddBlock(systemId, updateId, forceBlock));
+
+    auto portableBlock = Keire::CreateVfxGraphPortableHlslBlock("Size *= 1.0;");
+    portableBlock.Id = Id(410);
+    REQUIRE(document.AddBlock(systemId, updateId, portableBlock));
+
+    const auto findUpdate = [&document, updateId]() -> const Keire::VfxGraphNode&
+    {
+        const auto& nodes = document.Definition().Systems.front().Nodes;
+        const auto found = std::ranges::find(nodes, updateId, &Keire::VfxGraphNode::Id);
+        if (found == nodes.end())
+            throw std::logic_error("Expected Update Context was unavailable.");
+        return *found;
+    };
+    const auto findBlock = [&findUpdate](const Keire::AssetId blockId) -> const Keire::VfxGraphBlock&
+    {
+        const auto& blocks = findUpdate().Blocks;
+        const auto found = std::ranges::find(blocks, blockId, &Keire::VfxGraphBlock::Id);
+        if (found == blocks.end())
+            throw std::logic_error("Expected Context Block was unavailable.");
+        return *found;
+    };
+
+    REQUIRE(findUpdate().Blocks.size() == originalBlockCount + 2);
+    CHECK(findUpdate().Blocks[originalBlockCount].Id == forceBlock.Id);
+    CHECK(findUpdate().Blocks[originalBlockCount + 1].Id == portableBlock.Id);
+    CHECK(findBlock(forceBlock.Id).Reference == forceModule.Id);
+    CHECK(findBlock(portableBlock.Id).TypeId.View() == "keire.block.portable-hlsl");
+    REQUIRE(findBlock(portableBlock.Id).Properties.size() == 1);
+    CHECK(std::get<std::string>(findBlock(portableBlock.Id).Properties.front().Value) == "Size *= 1.0;");
+
+    REQUIRE(document.SetBlockEnabled(systemId, updateId, forceBlock.Id, false));
+    REQUIRE(document.EditModule(forceModule.Id, [](Keire::VfxModuleDefinition& module) { module.Enabled = false; }));
+    CHECK_FALSE(findBlock(forceBlock.Id).Enabled);
+    REQUIRE(document.EditModule(forceModule.Id, [](Keire::VfxModuleDefinition& module) { module.Enabled = true; }));
+    CHECK_FALSE(findBlock(forceBlock.Id).Enabled);
+    REQUIRE(document.SetBlockEnabled(systemId, updateId, forceBlock.Id, true));
+
+    REQUIRE(document.MoveBlock(systemId, updateId, portableBlock.Id, 0));
+    CHECK(findUpdate().Blocks.front().Id == portableBlock.Id);
+    CHECK(document.Undo());
+    CHECK(findUpdate().Blocks[originalBlockCount + 1].Id == portableBlock.Id);
+    CHECK(document.Redo());
+    CHECK(findUpdate().Blocks.front().Id == portableBlock.Id);
+
+    REQUIRE(document.SetBlockEnabled(systemId, updateId, portableBlock.Id, false));
+    CHECK_FALSE(findBlock(portableBlock.Id).Enabled);
+    CHECK(document.Undo());
+    CHECK(findBlock(portableBlock.Id).Enabled);
+    CHECK(document.Redo());
+    CHECK_FALSE(findBlock(portableBlock.Id).Enabled);
+    REQUIRE(document.SetBlockEnabled(systemId, updateId, portableBlock.Id, true));
+
+    const Keire::VfxGraphPin amountPin{
+        .Id = Id(411),
+        .Name = "Amount",
+        .Type = Keire::VfxValueType::Scalar,
+        .Input = true,
+        .Semantic = "amount",
+        .DefaultValue = Keire::VfxParameterValue{1.0F},
+    };
+    REQUIRE(document.AddBlockPin(systemId, updateId, portableBlock.Id, amountPin));
+    REQUIRE(document.EditBlock(systemId, updateId, portableBlock.Id, [](Keire::VfxGraphBlock& block)
+                               { block.Properties.front().Value = std::string("Size *= amount;"); }));
+    CHECK(std::get<std::string>(findBlock(portableBlock.Id).Properties.front().Value) == "Size *= amount;");
+
+    const Keire::VfxBlackboardParameter amountParameter{
+        .Id = Id(412),
+        .Name = "Amount",
+        .Type = Keire::VfxValueType::Scalar,
+        .DefaultValue = 2.0F,
+    };
+    const Keire::VfxGraphNode amountNode{
+        .Id = Id(413),
+        .Type = "Amount",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {-320.0F, 220.0F},
+        .Pins = {{Id(414), "Amount", Keire::VfxValueType::Scalar, false, "value", std::nullopt}},
+        .Kind = Keire::VfxGraphNodeKind::Parameter,
+        .Reference = amountParameter.Id,
+        .TypeId = {"keire.parameter"},
+    };
+    REQUIRE(document.AddBlackboardParameter(amountParameter));
+    REQUIRE(document.AddNode(systemId, amountNode));
+
+    const Keire::VfxGraphEndpoint outputEndpoint{amountNode.Id, {}, amountNode.Pins.front().Id};
+    const Keire::VfxGraphEndpoint inputEndpoint{updateId, portableBlock.Id, amountPin.Id};
+    const auto accepted = document.CheckConnection(systemId, outputEndpoint, inputEndpoint);
+    CHECK(accepted.Status == KeireEditor::VfxGraphConnectionStatus::Accepted);
+    CHECK_FALSE(accepted.ReplacesInput);
+    const auto missingBlock = document.CheckConnection(systemId, outputEndpoint, {updateId, {}, amountPin.Id});
+    CHECK(missingBlock.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+
+    const Keire::VfxGraphConnection binding{
+        .Id = Id(415),
+        .OutputNode = outputEndpoint.Node,
+        .OutputPin = outputEndpoint.Pin,
+        .InputNode = inputEndpoint.Node,
+        .InputPin = inputEndpoint.Pin,
+        .OutputBlock = outputEndpoint.Block,
+        .InputBlock = inputEndpoint.Block,
+    };
+    REQUIRE(document.AddConnection(systemId, binding));
+    REQUIRE(document.EditBlockPin(systemId, updateId, portableBlock.Id, amountPin.Id,
+                                  [](Keire::VfxGraphPin& pin) { pin.Name = "Strength"; }));
+    CHECK(findBlock(portableBlock.Id).Pins.front().Name == "Strength");
+    CHECK(std::ranges::find(document.Definition().Systems.front().Connections, binding.Id,
+                            &Keire::VfxGraphConnection::Id) != document.Definition().Systems.front().Connections.end());
+
+    REQUIRE(document.EditBlock(systemId, updateId, portableBlock.Id, [](Keire::VfxGraphBlock& block)
+                               { block.Properties.front().Value = std::string("Size *= 1.0;"); }));
+    REQUIRE(document.RemoveBlockPin(systemId, updateId, portableBlock.Id, amountPin.Id));
+    CHECK(findBlock(portableBlock.Id).Pins.empty());
+    CHECK(std::ranges::find(document.Definition().Systems.front().Connections, binding.Id,
+                            &Keire::VfxGraphConnection::Id) == document.Definition().Systems.front().Connections.end());
+    CHECK(document.Undo());
+    REQUIRE(findBlock(portableBlock.Id).Pins.size() == 1);
+    CHECK(findBlock(portableBlock.Id).Pins.front().Id == amountPin.Id);
+    CHECK(std::ranges::find(document.Definition().Systems.front().Connections, binding.Id,
+                            &Keire::VfxGraphConnection::Id) != document.Definition().Systems.front().Connections.end());
+
+    REQUIRE(document.RemoveBlock(systemId, updateId, portableBlock.Id));
+    CHECK(std::ranges::find(findUpdate().Blocks, portableBlock.Id, &Keire::VfxGraphBlock::Id) ==
+          findUpdate().Blocks.end());
+    CHECK(std::ranges::find(document.Definition().Systems.front().Connections, binding.Id,
+                            &Keire::VfxGraphConnection::Id) == document.Definition().Systems.front().Connections.end());
+    CHECK(document.Undo());
+    CHECK(findBlock(portableBlock.Id).Pins.front().Id == amountPin.Id);
+    CHECK(std::ranges::find(document.Definition().Systems.front().Connections, binding.Id,
+                            &Keire::VfxGraphConnection::Id) != document.Definition().Systems.front().Connections.end());
+    CHECK(document.Redo());
+    CHECK(std::ranges::find(findUpdate().Blocks, portableBlock.Id, &Keire::VfxGraphBlock::Id) ==
+          findUpdate().Blocks.end());
+    CHECK(document.Undo());
+
+    const auto beforeRejectedEdit = document.Definition();
+    CHECK_THROWS_AS((void)document.EditBlock(systemId, updateId, portableBlock.Id,
+                                             [](Keire::VfxGraphBlock& block) { block.Id = Id(416); }),
+                    std::invalid_argument);
+    CHECK(document.Definition() == beforeRejectedEdit);
+    CHECK_THROWS_AS((void)document.EditBlockPin(systemId, updateId, portableBlock.Id, amountPin.Id,
+                                                [](Keire::VfxGraphPin& pin) { pin.Id = Id(417); }),
+                    std::invalid_argument);
+    CHECK(document.Definition() == beforeRejectedEdit);
+    CHECK_THROWS_AS((void)document.MoveBlock(systemId, updateId, portableBlock.Id, findUpdate().Blocks.size()),
+                    std::invalid_argument);
+    CHECK(document.Definition() == beforeRejectedEdit);
+
+    document.Close();
+    undoService->Close();
+}
+
+TEST_CASE("VFX Context Blocks remain authorable in a disconnected draft without replacing the last valid preview")
+{
+    const auto authored = Definition();
+    const auto& graph = authored.Systems.front();
+    const auto flowConnection = std::ranges::find_if(graph.Connections, [](const Keire::VfxGraphConnection& connection)
+                                                     { return !connection.OutputBlock && !connection.InputBlock; });
+    REQUIRE(flowConnection != graph.Connections.end());
+    const auto update = std::ranges::find_if(
+        graph.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(update != graph.Nodes.end());
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "VFX disconnected Context Block draft"});
+    Keire::VfxEffectDefinition preview;
+    std::size_t previewCount = 0;
+    KeireEditor::VfxEffectDocument document({.Preview =
+                                                 [&](const Keire::AssetId, const Keire::VfxEffectDefinition& definition)
+                                             {
+                                                 preview = definition;
+                                                 ++previewCount;
+                                             },
+                                             .Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(420), authored, 1, undo);
+    REQUIRE(previewCount == 1);
+
+    REQUIRE(document.RemoveConnection(graph.Id, flowConnection->Id));
+    CHECK_FALSE(document.Publishable());
+    CHECK(previewCount == 1);
+    CHECK(preview == authored);
+
+    const Keire::VfxModuleDefinition forceModule{
+        .Id = Id(421),
+        .Payload = Keire::VfxForceModule{.Force = {1.0F, 0.0F, 0.0F}},
+    };
+    REQUIRE(document.AddModule(forceModule));
+    auto forceBlock = Keire::CreateVfxGraphBlock(forceModule);
+    forceBlock.Id = Id(422);
+    for (std::size_t index = 0; index < forceBlock.Pins.size(); ++index)
+        forceBlock.Pins[index].Id = Id(423 + index);
+    REQUIRE(document.AddBlock(graph.Id, update->Id, forceBlock));
+    CHECK_FALSE(document.Publishable());
+    CHECK(previewCount == 1);
+    CHECK(preview == authored);
+
+    CHECK(document.Undo());
+    CHECK(document.Undo());
+    CHECK(document.Undo());
+    CHECK(document.Definition() == authored);
+    CHECK(document.Publishable());
+    CHECK(previewCount == 2);
+    CHECK(preview == authored);
+
+    document.Close();
+    undoService->Close();
+}
+
+TEST_CASE("VFX graph interactions preserve requested placement and atomically replace occupied inputs")
+{
+    auto authored = Definition();
+    authored.ExecutionSource = Keire::VfxExecutionSource::LegacyModules;
+    authored.Systems = {{.Id = Id(300), .Name = "Interaction Graph"}};
+    authored.Blackboard = {{Id(320), "Primary", Keire::VfxValueType::Scalar, 0.0F, true},
+                           {Id(321), "Alternate", Keire::VfxValueType::Scalar, 0.0F, true},
+                           {Id(322), "Vector", Keire::VfxValueType::Vector3, Keire::Vector3{}, true}};
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "VFX Graph Interactions"});
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(301), authored, 1, undo);
+
+    const Keire::VfxGraphNode primarySource{
+        .Id = Id(302),
+        .Type = "Primary Source",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {137.5F, -48.25F},
+        .Pins = {{Id(303), "Value", Keire::VfxValueType::Scalar, false}},
+        .Kind = Keire::VfxGraphNodeKind::Parameter,
+        .Reference = Id(320),
+        .TypeId = {"keire.parameter"},
+    };
+    const Keire::VfxGraphNode alternateSource{
+        .Id = Id(305),
+        .Type = "Alternate Source",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {-220.0F, 84.0F},
+        .Pins = {{Id(306), "Value", Keire::VfxValueType::Scalar, false}},
+        .Kind = Keire::VfxGraphNodeKind::Parameter,
+        .Reference = Id(321),
+        .TypeId = {"keire.parameter"},
+    };
+    const Keire::VfxGraphNode vectorSource{
+        .Id = Id(314),
+        .Type = "Vector Source",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {-220.0F, 180.0F},
+        .Pins = {{Id(315), "Vector", Keire::VfxValueType::Vector3, false}},
+        .Kind = Keire::VfxGraphNodeKind::Parameter,
+        .Reference = Id(322),
+        .TypeId = {"keire.parameter"},
+    };
+    const Keire::VfxGraphNode sink{
+        .Id = Id(307),
+        .Type = "Sink",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {520.0F, 96.0F},
+        .Pins = {{Id(308), "Value", Keire::VfxValueType::Scalar, true}},
+        .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
+    };
+
+    CHECK(document.AddNode(authored.Systems.front().Id, primarySource));
+    REQUIRE(document.Definition().Systems.front().Nodes.size() == 1);
+    CHECK(document.Definition().Systems.front().Nodes.front().EditorPosition == primarySource.EditorPosition);
+    CHECK(document.Undo());
+    CHECK(document.Definition().Systems.front().Nodes.empty());
+    CHECK(document.Redo());
+    REQUIRE(document.Definition().Systems.front().Nodes.size() == 1);
+    CHECK(document.Definition().Systems.front().Nodes.front() == primarySource);
+
+    CHECK(document.AddNode(authored.Systems.front().Id, alternateSource));
+    CHECK(document.AddNode(authored.Systems.front().Id, vectorSource));
+    CHECK(document.AddNode(authored.Systems.front().Id, sink));
+    const auto accepted = document.CheckConnection(authored.Systems.front().Id, primarySource.Id,
+                                                   primarySource.Pins[0].Id, sink.Id, sink.Pins[0].Id);
+    CHECK(accepted.Status == KeireEditor::VfxGraphConnectionStatus::Accepted);
+    CHECK_FALSE(accepted.ReplacesInput);
+    CHECK(accepted.Diagnostic.empty());
+    const auto wrongDirection = document.CheckConnection(authored.Systems.front().Id, sink.Id, sink.Pins[0].Id,
+                                                         primarySource.Id, primarySource.Pins[0].Id);
+    CHECK(wrongDirection.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+    CHECK_FALSE(wrongDirection.ReplacesInput);
+    CHECK_FALSE(wrongDirection.Diagnostic.empty());
+    const auto wrongType = document.CheckConnection(authored.Systems.front().Id, vectorSource.Id,
+                                                    vectorSource.Pins[0].Id, sink.Id, sink.Pins[0].Id);
+    CHECK(wrongType.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+    CHECK_FALSE(wrongType.ReplacesInput);
+    CHECK_FALSE(wrongType.Diagnostic.empty());
+
+    const Keire::VfxGraphConnection primary{
+        .Id = Id(309),
+        .OutputNode = primarySource.Id,
+        .OutputPin = primarySource.Pins[0].Id,
+        .InputNode = sink.Id,
+        .InputPin = sink.Pins[0].Id,
+    };
+    CHECK(document.AddConnection(authored.Systems.front().Id, primary));
+    REQUIRE(document.Definition().Systems.front().Connections.size() == 1);
+    CHECK(document.Definition().Systems.front().Connections.front() == primary);
+    const auto duplicate = document.CheckConnection(authored.Systems.front().Id, primarySource.Id,
+                                                    primarySource.Pins[0].Id, sink.Id, sink.Pins[0].Id);
+    CHECK(duplicate.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+    CHECK_FALSE(duplicate.ReplacesInput);
+    CHECK_FALSE(duplicate.Diagnostic.empty());
+
+    const auto beforeInvalidConnection = document.Definition();
+    CHECK_THROWS_AS((void)document.AddConnection(authored.Systems.front().Id, {.Id = Id(310),
+                                                                               .OutputNode = sink.Id,
+                                                                               .OutputPin = sink.Pins[0].Id,
+                                                                               .InputNode = primarySource.Id,
+                                                                               .InputPin = primarySource.Pins[0].Id}),
+                    std::invalid_argument);
+    CHECK(document.Definition() == beforeInvalidConnection);
+    CHECK_THROWS_AS((void)document.AddConnection(authored.Systems.front().Id, {.Id = Id(311),
+                                                                               .OutputNode = vectorSource.Id,
+                                                                               .OutputPin = vectorSource.Pins[0].Id,
+                                                                               .InputNode = sink.Id,
+                                                                               .InputPin = sink.Pins[0].Id}),
+                    std::invalid_argument);
+    CHECK(document.Definition() == beforeInvalidConnection);
+    CHECK_THROWS_AS((void)document.AddConnection(authored.Systems.front().Id, {.Id = Id(312),
+                                                                               .OutputNode = primarySource.Id,
+                                                                               .OutputPin = primarySource.Pins[0].Id,
+                                                                               .InputNode = sink.Id,
+                                                                               .InputPin = Id(399)}),
+                    std::invalid_argument);
+    CHECK(document.Definition() == beforeInvalidConnection);
+
+    const Keire::VfxGraphConnection replacement{
+        .Id = Id(313),
+        .OutputNode = alternateSource.Id,
+        .OutputPin = alternateSource.Pins[0].Id,
+        .InputNode = sink.Id,
+        .InputPin = sink.Pins[0].Id,
+    };
+    const auto replacementCheck = document.CheckConnection(authored.Systems.front().Id, alternateSource.Id,
+                                                           alternateSource.Pins[0].Id, sink.Id, sink.Pins[0].Id);
+    CHECK(replacementCheck.Status == KeireEditor::VfxGraphConnectionStatus::Accepted);
+    CHECK(replacementCheck.ReplacesInput);
+    CHECK(replacementCheck.Diagnostic.empty());
+    CHECK(document.AddConnection(authored.Systems.front().Id, replacement));
+    REQUIRE(document.Definition().Systems.front().Connections.size() == 1);
+    CHECK(document.Definition().Systems.front().Connections.front() == replacement);
+    CHECK(document.Undo());
+    REQUIRE(document.Definition().Systems.front().Connections.size() == 1);
+    CHECK(document.Definition().Systems.front().Connections.front() == primary);
+    CHECK(document.Redo());
+    REQUIRE(document.Definition().Systems.front().Connections.size() == 1);
+    CHECK(document.Definition().Systems.front().Connections.front() == replacement);
+
+    const auto beforeDuplicateId = document.Definition();
+    CHECK_THROWS_AS((void)document.AddConnection(authored.Systems.front().Id, replacement), std::invalid_argument);
+    CHECK(document.Definition() == beforeDuplicateId);
+
+    CHECK(document.RemoveConnection(authored.Systems.front().Id, replacement.Id));
+    CHECK(document.Definition().Systems.front().Connections.empty());
+    CHECK(document.Undo());
+    REQUIRE(document.Definition().Systems.front().Connections.size() == 1);
+    CHECK(document.Definition().Systems.front().Connections.front() == replacement);
+    CHECK(document.Redo());
+    CHECK(document.Definition().Systems.front().Connections.empty());
+
+    document.Close();
+    undoService->Close();
+}
+
+TEST_CASE("VFX graph interaction deletions clean incident cables and round trip through undo and redo")
+{
+    const Keire::VfxGraphNode source{
+        .Id = Id(320),
+        .Type = "Source",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {80.0F, 120.0F},
+        .Pins =
+            {
+                {Id(321), "First", Keire::VfxValueType::Scalar, false},
+                {Id(322), "Second", Keire::VfxValueType::Scalar, false},
+            },
+        .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
+    };
+    const Keire::VfxGraphNode sink{
+        .Id = Id(323),
+        .Type = "Sink",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {480.0F, 120.0F},
+        .Pins =
+            {
+                {Id(324), "First", Keire::VfxValueType::Scalar, true},
+                {Id(325), "Second", Keire::VfxValueType::Scalar, true},
+            },
+        .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
+    };
+    const Keire::VfxGraphSystem graph{
+        .Id = Id(326),
+        .Name = "Deletion Graph",
+        .Nodes = {source, sink},
+        .Connections =
+            {
+                {Id(327), source.Id, source.Pins[0].Id, sink.Id, sink.Pins[0].Id},
+                {Id(328), source.Id, source.Pins[1].Id, sink.Id, sink.Pins[1].Id},
+            },
+    };
+    auto authored = Definition();
+    authored.ExecutionSource = Keire::VfxExecutionSource::LegacyModules;
+    authored.Systems = {graph};
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "VFX Graph Deletions"});
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(329), authored, 1, undo);
+
+    CHECK(document.RemovePin(graph.Id, sink.Id, sink.Pins[0].Id));
+    REQUIRE(document.Definition().Systems.front().Nodes.back().Pins.size() == 1);
+    CHECK(document.Definition().Systems.front().Nodes.back().Pins.front() == sink.Pins[1]);
+    REQUIRE(document.Definition().Systems.front().Connections.size() == 1);
+    CHECK(document.Definition().Systems.front().Connections.front().Id == Id(328));
+    const auto withoutFirstPin = document.Definition();
+    CHECK(document.Undo());
+    CHECK(document.Definition() == authored);
+    CHECK(document.Redo());
+    CHECK(document.Definition() == withoutFirstPin);
+    CHECK(document.Undo());
+    CHECK(document.Definition() == authored);
+
+    CHECK(document.RemoveNode(graph.Id, source.Id));
+    REQUIRE(document.Definition().Systems.front().Nodes.size() == 1);
+    CHECK(document.Definition().Systems.front().Nodes.front() == sink);
+    CHECK(document.Definition().Systems.front().Connections.empty());
+    const auto withoutSource = document.Definition();
+    CHECK(document.Undo());
+    CHECK(document.Definition() == authored);
+    CHECK(document.Redo());
+    CHECK(document.Definition() == withoutSource);
+
+    document.Close();
+    undoService->Close();
+}
+
+TEST_CASE("VFX particle-stream unlink remains undoable while invalid drafts preserve the last valid preview")
+{
+    const auto authored = Definition();
+    REQUIRE(authored.ExecutionSource == Keire::VfxExecutionSource::Graph);
+    REQUIRE(authored.Systems.size() == 1);
+    const auto& graph = authored.Systems.front();
+    const auto findPin = [&](const Keire::AssetId nodeId, const Keire::AssetId pinId) -> const Keire::VfxGraphPin*
+    {
+        const auto node = std::ranges::find(graph.Nodes, nodeId, &Keire::VfxGraphNode::Id);
+        if (node == graph.Nodes.end())
+            return nullptr;
+        const auto pin = std::ranges::find(node->Pins, pinId, &Keire::VfxGraphPin::Id);
+        return pin == node->Pins.end() ? nullptr : &*pin;
+    };
+    const auto flowConnection =
+        std::ranges::find_if(graph.Connections,
+                             [&](const Keire::VfxGraphConnection& connection)
+                             {
+                                 const auto* output = findPin(connection.OutputNode, connection.OutputPin);
+                                 const auto* input = findPin(connection.InputNode, connection.InputPin);
+                                 return output && input && output->Type == Keire::VfxValueType::ParticleStream &&
+                                        input->Type == Keire::VfxValueType::ParticleStream;
+                             });
+    REQUIRE(flowConnection != graph.Connections.end());
+    const auto removableContext =
+        std::ranges::find_if(graph.Nodes, [](const Keire::VfxGraphNode& node)
+                             { return node.Kind == Keire::VfxGraphNodeKind::Context && !node.Blocks.empty(); });
+    REQUIRE(removableContext != graph.Nodes.end());
+    const auto removableBlock = removableContext->Blocks.front().Id;
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "VFX Particle Stream Unlink"});
+    Keire::VfxEffectDefinition preview;
+    std::size_t previewCount = 0;
+    std::size_t persistCount = 0;
+    KeireEditor::VfxEffectDocument document(
+        {.Preview =
+             [&](const Keire::AssetId, const Keire::VfxEffectDefinition& definition)
+         {
+             preview = definition;
+             ++previewCount;
+         },
+         .Persist = [&](const Keire::AssetId, const std::span<const std::byte>) { ++persistCount; }});
+    document.Open(Id(330), authored, 1, undo);
+    REQUIRE(previewCount == 1);
+    CHECK(preview == authored);
+
+    CHECK(document.RemoveConnection(graph.Id, flowConnection->Id));
+    CHECK(document.Dirty());
+    CHECK(std::ranges::find(document.Definition().Systems.front().Connections, flowConnection->Id,
+                            &Keire::VfxGraphConnection::Id) == document.Definition().Systems.front().Connections.end());
+    CHECK_FALSE(document.Diagnostic().empty());
+    CHECK(std::string(document.Diagnostic()).find("particle-stream") != std::string::npos);
+    CHECK(previewCount == 1);
+    CHECK(preview == authored);
+
+    CHECK_THROWS_AS(document.Save(), std::invalid_argument);
+    CHECK(persistCount == 0);
+    CHECK(document.Dirty());
+    CHECK(previewCount == 1);
+    CHECK(preview == authored);
+
+    const auto unlinked = document.Definition();
+    CHECK(document.RemoveBlock(graph.Id, removableContext->Id, removableBlock));
+    const auto changedContext =
+        std::ranges::find(document.Definition().Systems.front().Nodes, removableContext->Id, &Keire::VfxGraphNode::Id);
+    REQUIRE(changedContext != document.Definition().Systems.front().Nodes.end());
+    CHECK(std::ranges::find(changedContext->Blocks, removableBlock, &Keire::VfxGraphBlock::Id) ==
+          changedContext->Blocks.end());
+    CHECK(std::ranges::none_of(
+        document.Definition().Systems.front().Connections, [&](const Keire::VfxGraphConnection& connection)
+        { return connection.OutputBlock == removableBlock || connection.InputBlock == removableBlock; }));
+    CHECK_FALSE(document.Diagnostic().empty());
+    CHECK(previewCount == 1);
+    CHECK(document.Undo());
+    CHECK(document.Definition() == unlinked);
+    CHECK_FALSE(document.Diagnostic().empty());
+    CHECK(previewCount == 1);
+
+    CHECK(document.Undo());
+    CHECK(document.Definition() == authored);
+    CHECK_FALSE(document.Dirty());
+    CHECK(document.Diagnostic().empty());
+    CHECK(previewCount == 2);
+    CHECK(preview == authored);
+
+    document.Close();
+    undoService->Close();
+}
+
+TEST_CASE("VFX undo accounting includes dynamically allocated curve and gradient keys")
+{
+    const auto authored = Definition();
+    const auto initialCurve =
+        std::ranges::find_if(authored.Modules, [](const Keire::VfxModuleDefinition& module)
+                             { return std::holds_alternative<Keire::VfxSizeOverLifetimeModule>(module.Payload); });
+    const auto initialGradient =
+        std::ranges::find_if(authored.Modules, [](const Keire::VfxModuleDefinition& module)
+                             { return std::holds_alternative<Keire::VfxColorOverLifetimeModule>(module.Payload); });
+    REQUIRE(initialCurve != authored.Modules.end());
+    REQUIRE(initialGradient != authored.Modules.end());
+
+    std::vector<Keire::CurveKey> curveKeys;
+    std::vector<Keire::ColorGradientKey> gradientKeys;
+    constexpr std::size_t keyCount = 32;
+    curveKeys.reserve(keyCount);
+    gradientKeys.reserve(keyCount);
+    for (std::size_t index = 0; index < keyCount; ++index)
+    {
+        const auto time = static_cast<float>(index) / static_cast<float>(keyCount - 1);
+        curveKeys.push_back({.Time = time, .Value = 1.0F});
+        gradientKeys.push_back({.Time = time, .Value = Keire::Color{}});
+    }
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto controlUndo = undoService->CreateContext({.Name = "VFX control history"});
+    KeireEditor::VfxEffectDocument control({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    control.Open(Id(350), authored, 1, controlUndo);
+    REQUIRE(control.Edit("Control VFX storage", [](Keire::VfxEffectDefinition& definition) { ++definition.Seed; }));
+    const auto controlBytes = controlUndo->EstimatedBytes();
+
+    auto expandedUndo = undoService->CreateContext({.Name = "VFX expanded curve history"});
+    KeireEditor::VfxEffectDocument expanded({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    expanded.Open(Id(351), authored, 1, expandedUndo);
+    REQUIRE(expanded.Edit("Expand VFX curve storage",
+                          [curveKeys, gradientKeys](Keire::VfxEffectDefinition& definition)
+                          {
+                              for (auto& module : definition.Modules)
+                              {
+                                  if (auto* size = std::get_if<Keire::VfxSizeOverLifetimeModule>(&module.Payload))
+                                      size->Size = Keire::Curve1D(curveKeys);
+                                  if (auto* color = std::get_if<Keire::VfxColorOverLifetimeModule>(&module.Payload))
+                                      color->Color = Keire::ColorGradient(gradientKeys);
+                              }
+                          }));
+
+    const auto initialCurveKeys = std::get<Keire::VfxSizeOverLifetimeModule>(initialCurve->Payload).Size.Keys().size();
+    const auto initialGradientKeys =
+        std::get<Keire::VfxColorOverLifetimeModule>(initialGradient->Payload).Color.Keys().size();
+    const auto additionalBytes = (keyCount - initialCurveKeys) * sizeof(Keire::CurveKey) +
+                                 (keyCount - initialGradientKeys) * sizeof(Keire::ColorGradientKey);
+    CHECK(expandedUndo->EstimatedBytes() == controlBytes + additionalBytes);
+
+    control.Close();
+    expanded.Close();
+    undoService->Close();
+}
+
+TEST_CASE("VFX graph connection preflight rejects backward particle flow without changing the draft")
+{
+    const auto authored = Definition();
+    const auto& graph = authored.Systems.front();
+    const auto initialize = std::ranges::find_if(
+        graph.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Initialize; });
+    const auto update = std::ranges::find_if(
+        graph.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(initialize != graph.Nodes.end());
+    REQUIRE(update != graph.Nodes.end());
+    const auto initializeInput =
+        std::ranges::find_if(initialize->Pins, [](const Keire::VfxGraphPin& pin)
+                             { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+    const auto updateOutput =
+        std::ranges::find_if(update->Pins, [](const Keire::VfxGraphPin& pin)
+                             { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+    REQUIRE(initializeInput != initialize->Pins.end());
+    REQUIRE(updateOutput != update->Pins.end());
+
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(331), authored, 1);
+    const auto check =
+        document.CheckConnection(graph.Id, update->Id, updateOutput->Id, initialize->Id, initializeInput->Id);
+
+    CHECK(check.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+    CHECK(check.Diagnostic.find("backwards") != std::string::npos);
+    CHECK(document.Definition() == authored);
+    CHECK_FALSE(document.Dirty());
+    document.Close();
+}
+
+TEST_CASE("VFX graph connection preflight rejects cycles and invalid bindings in incomplete drafts")
+{
+    const auto authored = Definition();
+    const auto graphId = authored.Systems.front().Id;
+    const Keire::VfxGraphNode firstUpdate{
+        .Id = Id(360),
+        .Type = "First detached update",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {40.0F, 360.0F},
+        .Pins =
+            {
+                {Id(361), "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
+                {Id(362), "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt},
+            },
+        .CustomHlsl = "Size *= 1.0;",
+        .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
+    };
+    const Keire::VfxGraphNode lastUpdate{
+        .Id = Id(363),
+        .Type = "Last detached update",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {320.0F, 360.0F},
+        .Pins =
+            {
+                {Id(364), "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
+                {Id(365), "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt},
+            },
+        .CustomHlsl = "Size *= 1.0;",
+        .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
+    };
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(332), authored, 1);
+    REQUIRE(document.AddNode(graphId, firstUpdate));
+    REQUIRE(document.AddNode(graphId, lastUpdate));
+    REQUIRE(document.AddConnection(
+        graphId, {Id(366), firstUpdate.Id, firstUpdate.Pins[1].Id, lastUpdate.Id, lastUpdate.Pins[0].Id}));
+    const auto cycleDraft = document.Definition();
+    const auto cycle =
+        document.CheckConnection(graphId, lastUpdate.Id, lastUpdate.Pins[1].Id, firstUpdate.Id, firstUpdate.Pins[0].Id);
+    CHECK(cycle.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+    CHECK(cycle.Diagnostic.find("acyclic") != std::string::npos);
+    CHECK(document.Definition() == cycleDraft);
+    REQUIRE(document.RemoveNode(graphId, firstUpdate.Id));
+    REQUIRE(document.RemoveNode(graphId, lastUpdate.Id));
+    REQUIRE(document.Publishable());
+
+    const Keire::VfxBlackboardParameter parameter{
+        .Id = Id(333),
+        .Name = "Draft Amount",
+        .Type = Keire::VfxValueType::Scalar,
+        .DefaultValue = 1.0F,
+    };
+    const Keire::VfxGraphNode parameterNode{
+        .Id = Id(334),
+        .Type = "Draft Amount",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {-320.0F, 140.0F},
+        .Pins = {{Id(335), "Value", Keire::VfxValueType::Scalar, false, "value", std::nullopt}},
+        .Kind = Keire::VfxGraphNodeKind::Parameter,
+        .Reference = parameter.Id,
+        .TypeId = {"keire.parameter"},
+    };
+    auto custom = Keire::CreateVfxGraphPortableHlslBlock("Size *= amount;");
+    custom.Id = Id(336);
+    custom.Pins = {{Id(338), "Amount", Keire::VfxValueType::Scalar, true, "amount", Keire::VfxParameterValue{1.0F}}};
+    const auto updateContext = std::ranges::find_if(
+        authored.Systems.front().Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(updateContext != authored.Systems.front().Nodes.end());
+    CHECK(document.AddBlackboardParameter(parameter));
+    CHECK(document.AddNode(graphId, parameterNode));
+    CHECK(document.AddBlock(graphId, updateContext->Id, custom));
+    REQUIRE(document.Publishable());
+
+    const auto validRepair = document.CheckConnection(graphId, {parameterNode.Id, {}, parameterNode.Pins.front().Id},
+                                                      {updateContext->Id, custom.Id, custom.Pins.front().Id});
+    CHECK(validRepair.Status == KeireEditor::VfxGraphConnectionStatus::Accepted);
+    CHECK(validRepair.Diagnostic.empty());
+
+    const auto descriptor = std::ranges::find_if(
+        Keire::VfxNodeCatalog(),
+        [](const Keire::VfxNodeDescriptor& candidate)
+        {
+            return candidate.Class == Keire::VfxNodeClass::Operator &&
+                   candidate.SupportTier != Keire::VfxNodeSupportTier::Disabled &&
+                   std::ranges::any_of(candidate.Pins, [](const Keire::VfxNodePinDescriptor& pin)
+                                       { return !pin.Input && pin.Type == Keire::VfxValueType::Scalar; });
+        });
+    REQUIRE(descriptor != Keire::VfxNodeCatalog().end());
+    auto operatorNode = Keire::CreateVfxGraphOperatorNode(descriptor->TypeId.View(), {-20.0F, 260.0F});
+    const auto operatorOutput = std::ranges::find_if(operatorNode.Pins, [](const Keire::VfxGraphPin& pin)
+                                                     { return !pin.Input && pin.Type == Keire::VfxValueType::Scalar; });
+    REQUIRE(operatorOutput != operatorNode.Pins.end());
+    CHECK(document.AddNode(graphId, operatorNode));
+
+    const auto invalidBinding = document.CheckConnection(graphId, {operatorNode.Id, {}, operatorOutput->Id},
+                                                         {updateContext->Id, custom.Id, custom.Pins.front().Id});
+    CHECK(invalidBinding.Status == KeireEditor::VfxGraphConnectionStatus::Rejected);
+    CHECK(invalidBinding.Diagnostic.find("Blackboard") != std::string::npos);
+    CHECK(document.Definition().Systems.front().Connections == authored.Systems.front().Connections);
+    document.Close();
+}
+
+TEST_CASE("VFX graph mode adds executable nodes without implicitly splicing particle flow")
+{
+    auto authored = Definition();
+    const auto graphId = authored.Systems.front().Id;
+    const Keire::VfxModuleDefinition burst{
+        .Id = Id(340),
+        .Payload = Keire::VfxBurstModule{.Time = 0.1F, .Count = 4, .Cycles = 1, .Interval = 0.1F},
+    };
+
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    document.Open(Id(341), authored, 1);
+    CHECK(document.AddModule(burst));
+    const auto beforeModuleNode = document.Definition().Systems.front().Connections;
+    const auto moduleNode = Keire::CreateVfxGraphModuleNode(burst, {175.0F, -90.0F});
+    CHECK(document.AddNode(graphId, moduleNode));
+    CHECK(document.Definition().Systems.front().Connections == beforeModuleNode);
+    CHECK(std::ranges::find(document.Definition().Systems.front().Nodes, moduleNode.Id, &Keire::VfxGraphNode::Id) !=
+          document.Definition().Systems.front().Nodes.end());
+    CHECK_FALSE(document.Publishable());
+
+    const Keire::VfxGraphNode custom{
+        .Id = Id(342),
+        .Type = "Detached Custom HLSL",
+        .Context = Keire::VfxContextType::Update,
+        .EditorPosition = {475.0F, -90.0F},
+        .Pins =
+            {
+                {Id(343), "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
+                {Id(344), "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt},
+            },
+        .CustomHlsl = "Size *= 1.0;",
+        .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
+    };
+    const auto beforeCustomNode = document.Definition().Systems.front().Connections;
+    CHECK(document.AddNode(graphId, custom));
+    CHECK(document.Definition().Systems.front().Connections == beforeCustomNode);
+    CHECK(std::ranges::find(document.Definition().Systems.front().Nodes, custom.Id, &Keire::VfxGraphNode::Id) !=
+          document.Definition().Systems.front().Nodes.end());
+    CHECK_FALSE(document.Publishable());
+    document.Close();
+}
+
+TEST_CASE("VFX graph authoring persists Operator contexts inline values settings and Block literals")
+{
+    KeireEditor::VfxEffectDocument document({.Persist = [](const Keire::AssetId, const std::span<const std::byte>) {}});
+    const auto authored = Definition();
+    const auto systemId = authored.Systems.front().Id;
+    document.Open(Id(360), authored, 1);
+
+    auto range = Keire::CreateVfxGraphOperatorNode("keire.operator.range", {-320.0F, 120.0F});
+    const auto rangeId = range.Id;
+    CHECK(document.AddNode(systemId, std::move(range)));
+    CHECK(document.EditNode(systemId, rangeId,
+                            [](Keire::VfxGraphNode& node)
+                            {
+                                node.Context = Keire::VfxContextType::Initialize;
+                                const auto minimum = std::ranges::find(node.Pins, std::string_view("minimum"),
+                                                                       [](const Keire::VfxGraphPin& pin)
+                                                                       { return std::string_view(pin.Semantic); });
+                                const auto maximum = std::ranges::find(node.Pins, std::string_view("maximum"),
+                                                                       [](const Keire::VfxGraphPin& pin)
+                                                                       { return std::string_view(pin.Semantic); });
+                                REQUIRE(minimum != node.Pins.end());
+                                REQUIRE(maximum != node.Pins.end());
+                                minimum->DefaultValue = 1.0F;
+                                maximum->DefaultValue = 20.0F;
+                            }));
+
+    auto random = Keire::CreateVfxGraphOperatorNode("keire.operator.random-range", {-80.0F, 120.0F});
+    random.Context = Keire::VfxContextType::Initialize;
+    const auto randomId = random.Id;
+    CHECK(document.AddNode(systemId, std::move(random)));
+    CHECK(document.EditNode(systemId, randomId,
+                            [](Keire::VfxGraphNode& node)
+                            {
+                                const auto scope = std::ranges::find(node.Properties, std::string_view("Scope"),
+                                                                     [](const Keire::VfxGraphProperty& property)
+                                                                     { return std::string_view(property.Name); });
+                                const auto constant = std::ranges::find(node.Properties, std::string_view("Constant"),
+                                                                        [](const Keire::VfxGraphProperty& property)
+                                                                        { return std::string_view(property.Name); });
+                                REQUIRE(scope != node.Properties.end());
+                                REQUIRE(constant != node.Properties.end());
+                                scope->Value = static_cast<std::uint64_t>(Keire::VfxRandomScope::PerVfxComponent);
+                                constant->Value = true;
+                            }));
+
+    auto compare = Keire::CreateVfxGraphOperatorNode("keire.operator.compare", {160.0F, 120.0F});
+    const auto compareId = compare.Id;
+    CHECK(document.AddNode(systemId, std::move(compare)));
+    CHECK(document.EditNode(systemId, compareId,
+                            [](Keire::VfxGraphNode& node)
+                            {
+                                const auto condition = std::ranges::find(node.Properties, std::string_view("Condition"),
+                                                                         [](const Keire::VfxGraphProperty& property)
+                                                                         { return std::string_view(property.Name); });
+                                REQUIRE(condition != node.Properties.end());
+                                condition->Value = std::string("Greater Or Equal");
+                            }));
+
+    auto remap = Keire::CreateVfxGraphOperatorNode("keire.operator.remap", {380.0F, 120.0F});
+    const auto remapId = remap.Id;
+    CHECK(document.AddNode(systemId, std::move(remap)));
+    CHECK(document.EditNode(systemId, remapId,
+                            [](Keire::VfxGraphNode& node)
+                            {
+                                const auto clamp = std::ranges::find(node.Properties, std::string_view("Clamp"),
+                                                                     [](const Keire::VfxGraphProperty& property)
+                                                                     { return std::string_view(property.Name); });
+                                REQUIRE(clamp != node.Properties.end());
+                                clamp->Value = true;
+                            }));
+
+    const auto& definition = document.Definition();
+    const auto& system = definition.Systems.front();
+    const auto persistedRange = std::ranges::find(system.Nodes, rangeId, &Keire::VfxGraphNode::Id);
+    REQUIRE(persistedRange != system.Nodes.end());
+    CHECK(persistedRange->Context == Keire::VfxContextType::Initialize);
+    CHECK(
+        std::get<float>(*std::ranges::find(persistedRange->Pins, std::string_view("minimum"),
+                                           [](const Keire::VfxGraphPin& pin) { return std::string_view(pin.Semantic); })
+                             ->DefaultValue) == 1.0F);
+    CHECK(
+        std::get<float>(*std::ranges::find(persistedRange->Pins, std::string_view("maximum"),
+                                           [](const Keire::VfxGraphPin& pin) { return std::string_view(pin.Semantic); })
+                             ->DefaultValue) == 20.0F);
+
+    const auto persistedRandom = std::ranges::find(system.Nodes, randomId, &Keire::VfxGraphNode::Id);
+    REQUIRE(persistedRandom != system.Nodes.end());
+    CHECK(std::get<std::uint64_t>(std::ranges::find(persistedRandom->Properties, std::string_view("Scope"),
+                                                    [](const Keire::VfxGraphProperty& property)
+                                                    { return std::string_view(property.Name); })
+                                      ->Value) == static_cast<std::uint64_t>(Keire::VfxRandomScope::PerVfxComponent));
+    CHECK(std::get<bool>(std::ranges::find(persistedRandom->Properties, std::string_view("Constant"),
+                                           [](const Keire::VfxGraphProperty& property)
+                                           { return std::string_view(property.Name); })
+                             ->Value));
+    CHECK(std::get<std::string>(
+              std::ranges::find(system.Nodes, compareId, &Keire::VfxGraphNode::Id)->Properties.front().Value) ==
+          "Greater Or Equal");
+    CHECK(std::get<bool>(std::ranges::find(system.Nodes, remapId, &Keire::VfxGraphNode::Id)->Properties.front().Value));
+
+    const auto initializeContext = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Initialize; });
+    REQUIRE(initializeContext != system.Nodes.end());
+    const auto initializeBlock = std::ranges::find_if(
+        initializeContext->Blocks,
+        [&](const Keire::VfxGraphBlock& block)
+        {
+            const auto module = std::ranges::find(definition.Modules, block.Reference, &Keire::VfxModuleDefinition::Id);
+            return module != definition.Modules.end() &&
+                   std::holds_alternative<Keire::VfxInitializeModule>(module->Payload);
+        });
+    REQUIRE(initializeBlock != initializeContext->Blocks.end());
+    const auto lifetime =
+        std::ranges::find(initializeBlock->Pins, std::string_view("lifetimeMinimum"),
+                          [](const Keire::VfxGraphPin& pin) { return std::string_view(pin.Semantic); });
+    REQUIRE(lifetime != initializeBlock->Pins.end());
+    const auto initializeContextId = initializeContext->Id;
+    const auto initializeBlockId = initializeBlock->Id;
+    const auto lifetimeId = lifetime->Id;
+    CHECK(document.EditBlockPin(systemId, initializeContextId, initializeBlockId, lifetimeId,
+                                [](Keire::VfxGraphPin& pin) { pin.DefaultValue = 3.5F; }));
+    const auto& editedSystem = document.Definition().Systems.front();
+    const auto editedContext = std::ranges::find(editedSystem.Nodes, initializeContextId, &Keire::VfxGraphNode::Id);
+    REQUIRE(editedContext != editedSystem.Nodes.end());
+    const auto editedBlock = std::ranges::find(editedContext->Blocks, initializeBlockId, &Keire::VfxGraphBlock::Id);
+    REQUIRE(editedBlock != editedContext->Blocks.end());
+    CHECK(std::get<float>(*std::ranges::find(editedBlock->Pins, lifetimeId, &Keire::VfxGraphPin::Id)->DefaultValue) ==
+          3.5F);
+
+    auto age = Keire::CreateVfxGraphOperatorNode("keire.operator.age");
+    const auto ageId = age.Id;
+    CHECK(document.AddNode(systemId, std::move(age)));
+    CHECK_THROWS_AS((void)document.EditNode(systemId, ageId, [](Keire::VfxGraphNode& node)
+                                            { node.Context = Keire::VfxContextType::Spawn; }),
+                    std::invalid_argument);
+    CHECK(std::ranges::find(document.Definition().Systems.front().Nodes, ageId, &Keire::VfxGraphNode::Id)->Context ==
+          Keire::VfxContextType::Update);
+    document.Close();
+}
+
 TEST_CASE("VFX effect document converts legacy Runtime Modules to an undoable executable graph")
 {
     auto legacy = Definition();
@@ -334,18 +1284,29 @@ TEST_CASE("VFX effect document converts legacy Runtime Modules to an undoable ex
     document.Open(Id(106), legacy, 1, undo);
 
     CHECK(document.ConvertToGraph());
-    CHECK(document.Definition().SchemaVersion == 3);
+    CHECK(document.Definition().SchemaVersion == Keire::CurrentVfxSchemaVersion);
     CHECK(document.Definition().ExecutionSource == Keire::VfxExecutionSource::Graph);
+    CHECK(std::ranges::none_of(document.Definition().Systems,
+                               [](const Keire::VfxGraphSystem& system)
+                               {
+                                   return std::ranges::any_of(system.Nodes, [](const Keire::VfxGraphNode& node)
+                                                              { return node.Kind == Keire::VfxGraphNodeKind::Module; });
+                               }));
     for (const auto& module : document.Definition().Modules)
     {
-        CHECK(std::ranges::any_of(
-            document.Definition().Systems,
-            [&](const Keire::VfxGraphSystem& system)
-            {
-                return std::ranges::any_of(
-                    system.Nodes, [&](const Keire::VfxGraphNode& node)
-                    { return node.Kind == Keire::VfxGraphNodeKind::Module && node.Reference == module.Id; });
-            }));
+        CHECK(std::ranges::any_of(document.Definition().Systems,
+                                  [&](const Keire::VfxGraphSystem& system)
+                                  {
+                                      return std::ranges::any_of(
+                                          system.Nodes,
+                                          [&](const Keire::VfxGraphNode& node)
+                                          {
+                                              return node.Kind == Keire::VfxGraphNodeKind::Context &&
+                                                     std::ranges::any_of(node.Blocks,
+                                                                         [&](const Keire::VfxGraphBlock& block)
+                                                                         { return block.Reference == module.Id; });
+                                          });
+                                  }));
     }
     CHECK_FALSE(document.ConvertToGraph());
 
@@ -366,12 +1327,16 @@ TEST_CASE("VFX effect document converts legacy Runtime Modules to an undoable ex
             },
         .CustomHlsl = "Size *= 1.0;",
         .Kind = Keire::VfxGraphNodeKind::CustomHlsl,
+        .TypeId = {"keire.operator.portable-hlsl"},
     };
     CHECK(document.AddNode(document.Definition().Systems.front().Id, custom));
-    CHECK(document.Definition().Systems.front().Connections.size() ==
-          graphBeforeCustomNode.Systems.front().Connections.size() + 1);
+    CHECK(document.Definition().Systems.front().Connections == graphBeforeCustomNode.Systems.front().Connections);
+    CHECK(document.Definition().Systems.front().Nodes.size() == graphBeforeCustomNode.Systems.front().Nodes.size() + 1);
+    CHECK_FALSE(document.Publishable());
+    CHECK(document.GraphDiagnostic().find("main particle stream") != std::string_view::npos);
     CHECK(document.RemoveNode(document.Definition().Systems.front().Id, custom.Id));
     CHECK(document.Definition() == graphBeforeCustomNode);
+    CHECK(document.Publishable());
 
     document.Close();
     undoService->Close();
@@ -405,13 +1370,21 @@ TEST_CASE("VFX document keeps Blackboard references typed and gives each graph i
                              { return std::holds_alternative<Keire::VfxEmissionRateModule>(module.Payload); });
     REQUIRE(emissionModule != authored.Modules.end());
     const auto& authoredSystem = authored.Systems.front();
-    const auto emissionNode = std::ranges::find_if(
-        authoredSystem.Nodes, [&](const Keire::VfxGraphNode& node)
-        { return node.Kind == Keire::VfxGraphNodeKind::Module && node.Reference == emissionModule->Id; });
-    REQUIRE(emissionNode != authoredSystem.Nodes.end());
+    const auto emissionContext =
+        std::ranges::find_if(authoredSystem.Nodes,
+                             [&](const Keire::VfxGraphNode& node)
+                             {
+                                 return node.Kind == Keire::VfxGraphNodeKind::Context &&
+                                        std::ranges::any_of(node.Blocks, [&](const Keire::VfxGraphBlock& block)
+                                                            { return block.Reference == emissionModule->Id; });
+                             });
+    REQUIRE(emissionContext != authoredSystem.Nodes.end());
+    const auto emissionBlock =
+        std::ranges::find(emissionContext->Blocks, emissionModule->Id, &Keire::VfxGraphBlock::Reference);
+    REQUIRE(emissionBlock != emissionContext->Blocks.end());
     const auto emissionRatePin =
-        std::ranges::find(emissionNode->Pins, std::string("particlesPerSecond"), &Keire::VfxGraphPin::Semantic);
-    REQUIRE(emissionRatePin != emissionNode->Pins.end());
+        std::ranges::find(emissionBlock->Pins, std::string("particlesPerSecond"), &Keire::VfxGraphPin::Semantic);
+    REQUIRE(emissionRatePin != emissionBlock->Pins.end());
     const auto speedNode =
         std::ranges::find_if(authoredSystem.Nodes, [&](const Keire::VfxGraphNode& node)
                              { return node.Kind == Keire::VfxGraphNodeKind::Parameter && node.Reference == speed.Id; });
@@ -422,7 +1395,8 @@ TEST_CASE("VFX document keeps Blackboard references typed and gives each graph i
     REQUIRE(alternateNode != authoredSystem.Nodes.end());
 
     const auto system = authoredSystem.Id;
-    const auto emissionNodeId = emissionNode->Id;
+    const auto emissionNodeId = emissionContext->Id;
+    const auto emissionBlockId = emissionBlock->Id;
     const auto emissionRatePinId = emissionRatePin->Id;
     const auto speedNodeId = speedNode->Id;
     const auto speedPinId = speedNode->Pins.front().Id;
@@ -440,6 +1414,7 @@ TEST_CASE("VFX document keeps Blackboard references typed and gives each graph i
         .OutputPin = speedPinId,
         .InputNode = emissionNodeId,
         .InputPin = emissionRatePinId,
+        .InputBlock = emissionBlockId,
     };
     const Keire::VfxGraphConnection alternateWriter{
         .Id = Id(81),
@@ -447,6 +1422,7 @@ TEST_CASE("VFX document keeps Blackboard references typed and gives each graph i
         .OutputPin = alternatePinId,
         .InputNode = emissionNodeId,
         .InputPin = emissionRatePinId,
+        .InputBlock = emissionBlockId,
     };
     CHECK(document.AddConnection(system, speedWriter));
     CHECK(document.AddConnection(system, alternateWriter));
@@ -500,12 +1476,14 @@ TEST_CASE("VFX graph and blackboard edits preserve stable identities and reject 
                     .Type = "Output",
                     .Context = Keire::VfxContextType::Update,
                     .Pins = {{Id(52), "Value", Keire::VfxValueType::Scalar, false}},
+                    .TypeId = {"keire.context.update"},
                 },
                 {
                     .Id = Id(53),
                     .Type = "Input",
                     .Context = Keire::VfxContextType::Update,
                     .Pins = {{Id(54), "Value", Keire::VfxValueType::Scalar, true}},
+                    .TypeId = {"keire.context.update"},
                 },
             },
         .Connections =
@@ -616,13 +1594,16 @@ TEST_CASE("VFX effect document preserves curve and gradient edits through undo a
     const auto findModulePin = [&](const Keire::AssetId module,
                                    const std::string_view semantic) -> const Keire::VfxGraphPin&
     {
-        const auto node = std::ranges::find_if(
-            document.Definition().Systems.front().Nodes, [&](const Keire::VfxGraphNode& candidate)
-            { return candidate.Kind == Keire::VfxGraphNodeKind::Module && candidate.Reference == module; });
-        REQUIRE(node != document.Definition().Systems.front().Nodes.end());
-        const auto pin = std::ranges::find(node->Pins, semantic, &Keire::VfxGraphPin::Semantic);
-        REQUIRE(pin != node->Pins.end());
-        return *pin;
+        for (const auto& node : document.Definition().Systems.front().Nodes)
+        {
+            const auto block = std::ranges::find(node.Blocks, module, &Keire::VfxGraphBlock::Reference);
+            if (block == node.Blocks.end())
+                continue;
+            const auto pin = std::ranges::find(block->Pins, semantic, &Keire::VfxGraphPin::Semantic);
+            if (pin != block->Pins.end())
+                return *pin;
+        }
+        throw std::logic_error("Expected Runtime Module Block pin was unavailable.");
     };
     CHECK(std::get<float>(*findModulePin(size->Id, "size").DefaultValue) == doctest::Approx(0.5F));
     CHECK(std::get<Keire::Color>(*findModulePin(color->Id, "color").DefaultValue) ==

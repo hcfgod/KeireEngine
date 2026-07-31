@@ -16,6 +16,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -66,11 +67,19 @@ namespace Keire
         Gpu
     };
 
-    /// Selects the compatibility module stack or the schema-v3 executable graph as the authoritative program.
+    /// Selects the compatibility module stack or the schema-4 Context/Block graph as the authoritative program.
     enum class VfxExecutionSource : std::uint8_t
     {
         LegacyModules,
         Graph
+    };
+
+    /// Selects whether a schema-4 Graph enforces native capability errors or preserves historical module behavior with
+    /// explicit warnings. Conversion and schema 1-3 migration select MigratedLegacyModules automatically.
+    enum class VfxCompatibilityMode : std::uint8_t
+    {
+        NativeSchema4,
+        MigratedLegacyModules
     };
 
     /// Continuous emission in particles per second.
@@ -168,8 +177,9 @@ namespace Keire
         std::variant<VfxEmissionRateModule, VfxBurstModule, VfxShapeModule, VfxInitializeModule, VfxForceModule,
                      VfxSizeOverLifetimeModule, VfxColorOverLifetimeModule, VfxCollisionModule, VfxRendererModule>;
 
-    /// Stable module payload. LegacyModules executes enabled entries directly; Graph executes only connected
-    /// Module-node references and uses their particle-stream cable order.
+    /// Stable compatibility payload. LegacyModules executes enabled entries directly. Graph Blocks reference payloads
+    /// for structural data, while each Block's enabled state, typed inputs, and Context-stack position are
+    /// authoritative.
     struct VfxModuleDefinition
     {
         AssetId Id;
@@ -189,7 +199,35 @@ namespace Keire
         Event
     };
 
-    /// Data types shared by graph pins and blackboard defaults.
+    inline constexpr std::uint32_t CurrentVfxSchemaVersion = 4;
+
+    template <typename T> struct VfxRange
+    {
+        T Minimum{};
+        T Maximum{};
+
+        [[nodiscard]] bool operator==(const VfxRange&) const = default;
+    };
+
+    using VfxScalarRange = VfxRange<float>;
+    using VfxIntegerRange = VfxRange<std::int64_t>;
+    using VfxUnsignedIntegerRange = VfxRange<std::uint64_t>;
+    using VfxVector2Range = VfxRange<Vector2>;
+    using VfxVector3Range = VfxRange<Vector3>;
+    using VfxVector4Range = VfxRange<Vector4>;
+    using VfxColorRange = VfxRange<Color>;
+
+    /// Stable ASCII identifier for a catalog entry. Display labels are intentionally stored separately.
+    struct VfxNodeTypeId
+    {
+        std::string Value;
+
+        [[nodiscard]] bool Empty() const noexcept { return Value.empty(); }
+        [[nodiscard]] std::string_view View() const noexcept { return Value; }
+        [[nodiscard]] bool operator==(const VfxNodeTypeId&) const = default;
+    };
+
+    /// Data types shared by graph pins and blackboard defaults. Existing schema-3 values retain their numeric IDs.
     enum class VfxValueType : std::uint8_t
     {
         Boolean,
@@ -201,10 +239,84 @@ namespace Keire
         Texture,
         Mesh,
         Asset,
-        ParticleStream
+        ParticleStream,
+        UnsignedInteger,
+        Vector4,
+        Quaternion,
+        Matrix,
+        Curve,
+        Gradient,
+        ScalarRange,
+        IntegerRange,
+        UnsignedIntegerRange,
+        Vector2Range,
+        Vector3Range,
+        Vector4Range,
+        ColorRange,
+        Texture2DArray,
+        Texture3D,
+        TextureCube,
+        Buffer,
+        PointCache,
+        SignedDistanceField
     };
 
-    using VfxParameterValue = std::variant<bool, std::int64_t, float, Vector2, Vector3, Color, AssetId>;
+    /// Returns whether a value has the packed two-uint4 representation consumed by the current GPU expression
+    /// interpreter. Resource handles and structured authoring values require dedicated lowering paths.
+    [[nodiscard]] constexpr bool IsVfxGpuExpressionValueType(const VfxValueType type) noexcept
+    {
+        switch (type)
+        {
+        case VfxValueType::Boolean:
+        case VfxValueType::Integer:
+        case VfxValueType::UnsignedInteger:
+        case VfxValueType::Scalar:
+        case VfxValueType::Vector2:
+        case VfxValueType::Vector3:
+        case VfxValueType::Vector4:
+        case VfxValueType::Color:
+        case VfxValueType::ScalarRange:
+        case VfxValueType::IntegerRange:
+        case VfxValueType::UnsignedIntegerRange:
+        case VfxValueType::Vector2Range:
+        case VfxValueType::Vector3Range:
+        case VfxValueType::Vector4Range:
+        case VfxValueType::ColorRange:
+            return true;
+        case VfxValueType::Texture:
+        case VfxValueType::Mesh:
+        case VfxValueType::Asset:
+        case VfxValueType::ParticleStream:
+        case VfxValueType::Quaternion:
+        case VfxValueType::Matrix:
+        case VfxValueType::Curve:
+        case VfxValueType::Gradient:
+        case VfxValueType::Texture2DArray:
+        case VfxValueType::Texture3D:
+        case VfxValueType::TextureCube:
+        case VfxValueType::Buffer:
+        case VfxValueType::PointCache:
+        case VfxValueType::SignedDistanceField:
+            return false;
+        }
+        return false;
+    }
+
+    using VfxParameterValue =
+        std::variant<bool, std::int64_t, float, Vector2, Vector3, Color, AssetId, std::uint64_t, Vector4, Quaternion,
+                     Matrix4, Curve1D, ColorGradient, VfxScalarRange, VfxIntegerRange, VfxUnsignedIntegerRange,
+                     VfxVector2Range, VfxVector3Range, VfxVector4Range, VfxColorRange>;
+
+    using VfxGraphPropertyValue = std::variant<bool, std::int64_t, std::uint64_t, float, std::string, Vector2, Vector3,
+                                               Vector4, Quaternion, Color, Matrix4, AssetId>;
+
+    struct VfxGraphProperty
+    {
+        std::string Name;
+        VfxGraphPropertyValue Value = false;
+
+        [[nodiscard]] bool operator==(const VfxGraphProperty&) const = default;
+    };
 
     /// Runtime override keyed by the parameter's stable identity. Names are intentionally not part of the binding.
     struct VfxParameterOverride
@@ -220,7 +332,134 @@ namespace Keire
         Context,
         Module,
         Parameter,
-        CustomHlsl
+        CustomHlsl,
+        Operator,
+        Attribute,
+        Subgraph
+    };
+
+    enum class VfxEvaluationDomain : std::uint8_t
+    {
+        CompileTimeConstant,
+        PerEffect,
+        PerFrame,
+        PerSpawn,
+        PerParticleUpdate,
+        PerOutputEvent
+    };
+
+    enum class VfxRandomScope : std::uint8_t
+    {
+        PerParticle,
+        PerVfxComponent,
+        PerParticleStrip
+    };
+
+    enum class VfxNodeSupportTier : std::uint8_t
+    {
+        Supported,
+        GpuRequired,
+        KeireEquivalent,
+        Disabled
+    };
+
+    enum class VfxNodeBackendTier : std::uint8_t
+    {
+        CpuOnly,
+        CpuAndGpu,
+        GpuRequired
+    };
+
+    enum class VfxNodeClass : std::uint8_t
+    {
+        Operator,
+        Parameter,
+        Constant,
+        Attribute,
+        Subgraph,
+        Block,
+        Context,
+        Output
+    };
+
+    enum class VfxNodeTypeBehavior : std::uint8_t
+    {
+        Fixed,
+        Uniform,
+        Unified,
+        Cascaded
+    };
+
+    /// Append-only opcode set. Underlying values are encoded into canonical compiled IR.
+    enum class VfxValueOpcode : std::uint8_t
+    {
+        Constant,
+        Range,
+        Random,
+        RandomRange,
+        Remap,
+        Add,
+        Subtract,
+        Multiply,
+        Divide,
+        Minimum,
+        Maximum,
+        Clamp,
+        Saturate,
+        Absolute,
+        Compare,
+        BooleanAnd,
+        BooleanOr,
+        BooleanNot,
+        Select,
+        Combine,
+        Split,
+        Dot,
+        Cross,
+        Normalize,
+        Length,
+        Distance,
+        Time,
+        DeltaTime,
+        Age,
+        Lifetime,
+        ParticleId,
+        SpawnIndex,
+        ToFloat,
+        ToInteger,
+        ToUnsignedInteger,
+        Sine,
+        Cosine,
+        Tangent,
+        ArcSine,
+        ArcCosine,
+        ArcTangent,
+        Atan2,
+        Power,
+        SquareRoot,
+        Exponential,
+        Logarithm,
+        LogarithmBase2,
+        LogarithmBase10,
+        Ceiling,
+        Floor,
+        Round,
+        Fractional,
+        Lerp,
+        Smoothstep,
+        Step,
+        Negate,
+        Sign
+    };
+
+    enum class VfxComparisonCondition : std::uint8_t
+    {
+        Less,
+        LessOrEqual,
+        Equal,
+        NotEqual,
+        GreaterOrEqual,
+        Greater
     };
 
     /// A typed graph endpoint. Input=false identifies an output pin.
@@ -238,7 +477,22 @@ namespace Keire
         [[nodiscard]] bool operator==(const VfxGraphPin&) const = default;
     };
 
-    /// Persisted executable graph node. Reference identifies a Runtime Module payload or Blackboard parameter.
+    /// Ordered executable element owned by a schema-4 Context node.
+    struct VfxGraphBlock
+    {
+        AssetId Id;
+        VfxNodeTypeId TypeId;
+        std::string Type;
+        bool Enabled = true;
+        std::vector<VfxGraphPin> Pins;
+        std::vector<VfxGraphProperty> Properties;
+        std::uint32_t DefinitionVersion = 1;
+        AssetId Reference;
+
+        [[nodiscard]] bool operator==(const VfxGraphBlock&) const = default;
+    };
+
+    /// Persisted Context or free-floating value node. Reference identifies a Blackboard parameter or legacy payload.
     struct VfxGraphNode
     {
         AssetId Id;
@@ -249,8 +503,25 @@ namespace Keire
         std::string CustomHlsl;
         VfxGraphNodeKind Kind = VfxGraphNodeKind::Context;
         AssetId Reference;
+        VfxNodeTypeId TypeId;
+        std::uint32_t DefinitionVersion = 1;
+        std::vector<VfxGraphProperty> Properties;
+        /// Resolved polymorphic signature and adaptive pin order are persisted to make reload and undo deterministic.
+        std::vector<VfxValueType> ResolvedSignature;
+        std::vector<AssetId> DynamicPinOrder;
+        /// Only Context nodes own Blocks. Vector order is executable order.
+        std::vector<VfxGraphBlock> Blocks;
 
         [[nodiscard]] bool operator==(const VfxGraphNode&) const = default;
+    };
+
+    struct VfxGraphEndpoint
+    {
+        AssetId Node;
+        AssetId Block;
+        AssetId Pin;
+
+        [[nodiscard]] bool operator==(const VfxGraphEndpoint&) const = default;
     };
 
     /// A validated, typed output-to-input connection between graph nodes.
@@ -261,8 +532,48 @@ namespace Keire
         AssetId OutputPin;
         AssetId InputNode;
         AssetId InputPin;
+        AssetId OutputBlock;
+        AssetId InputBlock;
+
+        [[nodiscard]] VfxGraphEndpoint OutputEndpoint() const noexcept { return {OutputNode, OutputBlock, OutputPin}; }
+        [[nodiscard]] VfxGraphEndpoint InputEndpoint() const noexcept { return {InputNode, InputBlock, InputPin}; }
 
         [[nodiscard]] bool operator==(const VfxGraphConnection&) const = default;
+    };
+
+    struct VfxNodePinDescriptor
+    {
+        std::string Name;
+        std::string Semantic;
+        VfxValueType Type = VfxValueType::Scalar;
+        bool Input = true;
+        std::optional<VfxParameterValue> DefaultValue;
+        std::vector<VfxValueType> AcceptedTypes;
+    };
+
+    struct VfxNodeSettingDescriptor
+    {
+        std::string Name;
+        VfxGraphPropertyValue DefaultValue = false;
+    };
+
+    /// Single source of truth shared by compiler, editor palette, validation, tests, and generated documentation.
+    struct VfxNodeDescriptor
+    {
+        VfxNodeTypeId TypeId;
+        std::string Label;
+        std::string Category;
+        std::vector<std::string> Synonyms;
+        VfxNodeClass Class = VfxNodeClass::Operator;
+        VfxNodeTypeBehavior TypeBehavior = VfxNodeTypeBehavior::Fixed;
+        VfxNodeSupportTier SupportTier = VfxNodeSupportTier::Disabled;
+        std::string DisabledReason;
+        std::vector<VfxContextType> ValidContexts;
+        std::vector<VfxNodePinDescriptor> Pins;
+        std::vector<VfxNodeSettingDescriptor> Settings;
+        std::optional<VfxValueOpcode> Lowering;
+        std::uint32_t DefinitionVersion = 1;
+        VfxNodeBackendTier BackendTier = VfxNodeBackendTier::CpuOnly;
     };
 
     /// An authoring container for graph nodes and links. Multiple systems do not currently create multiple emitters.
@@ -290,11 +601,10 @@ namespace Keire
 
     /// Complete serialized definition of a .keirevfx asset.
     ///
-    /// Schema 1/2 assets remain LegacyModules. Schema-v3 Graph assets compile modules, cables, Blackboard bindings,
-    /// and Custom HLSL into one deterministic program consumed by both simulation backends.
+    /// Schemas 1-3 are migrated in memory. Explicit publication writes schema 4.
     struct VfxEffectDefinition
     {
-        std::uint32_t SchemaVersion = 3;
+        std::uint32_t SchemaVersion = CurrentVfxSchemaVersion;
         AssetId EmitterId;
         std::string Name = "VFX Effect";
         bool Loop = false;
@@ -306,6 +616,7 @@ namespace Keire
         std::vector<VfxGraphSystem> Systems;
         std::vector<VfxBlackboardParameter> Blackboard;
         VfxExecutionSource ExecutionSource = VfxExecutionSource::LegacyModules;
+        VfxCompatibilityMode CompatibilityMode = VfxCompatibilityMode::NativeSchema4;
 
         [[nodiscard]] bool operator==(const VfxEffectDefinition&) const = default;
     };
@@ -368,8 +679,123 @@ namespace Keire
         AssetId Node;
         AssetId Module;
         VfxModuleProperty Property = VfxModuleProperty::None;
+        VfxValueType Type = VfxValueType::Scalar;
         std::uint32_t ParameterSlot = 0;
+        std::uint32_t ValueRegister = ~std::uint32_t{0};
+        std::optional<VfxParameterValue> LiteralValue;
     };
+
+    enum class VfxCompiledValueSourceKind : std::uint8_t
+    {
+        Literal,
+        Parameter,
+        Register
+    };
+
+    struct VfxCompiledValueSource
+    {
+        VfxCompiledValueSourceKind Kind = VfxCompiledValueSourceKind::Literal;
+        VfxValueType Type = VfxValueType::Scalar;
+        std::uint32_t Index = 0;
+        VfxParameterValue Literal = 0.0F;
+    };
+
+    struct VfxCompiledValueInstruction
+    {
+        AssetId Node;
+        VfxValueOpcode Opcode = VfxValueOpcode::Constant;
+        VfxValueType Type = VfxValueType::Scalar;
+        VfxContextType Context = VfxContextType::Update;
+        VfxEvaluationDomain Domain = VfxEvaluationDomain::CompileTimeConstant;
+        std::uint32_t OutputRegister = 0;
+        /// Zero-based output pin selected from the descriptor. Multi-output Operators compile one live result at a
+        /// time, preserving dead-output elimination and stable pin identity.
+        std::uint32_t OutputIndex = 0;
+        std::vector<VfxCompiledValueSource> Inputs;
+        std::uint32_t ChannelSalt = 0;
+        VfxRandomScope RandomScope = VfxRandomScope::PerParticle;
+        bool ConstantRandom = false;
+        bool IndependentRandomChannels = true;
+        bool InclusiveMaximum = false;
+        bool ClampRemap = false;
+        VfxComparisonCondition Comparison = VfxComparisonCondition::Less;
+    };
+
+    /// Shader-consumable value storage. Primary contains a scalar/vector value or a Range minimum. Secondary contains
+    /// the Range maximum and is zero for non-Range values. Floating-point components are stored as IEEE-754 bits;
+    /// signed and unsigned 64-bit integers occupy the first two words of their lane.
+    struct alignas(16) VfxGpuValue
+    {
+        std::array<std::uint32_t, 4> Primary{};
+        std::array<std::uint32_t, 4> Secondary{};
+
+        [[nodiscard]] bool operator==(const VfxGpuValue&) const noexcept = default;
+    };
+
+    enum class VfxGpuValueSourceKind : std::uint32_t
+    {
+        Literal,
+        Parameter,
+        Register
+    };
+
+    /// Packed source record consumed as one uint4 by the GPU expression interpreter. Index selects the program's
+    /// Constants table, the compiled Blackboard parameter slot, or the logical GPU register file according to Kind.
+    struct alignas(16) VfxGpuValueSource
+    {
+        std::uint32_t Kind = static_cast<std::uint32_t>(VfxGpuValueSourceKind::Literal);
+        std::uint32_t Type = static_cast<std::uint32_t>(VfxValueType::Scalar);
+        std::uint32_t Index = 0;
+        std::uint32_t Reserved = 0;
+
+        [[nodiscard]] bool operator==(const VfxGpuValueSource&) const noexcept = default;
+    };
+
+    enum class VfxGpuValueInstructionFlag : std::uint32_t
+    {
+        ConstantRandom = 1U << 0U,
+        IndependentRandomChannels = 1U << 1U,
+        InclusiveMaximum = 1U << 2U,
+        ClampRemap = 1U << 3U
+    };
+
+    /// Four uint4 records forming the stable shader ABI for one expression instruction.
+    ///
+    /// Header: Opcode, Type, Context, Domain.
+    /// Output: logical register, selected output, first flattened source, source count.
+    /// Settings: channel salt, Random scope, VfxGpuValueInstructionFlag bits, Compare condition.
+    /// NodeIdentity: low/high words of AssetId::High followed by low/high words of AssetId::Low.
+    struct alignas(16) VfxGpuValueInstruction
+    {
+        std::array<std::uint32_t, 4> Header{};
+        std::array<std::uint32_t, 4> Output{};
+        std::array<std::uint32_t, 4> Settings{};
+        std::array<std::uint32_t, 4> NodeIdentity{};
+
+        [[nodiscard]] bool operator==(const VfxGpuValueInstruction&) const noexcept = default;
+    };
+
+    /// Bounded packed expression program prepared by GPU compilation. The renderer uploads these tables without
+    /// reinterpretation. Parameters remain indexed separately so live overrides can transactionally repack them.
+    struct VfxCompiledGpuValueProgram
+    {
+        static constexpr std::size_t MaximumInstructions = 64;
+        static constexpr std::size_t MaximumRegisters = 64;
+        static constexpr std::size_t MaximumSources = MaximumInstructions * 4;
+        static constexpr std::size_t MaximumConstants = MaximumSources;
+
+        std::array<std::uint32_t, 4> SystemIdentity{};
+        std::vector<VfxGpuValueInstruction> Instructions;
+        std::vector<VfxGpuValueSource> Sources;
+        std::vector<VfxGpuValue> Constants;
+        std::uint32_t RegisterCount = 0;
+
+        [[nodiscard]] bool operator==(const VfxCompiledGpuValueProgram&) const noexcept = default;
+    };
+
+    static_assert(sizeof(VfxGpuValue) == 32);
+    static_assert(sizeof(VfxGpuValueSource) == 16);
+    static_assert(sizeof(VfxGpuValueInstruction) == 64);
 
     struct VfxCompiledModule
     {
@@ -405,6 +831,8 @@ namespace Keire
         VfxValueType OperandType = VfxValueType::Scalar;
         /// UINT32_MAX selects Literal; otherwise this indexes VfxCompiledProgram::Parameters.
         std::uint32_t ParameterSlot = ~std::uint32_t{0};
+        /// UINT32_MAX selects ParameterSlot or Literal; otherwise this indexes the expression register file.
+        std::uint32_t ValueRegister = ~std::uint32_t{0};
         VfxParameterValue Literal = 0.0F;
         bool ScaleByDeltaTime = false;
     };
@@ -415,7 +843,7 @@ namespace Keire
         CustomHlsl
     };
 
-    /// One operation in the cable-defined execution order. Index selects Modules or CustomInstructions by Kind.
+    /// One operation in Context Block order. Node is the stable Block ID; Index selects Modules or CustomInstructions.
     struct VfxCompiledOperation
     {
         AssetId Node;
@@ -424,7 +852,7 @@ namespace Keire
         std::uint32_t Index = 0;
     };
 
-    /// Deterministic executable program lowered from either the compatibility stack or a schema-v3 graph.
+    /// Deterministic executable program lowered from the compatibility stack or a schema-4 Context/Block graph.
     struct VfxCompiledProgram
     {
         std::uint64_t Hash = 0;
@@ -434,24 +862,47 @@ namespace Keire
         std::vector<VfxCompiledParameter> Parameters;
         std::vector<VfxCompiledModule> Modules;
         std::vector<VfxCompiledBinding> Bindings;
+        std::vector<VfxCompiledValueInstruction> ValueInstructions;
+        std::uint32_t ValueRegisterCount = 0;
+        VfxCompiledGpuValueProgram GpuValueProgram;
         std::vector<VfxCompiledCustomInstruction> CustomInstructions;
         std::vector<VfxCompiledOperation> Operations;
         std::vector<VfxCompileDiagnostic> Diagnostics;
         bool Valid = false;
     };
 
-    /// Validates limits, stable identity, module payloads, graph references, topology, and typed input ownership.
-    /// Throws std::invalid_argument when the definition is not publishable.
+    /// Validates persisted authoring data while permitting a temporarily incomplete executable graph.
+    /// For Graph execution, canonical node shapes, references, cable ownership, direction, type, stage order, and
+    /// acyclic topology remain strict. Throws std::invalid_argument when the draft is structurally invalid.
+    /// Runtime compilation and asset publication must use ValidateVfxEffect instead.
+    KEIRE_API void ValidateVfxEffectAuthoring(const VfxEffectDefinition& definition);
+    /// Validates authoring data plus the complete, publishable executable graph contract.
     KEIRE_API void ValidateVfxEffect(const VfxEffectDefinition& definition);
     /// Returns asset-valued module and blackboard dependencies in deterministic order.
     [[nodiscard]] KEIRE_API std::vector<AssetId> VfxEffectDependencies(const VfxEffectDefinition& definition);
     /// Lowers an effect into the deterministic program consumed by CPU and GPU simulation.
     [[nodiscard]] KEIRE_API VfxCompiledProgram CompileVfxEffect(const VfxEffectDefinition& definition,
                                                                 VfxBackend backend);
+    /// Returns the immutable compiler-owned node catalog used by authoring and lowering.
+    [[nodiscard]] KEIRE_API std::span<const VfxNodeDescriptor> VfxNodeCatalog();
+    [[nodiscard]] KEIRE_API const VfxNodeDescriptor* FindVfxNodeDescriptor(std::string_view typeId);
+    [[nodiscard]] KEIRE_API bool VfxValueMatchesType(VfxValueType type, const VfxParameterValue& value) noexcept;
+    [[nodiscard]] KEIRE_API bool IsFiniteVfxValue(const VfxParameterValue& value) noexcept;
+    [[nodiscard]] KEIRE_API VfxParameterValue DefaultVfxValue(VfxValueType type);
+    /// Creates an Operator node from a supported catalog descriptor with canonical stable pins and settings.
+    [[nodiscard]] KEIRE_API VfxGraphNode CreateVfxGraphOperatorNode(std::string_view typeId,
+                                                                    Vector2 editorPosition = {});
     /// Creates an executable module node with generated stable identity and canonical typed pins.
     [[nodiscard]] KEIRE_API VfxGraphNode CreateVfxGraphModuleNode(const VfxModuleDefinition& module,
                                                                   Vector2 editorPosition = {});
-    /// Converts a legacy module stack to a schema-v3 executable graph without changing module stable IDs.
+    /// Creates a schema-4 Block for an ordered Context stack. The block references, but does not duplicate, the
+    /// module payload and owns canonical data-input pins only; its vector position in the Context is execution order.
+    [[nodiscard]] KEIRE_API VfxGraphBlock CreateVfxGraphBlock(const VfxModuleDefinition& module);
+    /// Creates an ordered Portable Custom HLSL Block. Callers may append supported typed input pins before insertion.
+    [[nodiscard]] KEIRE_API VfxGraphBlock CreateVfxGraphPortableHlslBlock(std::string source);
+    /// Migrates any supported historical definition to the current schema without changing existing stable IDs.
+    [[nodiscard]] KEIRE_API VfxEffectDefinition MigrateVfxEffectToSchema4(const VfxEffectDefinition& definition);
+    /// Converts a legacy module stack to an executable graph without changing module stable IDs.
     [[nodiscard]] KEIRE_API VfxEffectDefinition ConvertVfxEffectToGraph(const VfxEffectDefinition& definition);
 
     /// Immutable runtime asset that retains a validated VfxEffectDefinition.
@@ -633,23 +1084,65 @@ namespace Keire
     ///
     /// The renderer keys persistent particles by Handle. SimulationRevision changes request a handle-local particle
     /// retirement without advancing the VfxRenderSnapshot world reset revision.
+    enum class VfxGpuParticleOperationKind : std::uint8_t
+    {
+        Shape,
+        Initialize,
+        Force,
+        Size,
+        Color,
+        Collision,
+        Renderer,
+        CustomHlsl
+    };
+
+    struct VfxGpuCustomInstruction
+    {
+        VfxContextType Context = VfxContextType::Update;
+        VfxCustomTarget Target = VfxCustomTarget::Velocity;
+        VfxCustomOperation Operation = VfxCustomOperation::Add;
+        bool ScaleByDeltaTime = false;
+        VfxValueType OperandType = VfxValueType::Scalar;
+        Vector4 Operand;
+        /// UINT32_MAX selects Operand; otherwise the shader reads the evaluated expression register.
+        std::uint32_t ValueRegister = ~std::uint32_t{0};
+
+        [[nodiscard]] bool operator==(const VfxGpuCustomInstruction&) const noexcept = default;
+    };
+
+    struct VfxGpuParticleOperation
+    {
+        VfxContextType Context = VfxContextType::Update;
+        VfxGpuParticleOperationKind Kind = VfxGpuParticleOperationKind::CustomHlsl;
+        /// Selects CustomInstructions when Kind is CustomHlsl; zero for built-in module operations.
+        std::uint32_t Index = 0;
+
+        [[nodiscard]] bool operator==(const VfxGpuParticleOperation&) const noexcept = default;
+    };
+
+    /// Immutable execution tables retained by a render snapshot. Static program tables, live Blackboard values, and
+    /// ordered particle operations share one lifetime so render threads never borrow storage from the simulation
+    /// world. The vectors are compiler-bounded by byte-addressable backend limits, not legacy cbuffer array sizes.
+    struct VfxGpuExecutionPayload
+    {
+        VfxCompiledGpuValueProgram ValueProgram;
+        std::vector<VfxGpuValue> Parameters;
+        std::vector<VfxGpuCustomInstruction> CustomInstructions;
+        std::vector<VfxGpuParticleOperation> ParticleOperations;
+
+        [[nodiscard]] bool operator==(const VfxGpuExecutionPayload&) const noexcept = default;
+    };
+
     struct VfxGpuEmitter
     {
-        enum class ParticleOperationKind : std::uint8_t
-        {
-            Shape,
-            Initialize,
-            Force,
-            Size,
-            Color,
-            Collision,
-            Renderer,
-            CustomHlsl
-        };
+        using ParticleOperationKind = VfxGpuParticleOperationKind;
+        using CustomInstruction = VfxGpuCustomInstruction;
+        using ParticleOperation = VfxGpuParticleOperation;
 
         VfxHandle Handle;
         std::uint64_t Revision = 0;
-        /// Cumulative requested spawn count used to derive frame-local work without losing skipped snapshots.
+        /// Cumulative requested spawn count used to preserve spawn work across skipped render snapshots.
+        /// Multiple skipped simulation steps currently execute with the latest published timing values.
         std::uint64_t SpawnSequence = 0;
         Vector3 Position;
         Quaternion Rotation;
@@ -670,29 +1163,27 @@ namespace Keire
         VfxRendererType Renderer = VfxRendererType::Sprite;
         /// Advances when an incompatible reload must discard this handle's prior GPU simulation state.
         std::uint64_t SimulationRevision = 1;
+        /// Deprecated compatibility mirror. GPU execution consumes Execution->CustomInstructions without this bound.
         static constexpr std::size_t MaximumCustomInstructions = 8;
-        struct CustomInstruction
-        {
-            VfxContextType Context = VfxContextType::Update;
-            VfxCustomTarget Target = VfxCustomTarget::Velocity;
-            VfxCustomOperation Operation = VfxCustomOperation::Add;
-            bool ScaleByDeltaTime = false;
-            Vector4 Operand;
-        };
         std::array<CustomInstruction, MaximumCustomInstructions> CustomInstructions;
         std::uint32_t CustomInstructionCount = 0;
+        /// Deprecated compatibility mirror. GPU execution consumes Execution->ParticleOperations without this bound.
         static constexpr std::size_t MaximumParticleOperations = 15;
-        struct ParticleOperation
-        {
-            VfxContextType Context = VfxContextType::Update;
-            ParticleOperationKind Kind = ParticleOperationKind::CustomHlsl;
-            /// Selects CustomInstructions when Kind is CustomHlsl; zero for built-in module operations.
-            std::uint32_t Index = 0;
-        };
         std::array<ParticleOperation, MaximumParticleOperations> ParticleOperations;
         std::uint32_t ParticleOperationCount = 0;
         /// Scaled simulation delta resolved for this handle by the world update that produced the snapshot.
         float SimulationDeltaSeconds = 0.0F;
+        /// Legacy module values required by the generic GPU kernel but kept outside its fixed historical payload.
+        Vector3 RotationMinimum;
+        Vector3 RotationMaximum;
+        float ConeAngleDegrees = 25.0F;
+        float ConeLength = 1.0F;
+        /// Shared, snapshot-safe packed program, live Blackboard values, and dynamic operation tables. GPU emitters
+        /// captured from a live world always provide this payload.
+        std::shared_ptr<const VfxGpuExecutionPayload> Execution;
+        /// Effect-local time and deterministic simulation step consumed by Time, Delta Time, and Random Operators.
+        float EffectTime = 0.0F;
+        std::uint64_t SimulationStep = 0;
     };
 
     /// Immutable render handoff for either CPU particle packets or GPU emitter descriptors.

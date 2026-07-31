@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -36,6 +37,7 @@ namespace KeireEditor
         {
             std::function<void(const Definition&)> Validate;
             std::function<std::vector<std::byte>(const Definition&)> Encode;
+            std::function<std::size_t(const Definition&)> EstimateSize;
             std::function<void(Keire::AssetId, const Definition&)> Preview;
             std::function<void(Keire::AssetId)> CancelPreview;
             std::function<void(Keire::AssetId, std::span<const std::byte>)> Persist;
@@ -284,7 +286,16 @@ namespace KeireEditor
             if (!m_Undo || !m_Undo->IsOpen())
                 return;
             const std::weak_ptr<LifetimeState> lifetime = m_Lifetime;
-            const auto estimated = m_Specification.Encode(m_Draft).size();
+            const auto estimate = [this](const Definition& definition)
+            {
+                return m_Specification.EstimateSize ? m_Specification.EstimateSize(definition)
+                                                    : m_Specification.Encode(definition).size();
+            };
+            const auto beforeSize = estimate(before);
+            const auto afterSize = estimate(after);
+            const auto estimated = beforeSize > std::numeric_limits<std::size_t>::max() - afterSize
+                                       ? std::numeric_limits<std::size_t>::max()
+                                       : beforeSize + afterSize;
             m_Undo->RecordApplied(Keire::CreateUndoCommand(
                 std::string(name),
                 [lifetime, after]

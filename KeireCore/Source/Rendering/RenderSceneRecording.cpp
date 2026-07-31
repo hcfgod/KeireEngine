@@ -188,6 +188,351 @@ namespace
 
 namespace Keire::RenderBackend
 {
+    namespace
+    {
+        [[nodiscard]] constexpr bool SupportedGpuValueType(const VfxValueType type) noexcept
+        {
+            return IsVfxGpuExpressionValueType(type);
+        }
+
+        [[nodiscard]] constexpr bool FloatGpuValueType(const VfxValueType type) noexcept
+        {
+            return type == VfxValueType::Scalar || type == VfxValueType::Vector2 || type == VfxValueType::Vector3 ||
+                   type == VfxValueType::Vector4 || type == VfxValueType::Color;
+        }
+
+        [[nodiscard]] constexpr bool FloatGpuRangeType(const VfxValueType type) noexcept
+        {
+            return type == VfxValueType::ScalarRange || type == VfxValueType::Vector2Range ||
+                   type == VfxValueType::Vector3Range || type == VfxValueType::Vector4Range ||
+                   type == VfxValueType::ColorRange;
+        }
+
+        [[nodiscard]] constexpr std::uint32_t GpuValueComponentCount(const VfxValueType type) noexcept
+        {
+            if (type == VfxValueType::Vector2 || type == VfxValueType::Vector2Range)
+                return 2;
+            if (type == VfxValueType::Vector3 || type == VfxValueType::Vector3Range)
+                return 3;
+            if (type == VfxValueType::Vector4 || type == VfxValueType::Color || type == VfxValueType::Vector4Range ||
+                type == VfxValueType::ColorRange)
+            {
+                return 4;
+            }
+            return 1;
+        }
+
+        [[nodiscard]] constexpr std::optional<VfxValueType> GpuRangeType(const VfxValueType type) noexcept
+        {
+            switch (type)
+            {
+            case VfxValueType::Integer:
+                return VfxValueType::IntegerRange;
+            case VfxValueType::UnsignedInteger:
+                return VfxValueType::UnsignedIntegerRange;
+            case VfxValueType::Scalar:
+                return VfxValueType::ScalarRange;
+            case VfxValueType::Vector2:
+                return VfxValueType::Vector2Range;
+            case VfxValueType::Vector3:
+                return VfxValueType::Vector3Range;
+            case VfxValueType::Vector4:
+                return VfxValueType::Vector4Range;
+            case VfxValueType::Color:
+                return VfxValueType::ColorRange;
+            default:
+                return std::nullopt;
+            }
+        }
+
+        [[nodiscard]] bool FiniteGpuValue(const VfxGpuValue& value, const VfxValueType type) noexcept
+        {
+            if (type == VfxValueType::Boolean)
+                return value.Primary[0] <= 1U;
+            if (!FloatGpuValueType(type) && !FloatGpuRangeType(type))
+                return SupportedGpuValueType(type);
+            const auto count = GpuValueComponentCount(type);
+            for (std::uint32_t component = 0; component < count; ++component)
+            {
+                if (!std::isfinite(std::bit_cast<float>(value.Primary[component])))
+                    return false;
+                if (FloatGpuRangeType(type) && !std::isfinite(std::bit_cast<float>(value.Secondary[component])))
+                    return false;
+            }
+            return true;
+        }
+
+        [[nodiscard]] bool ValidGpuInstructionSignature(const VfxValueOpcode opcode, const VfxValueType output,
+                                                        const std::uint32_t outputIndex,
+                                                        const std::span<const VfxValueType> inputs) noexcept
+        {
+            const auto allScalar = [&inputs]()
+            {
+                return std::ranges::all_of(inputs,
+                                           [](const VfxValueType type) { return type == VfxValueType::Scalar; });
+            };
+            switch (opcode)
+            {
+            case VfxValueOpcode::Constant:
+                return inputs.size() == 1 && inputs[0] == output;
+            case VfxValueOpcode::Range:
+                return inputs.size() == 2 && inputs[0] == inputs[1] && GpuRangeType(inputs[0]) == output;
+            case VfxValueOpcode::Random:
+                return (output == VfxValueType::Boolean && inputs.empty()) ||
+                       (GpuRangeType(output).has_value() && inputs.size() == 2 && inputs[0] == output &&
+                        inputs[1] == output);
+            case VfxValueOpcode::RandomRange:
+                return GpuRangeType(output).has_value() && inputs.size() == 1 && GpuRangeType(output) == inputs[0];
+            case VfxValueOpcode::Remap:
+                return output == VfxValueType::Scalar && inputs.size() == 3 && inputs[0] == VfxValueType::Scalar &&
+                       inputs[1] == VfxValueType::ScalarRange && inputs[2] == VfxValueType::ScalarRange;
+            case VfxValueOpcode::Add:
+            case VfxValueOpcode::Subtract:
+            case VfxValueOpcode::Multiply:
+            case VfxValueOpcode::Divide:
+            case VfxValueOpcode::Minimum:
+            case VfxValueOpcode::Maximum:
+            case VfxValueOpcode::Atan2:
+            case VfxValueOpcode::Power:
+            case VfxValueOpcode::Step:
+                return output == VfxValueType::Scalar && inputs.size() == 2 && allScalar();
+            case VfxValueOpcode::Clamp:
+            case VfxValueOpcode::Lerp:
+            case VfxValueOpcode::Smoothstep:
+                return output == VfxValueType::Scalar && inputs.size() == 3 && allScalar();
+            case VfxValueOpcode::Saturate:
+            case VfxValueOpcode::Absolute:
+            case VfxValueOpcode::Sine:
+            case VfxValueOpcode::Cosine:
+            case VfxValueOpcode::Tangent:
+            case VfxValueOpcode::ArcSine:
+            case VfxValueOpcode::ArcCosine:
+            case VfxValueOpcode::ArcTangent:
+            case VfxValueOpcode::SquareRoot:
+            case VfxValueOpcode::Exponential:
+            case VfxValueOpcode::Logarithm:
+            case VfxValueOpcode::LogarithmBase2:
+            case VfxValueOpcode::LogarithmBase10:
+            case VfxValueOpcode::Ceiling:
+            case VfxValueOpcode::Floor:
+            case VfxValueOpcode::Round:
+            case VfxValueOpcode::Fractional:
+            case VfxValueOpcode::Negate:
+            case VfxValueOpcode::Sign:
+                return output == VfxValueType::Scalar && inputs.size() == 1 && allScalar();
+            case VfxValueOpcode::Compare:
+                return output == VfxValueType::Boolean && inputs.size() == 2 && allScalar();
+            case VfxValueOpcode::BooleanAnd:
+            case VfxValueOpcode::BooleanOr:
+                return output == VfxValueType::Boolean && inputs.size() == 2 && inputs[0] == VfxValueType::Boolean &&
+                       inputs[1] == VfxValueType::Boolean;
+            case VfxValueOpcode::BooleanNot:
+                return output == VfxValueType::Boolean && inputs.size() == 1 && inputs[0] == VfxValueType::Boolean;
+            case VfxValueOpcode::Select:
+                return inputs.size() == 3 && inputs[0] == VfxValueType::Boolean && inputs[1] == output &&
+                       inputs[2] == output;
+            case VfxValueOpcode::Combine:
+                return output == VfxValueType::Vector3 && inputs.size() == 3 && allScalar();
+            case VfxValueOpcode::Split:
+                return output == VfxValueType::Scalar && outputIndex < 3 && inputs.size() == 1 &&
+                       inputs[0] == VfxValueType::Vector3;
+            case VfxValueOpcode::Dot:
+            case VfxValueOpcode::Distance:
+                return output == VfxValueType::Scalar && inputs.size() == 2 && inputs[0] == VfxValueType::Vector3 &&
+                       inputs[1] == VfxValueType::Vector3;
+            case VfxValueOpcode::Cross:
+                return output == VfxValueType::Vector3 && inputs.size() == 2 && inputs[0] == VfxValueType::Vector3 &&
+                       inputs[1] == VfxValueType::Vector3;
+            case VfxValueOpcode::Normalize:
+                return output == VfxValueType::Vector3 && inputs.size() == 1 && inputs[0] == VfxValueType::Vector3;
+            case VfxValueOpcode::Length:
+                return output == VfxValueType::Scalar && inputs.size() == 1 && inputs[0] == VfxValueType::Vector3;
+            case VfxValueOpcode::Time:
+            case VfxValueOpcode::DeltaTime:
+            case VfxValueOpcode::Age:
+            case VfxValueOpcode::Lifetime:
+                return output == VfxValueType::Scalar && inputs.empty();
+            case VfxValueOpcode::ParticleId:
+            case VfxValueOpcode::SpawnIndex:
+                return output == VfxValueType::UnsignedInteger && inputs.empty();
+            case VfxValueOpcode::ToFloat:
+                return output == VfxValueType::Scalar && inputs.size() == 1 &&
+                       (inputs[0] == VfxValueType::Integer || inputs[0] == VfxValueType::UnsignedInteger);
+            case VfxValueOpcode::ToInteger:
+                return output == VfxValueType::Integer && inputs.size() == 1 && inputs[0] == VfxValueType::Scalar;
+            case VfxValueOpcode::ToUnsignedInteger:
+                return output == VfxValueType::UnsignedInteger && inputs.size() == 1 &&
+                       inputs[0] == VfxValueType::Scalar;
+            }
+            return false;
+        }
+
+        [[nodiscard]] std::string IndexedGpuPayloadError(const std::string_view table, const std::size_t index,
+                                                         const std::string_view message)
+        {
+            return "GPU VFX " + std::string(table) + " " + std::to_string(index) + " " + std::string(message);
+        }
+    } // namespace
+
+    std::optional<std::string> ValidateGpuVfxExecutionPayload(const VfxGpuExecutionPayload& payload)
+    {
+        const auto& program = payload.ValueProgram;
+        if (program.Instructions.size() > VfxCompiledGpuValueProgram::MaximumInstructions)
+            return "GPU VFX expression instruction table exceeds the shader limit.";
+        if (program.Sources.size() > VfxCompiledGpuValueProgram::MaximumSources)
+            return "GPU VFX expression source table exceeds the shader limit.";
+        if (program.Constants.size() > VfxCompiledGpuValueProgram::MaximumConstants)
+            return "GPU VFX expression constant table exceeds the shader limit.";
+        if (program.RegisterCount > VfxCompiledGpuValueProgram::MaximumRegisters)
+            return "GPU VFX expression register count exceeds the shader limit.";
+        constexpr auto maximumBufferBytes = std::numeric_limits<std::uint32_t>::max();
+        if (payload.Parameters.size() > maximumBufferBytes / sizeof(VfxGpuValue) ||
+            payload.CustomInstructions.size() > maximumBufferBytes / sizeof(VfxGpuCustomInstructionRecord) ||
+            payload.ParticleOperations.size() > maximumBufferBytes / sizeof(VfxGpuParticleOperationRecord))
+        {
+            return "GPU VFX execution table exceeds SDL's 32-bit storage-buffer limit.";
+        }
+
+        std::array<std::optional<VfxValueType>, VfxCompiledGpuValueProgram::MaximumRegisters> registerTypes{};
+        for (std::size_t instructionIndex = 0; instructionIndex < program.Instructions.size(); ++instructionIndex)
+        {
+            const auto& instruction = program.Instructions[instructionIndex];
+            if (instruction.Header[0] > static_cast<std::uint32_t>(VfxValueOpcode::Sign))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unsupported opcode.");
+            if (instruction.Header[1] > static_cast<std::uint32_t>(VfxValueType::SignedDistanceField))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown value type.");
+            const auto opcode = static_cast<VfxValueOpcode>(instruction.Header[0]);
+            const auto outputType = static_cast<VfxValueType>(instruction.Header[1]);
+            if (!SupportedGpuValueType(outputType))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses a GPU-unsupported value type.");
+            if (instruction.Header[2] > static_cast<std::uint32_t>(VfxContextType::Output))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unsupported context.");
+            if (instruction.Header[3] > static_cast<std::uint32_t>(VfxEvaluationDomain::PerOutputEvent))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown evaluation domain.");
+            if (instruction.Output[0] >= program.RegisterCount ||
+                instruction.Output[0] >= VfxCompiledGpuValueProgram::MaximumRegisters)
+                return IndexedGpuPayloadError("instruction", instructionIndex, "writes outside the register file.");
+            if (registerTypes[instruction.Output[0]])
+                return IndexedGpuPayloadError("instruction", instructionIndex, "writes an SSA register twice.");
+            const auto firstSource = static_cast<std::size_t>(instruction.Output[2]);
+            const auto sourceCount = static_cast<std::size_t>(instruction.Output[3]);
+            if (sourceCount > 4 || firstSource > program.Sources.size() ||
+                sourceCount > program.Sources.size() - firstSource)
+                return IndexedGpuPayloadError("instruction", instructionIndex, "references an invalid source span.");
+            if ((instruction.Settings[2] & ~0xfU) != 0U)
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses unknown setting flags.");
+            if (instruction.Settings[1] > static_cast<std::uint32_t>(VfxRandomScope::PerParticleStrip))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown Random scope.");
+            if ((opcode == VfxValueOpcode::Random || opcode == VfxValueOpcode::RandomRange) &&
+                instruction.Settings[1] == static_cast<std::uint32_t>(VfxRandomScope::PerParticleStrip))
+                return IndexedGpuPayloadError("instruction", instructionIndex,
+                                              "requires particle-strip identity, which this renderer does not expose.");
+            if (instruction.Settings[3] > static_cast<std::uint32_t>(VfxComparisonCondition::Greater))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown comparison mode.");
+
+            std::array<VfxValueType, 4> inputTypes{};
+            for (std::size_t inputIndex = 0; inputIndex < sourceCount; ++inputIndex)
+            {
+                const auto& source = program.Sources[firstSource + inputIndex];
+                if (source.Reserved != 0 || source.Kind > static_cast<std::uint32_t>(VfxGpuValueSourceKind::Register) ||
+                    source.Type > static_cast<std::uint32_t>(VfxValueType::SignedDistanceField))
+                    return IndexedGpuPayloadError("source", firstSource + inputIndex, "has an invalid header.");
+                const auto type = static_cast<VfxValueType>(source.Type);
+                if (!SupportedGpuValueType(type))
+                    return IndexedGpuPayloadError("source", firstSource + inputIndex,
+                                                  "uses a GPU-unsupported value type.");
+                inputTypes[inputIndex] = type;
+                if (source.Kind == static_cast<std::uint32_t>(VfxGpuValueSourceKind::Literal))
+                {
+                    if (source.Index >= program.Constants.size() ||
+                        !FiniteGpuValue(program.Constants[source.Index], type))
+                        return IndexedGpuPayloadError("source", firstSource + inputIndex,
+                                                      "references an invalid packed constant.");
+                }
+                else if (source.Kind == static_cast<std::uint32_t>(VfxGpuValueSourceKind::Parameter))
+                {
+                    if (source.Index >= payload.Parameters.size() ||
+                        !FiniteGpuValue(payload.Parameters[source.Index], type))
+                        return IndexedGpuPayloadError("source", firstSource + inputIndex,
+                                                      "references an invalid packed parameter.");
+                }
+                else if (source.Index >= program.RegisterCount || !registerTypes[source.Index] ||
+                         *registerTypes[source.Index] != type)
+                {
+                    return IndexedGpuPayloadError("source", firstSource + inputIndex,
+                                                  "references an unwritten or mismatched register.");
+                }
+            }
+            if (!ValidGpuInstructionSignature(opcode, outputType, instruction.Output[1],
+                                              std::span(inputTypes).first(sourceCount)))
+                return IndexedGpuPayloadError("instruction", instructionIndex, "has an invalid operand signature.");
+            registerTypes[instruction.Output[0]] = outputType;
+        }
+
+        for (std::size_t customIndex = 0; customIndex < payload.CustomInstructions.size(); ++customIndex)
+        {
+            const auto& instruction = payload.CustomInstructions[customIndex];
+            if (instruction.Context > VfxContextType::Output || instruction.Target > VfxCustomTarget::Size ||
+                instruction.Operation > VfxCustomOperation::Multiply || !std::isfinite(instruction.Operand.X) ||
+                !std::isfinite(instruction.Operand.Y) || !std::isfinite(instruction.Operand.Z) ||
+                !std::isfinite(instruction.Operand.W))
+                return IndexedGpuPayloadError("custom instruction", customIndex, "is malformed.");
+            if (instruction.ValueRegister == std::numeric_limits<std::uint32_t>::max())
+            {
+                if (!SupportedGpuValueType(instruction.OperandType))
+                    return IndexedGpuPayloadError("custom instruction", customIndex,
+                                                  "uses a GPU-unsupported operand type.");
+            }
+            else
+            {
+                if (instruction.ValueRegister >= program.RegisterCount || !registerTypes[instruction.ValueRegister])
+                    return IndexedGpuPayloadError("custom instruction", customIndex,
+                                                  "references an unwritten expression register.");
+                if (*registerTypes[instruction.ValueRegister] != instruction.OperandType)
+                    return IndexedGpuPayloadError("custom instruction", customIndex,
+                                                  "does not match its expression register type.");
+            }
+            const auto compatible =
+                instruction.Target == VfxCustomTarget::Position || instruction.Target == VfxCustomTarget::Velocity
+                    ? instruction.OperandType == VfxValueType::Scalar ||
+                          instruction.OperandType == VfxValueType::Vector3
+                : instruction.Target == VfxCustomTarget::Tint ? instruction.OperandType == VfxValueType::Scalar ||
+                                                                    instruction.OperandType == VfxValueType::Color ||
+                                                                    instruction.OperandType == VfxValueType::Vector4
+                                                              : instruction.OperandType == VfxValueType::Scalar;
+            if (!compatible)
+                return IndexedGpuPayloadError("custom instruction", customIndex,
+                                              "references an incompatible expression value type.");
+        }
+
+        for (std::size_t operationIndex = 0; operationIndex < payload.ParticleOperations.size(); ++operationIndex)
+        {
+            const auto& operation = payload.ParticleOperations[operationIndex];
+            if (operation.Context > VfxContextType::Output || operation.Kind > VfxGpuParticleOperationKind::CustomHlsl)
+                return IndexedGpuPayloadError("particle operation", operationIndex, "is malformed.");
+            if (operation.Kind == VfxGpuParticleOperationKind::CustomHlsl)
+            {
+                if (operation.Index >= payload.CustomInstructions.size() ||
+                    payload.CustomInstructions[operation.Index].Context != operation.Context)
+                    return IndexedGpuPayloadError("particle operation", operationIndex,
+                                                  "references an invalid Custom HLSL instruction.");
+                continue;
+            }
+            if (operation.Index != 0)
+                return IndexedGpuPayloadError("particle operation", operationIndex,
+                                              "has a non-zero built-in operation index.");
+            const auto expectedContext =
+                operation.Kind == VfxGpuParticleOperationKind::Shape        ? VfxContextType::Initialize
+                : operation.Kind == VfxGpuParticleOperationKind::Initialize ? VfxContextType::Initialize
+                : operation.Kind == VfxGpuParticleOperationKind::Renderer   ? VfxContextType::Output
+                                                                            : VfxContextType::Update;
+            if (operation.Context != expectedContext)
+                return IndexedGpuPayloadError("particle operation", operationIndex,
+                                              "is scheduled in an incompatible context.");
+        }
+        return std::nullopt;
+    }
+
     SDL_GPUGraphicsPipeline* RenderSharedState::CreateGpuVfxPipeline(const SDL_GPUSampleCount samples)
     {
         const auto supported = SDL_GetGPUShaderFormats(Device);
@@ -276,8 +621,8 @@ namespace Keire::RenderBackend
         if (format == SDL_GPU_SHADERFORMAT_INVALID)
             return false;
 
-        const auto create =
-            [this, format](const BuiltinVfxShaderStage stage, const char* entrypoint, const std::uint32_t threads)
+        const auto create = [this, format](const BuiltinVfxShaderStage stage, const char* entrypoint,
+                                           const std::uint32_t threads, const bool usesExecutionTables = false)
         {
             const auto shader = SelectVfxShader(stage, format);
             SDL_GPUComputePipelineCreateInfo information{};
@@ -285,6 +630,7 @@ namespace Keire::RenderBackend
             information.code_size = shader.Size;
             information.entrypoint = entrypoint;
             information.format = format;
+            information.num_readonly_storage_buffers = usesExecutionTables ? 6U : 0U;
             information.num_readwrite_storage_buffers = 5;
             information.num_uniform_buffers = 1;
             information.threadcount_x = threads;
@@ -296,8 +642,8 @@ namespace Keire::RenderBackend
         VfxResetPipeline = create(BuiltinVfxShaderStage::Reset, "CSReset", 1);
         VfxKillPipeline = create(BuiltinVfxShaderStage::Kill, "CSKill", 256);
         VfxTransformPipeline = create(BuiltinVfxShaderStage::Transform, "CSTransform", 256);
-        VfxSimulatePipeline = create(BuiltinVfxShaderStage::Simulate, "CSSimulate", 256);
-        VfxSpawnPipeline = create(BuiltinVfxShaderStage::Spawn, "CSSpawn", 256);
+        VfxSimulatePipeline = create(BuiltinVfxShaderStage::Simulate, "CSSimulate", 256, true);
+        VfxSpawnPipeline = create(BuiltinVfxShaderStage::Spawn, "CSSpawn", 256, true);
         VfxFinalizePipeline = create(BuiltinVfxShaderStage::Finalize, "CSFinalize", 1);
         return VfxInitializePipeline && VfxResetPipeline && VfxKillPipeline && VfxTransformPipeline &&
                VfxSimulatePipeline && VfxSpawnPipeline && VfxFinalizePipeline;
@@ -338,7 +684,7 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("SDL_CreateGPUBuffer(GPU VFX) failed: " + LastSdlError());
                 return result;
             };
-            constexpr std::uint64_t particleStride = 128;
+            constexpr std::uint64_t particleStride = 144;
             const auto capacity = snapshot.ParticleCapacity();
             try
             {
@@ -365,7 +711,7 @@ namespace Keire::RenderBackend
         if (resources.LastPreparedFrame == Statistics.Frame)
             return;
 
-        static_assert(VfxGpuEmitter::MaximumCustomInstructions == 8);
+        static_assert(static_cast<std::uint32_t>(VfxContextType::Spawn) == 0);
         static_assert(static_cast<std::uint32_t>(VfxContextType::Initialize) == 1);
         static_assert(static_cast<std::uint32_t>(VfxContextType::Update) == 2);
         static_assert(static_cast<std::uint32_t>(VfxContextType::Output) == 3);
@@ -397,27 +743,26 @@ namespace Keire::RenderBackend
             std::array<float, 4> VelocityMinimumLifetime{};
             std::array<float, 4> VelocityMaximumLifetime{};
             std::array<float, 4> AccelerationShape{};
+            std::array<float, 4> ShapeRotationParameters{};
             std::array<float, 4> ColorStart{};
             std::array<float, 4> ColorEnd{};
             std::array<float, 4> Size{};
             std::array<float, 4> PreviousPosition{};
             std::array<float, 4> PreviousRotation{};
             std::array<std::uint32_t, 4> Identity{};
-            std::array<std::uint32_t, 4> CustomInstructionMetadata{};
-            std::array<std::array<std::uint32_t, 4>, VfxGpuEmitter::MaximumCustomInstructions>
-                CustomInstructionControls{};
-            std::array<std::array<float, 4>, VfxGpuEmitter::MaximumCustomInstructions> CustomInstructionOperands{};
-            std::array<std::uint32_t, 4> ParticleOperationMetadata{};
-            std::array<std::array<std::uint32_t, 4>, VfxGpuEmitter::MaximumParticleOperations>
-                ParticleOperationControls{};
+            std::array<std::uint32_t, 4> ValueProgramMetadata{};
+            std::array<std::uint32_t, 4> ValueRuntimeMetadata{};
+            std::array<std::uint32_t, 4> ValueSystemIdentity{};
+            std::array<std::uint32_t, 4> ValueSimulationMetadata{};
+            std::array<float, 4> ValueRuntimeTime{};
         };
-        static_assert(offsetof(Dispatch, Identity) == 192);
-        static_assert(offsetof(Dispatch, CustomInstructionMetadata) == 208);
-        static_assert(offsetof(Dispatch, CustomInstructionControls) == 224);
-        static_assert(offsetof(Dispatch, CustomInstructionOperands) == 352);
-        static_assert(offsetof(Dispatch, ParticleOperationMetadata) == 480);
-        static_assert(offsetof(Dispatch, ParticleOperationControls) == 496);
-        static_assert(sizeof(Dispatch) == 736);
+        static_assert(offsetof(Dispatch, Identity) == 208);
+        static_assert(offsetof(Dispatch, ValueProgramMetadata) == 224);
+        static_assert(offsetof(Dispatch, ValueRuntimeMetadata) == 240);
+        static_assert(offsetof(Dispatch, ValueSystemIdentity) == 256);
+        static_assert(offsetof(Dispatch, ValueSimulationMetadata) == 272);
+        static_assert(offsetof(Dispatch, ValueRuntimeTime) == 288);
+        static_assert(sizeof(Dispatch) == 304);
         Dispatch dispatch;
         dispatch.Capacity = resources.Capacity;
         const auto simulationDelta = [](const VfxGpuEmitter& emitter) noexcept
@@ -428,48 +773,112 @@ namespace Keire::RenderBackend
                        : 0.0F;
         };
 
-        const auto setCustomInstructions = [&dispatch](const VfxGpuEmitter& emitter)
+        const auto acquireExecutionBuffers =
+            [this, commands, &resources](const std::shared_ptr<const VfxGpuExecutionPayload>& execution)
+            -> std::shared_ptr<GpuVfxExecutionBuffers>
         {
-            dispatch.CustomInstructionMetadata = {};
-            dispatch.CustomInstructionControls = {};
-            dispatch.CustomInstructionOperands = {};
-            const auto count =
-                std::min<std::size_t>(emitter.CustomInstructionCount, VfxGpuEmitter::MaximumCustomInstructions);
-            dispatch.CustomInstructionMetadata[0] = static_cast<std::uint32_t>(count);
-            for (std::size_t index = 0; index < count; ++index)
+            if (!execution)
+                throw std::invalid_argument("GPU VFX emitter is missing its immutable execution payload.");
+            for (auto cached = resources.ExecutionCache.begin(); cached != resources.ExecutionCache.end();)
             {
-                const auto& instruction = emitter.CustomInstructions[index];
-                dispatch.CustomInstructionControls[index] = {
-                    static_cast<std::uint32_t>(instruction.Context),
-                    static_cast<std::uint32_t>(instruction.Target),
-                    static_cast<std::uint32_t>(instruction.Operation),
-                    instruction.ScaleByDeltaTime ? 1U : 0U,
-                };
-                dispatch.CustomInstructionOperands[index] = {
-                    instruction.Operand.X,
-                    instruction.Operand.Y,
-                    instruction.Operand.Z,
-                    instruction.Operand.W,
-                };
+                if (cached->second.expired())
+                    cached = resources.ExecutionCache.erase(cached);
+                else
+                    ++cached;
             }
-        };
-        const auto setParticleOperations = [&dispatch](const VfxGpuEmitter& emitter)
-        {
-            dispatch.ParticleOperationMetadata = {};
-            dispatch.ParticleOperationControls = {};
-            const auto count =
-                std::min<std::size_t>(emitter.ParticleOperationCount, VfxGpuEmitter::MaximumParticleOperations);
-            dispatch.ParticleOperationMetadata[0] = static_cast<std::uint32_t>(count);
-            for (std::size_t index = 0; index < count; ++index)
+            if (const auto found = resources.ExecutionCache.find(execution.get());
+                found != resources.ExecutionCache.end())
             {
-                const auto& operation = emitter.ParticleOperations[index];
-                dispatch.ParticleOperationControls[index] = {
+                if (auto cached = found->second.lock())
+                    return cached;
+                resources.ExecutionCache.erase(found);
+            }
+            if (const auto diagnostic = ValidateGpuVfxExecutionPayload(*execution))
+                throw std::invalid_argument(*diagnostic);
+
+            std::vector<VfxGpuCustomInstructionRecord> customInstructions;
+            customInstructions.reserve(execution->CustomInstructions.size());
+            for (const auto& instruction : execution->CustomInstructions)
+            {
+                const auto operationFlags = static_cast<std::uint32_t>(instruction.Operation) |
+                                            (instruction.ScaleByDeltaTime ? (1U << 8U) : 0U) |
+                                            (static_cast<std::uint32_t>(instruction.OperandType) << 16U);
+                customInstructions.push_back({
+                    {static_cast<std::uint32_t>(instruction.Context), static_cast<std::uint32_t>(instruction.Target),
+                     operationFlags, instruction.ValueRegister},
+                    {instruction.Operand.X, instruction.Operand.Y, instruction.Operand.Z, instruction.Operand.W},
+                });
+            }
+            std::vector<VfxGpuParticleOperationRecord> particleOperations;
+            particleOperations.reserve(execution->ParticleOperations.size());
+            for (const auto& operation : execution->ParticleOperations)
+            {
+                particleOperations.push_back({{{
                     static_cast<std::uint32_t>(operation.Context),
                     static_cast<std::uint32_t>(operation.Kind),
                     operation.Index,
                     0U,
-                };
+                }}});
             }
+
+            const auto release = [device = Device](GpuVfxExecutionBuffers* buffers) noexcept
+            {
+                if (buffers->ParticleOperations)
+                    SDL_ReleaseGPUBuffer(device, buffers->ParticleOperations);
+                if (buffers->CustomInstructions)
+                    SDL_ReleaseGPUBuffer(device, buffers->CustomInstructions);
+                if (buffers->Parameters)
+                    SDL_ReleaseGPUBuffer(device, buffers->Parameters);
+                if (buffers->Constants)
+                    SDL_ReleaseGPUBuffer(device, buffers->Constants);
+                if (buffers->Sources)
+                    SDL_ReleaseGPUBuffer(device, buffers->Sources);
+                if (buffers->Instructions)
+                    SDL_ReleaseGPUBuffer(device, buffers->Instructions);
+                delete buffers;
+            };
+            auto result = std::shared_ptr<GpuVfxExecutionBuffers>(new GpuVfxExecutionBuffers, release);
+            const auto uploadRecords = [this, commands]<typename T>(const std::span<const T> records)
+            {
+                const T emptyRecord{};
+                const auto uploadSpan = records.empty() ? std::span<const T>(std::addressof(emptyRecord), 1) : records;
+                return UploadBuffer(commands, std::as_bytes(uploadSpan), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
+            };
+            result->Instructions = uploadRecords(std::span(execution->ValueProgram.Instructions));
+            result->Sources = uploadRecords(std::span(execution->ValueProgram.Sources));
+            result->Constants = uploadRecords(std::span(execution->ValueProgram.Constants));
+            result->Parameters = uploadRecords(std::span(execution->Parameters));
+            result->CustomInstructions =
+                uploadRecords(std::span<const VfxGpuCustomInstructionRecord>(customInstructions));
+            result->ParticleOperations =
+                uploadRecords(std::span<const VfxGpuParticleOperationRecord>(particleOperations));
+            result->ByteSize =
+                std::max<std::size_t>(execution->ValueProgram.Instructions.size(), 1) * sizeof(VfxGpuValueInstruction) +
+                std::max<std::size_t>(execution->ValueProgram.Sources.size(), 1) * sizeof(VfxGpuValueSource) +
+                std::max<std::size_t>(execution->ValueProgram.Constants.size(), 1) * sizeof(VfxGpuValue) +
+                std::max<std::size_t>(execution->Parameters.size(), 1) * sizeof(VfxGpuValue) +
+                std::max<std::size_t>(customInstructions.size(), 1) * sizeof(VfxGpuCustomInstructionRecord) +
+                std::max<std::size_t>(particleOperations.size(), 1) * sizeof(VfxGpuParticleOperationRecord);
+            resources.ExecutionCache.emplace(execution.get(), result);
+            return result;
+        };
+
+        const auto setExecutionDispatch = [&dispatch](const VfxGpuEmitter& emitter)
+        {
+            if (!emitter.Execution || !std::isfinite(emitter.EffectTime))
+                throw std::invalid_argument("GPU VFX emitter execution timing is invalid.");
+            const auto& execution = *emitter.Execution;
+            dispatch.ValueProgramMetadata = {static_cast<std::uint32_t>(execution.ValueProgram.Instructions.size()),
+                                             static_cast<std::uint32_t>(execution.ValueProgram.Sources.size()),
+                                             static_cast<std::uint32_t>(execution.ValueProgram.Constants.size()),
+                                             execution.ValueProgram.RegisterCount};
+            dispatch.ValueRuntimeMetadata = {static_cast<std::uint32_t>(execution.Parameters.size()),
+                                             static_cast<std::uint32_t>(execution.CustomInstructions.size()),
+                                             static_cast<std::uint32_t>(execution.ParticleOperations.size()), 0U};
+            dispatch.ValueSystemIdentity = execution.ValueProgram.SystemIdentity;
+            dispatch.ValueSimulationMetadata = {static_cast<std::uint32_t>(emitter.SimulationStep),
+                                                static_cast<std::uint32_t>(emitter.SimulationStep >> 32U), 0U, 0U};
+            dispatch.ValueRuntimeTime = {emitter.EffectTime, 0.0F, 0.0F, 0.0F};
         };
 
         const std::array writeBindings{
@@ -479,17 +888,44 @@ namespace Keire::RenderBackend
             SDL_GPUStorageBufferReadWriteBinding{resources.Counters, false},
             SDL_GPUStorageBufferReadWriteBinding{resources.IndirectArguments, false},
         };
-        const auto dispatchCompute = [&](SDL_GPUComputePipeline* pipeline, const std::uint32_t groupCount)
+        const auto dispatchCompute = [&](SDL_GPUComputePipeline* pipeline, const std::uint32_t groupCount,
+                                         const GpuVfxExecutionBuffers* execution = nullptr)
         {
             auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
                                                  static_cast<std::uint32_t>(writeBindings.size()));
             if (!pass)
                 throw std::runtime_error("SDL_BeginGPUComputePass(VFX) failed: " + LastSdlError());
             SDL_BindGPUComputePipeline(pass, pipeline);
+            if (execution)
+            {
+                const std::array readBindings{execution->Instructions,       execution->Sources,
+                                              execution->Constants,          execution->Parameters,
+                                              execution->CustomInstructions, execution->ParticleOperations};
+                SDL_BindGPUComputeStorageBuffers(pass, 0, readBindings.data(),
+                                                 static_cast<std::uint32_t>(readBindings.size()));
+            }
             SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
             SDL_DispatchGPUCompute(pass, groupCount, 1, 1);
             SDL_EndGPUComputePass(pass);
             ++Statistics.VfxComputeDispatches;
+        };
+
+        const auto allocatedBufferBytes = [this]() noexcept
+        {
+            std::uint64_t result = 0;
+            for (const auto& [world, liveResources] : GpuVfxWorlds)
+            {
+                (void)world;
+                result += static_cast<std::uint64_t>(liveResources.Capacity) * (144U + sizeof(std::uint32_t) * 2U) +
+                          5U * sizeof(std::uint32_t) + sizeof(SDL_GPUIndirectDrawCommand);
+                for (const auto& [payload, cached] : liveResources.ExecutionCache)
+                {
+                    (void)payload;
+                    if (const auto buffers = cached.lock())
+                        result += buffers->ByteSize;
+                }
+            }
+            return result;
         };
 
         const auto applySnapshot = resources.ShouldApplySnapshot(snapshot.Revision());
@@ -497,9 +933,7 @@ namespace Keire::RenderBackend
         {
             resources.LastPreparedFrame = Statistics.Frame;
             Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
-            Statistics.VfxGpuBufferBytes =
-                static_cast<std::uint64_t>(resources.Capacity) * (128U + sizeof(std::uint32_t) * 2U) +
-                5U * sizeof(std::uint32_t) + sizeof(SDL_GPUIndirectDrawCommand);
+            Statistics.VfxGpuBufferBytes = allocatedBufferBytes();
             return;
         }
         const auto consumeSimulation = resources.ShouldConsumeSimulationStep(snapshot.SimulationStepRevision());
@@ -570,10 +1004,20 @@ namespace Keire::RenderBackend
         dispatchCompute(VfxResetPipeline, 1);
         for (const auto& emitter : snapshot.GpuEmitters())
         {
+            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+            auto& state = nextEmitters[key];
+            if (state.Execution != emitter.Execution || !state.ExecutionBuffers)
+            {
+                state.ExecutionBuffers = acquireExecutionBuffers(emitter.Execution);
+                state.Execution = emitter.Execution;
+            }
             dispatch.DeltaSeconds = consumeSimulation ? simulationDelta(emitter) : 0.0F;
+            dispatch.Seed = emitter.Seed;
             dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
             dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
             dispatch.AccelerationShape = {emitter.Acceleration.X, emitter.Acceleration.Y, emitter.Acceleration.Z, 0.0F};
+            dispatch.ShapeRotationParameters = {emitter.ConeAngleDegrees, emitter.ConeLength, emitter.RotationMinimum.Z,
+                                                emitter.RotationMaximum.Z};
             dispatch.ColorStart = {emitter.ColorStart.Red, emitter.ColorStart.Green, emitter.ColorStart.Blue,
                                    emitter.ColorStart.Alpha};
             dispatch.ColorEnd = {emitter.ColorEnd.Red, emitter.ColorEnd.Green, emitter.ColorEnd.Blue,
@@ -581,9 +1025,8 @@ namespace Keire::RenderBackend
             dispatch.Size = {emitter.SizeStart, emitter.SizeEnd,
                              std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Space)), 0.0F};
             dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
-            setCustomInstructions(emitter);
-            setParticleOperations(emitter);
-            dispatchCompute(VfxSimulatePipeline, (resources.Capacity + 255U) / 256U);
+            setExecutionDispatch(emitter);
+            dispatchCompute(VfxSimulatePipeline, (resources.Capacity + 255U) / 256U, state.ExecutionBuffers.get());
         }
 
         if (applySnapshot)
@@ -596,6 +1039,8 @@ namespace Keire::RenderBackend
                 const auto requested = emitter.SpawnSequence >= state.SpawnSequence
                                            ? emitter.SpawnSequence - state.SpawnSequence
                                            : emitter.SpawnSequence;
+                const auto firstSpawnSequence =
+                    emitter.SpawnSequence >= requested ? emitter.SpawnSequence - requested : std::uint64_t{0};
                 state.SpawnSequence = emitter.SpawnSequence;
                 state.SimulationRevision = emitter.SimulationRevision;
                 state.Position = emitter.Position;
@@ -605,6 +1050,7 @@ namespace Keire::RenderBackend
                     continue;
                 dispatch.SpawnCount =
                     static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, resources.Capacity));
+                dispatch.DeltaSeconds = consumeSimulation ? simulationDelta(emitter) : 0.0F;
                 dispatch.Seed = emitter.Seed;
                 dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
                 dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
@@ -616,6 +1062,8 @@ namespace Keire::RenderBackend
                                                     emitter.VelocityMaximum.Z, emitter.LifetimeMaximum};
                 dispatch.AccelerationShape = {emitter.Acceleration.X, emitter.Acceleration.Y, emitter.Acceleration.Z,
                                               std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Shape))};
+                dispatch.ShapeRotationParameters = {emitter.ConeAngleDegrees, emitter.ConeLength,
+                                                    emitter.RotationMinimum.Z, emitter.RotationMaximum.Z};
                 dispatch.ColorStart = {emitter.ColorStart.Red, emitter.ColorStart.Green, emitter.ColorStart.Blue,
                                        emitter.ColorStart.Alpha};
                 dispatch.ColorEnd = {emitter.ColorEnd.Red, emitter.ColorEnd.Green, emitter.ColorEnd.Blue,
@@ -623,11 +1071,10 @@ namespace Keire::RenderBackend
                 dispatch.Size = {emitter.SizeStart, emitter.SizeEnd,
                                  std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Space)), 0.0F};
                 dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(),
-                                     static_cast<std::uint32_t>(emitter.SpawnSequence),
-                                     static_cast<std::uint32_t>(emitter.Renderer)};
-                setCustomInstructions(emitter);
-                setParticleOperations(emitter);
-                dispatchCompute(VfxSpawnPipeline, (dispatch.SpawnCount + 255U) / 256U);
+                                     static_cast<std::uint32_t>(firstSpawnSequence),
+                                     static_cast<std::uint32_t>(firstSpawnSequence >> 32U)};
+                setExecutionDispatch(emitter);
+                dispatchCompute(VfxSpawnPipeline, (dispatch.SpawnCount + 255U) / 256U, state.ExecutionBuffers.get());
             }
         }
 
@@ -642,9 +1089,7 @@ namespace Keire::RenderBackend
             resources.MarkSimulationStepConsumed(snapshot.SimulationStepRevision());
         resources.LastPreparedFrame = Statistics.Frame;
         Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
-        Statistics.VfxGpuBufferBytes =
-            static_cast<std::uint64_t>(resources.Capacity) * (128U + sizeof(std::uint32_t) * 2U) +
-            5U * sizeof(std::uint32_t) + sizeof(SDL_GPUIndirectDrawCommand);
+        Statistics.VfxGpuBufferBytes = allocatedBufferBytes();
     }
 
     bool RenderSharedState::EnsureSkinningPipeline()

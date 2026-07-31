@@ -7,10 +7,25 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace KeireEditor
 {
+    enum class VfxGraphConnectionStatus : std::uint8_t
+    {
+        Accepted,
+        AcceptedWithWarning,
+        Rejected
+    };
+
+    struct VfxGraphConnectionCheck
+    {
+        VfxGraphConnectionStatus Status = VfxGraphConnectionStatus::Rejected;
+        bool ReplacesInput = false;
+        std::string Diagnostic;
+    };
+
     struct VfxEffectDocumentSpecification
     {
         // Preview is transient and must not persist the asset or dirty scene state.
@@ -50,7 +65,9 @@ namespace KeireEditor
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Host.Asset(); }
         [[nodiscard]] std::uint64_t Revision() const noexcept { return m_Host.Revision(); }
         [[nodiscard]] bool Dirty() const noexcept { return m_Host.Dirty(); }
-        [[nodiscard]] std::string_view Diagnostic() const noexcept { return m_Host.Diagnostic(); }
+        [[nodiscard]] std::string_view Diagnostic() const noexcept;
+        [[nodiscard]] bool Publishable() const noexcept { return m_GraphDiagnostic.empty(); }
+        [[nodiscard]] std::string_view GraphDiagnostic() const noexcept { return m_GraphDiagnostic; }
         [[nodiscard]] const Keire::VfxEffectDefinition& Definition() const { return m_Host.Draft(); }
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const noexcept { return m_Host.UndoContext(); }
 
@@ -70,6 +87,20 @@ namespace KeireEditor
         [[nodiscard]] bool EditNode(Keire::AssetId system, Keire::AssetId node,
                                     const std::function<void(Keire::VfxGraphNode&)>& operation);
         [[nodiscard]] bool RemoveNode(Keire::AssetId system, Keire::AssetId node);
+        [[nodiscard]] bool AddBlock(Keire::AssetId system, Keire::AssetId context, Keire::VfxGraphBlock block);
+        [[nodiscard]] bool EditBlock(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
+                                     const std::function<void(Keire::VfxGraphBlock&)>& operation);
+        [[nodiscard]] bool SetBlockEnabled(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
+                                           bool enabled);
+        [[nodiscard]] bool RemoveBlock(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block);
+        [[nodiscard]] bool MoveBlock(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
+                                     std::size_t destination);
+        [[nodiscard]] bool AddBlockPin(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
+                                       Keire::VfxGraphPin pin);
+        [[nodiscard]] bool EditBlockPin(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
+                                        Keire::AssetId pin, const std::function<void(Keire::VfxGraphPin&)>& operation);
+        [[nodiscard]] bool RemoveBlockPin(Keire::AssetId system, Keire::AssetId context, Keire::AssetId block,
+                                          Keire::AssetId pin);
         [[nodiscard]] bool AddPin(Keire::AssetId system, Keire::AssetId node, Keire::VfxGraphPin pin);
         [[nodiscard]] bool EditPin(Keire::AssetId system, Keire::AssetId node, Keire::AssetId pin,
                                    const std::function<void(Keire::VfxGraphPin&)>& operation);
@@ -78,6 +109,11 @@ namespace KeireEditor
         [[nodiscard]] bool EditConnection(Keire::AssetId system, Keire::AssetId connection,
                                           const std::function<void(Keire::VfxGraphConnection&)>& operation);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId system, Keire::AssetId connection);
+        [[nodiscard]] VfxGraphConnectionCheck CheckConnection(Keire::AssetId system, Keire::AssetId outputNode,
+                                                              Keire::AssetId outputPin, Keire::AssetId inputNode,
+                                                              Keire::AssetId inputPin) const;
+        [[nodiscard]] VfxGraphConnectionCheck CheckConnection(Keire::AssetId system, Keire::VfxGraphEndpoint output,
+                                                              Keire::VfxGraphEndpoint input) const;
         [[nodiscard]] bool AddBlackboardParameter(Keire::VfxBlackboardParameter parameter);
         [[nodiscard]] bool
         EditBlackboardParameter(Keire::AssetId parameter,
@@ -86,5 +122,6 @@ namespace KeireEditor
 
       private:
         Host m_Host;
+        std::string m_GraphDiagnostic;
     };
 } // namespace KeireEditor

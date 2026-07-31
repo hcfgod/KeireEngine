@@ -10,6 +10,8 @@ var tests = new (string Name, Action Run)[]
     ("Reload interruption returns reserved magazines", ReloadInterruptionReturnsReservedMagazine),
     ("Feedback pool acquisition is transactional", FeedbackPoolAcquisitionIsTransactional),
     ("Ballistic zero-time and invalid steps", BallisticZeroTimeAndInvalidSteps),
+    ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
+    ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
 };
 
 int failed = 0;
@@ -196,6 +198,69 @@ static void BallisticZeroTimeAndInvalidSteps()
         "Non-finite ballistic steps must be rejected.");
     world.Step(0.0001f);
     Assert(world.ActiveCount == 0, "A positive step must continue advancing projectile lifetime.");
+}
+
+static void VfxRangesNormalizeAndValidate()
+{
+    var scalar = new Keire.VfxRange<float>(5.0f, -2.0f);
+    scalar.Deconstruct(out float scalarMinimum, out float scalarMaximum);
+    Assert(scalarMinimum == -2.0f && scalarMaximum == 5.0f, "Scalar VFX ranges must canonicalize reversed endpoints.");
+    Assert(scalar == new Keire.VfxRange<float>(-2.0f, 5.0f), "Canonical VFX ranges must retain value equality.");
+
+    var integer = new Keire.VfxRange<long>(long.MaxValue, long.MinValue);
+    Assert(integer.Minimum == long.MinValue && integer.Maximum == long.MaxValue,
+           "Signed integer VFX ranges must preserve their full domain.");
+    var unsigned = new Keire.VfxRange<ulong>(ulong.MaxValue, 0UL);
+    Assert(unsigned.Minimum == 0UL && unsigned.Maximum == ulong.MaxValue,
+           "Unsigned integer VFX ranges must preserve their full domain.");
+
+    var vector2 = new Keire.VfxRange<Keire.Vector2>(new(4.0f, -3.0f), new(-2.0f, 8.0f));
+    Assert(vector2.Minimum == new Keire.Vector2(-2.0f, -3.0f) && vector2.Maximum == new Keire.Vector2(4.0f, 8.0f),
+           "Vector2 VFX ranges must canonicalize each component independently.");
+    var vector3 = new Keire.VfxRange<Keire.Vector3>(new(4.0f, -3.0f, 9.0f), new(-2.0f, 8.0f, 1.0f));
+    Assert(vector3.Minimum == new Keire.Vector3(-2.0f, -3.0f, 1.0f) &&
+               vector3.Maximum == new Keire.Vector3(4.0f, 8.0f, 9.0f),
+           "Vector3 VFX ranges must canonicalize each component independently.");
+    var vector4 = new Keire.VfxRange<Keire.Vector4>(new(4.0f, -3.0f, 9.0f, 0.8f), new(-2.0f, 8.0f, 1.0f, 0.2f));
+    Assert(vector4.Minimum == new Keire.Vector4(-2.0f, -3.0f, 1.0f, 0.2f) &&
+               vector4.Maximum == new Keire.Vector4(4.0f, 8.0f, 9.0f, 0.8f),
+           "Vector4 VFX ranges must canonicalize each component independently.");
+    var color = new Keire.VfxRange<Keire.Color>(new(0.9f, 0.1f, 0.8f, 1.0f), new(0.2f, 0.7f, 0.3f, 0.4f));
+    Assert(color.Minimum == new Keire.Color(0.2f, 0.1f, 0.3f, 0.4f) &&
+               color.Maximum == new Keire.Color(0.9f, 0.7f, 0.8f, 1.0f),
+           "Color VFX ranges must canonicalize each channel independently.");
+
+    AssertThrows<ArgumentOutOfRangeException>(() => _ = new Keire.VfxRange<float>(float.NaN, 1.0f),
+                                              "Non-finite scalar VFX range endpoints must be rejected.");
+    AssertThrows<ArgumentOutOfRangeException>(
+        () => _ = new Keire.VfxRange<Keire.Vector3>(new(float.PositiveInfinity, 0.0f, 0.0f), default),
+        "Non-finite vector VFX range endpoints must be rejected.");
+    AssertThrows<NotSupportedException>(() => _ = new Keire.VfxRange<int>(1, 2),
+                                        "Unsupported VFX range element types must be rejected.");
+}
+
+static void VfxRangeSettersExposeEverySupportedType()
+{
+    Type[] supportedTypes = {
+        typeof(float),         typeof(long),          typeof(ulong),       typeof(Keire.Vector2),
+        typeof(Keire.Vector3), typeof(Keire.Vector4), typeof(Keire.Color),
+    };
+    foreach (Type elementType in supportedTypes)
+    {
+        Type rangeType = typeof(Keire.VfxRange<>).MakeGenericType(elementType);
+        var handleSetter =
+            typeof(Keire.VfxEmitterHandle)
+                .GetMethod("SetParameter",
+                           System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance,
+                           binder: null, types: new[] { typeof(Keire.AssetId), rangeType }, modifiers: null);
+        Assert(handleSetter?.ReturnType == typeof(bool),
+               $"VfxEmitterHandle must expose a Boolean {rangeType.Name} setter.");
+
+        var staticSetter = typeof(Keire.Vfx).GetMethod(
+            "SetParameter", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, binder: null,
+            types: new[] { typeof(Keire.Entity), typeof(Keire.AssetId), rangeType }, modifiers: null);
+        Assert(staticSetter?.ReturnType == typeof(bool), $"Vfx must expose a Boolean {rangeType.Name} setter.");
+    }
 }
 
 static void Assert(bool condition, string message)

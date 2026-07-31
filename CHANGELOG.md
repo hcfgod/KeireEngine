@@ -5,6 +5,47 @@ version tags.
 
 ## Unreleased
 
+- Introduced the schema-4 VFX foundation with stable descriptor-backed node IDs, typed properties and ranges, ordered
+  Context Blocks, block-pin endpoints, deterministic SSA-style CPU value evaluation, core Range/Random/Remap and
+  math/logic/vector Operators, explicit backend diagnostics, and in-memory schema 1-3 migration. Added transactional
+  managed `VfxRange<T>` updates for exposed Play Mode parameters and a validated Unity 6.3 LTS parity manifest whose
+  unfinished catalog rows remain disabled with actionable reasons. Canonical validation now rejects stale disconnected
+  Operators, unsafe dynamic Burst values, malformed range overrides, and strip-scoped Random until strips are real.
+  The graph Inspector now exposes descriptor-constrained Operator contexts, typed Operator/Block inline values, and
+  editable Random, Compare, and Remap settings instead of requiring source-level asset edits.
+  Added scalar trigonometric, power/root/logarithmic, rounding, interpolation, Negate, and Sign Operators with
+  deterministic constant folding and zero containment for invalid or non-finite math domains.
+  The offline parity tooling now preserves Unity's dynamic `<Attribute>` labels, enforces canonical UTF-8 JSON, and
+  cross-checks every claimed implementation/support tier against the build-time runtime descriptor contract.
+  Executable Operator results can now feed Portable Custom HLSL inputs through typed expression registers on CPU and
+  the packed GPU value interpreter. Descriptor backend badges now report CPU + GPU only where packed representation and
+  backend semantics are validated; structurally available opcodes with open differential cases remain CPU-only, and
+  incomplete Unity parity rows remain disabled. Uniform work may still be folded or hoisted, particle-varying Portable
+  inputs execute in the shader, and generic Runtime Block properties without a lowered GPU binding remain explicit
+  node-linked compile errors. Dynamic Portable execution now uses the 4,096-instruction compiler safety bound; the
+  fixed eight-instruction/fifteen-operation snapshot arrays are compatibility mirrors only. GPU compilation also rejects
+  unsupported resource shapes, nonlinear curve/gradient payloads, collision modes, renderer resources, and fixed ABI
+  overflows at the responsible Block instead of silently approximating or ignoring them. Point/Box/Sphere/Cone
+  initialization now consumes exact authored GPU shape data, Sprite Z-rotation is sampled on GPU, and global spawn
+  identity keeps random initialization stable across dispatch batching. Schema-4 graphs may schedule multiple same-kind
+  compatibility Blocks; additive
+  emission rates execute on both backends, while fixed-payload GPU duplicates and duplicate Renderer outputs fail at
+  the exact Block. CPU/GPU activation and live parameter edits now transactionally revalidate resolved backend
+  capabilities, including unsupported custom Sprite resources and billboard X/Y rotation. A serialized schema-4
+  compatibility mode keeps migrated schemas 1-3 and explicit Runtime Module conversions warning-compatible while new
+  native graphs enforce unsupported capabilities as errors.
+- Replaced the GPU VFX execution snapshot limits with validated dynamic expression, custom-instruction, particle-
+  operation, resource, and attribute payloads. The renderer now caches immutable uploads by program hash, accounts for
+  their real buffer sizes, broadcasts scalar Portable inputs by declared operand type, and executes live Force, Size,
+  Color, and Renderer uniform edits without restarting particle state. The graph compiler now enforces descriptor
+  backend tiers at the producing node. Cumulative spawn work survives skipped render snapshots; exact timing across
+  multiple skipped simulation steps remains a documented queued-handoff milestone.
+- Upgraded the VFX graph canvas to modern direct manipulation with a searchable, categorized right-click node palette,
+  bidirectional typed-pin cable dragging, live green/amber/red validation feedback, atomic occupied-input replacement,
+  cable/node/pin context menus, cable selection and inspection, right-click unlink, Delete/Escape shortcuts, and
+  undoable gesture-level edits. Temporarily incomplete Graph drafts now retain the last valid frozen preview, show an
+  actionable diagnostic, and block Save until reconnection or Undo restores a publishable graph; the Audio Mixer's
+  existing pinless read-only routing view remains compatible.
 - Made schema-v3 VFX graphs executable on CPU and GPU: typed `ParticleStream` cables now schedule stable-ID Module
   payload references, Blackboard Parameter nodes bind canonical module properties, and bounded Portable Custom HLSL
   lowers to the same verified instructions on both backends. Added explicit LegacyModules-to-Graph conversion,
@@ -54,11 +95,13 @@ version tags.
 - Made AssetTool import and cook use the packaged private asset worker, and taught cooking to restore validated
   dependency-free outputs from the persistent cache, so FFmpeg-backed audio sources cook without exposing the private
   codec backend through public engine or SDK boundaries. Linux and macOS worker codec lookup now uses their respective
-  relocatable `$ORIGIN` and `@loader_path`/`@rpath` conventions.
+  relocatable `$ORIGIN` and `
+                @loader_path`/`@rpath` conventions.
 - Bounded transactional cook/staging token lengths and made Windows native renames extended-path aware, preventing
   content-addressed pack publication from failing when package staging paths cross the legacy 260-character limit.
 - Removed a Windows package-smoke race by explicitly owning, waiting, reading, and disposing the short-lived
-  invalid-option client process instead of querying a `Start-Process` object after the client had already exited.
+  invalid-option client process instead of querying a `Start -
+        Process` object after the client had already exited.
 - Removed three orphaned Sandbox metadata sidecars left behind by temporary and backup source files.
 - Matched SDL's GPU presentation queue to Kéire's configured frames-in-flight policy and split command-recording
   statistics into skinning, VFX, draw preparation, shadows, Forward+, scene, depth, tone mapping, and residual overhead.
@@ -449,7 +492,7 @@ version tags.
 - Editor shutdown now cancels queued background catalog refreshes instead of forcing a project-wide import to finish;
   saved asset sources remain durable and refresh normally on the next launch.
 - Scene view `F` frames the selected entity's imported mesh metadata and transformed descendants with aspect-aware
-  camera padding, while double-`F` locks the camera to the selection like `Shift+F`.
+  camera padding, while double-`F` locks the camera to the selection like `Shift + F`.
 - Project editors restore their last normal window position and size plus maximized or borderless-fullscreen state from
   project-local user settings. The Project Hub now uses a modern navigation rail and responsive recent-project cards.
 - Fixed scene saves freezing the editor behind their background asset import by keeping asset record and status
@@ -662,7 +705,7 @@ version tags.
 - Extracted layer ownership, overlay ordering, deferred mutations, traversal, and teardown into a dedicated public `LayerStack`; `Application` now delegates layer operations while orchestrating frame boundaries.
 - Moved the executable entrypoint, informational command handling, exception boundary, application lifetime, and `Run` invocation into KeireCore; KeireClient now supplies `CreateApplication`.
 - Moved client-specific help text into a static client command-line descriptor while retaining core-owned help/version handling.
-- Public KeireCore headers now use the `Keire/` include prefix and the clean `KEIRE_*` macro family.
+- Public KeireCore headers now use the `Keire /` include prefix and the clean `KEIRE_ *` macro family.
 - Logging owns reference-counted private asynchronous state, supports console suppression, and makes detached handles safely inert after shutdown.
 - Build identity refreshes immediately before KeireCore compilation and includes tracked and untracked dirty state.
 - Dist builds use link-time optimization and CI treats template warnings as errors.

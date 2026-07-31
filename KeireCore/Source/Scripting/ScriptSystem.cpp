@@ -7,6 +7,7 @@
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
+#include "Keire/Vfx/VfxSystem.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
@@ -2696,6 +2697,95 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxParameter(const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
+                               const std::uint64_t parameterHigh, const std::uint64_t parameterLow,
+                               VfxParameterValue value) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->SetManagedVfxParameter(
+                                     entity.Id().Value(), {AssetId(parameterHigh, parameterLow), std::move(value)})
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxScalarRange(const std::uint64_t world, const std::uint64_t entityHigh,
+                                 const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                 const std::uint64_t parameterLow, const float minimum, const float maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxScalarRange{minimum, maximum});
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxIntegerRange(const std::uint64_t world, const std::uint64_t entityHigh,
+                                  const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                  const std::uint64_t parameterLow, const std::int64_t minimum,
+                                  const std::int64_t maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxIntegerRange{minimum, maximum});
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxUnsignedIntegerRange(const std::uint64_t world, const std::uint64_t entityHigh,
+                                          const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                          const std::uint64_t parameterLow, const std::uint64_t minimum,
+                                          const std::uint64_t maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxUnsignedIntegerRange{minimum, maximum});
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxVector2Range(const std::uint64_t world, const std::uint64_t entityHigh,
+                                  const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                  const std::uint64_t parameterLow, const Vector2 minimum,
+                                  const Vector2 maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxVector2Range{minimum, maximum});
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxVector3Range(const std::uint64_t world, const std::uint64_t entityHigh,
+                                  const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                  const std::uint64_t parameterLow, const Vector3 minimum,
+                                  const Vector3 maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxVector3Range{minimum, maximum});
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxVector4Range(const std::uint64_t world, const std::uint64_t entityHigh,
+                                  const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                  const std::uint64_t parameterLow, const Vector4 minimum,
+                                  const Vector4 maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxVector4Range{minimum, maximum});
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeSetVfxColorRange(const std::uint64_t world, const std::uint64_t entityHigh,
+                                const std::uint64_t entityLow, const std::uint64_t parameterHigh,
+                                const std::uint64_t parameterLow, const Color minimum, const Color maximum) noexcept
+        {
+            return RuntimeSetVfxParameter(world, entityHigh, entityLow, parameterHigh, parameterLow,
+                                          VfxColorRange{minimum, maximum});
+        }
+
         [[nodiscard]] static std::uint8_t RuntimeSetUiText(const std::uint64_t world, const std::uint64_t entityHigh,
                                                            const std::uint64_t entityLow,
                                                            const Coral::String text) noexcept
@@ -3836,6 +3926,20 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimePauseVfx));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "IsVfxAliveIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeIsVfxAlive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxScalarRangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxScalarRange));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxIntegerRangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxIntegerRange));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxUnsignedIntegerRangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxUnsignedIntegerRange));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxVector2RangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxVector2Range));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxVector3RangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxVector3Range));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxVector4RangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxVector4Range));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxColorRangeIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetVfxColorRange));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetUiTextIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetUiText));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",

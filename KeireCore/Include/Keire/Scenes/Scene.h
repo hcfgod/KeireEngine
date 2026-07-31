@@ -19,6 +19,7 @@ namespace Keire
 {
     class Scene;
     class VfxWorld;
+    struct VfxParameterOverride;
 
     namespace Detail
     {
@@ -153,6 +154,10 @@ namespace Keire
         [[nodiscard]] bool PauseVfx(EntityId entity, bool paused);
         /// Reports whether the runtime entity currently owns a live native VfxHandle.
         [[nodiscard]] bool IsVfxAlive(EntityId entity) const noexcept;
+        /// Atomically updates an exposed Blackboard override on the runtime component and its live native VFX handle.
+        /// Returns false without changing either side when the entity, handle, parameter, exposure, type, or range is
+        /// incompatible.
+        [[nodiscard]] bool SetVfxParameter(EntityId entity, const VfxParameterOverride& value);
         [[nodiscard]] std::vector<ScenePhysicsQueryHit> RayCast(const PhysicsRayQuery& query,
                                                                 EntityId ignoredEntity = {}) const;
         void SetPresentationViewport(float width, float height, RuntimeUiInsets safeArea = {});

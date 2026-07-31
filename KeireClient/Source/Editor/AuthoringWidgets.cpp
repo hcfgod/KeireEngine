@@ -2,13 +2,26 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace
 {
+    constexpr float PinRowHeight = 22.0F;
+    constexpr float PinBottomPadding = 8.0F;
+    constexpr float BlockHeaderHeight = 28.0F;
+    constexpr float BlockSpacing = 6.0F;
+    constexpr float BlockInset = 8.0F;
+    constexpr float ConnectionHitRadius = 7.0F;
+    constexpr int ConnectionSegmentCount = 28;
+
     [[nodiscard]] Keire::UiPosition Add(const Keire::UiPosition left, const Keire::UiPosition right) noexcept
     {
         return {left.X + right.X, left.Y + right.Y};
@@ -39,6 +52,184 @@ namespace
                     3.0F * inverse * amount * amount * second.X + amount * amount * amount * end.X,
                 inverse * inverse * inverse * start.Y + 3.0F * inverse * inverse * amount * first.Y +
                     3.0F * inverse * amount * amount * second.Y + amount * amount * amount * end.Y};
+    }
+
+    [[nodiscard]] float SquaredDistance(const Keire::UiPosition first, const Keire::UiPosition second) noexcept
+    {
+        const float x = first.X - second.X;
+        const float y = first.Y - second.Y;
+        return x * x + y * y;
+    }
+
+    [[nodiscard]] float SquaredDistanceToSegment(const Keire::UiPosition point, const Keire::UiPosition first,
+                                                 const Keire::UiPosition second) noexcept
+    {
+        const float segmentX = second.X - first.X;
+        const float segmentY = second.Y - first.Y;
+        const float lengthSquared = segmentX * segmentX + segmentY * segmentY;
+        if (lengthSquared <= std::numeric_limits<float>::epsilon())
+            return SquaredDistance(point, first);
+        const float amount =
+            std::clamp(((point.X - first.X) * segmentX + (point.Y - first.Y) * segmentY) / lengthSquared, 0.0F, 1.0F);
+        return SquaredDistance(point, {first.X + segmentX * amount, first.Y + segmentY * amount});
+    }
+
+    [[nodiscard]] float HeaderHeight(const KeireEditor::NodeGraphNode& node) noexcept
+    {
+        return node.Subtitle.empty() ? 34.0F : 48.0F;
+    }
+
+    [[nodiscard]] float PinAreaHeight(const std::span<const KeireEditor::NodeGraphPin> pins) noexcept
+    {
+        const auto inputCount = static_cast<std::size_t>(
+            std::ranges::count(pins, KeireEditor::NodeGraphPinDirection::Input, &KeireEditor::NodeGraphPin::Direction));
+        const auto outputCount = static_cast<std::size_t>(std::ranges::count(
+            pins, KeireEditor::NodeGraphPinDirection::Output, &KeireEditor::NodeGraphPin::Direction));
+        return pins.empty() ? 0.0F
+                            : static_cast<float>(std::max(inputCount, outputCount)) * PinRowHeight + PinBottomPadding;
+    }
+
+    [[nodiscard]] float BlockHeight(const KeireEditor::NodeGraphBlockRow& block) noexcept
+    {
+        return BlockHeaderHeight + PinAreaHeight(block.Pins);
+    }
+
+    [[nodiscard]] float BlockAreaOffset(const KeireEditor::NodeGraphNode& node) noexcept
+    {
+        return HeaderHeight(node) + PinAreaHeight(node.Pins);
+    }
+
+    [[nodiscard]] Keire::UiSize EffectiveNodeSize(const KeireEditor::NodeGraphNode& node) noexcept
+    {
+        float contentHeight = BlockAreaOffset(node);
+        if (!node.Blocks.empty())
+        {
+            contentHeight += BlockSpacing;
+            for (const auto& block : node.Blocks)
+                contentHeight += BlockHeight(block) + BlockSpacing;
+        }
+        return {node.Size.X, std::max(node.Size.Y, contentHeight)};
+    }
+
+    struct DrawnNode
+    {
+        KeireEditor::StableNodeId Id = 0;
+        Keire::UiItemRect Rectangle;
+    };
+
+    struct DrawnPin
+    {
+        KeireEditor::NodeGraphPinAddress Address;
+        const KeireEditor::NodeGraphPin* Pin = nullptr;
+        Keire::UiPosition Position;
+    };
+
+    struct DrawnBlock
+    {
+        KeireEditor::NodeGraphBlockAddress Address;
+        const KeireEditor::NodeGraphBlockRow* Block = nullptr;
+        std::size_t Index = 0;
+        Keire::UiItemRect Rectangle;
+    };
+
+    struct DrawnConnection
+    {
+        const KeireEditor::NodeGraphConnection* Connection = nullptr;
+        Keire::UiPosition Start;
+        Keire::UiPosition FirstControl;
+        Keire::UiPosition SecondControl;
+        Keire::UiPosition End;
+        Keire::UiColor Color;
+    };
+
+    [[nodiscard]] std::pair<Keire::UiPosition, Keire::UiPosition> BezierControls(const Keire::UiPosition start,
+                                                                                 const Keire::UiPosition end,
+                                                                                 const bool startPointsRight,
+                                                                                 const bool endPointsLeft) noexcept
+    {
+        const float distance = std::max(std::abs(end.X - start.X) * 0.5F, 32.0F);
+        return {{start.X + (startPointsRight ? distance : -distance), start.Y},
+                {end.X + (endPointsLeft ? -distance : distance), end.Y}};
+    }
+
+    void DrawBezier(Keire::UiFrame& ui, const Keire::UiPosition start, const Keire::UiPosition first,
+                    const Keire::UiPosition second, const Keire::UiPosition end, const Keire::UiColor color,
+                    const float thickness)
+    {
+        Keire::UiPosition previous = start;
+        for (int segment = 1; segment <= ConnectionSegmentCount; ++segment)
+        {
+            const float amount = static_cast<float>(segment) / static_cast<float>(ConnectionSegmentCount);
+            const auto current = BezierPoint(start, first, second, end, amount);
+            ui.DrawLine(previous, current, color, thickness);
+            previous = current;
+        }
+    }
+
+    [[nodiscard]] float DistanceToBezierSquared(const DrawnConnection& connection,
+                                                const Keire::UiPosition point) noexcept
+    {
+        float distance = std::numeric_limits<float>::max();
+        Keire::UiPosition previous = connection.Start;
+        for (int segment = 1; segment <= ConnectionSegmentCount; ++segment)
+        {
+            const float amount = static_cast<float>(segment) / static_cast<float>(ConnectionSegmentCount);
+            const auto current = BezierPoint(connection.Start, connection.FirstControl, connection.SecondControl,
+                                             connection.End, amount);
+            distance = std::min(distance, SquaredDistanceToSegment(point, previous, current));
+            previous = current;
+        }
+        return distance;
+    }
+
+    [[nodiscard]] const KeireEditor::NodeGraphNode* FindNode(const std::span<const KeireEditor::NodeGraphNode> nodes,
+                                                             const KeireEditor::StableNodeId id) noexcept
+    {
+        const auto found = std::ranges::find(nodes, id, &KeireEditor::NodeGraphNode::Id);
+        return found == nodes.end() ? nullptr : std::addressof(*found);
+    }
+
+    [[nodiscard]] const KeireEditor::NodeGraphPin* FindPin(const std::span<const KeireEditor::NodeGraphNode> nodes,
+                                                           const KeireEditor::NodeGraphPinAddress address) noexcept
+    {
+        const auto* node = FindNode(nodes, address.Node);
+        if (!node)
+            return nullptr;
+        if (address.Block)
+        {
+            const auto block = std::ranges::find(node->Blocks, address.Block, &KeireEditor::NodeGraphBlockRow::Id);
+            if (block == node->Blocks.end())
+                return nullptr;
+            const auto found = std::ranges::find(block->Pins, address.Pin, &KeireEditor::NodeGraphPin::Id);
+            return found == block->Pins.end() ? nullptr : std::addressof(*found);
+        }
+        const auto found = std::ranges::find(node->Pins, address.Pin, &KeireEditor::NodeGraphPin::Id);
+        return found == node->Pins.end() ? nullptr : std::addressof(*found);
+    }
+
+    [[nodiscard]] std::optional<KeireEditor::NodeGraphConnectionRequest>
+    ConnectionBetween(const std::span<const KeireEditor::NodeGraphNode> nodes,
+                      const KeireEditor::NodeGraphPinAddress first,
+                      const KeireEditor::NodeGraphPinAddress second) noexcept
+    {
+        const auto* firstPin = FindPin(nodes, first);
+        const auto* secondPin = FindPin(nodes, second);
+        if (!firstPin || !secondPin)
+            return std::nullopt;
+        if (firstPin->Direction == KeireEditor::NodeGraphPinDirection::Output &&
+            secondPin->Direction == KeireEditor::NodeGraphPinDirection::Input)
+        {
+            return KeireEditor::NodeGraphConnectionRequest{first.Node, first.Pin,   second.Node,
+                                                           second.Pin, first.Block, second.Block};
+        }
+        if (firstPin->Direction == KeireEditor::NodeGraphPinDirection::Input &&
+            secondPin->Direction == KeireEditor::NodeGraphPinDirection::Output)
+        {
+            return KeireEditor::NodeGraphConnectionRequest{second.Node, second.Pin,   first.Node,
+                                                           first.Pin,   second.Block, first.Block};
+        }
+        return KeireEditor::NodeGraphConnectionRequest{first.Node, first.Pin,   second.Node,
+                                                       second.Pin, first.Block, second.Block};
     }
 } // namespace
 
@@ -75,6 +266,8 @@ namespace KeireEditor
                                          const std::span<const NodeGraphConnection> connections)
     {
         std::unordered_set<StableNodeId> nodeIds;
+        std::unordered_set<StableNodeId> blockIds;
+        std::unordered_set<StableNodeId> pinIds;
         nodeIds.reserve(nodes.size());
         for (const auto& node : nodes)
         {
@@ -86,6 +279,36 @@ namespace KeireEditor
                 !std::isfinite(node.Size.X) || !std::isfinite(node.Size.Y) || node.Size.X < 40.0F ||
                 node.Size.Y < 24.0F)
                 throw std::invalid_argument("Node graph nodes require a label, finite position, and usable size.");
+
+            for (const auto& pin : node.Pins)
+            {
+                if (pin.Id == 0 || !pinIds.emplace(pin.Id).second)
+                    throw std::invalid_argument("Node graph pin IDs must be non-zero and unique.");
+                if (pin.Label.empty() || !std::isfinite(pin.Color.Red) || !std::isfinite(pin.Color.Green) ||
+                    !std::isfinite(pin.Color.Blue) || !std::isfinite(pin.Color.Alpha))
+                {
+                    throw std::invalid_argument("Node graph pins require a label and finite color.");
+                }
+            }
+            for (const auto& block : node.Blocks)
+            {
+                if (block.Id == 0 || !blockIds.emplace(block.Id).second || block.Label.empty() ||
+                    !std::isfinite(block.Color.Red) || !std::isfinite(block.Color.Green) ||
+                    !std::isfinite(block.Color.Blue) || !std::isfinite(block.Color.Alpha))
+                {
+                    throw std::invalid_argument("Node graph Blocks require a unique ID, label, and finite color.");
+                }
+                for (const auto& pin : block.Pins)
+                {
+                    if (pin.Id == 0 || !pinIds.emplace(pin.Id).second)
+                        throw std::invalid_argument("Node graph pin IDs must be non-zero and unique.");
+                    if (pin.Label.empty() || !std::isfinite(pin.Color.Red) || !std::isfinite(pin.Color.Green) ||
+                        !std::isfinite(pin.Color.Blue) || !std::isfinite(pin.Color.Alpha))
+                    {
+                        throw std::invalid_argument("Node graph pins require a label and finite color.");
+                    }
+                }
+            }
         }
 
         std::unordered_set<StableNodeId> connectionIds;
@@ -96,13 +319,63 @@ namespace KeireEditor
                 throw std::invalid_argument("Node graph connection IDs must be non-zero and unique.");
             if (!nodeIds.contains(connection.Source) || !nodeIds.contains(connection.Target))
                 throw std::invalid_argument("Node graph connections must reference existing nodes.");
+
+            const bool legacy = connection.SourcePin == 0 && connection.TargetPin == 0;
+            if (legacy)
+            {
+                if (connection.SourceBlock != 0 || connection.TargetBlock != 0)
+                    throw std::invalid_argument("Legacy node graph connections cannot reference Blocks.");
+                continue;
+            }
+            if (connection.SourcePin == 0 || connection.TargetPin == 0)
+                throw std::invalid_argument("Pin-aware node graph connections require both endpoint pins.");
+            const NodeGraphConnectionRequest request{connection.Source,      connection.SourcePin,
+                                                     connection.Target,      connection.TargetPin,
+                                                     connection.SourceBlock, connection.TargetBlock};
+            const auto validation = EvaluateConnection(nodes, request);
+            if (!validation.CanConnect())
+                throw std::invalid_argument(validation.Diagnostic);
         }
+    }
+
+    NodeGraphConnectionValidation
+    StableNodeGraphCanvas::EvaluateConnection(const std::span<const NodeGraphNode> nodes,
+                                              const NodeGraphConnectionRequest& connection,
+                                              const NodeGraphConnectionValidator& validator)
+    {
+        const NodeGraphPinAddress sourceAddress{connection.SourceNode, connection.SourcePin, connection.SourceBlock};
+        const NodeGraphPinAddress targetAddress{connection.TargetNode, connection.TargetPin, connection.TargetBlock};
+        if (sourceAddress.Node == 0 || sourceAddress.Pin == 0 || targetAddress.Node == 0 || targetAddress.Pin == 0)
+            return {NodeGraphConnectionValidationStatus::Reject, "A connection requires two stable pin endpoints."};
+        if (sourceAddress == targetAddress)
+            return {NodeGraphConnectionValidationStatus::Reject, "A pin cannot connect to itself."};
+
+        const auto* source = FindPin(nodes, sourceAddress);
+        const auto* target = FindPin(nodes, targetAddress);
+        if (!source || !target)
+            return {NodeGraphConnectionValidationStatus::Reject, "A connection references an unavailable pin."};
+        if (source->Direction != NodeGraphPinDirection::Output || target->Direction != NodeGraphPinDirection::Input)
+            return {NodeGraphConnectionValidationStatus::Reject, "Connections must run from an output to an input."};
+        if (source->Type != target->Type)
+            return {NodeGraphConnectionValidationStatus::Reject, "The selected pins have incompatible types."};
+        if (!validator)
+            return {};
+        return validator(connection);
     }
 
     NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
                                                       const std::span<NodeGraphNode> nodes,
                                                       const std::span<const NodeGraphConnection> connections,
                                                       const bool editable)
+    {
+        return Draw(ui, id, nodes, connections,
+                    NodeGraphCanvasOptions{.Editable = editable, .InteractiveConnections = editable});
+    }
+
+    NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
+                                                      const std::span<NodeGraphNode> nodes,
+                                                      const std::span<const NodeGraphConnection> connections,
+                                                      const NodeGraphCanvasOptions& options)
     {
         Validate(nodes, connections);
         NodeGraphCanvasResult result;
@@ -111,8 +384,30 @@ namespace KeireEditor
         (void)ui.InvisibleButton(id, size);
         const auto canvas = ui.LastItemRect();
         const auto pointer = ui.PointerState();
+        const bool canvasHovered = ui.LastItemState().Hovered;
+        result.PointerGraphPosition = ToGraph(pointer.Position, canvas);
 
         ui.DrawFilledRectangle(canvas, {0.055F, 0.06F, 0.073F, 1.0F}, 4.0F);
+        if (canvasHovered && !m_DraggingPin)
+        {
+            if (pointer.Wheel != 0.0F)
+            {
+                const auto before = Scale(Subtract(pointer.Position, canvas.Minimum), 1.0F / m_Zoom);
+                const float nextZoom = std::clamp(m_Zoom * std::pow(1.1F, pointer.Wheel), 0.35F, 2.5F);
+                const auto after = Scale(Subtract(pointer.Position, canvas.Minimum), 1.0F / nextZoom);
+                m_Pan.X += after.X - before.X;
+                m_Pan.Y += after.Y - before.Y;
+                m_Zoom = nextZoom;
+                result.PointerGraphPosition = ToGraph(pointer.Position, canvas);
+            }
+            if (pointer.MiddleDown)
+            {
+                m_Pan.X += pointer.Delta.X / m_Zoom;
+                m_Pan.Y += pointer.Delta.Y / m_Zoom;
+                result.PointerGraphPosition = ToGraph(pointer.Position, canvas);
+            }
+        }
+
         const float minorGridStep = 24.0F * m_Zoom;
         if (minorGridStep >= 8.0F)
         {
@@ -133,29 +428,6 @@ namespace KeireEditor
         }
         ui.DrawRectangle(canvas, {0.18F, 0.2F, 0.24F, 1.0F}, 1.0F, 4.0F);
 
-        if (ui.LastItemState().Hovered)
-        {
-            if (pointer.Wheel != 0.0F)
-            {
-                const auto before = Scale(Subtract(pointer.Position, canvas.Minimum), 1.0F / m_Zoom);
-                const float nextZoom = std::clamp(m_Zoom * std::pow(1.1F, pointer.Wheel), 0.35F, 2.5F);
-                const auto after = Scale(Subtract(pointer.Position, canvas.Minimum), 1.0F / nextZoom);
-                m_Pan.X += after.X - before.X;
-                m_Pan.Y += after.Y - before.Y;
-                m_Zoom = nextZoom;
-            }
-            if (pointer.MiddleDown)
-            {
-                m_Pan.X += pointer.Delta.X / m_Zoom;
-                m_Pan.Y += pointer.Delta.Y / m_Zoom;
-            }
-            if (pointer.LeftPressed)
-            {
-                m_Selection.reset();
-                result.BackgroundActivated = true;
-            }
-        }
-
         if (m_Dragging)
         {
             const auto dragged = std::ranges::find(nodes, *m_Dragging, &NodeGraphNode::Id);
@@ -166,7 +438,7 @@ namespace KeireEditor
             }
             else
             {
-                if (editable && pointer.LeftDown)
+                if (options.Editable && pointer.LeftDown)
                 {
                     m_DragPosition.X += pointer.Delta.X / m_Zoom;
                     m_DragPosition.Y += pointer.Delta.Y / m_Zoom;
@@ -178,115 +450,617 @@ namespace KeireEditor
             }
         }
 
-        std::unordered_map<StableNodeId, const NodeGraphNode*> lookup;
-        lookup.reserve(nodes.size());
+        std::unordered_map<StableNodeId, const NodeGraphNode*> nodeLookup;
+        nodeLookup.reserve(nodes.size());
         for (const auto& node : nodes)
-            lookup.emplace(node.Id, &node);
-        if (m_Dragging && !lookup.contains(*m_Dragging))
+            nodeLookup.emplace(node.Id, std::addressof(node));
+
+        if (m_Selection && !nodeLookup.contains(*m_Selection))
+            m_Selection.reset();
+        const auto blockAvailable = [&](const NodeGraphBlockAddress address)
         {
-            m_Dragging.reset();
-            m_DragMoved = false;
+            const auto* node = FindNode(nodes, address.Node);
+            return node && std::ranges::find(node->Blocks, address.Block, &NodeGraphBlockRow::Id) != node->Blocks.end();
+        };
+        if (m_BlockSelection && !blockAvailable(*m_BlockSelection))
+            m_BlockSelection.reset();
+        if (m_DraggingBlock && !blockAvailable(*m_DraggingBlock))
+            m_DraggingBlock.reset();
+        if (m_ConnectionSelection &&
+            std::ranges::find(connections, *m_ConnectionSelection, &NodeGraphConnection::Id) == connections.end())
+        {
+            m_ConnectionSelection.reset();
         }
+        if (!options.InteractiveConnections)
+            m_ConnectionSelection.reset();
+        if (m_DraggingPin && !FindPin(nodes, *m_DraggingPin))
+        {
+            m_DraggingPin.reset();
+            result.ConnectionDragCancelled = true;
+        }
+        if (!options.Editable && m_DraggingPin)
+        {
+            m_DraggingPin.reset();
+            result.ConnectionDragCancelled = true;
+        }
+        if (!options.Editable)
+            m_DraggingBlock.reset();
+
+        std::vector<DrawnNode> drawnNodes;
+        std::vector<DrawnBlock> drawnBlocks;
+        std::vector<DrawnPin> drawnPins;
+        drawnNodes.reserve(nodes.size());
+        for (const auto& node : nodes)
+        {
+            const auto minimum = ToScreen(node.Position, canvas);
+            const auto effectiveSize = EffectiveNodeSize(node);
+            const Keire::UiSize scaledSize{effectiveSize.Width * m_Zoom, effectiveSize.Height * m_Zoom};
+            drawnNodes.push_back({node.Id, {minimum, Add(minimum, {scaledSize.Width, scaledSize.Height})}});
+
+            std::size_t inputIndex = 0;
+            std::size_t outputIndex = 0;
+            for (const auto& pin : node.Pins)
+            {
+                const std::size_t row = pin.Direction == NodeGraphPinDirection::Input ? inputIndex++ : outputIndex++;
+                const float authoredY =
+                    node.Position.Y + HeaderHeight(node) + (static_cast<float>(row) + 0.5F) * PinRowHeight;
+                const float authoredX = pin.Direction == NodeGraphPinDirection::Input
+                                            ? node.Position.X
+                                            : node.Position.X + effectiveSize.Width;
+                drawnPins.push_back(
+                    {{node.Id, pin.Id, 0}, std::addressof(pin), ToScreen({authoredX, authoredY}, canvas)});
+            }
+
+            float blockY = node.Position.Y + BlockAreaOffset(node) + BlockSpacing;
+            for (std::size_t blockIndex = 0; blockIndex < node.Blocks.size(); ++blockIndex)
+            {
+                const auto& block = node.Blocks[blockIndex];
+                const auto blockMinimum = ToScreen({node.Position.X + BlockInset, blockY}, canvas);
+                const auto blockMaximum =
+                    ToScreen({node.Position.X + effectiveSize.Width - BlockInset, blockY + BlockHeight(block)}, canvas);
+                drawnBlocks.push_back(
+                    {{node.Id, block.Id}, std::addressof(block), blockIndex, {blockMinimum, blockMaximum}});
+
+                inputIndex = 0;
+                outputIndex = 0;
+                for (const auto& pin : block.Pins)
+                {
+                    const std::size_t row =
+                        pin.Direction == NodeGraphPinDirection::Input ? inputIndex++ : outputIndex++;
+                    const float authoredY =
+                        blockY + BlockHeaderHeight + (static_cast<float>(row) + 0.5F) * PinRowHeight;
+                    const float authoredX = pin.Direction == NodeGraphPinDirection::Input
+                                                ? node.Position.X + BlockInset
+                                                : node.Position.X + effectiveSize.Width - BlockInset;
+                    drawnPins.push_back(
+                        {{node.Id, pin.Id, block.Id}, std::addressof(pin), ToScreen({authoredX, authoredY}, canvas)});
+                }
+                blockY += BlockHeight(block) + BlockSpacing;
+            }
+        }
+
+        const auto findDrawnPin = [&drawnPins](const NodeGraphPinAddress address) -> const DrawnPin*
+        {
+            const auto found = std::ranges::find(drawnPins, address, &DrawnPin::Address);
+            return found == drawnPins.end() ? nullptr : std::addressof(*found);
+        };
+
+        std::vector<DrawnConnection> drawnConnections;
+        drawnConnections.reserve(connections.size());
         for (const auto& connection : connections)
         {
-            const auto& source = *lookup.at(connection.Source);
-            const auto& target = *lookup.at(connection.Target);
-            const auto sourcePosition =
-                ToScreen({source.Position.X + source.Size.X, source.Position.Y + source.Size.Y * 0.5F}, canvas);
-            const auto targetPosition = ToScreen({target.Position.X, target.Position.Y + target.Size.Y * 0.5F}, canvas);
-            const auto distance = std::max(std::abs(targetPosition.X - sourcePosition.X) * 0.5F, 24.0F);
-            const Keire::UiPosition first{sourcePosition.X + distance, sourcePosition.Y};
-            const Keire::UiPosition second{targetPosition.X - distance, targetPosition.Y};
-            constexpr int segmentCount = 20;
-            const auto drawConnection = [&](const Keire::UiColor color, const float thickness)
-            {
-                Keire::UiPosition previous = sourcePosition;
-                for (int segment = 1; segment <= segmentCount; ++segment)
-                {
-                    const float amount = static_cast<float>(segment) / static_cast<float>(segmentCount);
-                    const auto current = BezierPoint(sourcePosition, first, second, targetPosition, amount);
-                    ui.DrawLine(previous, current, color, thickness);
-                    previous = current;
-                }
-            };
-            drawConnection({0.015F, 0.02F, 0.03F, 0.8F}, 5.0F);
-            drawConnection({0.42F, 0.62F, 0.9F, 1.0F}, 2.0F);
+            const auto sourceNode = nodeLookup.find(connection.Source);
+            const auto targetNode = nodeLookup.find(connection.Target);
+            if (sourceNode == nodeLookup.end() || targetNode == nodeLookup.end())
+                continue;
 
-            if (!connection.Label.empty())
+            Keire::UiPosition sourcePosition;
+            Keire::UiPosition targetPosition;
+            Keire::UiColor cableColor{0.42F, 0.62F, 0.9F, 1.0F};
+            if (connection.SourcePin != 0)
             {
-                constexpr float labelFontSize = 11.0F;
-                const auto labelPosition = BezierPoint(sourcePosition, first, second, targetPosition, 0.5F);
-                const auto labelSize = ui.MeasureText(connection.Label, labelFontSize);
-                const Keire::UiItemRect labelRectangle{
-                    {labelPosition.X - labelSize.Width * 0.5F - 5.0F, labelPosition.Y - labelSize.Height * 0.5F - 2.0F},
-                    {labelPosition.X + labelSize.Width * 0.5F + 5.0F,
-                     labelPosition.Y + labelSize.Height * 0.5F + 2.0F}};
-                ui.DrawFilledRectangle(labelRectangle, {0.075F, 0.085F, 0.105F, 0.96F}, 3.0F);
-                ui.DrawRectangle(labelRectangle, {0.24F, 0.31F, 0.42F, 1.0F}, 1.0F, 3.0F);
-                ui.DrawOverlayText({labelRectangle.Minimum.X + 5.0F, labelRectangle.Minimum.Y + 2.0F},
-                                   {0.68F, 0.76F, 0.9F, 1.0F}, connection.Label, labelFontSize, canvas);
+                const auto* source = findDrawnPin({connection.Source, connection.SourcePin, connection.SourceBlock});
+                const auto* target = findDrawnPin({connection.Target, connection.TargetPin, connection.TargetBlock});
+                if (!source || !target)
+                    continue;
+                sourcePosition = source->Position;
+                targetPosition = target->Position;
+                cableColor = source->Pin->Color;
             }
+            else
+            {
+                const auto sourceSize = EffectiveNodeSize(*sourceNode->second);
+                const auto targetSize = EffectiveNodeSize(*targetNode->second);
+                sourcePosition = ToScreen({sourceNode->second->Position.X + sourceSize.Width,
+                                           sourceNode->second->Position.Y + sourceSize.Height * 0.5F},
+                                          canvas);
+                targetPosition = ToScreen(
+                    {targetNode->second->Position.X, targetNode->second->Position.Y + targetSize.Height * 0.5F},
+                    canvas);
+            }
+            const auto [first, second] = BezierControls(sourcePosition, targetPosition, true, true);
+            drawnConnections.push_back(
+                {std::addressof(connection), sourcePosition, first, second, targetPosition, cableColor});
         }
 
-        for (auto iterator = nodes.rbegin(); iterator != nodes.rend(); ++iterator)
+        std::optional<NodeGraphPinAddress> hoveredPin;
+        const float pinHitRadius = std::clamp(9.0F * m_Zoom, 7.0F, 12.0F);
+        float pinDistance = pinHitRadius * pinHitRadius;
+        for (const auto& pin : drawnPins)
         {
-            auto& node = *iterator;
-            const auto minimum = ToScreen(node.Position, canvas);
-            const Keire::UiSize scaledSize{node.Size.X * m_Zoom, node.Size.Y * m_Zoom};
-            const Keire::UiItemRect rectangle{minimum, Add(minimum, {scaledSize.Width, scaledSize.Height})};
-            const bool hovered = rectangle.Contains(pointer.Position);
-            const bool selected = m_Selection && *m_Selection == node.Id;
-            const Keire::UiItemRect shadow{{rectangle.Minimum.X + 4.0F, rectangle.Minimum.Y + 5.0F},
-                                           {rectangle.Maximum.X + 4.0F, rectangle.Maximum.Y + 5.0F}};
-            ui.DrawFilledRectangle(shadow, {0.0F, 0.0F, 0.0F, 0.38F}, 7.0F);
-            ui.DrawFilledRectangle(rectangle, ScaleColor(node.Color, 0.48F, 1.0F), 7.0F);
-
-            const float authoredHeaderHeight = node.Subtitle.empty() ? 34.0F : 48.0F;
-            const float headerHeight = std::min(node.Size.Y * m_Zoom, authoredHeaderHeight * m_Zoom);
-            const Keire::UiItemRect header{rectangle.Minimum,
-                                           {rectangle.Maximum.X, rectangle.Minimum.Y + headerHeight}};
-            ui.DrawFilledRectangle(header, ScaleColor(node.Color, hovered ? 1.12F : 1.0F, 1.0F), 7.0F);
-
-            const float accentWidth = std::clamp(3.0F * m_Zoom, 2.0F, 4.0F);
-            const Keire::UiItemRect accent{{rectangle.Minimum.X, rectangle.Minimum.Y + 6.0F},
-                                           {rectangle.Minimum.X + accentWidth, rectangle.Maximum.Y - 6.0F}};
-            ui.DrawFilledRectangle(accent, ScaleColor(node.Color, 1.65F, 1.0F), 2.0F);
-
-            const auto borderColor = selected  ? Keire::UiColor{0.35F, 0.7F, 1.0F, 1.0F}
-                                     : hovered ? Keire::UiColor{0.4F, 0.46F, 0.56F, 1.0F}
-                                               : Keire::UiColor{0.24F, 0.27F, 0.33F, 1.0F};
-            ui.DrawRectangle(rectangle, borderColor, selected ? 3.0F : 1.0F, 7.0F);
-
-            const float portRadius = std::clamp(4.5F * m_Zoom, 2.5F, 5.0F);
-            const float portY = rectangle.Minimum.Y + scaledSize.Height * 0.5F;
-            ui.DrawFilledCircle({rectangle.Minimum.X, portY}, portRadius, {0.32F, 0.6F, 0.9F, 1.0F});
-            ui.DrawCircle({rectangle.Minimum.X, portY}, portRadius, {0.72F, 0.85F, 1.0F, 1.0F});
-            ui.DrawFilledCircle({rectangle.Maximum.X, portY}, portRadius, {0.32F, 0.6F, 0.9F, 1.0F});
-            ui.DrawCircle({rectangle.Maximum.X, portY}, portRadius, {0.72F, 0.85F, 1.0F, 1.0F});
-
-            const float labelX = minimum.X + 12.0F;
-            ui.DrawOverlayText({labelX, minimum.Y + 8.0F}, {0.96F, 0.97F, 0.99F, 1.0F}, node.Label, 0.0F, rectangle);
-            if (!node.Subtitle.empty())
-                ui.DrawOverlayText({labelX, minimum.Y + 27.0F}, {0.68F, 0.72F, 0.8F, 1.0F}, node.Subtitle, 11.0F,
-                                   rectangle);
-
-            if (hovered && pointer.LeftPressed)
+            const float candidate = SquaredDistance(pointer.Position, pin.Position);
+            if (candidate <= pinDistance)
             {
-                m_Selection = node.Id;
-                m_Dragging = editable ? std::optional(node.Id) : std::nullopt;
-                m_DragPosition = node.Position;
-                m_DragMoved = false;
-                result.ActivatedNode = node.Id;
-                result.BackgroundActivated = false;
+                hoveredPin = pin.Address;
+                pinDistance = candidate;
             }
         }
+
+        std::optional<NodeGraphBlockAddress> hoveredBlock;
+        if (!hoveredPin)
+        {
+            for (const auto& block : drawnBlocks)
+            {
+                if (block.Rectangle.Contains(pointer.Position))
+                {
+                    hoveredBlock = block.Address;
+                    break;
+                }
+            }
+        }
+
+        std::optional<StableNodeId> hoveredNode;
+        if (!hoveredPin && !hoveredBlock)
+        {
+            for (const auto& node : drawnNodes)
+            {
+                if (node.Rectangle.Contains(pointer.Position))
+                {
+                    hoveredNode = node.Id;
+                    break;
+                }
+            }
+        }
+
+        std::optional<StableNodeId> hoveredConnection;
+        if (!hoveredPin && !hoveredBlock && !hoveredNode)
+        {
+            float cableDistance = ConnectionHitRadius * ConnectionHitRadius;
+            for (const auto& connection : drawnConnections)
+            {
+                const float candidate = DistanceToBezierSquared(connection, pointer.Position);
+                if (candidate <= cableDistance)
+                {
+                    hoveredConnection = connection.Connection->Id;
+                    cableDistance = candidate;
+                }
+            }
+        }
+
+        result.HoveredPin = hoveredPin;
+        result.HoveredBlock = hoveredBlock;
+        result.HoveredNode = hoveredNode;
+        result.HoveredConnection = hoveredConnection;
+
+        if (canvasHovered && pointer.LeftPressed)
+        {
+            if (hoveredPin)
+            {
+                m_Selection = hoveredPin->Node;
+                m_BlockSelection = hoveredPin->Block
+                                       ? std::optional(NodeGraphBlockAddress{hoveredPin->Node, hoveredPin->Block})
+                                       : std::nullopt;
+                m_ConnectionSelection.reset();
+                result.ActivatedNode = hoveredPin->Node;
+                result.ActivatedPin = hoveredPin;
+                if (options.Editable)
+                    m_DraggingPin = hoveredPin;
+            }
+            else if (hoveredBlock)
+            {
+                m_Selection = hoveredBlock->Node;
+                m_BlockSelection = hoveredBlock;
+                m_ConnectionSelection.reset();
+                result.ActivatedNode = hoveredBlock->Node;
+                result.ActivatedBlock = hoveredBlock;
+                if (options.Editable)
+                {
+                    m_DraggingBlock = hoveredBlock;
+                    const auto found = std::ranges::find(drawnBlocks, *hoveredBlock, &DrawnBlock::Address);
+                    m_BlockDragDestination = found->Index;
+                }
+            }
+            else if (hoveredNode)
+            {
+                m_Selection = hoveredNode;
+                m_BlockSelection.reset();
+                m_ConnectionSelection.reset();
+                result.ActivatedNode = hoveredNode;
+                if (options.Editable)
+                {
+                    const auto found = std::ranges::find(nodes, *hoveredNode, &NodeGraphNode::Id);
+                    m_Dragging = hoveredNode;
+                    m_DragPosition = found->Position;
+                    m_DragMoved = false;
+                }
+            }
+            else if (hoveredConnection && options.InteractiveConnections)
+            {
+                m_Selection.reset();
+                m_BlockSelection.reset();
+                m_ConnectionSelection = hoveredConnection;
+                result.ActivatedConnection = hoveredConnection;
+            }
+            else
+            {
+                m_Selection.reset();
+                m_BlockSelection.reset();
+                m_ConnectionSelection.reset();
+                result.BackgroundActivated = true;
+            }
+        }
+
+        if (canvasHovered && pointer.RightPressed)
+        {
+            NodeGraphContextRequest request;
+            request.GraphPosition = result.PointerGraphPosition;
+            if (hoveredPin)
+            {
+                request.Kind = NodeGraphContextTargetKind::Pin;
+                request.Node = hoveredPin->Node;
+                request.Pin = hoveredPin->Pin;
+                request.Block = hoveredPin->Block;
+                m_Selection = hoveredPin->Node;
+                m_BlockSelection = hoveredPin->Block
+                                       ? std::optional(NodeGraphBlockAddress{hoveredPin->Node, hoveredPin->Block})
+                                       : std::nullopt;
+                m_ConnectionSelection.reset();
+            }
+            else if (hoveredBlock)
+            {
+                request.Kind = NodeGraphContextTargetKind::Block;
+                request.Node = hoveredBlock->Node;
+                request.Block = hoveredBlock->Block;
+                m_Selection = hoveredBlock->Node;
+                m_BlockSelection = hoveredBlock;
+                m_ConnectionSelection.reset();
+            }
+            else if (hoveredNode)
+            {
+                request.Kind = NodeGraphContextTargetKind::Node;
+                request.Node = *hoveredNode;
+                m_Selection = hoveredNode;
+                m_BlockSelection.reset();
+                m_ConnectionSelection.reset();
+            }
+            else if (hoveredConnection && options.InteractiveConnections)
+            {
+                request.Kind = NodeGraphContextTargetKind::Connection;
+                request.Connection = *hoveredConnection;
+                m_Selection.reset();
+                m_BlockSelection.reset();
+                m_ConnectionSelection = hoveredConnection;
+            }
+            result.ContextRequested = request;
+        }
+
+        if (m_DraggingBlock && pointer.LeftDown)
+        {
+            std::size_t destination = 0;
+            for (const auto& block : drawnBlocks)
+            {
+                if (block.Address.Node != m_DraggingBlock->Node)
+                    continue;
+                destination = block.Index;
+                if (pointer.Position.Y <= (block.Rectangle.Minimum.Y + block.Rectangle.Maximum.Y) * 0.5F)
+                    break;
+            }
+            m_BlockDragDestination = destination;
+        }
+
+        std::optional<NodeGraphConnectionRequest> previewConnection;
+        std::optional<NodeGraphConnectionValidation> previewValidation;
+        const DrawnPin* dragStart = nullptr;
+        const DrawnPin* dragTarget = nullptr;
+        if (m_DraggingPin)
+        {
+            if (ui.KeyDown(Keire::UiKey::Escape))
+            {
+                m_DraggingPin.reset();
+                result.ConnectionDragCancelled = true;
+            }
+            else
+            {
+                dragStart = findDrawnPin(*m_DraggingPin);
+                if (!dragStart)
+                {
+                    m_DraggingPin.reset();
+                    result.ConnectionDragCancelled = true;
+                }
+                else if (hoveredPin && *hoveredPin != *m_DraggingPin)
+                {
+                    dragTarget = findDrawnPin(*hoveredPin);
+                    previewConnection = ConnectionBetween(nodes, *m_DraggingPin, *hoveredPin);
+                    if (previewConnection)
+                    {
+                        previewValidation = EvaluateConnection(nodes, *previewConnection, options.ValidateConnection);
+                        result.PreviewConnection = previewConnection;
+                        result.PreviewValidation = previewValidation;
+                    }
+                }
+            }
+        }
+
         if (pointer.LeftReleased)
         {
             if (m_Dragging && m_DragMoved)
                 result.MoveCompletedNode = m_Dragging;
             m_Dragging.reset();
             m_DragMoved = false;
+
+            if (m_DraggingBlock)
+            {
+                const auto source = std::ranges::find(drawnBlocks, *m_DraggingBlock, &DrawnBlock::Address);
+                if (source != drawnBlocks.end() && source->Index != m_BlockDragDestination)
+                {
+                    result.BlockMoveRequested = NodeGraphBlockMoveRequest{m_DraggingBlock->Node, m_DraggingBlock->Block,
+                                                                          m_BlockDragDestination};
+                }
+                m_DraggingBlock.reset();
+            }
+
+            if (m_DraggingPin)
+            {
+                if (previewConnection && previewValidation && previewValidation->CanConnect())
+                    result.ConnectionRequested = previewConnection;
+                else
+                    result.ConnectionDragCancelled = true;
+                m_DraggingPin.reset();
+                dragStart = nullptr;
+                dragTarget = nullptr;
+            }
         }
+
+        if (canvasHovered && options.Editable && ui.Shortcut({Keire::UiKey::Delete}))
+        {
+            if (m_ConnectionSelection)
+                result.DeleteConnectionRequested = m_ConnectionSelection;
+            else if (m_BlockSelection)
+                result.DeleteBlockRequested = m_BlockSelection;
+            else if (m_Selection)
+                result.DeleteNodeRequested = m_Selection;
+        }
+
+        for (const auto& connection : drawnConnections)
+        {
+            const bool hovered = hoveredConnection && *hoveredConnection == connection.Connection->Id;
+            const bool selected = m_ConnectionSelection && *m_ConnectionSelection == connection.Connection->Id;
+            DrawBezier(ui, connection.Start, connection.FirstControl, connection.SecondControl, connection.End,
+                       {0.008F, 0.012F, 0.02F, 0.88F}, selected ? 8.0F : 6.0F);
+            const auto color = selected  ? ScaleColor(connection.Color, 1.35F, 1.0F)
+                               : hovered ? ScaleColor(connection.Color, 1.2F, 1.0F)
+                                         : connection.Color;
+            DrawBezier(ui, connection.Start, connection.FirstControl, connection.SecondControl, connection.End, color,
+                       selected  ? 3.5F
+                       : hovered ? 3.0F
+                                 : 2.0F);
+
+            if (!connection.Connection->Label.empty() && m_Zoom >= 0.55F)
+            {
+                constexpr float labelFontSize = 11.0F;
+                const auto labelPosition = BezierPoint(connection.Start, connection.FirstControl,
+                                                       connection.SecondControl, connection.End, 0.5F);
+                const auto labelSize = ui.MeasureText(connection.Connection->Label, labelFontSize);
+                const Keire::UiItemRect labelRectangle{
+                    {labelPosition.X - labelSize.Width * 0.5F - 5.0F, labelPosition.Y - labelSize.Height * 0.5F - 2.0F},
+                    {labelPosition.X + labelSize.Width * 0.5F + 5.0F,
+                     labelPosition.Y + labelSize.Height * 0.5F + 2.0F}};
+                ui.DrawFilledRectangle(labelRectangle, {0.055F, 0.065F, 0.085F, 0.97F}, 4.0F);
+                ui.DrawRectangle(labelRectangle, color, 1.0F, 4.0F);
+                ui.DrawOverlayText({labelRectangle.Minimum.X + 5.0F, labelRectangle.Minimum.Y + 2.0F},
+                                   {0.76F, 0.82F, 0.92F, 1.0F}, connection.Connection->Label, labelFontSize, canvas);
+            }
+        }
+
+        if (dragStart)
+        {
+            const auto end = dragTarget ? dragTarget->Position : pointer.Position;
+            const bool startsAtOutput = dragStart->Pin->Direction == NodeGraphPinDirection::Output;
+            const bool endsAtInput =
+                dragTarget ? dragTarget->Pin->Direction == NodeGraphPinDirection::Input : startsAtOutput;
+            const auto [first, second] = BezierControls(dragStart->Position, end, startsAtOutput, endsAtInput);
+            Keire::UiColor previewColor = ScaleColor(dragStart->Pin->Color, 1.18F, 1.0F);
+            if (previewValidation)
+            {
+                switch (previewValidation->Status)
+                {
+                case NodeGraphConnectionValidationStatus::Accept:
+                    previewColor = {0.24F, 0.9F, 0.58F, 1.0F};
+                    break;
+                case NodeGraphConnectionValidationStatus::AcceptWithWarning:
+                    previewColor = {1.0F, 0.67F, 0.2F, 1.0F};
+                    break;
+                case NodeGraphConnectionValidationStatus::Reject:
+                    previewColor = {1.0F, 0.28F, 0.3F, 1.0F};
+                    break;
+                }
+            }
+            DrawBezier(ui, dragStart->Position, first, second, end, {0.008F, 0.012F, 0.02F, 0.9F}, 7.0F);
+            DrawBezier(ui, dragStart->Position, first, second, end, previewColor, 3.0F);
+        }
+
+        for (auto iterator = nodes.rbegin(); iterator != nodes.rend(); ++iterator)
+        {
+            const auto& node = *iterator;
+            const auto drawn = std::ranges::find(drawnNodes, node.Id, &DrawnNode::Id);
+            const auto rectangle = drawn->Rectangle;
+            const bool hovered =
+                (hoveredNode && *hoveredNode == node.Id) || (hoveredBlock && hoveredBlock->Node == node.Id);
+            const bool selected = m_Selection && *m_Selection == node.Id;
+            const Keire::UiItemRect shadow{{rectangle.Minimum.X + 4.0F, rectangle.Minimum.Y + 6.0F},
+                                           {rectangle.Maximum.X + 4.0F, rectangle.Maximum.Y + 6.0F}};
+            ui.DrawFilledRectangle(shadow, {0.0F, 0.0F, 0.0F, 0.42F}, 8.0F);
+            ui.DrawFilledRectangle(rectangle, ScaleColor(node.Color, 0.43F, 1.0F), 8.0F);
+
+            const float headerHeight = std::min(rectangle.Size().Height, HeaderHeight(node) * m_Zoom);
+            const Keire::UiItemRect header{rectangle.Minimum,
+                                           {rectangle.Maximum.X, rectangle.Minimum.Y + headerHeight}};
+            ui.DrawFilledRectangle(header, ScaleColor(node.Color, hovered ? 1.14F : 1.0F, 1.0F), 8.0F);
+            ui.DrawLine({header.Minimum.X, header.Maximum.Y}, {header.Maximum.X, header.Maximum.Y},
+                        ScaleColor(node.Color, 1.25F, 0.8F), 1.0F);
+
+            const float accentWidth = std::clamp(3.0F * m_Zoom, 2.0F, 4.0F);
+            const Keire::UiItemRect accent{{rectangle.Minimum.X, rectangle.Minimum.Y + 7.0F},
+                                           {rectangle.Minimum.X + accentWidth, rectangle.Maximum.Y - 7.0F}};
+            ui.DrawFilledRectangle(accent, ScaleColor(node.Color, 1.7F, 1.0F), 2.0F);
+
+            const auto borderColor = selected  ? Keire::UiColor{0.3F, 0.72F, 1.0F, 1.0F}
+                                     : hovered ? Keire::UiColor{0.46F, 0.54F, 0.68F, 1.0F}
+                                               : Keire::UiColor{0.22F, 0.25F, 0.32F, 1.0F};
+            ui.DrawRectangle(rectangle, borderColor, selected ? 2.5F : hovered ? 1.5F : 1.0F, 8.0F);
+
+            const float labelX = rectangle.Minimum.X + 13.0F;
+            ui.DrawOverlayText({labelX, rectangle.Minimum.Y + 8.0F}, {0.97F, 0.98F, 1.0F, 1.0F}, node.Label, 0.0F,
+                               rectangle);
+            if (!node.Subtitle.empty())
+                ui.DrawOverlayText({labelX, rectangle.Minimum.Y + 27.0F}, {0.68F, 0.73F, 0.82F, 1.0F}, node.Subtitle,
+                                   11.0F, rectangle);
+
+            for (const auto& block : drawnBlocks)
+            {
+                if (block.Address.Node != node.Id)
+                    continue;
+                const bool blockHovered = hoveredBlock && *hoveredBlock == block.Address;
+                const bool blockSelected = m_BlockSelection && *m_BlockSelection == block.Address;
+                const auto fill = block.Block->Enabled
+                                      ? ScaleColor(block.Block->Color, blockHovered ? 1.12F : 0.9F, 0.96F)
+                                      : ScaleColor(block.Block->Color, 0.58F, 0.72F);
+                ui.DrawFilledRectangle(block.Rectangle, fill, 5.0F);
+                const auto blockBorder = blockSelected  ? Keire::UiColor{0.34F, 0.76F, 1.0F, 1.0F}
+                                         : blockHovered ? Keire::UiColor{0.45F, 0.58F, 0.76F, 1.0F}
+                                                        : Keire::UiColor{0.2F, 0.24F, 0.31F, 1.0F};
+                ui.DrawRectangle(block.Rectangle, blockBorder, blockSelected ? 2.0F : 1.0F, 5.0F);
+                const Keire::UiItemRect blockAccent{
+                    block.Rectangle.Minimum,
+                    {block.Rectangle.Minimum.X + std::clamp(3.0F * m_Zoom, 2.0F, 4.0F), block.Rectangle.Maximum.Y}};
+                ui.DrawFilledRectangle(blockAccent, ScaleColor(node.Color, block.Block->Enabled ? 1.45F : 0.65F, 1.0F),
+                                       3.0F);
+
+                if (m_Zoom >= 0.45F)
+                {
+                    constexpr float blockFontSize = 11.0F;
+                    const auto order = std::to_string(block.Index + 1);
+                    ui.DrawOverlayText({block.Rectangle.Minimum.X + 9.0F, block.Rectangle.Minimum.Y + 7.0F},
+                                       {0.48F, 0.58F, 0.72F, 1.0F}, order, blockFontSize, block.Rectangle);
+                    ui.DrawOverlayText({block.Rectangle.Minimum.X + 28.0F, block.Rectangle.Minimum.Y + 7.0F},
+                                       block.Block->Enabled ? Keire::UiColor{0.9F, 0.93F, 0.98F, 1.0F}
+                                                            : Keire::UiColor{0.5F, 0.54F, 0.62F, 1.0F},
+                                       block.Block->Label, blockFontSize, block.Rectangle);
+                    constexpr std::string_view enabledText = "ON";
+                    constexpr std::string_view disabledText = "OFF";
+                    const auto state = block.Block->Enabled ? enabledText : disabledText;
+                    const auto stateSize = ui.MeasureText(state, blockFontSize);
+                    ui.DrawOverlayText(
+                        {block.Rectangle.Maximum.X - stateSize.Width - 10.0F, block.Rectangle.Minimum.Y + 7.0F},
+                        block.Block->Enabled ? Keire::UiColor{0.3F, 0.9F, 0.58F, 1.0F}
+                                             : Keire::UiColor{0.62F, 0.65F, 0.72F, 1.0F},
+                        state, blockFontSize, block.Rectangle);
+                }
+
+                if (m_DraggingBlock && m_DraggingBlock->Node == node.Id && block.Index == m_BlockDragDestination)
+                {
+                    const auto source = std::ranges::find(drawnBlocks, *m_DraggingBlock, &DrawnBlock::Address);
+                    const bool insertAfter = source != drawnBlocks.end() && source->Index < m_BlockDragDestination;
+                    const float y = insertAfter ? block.Rectangle.Maximum.Y : block.Rectangle.Minimum.Y;
+                    ui.DrawLine({block.Rectangle.Minimum.X + 3.0F, y}, {block.Rectangle.Maximum.X - 3.0F, y},
+                                {0.3F, 0.78F, 1.0F, 1.0F}, 3.0F);
+                }
+            }
+
+            if (node.Pins.empty() && node.Blocks.empty())
+            {
+                const float portRadius = std::clamp(4.5F * m_Zoom, 2.5F, 5.0F);
+                const float portY = rectangle.Minimum.Y + rectangle.Size().Height * 0.5F;
+                ui.DrawFilledCircle({rectangle.Minimum.X, portY}, portRadius, {0.32F, 0.6F, 0.9F, 1.0F});
+                ui.DrawCircle({rectangle.Minimum.X, portY}, portRadius, {0.72F, 0.85F, 1.0F, 1.0F});
+                ui.DrawFilledCircle({rectangle.Maximum.X, portY}, portRadius, {0.32F, 0.6F, 0.9F, 1.0F});
+                ui.DrawCircle({rectangle.Maximum.X, portY}, portRadius, {0.72F, 0.85F, 1.0F, 1.0F});
+            }
+        }
+
+        for (const auto& pin : drawnPins)
+        {
+            const bool hovered = hoveredPin && *hoveredPin == pin.Address;
+            const bool linkOrigin = m_DraggingPin && *m_DraggingPin == pin.Address;
+            Keire::UiColor ring{0.72F, 0.78F, 0.88F, 1.0F};
+            if (linkOrigin)
+                ring = {0.92F, 0.96F, 1.0F, 1.0F};
+            else if (hovered && previewValidation)
+            {
+                switch (previewValidation->Status)
+                {
+                case NodeGraphConnectionValidationStatus::Accept:
+                    ring = {0.24F, 0.9F, 0.58F, 1.0F};
+                    break;
+                case NodeGraphConnectionValidationStatus::AcceptWithWarning:
+                    ring = {1.0F, 0.67F, 0.2F, 1.0F};
+                    break;
+                case NodeGraphConnectionValidationStatus::Reject:
+                    ring = {1.0F, 0.28F, 0.3F, 1.0F};
+                    break;
+                }
+            }
+            else if (hovered)
+            {
+                ring = {0.92F, 0.95F, 1.0F, 1.0F};
+            }
+
+            const float radius = std::clamp(5.0F * m_Zoom, 3.5F, 6.0F);
+            if (hovered || linkOrigin)
+                ui.DrawFilledCircle(pin.Position, radius + 3.0F, {ring.Red, ring.Green, ring.Blue, 0.18F});
+            ui.DrawFilledCircle(pin.Position, radius, ScaleColor(pin.Pin->Color, hovered ? 1.2F : 0.88F, 1.0F));
+            ui.DrawCircle(pin.Position, radius, ring, hovered || linkOrigin ? 2.0F : 1.0F);
+
+            if (m_Zoom >= 0.55F)
+            {
+                auto labelRectangle = std::ranges::find(drawnNodes, pin.Address.Node, &DrawnNode::Id)->Rectangle;
+                if (pin.Address.Block)
+                {
+                    const auto block = std::ranges::find(
+                        drawnBlocks, NodeGraphBlockAddress{pin.Address.Node, pin.Address.Block}, &DrawnBlock::Address);
+                    if (block != drawnBlocks.end())
+                        labelRectangle = block->Rectangle;
+                }
+                constexpr float pinFontSize = 11.0F;
+                if (pin.Pin->Direction == NodeGraphPinDirection::Input)
+                {
+                    ui.DrawOverlayText({pin.Position.X + 10.0F, pin.Position.Y - 6.0F}, {0.78F, 0.82F, 0.9F, 1.0F},
+                                       pin.Pin->Label, pinFontSize, labelRectangle);
+                }
+                else
+                {
+                    const auto labelSize = ui.MeasureText(pin.Pin->Label, pinFontSize);
+                    ui.DrawOverlayText({pin.Position.X - labelSize.Width - 10.0F, pin.Position.Y - 6.0F},
+                                       {0.78F, 0.82F, 0.9F, 1.0F}, pin.Pin->Label, pinFontSize, labelRectangle);
+                }
+            }
+        }
+
+        if (previewValidation && !previewValidation->Diagnostic.empty() && dragStart)
+        {
+            const auto textSize = ui.MeasureText(previewValidation->Diagnostic, 11.0F);
+            const Keire::UiPosition minimum{pointer.Position.X + 14.0F, pointer.Position.Y + 16.0F};
+            const Keire::UiItemRect diagnostic{
+                minimum, {minimum.X + textSize.Width + 12.0F, minimum.Y + textSize.Height + 8.0F}};
+            const auto diagnosticColor = previewValidation->Status == NodeGraphConnectionValidationStatus::Reject
+                                             ? Keire::UiColor{0.88F, 0.22F, 0.25F, 1.0F}
+                                             : Keire::UiColor{0.96F, 0.58F, 0.14F, 1.0F};
+            ui.DrawFilledRectangle(diagnostic, {0.045F, 0.05F, 0.065F, 0.97F}, 5.0F);
+            ui.DrawRectangle(diagnostic, diagnosticColor, 1.0F, 5.0F);
+            ui.DrawOverlayText({minimum.X + 6.0F, minimum.Y + 4.0F}, {0.94F, 0.95F, 0.98F, 1.0F},
+                               previewValidation->Diagnostic, 11.0F, canvas);
+        }
+
         return result;
     }
 
@@ -302,10 +1076,11 @@ namespace KeireEditor
         Keire::Vector2 maximum{std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()};
         for (const auto& node : nodes)
         {
+            const auto size = EffectiveNodeSize(node);
             minimum.X = std::min(minimum.X, node.Position.X);
             minimum.Y = std::min(minimum.Y, node.Position.Y);
-            maximum.X = std::max(maximum.X, node.Position.X + node.Size.X);
-            maximum.Y = std::max(maximum.Y, node.Position.Y + node.Size.Y);
+            maximum.X = std::max(maximum.X, node.Position.X + size.Width);
+            maximum.Y = std::max(maximum.Y, node.Position.Y + size.Height);
         }
         const float width = std::max(maximum.X - minimum.X, 1.0F);
         const float height = std::max(maximum.Y - minimum.Y, 1.0F);
@@ -319,6 +1094,12 @@ namespace KeireEditor
                                                       const Keire::UiItemRect canvas) const noexcept
     {
         return {canvas.Minimum.X + (position.X + m_Pan.X) * m_Zoom, canvas.Minimum.Y + (position.Y + m_Pan.Y) * m_Zoom};
+    }
+
+    Keire::Vector2 StableNodeGraphCanvas::ToGraph(const Keire::UiPosition position,
+                                                  const Keire::UiItemRect canvas) const noexcept
+    {
+        return {(position.X - canvas.Minimum.X) / m_Zoom - m_Pan.X, (position.Y - canvas.Minimum.Y) / m_Zoom - m_Pan.Y};
     }
 
     bool AuthoringValueEditors::Curve(Keire::UiFrame& ui, const std::string_view label, Keire::Curve1D& value,

@@ -31,20 +31,47 @@ namespace Keire
             throw std::invalid_argument("VFX Emitter property has an incompatible type.");
         }
 
-        [[nodiscard]] bool FiniteOverride(const VfxParameterValue& value) noexcept
+        [[nodiscard]] bool HasCanonicalRangeEndpoints(const VfxParameterValue& value) noexcept
         {
             return std::visit(
-                [](const auto& item)
+                [](const auto& item) noexcept
                 {
                     using T = std::decay_t<decltype(item)>;
-                    if constexpr (std::same_as<T, float>)
-                        return std::isfinite(item);
-                    else if constexpr (std::same_as<T, Vector2> || std::same_as<T, Vector3> || std::same_as<T, Color>)
-                        return Math::IsFinite(item);
+                    if constexpr (std::same_as<T, VfxScalarRange> || std::same_as<T, VfxIntegerRange> ||
+                                  std::same_as<T, VfxUnsignedIntegerRange>)
+                    {
+                        return item.Minimum <= item.Maximum;
+                    }
+                    else if constexpr (std::same_as<T, VfxVector2Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y;
+                    }
+                    else if constexpr (std::same_as<T, VfxVector3Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                               item.Minimum.Z <= item.Maximum.Z;
+                    }
+                    else if constexpr (std::same_as<T, VfxVector4Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                               item.Minimum.Z <= item.Maximum.Z && item.Minimum.W <= item.Maximum.W;
+                    }
+                    else if constexpr (std::same_as<T, VfxColorRange>)
+                    {
+                        return item.Minimum.Red <= item.Maximum.Red && item.Minimum.Green <= item.Maximum.Green &&
+                               item.Minimum.Blue <= item.Maximum.Blue && item.Minimum.Alpha <= item.Maximum.Alpha;
+                    }
                     else
+                    {
                         return true;
+                    }
                 },
                 value);
+        }
+
+        [[nodiscard]] bool ValidOverride(const VfxParameterValue& value) noexcept
+        {
+            return IsFiniteVfxValue(value) && HasCanonicalRangeEndpoints(value);
         }
 
         [[nodiscard]] Json EncodeOverrideValue(const VfxParameterValue& value)
@@ -57,19 +84,94 @@ namespace Keire
                         return Json{{"kind", "boolean"}, {"value", item}};
                     else if constexpr (std::same_as<T, std::int64_t>)
                         return Json{{"kind", "integer"}, {"value", item}};
+                    else if constexpr (std::same_as<T, std::uint64_t>)
+                        return Json{{"kind", "unsignedInteger"}, {"value", item}};
                     else if constexpr (std::same_as<T, float>)
                         return Json{{"kind", "scalar"}, {"value", item}};
                     else if constexpr (std::same_as<T, Vector2>)
                         return Json{{"kind", "vector2"}, {"value", Json::array({item.X, item.Y})}};
                     else if constexpr (std::same_as<T, Vector3>)
                         return Json{{"kind", "vector3"}, {"value", Json::array({item.X, item.Y, item.Z})}};
+                    else if constexpr (std::same_as<T, Vector4>)
+                        return Json{{"kind", "vector4"}, {"value", Json::array({item.X, item.Y, item.Z, item.W})}};
+                    else if constexpr (std::same_as<T, Quaternion>)
+                        return Json{{"kind", "quaternion"}, {"value", Json::array({item.X, item.Y, item.Z, item.W})}};
                     else if constexpr (std::same_as<T, Color>)
                     {
                         return Json{{"kind", "color"},
                                     {"value", Json::array({item.Red, item.Green, item.Blue, item.Alpha})}};
                     }
-                    else
+                    else if constexpr (std::same_as<T, Matrix4>)
+                        return Json{{"kind", "matrix"}, {"value", item.Elements}};
+                    else if constexpr (std::same_as<T, Curve1D>)
+                    {
+                        auto keys = Json::array();
+                        for (const auto& key : item.Keys())
+                        {
+                            keys.push_back({{"time", key.Time},
+                                            {"value", key.Value},
+                                            {"inTangent", key.InTangent},
+                                            {"outTangent", key.OutTangent},
+                                            {"interpolation", static_cast<std::uint32_t>(key.Interpolation)}});
+                        }
+                        return Json{{"kind", "curve"}, {"value", std::move(keys)}};
+                    }
+                    else if constexpr (std::same_as<T, ColorGradient>)
+                    {
+                        auto keys = Json::array();
+                        for (const auto& key : item.Keys())
+                        {
+                            keys.push_back({{"time", key.Time},
+                                            {"value", Json::array({key.Value.Red, key.Value.Green, key.Value.Blue,
+                                                                   key.Value.Alpha})}});
+                        }
+                        return Json{{"kind", "gradient"},
+                                    {"interpolation", static_cast<std::uint32_t>(item.Interpolation())},
+                                    {"value", std::move(keys)}};
+                    }
+                    else if constexpr (std::same_as<T, VfxScalarRange>)
+                        return Json{{"kind", "scalarRange"}, {"value", Json::array({item.Minimum, item.Maximum})}};
+                    else if constexpr (std::same_as<T, VfxIntegerRange>)
+                        return Json{{"kind", "integerRange"}, {"value", Json::array({item.Minimum, item.Maximum})}};
+                    else if constexpr (std::same_as<T, VfxUnsignedIntegerRange>)
+                    {
+                        return Json{{"kind", "unsignedIntegerRange"},
+                                    {"value", Json::array({item.Minimum, item.Maximum})}};
+                    }
+                    else if constexpr (std::same_as<T, VfxVector2Range>)
+                    {
+                        return Json{{"kind", "vector2Range"},
+                                    {"value", Json::array({Json::array({item.Minimum.X, item.Minimum.Y}),
+                                                           Json::array({item.Maximum.X, item.Maximum.Y})})}};
+                    }
+                    else if constexpr (std::same_as<T, VfxVector3Range>)
+                    {
+                        return Json{
+                            {"kind", "vector3Range"},
+                            {"value", Json::array({Json::array({item.Minimum.X, item.Minimum.Y, item.Minimum.Z}),
+                                                   Json::array({item.Maximum.X, item.Maximum.Y, item.Maximum.Z})})}};
+                    }
+                    else if constexpr (std::same_as<T, VfxVector4Range>)
+                    {
+                        return Json{
+                            {"kind", "vector4Range"},
+                            {"value",
+                             Json::array(
+                                 {Json::array({item.Minimum.X, item.Minimum.Y, item.Minimum.Z, item.Minimum.W}),
+                                  Json::array({item.Maximum.X, item.Maximum.Y, item.Maximum.Z, item.Maximum.W})})}};
+                    }
+                    else if constexpr (std::same_as<T, VfxColorRange>)
+                    {
+                        return Json{{"kind", "colorRange"},
+                                    {"value", Json::array({Json::array({item.Minimum.Red, item.Minimum.Green,
+                                                                        item.Minimum.Blue, item.Minimum.Alpha}),
+                                                           Json::array({item.Maximum.Red, item.Maximum.Green,
+                                                                        item.Maximum.Blue, item.Maximum.Alpha})})}};
+                    }
+                    else if constexpr (std::same_as<T, AssetId>)
                         return Json{{"kind", "asset"}, {"value", item ? item.ToString() : std::string{}}};
+                    else
+                        static_assert(!sizeof(T), "Unhandled VFX parameter value type.");
                 },
                 value);
         }
@@ -82,16 +184,98 @@ namespace Keire
                 return value.get<bool>();
             if (kind == "integer")
                 return value.get<std::int64_t>();
+            if (kind == "unsignedInteger")
+                return value.get<std::uint64_t>();
             if (kind == "scalar")
                 return value.get<float>();
             if (kind == "vector2" && value.is_array() && value.size() == 2)
                 return Vector2{value.at(0).get<float>(), value.at(1).get<float>()};
             if (kind == "vector3" && value.is_array() && value.size() == 3)
                 return Vector3{value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>()};
+            if (kind == "vector4" && value.is_array() && value.size() == 4)
+            {
+                return Vector4{value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>(),
+                               value.at(3).get<float>()};
+            }
+            if (kind == "quaternion" && value.is_array() && value.size() == 4)
+            {
+                return Quaternion{value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>(),
+                                  value.at(3).get<float>()};
+            }
             if (kind == "color" && value.is_array() && value.size() == 4)
             {
                 return Color{value.at(0).get<float>(), value.at(1).get<float>(), value.at(2).get<float>(),
                              value.at(3).get<float>()};
+            }
+            if (kind == "matrix" && value.is_array() && value.size() == 16)
+            {
+                Matrix4 result;
+                for (std::size_t index = 0; index < result.Elements.size(); ++index)
+                    result.Elements[index] = value.at(index).get<float>();
+                return result;
+            }
+            if (kind == "curve" && value.is_array())
+            {
+                std::vector<CurveKey> keys;
+                keys.reserve(value.size());
+                for (const auto& key : value)
+                {
+                    keys.push_back({key.at("time").get<float>(), key.at("value").get<float>(),
+                                    key.at("inTangent").get<float>(), key.at("outTangent").get<float>(),
+                                    static_cast<CurveInterpolation>(key.at("interpolation").get<std::uint32_t>())});
+                }
+                return Curve1D(std::move(keys));
+            }
+            if (kind == "gradient" && value.is_array())
+            {
+                std::vector<ColorGradientKey> keys;
+                keys.reserve(value.size());
+                for (const auto& key : value)
+                {
+                    const auto& color = key.at("value");
+                    if (!color.is_array() || color.size() != 4)
+                        throw std::invalid_argument("VFX Emitter gradient color is malformed.");
+                    keys.push_back({key.at("time").get<float>(),
+                                    {color.at(0).get<float>(), color.at(1).get<float>(), color.at(2).get<float>(),
+                                     color.at(3).get<float>()}});
+                }
+                return ColorGradient(std::move(keys), static_cast<GradientInterpolation>(
+                                                          encoded.at("interpolation").get<std::uint32_t>()));
+            }
+            if (kind == "scalarRange" && value.is_array() && value.size() == 2)
+                return VfxScalarRange{value.at(0).get<float>(), value.at(1).get<float>()};
+            if (kind == "integerRange" && value.is_array() && value.size() == 2)
+                return VfxIntegerRange{value.at(0).get<std::int64_t>(), value.at(1).get<std::int64_t>()};
+            if (kind == "unsignedIntegerRange" && value.is_array() && value.size() == 2)
+                return VfxUnsignedIntegerRange{value.at(0).get<std::uint64_t>(), value.at(1).get<std::uint64_t>()};
+            if (kind == "vector2Range" && value.is_array() && value.size() == 2 && value.at(0).is_array() &&
+                value.at(0).size() == 2 && value.at(1).is_array() && value.at(1).size() == 2)
+            {
+                return VfxVector2Range{{value.at(0).at(0).get<float>(), value.at(0).at(1).get<float>()},
+                                       {value.at(1).at(0).get<float>(), value.at(1).at(1).get<float>()}};
+            }
+            if (kind == "vector3Range" && value.is_array() && value.size() == 2 && value.at(0).is_array() &&
+                value.at(0).size() == 3 && value.at(1).is_array() && value.at(1).size() == 3)
+            {
+                return VfxVector3Range{
+                    {value.at(0).at(0).get<float>(), value.at(0).at(1).get<float>(), value.at(0).at(2).get<float>()},
+                    {value.at(1).at(0).get<float>(), value.at(1).at(1).get<float>(), value.at(1).at(2).get<float>()}};
+            }
+            if (kind == "vector4Range" && value.is_array() && value.size() == 2 && value.at(0).is_array() &&
+                value.at(0).size() == 4 && value.at(1).is_array() && value.at(1).size() == 4)
+            {
+                return VfxVector4Range{{value.at(0).at(0).get<float>(), value.at(0).at(1).get<float>(),
+                                        value.at(0).at(2).get<float>(), value.at(0).at(3).get<float>()},
+                                       {value.at(1).at(0).get<float>(), value.at(1).at(1).get<float>(),
+                                        value.at(1).at(2).get<float>(), value.at(1).at(3).get<float>()}};
+            }
+            if (kind == "colorRange" && value.is_array() && value.size() == 2 && value.at(0).is_array() &&
+                value.at(0).size() == 4 && value.at(1).is_array() && value.at(1).size() == 4)
+            {
+                return VfxColorRange{{value.at(0).at(0).get<float>(), value.at(0).at(1).get<float>(),
+                                      value.at(0).at(2).get<float>(), value.at(0).at(3).get<float>()},
+                                     {value.at(1).at(0).get<float>(), value.at(1).at(1).get<float>(),
+                                      value.at(1).at(2).get<float>(), value.at(1).at(3).get<float>()}};
             }
             if (kind == "asset")
             {
@@ -127,7 +311,7 @@ namespace Keire
                 {
                     const auto parameter = AssetId::Parse(encoded.at("parameter").get<std::string>());
                     auto value = DecodeOverrideValue(encoded);
-                    if (!parameter || !unique.insert(parameter).second || !FiniteOverride(value))
+                    if (!parameter || !unique.insert(parameter).second || !ValidOverride(value))
                         throw std::invalid_argument("VFX Emitter parameter override is invalid.");
                     result.push_back({parameter, std::move(value)});
                 }
@@ -214,7 +398,7 @@ namespace Keire
 
     void VfxEmitterComponent::SetParameterOverride(VfxParameterOverride value)
     {
-        if (!value.Parameter || !FiniteOverride(value.Value))
+        if (!value.Parameter || !ValidOverride(value.Value))
             throw std::invalid_argument("VFX Emitter parameter override is invalid.");
         const auto existing =
             std::ranges::lower_bound(m_ParameterOverrides, value.Parameter, {}, &VfxParameterOverride::Parameter);
@@ -227,6 +411,11 @@ namespace Keire
         else
             *existing = std::move(value);
         NotifyChanged();
+    }
+
+    void VfxEmitterComponent::CommitRuntimeParameterOverrides(std::vector<VfxParameterOverride> values) noexcept
+    {
+        m_ParameterOverrides.swap(values);
     }
 
     bool VfxEmitterComponent::RemoveParameterOverride(const AssetId parameter)

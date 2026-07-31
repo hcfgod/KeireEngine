@@ -7,64 +7,245 @@ covers the complete supported workflow and identifies the deliberately bounded p
 Related guides cover [Scene Authoring](SceneAuthoring.md), [Rendering](Rendering.md), and
 [managed Gameplay Services](Scripting/GameplayServices.md).
 
-The execution badge in the VFX Effect panel is authoritative:
+The execution and backend badges in the VFX Effect panel are authoritative:
 
-> **Schema-v3 Graph assets execute their connected graph. LegacyModules assets execute the compatibility module
-> stack.** Conversion is explicit, deterministic, and undoable; merely saving an older asset does not silently change
-> its behavior.
+> **Schema-4 Graph assets execute their connected value graph and ordered Context Blocks. LegacyModules assets execute
+> the compatibility module stack.** Schemas 1–3 migrate in memory and are only written as schema 4 on explicit Save. A
+> node marked Disabled or GPU Required never degrades into a silent no-op.
+
+A **CPU + GPU** badge means the node's lowering opcode and packed pin types have implementations on both value
+interpreters. It is not a blanket promise that every downstream Block, resource, or Context placement is available on
+GPU. Compilation still validates the complete graph and reports an unsupported consumer or ABI limit at its stable ID.
+A **CPU** badge also remains on structurally encoded shader opcodes whose edge semantics have not passed production
+differential/readback gates; authored effects must not rely on those nodes for GPU parity yet.
 
 ## Mental Model
 
-Every `.keirevfx` asset contains one `Keire::VfxEffectDefinition` with four major parts and an explicit
+Every `.keirevfx` asset contains one `Keire::VfxEffectDefinition` with an explicit
 `VfxExecutionSource`:
 
 ```mermaid
 flowchart TD
-    Asset[".keirevfx schema 3"] --> Source{"Execution Source"}
+    Asset[".keirevfx schema 4"] --> Source{"Execution Source"}
     Source -->|"LegacyModules"| Legacy["Enabled module stack<br/>compatibility schedule"]
-    Source -->|"Graph"| Graph["One connected ParticleStream graph<br/>stable topological schedule"]
-    Payloads["Runtime Module payloads"] --> Legacy
-    Payloads --> ModuleNodes["Module nodes<br/>reference payload IDs"]
-    ModuleNodes --> Graph
-    Blackboard["Blackboard defaults + overrides"] --> ParameterNodes["Parameter nodes<br/>stable-ID bindings"]
-    ParameterNodes --> Graph
-    Custom["Portable Custom HLSL nodes"] --> Graph
+    Source -->|"Graph"| Contexts["Spawn / Initialize / Update / Output Contexts"]
+    Payloads["Validated module payload data"] --> Legacy
+    Payloads --> Blocks["Ordered Context Blocks<br/>stable block and payload IDs"]
+    Blocks --> Contexts
+    Blackboard["Blackboard defaults + scene/code overrides"] --> Values["Parameters / inline literals / Operators"]
+    Values --> Blocks
+    Operators["Typed SSA value program<br/>Range / Random / Remap / math / logic / vectors"] --> Blocks
+    Custom["Portable Custom HLSL"] --> Contexts
     Legacy --> Program["Deterministic compiled program"]
-    Graph --> Program
+    Contexts --> Program
     Program --> CPU["CPU simulation"]
-    Program --> GPU["GPU compute simulation"]
+    Program --> GPU["Cooked GPU simulation"]
 ```
 
-The graph and module payload list are related, but they are not interchangeable:
+The graph and compatibility payload list are related, but they are not interchangeable:
 
-- A Graph asset has exactly one executable particle **system**. Multiple systems and Event execution are not supported.
-- **Context nodes** delimit Spawn, Initialize, Update, and Output stages.
-- A **Module node** references one stable Runtime Module payload. In Graph mode, an unreferenced payload does not run.
-- `ParticleStream` cables establish executable flow and deterministic node order.
-- A **Parameter node** references a Blackboard parameter by stable ID. Its typed cable binds a module property or
-  Portable Custom HLSL input.
-- A **Custom HLSL node** lowers a small, verified statement language into the same bounded instructions on CPU and GPU.
-- LegacyModules mode ignores graph scheduling and directly lowers enabled module payloads for source compatibility.
+- A Graph asset currently has one executable particle **system**. Multiple systems, Events, strips, and subgraphs are
+  represented by schema-4 types and parity data but remain disabled until their production milestones land.
+- **Context nodes** delimit Spawn, Initialize, Update, and Output. Their `Blocks` vectors are executable order; Blocks do
+  not need decorative flow cables between one another.
+- A **Block** references validated payload data by stable ID, owns canonical typed input pins, and runs only because it
+  is present and enabled in a connected Context stack. Free-floating compatibility Module nodes remain readable during
+  migration, but new schema-4 authoring should prefer Blocks.
+- Free-floating **Operator** and **Parameter** nodes produce typed values; Block and Operator pins also provide inline
+  literals. Attribute, Constant-card, and Subgraph nodes remain disabled milestones. Executable value cables feed Block
+  inputs and are lowered into a bounded SSA-style register program.
+- `ParticleStream` cables connect Contexts and establish the system path. Data cables never imply particle execution.
+- A **Parameter node** references a Blackboard property by stable ID. Renaming the property cannot break a binding.
+- **Portable Custom HLSL** remains the deterministic CPU/GPU subset. Full Unity-style Custom HLSL is catalogued as a
+  separate GPU-required milestone and cannot silently run through Portable HLSL semantics.
+- LegacyModules mode ignores graph scheduling and lowers enabled payloads directly for historical compatibility.
+
+## Schema-4 Core Value Release
+
+Schema 4 separates stable machine identity from presentation. `VfxNodeTypeId` values such as
+`keire.operator.random-range` stay ASCII and stable while the editor displays familiar labels such as **Random Range**.
+The compiler-owned `VfxNodeDescriptor` catalog is shared by validation, lowering, the right-click palette, backend
+badges, search synonyms, canonical pins, settings, and tests. Hand-authored unknown IDs are rejected during import and
+compile.
+
+The current executable value catalog includes:
+
+| Family | Operators |
+| --- | --- |
+| Range and random | Range, Random Number, Random Range, Remap |
+| Scalar arithmetic | Add, Subtract, Multiply, Divide, Power, Square Root, Minimum, Maximum, Absolute, Fractional, Negate (-x), Sign, Clamp, Saturate |
+| Trigonometry | Sine, Cosine, Tangent, Asin, Acos, Atan, Atan2 |
+| Exponential and logarithmic | Exp, Log, Log2, Log10 |
+| Rounding | Ceiling, Floor, Round |
+| Interpolation | Lerp, Smoothstep, Step |
+| Logic | Compare, Branch, And, Or, Not |
+| Vector3 | Combine, Split, Dot Product, Cross Product, Normalize, Length, Distance |
+| Casts | To Float, To Integer, To Unsigned Integer |
+| Built-ins | Total Time, Delta Time, Age, Lifetime, Particle ID, Spawn Index |
+
+Pure literal subgraphs are folded during compilation. Unreachable Operators are eliminated. One output fanning out to
+several inputs evaluates once and shares its register. The shared compiler bounds a graph to 4,096 live value
+registers; the current GPU interpreter has a tighter cooked-program limit of 64 live registers and 64 instructions,
+with at most 256 sources and 256 deduplicated constants. Limit diagnostics retain the responsible node. The GPU
+compiler packs supported Boolean, integer, scalar, vector, color, and range values into a cooked expression program.
+Its shader interpreter implements the current opcode interval from `Constant` through `Sign` (0–56); compile-time and
+uniform work may still be folded or hoisted before upload. Catalog promotion is deliberately stricter than structural
+opcode availability: Random/identity sequencing, Delta Time and Lifetime edges, negative-base Power,
+overflow-resistant Lerp/Waves, and 64-bit integer-to-float conversion retain CPU badges until focused differential and
+GPU-readback gates close them.
+
+Trigonometric inputs and outputs use radians; `Atan2` receives Y followed by X. `Lerp` is intentionally unclamped,
+`Step` returns one when Input equals Edge, `Fractional` follows shader `frac` behavior for negative values, and `Round`
+uses deterministic ties-to-even semantics. Invalid scalar math never injects NaN or Infinity into particle state:
+out-of-range Asin/Acos, negative Square Root, non-positive logarithms, invalid or overflowing Power/Exp, and a
+zero-width Smoothstep all resolve to zero. These rules apply identically during literal constant folding and CPU
+runtime evaluation. Operators promoted to CPU + GPU apply the same containment contract within documented
+floating-point tolerances.
+
+Particle-varying Operator inputs are currently scheduled for GPU Portable Custom HLSL consumers. A dynamic generic
+Runtime Block property without a lowered shader-side binding remains an explicit node-linked compile error even though
+the producing Operator correctly carries a CPU + GPU badge.
+
+### Unity 6.3 LTS parity manifest
+
+The [machine-readable parity manifest](VfxParityManifest.json) freezes Kéire's comparison baseline to Unity 6.3 LTS,
+Unity Editor 6000.3, `com.unity.visualeffectgraph` 17.3.0, and Unity Graphics commit
+`2d2e78cc9d6254bc6e7c9c5552cea053508e86cb`. It records the exact user-facing label, category, settings, source
+provenance, Kéire implementation ID, backend tier, tests, documentation, support state, and disabled reason for every
+catalogued Operator, Block, Context, and Output.
+
+The frozen snapshot currently contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Every row remains
+`Disabled` until its Unity type rules, settings, execution behavior, backend behavior, tests, and documentation meet the
+row's complete acceptance contract. A `keire` implementation mapping means related native functionality exists; it
+does not by itself claim Unity parity. Disabled entries remain visible to tooling but creation or compilation must
+reject them with their recorded reason.
+
+The checked-in runtime catalog contract is consumed by `VfxNodeCatalog()` and the offline validator. Engine startup
+rejects any descriptor whose stable ID, label, class, support tier, or backend tier drifts from that contract, while
+manifest validation rejects mappings to IDs the runtime does not register. Legacy Runtime Module switches are not
+reported as descriptor-backed implementations until their Blocks are registered in the catalog. This keeps parity
+claims honest while that migration is still in progress. Dynamic Unity labels such as `<Attribute>` and `<Mode>` are
+preserved verbatim rather than interpreted as HTML.
+
+From the repository root, validate the checked-in manifest without a Unity checkout:
+
+```powershell
+python Scripts/Vfx/validate_vfx_parity_manifest.py
+python Scripts/Vfx/test_vfx_parity_tooling.py
+python Scripts/Vfx/export_vfx_runtime_catalog.py
+```
+
+Maintainers with the pinned Unity Graphics checkout can also verify source coverage and regenerate canonically:
+
+```powershell
+python Scripts/Vfx/validate_vfx_parity_manifest.py --unity-source <path-to-pinned-graphics-checkout>
+python Scripts/Vfx/generate_vfx_parity_manifest.py --unity-source <path-to-pinned-graphics-checkout> --check
+```
+
+The generator verifies the checkout commit and package identity before reading Unity's shipped `Documentation~`
+catalog. Remove `--check` only when intentionally updating the checked-in JSON. The optional
+[Unity catalog exporter](../Scripts/Vfx/UnityVfxCatalogExporter.cs) provides a second editor-side inventory for audits;
+the [generator](../Scripts/Vfx/generate_vfx_parity_manifest.py) and
+[validator](../Scripts/Vfx/validate_vfx_parity_manifest.py) remain the checked-in manifest authorities. Unity assets,
+source, and icons are not copied or treated as compatible Kéire inputs.
+
+### Range, Random Range, and Remap
+
+Use **Range** when Min/Max should travel through one cable and be reused:
+
+```mermaid
+flowchart LR
+    Min["Scalar Min = 1"] --> Range["Range"]
+    Max["Scalar Max = 20"] --> Range
+    Range --> Random["Random Range<br/>Per Particle"]
+    Random --> LifetimeMin["Initialize Block<br/>Lifetime Minimum"]
+    Random --> LifetimeMax["Initialize Block<br/>Lifetime Maximum"]
+```
+
+1. Right-click empty canvas space and search for **Range**.
+2. Enter inline Min and Max values, or cable Parameters/Operators into those pins.
+3. Add **Random Range** in the same evaluation Context and connect `Range` to `Range`.
+4. Choose Per Particle or Per VFX Component scope. Per Particle Strip is catalogued for parity, but compilation rejects
+   it explicitly until strip systems can provide a real strip identity.
+5. Enable **Constant** when the sample must remain stable for the effect rather than vary with simulation identity.
+6. Enable **Inclusive Maximum** only for Kéire convenience behavior. Unity-labelled integer Random retains its
+   maximum-exclusive contract.
+7. Fan the output into several Block pins when those pins must receive the same sample. Duplicate the Random node when
+   independent samples are required; separate stable node IDs deliberately produce separate random streams.
+
+**Remap** takes one Input, a Source Range, a Destination Range, and optional Clamp. A zero-width Source returns the
+Destination minimum. Reversed Clamp bounds are normalized for scalar Clamp, while persisted range values require
+component-wise `Minimum <= Maximum`. Divide-by-zero and non-finite intermediate values are contained deterministically
+instead of leaking NaN/Infinity into particle state.
+
+### Deterministic random identity
+
+CPU random sampling hashes the effect seed, emitter seed offset, Operator stable ID, system ID, Context, particle or
+strip identity, spawn index, simulation step, and channel salt. Reordering cards does not change a node's sequence.
+Duplicating a Random node does change it because the duplicate receives a new stable ID. A single Random output with
+three cables samples once; three Random nodes sample independently.
+
+### Evaluation domains
+
+```mermaid
+flowchart LR
+    Constant["Compile-time constant"] --> Effect["Per effect"]
+    Effect --> Frame["Per frame"]
+    Frame --> Spawn["Per spawn"]
+    Spawn --> Update["Per particle update"]
+    Update --> Output["Per output / event"]
+```
+
+The compiler classifies each value by its earliest valid domain and records that domain in canonical IR. Literals fold
+at compile time; Blackboard-driven pure chains are hoisted per effect; Total Time and Delta Time chains are per frame;
+Initialize random is per spawn; Age and Lifetime are per-particle updates. The GPU value interpreter can evaluate the
+packed program in particle stages when the consumer has a lowered shader binding. Portable Custom HLSL provides that
+particle-varying path today; generic Runtime Block property bindings that lack one are rejected with the producing
+Operator's stable ID. Operator cables currently stay inside one Context except stable Blackboard Parameter outputs. A
+rejected cross-Context data cable leaves the document unchanged.
+
+### Ordered Context Blocks
+
+Schema-4 Contexts own `std::vector<VfxGraphBlock> Blocks`. Vector order is execution order and survives save, reload,
+undo, and compilation. `CreateVfxGraphBlock(module)` creates canonical stable pins without particle-flow pins. A Block
+input endpoint uses the owning Context node ID plus the Block ID and pin ID; this prevents ID ambiguity while keeping the
+Block visually inside its Context.
+
+```mermaid
+flowchart LR
+    Spawn["Spawn Context<br/>Emission Rate<br/>Burst"] --> Init["Initialize Context<br/>Shape<br/>Initialize"]
+    Init --> Update["Update Context<br/>Force<br/>Size<br/>Color<br/>Collision"]
+    Update --> Output["Output Context<br/>Renderer"]
+    Values["Parameters + Operators"] -. "typed data cables" .-> Init
+    Values -. "typed data cables" .-> Update
+```
+
+Disabling or removing a Block removes it from execution. Merely retaining its payload in the compatibility list does
+not schedule it in a Block-authored graph. Context stacks still require at least one enabled emission Block and one
+enabled renderer Block before publication.
 
 ## Quick Start
 
 Use this workflow for a first effect:
 
 1. In the Project panel, open the create menu and choose **VFX Effect**.
-2. Name the asset. Kéire creates a schema-v3 Graph asset with connected Spawn, Initialize, Update, and Output contexts
-   and module nodes for its default payloads.
+2. Name the asset. Kéire creates a schema-4 Graph asset with connected Spawn, Initialize, Update, and Output contexts
+   and ordered Blocks for its default payloads.
 3. Double-click the asset to open the **VFX Effect** panel.
 4. Confirm the header says **EXECUTION: GRAPH**.
-5. Open **Runtime Modules** to edit payload values. In Graph mode, only payloads represented by connected Module nodes
-   execute.
-6. In **Graph**, use **Add Node** to add Module, Blackboard, or Custom HLSL nodes and connect their typed pins.
+5. Expand a Context to edit and reorder its Blocks. The compatibility Runtime Modules view remains available for
+   payload editing and historical assets, but Context Block order is authoritative for schema-4 Graph execution.
+6. In **Graph**, right-click the canvas to open the ranked, context-sensitive palette. Add an Operator, Blackboard
+   Parameter, compatible Context Block,
+   or Custom HLSL node, then drag between compatible typed pins to connect it.
 7. Open **Effect Settings**. Choose Loop, Duration, Simulation Space, Seed, and Capacity.
 8. Select **Compile**, then use the default **CPU (Authoring)** preview while tuning the effect.
 9. Add a **VFX Emitter** component to a scene entity and assign the `.keirevfx` asset.
 10. Enable **Preview In Edit Mode** to see the scene emitter without entering Play Mode.
 11. Choose **Local** simulation space for an aura or other effect that must follow the entity. Choose **World** for
     smoke, sparks, or trails that should remain where they were emitted.
-12. Enter Play Mode and verify the effect on the GPU runtime backend.
+12. Enter Play Mode and verify the effect on the intended runtime backend. A CPU + GPU node badge confirms interpreter
+    support; the compile result remains authoritative for whether its downstream Block binding is available on GPU.
 
 The default asset already contains an enabled Emission Rate module and Renderer, so it is valid immediately. Saving is
 not required to see a transient authoring preview, but it is required to publish changes to the asset source.
@@ -95,16 +276,23 @@ The header displays the asset path and appends `*` when the document contains un
 
 | Control | Behavior |
 | --- | --- |
-| **Save** | Validates, encodes, and atomically persists the current draft. `Ctrl+S` also saves a dirty document. |
+| **Save** | Validates, encodes, and atomically persists a publishable draft. `Ctrl+S` also saves a dirty document. Save is blocked while the executable graph is incomplete. |
 | **Discard** | Restores the last saved definition and its preview. |
 | **Reload Source** | Reads the source again. Reload is skipped if unsaved local edits would be overwritten. |
 | **Undo** | Reverts the most recent edit in the VFX document's undo context. |
 | **Redo** | Reapplies the most recently undone edit. |
 | **Compile** | Validates the current definition and produces canonical backend-tagged IR plus diagnostics. |
 
-Edits are transactional. Kéire validates a candidate definition and its transient preview before replacing the current
-draft. If validation or preview creation fails, the document keeps its last-good state. Removing a node or pin removes
-its incident links in the same undoable transaction.
+Edits are transactional. Kéire always validates stable identity, pin ownership, connection direction and type, bounded
+document structure, and module data before replacing the current draft. Direct graph manipulation may temporarily
+produce a structurally valid but non-executable draft, such as immediately after unlinking a required
+`ParticleStream` cable. That incomplete draft remains editable and undoable, but it is not publishable; the last valid
+preview remains frozen, a prominent graph diagnostic explains what must be repaired, and **Save** is blocked.
+
+Reconnect the missing cable or choose **Undo** to restore a publishable graph. As soon as the draft validates again,
+the transient preview resumes from the repaired definition and Save becomes available. Invalid direction, mismatched
+types, unavailable pins, duplicate stable IDs, and other structurally malformed edits are still rejected without
+changing the draft. Removing a node or pin removes its incident links in the same undoable transaction.
 
 Compile validates and lowers the selected execution source. For Graph assets it checks canonical node shapes,
 references, cable types, stage order, acyclic topology, the connected main particle stream, parameter bindings, and
@@ -164,7 +352,7 @@ flowchart TD
 
 ## Graph Workflow
 
-The Graph tab is the executable authoring surface for schema-v3 Graph assets. It shows the current schema and execution
+The Graph tab is the executable authoring surface for schema-4 Graph assets. It shows the current schema and execution
 source in the Systems pane. If the header says **EXECUTION: LEGACY RUNTIME MODULES**, graph edits remain descriptive
 until the asset is explicitly converted.
 
@@ -201,24 +389,32 @@ The four canonical Graph Context nodes are structural anchors and cannot be dele
 
 ### Execution Source And Migration
 
-New effects are Graph assets. Schema-v1 and schema-v2 effects always open as `LegacyModules`, even if schema-v2 contains
-an older presentation graph. Saving such an effect publishes schema 3 with `executionSource: "legacyModules"` and
-preserves compatibility behavior; Save alone does not opt in to cable execution.
+New effects are Graph assets. Schemas 1–3 are accepted and migrated in memory. Historical module-stack assets retain
+`LegacyModules` execution until explicit conversion; Save publishes canonical schema 4 without silently opting into a
+different execution model. Reachable executable nodes in a historical schema-3 Graph are migrated automatically into
+ordered Context Blocks. Their node IDs become Block IDs, data-pin and cable IDs are preserved, and the four Contexts
+become the only `ParticleStream` path. Disconnected legacy draft nodes remain readable so migration never invents
+execution for unfinished work.
+
+Schema 4 records a `VfxCompatibilityMode`. Newly created graphs use `NativeSchema4`, where unsupported authored values
+are compile errors. Schema 1-3 migration and explicit Runtime Module conversion use `MigratedLegacyModules`, preserving
+historical execution while publishing explicit capability warnings. Hard ABI bounds and unsafe duplicate fixed-payload
+GPU Blocks remain errors in both modes. The mode is serialized so Save/reload cannot silently change compatibility.
 
 Select **Convert Runtime Modules to Graph** in the header to migrate:
 
 ```mermaid
 flowchart TD
-    Old["Schema 1/2 or schema-3 LegacyModules asset"] --> Convert["Convert Runtime Modules to Graph"]
+    Old["Schema 1-3 LegacyModules asset"] --> Convert["Convert Runtime Modules to Graph"]
     Convert --> Keep["Preserve emitter, module, and Blackboard stable IDs<br/>and all payload/default values"]
     Convert --> Replace["Replace old Systems with one canonical Particle System"]
     Replace --> Contexts["Create Spawn / Initialize / Update / Output contexts"]
-    Replace --> Nodes["Create one Module node per payload"]
+    Replace --> Blocks["Create ordered Blocks from module payloads"]
     Replace --> Cables["Connect one ParticleStream path"]
     Replace --> Params["Create stable-ID Parameter nodes"]
-    Keep --> Graph["Schema-3 Graph draft"]
+    Keep --> Graph["Schema-4 Graph draft"]
     Contexts --> Graph
-    Nodes --> Graph
+    Blocks --> Graph
     Cables --> Graph
     Params --> Graph
     Graph --> Compile["Validate and compile"]
@@ -235,24 +431,29 @@ Native import or migration tools can perform the same conversion with
 
 ### Node Kinds
 
-Use **Add Node** above the canvas in Graph mode:
+Use **Add Node** above the canvas, or right-click empty canvas space to open the ranked node palette at that graph
+position. Results are filtered by Context, requested pin direction/type, backend, and support status:
 
 | Node kind | Purpose | Executable requirements |
 | --- | --- | --- |
 | Context | Delimits Spawn, Initialize, Update, or Output | Canonical `ParticleStream` pins; exactly one of each supported stage |
-| Module | Runs a Runtime Module payload | References one payload stable ID; canonical flow pins and property-input pins |
+| Block | Runs one ordered particle operation inside a Context | Canonical payload reference and typed inputs; vector order is execution order |
+| Operator | Produces a reusable typed value | Known descriptor ID/version, canonical settings/pins, and a valid evaluation Context |
 | Blackboard Parameter | Supplies one typed value | References a Blackboard stable ID and has one typed `value` output |
-| Custom HLSL | Mutates bounded particle attributes | Flow input/output, optional typed value inputs, and valid Portable Custom HLSL |
+| Constant / Attribute / Subgraph | Reserved production-parity nodes | Disabled with a visible reason until the corresponding milestone is executable; use inline literals for current constants |
+| Portable Custom HLSL | Mutates bounded particle attributes | An ordered Context Block, optional typed value inputs, and valid Portable source |
+| Legacy Module node | Reads historical schema-3 flow graphs | Canonical flow/property pins; retained for migration, not preferred for new schema-4 work |
 
-A Module node is not a copy of its payload. The Runtime Modules tab remains the payload editor, while the graph stores
-the payload's stable ID in `VfxGraphNode::Reference`. Deleting the graph node stops that payload from executing in Graph
-mode; deleting the payload also makes its referencing node invalid. The same payload may not be referenced by two nodes
-in the executable system.
+A Block stores the compatibility payload stable ID in `VfxGraphBlock::Reference`, but its enabled state, inline pin
+values, incoming value cables, and position in the Context stack are authoritative for Graph execution. The payload
+retains structural choices and allows historical readers to preserve the operation. Deleting the Block removes its
+incident value cables and stops that operation. The same payload may not be referenced by two executable Blocks or
+legacy Module nodes in one system.
 
-Adding a new Runtime Module payload does not automatically place it on an existing Graph. Add the matching
-**Module / ...** node; the editor transactionally splices it into the particle stream at its canonical context
-boundary. Adding a Custom HLSL node similarly splices it at the selected stage. Conversely, an unreferenced payload can
-remain in the asset as inactive authoring data.
+Adding payload data does not automatically schedule it. Right-click the target Context or choose its **Add Block**
+action, select a compatible payload, and reorder the resulting Block in that Context. Operator and Custom HLSL creation
+never rewires an existing cable behind your back: a new free-floating node remains disconnected until you drag its
+cables. An unreferenced payload can remain in the asset as inactive compatibility data.
 
 ### Canvas Navigation
 
@@ -260,25 +461,49 @@ Use the canvas controls as follows:
 
 - Click a card to select it.
 - Left-drag a card to move it. Its new graph position is committed when the drag completes.
+- Drag a Block within its Context stack to reorder it; the completed reorder is one undoable transaction.
+- Click a cable to select it and inspect its typed source and destination.
+- Drag from either end of a compatible typed connection: output to input or input to output.
+- Right-click empty space to open the searchable, categorized node palette at the pointer.
+- Right-click a node, pin, or cable for actions specific to that target.
+- Press **Delete** to remove the selected deletable node or selected cable.
+- Press **Escape** to cancel a cable drag or dismiss the active creation gesture without editing the document.
 - Middle-drag the canvas to pan.
 - Use the mouse wheel to zoom.
 - Click the background to clear node selection.
 - Select **Frame All** to fit every card in the available canvas.
 
-The Inspector also exposes **Graph Position** for precise placement.
+The Inspector exposes **Graph Position** for precise node placement. When a cable is selected, it instead presents the
+cable's stable identity, source node and pin, destination node and pin, value type, and unlink action.
+
+Every completed gesture is one document command. Moving a node creates one undo entry when the drag ends; creating,
+replacing, unlinking, or deleting a cable creates one entry when the action completes. **Undo** and **Redo** therefore
+operate on the same meaningful actions visible on the canvas rather than on every intermediate pointer position.
+
+These direct-manipulation behaviors apply to the VFX graph. The shared generic canvas remains backward compatible with
+the Audio Mixer's existing pinless, read-only routing presentation; VFX pin interactions do not change Audio Mixer
+authoring or runtime routing.
 
 ### Editing A Node
 
-Selecting a node opens its stable identity, reference where applicable, stage, graph position, typed pins, and touching
-connections. Context and Custom HLSL nodes can be renamed. Module and Parameter labels come from their referenced
-payload or Blackboard property so a display rename does not break the stable-ID binding.
+Selecting a node or Block opens its stable identity, reference where applicable, stage, graph position/order, typed
+pins, settings, backend/support badges, and touching connections. Context and Custom HLSL nodes can be renamed. Block
+and Parameter labels come from catalog/payload or Blackboard metadata, so a display rename does not break binding.
 
-Module node contexts and property semantics are compiler-owned and match the referenced payload type. Custom HLSL nodes
-may select Spawn, Initialize, Update, or Output. Moving a card changes editor layout only; changing a stage changes
-program order and must still satisfy the forward-flow rules.
+Block Context and property semantics are compiler-owned and match the referenced payload type. An Operator's Context
+selector lists only the stages permitted by its descriptor; Event remains visibly unavailable until Event execution
+lands. The Inspector edits descriptor settings such as Random scope/constant/channel behavior, Compare condition, and
+Remap clamping. Custom HLSL nodes may select Spawn, Initialize, Update, or Output. Moving a free-floating card changes
+editor layout only; moving a Block changes executable order.
 
-Deleting a Module or Custom HLSL node removes its incident cables and reconnects its particle-stream predecessor to its
-successor in the same undoable edit. Canonical Context nodes are not deletable. Parameter nodes may remain unconnected.
+Deleting a Block removes its incident data cables in the same undoable edit. Deleting a legacy Module or Custom HLSL
+node removes its incident cables; canonical Context nodes are not deletable. Parameter and Operator nodes may remain
+unconnected and are removed by dead-node elimination at compile time.
+
+Right-clicking a node opens its context menu. Deletable nodes offer **Delete Node**; canonical Context nodes explain why
+deletion is unavailable. Right-clicking a pin provides its typed connection actions, including disconnecting an
+occupied input or its touching cables. Right-clicking a cable selects it and offers **Unlink**. The keyboard
+**Delete** command applies to the currently selected node or cable and follows the same validation and undo rules.
 
 ### Typed Pins
 
@@ -291,64 +516,94 @@ Each pin has:
 - A compiler semantic such as `particles`, `value`, `gravityMultiplier`, or a Custom HLSL input identifier
 - An optional typed fallback for a Custom HLSL input
 
-Available graph types are Boolean, Integer, Scalar, Vector 2, Vector 3, Color, Texture, Mesh, Asset, and
+Schema-4 graph types include Boolean, signed/unsigned Integer, Scalar, Vector2/3/4, Quaternion, Matrix, Color, Curve,
+Gradient, scalar/integer/vector/color Ranges, Texture/resource types, Mesh, generic Asset, and
 `ParticleStream`. `ParticleStream` represents execution flow; it is not a Blackboard value and has no literal default.
 
-Context, Module, Parameter, and flow pins have canonical compiler-owned shapes. Custom HLSL value inputs are editable
-and may be Scalar, Vector 2, Vector 3, or Color. Their semantic is the identifier used in source. An unconnected Custom
-HLSL input uses its typed fallback; a connected input must be driven by a matching Parameter node.
+Context, Block, Operator, Parameter, legacy Module, and flow pins have canonical compiler-owned shapes. Portable Custom
+HLSL value inputs are editable and may use its supported scalar/vector/color subset. Their semantic is the identifier
+used in source. An unconnected input uses its typed fallback; a connected Portable input may be driven by a matching
+Parameter or executable Operator. CPU execution resolves Operator registers in the Portable Block's Context before the
+ordered instruction runs. GPU execution consumes the packed value program in the Portable Block's particle stage, so
+particle-varying inputs use the shader interpreter instead of a host approximation. Unsupported types and program
+limits fail compilation with the source Operator's stable ID.
 
-Editing a Runtime Module payload refreshes its Module node's canonical property-pin defaults without replacing stable
-pin IDs. Context, Module, Parameter, and stream pins are read-only; only Custom HLSL data inputs can be added, renamed,
-retyped, assigned a fallback, or removed.
+Compatibility payload edits can refresh matching Block or legacy Module defaults without replacing stable pin IDs.
+Once a Block pin is edited directly, that inline value is compiled as the operation input even if its backing payload
+contains a different value. Context, built-in Block, Operator, Parameter, and stream pin shapes are compiler-owned; only
+Portable Custom HLSL data inputs can be added, renamed, retyped, assigned a fallback, or removed in this release.
 
 ### Creating A Link
 
-Links are created from an output pin to a compatible input pin:
+Create a link directly on the canvas:
 
-1. Select the source node.
-2. Click **Start Link** on its output pin.
-3. Select the target node.
-4. Find an input pin with the same value type.
-5. Click **Connect Here**.
+1. Point at either an output or input pin.
+2. Left-drag away from the pin. A live cable follows the pointer.
+3. Hover the opposite pin. Direction is normalized automatically, so dragging input-to-output is equivalent to
+   output-to-input.
+4. Release over a compatible destination to commit one connection edit.
 
-The editor disables **Connect Here** when the source is missing, direction is invalid, value types differ, or that exact
-connection already exists. Connecting to an input that already has a writer replaces its old cable transactionally.
-Compile additionally rejects multiple drivers in hand-authored data, cycles, backward flow, invalid node/pin ownership,
-and value cables whose source is not a Parameter node. Use **Cancel Link** above the canvas to abandon an in-progress
-link.
+The live cable communicates the candidate result before release:
 
-Connections touching the selected node appear under **CONNECTIONS**. Use **Remove Link** to delete one. Deleting a node
-automatically deletes every connection that references it.
+| Feedback | Meaning |
+| --- | --- |
+| **Green** | The connection is compatible and leaves the graph publishable. |
+| **Amber** | The connection is structurally valid, but the draft will remain temporarily incomplete, another executable-graph diagnostic remains, or the destination's existing cable will be replaced. The nearby diagnostic explains why. |
+| **Red** | The pins cannot be connected. Direction, type, duplicate-cable, ownership, or other validation details appear beside the gesture. Releasing makes no edit. |
+
+Exact pin types must match, and one input has at most one writer. Dropping onto an occupied input atomically replaces
+its previous cable; the old removal and new connection form one undoable command, so the document never exposes a
+half-rewired input. An exact duplicate is rejected. Block inputs accept matching Parameter or executable Operator
+outputs;
+`ParticleStream` flow must ultimately remain acyclic and ordered from Spawn through Output.
+
+Press **Escape** or release over empty or incompatible space to cancel without changing the document. The Inspector's
+connection controls remain an accessible alternative, but direct pin dragging is the primary workflow.
+
+Click a cable to select it and inspect both endpoints. Right-click the cable and choose **Unlink**, or press
+**Delete** while it is selected. Deleting a node automatically deletes every connection that references it. Unlinking a
+required executable cable may intentionally leave a temporarily incomplete draft as described below.
+
+### Temporarily Incomplete Graph Drafts
+
+Direct manipulation must permit multi-step repairs without publishing broken runtime data. For example, you may unlink
+a `ParticleStream` cable before reconnecting it to a different node. During that interval:
+
+- The editable draft, selection, node positions, and undo history retain the incomplete topology.
+- The authoring preview does not execute the incomplete graph. It remains frozen on the last valid compiled draft.
+- A prominent diagnostic identifies the disconnected stream, cycle, backward edge, missing stage, or other remaining
+  executable requirement.
+- **Save** and `Ctrl+S` are blocked, preventing an incomplete executable graph from being published.
+- Structurally invalid gestures, such as connecting two inputs or mismatched value types, are still rejected outright.
+
+Reconnect until the live cable feedback becomes green, or choose **Undo** to restore the previous topology. Once the
+diagnostic clears, preview synchronization resumes and the document becomes saveable again. Closing or discarding the
+draft follows the normal unsaved-document workflow; it never silently publishes the incomplete graph.
 
 ### Building The Main Particle Stream
 
-Every Context, Module, and Custom HLSL node that should execute must be on one connected `ParticleStream` path from
-Spawn to Output. Cables determine the schedule; screen position does not.
+Every Graph system needs one connected `ParticleStream` path through Spawn, Initialize, Update, and Output Contexts.
+Blocks execute inside those Contexts in stored vector order; they do not use flow cables. Free-floating Parameters and
+Operators feed typed Block inputs, while screen position remains presentation-only.
 
 ```mermaid
 flowchart LR
-    Spawn["Spawn<br/>Context"] --> Rate["Emission Rate<br/>Module"]
-    Rate --> InitContext["Initialize<br/>Context"]
-    InitContext --> Shape["Shape<br/>Module"]
-    Shape --> Initialize["Initialize<br/>Module"]
-    Initialize --> UpdateContext["Update<br/>Context"]
-    UpdateContext --> Force["Force<br/>Module"]
-    Force --> Custom["Custom HLSL<br/>Update"]
-    Custom --> Renderer["Renderer<br/>Module"]
-    Renderer --> Output["Output<br/>Context"]
-    Accel["Acceleration<br/>Parameter"] -->|"Vector3"| Custom
-    Gravity["Gravity Scale<br/>Parameter"] -->|"Scalar"| Force
+    Spawn["Spawn Context<br/>Emission Rate / Burst Blocks"] --> Initialize["Initialize Context<br/>Shape / Initialize Blocks"]
+    Initialize --> Update["Update Context<br/>Force / Curves / Collision / Portable HLSL Blocks"]
+    Update --> Output["Output Context<br/>Renderer Block"]
+    Accel["Acceleration Parameter"] -. "Vector3 data cable" .-> Update
+    Gravity["Gravity Scale Parameter"] -. "Scalar data cable" .-> Update
+    Random["Range / Random / Math Operators"] -. "typed data cables" .-> Initialize
 ```
 
-The compiler performs a stable topological sort; stable IDs break ties when independent parameter nodes are ready at the
-same time. It then lowers enabled connected Module nodes in that order. Graph compilation still requires at least one
-connected enabled Emission Rate or Burst payload and one connected enabled Renderer payload.
+The compiler walks each connected Context in stage order and lowers enabled Blocks in their stored order. It separately
+topologically lowers only the value Operators needed by connected, enabled Block inputs; unused Operators are removed.
+Graph compilation still requires at least one enabled Emission Rate or Burst Block and one enabled Renderer Block.
 
 Built-in payload types retain their defined stage semantics: emission schedules Spawn, shape/initialization configure
-creation, force/collision/curves run Update, and Renderer supplies Output. Within those constraints, cables control
-reachability and deterministic Module/Custom operation order; they do not turn a payload into an arbitrary operator or
-move it outside its canonical context.
+creation, force/collision/curves run Update, and Renderer supplies Output. Within those constraints, Context order and
+Block vector order determine the operation schedule. Typed value cables supply inputs; they do not move a Block outside
+its canonical Context.
 
 Use Compile before Save. The editor's candidate-preview validation is transactional, so an invalid edit reports an
 error and retains the last-good draft instead of publishing half-valid topology.
@@ -397,19 +652,22 @@ Numeric literals must be finite and have magnitude at most `1,000,000`. Custom i
 Vector 3, or Color, but a Vector 2 operand currently has no matching writable target. Input semantics must be unique
 identifier names using letters, digits, and underscores, and may not begin with a digit.
 
-The limit is eight non-empty Custom HLSL statements across the entire effect, not eight per node. Empty programs are
-invalid. The following are intentionally forbidden:
+An executable Graph effect may contain up to 4,096 non-empty Portable statements across all Blocks. This is a compiler
+safety bound, not a constant-buffer ABI limit; the renderer uploads the exact dynamic instruction and operation tables.
+Empty programs are invalid. The following are intentionally forbidden:
 
 - Functions, declarations, structs, macros, `#include`, and preprocessor directives
 - `if`, `switch`, loops, recursion, and function calls other than the literal forms `float2/3/4(...)`
 - Textures, samplers, buffers, atomics, thread IDs, and other resource access
 - Swizzles, indexing, arbitrary arithmetic expressions, and chained operators
 - Writes to particle age, lifetime, identity, renderer, free lists, or emission counts
-- Cables from non-Parameter value nodes
+- Cables from nodes other than Blackboard Parameters or supported executable Operators
 
 Portable instructions execute at their compiled cable position within the selected stage. Spawn, Initialize, and the
-first Output evaluation run when a particle is created; Update and Output run during per-frame simulation. `DeltaTime`
-is zero in creation stages and is the effect's scaled step in Update/Output. Local-space Position and Velocity writes
+first Output evaluation run when a particle is created; Update and Output run during per-frame simulation. The Delta
+Time Operator receives the effect's scaled step in Spawn, Update, and per-frame Output, and zero in Initialize and the
+creation Output pass. Portable statements using the trailing `* DeltaTime` modifier receive zero throughout particle
+creation and the scaled step in Update/per-frame Output. Local-space Position and Velocity writes
 use local semantics on both backends.
 
 On GPU, Custom instructions and built-in Modules execute together in cable order inside that emitter's normal spawn or
@@ -421,40 +679,46 @@ capacity, even when it owns few live particles. The cost therefore grows with
 
 Graph execution currently supports:
 
-- One particle system with Spawn, Initialize, Update, and Output contexts
-- Module payload references scheduled by `ParticleStream` cables
-- Blackboard Parameter nodes bound to canonical module-property inputs
-- Portable Custom HLSL nodes and typed defaults or Parameter inputs
-- Deterministic CPU and GPU lowering from the same canonical program
+- One particle system with Spawn, Initialize, Update, and Output Contexts
+- Ordered Blocks referencing compatibility payloads for structural data
+- Blackboard Parameters and executable core Operators bound to canonical Block inputs
+- Portable Custom HLSL Blocks with typed defaults, Parameter inputs, or executable Operator inputs
+- Deterministic CPU lowering and the packed core value-opcode interpreter on GPU
 
-It does not currently support multiple executable systems, Event contexts, general arithmetic/operator nodes,
-subgraphs, ribbons, trails, decals, volumetric outputs, arbitrary shader HLSL, or custom GPU resources.
+It does not currently support multiple executable systems, Event contexts, the remainder of the Unity Operator/Block
+catalog,
+subgraphs, ribbons, trails, decals, volumetric outputs, unrestricted Custom HLSL, custom GPU resources, or
+generic particle-varying Runtime Block property bindings without a lowered shader-side binding. Those entries and
+placements remain disabled, GPU-required, or explicit compile errors rather than changing behavior silently.
 
 ## Runtime Modules
 
 The Runtime Modules tab edits module payload records. The left pane selects, adds, removes, and reorders them; the right
 pane edits the selected payload.
 
-Every module has a stable ID and an **Enabled** checkbox. A disabled module remains in the asset but is ignored by
-simulation. In LegacyModules mode, enabled payloads lower directly in stack order. In Graph mode, only enabled payloads
-referenced by connected Module nodes lower into the program, and cable topology supplies their deterministic order.
+Every module has a stable ID and a compatibility **Enabled** checkbox. In LegacyModules mode, enabled payloads lower
+directly in stack order. In Graph mode, the enabled state and order of Context Blocks are authoritative: keeping,
+disabling, or reordering a payload record does not independently schedule the operation. A Block references the payload
+for structural compatibility while its inline inputs and value cables supply executable values.
 
 ### Module Multiplicity
 
-| Module type | Allowed count |
-| --- | ---: |
-| Emission Rate | 0 or 1 |
-| Burst | 0 to 32 |
-| Shape | 0 or 1 |
-| Initialize | 0 or 1 |
-| Forces | 0 or 1 |
-| Size over Lifetime | 0 or 1 |
-| Color over Lifetime | 0 or 1 |
-| Collision | 0 or 1 |
-| Renderer | Exactly 1 |
+| Module type | LegacyModules count | Schema-4 Graph count |
+| --- | ---: | ---: |
+| Emission Rate | Bounded by the module limit | Bounded by the graph module limit |
+| Burst | 0 to 32 | 0 to 32 |
+| Shape | Bounded by the module limit | Bounded by the graph module limit |
+| Initialize | Bounded by the module limit | Bounded by the graph module limit |
+| Forces | Bounded by the module limit | Bounded by the graph module limit |
+| Size over Lifetime | Bounded by the module limit | Bounded by the graph module limit |
+| Color over Lifetime | Bounded by the module limit | Bounded by the graph module limit |
+| Collision | Bounded by the module limit | Bounded by the graph module limit |
+| Renderer | One or more; backend checks apply | One or more; backend checks apply |
 
-The effect must contain at least one enabled Emission Rate or Burst and one enabled Renderer. Removing or disabling the
-last usable emission source or renderer is rejected transactionally.
+LegacyModules execution requires at least one enabled Emission Rate or Burst payload and one enabled Renderer payload.
+Graph execution applies the same invariant to enabled Context Blocks; a disabled compatibility payload does not disable
+its referencing Block. Removing or disabling the last usable emission Block or renderer Block is rejected
+transactionally.
 
 ### Emission Rate
 
@@ -464,7 +728,9 @@ Emission Rate continuously requests particles while the emitter is emitting.
 | --- | --- |
 | **Particles per Second** | Continuous rate from `0` to `1,000,000`. Fractional particles accumulate deterministically. |
 
-For a one-shot effect driven only by bursts, remove or disable Emission Rate.
+For a one-shot effect driven only by bursts, remove or disable Emission Rate. Multiple scheduled schema-4 Emission Rate
+Blocks are additive on both CPU and GPU; the shared fractional accumulator makes their total independent of Block
+grouping.
 
 ### Burst
 
@@ -498,8 +764,12 @@ Point needs no shape data. CPU Box, Sphere, and Cone sampling are built in. CPU 
 `VfxWorldSpecification::ShapeSample` callback. Without that callback, particles use the emitter origin and report
 `ShapeAssetSamplerUnavailable`.
 
-The GPU path currently supports Point, Box, and Sphere directly. Cone is an approximation and does not consume the full
-authored cone parameters. GPU Mesh and Volume asset sampling are not implemented.
+The GPU path supports Point, Box, uniformly distributed Sphere volume, and Cone volume directly with the authored cone
+angle and length. GPU compilation rejects Mesh and Volume sampling at the Shape Block because the compute path cannot
+consume those resource samplers yet. The current fixed GPU payload has one Shape, Initialize, Force, Size, Color, and
+Renderer slot; a schema-4 graph containing a duplicate of one of those scheduled per-particle Blocks is rejected at the
+first unrepresentable Block instead of reusing the wrong payload. Multiple Emission Rate and Burst Blocks remain
+supported.
 
 ### Initialize
 
@@ -514,7 +784,9 @@ Initialize chooses each new particle's lifetime, velocity, and Euler rotation fr
 The effect seed and emitter Seed Offset determine the random sequence. Equal definitions, seeds, offsets, activation
 transforms, and update deltas produce equal CPU particle results.
 
-GPU initialization currently uses lifetime and velocity ranges. Initial rotation-range parity is incomplete.
+GPU initialization uses lifetime, velocity, and Sprite Z-rotation ranges. CPU and GPU compilation reject non-zero X/Y
+initialization rotation when the selected output is Sprite, because billboards consume only Z rotation. CPU Mesh output
+accepts all three Euler components; GPU Mesh output remains unavailable.
 
 ### Forces
 
@@ -536,8 +808,9 @@ normalized age = particle age / particle lifetime
 ```
 
 The CPU backend evaluates the full curve, including its keys and interpolation. Negative evaluated size is clamped to
-zero. The GPU path currently publishes and interpolates the curve's values at ages zero and one; intermediate keys and
-tangents do not have full parity.
+zero. The fixed GPU ABI represents one constant or one exact linear segment from normalized age zero to one. GPU
+compilation rejects intermediate non-collinear keys, constant/cubic segments, shifted endpoints, and nonlinear tangents
+at the Size Block instead of approximating them.
 
 The current Inspector lists each existing curve key as editable **Time** and **Value** fields. Key times remain ordered
 and are clamped between their neighbors. The UI does not yet add/remove keys or expose interpolation/tangent editing;
@@ -546,7 +819,8 @@ multi-key curves created through the native asset API or existing source remain 
 ### Color Over Lifetime
 
 Color over Lifetime evaluates a `ColorGradient` using normalized particle age. The CPU backend evaluates the complete
-gradient. The GPU path currently interpolates the gradient values sampled at ages zero and one.
+gradient. The fixed GPU ABI represents one constant or one exact linear gradient from normalized age zero to one. GPU
+compilation rejects constant interpolation, shifted endpoints, and non-collinear intermediate keys at the Color Block.
 
 The current Inspector lists each existing gradient key as **Time** plus **Color**. Times remain ordered from zero to one.
 The UI does not yet add/remove gradient keys or expose gradient interpolation selection. Use alpha in existing keys to
@@ -567,8 +841,9 @@ The CPU implementation sends each non-None collision mode through
 physics world exists. If no query is available, the effect continues without collision and reports
 `CollisionQueryUnavailable`.
 
-True GPU depth collision and GPU scene-physics collision are not implemented by the current compute path. Use the CPU
-backend when collision behavior must be inspected precisely.
+The current GPU compute path has no collision implementation. GPU compilation therefore accepts only **None** and
+reports every other mode at the Collision Block. Use the CPU backend for CPU, GPU Depth compatibility, and Scene Physics
+collision modes.
 
 ### Renderer
 
@@ -580,10 +855,12 @@ Renderer selects particle output.
 | **Sprite** | Texture asset retained for Sprite output. |
 | **Mesh** | Mesh asset required for Mesh output. |
 
-Both asset pickers remain visible, but only the asset selected by Renderer is used. CPU rendering supports billboarding
-Sprite particles and Mesh particles. The Sprite asset reference is persisted, emitted in CPU render packets, and tracked
-as a dependency, but the current built-in billboard path does not sample a custom Sprite texture yet. The GPU compute
-path currently produces indirect tinted billboard output; GPU indirect Mesh output is not implemented.
+Both asset pickers remain visible, but only the asset selected by Renderer is used. CPU rendering supports untextured
+billboard Sprite particles and Mesh particles. The Sprite asset reference is persisted, emitted in legacy CPU render packets, and tracked
+as a dependency, but the current built-in billboard path does not sample a custom Sprite texture.
+Schema-4 CPU and GPU compilation therefore reject a non-empty custom Sprite at the Renderer Block; historical module
+assets remain readable and receive a warning. The GPU path also rejects Mesh output. Both backends reject duplicate
+scheduled Renderer Blocks until per-particle output selection has a real compiled representation.
 
 ## Blackboard
 
@@ -624,9 +901,9 @@ cables are removed in the same undoable edit. Removing a property removes its Pa
 Names are display-only. Parameter nodes, scene components, activation overrides, and live runtime calls all bind by the
 parameter's stable `AssetId`, so renaming a property does not break its consumers. Changing or regenerating that ID does.
 
-### Binding A Module Property
+### Binding A Block Property
 
-Module nodes expose canonical typed property inputs. Connect a Parameter node directly to one of these inputs:
+Blocks expose canonical typed property inputs. Connect a Parameter or Operator output directly to one of these inputs:
 
 | Module | Bindable property inputs |
 | --- | --- |
@@ -662,7 +939,9 @@ flowchart LR
 
 Hidden parameters may still drive graph bindings, but external overrides are rejected. Overrides must use a known,
 Exposed stable ID and an exactly matching `VfxParameterValue` alternative. Duplicate IDs, non-finite values, unknown
-IDs, hidden parameters, and type mismatches are rejected transactionally by direct `VfxWorld` APIs.
+IDs, hidden parameters, type mismatches, and values that violate the selected backend's renderer or rotation
+capabilities are rejected transactionally by direct `VfxWorld` APIs. Activation and live updates revalidate the fully
+materialized definition, so an exposed resource parameter cannot bypass the compiler by using an empty default.
 
 ### Scene-Component Overrides
 
@@ -693,8 +972,10 @@ changed to an incompatible type remain visible as stale entries until **Remove**
 synchronization apply only overrides that are still known, Exposed, and type-compatible with the assigned effect.
 Asset-valued component overrides participate in scene dependency extraction and cooking.
 
-The managed C# VFX service currently exposes playback controls, not Blackboard mutation. Use native component/world
-APIs for parameter changes in this milestone.
+Managed C# can update exposed range parameters on the Play Mode runtime component and live effect. See
+[Runtime Range Parameters](#runtime-range-parameters). Other managed Blackboard value types and managed reset/remove
+operations are not exposed in this milestone; use the native component/world
+APIs for those workflows.
 
 ## Effect Settings
 
@@ -891,6 +1172,75 @@ public sealed class ImpactVfx : Behaviour
 entity. A valid returned `VfxEmitterHandle` means the request was accepted. Asset loading is asynchronous, so
 `handle.IsAlive` may remain false until the native effect instance activates.
 
+### Runtime Range Parameters
+
+`VfxRange<T>` is the managed, inclusive Min/Max value used by range-typed Blackboard parameters. The constructor accepts
+endpoints in either order and stores component-wise minima and maxima. Floating-point components must be finite. Pass
+the Blackboard row's stable `AssetId`, not its display label; renaming a Blackboard property does not break code that
+retains the same stable ID. The public `readonly record struct VfxRange<T> where T : unmanaged` exposes
+`VfxRange(T first, T second)`, read-only `Minimum` and `Maximum` properties, and
+`Deconstruct(out T minimum, out T maximum)`.
+
+```csharp
+using Keire;
+
+public bool ConfigureTrailRanges(AssetId lifetimeRangeParameter, AssetId velocityRangeParameter)
+{
+    // The reversed scalar endpoints are normalized to Minimum = 1 and Maximum = 20.
+    VfxRange<float> lifetime = new(20.0f, 1.0f);
+    if (!_emitter.SetParameter(lifetimeRangeParameter, lifetime))
+        return false;
+
+    VfxRange<Vector3> velocity = new(
+        new Vector3(2.0f, 14.0f, 2.0f),
+        new Vector3(-2.0f, 8.0f, -2.0f));
+
+    // The entity-scoped service and handle overloads have the same behavior.
+    return Vfx.SetParameter(Entity, velocityRangeParameter, velocity);
+}
+```
+
+The supported element types and exact overloads are:
+
+```csharp
+// VfxEmitterHandle instance overloads
+public bool SetParameter(AssetId parameter, VfxRange<float> value);
+public bool SetParameter(AssetId parameter, VfxRange<long> value);
+public bool SetParameter(AssetId parameter, VfxRange<ulong> value);
+public bool SetParameter(AssetId parameter, VfxRange<Vector2> value);
+public bool SetParameter(AssetId parameter, VfxRange<Vector3> value);
+public bool SetParameter(AssetId parameter, VfxRange<Vector4> value);
+public bool SetParameter(AssetId parameter, VfxRange<Color> value);
+
+// Vfx static-service equivalents
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<float> value);
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<long> value);
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<ulong> value);
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<Vector2> value);
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<Vector3> value);
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<Vector4> value);
+public static bool SetParameter(Entity entity, AssetId parameter, VfxRange<Color> value);
+```
+
+The range constructor throws `ArgumentOutOfRangeException` when any floating-point component is NaN or Infinity. It
+throws `NotSupportedException` if another unmanaged `T` is constructed. Reversed endpoints are valid and normalized;
+they are not an error.
+
+`SetParameter` returns `false` without changing the runtime component or live native effect when any of these conditions
+is true:
+
+- The entity is stale, lacks a VFX Emitter, or has no active runtime scene (in the editor, this means outside Play Mode).
+- The parameter ID is invalid, unknown, hidden, or not the exact matching range type.
+- The effect is still loading, the native handle is not alive, or the component and live effect no longer refer to the
+  same asset.
+- Native validation rejects the candidate, including a range/finite-value contract violation.
+
+Call from normal Behaviour lifecycle callbacks on the runtime owner thread. Because asset activation is asynchronous,
+wait for `handle.IsAlive` before treating a `false` result as a permanent content error. A successful call updates the
+runtime-scene component clone and that entity's live effect atomically; it does not modify the `.keirevfx` asset, the
+edit-scene component, or another emitter. This milestone does not expose managed `ResetParameter`, so retain the
+authored default in content or use native control when reset semantics are required.
+
 ### Managed API Reference
 
 ```csharp
@@ -907,6 +1257,10 @@ handle.Pause();
 handle.Resume();
 handle.Restart(effectReference);
 handle.Stop();
+
+VfxRange<float> lifetime = new(1.0f, 20.0f);
+bool rangeApplied = handle.SetParameter(lifetimeRangeParameter, lifetime);
+bool entityRangeApplied = Vfx.SetParameter(entity, lifetimeRangeParameter, lifetime);
 ```
 
 Important behavior:
@@ -918,6 +1272,9 @@ Important behavior:
 - Pause sets Simulation Speed to zero.
 - Resume currently restores Simulation Speed to `1.0`, not an earlier custom speed.
 - Stop disables automatic playback and releases the runtime instance but leaves the component attached.
+- Managed Blackboard mutation currently covers only the seven `VfxRange<T>` overloads documented above.
+- Range updates require an active, loaded Play Mode effect and return `false` transactionally on lifecycle, exposure,
+  or exact-type mismatch.
 - Calling `Vfx.Play` with an invalid entity or effect throws `ArgumentException`.
 
 ## Native C++ Scene Usage
@@ -1026,7 +1383,7 @@ flowchart LR
 ### Build A Parameter Binding In C++
 
 The graph schema is public through `<Keire/Core.h>`. This example adds an exposed Scalar parameter and connects its
-Parameter node to the default Emission Rate Module node:
+Parameter node to the default Emission Rate Block:
 
 ```cpp
 #include <Keire/Core.h>
@@ -1059,16 +1416,24 @@ namespace MyGame
         if (emission == definition.Modules.end())
             throw std::runtime_error("The effect has no Emission Rate payload.");
 
-        const auto emissionNode =
-            std::ranges::find(system.Nodes, emission->Id, &Keire::VfxGraphNode::Reference);
-        if (emissionNode == system.Nodes.end())
-            throw std::runtime_error("The Emission Rate payload is not represented in the graph.");
+        const auto emissionContext =
+            std::ranges::find_if(system.Nodes,
+                                 [emissionId = emission->Id](const Keire::VfxGraphNode& node)
+                                 {
+                                     return std::ranges::find(node.Blocks, emissionId, &Keire::VfxGraphBlock::Reference) != node.Blocks.end();
+                                 });
+        if (emissionContext == system.Nodes.end())
+            throw std::runtime_error("The Emission Rate payload is not represented by a Context Block.");
+
+        const auto emissionBlock =
+            std::ranges::find(emissionContext->Blocks, emission->Id, &Keire::VfxGraphBlock::Reference);
 
         const auto rateInput =
-            std::ranges::find(emissionNode->Pins, std::string("particlesPerSecond"), &Keire::VfxGraphPin::Semantic);
-        if (rateInput == emissionNode->Pins.end())
-            throw std::runtime_error("The Emission Rate node has no canonical rate input.");
-        const auto emissionNodeId = emissionNode->Id;
+            std::ranges::find(emissionBlock->Pins, std::string("particlesPerSecond"), &Keire::VfxGraphPin::Semantic);
+        if (rateInput == emissionBlock->Pins.end())
+            throw std::runtime_error("The Emission Rate Block has no canonical rate input.");
+        const auto emissionContextId = emissionContext->Id;
+        const auto emissionBlockId = emissionBlock->Id;
         const auto rateInputId = rateInput->Id;
 
         Keire::VfxGraphNode parameterNode;
@@ -1088,11 +1453,14 @@ namespace MyGame
         const auto parameterNodeId = parameterNode.Id;
         const auto parameterPinId = parameterNode.Pins.front().Id;
         system.Nodes.push_back(std::move(parameterNode));
-        system.Connections.push_back({Keire::AssetId::Generate(),
-                                      parameterNodeId,
-                                      parameterPinId,
-                                      emissionNodeId,
-                                      rateInputId});
+        Keire::VfxGraphConnection connection;
+        connection.Id = Keire::AssetId::Generate();
+        connection.OutputNode = parameterNodeId;
+        connection.OutputPin = parameterPinId;
+        connection.InputNode = emissionContextId;
+        connection.InputBlock = emissionBlockId;
+        connection.InputPin = rateInputId;
+        system.Connections.push_back(connection);
 
         Keire::ValidateVfxEffect(definition);
         return definition;
@@ -1282,6 +1650,50 @@ advances only that handle's GPU simulation revision and retires its prior partic
 with the new value. Other creation-property changes affect future GPU particles. Portable Custom HLSL Update/Output
 operands are resolved per emitter and affect existing particles on both backends without a handle restart.
 
+Ranges are ordinary typed Blackboard values and use the same API:
+
+```cpp
+const Keire::VfxScalarRange lifetime{1.0F, 20.0F};
+world->SetParameter(handle, lifetimeRangeParameter, lifetime);
+
+const Keire::VfxVector3Range launchVelocity{
+    Keire::Vector3{-2.0F, 8.0F, -2.0F},
+    Keire::Vector3{2.0F, 14.0F, 2.0F},
+};
+world->SetParameter(handle, velocityRangeParameter, launchVelocity);
+```
+
+`VfxRange<T>` is available for scalar, signed/unsigned integer, Vector2/3/4, and Color aliases. Native construction is
+an explicit aggregate; persisted/authoring values require component-wise `Minimum <= Maximum` and finite floating
+components. `SetParameter` validates the exact Blackboard type and applies the whole candidate transactionally.
+
+### Building A Schema-4 Value Graph In C++
+
+Authoring tools normally create IDs and undo records, but importers and procedural tooling can use the same public
+catalog and canonical factories:
+
+```cpp
+auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+auto range = Keire::CreateVfxGraphOperatorNode("keire.operator.range", {-500.0F, 200.0F});
+auto random = Keire::CreateVfxGraphOperatorNode("keire.operator.random-range", {-260.0F, 200.0F});
+
+range.Context = Keire::VfxContextType::Initialize;
+random.Context = Keire::VfxContextType::Initialize;
+
+// Pin IDs come from the descriptor factory. Connect the Range output to Random Range,
+// then connect Random Range to an Initialize Block input using Context+Block+Pin endpoints.
+definition.Systems.front().Nodes.push_back(std::move(range));
+definition.Systems.front().Nodes.push_back(std::move(random));
+
+const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+if (!program.Valid)
+    throw std::runtime_error(program.Diagnostics.front().Message);
+```
+
+Use `FindVfxNodeDescriptor(typeId)` before procedural creation to inspect canonical pins, settings, valid Contexts,
+support tier, and backend tier. Never construct a known built-in with hand-invented pin names: schema-4 validation
+rejects stale signatures instead of guessing.
+
 On `Reload`, compatible overrides with the same stable ID, exact type, and Exposed status are preserved. Removed,
 hidden, or type-changed parameters fall back to the new asset and set
 `VfxRuntimeDiagnostic::ParameterOverrideRejected`. Program layout changes can restart that handle's simulation while
@@ -1414,16 +1826,22 @@ currently install a Mesh/Volume ShapeSample callback.
 - `CanonicalIr` stores the lowered execution source, parameters, payload references, bindings, custom instructions,
   and interleaved operation schedule.
 - `Parameters` contains stable-ID slots and typed defaults.
-- `Modules` contains the connected, enabled Runtime Module payload references.
-- `Bindings` maps parameter slots to canonical module properties.
+- `Modules` contains lowered Block payload snapshots, or enabled payloads in LegacyModules mode.
+- `Bindings` maps parameter or expression sources to canonical Block properties.
 - `CustomInstructions` contains verified Portable Custom HLSL operations.
-- `Operations` is the authoritative cable-ordered Module/Custom execution schedule.
+- `Operations` is the authoritative Context/Block-ordered Module/Custom execution schedule.
 - `Diagnostics` contains Information, Warning, or Error entries with optional node/module stable IDs.
 
-Both backends compile the same graph and Portable Custom HLSL semantics. CPU compilation warns when GPU Depth collision
-must degrade to the configured CPU collision query. Structural graph, binding, and portable-language errors set
-`Valid` to false and are returned as Error diagnostics instead of partially executing the program. Bound Blackboard
-defaults are resolved during compilation and must leave every affected module within its normal validation range.
+GPU compilation packs supported value instructions and their literal, Parameter, register, identity, and setting data
+for the shader interpreter. It rejects unsupported packed types, opcode/register/source/constant limits, or a
+particle-varying generic Runtime Block binding that has no shader-side property ABI. It also validates resolved Block
+defaults against the exact compute capabilities: unsupported resource shapes, nonlinear curves/gradients, collisions,
+renderer modes/resources, and packed expression-program limits are node-linked errors. CPU compilation warns when GPU Depth collision
+must degrade to the configured CPU collision query. Structural graph, binding, portable-language,
+and backend-capability errors set
+`Valid` to false instead of partially executing the program. Bound Blackboard
+defaults are resolved during compilation and must leave every affected Block within both its normal validation range
+and the selected backend's capability contract.
 
 ### Runtime Diagnostics
 
@@ -1485,24 +1903,26 @@ The GPU backend is a runtime acceleration path, not a promise that every authore
 | --- | --- | --- |
 | Emission Rate and Burst scheduling | Yes | Yes, published as cumulative spawn work |
 | Point / Box / Sphere shape | Yes | Yes |
-| Cone shape | Full authored CPU cone | Approximation; full cone fields are not consumed |
-| Mesh / Volume shape | With `ShapeSample` callback | Not implemented |
+| Cone shape | Full authored CPU cone | Full authored cone angle/length and volume distribution |
+| Mesh / Volume shape | With `ShapeSample` callback | Schema-4 compile error at the Shape Block |
 | Lifetime and velocity ranges | Yes | Yes |
-| Initial rotation ranges | Yes | Incomplete |
+| Initial rotation ranges | Full Euler for Mesh; Z for Sprite | Z for Sprite; X/Y rejected explicitly |
 | Forces and gravity | Yes | Yes |
-| Size curve | Full curve | Age-zero to age-one values |
-| Color gradient | Full gradient | Age-zero to age-one values |
+| Size curve | Full curve | Constant or exact linear 0..1 curve; nonlinear curves are rejected |
+| Color gradient | Full gradient | Constant or exact linear 0..1 gradient; nonlinear gradients are rejected |
 | Collision callback | Yes | No compute collision |
-| Sprite output | Tinted billboard; Sprite ID is retained but custom texture sampling is not wired | Indirect tinted billboard; custom texture sampling is not wired |
+| Sprite output | Tinted billboard; schema-4 custom textures are rejected | Indirect tinted billboard; custom textures are rejected |
 | Mesh particle output | Yes | No indirect Mesh output |
 | Local-space following | Yes | Yes; rigid position/rotation changes transform existing particles |
 | Per-handle stop, restart, and incompatible-reload isolation | Yes | Yes; matching handle generation only |
 | Exact active particle count | Yes | Spawn-based estimate |
 | Per-particle debug samples | Yes | No |
-| Schema-v3 Graph cable scheduling | Yes | Yes |
+| Schema-4 Context/Block scheduling | Yes | Cooked paths only |
 | Module-property Blackboard binding | Yes | Yes |
 | Activation/component/live parameter overrides | Yes | Yes |
-| Live module override on existing particles | Update modules are read on later CPU steps | Force/Size/Color/Renderer changes restart only that handle; other creation fields affect future particles |
+| Core packed value Operators | Yes | Yes; opcode and pin support is shown by the CPU + GPU badge |
+| Particle-varying generic Block properties | Yes | Only properties with a lowered shader binding; otherwise a compile error |
+| Live module override on existing particles | Update modules are read on later CPU steps | Force, Size, Color, and Renderer uniforms update without restarting existing particles; creation fields affect future particles |
 | Portable Custom HLSL | Yes; bounded instructions run in cable order inside particle loops | Yes; cable-ordered Module and Custom operations share the per-emitter spawn/simulation dispatches |
 | Event contexts | No | No |
 | Multiple executable graph systems | No | No |
@@ -1510,6 +1930,12 @@ The GPU backend is a runtime acceleration path, not a promise that every authore
 
 Author and diagnose on CPU, then deliberately verify the effect on GPU. If a required feature is absent from the GPU
 column, keep that effect on a supported compatibility path until parity is implemented.
+
+GPU spawn publication is cumulative, so a render handoff that skips an intermediate snapshot does not discard requested
+spawn work. The current render handoff retains only the latest Time, Delta Time, and Simulation Step values, however.
+When more than one simulation snapshot is consumed by a single render update, all accumulated work therefore uses that
+latest timing tuple. Projects that require exact per-step GPU timing must currently consume every simulation snapshot;
+a queued per-step handoff is a remaining backend milestone.
 
 ## Production Recipes
 
@@ -1572,11 +1998,11 @@ column, keep that effect on a supported compatibility path until parity is imple
 | The open draft appears at world origin | No eligible scene emitter using that asset is available. Assign the open effect to an active, enabled emitter and check Preview In Edit Mode to host the draft at that emitter. |
 | No edit-mode particles | Assign Effect, activate the entity hierarchy, enable the component, and check Preview In Edit Mode. |
 | No Play Mode particles | Enable Play On Awake or call `Vfx.Play`; then allow the asset to finish loading. |
-| Graph changes do not alter the effect | Check the header execution badge. LegacyModules ignores graph scheduling until explicit conversion. In Graph mode, put the enabled Module node on the Spawn-to-Output `ParticleStream` path and Compile. |
-| A new Runtime Module has no effect in Graph mode | Adding a payload does not add an executable node. Use **Add Node / Module** to splice it into the main stream, then Compile. |
-| Blackboard changes do nothing | Add a Parameter node and cable its typed output to a canonical Module or Custom HLSL input. A property existing only in the Blackboard has no consumer. |
+| Graph changes do not alter the effect | Check the header execution badge. LegacyModules ignores graph scheduling until explicit conversion. In Graph mode, add or enable the operation as a Block in the correct connected Context and Compile. |
+| A new Runtime Module has no effect in Graph mode | Adding compatibility payload data does not schedule it. Right-click the matching Context, choose **Add Block**, select the payload, and place the Block in the intended stack order. |
+| Blackboard changes do nothing | Add a Parameter node and cable its typed output to a canonical Block or Portable Custom HLSL input. A property existing only in the Blackboard has no consumer. |
 | A parameter override is rejected | Use the parameter's stable ID, exact `VfxParameterValue` type, and an Exposed parameter. Direct world APIs also reject duplicate IDs and stale handles. |
-| Custom HLSL does nothing | Confirm Graph mode, connect the node to the main `ParticleStream`, use only the portable grammar, and Compile. `DeltaTime` is zero in creation stages; use Update for per-frame motion. |
+| Custom HLSL does nothing | Confirm Graph mode, add or enable the Portable HLSL Block in the intended Context, use only the portable grammar, and Compile. Portable `*DeltaTime` is zero in creation stages; use Update for per-frame motion. |
 | GPU effects are expensive with many emitters | Each active emitter uses one handle-filtered, world-capacity simulation dispatch. Reduce active emitters or lower the owning world's particle capacity. |
 | Mesh or Volume particles spawn at the emitter origin | The current world has no `ShapeSample` callback. |
 | GPU preview differs from CPU | Consult the capability matrix; several advanced module fields have partial GPU parity. |
@@ -1586,12 +2012,15 @@ column, keep that effect on a supported compatibility path until parity is imple
 | Dropped count increases | Reduce emission/lifetime, raise effect Capacity, or raise the owning world's particle budget. |
 | Scale has no visible effect | VFX synchronization uses position and rotation only. Author dimensions in VFX modules. |
 | Collision has no effect | Use CPU, provide a CollisionQuery or Play Mode physics world, and inspect runtime diagnostics. |
-| Compile reports an invalid header | Check Name, Duration, Capacity, module count, enabled emission, and Renderer. |
+| Compile reports an invalid header | Check Name, Duration, Capacity, payload count, and the required enabled emission/renderer payloads or Blocks for the selected execution source. |
 | Compile reports duplicate stable IDs | Do not hand-copy IDs between modules, systems, nodes, pins, links, or parameters. |
 | Compile requires one particle system | Graph execution supports exactly one system. Remove extra systems or keep the asset in LegacyModules compatibility mode. |
-| Compile reports a disconnected executable node | Cable every Module and Custom HLSL node that should execute into the one Spawn-to-Output `ParticleStream` path. |
+| Compile reports a disconnected executable node | Connect the four Contexts. Reachable schema-3 Module/Custom nodes migrate into Blocks; new executable work must be an enabled Block in a connected Context. |
 | Compile reports a cycle or backward context | Remove the cycle and keep flow ordered Spawn → Initialize → Update → Output. |
-| A link cannot be completed | Output/input direction and `VfxValueType` must match. An input may have only one driver, and executable value inputs accept Parameter-node sources. |
+| A cable drag stays red | The endpoints have the same direction, different `VfxValueType`, already form that exact cable, or violate pin ownership. Read the live diagnostic and choose a compatible opposite pin. |
+| A cable drag is amber | The proposed cable is structurally valid, but the draft still has an executable-graph error. Complete the remaining repair or Undo; preview remains on the last valid graph meanwhile. |
+| Preview freezes after unlinking a cable | The editable graph is temporarily incomplete. This is intentional: reconnect the required path or Undo. The diagnostic remains visible and Save stays blocked until the graph is publishable. |
+| A link cannot be completed | Output/input direction and `VfxValueType` must match. An input may have only one driver; Block inputs accept compatible Parameter or executable Operator outputs in the valid evaluation Context. Dragging may begin from either endpoint. |
 | Reload does not apply | The revision must increase; the editor also refuses source reload over unsaved local changes. |
 | Pause then Resume loses a custom speed in C# | Managed Resume currently restores Simulation Speed to `1.0`. |
 
@@ -1607,9 +2036,10 @@ modify them; hand editing can easily break stable identity.
 | Graph systems | 64 |
 | Graph nodes across all systems | 4,096 |
 | Graph connections across all systems | 16,384 |
+| Compiled value registers | 4,096 |
 | Blackboard parameters | 1,024 |
 | Serialized scene-component parameter overrides | 1,024 |
-| Portable Custom HLSL instructions per executable Graph effect | 8 |
+| Portable Custom HLSL instructions per executable Graph effect | 4,096 |
 | Burst modules | 32 |
 | Cycles per Burst | 1,024 |
 | Name, system, node, pin, or parameter name | 128 UTF-8 bytes |
@@ -1626,15 +2056,17 @@ Graph execution adds these publish-time requirements:
 - Exactly one system and exactly one Spawn, Initialize, Update, and Output Context node
 - No Event nodes, cycles, backward `ParticleStream` stage transitions, or disconnected executable nodes
 - One connected Spawn-to-Output particle stream
-- Unique valid Module references with canonical context, flow pins, property semantics, and types
+- Unique valid Block or compatibility Module references with canonical Context, property semantics, and types
+- Canonical Operator type IDs, definition versions, resolved signatures, dynamic-pin order, settings, and typed pins
 - Valid Parameter references whose output type matches the Blackboard definition
-- Parameter-only value sources for Module and Custom HLSL inputs
-- At least one connected enabled emission payload and one connected enabled Renderer
-- At most eight valid Portable Custom HLSL statements
+- Parameter or executable Operator value sources for Module/Block and Portable Custom HLSL inputs
+- At least one enabled emission Block/module and one enabled Renderer Block/module on the connected Context path
+- Block endpoints identify the owning Context, Block, and pin; Context vector order is executable order
+- At most 4,096 valid Portable Custom HLSL statements
 
-Schema versions 1, 2, and 3 are readable. Saving publishes schema version 3. Schema 1/2 always decode as
-`LegacyModules`; opening, previewing, or saving does not convert execution. Use the explicit conversion command to
-replace old Systems with a schema-v3 executable Graph.
+Schema versions 1, 2, 3, and 4 are readable. Schemas 1–3 migrate in memory and explicit Save publishes schema 4.
+Historical compatibility assets retain `LegacyModules`; opening, previewing, or saving does not convert execution. Use
+the explicit conversion command to replace old Systems with a schema-4 executable Graph.
 
 ## API And Implementation Reference
 
@@ -1644,6 +2076,8 @@ Use these files as the final source of truth:
 | --- | --- |
 | Public definitions, modules, graph schema, compiler, world, handles, snapshots | `KeireCore/Include/Keire/Vfx/VfxSystem.h` |
 | Validation, schema migration, graph lowering, Portable Custom HLSL, encoding, and dependencies | `KeireCore/Source/Vfx/VfxAssets.cpp` |
+| Compiler-owned node descriptors, canonical factories, value defaults, and type validation | `KeireCore/Source/Vfx/VfxNodeCatalog.cpp` |
+| SSA value lowering, folding, deterministic RNG, register allocation, and CPU evaluation | `KeireCore/Source/Vfx/VfxExpressions.cpp` |
 | Shared compiled-binding resolution and executable payload materialization | `KeireCore/Source/Vfx/VfxExecutionInternal.h` |
 | CPU execution, parameter resolution, pooling, reload, statistics, and snapshots | `KeireCore/Source/Vfx/VfxSystem.cpp` |
 | GPU portable-instruction implementation | `KeireCore/Shaders/BuiltinVfx.hlsl` |
@@ -1654,12 +2088,16 @@ Use these files as the final source of truth:
 | Play Mode VFX session API | `KeireCore/Include/Keire/Scenes/Scene.h` |
 | Play Mode emitter synchronization and C++ control | `KeireCore/Source/Scenes/SceneRuntime.cpp` |
 | Transactional editor document | `KeireClient/Include/KeireClient/Editor/VfxEffectDocument.h` |
+| Ranked context/type/backend-aware palette search | `KeireClient/Include/KeireClient/Editor/VfxNodeCatalog.h`, `KeireClient/Source/Editor/VfxNodeCatalog.cpp` |
 | Graph, module, blackboard, settings, and preview UI | `KeireClient/Source/Editor/VfxEffectPanel.cpp` |
 | Typed scene-emitter Blackboard override Inspector | `KeireClient/Include/KeireClient/Editor/VfxEmitterInspector.h`, `KeireClient/Source/Editor/VfxEmitterInspector.cpp` |
 | Edit-mode emitter eligibility | `KeireClient/Include/KeireClient/Editor/EditModeVfxPreview.h` |
 | Editor asset and scene preview ownership | `KeireClient/Source/Editor/EditorWorkspaceAssets.cpp` |
 | Managed VFX API | `KeireManaged/RuntimeApi.cs` |
 | Managed VFX component marker | `KeireManaged/BuiltInComponents.cs` |
+| Frozen Unity 6.3 LTS parity catalog | `docs/VfxParityManifest.json` |
+| Parity manifest generation and validation | `Scripts/Vfx/generate_vfx_parity_manifest.py`, `Scripts/Vfx/validate_vfx_parity_manifest.py` |
 | Runtime and schema tests | `KeireTests/Source/Vfx/VfxTests.cpp` |
+| Range, Random, core Operator, Context Block, and expression-runtime tests | `KeireTests/Source/Vfx/VfxExpressionTests.cpp` |
 | Executable graph, cable order, binding, Custom HLSL, and component override tests | `KeireTests/Source/Vfx/VfxGraphRuntimeTests.cpp` |
 | Editor document and edit-preview tests | `KeireEditorTests/Source/VfxEffectDocumentTests.cpp` |

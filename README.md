@@ -77,7 +77,7 @@ Common examples:
 ./Scripts/project.ps1 generate -Generator ninja -Architecture ARM64 -Toolset clang -Force
 ./Scripts/project.ps1 clean -CleanScope generated
 ./Scripts/project.ps1 package -Generator vs2022 -Configuration Dist
-# Local diagnostics only; rejected in CI and marked as a development artifact.
+#Local diagnostics only; rejected in CI and marked as a development artifact.
 ./Scripts/project.ps1 package -Generator ninja -Configuration Release -AllowDirty
 ```
 
@@ -85,7 +85,7 @@ Common examples:
 bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset clang --force
 bash Scripts/project.sh clean --clean-scope generated
 bash Scripts/project.sh package --generator ninja --configuration Dist --toolset clang
-# Local diagnostics only; rejected in CI and marked as a development artifact.
+#Local diagnostics only; rejected in CI and marked as a development artifact.
 bash Scripts/project.sh package --generator ninja --configuration Release --allow-dirty
 ```
 
@@ -202,7 +202,7 @@ private AssetReference<AudioClip> _fireSound;
 protected override void Start()
 {
     if (_target.TryGetBehaviour<Health>(out var health))
-        Debug.Log($"Target health: {health.Current}");
+        Debug.Log($ "Target health: {health.Current}");
 
     if (!_target.HasComponent<ColliderComponent>())
         _target.AddComponent<ColliderComponent>();
@@ -230,7 +230,7 @@ the owning entity, validates that it has a UI Button component, and dispatches n
 protected override void Start()
 {
     if (uiButton is not null)
-        uiButton.Clicked += () => uiPanel.Active = !uiPanel.Active;
+        uiButton.Clicked += () = > uiPanel.Active = !uiPanel.Active;
 }
 ```
 
@@ -294,13 +294,16 @@ The sample project includes a
 `.keireasm` gameplay assembly, reload-aware third-person and navigation scripts, and base/variant prefab assets;
 `AssetTool cook` compiles and publishes those DLLs before writing the runtime manifest.
 
-`.keirevfx` assets use an explicit schema-v3 execution source: new Graph assets schedule referenced module payloads
-through typed `ParticleStream` cables, while older effects retain a `LegacyModules` compatibility path until the user
-converts them. The graph binds stable-ID Blackboard parameters to canonical module properties and bounded Portable
-Custom HLSL inputs; defaults, serialized component overrides, activation overrides, and live native parameter changes
-resolve through the same typed compiler on CPU and GPU. A scene-owned `VfxWorld` supplies generation-safe handles,
-fixed global/effect budgets, pooled steady-state simulation, revision-aware reload, diagnostics, and immutable
-debug/render snapshots.
+`.keirevfx` assets use an explicit schema-4 execution source. New Graph assets connect Spawn, Initialize, Update, and
+Output Contexts, order executable Blocks inside those Contexts, and cable descriptor-backed Operators and stable-ID
+Blackboard Parameters into typed Block inputs. Schemas 1-3 migrate in memory and are written as schema 4 only on
+explicit Save; historical module-stack effects retain `LegacyModules` execution until an explicit conversion. Range,
+Random/Random Range, Remap, core arithmetic/logic/vector Operators, and bounded CPU/GPU value interpreters form the
+current value release. Unsupported or GPU-required work reports an explicit diagnostic instead of acting as a no-op;
+compiled backend-limit diagnostics retain the responsible stable node ID. CPU + GPU catalog badges require validated
+packed representation and backend semantics; structurally present opcodes with open differential cases remain CPU-only.
+A scene-owned `VfxWorld` supplies generation-safe handles, fixed global/effect budgets, pooled steady-state simulation,
+revision-aware reload, diagnostics, and immutable debug/render snapshots.
 GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
 Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed. GPU compute
 simulation and indirect sprite output are active; Events, multiple executable graph systems, ribbons, decals, mesh
@@ -309,36 +312,41 @@ Modules, Blackboard, and Effect Settings workflows. The authoring preview defaul
 switch to the runtime GPU backend. In a scene, enable **Preview In Edit Mode** on a VFX Emitter to synchronize its
 assigned effect, revision, compatible parameter overrides, seed, simulation speed, enabled state, and world
 position/rotation without entering Play Mode or dirtying the scene.
-The [VFX Authoring And Runtime guide](docs/Vfx.md) covers the complete graph workflow, Runtime Modules, visual
-diagrams, scene setup, C++ and C# control, backend differences, recipes, and troubleshooting.
+The [VFX Authoring And Runtime guide](docs/Vfx.md) covers Context Blocks, value Operators, visual workflows, scene
+setup, native and managed range control, backend differences, recipes, migration, and troubleshooting. The
+[Unity 6.3 LTS parity manifest](docs/VfxParityManifest.json) is the machine-readable catalog and support ledger; its
+checked-in generator and validator live under [`Scripts/Vfx`](Scripts/Vfx).
 
 ## Windowing And Configuration
 
 ### GPU VFX runtime
 
-VFX effects publish schema-v3 documents with explicit `legacyModules` or `graph` execution. Schema 1/2 effects always
-open in compatibility mode; Save publishes schema 3 without changing behavior, while the undoable conversion command
-replaces presentation systems with one deterministic executable particle graph. Graph compilation validates canonical
-Context, Module, Parameter, and Custom HLSL nodes; same-typed single-driver cables; acyclic forward
-Spawn-to-Output flow; stable-ID references; and a connected emission/renderer path.
+VFX effects publish schema-4 documents with explicit `legacyModules` or `graph` execution. Schemas 1-3 migrate in
+memory without changing their execution source; explicit Save publishes schema 4, while the undoable conversion command
+replaces a compatibility module stack with one deterministic Context-and-Block particle graph. Graph compilation
+validates registered descriptor IDs and canonical pins/settings, ordered Block references and endpoints, same-typed
+single-driver value cables, acyclic forward Spawn-to-Output flow, stable-ID references, and an enabled
+emission/renderer path.
 
 Render-capable scene sessions use persistent structure-of-arrays GPU buffers, free/alive lists, compute
 spawn/update/compaction, Local-space transform following, generation-qualified per-handle retirement, and indirect
-sprite draws. Portable Custom HLSL lowers to at most eight verified assignment instructions shared by CPU and GPU;
-the GPU executes cable-ordered Module and Custom HLSL operations together in the relevant per-emitter spawn or
-handle-filtered, capacity-wide simulation dispatch. Stopping or restarting one GPU effect preserves unrelated emitters,
-and `VfxWorld::Clear` remains the explicit world-wide reset.
+sprite draws. Portable Custom HLSL accepts up to the explicit 4,096-instruction compiler safety bound and publishes its
+dynamic records for CPU and GPU execution. The fixed eight-instruction and fifteen-operation snapshot arrays are
+compatibility mirrors, not execution limits. The GPU executes ordered Context Block and Portable Custom HLSL operations
+together in the relevant per-emitter spawn or handle-filtered, capacity-wide simulation dispatch. Stopping or restarting
+one GPU effect preserves unrelated emitters, and `VfxWorld::Clear` remains the explicit world-wide reset.
 
-The VFX Effect panel authors draggable executable nodes and cables, module payloads, typed Blackboard defaults, portable
-custom statements, stable IDs, undo/redo, automatic incident-link cleanup, and CPU/GPU compile diagnostics. The toolbar
-provides restart, pause/resume, looping, backend, speed, active-particle, and dropped-particle controls.
+The VFX Effect panel authors draggable Contexts and ordered Blocks, descriptor-backed value nodes and cables, typed
+Blackboard defaults, portable custom statements, stable IDs, undo/redo, automatic incident-link cleanup, and CPU/GPU
+compile diagnostics. The toolbar provides restart, pause/resume, looping, backend, speed, active-particle, and
+dropped-particle controls.
 `VfxEmitterComponent` provides quality, culling, bounds, seed, speed, Play On Awake, Edit Mode preview, auto-destroy,
 and serialized stable-ID parameter overrides. The scene Inspector resolves the assigned effect and provides typed
 controls for exposed parameters, default reset, and stale-override cleanup. Native `VfxActivation`, `VfxWorld::SetParameter`,
 `SetParameterOverrides`, and `ResetParameter` provide typed per-handle control. Managed scripts can control playback
-through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, and `Vfx.Stop`; managed Blackboard mutation, Event contexts, multiple
-executable systems, general operator catalogs, subgraphs, ribbons, trails, decals, and volumetric outputs remain later
-compiler/runtime milestones.
+through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, and `Vfx.Stop`, and can transactionally update exposed scalar, integer,
+vector, and color ranges through `VfxRange<T>`. Other managed Blackboard types, Event contexts, multiple executable
+systems, subgraphs, ribbons, trails, decals, and volumetric outputs remain later compiler/runtime milestones.
 
 Animation-only FBX/glTF imports now publish `AnimationSourceAsset` as their effective primary type and retain stable
 skeleton, rig, and clip subasset IDs. They never pass through mesh vertex validation. Reimport changes metadata,
@@ -435,7 +443,8 @@ Keire::CreateApplication(const Keire::ApplicationCommandLineArguments& arguments
 Events are ordinary C++ value types. `Subscribe<T>` and `SubscribeAny` return move-only RAII tokens, while `Dispatch` delivers synchronously on the bus owner thread. Worker threads use bounded `TryEnqueue`; the application drains one stable snapshot per frame. Higher priorities run first, equal priorities retain registration order, and `EventFlow::Handled` stops propagation. An unhandled quit or primary-window close exits cleanly, so overlays can veto close requests when necessary.
 
 ```cpp
-struct AssetReady { std::uint64_t Id; };
+struct AssetReady {
+    std::uint64_t Id; };
 
 auto events = application.Events();
 auto subscription = events->Subscribe<AssetReady>([](const AssetReady& event) {

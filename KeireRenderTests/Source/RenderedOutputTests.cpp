@@ -250,20 +250,14 @@ namespace
         definition = Keire::ConvertVfxEffectToGraph(definition);
 
         auto& system = definition.Systems.front();
-        const auto force = std::ranges::find(system.Nodes, RenderVfxId(base + 6), &Keire::VfxGraphNode::Reference);
-        if (force == system.Nodes.end())
-            throw std::logic_error("Converted GPU VFX graph is missing its Force module.");
-        const auto forceInput =
-            std::ranges::find_if(force->Pins, [](const Keire::VfxGraphPin& pin)
-                                 { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
-        const auto forceOutput =
-            std::ranges::find_if(force->Pins, [](const Keire::VfxGraphPin& pin)
-                                 { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
-        if (forceInput == force->Pins.end() || forceOutput == force->Pins.end())
-            throw std::logic_error("Converted GPU VFX Force module has malformed flow pins.");
-        const auto forceNode = force->Id;
-        const auto forceInputPin = forceInput->Id;
-        const auto forceOutputPin = forceOutput->Id;
+        const auto update = std::ranges::find_if(
+            system.Nodes, [](const Keire::VfxGraphNode& node)
+            { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+        if (update == system.Nodes.end())
+            throw std::logic_error("Converted GPU VFX graph is missing its Update Context.");
+        const auto force = std::ranges::find(update->Blocks, RenderVfxId(base + 6), &Keire::VfxGraphBlock::Reference);
+        if (force == update->Blocks.end())
+            throw std::logic_error("Converted GPU VFX graph is missing its Force Block.");
 
         const auto parameter = std::ranges::find(system.Nodes, RenderVfxId(base + 20), &Keire::VfxGraphNode::Reference);
         if (parameter == system.Nodes.end() || parameter->Pins.empty())
@@ -271,55 +265,30 @@ namespace
         const auto parameterNode = parameter->Id;
         const auto parameterOutputPin = parameter->Pins.front().Id;
 
-        const auto customNode = RenderVfxId(base + 30);
-        const auto customFlowInput = RenderVfxId(base + 31);
+        const auto customBlock = RenderVfxId(base + 30);
         const auto customTintInput = RenderVfxId(base + 32);
-        const auto customFlowOutput = RenderVfxId(base + 33);
-        system.Nodes.push_back(
-            {customNode,
-             "Portable Order And Tint",
-             Keire::VfxContextType::Update,
-             {900.0F, 180.0F},
-             {{customFlowInput, "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
-              {customTintInput, "Tint Override", Keire::VfxValueType::Color, true, "TintOverride", std::nullopt},
-              {customFlowOutput, "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt}},
-             "Velocity = float3(0.0, 0.0, 0.0);\nTint = TintOverride;",
-             Keire::VfxGraphNodeKind::CustomHlsl,
-             {}});
+        auto custom = Keire::CreateVfxGraphPortableHlslBlock("Velocity = float3(0.0, 0.0, 0.0);\nTint = TintOverride;");
+        custom.Id = customBlock;
+        custom.Pins.push_back(
+            {customTintInput, "Tint Override", Keire::VfxValueType::Color, true, "TintOverride", std::nullopt});
+        update->Blocks.insert(customBeforeForce ? force : std::next(force), std::move(custom));
 
-        const auto flowPin = customBeforeForce ? forceInputPin : forceOutputPin;
-        const auto flowConnection = std::ranges::find_if(
-            system.Connections, [customBeforeForce, flowPin](const Keire::VfxGraphConnection& connection)
-            { return (customBeforeForce ? connection.InputPin : connection.OutputPin) == flowPin; });
-        if (flowConnection == system.Connections.end())
-            throw std::logic_error("Converted GPU VFX graph is missing the Force flow cable.");
-
-        if (customBeforeForce)
-        {
-            flowConnection->InputNode = customNode;
-            flowConnection->InputPin = customFlowInput;
-            system.Connections.push_back(
-                {RenderVfxId(base + 34), customNode, customFlowOutput, forceNode, forceInputPin});
-        }
-        else
-        {
-            const auto successorNode = flowConnection->InputNode;
-            const auto successorPin = flowConnection->InputPin;
-            flowConnection->InputNode = customNode;
-            flowConnection->InputPin = customFlowInput;
-            system.Connections.push_back(
-                {RenderVfxId(base + 34), customNode, customFlowOutput, successorNode, successorPin});
-        }
-        system.Connections.push_back(
-            {RenderVfxId(base + 35), parameterNode, parameterOutputPin, customNode, customTintInput});
+        Keire::VfxGraphConnection tintConnection;
+        tintConnection.Id = RenderVfxId(base + 35);
+        tintConnection.OutputNode = parameterNode;
+        tintConnection.OutputPin = parameterOutputPin;
+        tintConnection.InputNode = update->Id;
+        tintConnection.InputPin = customTintInput;
+        tintConnection.InputBlock = customBlock;
+        system.Connections.push_back(tintConnection);
 
         Keire::ValidateVfxEffect(definition);
         const auto compiled = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
         if (!compiled.Valid)
-            throw std::logic_error("Rendered schema-v3 GPU VFX graph did not compile.");
+            throw std::logic_error("Rendered schema-4 GPU VFX graph did not compile.");
         const auto persisted = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(definition));
         if (!persisted)
-            throw std::logic_error("Rendered schema-v3 GPU VFX graph did not survive persistence.");
+            throw std::logic_error("Rendered schema-4 GPU VFX graph did not survive persistence.");
         return persisted;
     }
 
@@ -1857,7 +1826,7 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
           ColorTolerance);
 }
 
-TEST_CASE("schema-v3 graph order Blackboard overrides and Portable HLSL drive rendered GPU VFX particles")
+TEST_CASE("schema-4 Block order Blackboard overrides and Portable HLSL drive rendered GPU VFX particles")
 {
     const auto results = std::make_shared<VfxGraphCaptureResults>();
     {

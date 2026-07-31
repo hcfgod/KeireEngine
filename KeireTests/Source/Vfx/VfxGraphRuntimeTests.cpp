@@ -47,7 +47,8 @@ namespace
                                 {{RuntimeId(31), "Rate", Keire::VfxValueType::Scalar, false, "value", std::nullopt}},
                                 {},
                                 Keire::VfxGraphNodeKind::Parameter,
-                                RuntimeId(20)});
+                                RuntimeId(20),
+                                {"keire.parameter"}});
         system.Nodes.push_back({RuntimeId(32),
                                 "Force",
                                 Keire::VfxContextType::Update,
@@ -55,40 +56,48 @@ namespace
                                 {{RuntimeId(33), "Force", Keire::VfxValueType::Vector3, false, "value", std::nullopt}},
                                 {},
                                 Keire::VfxGraphNodeKind::Parameter,
-                                RuntimeId(21)});
+                                RuntimeId(21),
+                                {"keire.parameter"}});
 
-        const auto emission = std::ranges::find(system.Nodes, RuntimeId(2),
-                                                [](const Keire::VfxGraphNode& node) { return node.Reference; });
-        REQUIRE(emission != system.Nodes.end());
+        const auto emissionContext =
+            std::ranges::find_if(system.Nodes,
+                                 [](const Keire::VfxGraphNode& node)
+                                 {
+                                     return std::ranges::find(node.Blocks, RuntimeId(2),
+                                                              &Keire::VfxGraphBlock::Reference) != node.Blocks.end();
+                                 });
+        REQUIRE(emissionContext != system.Nodes.end());
+        const auto emission =
+            std::ranges::find(emissionContext->Blocks, RuntimeId(2), &Keire::VfxGraphBlock::Reference);
+        REQUIRE(emission != emissionContext->Blocks.end());
         const auto rate =
             std::ranges::find(emission->Pins, std::string("particlesPerSecond"), &Keire::VfxGraphPin::Semantic);
         REQUIRE(rate != emission->Pins.end());
-        system.Connections.push_back({RuntimeId(34), RuntimeId(30), RuntimeId(31), emission->Id, rate->Id});
+        Keire::VfxGraphConnection rateConnection;
+        rateConnection.Id = RuntimeId(34);
+        rateConnection.OutputNode = RuntimeId(30);
+        rateConnection.OutputPin = RuntimeId(31);
+        rateConnection.InputNode = emissionContext->Id;
+        rateConnection.InputPin = rate->Id;
+        rateConnection.InputBlock = emission->Id;
+        system.Connections.push_back(rateConnection);
 
         const auto update = std::ranges::find_if(
             system.Nodes, [](const Keire::VfxGraphNode& node)
             { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
         REQUIRE(update != system.Nodes.end());
-        const auto outgoing = std::ranges::find(system.Connections, update->Id, &Keire::VfxGraphConnection::OutputNode);
-        REQUIRE(outgoing != system.Connections.end());
-        const auto previousNode = outgoing->InputNode;
-        const auto previousPin = outgoing->InputPin;
-
-        system.Nodes.push_back(
-            {RuntimeId(40),
-             "Portable Force",
-             Keire::VfxContextType::Update,
-             {900.0F, 180.0F},
-             {{RuntimeId(41), "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
-              {RuntimeId(42), "Force", Keire::VfxValueType::Vector3, true, "Force", std::nullopt},
-              {RuntimeId(43), "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt}},
-             "Velocity += Force * DeltaTime;",
-             Keire::VfxGraphNodeKind::CustomHlsl,
-             {}});
-        outgoing->InputNode = RuntimeId(40);
-        outgoing->InputPin = RuntimeId(41);
-        system.Connections.push_back({RuntimeId(44), RuntimeId(40), RuntimeId(43), previousNode, previousPin});
-        system.Connections.push_back({RuntimeId(45), RuntimeId(32), RuntimeId(33), RuntimeId(40), RuntimeId(42)});
+        auto portable = Keire::CreateVfxGraphPortableHlslBlock("Velocity += Force * DeltaTime;");
+        portable.Id = RuntimeId(40);
+        portable.Pins.push_back({RuntimeId(42), "Force", Keire::VfxValueType::Vector3, true, "Force", std::nullopt});
+        update->Blocks.push_back(std::move(portable));
+        Keire::VfxGraphConnection forceConnection;
+        forceConnection.Id = RuntimeId(45);
+        forceConnection.OutputNode = RuntimeId(32);
+        forceConnection.OutputPin = RuntimeId(33);
+        forceConnection.InputNode = update->Id;
+        forceConnection.InputPin = RuntimeId(42);
+        forceConnection.InputBlock = RuntimeId(40);
+        system.Connections.push_back(forceConnection);
         Keire::ValidateVfxEffect(definition);
         return definition;
     }
@@ -112,39 +121,19 @@ namespace
         definition = Keire::ConvertVfxEffectToGraph(definition);
 
         auto& system = definition.Systems.front();
+        const auto forceId = definition.Modules[3].Id;
         const auto collisionId = definition.Modules[4].Id;
-        const auto anchor = std::ranges::find_if(system.Nodes,
-                                                 [collisionId, customBeforeForce](const Keire::VfxGraphNode& node)
-                                                 {
-                                                     return customBeforeForce
-                                                                ? node.Kind == Keire::VfxGraphNodeKind::Context &&
-                                                                      node.Context == Keire::VfxContextType::Update
-                                                                : node.Kind == Keire::VfxGraphNodeKind::Module &&
-                                                                      node.Reference == collisionId;
-                                                 });
-        REQUIRE(anchor != system.Nodes.end());
-        const auto anchorId = anchor->Id;
-        const auto outgoing = std::ranges::find(system.Connections, anchorId, &Keire::VfxGraphConnection::OutputNode);
-        REQUIRE(outgoing != system.Connections.end());
-        const auto destinationNode = outgoing->InputNode;
-        const auto destinationPin = outgoing->InputPin;
-        const auto customNode = RuntimeId(customBeforeForce ? 110 : 210);
-        const auto customInput = RuntimeId(customBeforeForce ? 111 : 211);
-        const auto customOutput = RuntimeId(customBeforeForce ? 112 : 212);
-        outgoing->InputNode = customNode;
-        outgoing->InputPin = customInput;
-        system.Nodes.push_back(
-            {customNode,
-             "Ordered Custom HLSL",
-             Keire::VfxContextType::Update,
-             {900.0F, 0.0F},
-             {{customInput, "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
-              {customOutput, "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt}},
-             "Velocity = float3(0.0, 1.0, 0.0);",
-             Keire::VfxGraphNodeKind::CustomHlsl,
-             {}});
-        system.Connections.push_back(
-            {RuntimeId(customBeforeForce ? 113 : 213), customNode, customOutput, destinationNode, destinationPin});
+        const auto update = std::ranges::find_if(
+            system.Nodes, [](const Keire::VfxGraphNode& node)
+            { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+        REQUIRE(update != system.Nodes.end());
+        const auto force = std::ranges::find(update->Blocks, forceId, &Keire::VfxGraphBlock::Reference);
+        const auto collision = std::ranges::find(update->Blocks, collisionId, &Keire::VfxGraphBlock::Reference);
+        REQUIRE(force != update->Blocks.end());
+        REQUIRE(collision != update->Blocks.end());
+        auto portable = Keire::CreateVfxGraphPortableHlslBlock("Velocity = float3(0.0, 1.0, 0.0);");
+        portable.Id = RuntimeId(customBeforeForce ? 110 : 210);
+        update->Blocks.insert(customBeforeForce ? force : std::next(collision), std::move(portable));
         Keire::ValidateVfxEffect(definition);
         return definition;
     }
@@ -201,6 +190,78 @@ TEST_CASE("VFX graph cables, Blackboard defaults, overrides, and Portable HLSL d
     CHECK(snapshot.Effects[overridden.Index()].ActiveParticles == 6);
 }
 
+TEST_CASE("VFX Operator results drive Portable HLSL inputs on CPU and the packed GPU runtime")
+{
+    auto definition = ExecutableGraph();
+    auto& system = definition.Systems.front();
+
+    auto age = Keire::CreateVfxGraphOperatorNode("keire.operator.age", {-360.0F, 320.0F});
+    age.Context = Keire::VfxContextType::Update;
+    const auto ageNode = age.Id;
+    const auto ageOutput = age.Pins.front().Id;
+    system.Nodes.push_back(std::move(age));
+
+    const auto update = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(update != system.Nodes.end());
+    auto portable = Keire::CreateVfxGraphPortableHlslBlock("Size = DynamicSize;");
+    portable.Id = RuntimeId(50);
+    portable.Pins.push_back({RuntimeId(51), "Dynamic Size", Keire::VfxValueType::Scalar, true, "DynamicSize", 1.0F});
+    update->Blocks.push_back(std::move(portable));
+
+    Keire::VfxGraphConnection connection;
+    connection.Id = RuntimeId(52);
+    connection.OutputNode = ageNode;
+    connection.OutputPin = ageOutput;
+    connection.InputNode = update->Id;
+    connection.InputBlock = RuntimeId(50);
+    connection.InputPin = RuntimeId(51);
+    system.Connections.push_back(connection);
+
+    const auto cpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+    REQUIRE(cpu.Valid);
+    REQUIRE(cpu.ValueInstructions.size() == 1);
+    REQUIRE(cpu.CustomInstructions.size() == 2);
+    const auto dynamicInstruction =
+        std::ranges::find(cpu.CustomInstructions, RuntimeId(50), &Keire::VfxCompiledCustomInstruction::Node);
+    REQUIRE(dynamicInstruction != cpu.CustomInstructions.end());
+    CHECK(dynamicInstruction->ParameterSlot == ~std::uint32_t{0});
+    CHECK(dynamicInstruction->ValueRegister == cpu.ValueInstructions.front().OutputRegister);
+
+    const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(gpu.Valid);
+    REQUIRE(gpu.GpuValueProgram.Instructions.size() == 1);
+    CHECK(gpu.GpuValueProgram.RegisterCount == 1);
+
+    auto gpuWorld = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(gpuWorld->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    gpuWorld->Update(0.25F);
+    const auto gpuSnapshot = gpuWorld->CaptureRenderSnapshot();
+    REQUIRE(gpuSnapshot.GpuEmitters().size() == 1);
+    const auto& gpuEmitter = gpuSnapshot.GpuEmitters().front();
+    REQUIRE(gpuEmitter.Execution);
+    REQUIRE(gpuEmitter.Execution->CustomInstructions.size() == gpu.CustomInstructions.size());
+    CHECK(std::ranges::any_of(gpuEmitter.Execution->CustomInstructions,
+                              [registerIndex = gpu.ValueInstructions.front().OutputRegister](
+                                  const Keire::VfxGpuCustomInstruction& instruction)
+                              { return instruction.ValueRegister == registerIndex; }));
+
+    auto world =
+        Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 32});
+    const auto handle = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)});
+    REQUIRE(handle);
+    world->Update(0.25F);
+    world->Update(0.25F);
+
+    const auto snapshot = world->CaptureDebugSnapshot();
+    REQUIRE(snapshot.EffectCount == 1);
+    CHECK(snapshot.Effects[handle.Index()].ActiveParticles == 2);
+    CHECK(std::ranges::any_of(snapshot.Particles, [handle](const Keire::VfxDebugParticle& particle)
+                              { return particle.Effect == handle && particle.Size == doctest::Approx(0.25F); }));
+}
+
 TEST_CASE("GPU VFX descriptors receive graph-bound modules and resolved Portable HLSL operands")
 {
     const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(ExecutableGraph());
@@ -214,6 +275,7 @@ TEST_CASE("GPU VFX descriptors receive graph-bound modules and resolved Portable
     const auto snapshot = world->CaptureRenderSnapshot();
     REQUIRE(snapshot.GpuEmitters().size() == 1);
     const auto& emitter = snapshot.GpuEmitters().front();
+    REQUIRE(emitter.Execution);
     CHECK(emitter.SpawnSequence == 2);
     REQUIRE(emitter.CustomInstructionCount == 1);
     CHECK(emitter.CustomInstructions[0].Context == Keire::VfxContextType::Update);
@@ -222,11 +284,73 @@ TEST_CASE("GPU VFX descriptors receive graph-bound modules and resolved Portable
     CHECK(emitter.CustomInstructions[0].ScaleByDeltaTime);
 
     const auto simulationRevision = emitter.SimulationRevision;
+    const auto originalExecution = emitter.Execution;
     world->SetParameter(handle, RuntimeId(21), Keire::Vector3{0.0F, 4.0F, 0.0F});
     const auto updated = world->CaptureRenderSnapshot();
     REQUIRE(updated.GpuEmitters().size() == 1);
     CHECK(updated.GpuEmitters().front().SimulationRevision == simulationRevision);
     CHECK(updated.GpuEmitters().front().CustomInstructions[0].Operand.Y == doctest::Approx(4.0F));
+    REQUIRE(updated.GpuEmitters().front().Execution);
+    CHECK(updated.GpuEmitters().front().Execution != originalExecution);
+    CHECK(emitter.Execution == originalExecution);
+}
+
+TEST_CASE("GPU VFX keeps per-frame Portable HLSL Operator inputs in the immutable shader program")
+{
+    auto definition = ExecutableGraph();
+    auto& system = definition.Systems.front();
+
+    auto time = Keire::CreateVfxGraphOperatorNode("keire.operator.time", {-360.0F, 320.0F});
+    time.Context = Keire::VfxContextType::Update;
+    const auto timeNode = time.Id;
+    const auto timeOutput = time.Pins.front().Id;
+    system.Nodes.push_back(std::move(time));
+
+    const auto update = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(update != system.Nodes.end());
+    auto portable = Keire::CreateVfxGraphPortableHlslBlock("Size = DynamicSize;");
+    portable.Id = RuntimeId(60);
+    portable.Pins.push_back({RuntimeId(61), "Dynamic Size", Keire::VfxValueType::Scalar, true, "DynamicSize", 1.0F});
+    update->Blocks.push_back(std::move(portable));
+
+    Keire::VfxGraphConnection connection;
+    connection.Id = RuntimeId(62);
+    connection.OutputNode = timeNode;
+    connection.OutputPin = timeOutput;
+    connection.InputNode = update->Id;
+    connection.InputBlock = RuntimeId(60);
+    connection.InputPin = RuntimeId(61);
+    system.Connections.push_back(connection);
+
+    const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(program.Valid);
+    const auto dynamicInstruction =
+        std::ranges::find(program.CustomInstructions, RuntimeId(60), &Keire::VfxCompiledCustomInstruction::Node);
+    REQUIRE(dynamicInstruction != program.CustomInstructions.end());
+    CHECK(dynamicInstruction->ValueRegister != ~std::uint32_t{0});
+
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    world->Update(0.25F);
+    const auto firstSnapshot = world->CaptureRenderSnapshot();
+    REQUIRE(firstSnapshot.GpuEmitters().size() == 1);
+    const auto firstExecution = firstSnapshot.GpuEmitters().front().Execution;
+    REQUIRE(firstExecution);
+    world->Update(0.25F);
+
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    const auto& emitter = snapshot.GpuEmitters().front();
+    const auto uploaded =
+        std::ranges::find_if(std::span(emitter.CustomInstructions).first(emitter.CustomInstructionCount),
+                             [](const Keire::VfxGpuEmitter::CustomInstruction& instruction)
+                             { return instruction.Target == Keire::VfxCustomTarget::Size; });
+    REQUIRE(uploaded != std::span(emitter.CustomInstructions).first(emitter.CustomInstructionCount).end());
+    CHECK(uploaded->ValueRegister == dynamicInstruction->ValueRegister);
+    CHECK(emitter.Execution == firstExecution);
 }
 
 TEST_CASE("Saved VFX executable graphs preserve cables bindings and Portable HLSL at runtime")
@@ -264,29 +388,12 @@ TEST_CASE("Unreferenced VFX Runtime Module payloads are inert in Graph execution
     auto definition = OrderedGraph(true);
     auto& system = definition.Systems.front();
     const auto forceModule = definition.Modules[3].Id;
-    const auto forceNode = std::ranges::find(system.Nodes, forceModule, &Keire::VfxGraphNode::Reference);
-    REQUIRE(forceNode != system.Nodes.end());
-    const auto forceNodeId = forceNode->Id;
-    const auto flowInput =
-        std::ranges::find_if(forceNode->Pins, [](const Keire::VfxGraphPin& pin)
-                             { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
-    const auto flowOutput =
-        std::ranges::find_if(forceNode->Pins, [](const Keire::VfxGraphPin& pin)
-                             { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
-    REQUIRE(flowInput != forceNode->Pins.end());
-    REQUIRE(flowOutput != forceNode->Pins.end());
-    const auto incoming = std::ranges::find(system.Connections, flowInput->Id, &Keire::VfxGraphConnection::InputPin);
-    const auto outgoing = std::ranges::find(system.Connections, flowOutput->Id, &Keire::VfxGraphConnection::OutputPin);
-    REQUIRE(incoming != system.Connections.end());
-    REQUIRE(outgoing != system.Connections.end());
-    const auto predecessorNode = incoming->OutputNode;
-    const auto predecessorPin = incoming->OutputPin;
-    const auto successorNode = outgoing->InputNode;
-    const auto successorPin = outgoing->InputPin;
-    std::erase_if(system.Connections, [forceNodeId](const Keire::VfxGraphConnection& connection)
-                  { return connection.OutputNode == forceNodeId || connection.InputNode == forceNodeId; });
-    std::erase_if(system.Nodes, [forceNodeId](const Keire::VfxGraphNode& node) { return node.Id == forceNodeId; });
-    system.Connections.push_back({RuntimeId(300), predecessorNode, predecessorPin, successorNode, successorPin});
+    const auto update = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(update != system.Nodes.end());
+    CHECK(std::erase_if(update->Blocks, [forceModule](const Keire::VfxGraphBlock& block)
+                        { return block.Reference == forceModule; }) == 1);
     Keire::ValidateVfxEffect(definition);
 
     const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
@@ -448,6 +555,86 @@ TEST_CASE("Converting an executable VFX graph is idempotent")
     const auto definition = OrderedGraph(true);
     const auto converted = Keire::ConvertVfxEffectToGraph(definition);
     CHECK(converted == definition);
+}
+
+TEST_CASE("VFX authoring validation permits incomplete topology while runtime validation remains strict")
+{
+    auto definition = ExecutableGraph();
+    auto& system = definition.Systems.front();
+    const auto flowConnection = std::ranges::find_if(
+        system.Connections,
+        [&](const Keire::VfxGraphConnection& connection)
+        {
+            const auto node = std::ranges::find(system.Nodes, connection.OutputNode, &Keire::VfxGraphNode::Id);
+            if (node == system.Nodes.end())
+                return false;
+            const auto pin = std::ranges::find(node->Pins, connection.OutputPin, &Keire::VfxGraphPin::Id);
+            return pin != node->Pins.end() && pin->Type == Keire::VfxValueType::ParticleStream;
+        });
+    REQUIRE(flowConnection != system.Connections.end());
+    system.Connections.erase(flowConnection);
+
+    CHECK_NOTHROW(Keire::ValidateVfxEffectAuthoring(definition));
+    CHECK_THROWS_AS(Keire::ValidateVfxEffect(definition), std::invalid_argument);
+}
+
+TEST_CASE("VFX authoring validation still rejects backward flow and cycles")
+{
+    SUBCASE("backward particle flow")
+    {
+        auto definition = ExecutableGraph();
+        auto& system = definition.Systems.front();
+        const auto initialize = std::ranges::find_if(system.Nodes,
+                                                     [](const Keire::VfxGraphNode& node)
+                                                     {
+                                                         return node.Kind == Keire::VfxGraphNodeKind::Context &&
+                                                                node.Context == Keire::VfxContextType::Initialize;
+                                                     });
+        const auto update = std::ranges::find_if(
+            system.Nodes, [](const Keire::VfxGraphNode& node)
+            { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+        REQUIRE(initialize != system.Nodes.end());
+        REQUIRE(update != system.Nodes.end());
+        const auto updateOutput =
+            std::ranges::find_if(update->Pins, [](const Keire::VfxGraphPin& pin)
+                                 { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+        REQUIRE(updateOutput != update->Pins.end());
+        const auto incoming =
+            std::ranges::find(system.Connections, initialize->Id, &Keire::VfxGraphConnection::InputNode);
+        REQUIRE(incoming != system.Connections.end());
+        incoming->OutputNode = update->Id;
+        incoming->OutputPin = updateOutput->Id;
+
+        CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffectAuthoring(definition),
+                             "VFX particle-stream cables cannot travel backwards across contexts.",
+                             std::invalid_argument);
+    }
+
+    SUBCASE("directed cycle")
+    {
+        auto definition = ExecutableGraph();
+        auto& system = definition.Systems.front();
+        const auto update = std::ranges::find_if(
+            system.Nodes, [](const Keire::VfxGraphNode& node)
+            { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+        REQUIRE(update != system.Nodes.end());
+        const auto updateInput =
+            std::ranges::find_if(update->Pins, [](const Keire::VfxGraphPin& pin)
+                                 { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+        const auto updateOutput =
+            std::ranges::find_if(update->Pins, [](const Keire::VfxGraphPin& pin)
+                                 { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+        REQUIRE(updateInput != update->Pins.end());
+        REQUIRE(updateOutput != update->Pins.end());
+
+        const auto incoming = std::ranges::find(system.Connections, update->Id, &Keire::VfxGraphConnection::InputNode);
+        REQUIRE(incoming != system.Connections.end());
+        incoming->OutputNode = update->Id;
+        incoming->OutputPin = updateOutput->Id;
+
+        CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffectAuthoring(definition),
+                             "VFX graph must be a directed acyclic graph.", std::invalid_argument);
+    }
 }
 
 TEST_CASE("VFX Emitter parameter overrides serialize canonically regardless of insertion order")

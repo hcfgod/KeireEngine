@@ -76,6 +76,11 @@ namespace KeireEditor
         void DrawGraphSystems(Keire::UiFrame& ui);
         void DrawGraphCanvas(Keire::UiFrame& ui);
         void DrawGraphInspector(Keire::UiFrame& ui);
+        [[nodiscard]] bool DrawGraphValueEditor(Keire::UiFrame& ui, std::string_view label, Keire::VfxValueType type,
+                                                Keire::VfxParameterValue& value);
+        [[nodiscard]] bool DrawGraphPropertyEditor(Keire::UiFrame& ui, Keire::VfxGraphProperty& property);
+        [[nodiscard]] bool DrawNodePaletteEntries(Keire::UiFrame& ui, Keire::AssetId system, Keire::Vector2 position,
+                                                  std::string_view filter, Keire::AssetId blockContext = {});
         void DrawBlackboard(Keire::UiFrame& ui);
         void DrawModules(Keire::UiFrame& ui);
         void DrawSelectedModule(Keire::UiFrame& ui);
@@ -87,8 +92,15 @@ namespace KeireEditor
         Keire::AssetId m_SelectedModule;
         Keire::AssetId m_SelectedSystem;
         Keire::AssetId m_SelectedNode;
+        Keire::AssetId m_SelectedBlock;
+        Keire::AssetId m_SelectedConnection;
         Keire::AssetId m_SelectedParameter;
-        std::optional<std::pair<Keire::AssetId, Keire::AssetId>> m_PendingOutput;
+        Keire::AssetId m_ContextNode;
+        Keire::AssetId m_ContextBlock;
+        Keire::AssetId m_ContextPin;
+        Keire::AssetId m_ContextConnection;
+        Keire::Vector2 m_NodePalettePosition;
+        std::string m_NodePaletteSearch;
         std::string m_Message;
         bool m_WasVisible = false;
     };

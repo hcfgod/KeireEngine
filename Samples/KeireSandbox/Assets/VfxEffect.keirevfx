@@ -1,15 +1,38 @@
 {
-  "blackboard": [],
-  "capacity": 2979,
-  "duration": 5.409999847412109,
+  "blackboard": [
+    {
+      "default": [
+        0.0,
+        0.5168190002441406,
+        0.5970149040222168,
+        1.0
+      ],
+      "exposed": true,
+      "id": "eda50d66-6ff0-44de-a8e8-481e82a7a6c8",
+      "name": "Color",
+      "type": "color"
+    },
+    {
+      "default": [
+        0.5,
+        1.5
+      ],
+      "exposed": true,
+      "id": "8047e195-c5ad-4479-bd28-24a26ed6cb45",
+      "name": "Size",
+      "type": "vector2"
+    }
+  ],
+  "capacity": 1024,
+  "duration": 1.0,
   "emitterId": "56465844-4546-4155-0000-000000000001",
-  "executionSource": "legacyModules",
-  "loop": true,
+  "executionSource": "graph",
+  "loop": false,
   "modules": [
     {
       "enabled": true,
       "id": "56465844-4546-4155-0000-000000000002",
-      "particlesPerSecond": 378.0,
+      "particlesPerSecond": 10.0,
       "type": "emissionRate"
     },
     {
@@ -22,16 +45,16 @@
       "coneLength": 1.0,
       "enabled": true,
       "id": "56465844-4546-4155-0000-000000000003",
-      "mesh": "c0ffee00-0000-4000-8000-000000000001",
+      "mesh": "",
       "radius": 0.5,
-      "shape": "cone",
+      "shape": "point",
       "type": "shape",
-      "volume": "0a8ba309-c28a-4842-8949-09ff8c60a1fa"
+      "volume": ""
     },
     {
       "enabled": true,
       "id": "56465844-4546-4155-0000-000000000004",
-      "lifetimeMaximum": 4.889999866485596,
+      "lifetimeMaximum": 1.0,
       "lifetimeMinimum": 1.0,
       "rotationMaximum": [
         0.0,
@@ -61,7 +84,7 @@
           "inTangent": 0.0,
           "interpolation": "linear",
           "outTangent": 0.0,
-          "time": 0.6899999976158142,
+          "time": 0.0,
           "value": 1.0
         }
       ],
@@ -76,12 +99,12 @@
         "keys": [
           {
             "color": [
-              0.07450980693101883,
-              0.29019609093666077,
+              1.0,
+              1.0,
               1.0,
               1.0
             ],
-            "time": 0.3100000023841858
+            "time": 0.0
           }
         ]
       },
@@ -91,73 +114,559 @@
     {
       "enabled": true,
       "id": "56465844-4546-4155-0000-000000000007",
-      "mesh": "c0ffee00-0000-4000-8000-000000000001",
+      "mesh": "",
       "renderer": "sprite",
-      "sprite": "0a8ba309-c28a-4842-8949-09ff8c60a1fa",
+      "sprite": "",
       "type": "renderer"
     }
   ],
   "name": "VFX Effect",
   "schemaVersion": 3,
-  "seed": 83,
+  "seed": 1,
   "space": "world",
   "systems": [
     {
-      "connections": [],
-      "id": "56465844-4546-4155-0000-000000000008",
+      "connections": [
+        {
+          "id": "11141914-0d10-570d-8000-000000008001",
+          "inputNode": "11141914-0d10-570d-8000-000000003002",
+          "inputPin": "11141914-0d10-570d-8000-000000003102",
+          "outputNode": "11141914-0d10-570d-8000-000000002001",
+          "outputPin": "56465844-4546-5155-8000-000000002003"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008000",
+          "inputNode": "11141914-0d10-570d-8000-000000002101",
+          "inputPin": "56465844-4546-5155-8000-000000002100",
+          "outputNode": "11141914-0d10-570d-8000-000000003002",
+          "outputPin": "11141914-0d10-570d-8000-000000003100"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008003",
+          "inputNode": "11141914-0d10-570d-8000-000000003003",
+          "inputPin": "11141914-0d10-570d-8000-000000003101",
+          "outputNode": "11141914-0d10-570d-8000-000000002101",
+          "outputPin": "56465844-4546-5155-8000-000000002103"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008002",
+          "inputNode": "11141914-0d10-570d-8000-000000003004",
+          "inputPin": "11141914-0d10-570d-8000-00000000310c",
+          "outputNode": "11141914-0d10-570d-8000-000000003003",
+          "outputPin": "11141914-0d10-570d-8000-000000003109"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008005",
+          "inputNode": "11141914-0d10-570d-8000-000000002201",
+          "inputPin": "56465844-4546-5155-8000-000000002200",
+          "outputNode": "11141914-0d10-570d-8000-000000003004",
+          "outputPin": "11141914-0d10-570d-8000-000000003116"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008004",
+          "inputNode": "11141914-0d10-570d-8000-000000003005",
+          "inputPin": "11141914-0d10-570d-8000-000000003117",
+          "outputNode": "11141914-0d10-570d-8000-000000002201",
+          "outputPin": "56465844-4546-5155-8000-000000002203"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008007",
+          "inputNode": "11141914-0d10-570d-8000-000000003006",
+          "inputPin": "11141914-0d10-570d-8000-000000003112",
+          "outputNode": "11141914-0d10-570d-8000-000000003005",
+          "outputPin": "11141914-0d10-570d-8000-000000003110"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008006",
+          "inputNode": "11141914-0d10-570d-8000-000000003007",
+          "inputPin": "11141914-0d10-570d-8000-00000000311f",
+          "outputNode": "11141914-0d10-570d-8000-000000003006",
+          "outputPin": "11141914-0d10-570d-8000-00000000311e"
+        },
+        {
+          "id": "11141914-0d10-570d-8000-000000008009",
+          "inputNode": "11141914-0d10-570d-8000-000000002301",
+          "inputPin": "56465844-4546-5155-8000-000000002300",
+          "outputNode": "11141914-0d10-570d-8000-000000003007",
+          "outputPin": "11141914-0d10-570d-8000-00000000311b"
+        },
+        {
+          "id": "d09d43c1-6fea-4022-8a44-1be213d8ca74",
+          "inputNode": "11141914-0d10-570d-8000-000000003006",
+          "inputPin": "11141914-0d10-570d-8000-000000003113",
+          "outputNode": "1d46d1de-8f13-4281-b910-3fc1cfd3f96b",
+          "outputPin": "ed088231-6b7f-4f44-a23c-eddc7a64a076"
+        }
+      ],
+      "id": "11141914-0d10-570d-8000-000000001001",
       "name": "Particle System",
       "nodes": [
         {
           "context": "spawn",
           "customHlsl": "",
-          "id": "56465844-4546-4155-0000-000000000009",
+          "id": "11141914-0d10-570d-8000-000000002001",
           "kind": "context",
-          "pins": [],
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002003",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
           "position": [
-            -51.201839447021484,
-            19.730302810668945
+            -527.1847534179688,
+            453.9042053222656
           ],
           "reference": "",
-          "type": "Spawn Context"
+          "type": "spawn Context"
+        },
+        {
+          "context": "spawn",
+          "customHlsl": "",
+          "id": "11141914-0d10-570d-8000-000000003002",
+          "kind": "module",
+          "pins": [
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003102",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": 10.0,
+              "id": "11141914-0d10-570d-8000-000000003103",
+              "input": true,
+              "name": "Particles Per Second",
+              "semantic": "particlesPerSecond",
+              "type": "scalar"
+            },
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003100",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            -132.9274139404297,
+            119.99996185302734
+          ],
+          "reference": "56465844-4546-4155-0000-000000000002",
+          "type": "emissionRate"
         },
         {
           "context": "initialize",
           "customHlsl": "",
-          "id": "56465844-4546-4155-0000-00000000000a",
+          "id": "11141914-0d10-570d-8000-000000002101",
           "kind": "context",
-          "pins": [],
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002100",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002103",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
           "position": [
-            265.827392578125,
-            21.258731842041016
+            -132.3762664794922,
+            257.1429748535156
           ],
           "reference": "",
-          "type": "Initialize Context"
+          "type": "initialize Context"
+        },
+        {
+          "context": "initialize",
+          "customHlsl": "",
+          "id": "11141914-0d10-570d-8000-000000003003",
+          "kind": "module",
+          "pins": [
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003101",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": [
+                0.5,
+                0.5,
+                0.5
+              ],
+              "id": "11141914-0d10-570d-8000-000000003107",
+              "input": true,
+              "name": "Box Half Extent",
+              "semantic": "boxHalfExtent",
+              "type": "vector3"
+            },
+            {
+              "default": 0.5,
+              "id": "11141914-0d10-570d-8000-000000003106",
+              "input": true,
+              "name": "Radius",
+              "semantic": "radius",
+              "type": "scalar"
+            },
+            {
+              "default": 25.0,
+              "id": "11141914-0d10-570d-8000-000000003105",
+              "input": true,
+              "name": "Cone Angle",
+              "semantic": "coneAngleDegrees",
+              "type": "scalar"
+            },
+            {
+              "default": 1.0,
+              "id": "11141914-0d10-570d-8000-000000003104",
+              "input": true,
+              "name": "Cone Length",
+              "semantic": "coneLength",
+              "type": "scalar"
+            },
+            {
+              "default": "",
+              "id": "11141914-0d10-570d-8000-00000000310b",
+              "input": true,
+              "name": "Mesh",
+              "semantic": "mesh",
+              "type": "mesh"
+            },
+            {
+              "default": "",
+              "id": "11141914-0d10-570d-8000-00000000310a",
+              "input": true,
+              "name": "Volume",
+              "semantic": "volume",
+              "type": "asset"
+            },
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003109",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            205.716552734375,
+            97.1427993774414
+          ],
+          "reference": "56465844-4546-4155-0000-000000000003",
+          "type": "shape"
+        },
+        {
+          "context": "initialize",
+          "customHlsl": "",
+          "id": "11141914-0d10-570d-8000-000000003004",
+          "kind": "module",
+          "pins": [
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-00000000310c",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": 1.0,
+              "id": "11141914-0d10-570d-8000-00000000310d",
+              "input": true,
+              "name": "Lifetime Minimum",
+              "semantic": "lifetimeMinimum",
+              "type": "scalar"
+            },
+            {
+              "default": 1.0,
+              "id": "11141914-0d10-570d-8000-00000000310e",
+              "input": true,
+              "name": "Lifetime Maximum",
+              "semantic": "lifetimeMaximum",
+              "type": "scalar"
+            },
+            {
+              "default": [
+                -0.5,
+                1.0,
+                -0.5
+              ],
+              "id": "11141914-0d10-570d-8000-00000000310f",
+              "input": true,
+              "name": "Velocity Minimum",
+              "semantic": "velocityMinimum",
+              "type": "vector3"
+            },
+            {
+              "default": [
+                0.5,
+                2.0,
+                0.5
+              ],
+              "id": "11141914-0d10-570d-8000-000000003108",
+              "input": true,
+              "name": "Velocity Maximum",
+              "semantic": "velocityMaximum",
+              "type": "vector3"
+            },
+            {
+              "default": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "id": "11141914-0d10-570d-8000-000000003114",
+              "input": true,
+              "name": "Rotation Minimum",
+              "semantic": "rotationMinimum",
+              "type": "vector3"
+            },
+            {
+              "default": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "id": "11141914-0d10-570d-8000-000000003115",
+              "input": true,
+              "name": "Rotation Maximum",
+              "semantic": "rotationMaximum",
+              "type": "vector3"
+            },
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003116",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            528.5737915039063,
+            97.14281463623047
+          ],
+          "reference": "56465844-4546-4155-0000-000000000004",
+          "type": "initialize"
         },
         {
           "context": "update",
           "customHlsl": "",
-          "id": "56465844-4546-4155-0000-00000000000b",
+          "id": "11141914-0d10-570d-8000-000000002201",
           "kind": "context",
-          "pins": [],
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002200",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002203",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
           "position": [
-            560.0,
-            0.0
+            514.2857055664063,
+            362.8573303222656
           ],
           "reference": "",
-          "type": "Update Context"
+          "type": "update Context"
+        },
+        {
+          "context": "update",
+          "customHlsl": "",
+          "id": "11141914-0d10-570d-8000-000000003005",
+          "kind": "module",
+          "pins": [
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003117",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": 1.0,
+              "id": "11141914-0d10-570d-8000-000000003111",
+              "input": true,
+              "name": "Size",
+              "semantic": "size",
+              "type": "scalar"
+            },
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003110",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            525.7130737304688,
+            497.1435546875
+          ],
+          "reference": "56465844-4546-4155-0000-000000000005",
+          "type": "sizeOverLifetime"
+        },
+        {
+          "context": "update",
+          "customHlsl": "",
+          "id": "11141914-0d10-570d-8000-000000003006",
+          "kind": "module",
+          "pins": [
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-000000003112",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": [
+                1.0,
+                1.0,
+                1.0,
+                1.0
+              ],
+              "id": "11141914-0d10-570d-8000-000000003113",
+              "input": true,
+              "name": "Color",
+              "semantic": "color",
+              "type": "color"
+            },
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-00000000311e",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            539.999267578125,
+            648.570556640625
+          ],
+          "reference": "56465844-4546-4155-0000-000000000006",
+          "type": "colorOverLifetime"
         },
         {
           "context": "output",
           "customHlsl": "",
-          "id": "56465844-4546-4155-0000-00000000000c",
-          "kind": "context",
-          "pins": [],
+          "id": "11141914-0d10-570d-8000-000000003007",
+          "kind": "module",
+          "pins": [
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-00000000311f",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": "",
+              "id": "11141914-0d10-570d-8000-00000000311d",
+              "input": true,
+              "name": "Sprite",
+              "semantic": "sprite",
+              "type": "texture"
+            },
+            {
+              "default": "",
+              "id": "11141914-0d10-570d-8000-00000000311c",
+              "input": true,
+              "name": "Mesh",
+              "semantic": "mesh",
+              "type": "mesh"
+            },
+            {
+              "default": null,
+              "id": "11141914-0d10-570d-8000-00000000311b",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
           "position": [
-            840.0,
-            0.0
+            514.2835083007813,
+            799.9985961914063
+          ],
+          "reference": "56465844-4546-4155-0000-000000000007",
+          "type": "renderer"
+        },
+        {
+          "context": "output",
+          "customHlsl": "",
+          "id": "11141914-0d10-570d-8000-000000002301",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "56465844-4546-5155-8000-000000002300",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            957.1341552734375,
+            334.28594970703125
           ],
           "reference": "",
-          "type": "Output Context"
+          "type": "output Context"
+        },
+        {
+          "context": "update",
+          "customHlsl": "",
+          "id": "1d46d1de-8f13-4281-b910-3fc1cfd3f96b",
+          "kind": "parameter",
+          "pins": [
+            {
+              "default": null,
+              "id": "ed088231-6b7f-4f44-a23c-eddc7a64a076",
+              "input": false,
+              "name": "Color",
+              "semantic": "value",
+              "type": "color"
+            }
+          ],
+          "position": [
+            92.5727767944336,
+            778.145751953125
+          ],
+          "reference": "eda50d66-6ff0-44de-a8e8-481e82a7a6c8",
+          "type": "Blackboard Parameter"
         }
       ]
     }

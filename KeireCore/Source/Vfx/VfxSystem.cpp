@@ -1,6 +1,7 @@
 #include "Keire/Vfx/VfxSystem.h"
 
 #include "VfxExecutionInternal.h"
+#include "VfxExpressionInternal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -17,6 +18,17 @@ namespace Keire
     namespace
     {
         constexpr Vector3 Gravity{0.0F, -9.81F, 0.0F};
+        constexpr std::uint32_t MaximumRuntimeBurstCycles = 1024;
+
+        [[nodiscard]] bool ValidRuntimeBurst(const VfxEffectDefinition& definition,
+                                             const VfxBurstModule& burst) noexcept
+        {
+            return std::isfinite(burst.Time) && burst.Time >= 0.0F && burst.Time < definition.Duration &&
+                   burst.Count >= 1 && burst.Count <= 1'000'000 && burst.Cycles >= 1 &&
+                   burst.Cycles <= MaximumRuntimeBurstCycles && std::isfinite(burst.Interval) &&
+                   burst.Interval >= 0.0F && (burst.Cycles == 1 || burst.Interval > 0.0F) &&
+                   burst.Time + static_cast<float>(burst.Cycles - 1) * burst.Interval < definition.Duration;
+        }
 
         [[nodiscard]] Vector3 Add(const Vector3 left, const Vector3 right) noexcept
         {
@@ -90,6 +102,33 @@ namespace Keire
             return nullptr;
         }
 
+        [[nodiscard]] const VfxModuleDefinition* FindCompiledModule(const VfxEffectDefinition& definition,
+                                                                    const VfxCompiledProgram& program,
+                                                                    const std::uint32_t compiledModuleIndex) noexcept
+        {
+            if (compiledModuleIndex >= program.Modules.size())
+                return nullptr;
+            const auto& compiled = program.Modules[compiledModuleIndex];
+            if (compiled.ModuleIndex < definition.Modules.size() &&
+                definition.Modules[compiled.ModuleIndex].Id == compiled.Module)
+            {
+                return std::addressof(definition.Modules[compiled.ModuleIndex]);
+            }
+            const auto found = std::ranges::find(definition.Modules, compiled.Module, &VfxModuleDefinition::Id);
+            return found == definition.Modules.end() ? nullptr : std::addressof(*found);
+        }
+
+        template <typename T>
+        [[nodiscard]] const T* FindCompiledModule(const VfxEffectDefinition& definition,
+                                                  const VfxCompiledProgram& program) noexcept
+        {
+            for (std::uint32_t index = 0; index < program.Modules.size(); ++index)
+                if (const auto* module = FindCompiledModule(definition, program, index))
+                    if (const auto* result = std::get_if<T>(&module->Payload))
+                        return result;
+            return nullptr;
+        }
+
         [[nodiscard]] std::optional<VfxGpuEmitter::ParticleOperationKind>
         GpuParticleOperationKind(const VfxModulePayload& payload) noexcept
         {
@@ -117,47 +156,47 @@ namespace Keire
                 payload);
         }
 
-        template <typename T>
-        [[nodiscard]] bool ModuleChanged(const VfxEffectDefinition& first, const VfxEffectDefinition& second) noexcept
+        [[nodiscard]] bool HasCanonicalRangeEndpoints(const VfxParameterValue& value) noexcept
         {
-            const auto* left = FindEnabledModule<T>(first);
-            const auto* right = FindEnabledModule<T>(second);
-            return (left == nullptr) != (right == nullptr) || (left && right && *left != *right);
-        }
-
-        [[nodiscard]] bool GpuStoredParticleStateChanged(const VfxEffectDefinition& first,
-                                                         const VfxEffectDefinition& second) noexcept
-        {
-            return ModuleChanged<VfxForceModule>(first, second) ||
-                   ModuleChanged<VfxSizeOverLifetimeModule>(first, second) ||
-                   ModuleChanged<VfxColorOverLifetimeModule>(first, second) ||
-                   ModuleChanged<VfxRendererModule>(first, second);
+            return std::visit(
+                [](const auto& item) noexcept
+                {
+                    using T = std::decay_t<decltype(item)>;
+                    if constexpr (std::is_same_v<T, VfxScalarRange> || std::is_same_v<T, VfxIntegerRange> ||
+                                  std::is_same_v<T, VfxUnsignedIntegerRange>)
+                    {
+                        return item.Minimum <= item.Maximum;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxVector2Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxVector3Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                               item.Minimum.Z <= item.Maximum.Z;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxVector4Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                               item.Minimum.Z <= item.Maximum.Z && item.Minimum.W <= item.Maximum.W;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxColorRange>)
+                    {
+                        return item.Minimum.Red <= item.Maximum.Red && item.Minimum.Green <= item.Maximum.Green &&
+                               item.Minimum.Blue <= item.Maximum.Blue && item.Minimum.Alpha <= item.Maximum.Alpha;
+                    }
+                    else
+                    {
+                        return true;
+                    }
+                },
+                value);
         }
 
         [[nodiscard]] bool ParameterValueMatches(const VfxValueType type, const VfxParameterValue& value) noexcept
         {
-            switch (type)
-            {
-            case VfxValueType::Boolean:
-                return std::holds_alternative<bool>(value);
-            case VfxValueType::Integer:
-                return std::holds_alternative<std::int64_t>(value);
-            case VfxValueType::Scalar:
-                return std::holds_alternative<float>(value) && std::isfinite(std::get<float>(value));
-            case VfxValueType::Vector2:
-                return std::holds_alternative<Vector2>(value) && Math::IsFinite(std::get<Vector2>(value));
-            case VfxValueType::Vector3:
-                return std::holds_alternative<Vector3>(value) && Math::IsFinite(std::get<Vector3>(value));
-            case VfxValueType::Color:
-                return std::holds_alternative<Color>(value) && Math::IsFinite(std::get<Color>(value));
-            case VfxValueType::Texture:
-            case VfxValueType::Mesh:
-            case VfxValueType::Asset:
-                return std::holds_alternative<AssetId>(value);
-            case VfxValueType::ParticleStream:
-                return false;
-            }
-            return false;
+            return VfxValueMatchesType(type, value) && IsFiniteVfxValue(value) && HasCanonicalRangeEndpoints(value);
         }
 
         [[nodiscard]] Vector4 ParameterVector(const VfxValueType type, const VfxParameterValue& value)
@@ -172,6 +211,11 @@ namespace Keire
             case VfxValueType::Integer:
             {
                 const auto scalar = static_cast<float>(std::get<std::int64_t>(value));
+                return {scalar, scalar, scalar, scalar};
+            }
+            case VfxValueType::UnsignedInteger:
+            {
+                const auto scalar = static_cast<float>(std::get<std::uint64_t>(value));
                 return {scalar, scalar, scalar, scalar};
             }
             case VfxValueType::Scalar:
@@ -189,6 +233,13 @@ namespace Keire
                 const auto vector = std::get<Vector3>(value);
                 return {vector.X, vector.Y, vector.Z, 0.0F};
             }
+            case VfxValueType::Vector4:
+                return std::get<Vector4>(value);
+            case VfxValueType::Quaternion:
+            {
+                const auto quaternion = std::get<Quaternion>(value);
+                return {quaternion.X, quaternion.Y, quaternion.Z, quaternion.W};
+            }
             case VfxValueType::Color:
             {
                 const auto color = std::get<Color>(value);
@@ -198,6 +249,22 @@ namespace Keire
             case VfxValueType::Mesh:
             case VfxValueType::Asset:
             case VfxValueType::ParticleStream:
+            case VfxValueType::Matrix:
+            case VfxValueType::Curve:
+            case VfxValueType::Gradient:
+            case VfxValueType::ScalarRange:
+            case VfxValueType::IntegerRange:
+            case VfxValueType::UnsignedIntegerRange:
+            case VfxValueType::Vector2Range:
+            case VfxValueType::Vector3Range:
+            case VfxValueType::Vector4Range:
+            case VfxValueType::ColorRange:
+            case VfxValueType::Texture2DArray:
+            case VfxValueType::Texture3D:
+            case VfxValueType::TextureCube:
+            case VfxValueType::Buffer:
+            case VfxValueType::PointCache:
+            case VfxValueType::SignedDistanceField:
                 break;
             }
             throw std::invalid_argument("VFX value cannot be used by Portable Custom HLSL.");
@@ -230,23 +297,84 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] std::shared_ptr<const VfxGpuExecutionPayload>
+        BuildGpuExecutionPayload(const VfxCompiledProgram& program, const VfxEffectDefinition& definition,
+                                 const std::span<const VfxParameterValue> parameters,
+                                 const std::span<const VfxGpuEmitter::CustomInstruction> customInstructions)
+        {
+            if (program.Backend != VfxBackend::Gpu)
+                return {};
+            if (parameters.size() != program.Parameters.size())
+                throw std::invalid_argument("VFX GPU parameter layout is invalid.");
+
+            auto payload = std::make_shared<VfxGpuExecutionPayload>();
+            payload->ValueProgram = program.GpuValueProgram;
+            payload->CustomInstructions.assign(customInstructions.begin(), customInstructions.end());
+            payload->Parameters.resize(parameters.size());
+            std::vector<bool> assigned(parameters.size());
+            for (const auto& source : program.GpuValueProgram.Sources)
+            {
+                if (source.Kind != static_cast<std::uint32_t>(VfxGpuValueSourceKind::Parameter))
+                    continue;
+                if (source.Index >= parameters.size())
+                    throw std::invalid_argument("VFX GPU expression parameter source is invalid.");
+                if (assigned[source.Index])
+                    continue;
+                const auto type = static_cast<VfxValueType>(source.Type);
+                if (!Internal::PackVfxGpuValue(type, parameters[source.Index], payload->Parameters[source.Index]))
+                {
+                    throw std::invalid_argument("VFX GPU parameter value cannot be represented by the expression ABI.");
+                }
+                assigned[source.Index] = true;
+            }
+            payload->ParticleOperations.reserve(program.Operations.size());
+            for (const auto& operation : program.Operations)
+            {
+                if (operation.Kind == VfxCompiledOperationKind::CustomHlsl)
+                {
+                    if (operation.Index >= customInstructions.size())
+                        throw std::invalid_argument("VFX GPU operation references an invalid Custom HLSL instruction.");
+                    payload->ParticleOperations.push_back(
+                        {operation.Context, VfxGpuEmitter::ParticleOperationKind::CustomHlsl, operation.Index});
+                    continue;
+                }
+                if (operation.Index >= program.Modules.size())
+                    throw std::invalid_argument("VFX GPU operation references an invalid Runtime Module.");
+                const auto* module = FindCompiledModule(definition, program, operation.Index);
+                if (!module)
+                    throw std::invalid_argument("VFX GPU operation Runtime Module identity is invalid.");
+                if (const auto kind = GpuParticleOperationKind(module->Payload))
+                    payload->ParticleOperations.push_back({operation.Context, *kind, 0});
+            }
+            return payload;
+        }
+
         [[nodiscard]] std::vector<VfxGpuEmitter::CustomInstruction>
         ResolveCustomInstructions(const VfxCompiledProgram& program,
                                   const std::span<const VfxParameterValue> parameters)
         {
-            if (program.CustomInstructions.size() > VfxGpuEmitter::MaximumCustomInstructions)
-                throw std::invalid_argument("VFX program exceeds the portable Custom HLSL instruction budget.");
             std::vector<VfxGpuEmitter::CustomInstruction> result;
             result.reserve(program.CustomInstructions.size());
             for (const auto& instruction : program.CustomInstructions)
             {
+                if (instruction.ParameterSlot != ~std::uint32_t{0} && instruction.ValueRegister != ~std::uint32_t{0})
+                {
+                    throw std::invalid_argument("VFX Custom HLSL instruction has multiple operand sources.");
+                }
                 if (instruction.ParameterSlot != ~std::uint32_t{0} && instruction.ParameterSlot >= parameters.size())
                     throw std::invalid_argument("VFX Custom HLSL parameter slot is invalid.");
-                const auto& value = instruction.ParameterSlot == ~std::uint32_t{0}
-                                        ? instruction.Literal
-                                        : parameters[instruction.ParameterSlot];
+                if (instruction.ValueRegister != ~std::uint32_t{0} &&
+                    instruction.ValueRegister >= program.ValueRegisterCount)
+                {
+                    throw std::invalid_argument("VFX Custom HLSL expression register is invalid.");
+                }
+                const auto& value =
+                    instruction.ValueRegister != ~std::uint32_t{0}   ? DefaultVfxValue(instruction.OperandType)
+                    : instruction.ParameterSlot == ~std::uint32_t{0} ? instruction.Literal
+                                                                     : parameters[instruction.ParameterSlot];
                 result.push_back({instruction.Context, instruction.Target, instruction.Operation,
-                                  instruction.ScaleByDeltaTime, ParameterVector(instruction.OperandType, value)});
+                                  instruction.ScaleByDeltaTime, instruction.OperandType,
+                                  ParameterVector(instruction.OperandType, value), instruction.ValueRegister});
             }
             return result;
         }
@@ -258,6 +386,7 @@ namespace Keire
             std::vector<VfxParameterOverride> Overrides;
             std::vector<VfxParameterValue> Parameters;
             std::vector<VfxGpuEmitter::CustomInstruction> CustomInstructions;
+            std::shared_ptr<const VfxGpuExecutionPayload> GpuExecution;
         };
 
         [[nodiscard]] ResolvedProgramState ResolveProgram(const VfxEffectAsset& effect, const VfxBackend backend,
@@ -277,7 +406,14 @@ namespace Keire
             result.Parameters = ResolveParameters(result.Program, result.Overrides);
             result.Definition =
                 Internal::ResolveVfxExecutableDefinition(effect.Definition(), result.Program, result.Parameters);
+            Internal::ValidateVfxResolvedBackendCapabilities(
+                result.Definition, result.Program, backend,
+                effect.Definition().SchemaVersion >= CurrentVfxSchemaVersion &&
+                    effect.Definition().ExecutionSource == VfxExecutionSource::Graph &&
+                    effect.Definition().CompatibilityMode == VfxCompatibilityMode::NativeSchema4);
             result.CustomInstructions = ResolveCustomInstructions(result.Program, result.Parameters);
+            result.GpuExecution = BuildGpuExecutionPayload(result.Program, result.Definition, result.Parameters,
+                                                           result.CustomInstructions);
             return result;
         }
     } // namespace
@@ -296,7 +432,9 @@ namespace Keire
             VfxEffectDefinition RuntimeDefinition;
             std::vector<VfxParameterOverride> ParameterOverrides;
             std::vector<VfxParameterValue> Parameters;
+            std::vector<VfxParameterValue> ExpressionRegisters;
             std::vector<VfxGpuEmitter::CustomInstruction> CustomInstructions;
+            std::shared_ptr<const VfxGpuExecutionPayload> GpuExecution;
             std::uint64_t Revision = 0;
             Vector3 Position;
             Quaternion Rotation;
@@ -307,9 +445,12 @@ namespace Keire
             std::uint32_t ActiveParticles = 0;
             std::uint64_t DroppedParticles = 0;
             std::uint64_t GpuSpawnSequence = 0;
+            std::uint64_t SpawnSequence = 0;
+            std::uint64_t NextParticleId = 1;
             std::uint64_t GpuSimulationRevision = 1;
             double GpuLastDeathTime = 0.0;
             float GpuSimulationDeltaSeconds = 0.0F;
+            float GpuEffectTime = 0.0F;
             float SimulationSpeed = 1.0F;
             VfxRuntimeDiagnostic Diagnostics = VfxRuntimeDiagnostic::None;
         };
@@ -318,6 +459,8 @@ namespace Keire
         {
             bool Active = false;
             std::uint32_t EffectIndex = 0;
+            std::uint64_t Id = 0;
+            std::uint64_t SpawnIndex = 0;
             Vector3 Position;
             Vector3 Velocity;
             Vector3 Rotation;
@@ -359,16 +502,17 @@ namespace Keire
                    Effects[handle.Index()].Generation == handle.Generation();
         }
 
-        [[nodiscard]] VfxRuntimeDiagnostic DiagnosticsFor(const VfxEffectDefinition& definition) const noexcept
+        [[nodiscard]] VfxRuntimeDiagnostic DiagnosticsFor(const VfxEffectDefinition& definition,
+                                                          const VfxCompiledProgram& program) const noexcept
         {
             auto result = VfxRuntimeDiagnostic::None;
-            if (const auto* shape = FindEnabledModule<VfxShapeModule>(definition);
+            if (const auto* shape = FindCompiledModule<VfxShapeModule>(definition, program);
                 shape && (shape->Shape == VfxShape::Mesh || shape->Shape == VfxShape::Volume) &&
                 !Specification.ShapeSample)
             {
                 result |= VfxRuntimeDiagnostic::ShapeAssetSamplerUnavailable;
             }
-            if (const auto* collision = FindEnabledModule<VfxCollisionModule>(definition))
+            if (const auto* collision = FindCompiledModule<VfxCollisionModule>(definition, program))
             {
                 if (collision->Mode == VfxCollisionMode::GpuDepth)
                     result |= VfxRuntimeDiagnostic::GpuDepthFellBackToCpu;
@@ -390,11 +534,14 @@ namespace Keire
             slot.Random = random == 0 ? 0x9e3779b9U : random;
             slot.ActiveParticles = 0;
             slot.GpuSpawnSequence = 0;
+            slot.SpawnSequence = 0;
+            slot.NextParticleId = 1;
             slot.GpuSimulationRevision = slot.GpuSimulationRevision == std::numeric_limits<std::uint64_t>::max()
                                              ? 1
                                              : slot.GpuSimulationRevision + 1;
             slot.GpuLastDeathTime = 0.0;
             slot.GpuSimulationDeltaSeconds = 0.0F;
+            slot.GpuEffectTime = 0.0F;
         }
 
         void SetOverrides(EffectSlot& slot, const std::span<const VfxParameterOverride> overrides)
@@ -403,18 +550,21 @@ namespace Keire
             auto candidateParameters = ResolveParameters(slot.Program, candidateOverrides);
             auto candidateDefinition =
                 Internal::ResolveVfxExecutableDefinition(slot.Effect->Definition(), slot.Program, candidateParameters);
+            Internal::ValidateVfxResolvedBackendCapabilities(
+                candidateDefinition, slot.Program, Specification.Backend,
+                slot.Effect->Definition().SchemaVersion >= CurrentVfxSchemaVersion &&
+                    slot.Effect->Definition().ExecutionSource == VfxExecutionSource::Graph &&
+                    slot.Effect->Definition().CompatibilityMode == VfxCompatibilityMode::NativeSchema4);
             auto candidateInstructions = ResolveCustomInstructions(slot.Program, candidateParameters);
-            const auto diagnostics = DiagnosticsFor(candidateDefinition);
-            const bool restartGpuParticles = Specification.Backend == VfxBackend::Gpu &&
-                                             GpuStoredParticleStateChanged(slot.RuntimeDefinition, candidateDefinition);
-
+            auto candidateGpuExecution =
+                BuildGpuExecutionPayload(slot.Program, candidateDefinition, candidateParameters, candidateInstructions);
+            const auto diagnostics = DiagnosticsFor(candidateDefinition, slot.Program);
             slot.ParameterOverrides = std::move(candidateOverrides);
             slot.Parameters = std::move(candidateParameters);
             slot.RuntimeDefinition = std::move(candidateDefinition);
             slot.CustomInstructions = std::move(candidateInstructions);
+            slot.GpuExecution = std::move(candidateGpuExecution);
             slot.Diagnostics = diagnostics;
-            if (restartGpuParticles)
-                RestartEffectState(slot);
         }
 
         [[nodiscard]] std::uint32_t NextRandom(EffectSlot& slot) noexcept
@@ -441,6 +591,134 @@ namespace Keire
         {
             return {Range(slot, minimum.X, maximum.X), Range(slot, minimum.Y, maximum.Y),
                     Range(slot, minimum.Z, maximum.Z)};
+        }
+
+        [[nodiscard]] bool EvaluateValueContext(EffectSlot& slot, const VfxContextType context,
+                                                const float deltaSeconds, const Particle* particle = nullptr,
+                                                const std::uint64_t spawnIndex = 0) noexcept
+        {
+            if (slot.Program.ValueInstructions.empty())
+                return true;
+            const auto& source = slot.Effect->Definition();
+            Internal::VfxExpressionEvaluationContext evaluation;
+            evaluation.EffectSeed = slot.RuntimeDefinition.Seed;
+            evaluation.SeedOffset = slot.SeedOffset;
+            evaluation.System = source.Systems.empty() ? source.EmitterId : source.Systems.front().Id;
+            evaluation.Context = context;
+            evaluation.ParticleId = particle ? particle->Id : 0;
+            evaluation.SpawnIndex = particle ? particle->SpawnIndex : spawnIndex;
+            evaluation.SimulationStep = SimulationStepRevision;
+            evaluation.EffectTime = static_cast<float>(slot.Elapsed);
+            evaluation.DeltaTime = deltaSeconds;
+            evaluation.Age = particle ? particle->Age : 0.0F;
+            evaluation.Lifetime = particle ? particle->Lifetime : 1.0F;
+            if (!Internal::EvaluateVfxExpressions(slot.Program, slot.Parameters, evaluation, slot.ExpressionRegisters))
+            {
+                slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                return false;
+            }
+            return true;
+        }
+
+        [[nodiscard]] const VfxParameterValue* BindingValue(const EffectSlot& slot, const AssetId module,
+                                                            const VfxModuleProperty property) const noexcept
+        {
+            const auto binding =
+                std::ranges::find_if(slot.Program.Bindings, [module, property](const VfxCompiledBinding& value)
+                                     { return value.Module == module && value.Property == property; });
+            if (binding == slot.Program.Bindings.end())
+                return nullptr;
+            const VfxParameterValue* result = nullptr;
+            if (binding->LiteralValue)
+                result = std::addressof(*binding->LiteralValue);
+            else if (binding->ValueRegister != ~std::uint32_t{0})
+            {
+                if (binding->ValueRegister < slot.ExpressionRegisters.size())
+                    result = std::addressof(slot.ExpressionRegisters[binding->ValueRegister]);
+            }
+            else if (binding->ParameterSlot < slot.Parameters.size())
+                result = std::addressof(slot.Parameters[binding->ParameterSlot]);
+            return result && VfxValueMatchesType(binding->Type, *result) ? result : nullptr;
+        }
+
+        [[nodiscard]] std::optional<VfxModuleDefinition> BoundModule(EffectSlot& slot,
+                                                                     const std::uint32_t compiledModuleIndex)
+        {
+            if (compiledModuleIndex >= slot.Program.Modules.size())
+                return std::nullopt;
+            const auto* module = FindCompiledModule(slot.RuntimeDefinition, slot.Program, compiledModuleIndex);
+            if (!module)
+                return std::nullopt;
+            auto result = *module;
+            try
+            {
+                for (const auto& binding : slot.Program.Bindings)
+                {
+                    if (binding.Module != result.Id)
+                        continue;
+                    const auto* value = BindingValue(slot, result.Id, binding.Property);
+                    if (!value)
+                        throw std::invalid_argument("VFX runtime binding value is unavailable.");
+                    Internal::ApplyVfxModuleProperty(result, binding.Property, *value);
+                }
+                return result;
+            }
+            catch (...)
+            {
+                slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                return std::nullopt;
+            }
+        }
+
+        [[nodiscard]] bool PrepareGpuUniformExpressions(EffectSlot& slot, const float deltaSeconds) noexcept
+        {
+            const auto hasRuntimeModuleBinding =
+                std::ranges::any_of(slot.Program.Bindings, [](const VfxCompiledBinding& binding)
+                                    { return binding.ValueRegister != ~std::uint32_t{0}; });
+            if (slot.Program.ValueInstructions.empty() || !hasRuntimeModuleBinding)
+                return true;
+
+            const auto isParticleRegister = [&slot](const std::uint32_t valueRegister) noexcept
+            {
+                const auto instruction = std::ranges::find(slot.Program.ValueInstructions, valueRegister,
+                                                           &VfxCompiledValueInstruction::OutputRegister);
+                return instruction != slot.Program.ValueInstructions.end() &&
+                       instruction->Domain > VfxEvaluationDomain::PerFrame;
+            };
+
+            constexpr std::array contexts{VfxContextType::Spawn, VfxContextType::Initialize, VfxContextType::Update,
+                                          VfxContextType::Output};
+            for (const auto context : contexts)
+                if (!EvaluateValueContext(slot, context, deltaSeconds))
+                    return false;
+
+            try
+            {
+                for (const auto& binding : slot.Program.Bindings)
+                {
+                    if (binding.ValueRegister == ~std::uint32_t{0})
+                        continue;
+                    if (isParticleRegister(binding.ValueRegister))
+                    {
+                        throw std::invalid_argument(
+                            "VFX GPU particle-domain Block binding reached the uniform materialization path.");
+                    }
+                    const auto module =
+                        std::ranges::find(slot.RuntimeDefinition.Modules, binding.Module, &VfxModuleDefinition::Id);
+                    const auto* value = BindingValue(slot, binding.Module, binding.Property);
+                    if (module == slot.RuntimeDefinition.Modules.end() || !value)
+                        throw std::invalid_argument("VFX GPU uniform binding is unavailable.");
+                    Internal::ApplyVfxModuleProperty(*module, binding.Property, *value);
+                }
+
+                ValidateVfxEffect(slot.RuntimeDefinition);
+                return true;
+            }
+            catch (...)
+            {
+                slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                return false;
+            }
         }
 
         [[nodiscard]] Vector3 SampleShape(EffectSlot& slot, const VfxShapeModule* module) noexcept
@@ -494,11 +772,16 @@ namespace Keire
             return {};
         }
 
-        void ApplyCustomInstruction(const EffectSlot& slot, Particle& particle, const std::uint32_t instructionIndex,
-                                    const float deltaSeconds) const noexcept
+        [[nodiscard]] bool ApplyCustomInstruction(EffectSlot& slot, Particle& particle,
+                                                  const std::uint32_t instructionIndex,
+                                                  const float deltaSeconds) const noexcept
         {
-            if (instructionIndex >= slot.CustomInstructions.size())
-                return;
+            if (instructionIndex >= slot.CustomInstructions.size() ||
+                instructionIndex >= slot.Program.CustomInstructions.size())
+            {
+                slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                return false;
+            }
             const auto applyScalar = [](float& target, const float operand, const VfxCustomOperation operation)
             {
                 switch (operation)
@@ -532,6 +815,24 @@ namespace Keire
 
             const auto& instruction = slot.CustomInstructions[instructionIndex];
             auto operand = instruction.Operand;
+            const auto& compiled = slot.Program.CustomInstructions[instructionIndex];
+            if (compiled.ValueRegister != ~std::uint32_t{0})
+            {
+                if (compiled.ValueRegister >= slot.ExpressionRegisters.size())
+                {
+                    slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                    return false;
+                }
+                try
+                {
+                    operand = ParameterVector(compiled.OperandType, slot.ExpressionRegisters[compiled.ValueRegister]);
+                }
+                catch (...)
+                {
+                    slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                    return false;
+                }
+            }
             if (instruction.ScaleByDeltaTime)
             {
                 operand.X *= deltaSeconds;
@@ -557,6 +858,7 @@ namespace Keire
                 applyScalar(particle.Size, operand.X, instruction.Operation);
                 break;
             }
+            return true;
         }
 
         void ReleaseParticle(const std::uint32_t index) noexcept
@@ -595,14 +897,16 @@ namespace Keire
             slot.RuntimeDefinition = {};
             slot.ParameterOverrides.clear();
             slot.Parameters.clear();
+            slot.ExpressionRegisters.clear();
             slot.CustomInstructions.clear();
+            slot.GpuExecution.reset();
             slot.Revision = 0;
             slot.Generation = NextGeneration(slot.Generation);
             FreeEffects.push_back(index);
             --WorldStatistics.ActiveEffects;
         }
 
-        void SpawnOne(const std::uint32_t effectIndex)
+        void SpawnOne(const std::uint32_t effectIndex, const std::uint64_t spawnIndex, const float deltaSeconds)
         {
             auto& slot = Effects[effectIndex];
             const auto& definition = slot.RuntimeDefinition;
@@ -616,11 +920,15 @@ namespace Keire
             const auto particleIndex = FreeParticles.back();
             FreeParticles.pop_back();
             auto& particle = Particles[particleIndex];
-            const auto* size = FindEnabledModule<VfxSizeOverLifetimeModule>(definition);
-            const auto* color = FindEnabledModule<VfxColorOverLifetimeModule>(definition);
+            const auto* size = FindCompiledModule<VfxSizeOverLifetimeModule>(definition, slot.Program);
+            const auto* color = FindCompiledModule<VfxColorOverLifetimeModule>(definition, slot.Program);
 
             particle.Active = true;
             particle.EffectIndex = effectIndex;
+            particle.Id = slot.NextParticleId++;
+            if (slot.NextParticleId == 0)
+                slot.NextParticleId = 1;
+            particle.SpawnIndex = spawnIndex;
             particle.Position = definition.Space == VfxSimulationSpace::World ? slot.Position : Vector3{};
             particle.Velocity = {};
             particle.Rotation = {};
@@ -630,6 +938,15 @@ namespace Keire
             particle.Tint = color ? color->Color.Evaluate(0.0F) : Color{};
             particle.Renderer = VfxRendererType::Sprite;
 
+            if (!EvaluateValueContext(slot, VfxContextType::Spawn, deltaSeconds, std::addressof(particle), spawnIndex))
+            {
+                particle.Active = false;
+                FreeParticles.push_back(particleIndex);
+                SaturatingAdd(slot.DroppedParticles, 1);
+                SaturatingAdd(WorldStatistics.DroppedParticles, 1);
+                return;
+            }
+
             for (const auto& operation : slot.Program.Operations)
             {
                 if (operation.Context != VfxContextType::Spawn ||
@@ -637,7 +954,22 @@ namespace Keire
                 {
                     continue;
                 }
-                ApplyCustomInstruction(slot, particle, operation.Index, 0.0F);
+                if (!ApplyCustomInstruction(slot, particle, operation.Index, 0.0F))
+                {
+                    particle.Active = false;
+                    FreeParticles.push_back(particleIndex);
+                    SaturatingAdd(slot.DroppedParticles, 1);
+                    SaturatingAdd(WorldStatistics.DroppedParticles, 1);
+                    return;
+                }
+            }
+            if (!EvaluateValueContext(slot, VfxContextType::Initialize, 0.0F, std::addressof(particle), spawnIndex))
+            {
+                particle.Active = false;
+                FreeParticles.push_back(particleIndex);
+                SaturatingAdd(slot.DroppedParticles, 1);
+                SaturatingAdd(WorldStatistics.DroppedParticles, 1);
+                return;
             }
             for (const auto& operation : slot.Program.Operations)
             {
@@ -645,19 +977,26 @@ namespace Keire
                     continue;
                 if (operation.Kind == VfxCompiledOperationKind::CustomHlsl)
                 {
-                    ApplyCustomInstruction(slot, particle, operation.Index, 0.0F);
+                    if (!ApplyCustomInstruction(slot, particle, operation.Index, 0.0F))
+                    {
+                        particle.Active = false;
+                        FreeParticles.push_back(particleIndex);
+                        SaturatingAdd(slot.DroppedParticles, 1);
+                        SaturatingAdd(WorldStatistics.DroppedParticles, 1);
+                        return;
+                    }
                     continue;
                 }
-                if (operation.Index >= definition.Modules.size())
+                auto module = BoundModule(slot, operation.Index);
+                if (!module)
                     continue;
-                const auto& module = definition.Modules[operation.Index];
-                if (const auto* shape = std::get_if<VfxShapeModule>(&module.Payload))
+                if (const auto* shape = std::get_if<VfxShapeModule>(&module->Payload))
                 {
                     particle.Position = SampleShape(slot, shape);
                     if (definition.Space == VfxSimulationSpace::World)
                         particle.Position = TransformPosition(slot.Position, slot.Rotation, particle.Position);
                 }
-                else if (const auto* initialize = std::get_if<VfxInitializeModule>(&module.Payload))
+                else if (const auto* initialize = std::get_if<VfxInitializeModule>(&module->Payload))
                 {
                     particle.Velocity = Range(slot, initialize->VelocityMinimum, initialize->VelocityMaximum);
                     if (definition.Space == VfxSimulationSpace::World)
@@ -666,21 +1005,36 @@ namespace Keire
                     particle.Lifetime = Range(slot, initialize->LifetimeMinimum, initialize->LifetimeMaximum);
                 }
             }
+            if (!EvaluateValueContext(slot, VfxContextType::Output, 0.0F, std::addressof(particle), spawnIndex))
+            {
+                particle.Active = false;
+                FreeParticles.push_back(particleIndex);
+                SaturatingAdd(slot.DroppedParticles, 1);
+                SaturatingAdd(WorldStatistics.DroppedParticles, 1);
+                return;
+            }
             for (const auto& operation : slot.Program.Operations)
             {
                 if (operation.Context != VfxContextType::Output)
                     continue;
                 if (operation.Kind == VfxCompiledOperationKind::CustomHlsl)
                 {
-                    ApplyCustomInstruction(slot, particle, operation.Index, 0.0F);
+                    if (!ApplyCustomInstruction(slot, particle, operation.Index, 0.0F))
+                    {
+                        particle.Active = false;
+                        FreeParticles.push_back(particleIndex);
+                        SaturatingAdd(slot.DroppedParticles, 1);
+                        SaturatingAdd(WorldStatistics.DroppedParticles, 1);
+                        return;
+                    }
                     continue;
                 }
-                if (operation.Index >= definition.Modules.size())
-                    continue;
-                if (const auto* renderer = std::get_if<VfxRendererModule>(&definition.Modules[operation.Index].Payload))
-                {
-                    particle.Renderer = renderer->Type;
-                }
+                const auto module = BoundModule(slot, operation.Index);
+                if (module)
+                    if (const auto* renderer = std::get_if<VfxRendererModule>(&module->Payload))
+                    {
+                        particle.Renderer = renderer->Type;
+                    }
             }
             if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.Velocity) ||
                 !Math::IsFinite(particle.Rotation) || !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Size))
@@ -699,7 +1053,7 @@ namespace Keire
         [[nodiscard]] std::uint64_t CountBurst(const EffectSlot& slot, const VfxBurstModule& burst,
                                                const double previous, const double current) const noexcept
         {
-            if (current < previous)
+            if (current < previous || !ValidRuntimeBurst(slot.RuntimeDefinition, burst))
                 return 0;
             std::uint64_t count = 0;
             const auto& definition = slot.RuntimeDefinition;
@@ -743,25 +1097,42 @@ namespace Keire
             const auto current = previous + effectiveDelta;
 
             std::uint64_t requested = 0;
-            if (const auto* rate = FindEnabledModule<VfxEmissionRateModule>(definition))
+            const auto expressionsValid =
+                EvaluateValueContext(slot, VfxContextType::Spawn, deltaSeconds, nullptr, slot.SpawnSequence);
+            for (std::uint32_t moduleIndex = 0; expressionsValid && moduleIndex < slot.Program.Modules.size();
+                 ++moduleIndex)
             {
+                const auto module = BoundModule(slot, moduleIndex);
+                const auto* rate = module ? std::get_if<VfxEmissionRateModule>(&module->Payload) : nullptr;
+                if (!rate)
+                    continue;
+                if (!rate || !std::isfinite(rate->ParticlesPerSecond) || rate->ParticlesPerSecond < 0.0F ||
+                    rate->ParticlesPerSecond > 1'000'000.0F)
+                {
+                    slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                    continue;
+                }
                 slot.RateAccumulator += effectiveDelta * rate->ParticlesPerSecond;
                 const auto whole = std::floor(slot.RateAccumulator);
                 requested += static_cast<std::uint64_t>(
                     std::min(whole, static_cast<double>(std::numeric_limits<std::uint64_t>::max())));
                 slot.RateAccumulator -= whole;
             }
-            for (const auto& module : definition.Modules)
+            for (std::uint32_t moduleIndex = 0; expressionsValid && moduleIndex < slot.Program.Modules.size();
+                 ++moduleIndex)
             {
-                if (!module.Enabled)
+                const auto module = BoundModule(slot, moduleIndex);
+                const auto* burst = module ? std::get_if<VfxBurstModule>(&module->Payload) : nullptr;
+                if (!burst)
                     continue;
-                if (const auto* burst = std::get_if<VfxBurstModule>(&module.Payload))
+                if (!burst || !ValidRuntimeBurst(definition, *burst))
                 {
-                    const auto burstCount = CountBurst(slot, *burst, previous, current);
-                    requested =
-                        std::min<std::uint64_t>(std::numeric_limits<std::uint64_t>::max() - requested, burstCount) +
-                        requested;
+                    slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;
+                    continue;
                 }
+                const auto burstCount = CountBurst(slot, *burst, previous, current);
+                requested = std::min<std::uint64_t>(std::numeric_limits<std::uint64_t>::max() - requested, burstCount) +
+                            requested;
             }
 
             const auto availableForEffect =
@@ -769,10 +1140,17 @@ namespace Keire
             const auto available = std::min<std::uint64_t>(availableForEffect, FreeParticles.size());
             const auto spawnCount = std::min(requested, available);
             for (std::uint64_t index = 0; index < spawnCount; ++index)
-                SpawnOne(effectIndex);
+            {
+                SpawnOne(effectIndex, slot.SpawnSequence, deltaSeconds);
+                SaturatingAdd(slot.SpawnSequence, 1);
+            }
             if (requested > spawnCount)
             {
                 const auto dropped = requested - spawnCount;
+                // Spawn identity is based on the requested stream, not only accepted particles. Advancing across
+                // capacity drops keeps later CPU identities aligned with the GPU allocator's request sequence.
+                SaturatingAdd(slot.SpawnSequence, dropped);
+                SaturatingAdd(slot.NextParticleId, dropped);
                 SaturatingAdd(slot.DroppedParticles, dropped);
                 SaturatingAdd(WorldStatistics.DroppedParticles, dropped);
             }
@@ -786,32 +1164,48 @@ namespace Keire
         void EmitGpu(const std::uint32_t effectIndex, const float deltaSeconds)
         {
             auto& slot = Effects[effectIndex];
+            slot.GpuEffectTime = static_cast<float>(slot.Elapsed);
             if (!slot.Emitting)
             {
+                (void)PrepareGpuUniformExpressions(slot, deltaSeconds);
                 slot.Elapsed += deltaSeconds;
                 return;
             }
-            const auto& definition = slot.RuntimeDefinition;
             const auto previous = slot.Elapsed;
+            const auto& authoredDefinition = slot.RuntimeDefinition;
             auto effectiveDelta = static_cast<double>(deltaSeconds);
-            if (!definition.Loop)
-                effectiveDelta = std::min(effectiveDelta, std::max(0.0, definition.Duration - slot.Elapsed));
+            if (!authoredDefinition.Loop)
+                effectiveDelta = std::min(effectiveDelta, std::max(0.0, authoredDefinition.Duration - slot.Elapsed));
             const auto current = previous + effectiveDelta;
 
-            std::uint64_t requested = 0;
-            if (const auto* rate = FindEnabledModule<VfxEmissionRateModule>(definition))
+            if (!PrepareGpuUniformExpressions(slot, deltaSeconds))
             {
+                slot.Elapsed = current;
+                slot.FirstUpdate = false;
+                if (!slot.RuntimeDefinition.Loop && slot.Elapsed >= slot.RuntimeDefinition.Duration)
+                    slot.Emitting = false;
+                return;
+            }
+            const auto& definition = slot.RuntimeDefinition;
+
+            std::uint64_t requested = 0;
+            for (std::uint32_t moduleIndex = 0; moduleIndex < slot.Program.Modules.size(); ++moduleIndex)
+            {
+                const auto module = BoundModule(slot, moduleIndex);
+                const auto* rate = module ? std::get_if<VfxEmissionRateModule>(&module->Payload) : nullptr;
+                if (!rate)
+                    continue;
                 slot.RateAccumulator += effectiveDelta * rate->ParticlesPerSecond;
                 const auto whole = std::floor(slot.RateAccumulator);
-                requested += static_cast<std::uint64_t>(
+                const auto emitted = static_cast<std::uint64_t>(
                     std::min(whole, static_cast<double>(std::numeric_limits<std::uint64_t>::max())));
+                requested = std::min(std::numeric_limits<std::uint64_t>::max() - requested, emitted) + requested;
                 slot.RateAccumulator -= whole;
             }
-            for (const auto& module : definition.Modules)
+            for (std::uint32_t moduleIndex = 0; moduleIndex < slot.Program.Modules.size(); ++moduleIndex)
             {
-                if (!module.Enabled)
-                    continue;
-                if (const auto* burst = std::get_if<VfxBurstModule>(&module.Payload))
+                const auto module = BoundModule(slot, moduleIndex);
+                if (const auto* burst = module ? std::get_if<VfxBurstModule>(&module->Payload) : nullptr)
                 {
                     const auto count = CountBurst(slot, *burst, previous, current);
                     requested = std::min(std::numeric_limits<std::uint64_t>::max() - requested, count) + requested;
@@ -819,8 +1213,16 @@ namespace Keire
             }
 
             SaturatingAdd(slot.GpuSpawnSequence, requested);
-            const auto* initialize = FindEnabledModule<VfxInitializeModule>(definition);
-            const auto lifetime = initialize ? initialize->LifetimeMaximum : 1.0F;
+            auto lifetime = 1.0F;
+            for (std::uint32_t moduleIndex = 0; moduleIndex < slot.Program.Modules.size(); ++moduleIndex)
+            {
+                const auto module = BoundModule(slot, moduleIndex);
+                if (const auto* initialize = module ? std::get_if<VfxInitializeModule>(&module->Payload) : nullptr)
+                {
+                    lifetime = initialize->LifetimeMaximum;
+                    break;
+                }
+            }
             if (requested != 0)
                 slot.GpuLastDeathTime = std::max(slot.GpuLastDeathTime, current + lifetime);
             slot.ActiveParticles =
@@ -855,6 +1257,12 @@ namespace Keire
             const auto& definition = slot.RuntimeDefinition;
             particle.Age += deltaSeconds;
             if (particle.Age >= particle.Lifetime)
+            {
+                ReleaseParticle(particleIndex);
+                return;
+            }
+            if (!EvaluateValueContext(slot, VfxContextType::Update, deltaSeconds, std::addressof(particle),
+                                      particle.SpawnIndex))
             {
                 ReleaseParticle(particleIndex);
                 return;
@@ -919,26 +1327,32 @@ namespace Keire
                     continue;
                 if (operation.Kind == VfxCompiledOperationKind::CustomHlsl)
                 {
-                    ApplyCustomInstruction(slot, particle, operation.Index, deltaSeconds);
+                    if (!ApplyCustomInstruction(slot, particle, operation.Index, deltaSeconds))
+                    {
+                        ReleaseParticle(particleIndex);
+                        return;
+                    }
                     continue;
                 }
-                if (operation.Index >= definition.Modules.size())
+                auto module = BoundModule(slot, operation.Index);
+                if (!module)
                     continue;
-                const auto& module = definition.Modules[operation.Index];
-                if (const auto* force = std::get_if<VfxForceModule>(&module.Payload))
+                if (const auto* size = std::get_if<VfxSizeOverLifetimeModule>(&module->Payload))
+                {
+                    particle.Size = std::max(0.0F, size->Size.Evaluate(normalizedAge));
+                    continue;
+                }
+                if (const auto* color = std::get_if<VfxColorOverLifetimeModule>(&module->Payload))
+                {
+                    particle.Tint = color->Color.Evaluate(normalizedAge);
+                    continue;
+                }
+                if (const auto* force = std::get_if<VfxForceModule>(&module->Payload))
                 {
                     const auto acceleration = Add(force->Force, Multiply(Gravity, force->GravityMultiplier));
                     particle.Velocity = Add(particle.Velocity, Multiply(acceleration, deltaSeconds));
                 }
-                else if (const auto* size = std::get_if<VfxSizeOverLifetimeModule>(&module.Payload))
-                {
-                    particle.Size = std::max(0.0F, size->Size.Evaluate(normalizedAge));
-                }
-                else if (const auto* color = std::get_if<VfxColorOverLifetimeModule>(&module.Payload))
-                {
-                    particle.Tint = color->Color.Evaluate(normalizedAge);
-                }
-                else if (const auto* collision = std::get_if<VfxCollisionModule>(&module.Payload))
+                else if (const auto* collision = std::get_if<VfxCollisionModule>(&module->Payload))
                 {
                     if (!moveParticle(collision))
                         return;
@@ -947,21 +1361,31 @@ namespace Keire
             }
             if (!moved && !moveParticle(nullptr))
                 return;
+            if (!EvaluateValueContext(slot, VfxContextType::Output, deltaSeconds, std::addressof(particle),
+                                      particle.SpawnIndex))
+            {
+                ReleaseParticle(particleIndex);
+                return;
+            }
             for (const auto& operation : slot.Program.Operations)
             {
                 if (operation.Context != VfxContextType::Output)
                     continue;
                 if (operation.Kind == VfxCompiledOperationKind::CustomHlsl)
                 {
-                    ApplyCustomInstruction(slot, particle, operation.Index, deltaSeconds);
+                    if (!ApplyCustomInstruction(slot, particle, operation.Index, deltaSeconds))
+                    {
+                        ReleaseParticle(particleIndex);
+                        return;
+                    }
                     continue;
                 }
-                if (operation.Index >= definition.Modules.size())
-                    continue;
-                if (const auto* renderer = std::get_if<VfxRendererModule>(&definition.Modules[operation.Index].Payload))
-                {
-                    particle.Renderer = renderer->Type;
-                }
+                const auto module = BoundModule(slot, operation.Index);
+                if (module)
+                    if (const auto* renderer = std::get_if<VfxRendererModule>(&module->Payload))
+                    {
+                        particle.Renderer = renderer->Type;
+                    }
             }
             if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.Velocity) ||
                 !Math::IsFinite(particle.Rotation) || !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Size))
@@ -1007,7 +1431,7 @@ namespace Keire
         auto resolved =
             ResolveProgram(*activation.Effect, m_Impl->Specification.Backend, activation.ParameterOverrides);
         const auto random = resolved.Definition.Seed ^ activation.SeedOffset;
-        const auto diagnostics = m_Impl->DiagnosticsFor(resolved.Definition);
+        const auto diagnostics = m_Impl->DiagnosticsFor(resolved.Definition, resolved.Program);
         const auto index = m_Impl->FreeEffects.back();
         auto& slot = m_Impl->Effects[index];
 
@@ -1020,7 +1444,9 @@ namespace Keire
         slot.RuntimeDefinition = std::move(resolved.Definition);
         slot.ParameterOverrides = std::move(resolved.Overrides);
         slot.Parameters = std::move(resolved.Parameters);
+        slot.ExpressionRegisters.assign(slot.Program.ValueRegisterCount, 0.0F);
         slot.CustomInstructions = std::move(resolved.CustomInstructions);
+        slot.GpuExecution = std::move(resolved.GpuExecution);
         slot.Revision = activation.Revision;
         slot.Position = activation.Position;
         slot.Rotation = normalizedRotation;
@@ -1031,9 +1457,12 @@ namespace Keire
         slot.ActiveParticles = 0;
         slot.DroppedParticles = 0;
         slot.GpuSpawnSequence = 0;
+        slot.SpawnSequence = 0;
+        slot.NextParticleId = 1;
         slot.GpuSimulationRevision = 1;
         slot.GpuLastDeathTime = 0.0;
         slot.GpuSimulationDeltaSeconds = 0.0F;
+        slot.GpuEffectTime = 0.0F;
         slot.SimulationSpeed = 1.0F;
         slot.Diagnostics = diagnostics;
         ++m_Impl->WorldStatistics.ActiveEffects;
@@ -1139,10 +1568,8 @@ namespace Keire
         }
         auto resolved = ResolveProgram(*effect, m_Impl->Specification.Backend, preservedOverrides);
         const auto compatible = slot.RuntimeDefinition.EmitterId == resolved.Definition.EmitterId &&
-                                slot.Program.StateLayoutHash == resolved.Program.StateLayoutHash &&
-                                (m_Impl->Specification.Backend != VfxBackend::Gpu ||
-                                 !GpuStoredParticleStateChanged(slot.RuntimeDefinition, resolved.Definition));
-        auto diagnostics = m_Impl->DiagnosticsFor(resolved.Definition);
+                                slot.Program.StateLayoutHash == resolved.Program.StateLayoutHash;
+        auto diagnostics = m_Impl->DiagnosticsFor(resolved.Definition, resolved.Program);
         if (rejectedOverride)
             diagnostics |= VfxRuntimeDiagnostic::ParameterOverrideRejected;
         slot.Effect = std::move(effect);
@@ -1150,7 +1577,9 @@ namespace Keire
         slot.RuntimeDefinition = std::move(resolved.Definition);
         slot.ParameterOverrides = std::move(resolved.Overrides);
         slot.Parameters = std::move(resolved.Parameters);
+        slot.ExpressionRegisters.assign(slot.Program.ValueRegisterCount, 0.0F);
         slot.CustomInstructions = std::move(resolved.CustomInstructions);
+        slot.GpuExecution = std::move(resolved.GpuExecution);
         slot.Revision = revision;
         slot.Diagnostics = diagnostics;
         if (!compatible)
@@ -1235,7 +1664,7 @@ namespace Keire
                 continue;
             }
             const auto& slot = m_Impl->Effects[particle.EffectIndex];
-            const auto* renderer = FindEnabledModule<VfxRendererModule>(slot.RuntimeDefinition);
+            const auto* renderer = FindCompiledModule<VfxRendererModule>(slot.RuntimeDefinition, slot.Program);
             destination[result.Written++] = {
                 VfxHandle(particle.EffectIndex, slot.Generation),
                 m_Impl->WorldPosition(slot, particle),
@@ -1270,12 +1699,12 @@ namespace Keire
                 if (!slot.Active || !slot.Effect)
                     continue;
                 const auto& definition = slot.RuntimeDefinition;
-                const auto* shape = FindEnabledModule<VfxShapeModule>(definition);
-                const auto* initialize = FindEnabledModule<VfxInitializeModule>(definition);
-                const auto* force = FindEnabledModule<VfxForceModule>(definition);
-                const auto* size = FindEnabledModule<VfxSizeOverLifetimeModule>(definition);
-                const auto* color = FindEnabledModule<VfxColorOverLifetimeModule>(definition);
-                const auto* renderer = FindEnabledModule<VfxRendererModule>(definition);
+                const auto* shape = FindCompiledModule<VfxShapeModule>(definition, slot.Program);
+                const auto* initialize = FindCompiledModule<VfxInitializeModule>(definition, slot.Program);
+                const auto* force = FindCompiledModule<VfxForceModule>(definition, slot.Program);
+                const auto* size = FindCompiledModule<VfxSizeOverLifetimeModule>(definition, slot.Program);
+                const auto* color = FindCompiledModule<VfxColorOverLifetimeModule>(definition, slot.Program);
+                const auto* renderer = FindCompiledModule<VfxRendererModule>(definition, slot.Program);
                 VfxGpuEmitter emitter{VfxHandle(index, slot.Generation),
                                       slot.Revision,
                                       slot.GpuSpawnSequence,
@@ -1298,33 +1727,26 @@ namespace Keire
                                       definition.Space,
                                       renderer ? renderer->Type : VfxRendererType::Sprite,
                                       slot.GpuSimulationRevision};
+                if (!slot.GpuExecution)
+                    throw std::logic_error("VFX GPU effect is missing its immutable execution payload.");
                 emitter.CustomInstructionCount = static_cast<std::uint32_t>(
-                    std::min(slot.CustomInstructions.size(), emitter.CustomInstructions.size()));
-                std::ranges::copy_n(slot.CustomInstructions.begin(), emitter.CustomInstructionCount,
+                    std::min(slot.GpuExecution->CustomInstructions.size(), emitter.CustomInstructions.size()));
+                std::ranges::copy_n(slot.GpuExecution->CustomInstructions.begin(), emitter.CustomInstructionCount,
                                     emitter.CustomInstructions.begin());
-                for (const auto& operation : slot.Program.Operations)
-                {
-                    if (operation.Kind == VfxCompiledOperationKind::CustomHlsl)
-                    {
-                        if (operation.Index >= emitter.CustomInstructionCount)
-                            throw std::logic_error("VFX program contains an invalid GPU Custom HLSL operation.");
-                        if (emitter.ParticleOperationCount >= emitter.ParticleOperations.size())
-                            throw std::logic_error("VFX program exceeds the GPU particle-operation budget.");
-                        emitter.ParticleOperations[emitter.ParticleOperationCount++] = {
-                            operation.Context, VfxGpuEmitter::ParticleOperationKind::CustomHlsl, operation.Index};
-                        continue;
-                    }
-                    if (operation.Index >= definition.Modules.size())
-                        throw std::logic_error("VFX program contains an invalid GPU module operation.");
-                    const auto kind = GpuParticleOperationKind(definition.Modules[operation.Index].Payload);
-                    if (kind)
-                    {
-                        if (emitter.ParticleOperationCount >= emitter.ParticleOperations.size())
-                            throw std::logic_error("VFX program exceeds the GPU particle-operation budget.");
-                        emitter.ParticleOperations[emitter.ParticleOperationCount++] = {operation.Context, *kind, 0};
-                    }
-                }
+                emitter.ParticleOperationCount = static_cast<std::uint32_t>(
+                    std::min(slot.GpuExecution->ParticleOperations.size(), emitter.ParticleOperations.size()));
+                std::ranges::copy_n(slot.GpuExecution->ParticleOperations.begin(), emitter.ParticleOperationCount,
+                                    emitter.ParticleOperations.begin());
                 emitter.SimulationDeltaSeconds = slot.GpuSimulationDeltaSeconds;
+                emitter.RotationMinimum = initialize ? initialize->RotationMinimum : Vector3{};
+                emitter.RotationMaximum = initialize ? initialize->RotationMaximum : Vector3{};
+                emitter.ConeAngleDegrees = shape ? shape->ConeAngleDegrees : 25.0F;
+                emitter.ConeLength = shape ? shape->ConeLength : 1.0F;
+                emitter.Execution = slot.GpuExecution;
+                emitter.EffectTime = slot.GpuEffectTime;
+                // CPU expressions evaluate before Update publishes the completed step revision. Preserve that same
+                // zero-based step identity in the deferred GPU dispatch captured after the update.
+                emitter.SimulationStep = m_Impl->SimulationStepRevision == 0 ? 0 : m_Impl->SimulationStepRevision - 1;
                 result.m_GpuEmitters.push_back(std::move(emitter));
             }
             return result;

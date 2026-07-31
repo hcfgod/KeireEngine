@@ -2,7 +2,11 @@
 
 #include <doctest/doctest.h>
 
+#include <bit>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <string>
 
 TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
 {
@@ -70,6 +74,94 @@ TEST_CASE("GPU VFX sequencing distinguishes document snapshots from simulation s
 
     CHECK(resources.ShouldApplySnapshot(2));
     CHECK(resources.ShouldConsumeSimulationStep(2));
+}
+
+TEST_CASE("GPU VFX execution wire records remain explicit 16-byte lanes")
+{
+    using Keire::RenderBackend::VfxGpuCustomInstructionRecord;
+    using Keire::RenderBackend::VfxGpuParticleOperationRecord;
+
+    CHECK(alignof(VfxGpuCustomInstructionRecord) == 16);
+    CHECK(sizeof(VfxGpuCustomInstructionRecord) == 32);
+    CHECK(offsetof(VfxGpuCustomInstructionRecord, Metadata) == 0);
+    CHECK(offsetof(VfxGpuCustomInstructionRecord, Operand) == 16);
+    CHECK(alignof(VfxGpuParticleOperationRecord) == 16);
+    CHECK(sizeof(VfxGpuParticleOperationRecord) == 16);
+}
+
+TEST_CASE("GPU VFX renderer validation accepts dynamic operation tables beyond the legacy cbuffer limits")
+{
+    Keire::VfxGpuExecutionPayload payload;
+    payload.CustomInstructions.resize(9);
+    for (auto& instruction : payload.CustomInstructions)
+    {
+        instruction.Context = Keire::VfxContextType::Update;
+        instruction.Target = Keire::VfxCustomTarget::Size;
+        instruction.Operation = Keire::VfxCustomOperation::Add;
+        instruction.Operand = {0.25F, 0.0F, 0.0F, 0.0F};
+    }
+    payload.ParticleOperations.resize(16);
+    for (std::size_t index = 0; index < payload.ParticleOperations.size(); ++index)
+    {
+        payload.ParticleOperations[index].Context = Keire::VfxContextType::Update;
+        payload.ParticleOperations[index].Kind = Keire::VfxGpuParticleOperationKind::CustomHlsl;
+        payload.ParticleOperations[index].Index = static_cast<std::uint32_t>(index % payload.CustomInstructions.size());
+    }
+
+    CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
+}
+
+TEST_CASE("GPU VFX renderer validation accepts the production built-in context schedule")
+{
+    Keire::VfxGpuExecutionPayload payload;
+    payload.ParticleOperations = {
+        {Keire::VfxContextType::Initialize, Keire::VfxGpuParticleOperationKind::Shape, 0U},
+        {Keire::VfxContextType::Initialize, Keire::VfxGpuParticleOperationKind::Initialize, 0U},
+        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Force, 0U},
+        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Size, 0U},
+        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Color, 0U},
+        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Collision, 0U},
+        {Keire::VfxContextType::Output, Keire::VfxGpuParticleOperationKind::Renderer, 0U},
+    };
+
+    CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
+}
+
+TEST_CASE("GPU VFX renderer validation rejects malformed expression and Custom HLSL register references")
+{
+    Keire::VfxGpuExecutionPayload payload;
+    payload.ValueProgram.RegisterCount = 1;
+    payload.ValueProgram.Constants.push_back({{std::bit_cast<std::uint32_t>(2.0F), 0U, 0U, 0U}, {}});
+    payload.ValueProgram.Sources.push_back({static_cast<std::uint32_t>(Keire::VfxGpuValueSourceKind::Literal),
+                                            static_cast<std::uint32_t>(Keire::VfxValueType::Scalar), 0U, 0U});
+    Keire::VfxGpuValueInstruction instruction;
+    instruction.Header = {static_cast<std::uint32_t>(Keire::VfxValueOpcode::Constant),
+                          static_cast<std::uint32_t>(Keire::VfxValueType::Scalar),
+                          static_cast<std::uint32_t>(Keire::VfxContextType::Update),
+                          static_cast<std::uint32_t>(Keire::VfxEvaluationDomain::PerParticleUpdate)};
+    instruction.Output = {0U, 0U, 0U, 1U};
+    payload.ValueProgram.Instructions.push_back(instruction);
+    payload.CustomInstructions.push_back({Keire::VfxContextType::Update,
+                                          Keire::VfxCustomTarget::Position,
+                                          Keire::VfxCustomOperation::Add,
+                                          false,
+                                          Keire::VfxValueType::Scalar,
+                                          {},
+                                          0U});
+    payload.ParticleOperations.push_back(
+        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::CustomHlsl, 0U});
+    CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
+
+    payload.CustomInstructions.front().ValueRegister = 1U;
+    const auto invalidRegister = Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload);
+    REQUIRE(invalidRegister);
+    CHECK(invalidRegister->find("unwritten expression register") != std::string::npos);
+
+    payload.CustomInstructions.front().ValueRegister = std::numeric_limits<std::uint32_t>::max();
+    payload.ValueProgram.Sources.front().Reserved = 1U;
+    const auto invalidSource = Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload);
+    REQUIRE(invalidSource);
+    CHECK(invalidSource->find("invalid header") != std::string::npos);
 }
 
 TEST_CASE("SDL frame scheduling follows its bounded device queue")

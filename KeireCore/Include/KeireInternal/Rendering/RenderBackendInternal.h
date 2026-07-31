@@ -702,6 +702,40 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* GpuVfx = nullptr;
     };
 
+    struct alignas(16) VfxGpuCustomInstructionRecord final
+    {
+        /// Context, target, operation/flags, and expression register. Operation occupies bits 0-7; bit 8 scales by
+        /// the operation-context delta; bits 16-23 contain VfxValueType. UINT32_MAX selects Operand instead of an
+        /// expression register.
+        std::array<std::uint32_t, 4> Metadata{};
+        std::array<float, 4> Operand{};
+    };
+
+    struct alignas(16) VfxGpuParticleOperationRecord final
+    {
+        /// Context, operation kind, custom-instruction index, reserved zero.
+        std::array<std::uint32_t, 4> Metadata{};
+    };
+
+    static_assert(sizeof(VfxGpuCustomInstructionRecord) == 32);
+    static_assert(alignof(VfxGpuCustomInstructionRecord) == 16);
+    static_assert(sizeof(VfxGpuParticleOperationRecord) == 16);
+    static_assert(alignof(VfxGpuParticleOperationRecord) == 16);
+
+    /// Returns an exact diagnostic for malformed or shader-unsupported renderer execution payloads.
+    [[nodiscard]] std::optional<std::string> ValidateGpuVfxExecutionPayload(const VfxGpuExecutionPayload& payload);
+
+    struct GpuVfxExecutionBuffers final
+    {
+        SDL_GPUBuffer* Instructions = nullptr;
+        SDL_GPUBuffer* Sources = nullptr;
+        SDL_GPUBuffer* Constants = nullptr;
+        SDL_GPUBuffer* Parameters = nullptr;
+        SDL_GPUBuffer* CustomInstructions = nullptr;
+        SDL_GPUBuffer* ParticleOperations = nullptr;
+        std::uint64_t ByteSize = 0;
+    };
+
     struct GpuVfxWorldResources final
     {
         struct EmitterState final
@@ -711,6 +745,8 @@ namespace Keire::RenderBackend
             Vector3 Position;
             Quaternion Rotation;
             VfxSimulationSpace Space = VfxSimulationSpace::World;
+            std::shared_ptr<const VfxGpuExecutionPayload> Execution;
+            std::shared_ptr<GpuVfxExecutionBuffers> ExecutionBuffers;
         };
 
         SDL_GPUBuffer* Particles = nullptr;
@@ -719,6 +755,7 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* Counters = nullptr;
         SDL_GPUBuffer* IndirectArguments = nullptr;
         std::unordered_map<std::uint64_t, EmitterState> Emitters;
+        std::unordered_map<const VfxGpuExecutionPayload*, std::weak_ptr<GpuVfxExecutionBuffers>> ExecutionCache;
         std::uint32_t Capacity = 0;
         std::uint64_t ResetRevision = 0;
         std::uint64_t LastPreparedFrame = 0;
@@ -749,6 +786,7 @@ namespace Keire::RenderBackend
         void InvalidateSequencing() noexcept
         {
             Emitters.clear();
+            ExecutionCache.clear();
             ResetRevision = 0;
             LastPreparedFrame = 0;
             LastAppliedSnapshotRevision = 0;

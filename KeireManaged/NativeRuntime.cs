@@ -314,6 +314,17 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> IsVfxAliveIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, float, float, byte> SetVfxScalarRangeIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, long, long, byte> SetVfxIntegerRangeIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, ulong, ulong, byte>
+        SetVfxUnsignedIntegerRangeIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Vector2, Vector2, byte>
+        SetVfxVector2RangeIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Vector3, Vector3, byte>
+        SetVfxVector3RangeIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Vector4, Vector4, byte>
+        SetVfxVector4RangeIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Color, Color, byte> SetVfxColorRangeIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> SetUiTextIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> ConsumeUiClickIcall;
 #pragma warning restore CS0649
@@ -695,6 +706,40 @@ internal static unsafe class NativeRuntime
 
     internal static bool IsVfxAlive(Entity entity) =>
         IsVfxAliveIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter,
+                                         VfxRange<float> value) => SetVfxScalarRangeIcall(entity.World, entity.Id.High,
+                                                                                          entity.Id.Low, parameter.High,
+                                                                                          parameter.Low, value.Minimum,
+                                                                                          value.Maximum) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter,
+                                         VfxRange<long> value) => SetVfxIntegerRangeIcall(entity.World, entity.Id.High,
+                                                                                          entity.Id.Low, parameter.High,
+                                                                                          parameter.Low, value.Minimum,
+                                                                                          value.Maximum) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter, VfxRange<ulong> value) =>
+        SetVfxUnsignedIntegerRangeIcall(entity.World, entity.Id.High, entity.Id.Low, parameter.High, parameter.Low,
+                                        value.Minimum, value.Maximum) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter, VfxRange<Vector2> value) =>
+        SetVfxVector2RangeIcall(entity.World, entity.Id.High, entity.Id.Low, parameter.High, parameter.Low,
+                                value.Minimum, value.Maximum) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter, VfxRange<Vector3> value) =>
+        SetVfxVector3RangeIcall(entity.World, entity.Id.High, entity.Id.Low, parameter.High, parameter.Low,
+                                value.Minimum, value.Maximum) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter, VfxRange<Vector4> value) =>
+        SetVfxVector4RangeIcall(entity.World, entity.Id.High, entity.Id.Low, parameter.High, parameter.Low,
+                                value.Minimum, value.Maximum) != 0;
+
+    internal static bool SetVfxParameter(Entity entity, AssetId parameter,
+                                         VfxRange<Color> value) => SetVfxColorRangeIcall(entity.World, entity.Id.High,
+                                                                                         entity.Id.Low, parameter.High,
+                                                                                         parameter.Low, value.Minimum,
+                                                                                         value.Maximum) != 0;
 
     internal static bool SetUiText(Entity entity, string text)
     {

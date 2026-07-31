@@ -23,6 +23,7 @@
 #include <span>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -30,30 +31,47 @@ namespace Keire
 {
     namespace
     {
+        [[nodiscard]] bool HasCanonicalVfxRangeEndpoints(const VfxParameterValue& value) noexcept
+        {
+            return std::visit(
+                [](const auto& item) noexcept
+                {
+                    using T = std::decay_t<decltype(item)>;
+                    if constexpr (std::is_same_v<T, VfxScalarRange> || std::is_same_v<T, VfxIntegerRange> ||
+                                  std::is_same_v<T, VfxUnsignedIntegerRange>)
+                    {
+                        return item.Minimum <= item.Maximum;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxVector2Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxVector3Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                               item.Minimum.Z <= item.Maximum.Z;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxVector4Range>)
+                    {
+                        return item.Minimum.X <= item.Maximum.X && item.Minimum.Y <= item.Maximum.Y &&
+                               item.Minimum.Z <= item.Maximum.Z && item.Minimum.W <= item.Maximum.W;
+                    }
+                    else if constexpr (std::is_same_v<T, VfxColorRange>)
+                    {
+                        return item.Minimum.Red <= item.Maximum.Red && item.Minimum.Green <= item.Maximum.Green &&
+                               item.Minimum.Blue <= item.Maximum.Blue && item.Minimum.Alpha <= item.Maximum.Alpha;
+                    }
+                    else
+                    {
+                        return true;
+                    }
+                },
+                value);
+        }
+
         [[nodiscard]] bool VfxOverrideMatches(const VfxValueType type, const VfxParameterValue& value) noexcept
         {
-            switch (type)
-            {
-            case VfxValueType::Boolean:
-                return std::holds_alternative<bool>(value);
-            case VfxValueType::Integer:
-                return std::holds_alternative<std::int64_t>(value);
-            case VfxValueType::Scalar:
-                return std::holds_alternative<float>(value);
-            case VfxValueType::Vector2:
-                return std::holds_alternative<Vector2>(value);
-            case VfxValueType::Vector3:
-                return std::holds_alternative<Vector3>(value);
-            case VfxValueType::Color:
-                return std::holds_alternative<Color>(value);
-            case VfxValueType::Texture:
-            case VfxValueType::Mesh:
-            case VfxValueType::Asset:
-                return std::holds_alternative<AssetId>(value);
-            case VfxValueType::ParticleStream:
-                return false;
-            }
-            return false;
+            return VfxValueMatchesType(type, value) && IsFiniteVfxValue(value) && HasCanonicalVfxRangeEndpoints(value);
         }
 
         [[nodiscard]] std::vector<VfxParameterOverride>
@@ -1176,6 +1194,65 @@ namespace Keire
         const auto state = m_Impl->VfxEmitters.find(entityId);
         return state != m_Impl->VfxEmitters.end() && state->second.Handle &&
                m_Impl->VfxWorldService->IsAlive(state->second.Handle);
+    }
+
+    bool SceneRuntimeSession::SetVfxParameter(const EntityId entityId, const VfxParameterOverride& value)
+    {
+        m_Impl->RequireOwner("SetVfxParameter");
+        if (!m_Impl->Runtime || !m_Impl->VfxWorldService || !value.Parameter)
+            return false;
+
+        const auto entity = m_Impl->Runtime->FindEntity(entityId);
+        const auto emitter = entity ? entity.GetComponent<VfxEmitterComponent>() : Ref<VfxEmitterComponent>{};
+        const auto state = m_Impl->VfxEmitters.find(entityId);
+        if (!emitter || state == m_Impl->VfxEmitters.end() || state->second.Effect != emitter->Effect() ||
+            !state->second.Handle || !m_Impl->VfxWorldService->IsAlive(state->second.Handle))
+        {
+            return false;
+        }
+
+        const auto effect = state->second.EffectHandle.TryGetLoaded();
+        if (!effect)
+            return false;
+        const auto parameter =
+            std::ranges::find(effect->Definition().Blackboard, value.Parameter, &VfxBlackboardParameter::Id);
+        if (parameter == effect->Definition().Blackboard.end() || !parameter->Exposed ||
+            !VfxOverrideMatches(parameter->Type, value.Value))
+        {
+            return false;
+        }
+
+        const auto authored = emitter->ParameterOverrides();
+        std::vector<VfxParameterOverride> componentCandidate(authored.begin(), authored.end());
+        const auto existing =
+            std::ranges::lower_bound(componentCandidate, value.Parameter, {}, &VfxParameterOverride::Parameter);
+        if (existing == componentCandidate.end() || existing->Parameter != value.Parameter)
+        {
+            if (componentCandidate.size() >= 1024)
+                return false;
+            componentCandidate.insert(existing, value);
+        }
+        else
+        {
+            *existing = value;
+        }
+
+        auto liveCandidate = CompatibleVfxOverrides(effect->Definition(), componentCandidate);
+        if (std::ranges::find(liveCandidate, value.Parameter, &VfxParameterOverride::Parameter) == liveCandidate.end())
+            return false;
+        auto trackedCandidate = liveCandidate;
+        try
+        {
+            m_Impl->VfxWorldService->SetParameterOverrides(state->second.Handle, liveCandidate);
+        }
+        catch (...)
+        {
+            return false;
+        }
+
+        emitter->CommitRuntimeParameterOverrides(std::move(componentCandidate));
+        state->second.Overrides.swap(trackedCandidate);
+        return true;
     }
 
     std::vector<ScenePhysicsQueryHit> SceneRuntimeSession::RayCast(const PhysicsRayQuery& query,

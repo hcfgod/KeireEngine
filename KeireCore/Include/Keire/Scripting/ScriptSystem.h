@@ -18,6 +18,8 @@
 
 namespace Keire
 {
+    struct VfxParameterOverride;
+
     enum class ManagedLogLevel : std::uint8_t
     {
         Trace,
@@ -130,6 +132,11 @@ namespace Keire
         [[nodiscard]] virtual bool StopManagedVfx(AssetId) noexcept { return false; }
         [[nodiscard]] virtual bool PauseManagedVfx(AssetId, bool) noexcept { return false; }
         [[nodiscard]] virtual bool IsManagedVfxAlive(AssetId) const noexcept { return false; }
+        /// Atomically updates an exposed parameter on both the runtime entity component and its live VFX instance.
+        [[nodiscard]] virtual bool SetManagedVfxParameter(AssetId, const VfxParameterOverride&) noexcept
+        {
+            return false;
+        }
         [[nodiscard]] virtual bool SetManagedUiText(AssetId, std::string_view) noexcept { return false; }
         [[nodiscard]] virtual bool ConsumeManagedUiClick(AssetId) noexcept { return false; }
     };

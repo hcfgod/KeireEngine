@@ -31,6 +31,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ThumbnailService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/VfxEffectDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/VfxEmitterInspector.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/VfxNodeCatalog.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ViewportAssetDropRouter.cpp"
     }
 

@@ -461,12 +461,106 @@ public static class Audio
 [StableAssetTypeId("4b454952-4556-4658-4546-464543540001")]
 public sealed class VfxEffect;
 
+/// <summary>A canonical inclusive range used by VFX Blackboard range parameters.</summary>
+/// <remarks>
+/// Endpoints may be supplied in either order. The constructor stores component-wise minima and maxima so the value
+/// always matches the native persisted range contract. Floating-point endpoints must be finite. Supported element
+/// types are <see cref="float"/>, <see cref="long"/>, <see cref="ulong"/>, <see cref="Vector2"/>,
+/// <see cref="Vector3"/>, <see cref="Vector4"/>, and <see cref="Color"/>.
+/// </remarks>
+public readonly record struct VfxRange<T>
+    where T : unmanaged
+{
+    public VfxRange(T first, T second) { (Minimum, Maximum) = Normalize(first, second); }
+
+    /// <summary>Component-wise minimum endpoint.</summary>
+    public T Minimum { get; }
+    /// <summary>Component-wise maximum endpoint.</summary>
+    public T Maximum { get; }
+
+    public void Deconstruct(out T minimum, out T maximum)
+    {
+        minimum = Minimum;
+        maximum = Maximum;
+    }
+
+    private static (T Minimum, T Maximum) Normalize(T first, T second)
+    {
+        if (typeof(T) == typeof(float))
+        {
+            (float minimum, float maximum) = NormalizeScalar((float)(object)first, (float)(object)second);
+            return ((T)(object)minimum, (T)(object)maximum);
+        }
+        if (typeof(T) == typeof(long))
+        {
+            long left = (long)(object)first;
+            long right = (long)(object)second;
+            return ((T)(object)Math.Min(left, right), (T)(object)Math.Max(left, right));
+        }
+        if (typeof(T) == typeof(ulong))
+        {
+            ulong left = (ulong)(object)first;
+            ulong right = (ulong)(object)second;
+            return ((T)(object)Math.Min(left, right), (T)(object)Math.Max(left, right));
+        }
+        if (typeof(T) == typeof(Vector2))
+        {
+            Vector2 left = (Vector2)(object)first;
+            Vector2 right = (Vector2)(object)second;
+            (float minimumX, float maximumX) = NormalizeScalar(left.X, right.X);
+            (float minimumY, float maximumY) = NormalizeScalar(left.Y, right.Y);
+            return ((T)(object)new Vector2(minimumX, minimumY), (T)(object)new Vector2(maximumX, maximumY));
+        }
+        if (typeof(T) == typeof(Vector3))
+        {
+            Vector3 left = (Vector3)(object)first;
+            Vector3 right = (Vector3)(object)second;
+            (float minimumX, float maximumX) = NormalizeScalar(left.X, right.X);
+            (float minimumY, float maximumY) = NormalizeScalar(left.Y, right.Y);
+            (float minimumZ, float maximumZ) = NormalizeScalar(left.Z, right.Z);
+            return ((T)(object)new Vector3(minimumX, minimumY, minimumZ),
+                    (T)(object)new Vector3(maximumX, maximumY, maximumZ));
+        }
+        if (typeof(T) == typeof(Vector4))
+        {
+            Vector4 left = (Vector4)(object)first;
+            Vector4 right = (Vector4)(object)second;
+            (float minimumX, float maximumX) = NormalizeScalar(left.X, right.X);
+            (float minimumY, float maximumY) = NormalizeScalar(left.Y, right.Y);
+            (float minimumZ, float maximumZ) = NormalizeScalar(left.Z, right.Z);
+            (float minimumW, float maximumW) = NormalizeScalar(left.W, right.W);
+            return ((T)(object)new Vector4(minimumX, minimumY, minimumZ, minimumW),
+                    (T)(object)new Vector4(maximumX, maximumY, maximumZ, maximumW));
+        }
+        if (typeof(T) == typeof(Color))
+        {
+            Color left = (Color)(object)first;
+            Color right = (Color)(object)second;
+            (float minimumRed, float maximumRed) = NormalizeScalar(left.Red, right.Red);
+            (float minimumGreen, float maximumGreen) = NormalizeScalar(left.Green, right.Green);
+            (float minimumBlue, float maximumBlue) = NormalizeScalar(left.Blue, right.Blue);
+            (float minimumAlpha, float maximumAlpha) = NormalizeScalar(left.Alpha, right.Alpha);
+            return ((T)(object)new Color(minimumRed, minimumGreen, minimumBlue, minimumAlpha),
+                    (T)(object)new Color(maximumRed, maximumGreen, maximumBlue, maximumAlpha));
+        }
+        throw new NotSupportedException($"{typeof(T).FullName} is not a supported VFX range element type.");
+    }
+
+    private static (float Minimum, float Maximum) NormalizeScalar(float first, float second)
+    {
+        if (!float.IsFinite(first) || !float.IsFinite(second))
+            throw new ArgumentOutOfRangeException(nameof(first), "VFX range endpoints must be finite.");
+        return (MathF.Min(first, second), MathF.Max(first, second));
+    }
+}
+
 /// <summary>
 /// Entity-scoped control surface for a scene VFX Emitter.
 /// </summary>
 /// <remarks>
 /// The managed handle identifies an entity, not a native VFX generation. <see cref="IsAlive"/> can remain false while
-/// the assigned effect loads asynchronously. Native generation safety is provided internally by <c>Keire::VfxHandle</c>.
+/// the assigned effect loads asynchronously. Native generation safety is provided internally by
+/// <c>Keire::VfxHandle</c>.
 /// </remarks>
 public readonly record struct VfxEmitterHandle(Entity Entity)
 {
@@ -486,6 +580,34 @@ public readonly record struct VfxEmitterHandle(Entity Entity)
     public bool Restart(AssetId effect) => IsValid && NativeRuntime.PlayVfx(Entity, effect, true);
     /// <summary>Assigns <paramref name="effect"/> and replaces only this entity's live instance.</summary>
     public bool Restart(AssetReference<VfxEffect> effect) => Restart(effect.Id);
+    /// <summary>Sets an exposed scalar-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<float> value) => IsValid && parameter.IsValid
+                                                       && NativeRuntime.SetVfxParameter(Entity, parameter, value);
+    /// <summary>Sets an exposed signed-integer-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<long> value) => IsValid && parameter.IsValid
+                                                      && NativeRuntime.SetVfxParameter(Entity, parameter, value);
+    /// <summary>Sets an exposed unsigned-integer-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<ulong> value) => IsValid && parameter.IsValid
+                                                       && NativeRuntime.SetVfxParameter(Entity, parameter, value);
+    /// <summary>Sets an exposed Vector2-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<Vector2> value) => IsValid && parameter.IsValid
+                                                         && NativeRuntime.SetVfxParameter(Entity, parameter, value);
+    /// <summary>Sets an exposed Vector3-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<Vector3> value) => IsValid && parameter.IsValid
+                                                         && NativeRuntime.SetVfxParameter(Entity, parameter, value);
+    /// <summary>Sets an exposed Vector4-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<Vector4> value) => IsValid && parameter.IsValid
+                                                         && NativeRuntime.SetVfxParameter(Entity, parameter, value);
+    /// <summary>Sets an exposed color-range Blackboard parameter on the component and live effect.</summary>
+    public bool SetParameter(AssetId parameter,
+                             VfxRange<Color> value) => IsValid && parameter.IsValid
+                                                       && NativeRuntime.SetVfxParameter(Entity, parameter, value);
 }
 
 /// <summary>High-level Play Mode controls for entity-scoped VFX playback.</summary>
@@ -522,6 +644,36 @@ public static class Vfx
     public static bool Resume(Entity entity) => entity.IsValid && NativeRuntime.PauseVfx(entity, false);
     /// <summary>Reports whether the entity currently owns a live native effect instance.</summary>
     public static bool IsAlive(Entity entity) => entity.IsValid && NativeRuntime.IsVfxAlive(entity);
+    /// <summary>Sets an exposed scalar-range Blackboard parameter on an entity's component and live effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<float> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                        value);
+    /// <summary>Sets an exposed signed-integer-range Blackboard parameter on an entity's component and live
+    /// effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<long> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                       value);
+    /// <summary>Sets an exposed unsigned-integer-range Blackboard parameter on an entity's component and live
+    /// effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<ulong> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                        value);
+    /// <summary>Sets an exposed Vector2-range Blackboard parameter on an entity's component and live effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<Vector2> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                          value);
+    /// <summary>Sets an exposed Vector3-range Blackboard parameter on an entity's component and live effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<Vector3> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                          value);
+    /// <summary>Sets an exposed Vector4-range Blackboard parameter on an entity's component and live effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<Vector4> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                          value);
+    /// <summary>Sets an exposed color-range Blackboard parameter on an entity's component and live effect.</summary>
+    public static bool SetParameter(Entity entity, AssetId parameter,
+                                    VfxRange<Color> value) => new VfxEmitterHandle(entity).SetParameter(parameter,
+                                                                                                        value);
 }
 
 public static class Prefab
