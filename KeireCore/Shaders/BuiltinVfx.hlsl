@@ -31,6 +31,8 @@ cbuffer VfxDispatch : register(b0, space2)
     float4 ColorStart;
     float4 ColorEnd;
     float4 SizeParameters;
+    float4 PreviousEmitterPosition;
+    float4 PreviousEmitterRotation;
     uint4 EmitterIdentity;
 };
 
@@ -120,6 +122,44 @@ void CSReset(uint3 dispatchThreadId : SV_DispatchThreadID)
 }
 
 [numthreads(256, 1, 1)]
+void CSKill(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint index = dispatchThreadId.x;
+    if (index >= ParticleCapacity)
+        return;
+    GpuParticle particle = Particles[index];
+    if (particle.PositionAge.w < 0.0F || any(particle.Identity.xy != EmitterIdentity.xy))
+        return;
+
+    particle.PositionAge.w = -1.0F;
+    Particles[index] = particle;
+    PushFreeIndex(index);
+    uint ignored = 0;
+    Counters.InterlockedAdd(12, 1, ignored);
+}
+
+[numthreads(256, 1, 1)]
+void CSTransform(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint index = dispatchThreadId.x;
+    if (index >= ParticleCapacity)
+        return;
+    GpuParticle particle = Particles[index];
+    if (particle.PositionAge.w < 0.0F || any(particle.Identity.xy != EmitterIdentity.xy))
+        return;
+
+    const float4 inversePreviousRotation = float4(-PreviousEmitterRotation.xyz, PreviousEmitterRotation.w);
+    const float3 localPosition =
+        RotateByQuaternion(particle.PositionAge.xyz - PreviousEmitterPosition.xyz, inversePreviousRotation);
+    particle.PositionAge.xyz = EmitterPosition.xyz + RotateByQuaternion(localPosition, EmitterRotation);
+    particle.VelocityLifetime.xyz = RotateByQuaternion(
+        RotateByQuaternion(particle.VelocityLifetime.xyz, inversePreviousRotation), EmitterRotation);
+    particle.AccelerationSizeEnd.xyz = RotateByQuaternion(
+        RotateByQuaternion(particle.AccelerationSizeEnd.xyz, inversePreviousRotation), EmitterRotation);
+    Particles[index] = particle;
+}
+
+[numthreads(256, 1, 1)]
 void CSSimulate(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     const uint index = dispatchThreadId.x;
@@ -190,7 +230,10 @@ void CSSpawn(uint3 dispatchThreadId : SV_DispatchThreadID)
     particle.Tint = ColorStart;
     particle.SizeRotation =
         float4(max(SizeParameters.x, 0.0F), max(SizeParameters.x, 0.0F), 0.0F, 0.0F);
-    particle.AccelerationSizeEnd = float4(AccelerationShape.xyz, max(SizeParameters.y, 0.0F));
+    const bool localSpace = asuint(SizeParameters.z) == 0;
+    const float3 acceleration =
+        localSpace ? RotateByQuaternion(AccelerationShape.xyz, EmitterRotation) : AccelerationShape.xyz;
+    particle.AccelerationSizeEnd = float4(acceleration, max(SizeParameters.y, 0.0F));
     particle.ColorStart = ColorStart;
     particle.ColorEnd = ColorEnd;
     particle.Identity = EmitterIdentity;

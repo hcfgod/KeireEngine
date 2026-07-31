@@ -6,9 +6,11 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 
@@ -348,6 +350,18 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
 {
     TemporaryPresentationProject project;
     project.Write("OneShot.testaudio", "test");
+    const Keire::AssetId masterBus(0x50524553454e5441ULL, 1);
+    const Keire::AssetId effectsBus(0x50524553454e5441ULL, 2);
+    Keire::AudioMixerDefinition mixerDefinition{
+        .MasterBus = masterBus,
+        .Buses =
+            {
+                {.Id = masterBus, .Name = "Master", .Gain = 1.0F},
+                {.Id = effectsBus, .Name = "Effects", .Parent = masterBus, .Gain = 0.5F},
+            },
+    };
+    const auto mixerBytes = Keire::AudioMixerAsset::Encode(mixerDefinition);
+    project.Write("Runtime.keiremixer", {reinterpret_cast<const char*>(mixerBytes.data()), mixerBytes.size()});
 
     Keire::AssetImporterRegistration importer;
     importer.Name = "Test.AudioClip";
@@ -358,22 +372,26 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
         Keire::AudioClipData clip;
         clip.SampleRate = 48'000;
         clip.Channels = 1;
-        clip.Samples = {0.25F, -0.25F, 0.5F, -0.5F};
+        clip.Samples.assign(64, 0.25F);
         return Keire::AudioClipAsset::Encode(clip);
     };
     Keire::AssetDatabaseSpecification databaseSpecification;
     databaseSpecification.ProjectRoot = project.Root;
     databaseSpecification.Importers.push_back(std::move(importer));
+    databaseSpecification.Importers.push_back(Keire::CreateAudioMixerAssetImporter());
     auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
     const auto imported = database->ImportAll();
     const auto record = database->Find("OneShot.testaudio");
+    const auto mixerRecord = database->Find("Runtime.keiremixer");
     REQUIRE(record);
+    REQUIRE(mixerRecord);
 
     Keire::AssetSystemSpecification assetSpecification;
     assetSpecification.Mode = Keire::AssetMode::Development;
     assetSpecification.DevelopmentCatalog = imported.CatalogPath;
     assetSpecification.WorkerCount = 1;
     assetSpecification.Decoders.push_back(Keire::CreateAudioClipAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateAudioMixerAssetDecoder());
     auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
     Keire::AudioSystemSpecification audioSpecification;
     audioSpecification.Mode = Keire::AudioMode::Headless;
@@ -385,18 +403,67 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     const auto source = sourceEntity.AddComponent<Keire::AudioSourceComponent>();
     REQUIRE(source);
     source->SetClip(record->Id);
+    source->SetMixer(mixerRecord->Id);
+    source->SetBus("Stale legacy bus");
+    source->SetBusId(effectsBus);
+    source->SetLoop(true);
     source->SetPlayOnAwake(true);
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (presentation->Statistics().ActiveAudioSources == 0 && std::chrono::steady_clock::now() < deadline)
+    while ((presentation->Statistics().ActiveAudioSources == 0 || presentation->Statistics().PendingAudioAssets != 0) &&
+           std::chrono::steady_clock::now() < deadline)
     {
         presentation->Synchronize(scene, 320.0F, 180.0F, true);
         (void)assets->PumpCompletions();
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     REQUIRE(presentation->Statistics().ActiveAudioSources == 1);
+    CHECK(presentation->Statistics().PendingAudioAssets == 0);
 
-    (void)audio->RenderVoicesOffline(16);
+    const auto routed = audio->RenderVoicesOffline(1);
+    REQUIRE(routed.size() == 2);
+    const auto centerPanGain = std::sqrt(0.5F);
+    const auto initialRoutedSample = 0.25F * 0.5F * centerPanGain;
+    CHECK(routed[0] == doctest::Approx(initialRoutedSample));
+    CHECK(routed[1] == doctest::Approx(initialRoutedSample));
+
+    mixerDefinition.Buses[1].Gain = 0.25F;
+    const auto revisedMixerBytes = Keire::AudioMixerAsset::Encode(mixerDefinition);
+    project.Write("Runtime.keiremixer",
+                  {reinterpret_cast<const char*>(revisedMixerBytes.data()), revisedMixerBytes.size()});
+    const auto revisedImport = database->ImportAll();
+    CHECK(revisedImport.Imported >= 1);
+    REQUIRE(assets->Unmount(revisedImport.CatalogPath));
+    assets->Mount({revisedImport.CatalogPath, 0, true});
+    REQUIRE(assets->Reload(mixerRecord->Id));
+    const auto revisedRoutedSample = 0.25F * 0.25F * centerPanGain;
+    bool observedRevisedMixer = false;
+    const auto reloadDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!observedRevisedMixer && std::chrono::steady_clock::now() < reloadDeadline)
+    {
+        (void)assets->PumpCompletions();
+        presentation->Synchronize(scene, 320.0F, 180.0F, true);
+        const auto revised = audio->RenderVoicesOffline(1);
+        observedRevisedMixer = revised.size() == 2 && revised[0] == doctest::Approx(revisedRoutedSample) &&
+                               revised[1] == doctest::Approx(revisedRoutedSample);
+        if (!observedRevisedMixer)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(observedRevisedMixer);
+
+    project.Write("Runtime.keiremixer", "{ malformed");
+    CHECK_THROWS_WITH_AS((void)database->ImportAll(), doctest::Contains("Audio mixer source is malformed"),
+                         std::invalid_argument);
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    const auto afterRejectedSource = audio->RenderVoicesOffline(1);
+    REQUIRE(afterRejectedSource.size() == 2);
+    CHECK(afterRejectedSource[0] == doctest::Approx(revisedRoutedSample));
+    CHECK(afterRejectedSource[1] == doctest::Approx(revisedRoutedSample));
+
+    source->SetLoop(false);
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    REQUIRE(presentation->Seek(sourceEntity.Id(), 0.0F));
+    (void)audio->RenderVoicesOffline(128);
     REQUIRE(audio->Voices().empty());
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
@@ -423,7 +490,10 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
     CHECK(audio->Voices().size() == 1);
 
+    const auto mixerRouting = audio->Voices().front().MixerRouting;
+    REQUIRE(mixerRouting);
     presentation->Clear();
+    CHECK_FALSE(audio->UpdateMixer(mixerRouting, mixerDefinition));
     scene->Close();
     assets->Close();
     audio->Close();

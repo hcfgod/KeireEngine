@@ -69,11 +69,15 @@ that immutable pair transactionally rather than resolving a process-global API a
 
 `VfxWorld` remains the backend-neutral scene facade. Render-capable scene sessions select the GPU backend; headless
 tests and explicit compatibility policy select deterministic CPU simulation. GPU snapshots contain only immutable
-per-emitter work descriptors, cumulative spawn sequences, reset revisions, and aggregate limits. They never contain
-per-particle CPU snapshots. The renderer owns persistent particle, free-list, alive-list, counter, event, dispatch, and
-indirect-draw buffers and mutates them only inside an active render frame. Compute initialization, reset, simulation,
-spawn, compaction, and indirect argument finalization precede one indirect output draw. Shutdown releases pipelines
-before the device and treats repeated close as inert.
+per-emitter work descriptors, cumulative spawn sequences, per-handle simulation revisions, a world reset revision, and
+aggregate limits. They never contain per-particle CPU snapshots. The renderer owns persistent particle, free-list,
+alive-list, counter, event, dispatch, and indirect-draw buffers and mutates them only inside an active render frame.
+Generation-qualified kill passes retire particles for one stopped, restarted, naturally completed, or incompatibly
+reloaded handle without clearing unrelated emitters. A transform pass applies Local-space emitter position/rotation
+deltas to that handle's existing position, velocity, and acceleration state. Only `VfxWorld::Clear` advances the
+world-wide reset revision. Compute world initialization, handle retirement, Local transforms, alive-list reset,
+simulation, spawn, compaction, and indirect argument finalization precede one indirect output draw. Shutdown releases
+pipelines before the device and treats repeated close as inert.
 
 Schema-v2 `.keirevfx` documents contain stable systems, contexts, nodes, typed pins, connections, and blackboard
 parameters. The canonical compiler validates stable identity and pin types before producing backend-specific programs.
@@ -532,6 +536,14 @@ The editor writes collider handle changes through `SceneDocument`, so a drag is 
 `PhysicsDebugSnapshot` copies bounded body, contact, and query-ring state only when capture is enabled; the shipping
 default records nothing. Physics Material and collision-mesh references remain ordinary asset dependencies.
 
+## Managed Scripting
+
+`ScriptSystem` owns managed build orchestration, runtime hosting, reflection, generation-safe reload, Behaviour
+instances, and the native call bridge. Private `ManagedSdk` support owns persisted SDK selection and cross-platform
+dotnet discovery, keeping filesystem and process-environment policy out of the runtime implementation. Configuration
+writes preserve unrelated scripting settings, and custom SDK resolution requires a .NET 10 SDK before it can become an
+active build dependency.
+
 ## Managed Data Assets
 
 `.keiredata` stores the authoritative stable managed type ID, a diagnostic type name, stable-field values, and sorted
@@ -549,14 +561,39 @@ is scene to managed data to referenced managed/native assets. Test assemblies ar
 
 `AudioMixerAsset` is an immutable authored definition with stable bus/effect/send/snapshot/ducking IDs and explicit
 AudioClip dependencies for convolution. Audio Source schema 2 forwards legacy string buses while carrying a mixer,
-stable local bus ID, and `Curve1D`. Meter publication is owner-thread bounded and immutable to editor consumers. The
-editor's mixer panel owns a typed `AudioMixerDocument`; preview-through-bus stays unavailable until it can exercise the
-same device DSP graph as runtime, so opening or closing the document cannot create hidden scene state.
+stable local bus ID, and `Curve1D`. Scene presentation resolves revisioned mixer assets, while `AudioSystem` owns
+immutable compiled routing snapshots behind generation-safe registrations. Each presentation releases its
+registrations when a mixer is no longer referenced or the presentation clears, so multiple presentations cannot
+invalidate one another or reuse stale project state. A valid stable bus ID wins over the compatibility name and
+applies its authored fader, mute, solo, and parent hierarchy to existing and new voices; invalid replacement leaves
+the last snapshot active. Legacy string gain and stop controls forward through the currently resolved authored bus
+name, while voice diagnostics report the resolved mixer, bus ID, and registration. Meter publication is owner-thread
+bounded and immutable to editor consumers. The editor's mixer panel owns a typed `AudioMixerDocument`;
+preview-through-bus stays unavailable until it can exercise the same complete device DSP graph as runtime, so opening
+or closing the document cannot create hidden scene state.
 
 `VfxWorld` owns fixed-capacity effect and particle storage. Activation is transactional, handles include generations,
-and revision-aware replacement preserves bounded lifecycle behavior. The CPU path publishes immutable sprite/mesh
-render packets into the transparent pass and records explicit diagnostics when GPU depth or scene-physics requests
-select CPU simulation. Renderer capability flags and sampleable resolved depth are truthful prerequisites for the
-later portable compute/indirect slice. `VfxEffectDocument` exposes the ordered module stack, curves, and gradients
-without exposing ImGui; its panel owns an isolated transient GPU `VfxWorld` whose edit-mode Scene-view snapshot never
-creates entities or mutates the authored scene.
+and revision-aware replacement preserves bounded lifecycle behavior. Non-looping GPU effects advance through their
+particle-drain interval after emission stops so generation-safe handles release at the actual last-death time. The CPU
+path publishes immutable sprite/mesh render packets into the transparent pass and records explicit diagnostics when GPU
+depth or scene-physics requests select CPU simulation.
+
+`VfxEffectDocument` owns transactional systems, nodes, pins, connections, blackboard properties, the ordered executable
+module stack, curves, and gradients without exposing ImGui. All graph edits preserve stable IDs; removing a node or pin
+removes its incident links in the same validated undo command. The panel projects those values into a context-colored
+node canvas and commits graph positions only when a drag finishes. Stored topology is validated and compiled to
+canonical IR, but the modular stack remains the runtime behavior source until a typed operator compiler is introduced.
+
+The editor owns one shared, transient `VfxWorld` for asset-authoring and scene edit-mode previews. It defaults to CPU
+for deterministic authoring and can be rebuilt for GPU runtime inspection. Checked `VfxEmitterComponent` instances are
+synchronized by edit-scene identity, entity, effect/revision, seed, enabled state, simulation speed, and decomposed
+world position/rotation. When an open draft matches an eligible scene emitter, its transient handle replaces one
+selected or deterministic matching scene handle and is routed to that emitter transform. This preserves unsaved draft
+preview while preventing a second copy at world origin; unrelated emitters retain independent handles. World-space
+editor previews restart after authored gizmo relocation so old particle history is not displayed beside the new
+emitter position, while runtime World-space semantics remain unchanged. GPU retirement is generation-qualified, so
+restarting that editor handle preserves the particles and spawn progress of unrelated preview emitters. Local-space
+particles follow synchronized position/rotation changes on both CPU and GPU. Asset preview pause affects only its
+handle; scene emitters continue advancing. Handles are stopped on uncheck, disable, deletion, scene replacement, Play
+transition, panel close where applicable, and shutdown. Capturing that world for the Scene viewport never creates
+entities or mutates authored scene state.

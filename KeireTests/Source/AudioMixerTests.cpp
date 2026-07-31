@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -273,6 +274,189 @@ TEST_CASE("Audio meter snapshots are owner-thread affine, ordered, and bounded")
     audio->Close();
 }
 
+TEST_CASE("Audio voices use stable authored mixer buses and retain the last valid routing snapshot")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    constexpr auto mixer = Id(500);
+
+    auto definition = MixerDefinition();
+    definition.Buses[0].Gain = 0.5F;
+    CHECK_NOTHROW(audio->SubmitMixer(mixer, definition));
+    std::atomic<bool> submitRejected = false;
+    std::atomic<bool> removeRejected = false;
+    std::thread mixerWorker(
+        [audio, &definition, &submitRejected, &removeRejected]
+        {
+            try
+            {
+                audio->SubmitMixer(Id(500), definition);
+            }
+            catch (const std::logic_error&)
+            {
+                submitRejected = true;
+            }
+            try
+            {
+                (void)audio->RemoveMixer(Id(500));
+            }
+            catch (const std::logic_error&)
+            {
+                removeRejected = true;
+            }
+        });
+    mixerWorker.join();
+    CHECK(submitRejected.load());
+    CHECK(removeRejected.load());
+
+    const auto scopedRouting = audio->RegisterMixer(Id(501), definition);
+    REQUIRE(scopedRouting);
+    std::atomic<bool> updateScopedRejected = false;
+    std::atomic<bool> removeScopedRejected = false;
+    std::thread scopedWorker(
+        [audio, scopedRouting, &definition, &updateScopedRejected, &removeScopedRejected]
+        {
+            try
+            {
+                (void)audio->UpdateMixer(scopedRouting, definition);
+            }
+            catch (const std::logic_error&)
+            {
+                updateScopedRejected = true;
+            }
+            try
+            {
+                (void)audio->UnregisterMixer(scopedRouting);
+            }
+            catch (const std::logic_error&)
+            {
+                removeScopedRejected = true;
+            }
+        });
+    scopedWorker.join();
+    CHECK(updateScopedRejected.load());
+    CHECK(removeScopedRejected.load());
+    CHECK(audio->UpdateMixer(scopedRouting, definition));
+    CHECK(audio->UnregisterMixer(scopedRouting));
+
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48'000;
+    clip->Channels = 1;
+    clip->Frames = 8;
+    clip->Samples.assign(8, 0.5F);
+
+    Keire::AudioPlaybackRequest excessiveGain;
+    excessiveGain.Clip = clip;
+    excessiveGain.Gain = 16.01F;
+    CHECK_THROWS_AS((void)audio->Play(std::move(excessiveGain)), std::invalid_argument);
+
+    Keire::AudioPlaybackRequest request;
+    request.Clip = clip;
+    request.Mixer = mixer;
+    request.BusId = Id(2);
+    request.Bus = "Effects";
+    request.Loop = true;
+    request.Spatial = false;
+    const auto voice = audio->Play(std::move(request));
+    REQUIRE(voice);
+
+    Keire::AudioPlaybackRequest mutedRequest;
+    mutedRequest.Clip = clip;
+    mutedRequest.Mixer = mixer;
+    mutedRequest.BusId = Id(3);
+    mutedRequest.Bus = "Music";
+    mutedRequest.Loop = true;
+    mutedRequest.Spatial = false;
+    const auto mutedVoice = audio->Play(std::move(mutedRequest));
+    REQUIRE(mutedVoice);
+
+    const auto first = audio->RenderVoicesOffline(1);
+    REQUIRE(first.size() == 2);
+    CHECK(first[0] == doctest::Approx(0.2F));
+    CHECK(first[1] == doctest::Approx(0.2F));
+
+    definition.Buses[1].Name = "Score";
+    definition.Buses[1].Gain = 0.25F;
+    definition.Buses[1].Solo = true;
+    definition.Buses[2].Mute = false;
+    CHECK_NOTHROW(audio->SubmitMixer(mixer, definition));
+    const auto renamed = audio->RenderVoicesOffline(1);
+    CHECK(renamed[0] == doctest::Approx(0.0625F));
+    CHECK(renamed[1] == doctest::Approx(0.0625F));
+    const auto renamedVoice = audio->Voice(voice);
+    REQUIRE(renamedVoice);
+    CHECK(renamedVoice->Bus == "Score");
+    CHECK(renamedVoice->Mixer == mixer);
+    CHECK(renamedVoice->BusId == Id(2));
+    CHECK_FALSE(renamedVoice->MixerRouting);
+    audio->SetBusGain("Score", 0.5F);
+    const auto stringForwarded = audio->RenderVoicesOffline(1);
+    CHECK(stringForwarded[0] == doctest::Approx(0.03125F));
+    CHECK(stringForwarded[1] == doctest::Approx(0.03125F));
+    audio->SetBusGain("Score", 1.0F);
+
+    auto invalid = definition;
+    invalid.Buses[1].Id = invalid.MasterBus;
+    CHECK_THROWS_AS(audio->SubmitMixer(mixer, invalid), std::invalid_argument);
+    auto overflowing = Keire::AudioMixerAsset::DefaultDefinition();
+    auto parent = overflowing.MasterBus;
+    for (std::uint64_t index = 0; index < 40; ++index)
+    {
+        const auto bus = Id(600 + index);
+        overflowing.Buses.push_back(
+            {.Id = bus, .Name = "Boost " + std::to_string(index), .Parent = parent, .Gain = 16.0F});
+        parent = bus;
+    }
+    CHECK_THROWS_WITH_AS(Keire::ValidateAudioMixer(overflowing),
+                         "Audio mixer effective bus gain exceeds the runtime range.", std::invalid_argument);
+    CHECK_THROWS_WITH_AS((void)Keire::AudioMixerAsset::Encode(overflowing),
+                         "Audio mixer effective bus gain exceeds the runtime range.", std::invalid_argument);
+    CHECK_THROWS_WITH_AS(audio->SubmitMixer(mixer, overflowing),
+                         "Audio mixer effective bus gain exceeds the runtime range.", std::invalid_argument);
+    const auto afterRejectedReplacement = audio->RenderVoicesOffline(1);
+    CHECK(afterRejectedReplacement[0] == doctest::Approx(0.0625F));
+    CHECK(afterRejectedReplacement[1] == doctest::Approx(0.0625F));
+
+    CHECK(audio->StopAll("Effects") == 1);
+    CHECK_FALSE(audio->Voice(mutedVoice));
+    CHECK(audio->Voice(voice));
+    CHECK(audio->RemoveMixer(mixer));
+    CHECK_FALSE(audio->RemoveMixer(mixer));
+    const auto legacyFallback = audio->RenderVoicesOffline(1);
+    CHECK(legacyFallback[0] == doctest::Approx(0.5F));
+    CHECK(legacyFallback[1] == doctest::Approx(0.5F));
+    CHECK(audio->Stop(voice));
+
+    constexpr auto boostedMixer = Id(900);
+    auto boosted = Keire::AudioMixerAsset::DefaultDefinition();
+    parent = boosted.MasterBus;
+    for (std::uint64_t index = 0; index < 31; ++index)
+    {
+        const auto bus = Id(700 + index);
+        boosted.Buses.push_back(
+            {.Id = bus, .Name = "Finite boost " + std::to_string(index), .Parent = parent, .Gain = 16.0F});
+        parent = bus;
+    }
+    CHECK_NOTHROW(audio->SubmitMixer(boostedMixer, boosted));
+    audio->SetBusGain("Master", 16.0F);
+    Keire::AudioPlaybackRequest silentBoosted;
+    silentBoosted.Clip = clip;
+    silentBoosted.Mixer = boostedMixer;
+    silentBoosted.BusId = parent;
+    silentBoosted.Bus = "Missing";
+    silentBoosted.Gain = 0.0F;
+    silentBoosted.Loop = true;
+    silentBoosted.Spatial = false;
+    const auto silentVoice = audio->Play(std::move(silentBoosted));
+    REQUIRE(silentVoice);
+    const auto finiteSilence = audio->RenderVoicesOffline(1);
+    REQUIRE(finiteSilence.size() == 2);
+    CHECK(finiteSilence[0] == 0.0F);
+    CHECK(finiteSilence[1] == 0.0F);
+    audio->Close();
+}
+
 TEST_CASE("Audio voices pause, seek, resume, and report deterministic playback state")
 {
     Keire::AudioSystemSpecification specification;
@@ -313,5 +497,106 @@ TEST_CASE("Audio voices pause, seek, resume, and report deterministic playback s
     CHECK(audio->Voice(voice)->Frame == 7);
     CHECK(audio->Stop(voice));
     CHECK_FALSE(audio->Voice(voice));
+    audio->Close();
+}
+
+TEST_CASE("Paused audio voices yield the audible budget without losing playback position")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    specification.MaximumVoices = 1;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48'000;
+    clip->Channels = 1;
+    clip->Frames = 8;
+    clip->Samples.assign(8, 0.5F);
+
+    Keire::AudioPlaybackRequest highPriority;
+    highPriority.Clip = clip;
+    highPriority.Spatial = false;
+    highPriority.Priority = 255;
+    const auto highVoice = audio->Play(std::move(highPriority));
+
+    Keire::AudioPlaybackRequest lowPriority;
+    lowPriority.Clip = clip;
+    lowPriority.Spatial = false;
+    lowPriority.Priority = 1;
+    const auto lowVoice = audio->Play(std::move(lowPriority));
+
+    REQUIRE(audio->Voice(highVoice));
+    REQUIRE(audio->Voice(lowVoice));
+    CHECK_FALSE(audio->Voice(highVoice)->Virtualized);
+    CHECK(audio->Voice(lowVoice)->Virtualized);
+
+    REQUIRE(audio->Pause(highVoice));
+    CHECK(audio->Voice(highVoice)->Paused);
+    CHECK(audio->Voice(highVoice)->Virtualized);
+    CHECK_FALSE(audio->Voice(lowVoice)->Virtualized);
+    CHECK(audio->Statistics().AudibleVoices == 1);
+
+    (void)audio->RenderVoicesOffline(1);
+    CHECK(audio->Voice(highVoice)->Frame == 0);
+    CHECK(audio->Voice(lowVoice)->Frame == 1);
+
+    REQUIRE(audio->Pause(highVoice, false));
+    CHECK_FALSE(audio->Voice(highVoice)->Paused);
+    CHECK_FALSE(audio->Voice(highVoice)->Virtualized);
+    CHECK(audio->Voice(lowVoice)->Virtualized);
+    CHECK(audio->Statistics().AudibleVoices == 1);
+
+    audio->Close();
+}
+
+TEST_CASE("Muted and solo-excluded mixer voices yield the audible budget while their playheads advance")
+{
+    Keire::AudioSystemSpecification specification;
+    specification.Mode = Keire::AudioMode::Headless;
+    specification.MaximumVoices = 1;
+    auto audio = Keire::CreateRef<Keire::AudioSystem>(specification);
+    constexpr auto mixer = Id(950);
+    auto definition = MixerDefinition();
+    audio->SubmitMixer(mixer, definition);
+
+    auto clip = std::make_shared<Keire::AudioClipData>();
+    clip->SampleRate = 48'000;
+    clip->Channels = 1;
+    clip->Frames = 8;
+    clip->Samples.assign(8, 0.5F);
+
+    Keire::AudioPlaybackRequest inaudible;
+    inaudible.Clip = clip;
+    inaudible.Mixer = mixer;
+    inaudible.BusId = Id(3);
+    inaudible.Priority = 255;
+    inaudible.Spatial = false;
+    const auto inaudibleVoice = audio->Play(std::move(inaudible));
+
+    Keire::AudioPlaybackRequest audible;
+    audible.Clip = clip;
+    audible.Mixer = mixer;
+    audible.BusId = Id(2);
+    audible.Priority = 1;
+    audible.Spatial = false;
+    const auto audibleVoice = audio->Play(std::move(audible));
+
+    REQUIRE(audio->Voice(inaudibleVoice));
+    REQUIRE(audio->Voice(audibleVoice));
+    CHECK(audio->Voice(inaudibleVoice)->Virtualized);
+    CHECK_FALSE(audio->Voice(audibleVoice)->Virtualized);
+    CHECK(audio->Statistics().AudibleVoices == 1);
+
+    const auto muted = audio->RenderVoicesOffline(1);
+    CHECK(muted[0] == doctest::Approx(0.4F));
+    CHECK(muted[1] == doctest::Approx(0.4F));
+    CHECK(audio->Voice(inaudibleVoice)->Frame == 1);
+    CHECK(audio->Voice(audibleVoice)->Frame == 1);
+
+    definition.Buses[1].Solo = true;
+    definition.Buses[2].Mute = false;
+    audio->SubmitMixer(mixer, definition);
+    CHECK(audio->Voice(inaudibleVoice)->Virtualized);
+    CHECK_FALSE(audio->Voice(audibleVoice)->Virtualized);
     audio->Close();
 }

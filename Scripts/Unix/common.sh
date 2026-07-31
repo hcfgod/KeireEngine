@@ -42,9 +42,14 @@ load_project_config() {
 project_generation_fingerprint() {
     local root="$1" source_root
     {
-        for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" AssetTool KeireAssetWorker KeireRuntime Scripts/Premake; do
+        for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" \
+          AssetTool KeireAssetWorker KeireRuntime KeireManaged Scripts/Premake; do
             [[ -d "$root/$source_root" ]] || continue
-            find "$root/$source_root" -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.lua' \) -print
+            find "$root/$source_root" -type f \( \
+              -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
+              -o -name '*.h' -o -name '*.hh' -o -name '*.hpp' -o -name '*.lua' \
+              -o -name '*.cs' -o -name '*.csproj' \
+            \) -print
         done | LC_ALL=C sort
         find "$root" -type f -name 'premake5.lua' -not -path "$root/Build/*" -not -path "$root/Vendor/*" -not -path "$root/Tools/*" -print | LC_ALL=C sort | while IFS= read -r source_root; do
             cksum "$source_root"

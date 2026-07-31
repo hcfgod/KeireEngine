@@ -47,13 +47,14 @@ function Get-ProjectGenerationFingerprint {
         "AssetTool",
         "KeireAssetWorker",
         "KeireRuntime",
+        "KeireManaged",
         "Scripts\Premake"
     )
     $inventory = foreach ($sourceRoot in $sourceRoots) {
         $absoluteRoot = Join-Path $Root $sourceRoot
         if (-not (Test-Path -LiteralPath $absoluteRoot -PathType Container)) { continue }
         Get-ChildItem -LiteralPath $absoluteRoot -Recurse -File | Where-Object {
-            $_.Extension -in @(".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".lua")
+            $_.Extension -in @(".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".lua", ".cs", ".csproj")
         } | ForEach-Object {
             $_.FullName.Substring($Root.ToString().Length).TrimStart("\", "/").Replace("\", "/")
         }

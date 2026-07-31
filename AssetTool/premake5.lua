@@ -1,6 +1,7 @@
 project(AssetToolTarget)
     location "."
     kind "ConsoleApp"
+    dependson { AssetWorkerTarget }
 
     ApplyCommonProjectSettings()
 

@@ -94,15 +94,6 @@
       "renderer": "sprite",
       "sprite": "0a8ba309-c28a-4842-8949-09ff8c60a1fa",
       "type": "renderer"
-    },
-    {
-      "count": 116,
-      "cycles": 13,
-      "enabled": true,
-      "id": "3d02dc95-b6ad-4ba7-bfea-4921cc5c1edc",
-      "interval": 0.12999999523162842,
-      "time": 0.23000000417232513,
-      "type": "burst"
     }
   ],
   "name": "VFX Effect",
@@ -121,8 +112,8 @@
           "id": "56465844-4546-4155-0000-000000000009",
           "pins": [],
           "position": [
-            0.0,
-            0.0
+            -24.801855087280273,
+            23.030303955078125
           ],
           "type": "Spawn Context"
         },
@@ -132,8 +123,8 @@
           "id": "56465844-4546-4155-0000-00000000000a",
           "pins": [],
           "position": [
-            280.0,
-            0.0
+            265.827392578125,
+            21.258731842041016
           ],
           "type": "Initialize Context"
         },

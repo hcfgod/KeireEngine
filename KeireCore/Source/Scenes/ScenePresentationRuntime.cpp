@@ -34,6 +34,13 @@ namespace Keire
             bool Paused = false;
         };
 
+        struct AudioMixerState final
+        {
+            AssetHandle<AudioMixerAsset> Handle;
+            AudioMixerRoutingId Routing;
+            std::uint64_t Revision = 0;
+        };
+
         Impl(Ref<AssetSystem> assets, Ref<AudioSystem> audio, const std::size_t maximumUiElements)
             : Assets(std::move(assets)), Audio(std::move(audio)), UiTree(CreateRef<RuntimeUiTree>(maximumUiElements))
         {
@@ -229,12 +236,58 @@ namespace Keire
         }
 
         [[nodiscard]] AudioPlaybackRequest PlaybackRequest(const Entity entity, const AudioSourceComponent& source,
-                                                           std::shared_ptr<const AudioClipData> clip) const
+                                                           std::shared_ptr<const AudioClipData> clip,
+                                                           const AudioMixerRoutingId mixerRouting) const
         {
             Vector3 position;
             if (const auto transform = entity.GetComponent<TransformComponent>())
                 position = transform->WorldPosition();
-            return source.PlaybackRequest(std::move(clip), position);
+            auto result = source.PlaybackRequest(std::move(clip), position);
+            result.MixerRouting = mixerRouting;
+            if (result.Mixer && !mixerRouting)
+                result.Mixer = {};
+            return result;
+        }
+
+        [[nodiscard]] AudioMixerRoutingId EnsureMixer(const AssetId mixer)
+        {
+            if (!mixer)
+                return {};
+            SeenMixers.insert(mixer);
+            auto& state = AudioMixers[mixer];
+            if (!state.Handle)
+                state.Handle = Assets->Load<AudioMixerAsset>(mixer, AssetPriority::High);
+            const auto loaded = state.Handle.TryGetLoaded();
+            if (!loaded)
+                return {};
+            const auto revision = state.Handle.Revision();
+            if (!state.Routing)
+            {
+                state.Routing = Audio->RegisterMixer(mixer, loaded->Definition());
+                state.Revision = revision;
+            }
+            else if (state.Revision != revision)
+            {
+                if (!Audio->UpdateMixer(state.Routing, loaded->Definition()))
+                    state.Routing = Audio->RegisterMixer(mixer, loaded->Definition());
+                state.Revision = revision;
+            }
+            return state.Routing;
+        }
+
+        void RemoveMixer(AudioMixerState& state) noexcept
+        {
+            if (Audio && state.Routing)
+            {
+                try
+                {
+                    (void)Audio->UnregisterMixer(state.Routing);
+                }
+                catch (...)
+                {
+                }
+            }
+            state.Routing = {};
         }
 
         void StopVoice(AudioSourceState& state) noexcept
@@ -258,7 +311,9 @@ namespace Keire
             if (!Audio)
             {
                 AudioSources.clear();
+                AudioMixers.clear();
                 SeenAudio.clear();
+                SeenMixers.clear();
                 PendingAudio = 0;
                 WasPlaying = false;
                 return;
@@ -273,6 +328,7 @@ namespace Keire
             }
             WasPlaying = playing;
             SeenAudio.clear();
+            SeenMixers.clear();
             std::size_t pending = 0;
             for (const auto entity : scene->Query<AudioSourceComponent>())
             {
@@ -280,6 +336,9 @@ namespace Keire
                     continue;
                 SeenAudio.insert(entity.Id());
                 const auto source = entity.GetComponent<AudioSourceComponent>();
+                const auto mixerRouting = EnsureMixer(source->Mixer());
+                if (source->Mixer() && !mixerRouting)
+                    ++pending;
                 auto& state = AudioSources[entity.Id()];
                 if (state.Clip != source->Clip())
                 {
@@ -307,7 +366,7 @@ namespace Keire
                     state.LoadedClip = loadedClip;
                     state.ManualPlayRequested = state.ManualPlayRequested || resume;
                 }
-                auto specification = PlaybackRequest(entity, *source, state.LoadedClip);
+                auto specification = PlaybackRequest(entity, *source, state.LoadedClip, mixerRouting);
                 if (state.Voice)
                 {
                     if (Audio->SetVoice(state.Voice, specification))
@@ -340,6 +399,16 @@ namespace Keire
                     ++iterator;
             }
             PendingAudio = pending;
+            for (auto iterator = AudioMixers.begin(); iterator != AudioMixers.end();)
+            {
+                if (!SeenMixers.contains(iterator->first))
+                {
+                    RemoveMixer(iterator->second);
+                    iterator = AudioMixers.erase(iterator);
+                }
+                else
+                    ++iterator;
+            }
 
             for (const auto entity : scene->Query<AudioListenerComponent>())
             {
@@ -363,7 +432,9 @@ namespace Keire
         std::set<EntityId> SeenUi;
         std::deque<RuntimeUiEvent> DeferredUiEvents;
         std::map<EntityId, AudioSourceState> AudioSources;
+        std::map<AssetId, AudioMixerState> AudioMixers;
         std::set<EntityId> SeenAudio;
+        std::set<AssetId> SeenMixers;
         std::size_t PendingAudio = 0;
         bool WasPlaying = false;
         std::uint64_t SynchronizationCount = 0;
@@ -414,11 +485,18 @@ namespace Keire
             m_Impl->StopVoice(state);
         }
         m_Impl->AudioSources.clear();
+        for (auto& [mixer, state] : m_Impl->AudioMixers)
+        {
+            (void)mixer;
+            m_Impl->RemoveMixer(state);
+        }
+        m_Impl->AudioMixers.clear();
         m_Impl->UiNodes.clear();
         m_Impl->NodeEntities.clear();
         m_Impl->SeenUi.clear();
         m_Impl->DeferredUiEvents.clear();
         m_Impl->SeenAudio.clear();
+        m_Impl->SeenMixers.clear();
         m_Impl->UiTree->Clear();
         m_Impl->ActiveScene.Reset();
         m_Impl->PendingAudio = 0;

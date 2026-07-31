@@ -176,6 +176,25 @@ TEST_CASE("VFX schema one definitions publish as schema two without mutating the
     CHECK(published->Definition().Systems.front().Nodes.size() == 4);
 }
 
+TEST_CASE("Default VFX effects expose a connected authoring context graph")
+{
+    const auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    REQUIRE(definition.Systems.size() == 1);
+    const auto& system = definition.Systems.front();
+    REQUIRE(system.Nodes.size() == 4);
+    REQUIRE(system.Connections.size() == 3);
+    CHECK(system.Nodes[0].Pins.size() == 1);
+    CHECK(system.Nodes[1].Pins.size() == 2);
+    CHECK(system.Nodes[2].Pins.size() == 2);
+    CHECK(system.Nodes[3].Pins.size() == 1);
+
+    const auto cpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+    const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    CHECK(cpu.Valid);
+    CHECK(gpu.Valid);
+    CHECK(cpu.CanonicalIr == gpu.CanonicalIr);
+}
+
 TEST_CASE("VFX validation rejects malformed assets and invalid stable topology")
 {
     auto definition = EffectDefinition();
@@ -283,6 +302,40 @@ TEST_CASE("CPU VFX simulation is deterministic and snapshots are bounded value o
                     std::invalid_argument);
 }
 
+TEST_CASE("VFX transform updates preserve World particles and move Local particles")
+{
+    const auto captureAfterMove = [](const Keire::VfxSimulationSpace space)
+    {
+        auto definition = EffectDefinition();
+        definition.Space = space;
+        definition.Modules.erase(definition.Modules.begin());
+        auto& burst = std::get<Keire::VfxBurstModule>(definition.Modules.front().Payload);
+        burst.Count = 1;
+        burst.Cycles = 1;
+        auto& initialize = std::get<Keire::VfxInitializeModule>(definition.Modules[2].Payload);
+        initialize.LifetimeMinimum = 5.0F;
+        initialize.LifetimeMaximum = 5.0F;
+        initialize.VelocityMinimum = {};
+        initialize.VelocityMaximum = {};
+        auto& force = std::get<Keire::VfxForceModule>(definition.Modules[3].Payload);
+        force.Force = {};
+        force.GravityMultiplier = 0.0F;
+
+        auto world =
+            Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 4});
+        const auto handle =
+            world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition), 1, {1.0F, 2.0F, 3.0F}});
+        REQUIRE(handle);
+        world->Update(0.01F);
+        REQUIRE(world->CaptureRenderSnapshot().Particles().size() == 1);
+        world->SetTransform(handle, {11.0F, 2.0F, 3.0F}, {});
+        return world->CaptureRenderSnapshot().Particles().front().Position;
+    };
+
+    CHECK(captureAfterMove(Keire::VfxSimulationSpace::World) == (Keire::Vector3{1.0F, 2.0F, 3.0F}));
+    CHECK(captureAfterMove(Keire::VfxSimulationSpace::Local) == (Keire::Vector3{11.0F, 2.0F, 3.0F}));
+}
+
 TEST_CASE("GPU VFX simulation publishes compact emitter work without allocating CPU particles")
 {
     auto definition = EffectDefinition();
@@ -305,6 +358,107 @@ TEST_CASE("GPU VFX simulation publishes compact emitter work without allocating 
     REQUIRE(render.GpuEmitters().size() == 1);
     CHECK(render.GpuEmitters().front().Position == Keire::Vector3{1.0F, 2.0F, 3.0F});
     CHECK(render.GpuEmitters().front().Renderer == Keire::VfxRendererType::Sprite);
+}
+
+TEST_CASE("Stopping one GPU VFX handle preserves unrelated world state")
+{
+    auto definition = EffectDefinition();
+    Keire::VfxWorldSpecification specification;
+    specification.Backend = Keire::VfxBackend::Gpu;
+    specification.MaximumEffects = 2;
+    specification.MaximumParticles = 64;
+    auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+    const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(definition);
+    const auto first = world->Activate({effect, 1, {1.0F, 0.0F, 0.0F}});
+    const auto second = world->Activate({effect, 1, {2.0F, 0.0F, 0.0F}});
+    REQUIRE(first);
+    REQUIRE(second);
+    world->Update(0.1F);
+
+    const auto resetRevision = world->CaptureRenderSnapshot().ResetRevision();
+    world->Stop(first);
+    const auto afterStop = world->CaptureRenderSnapshot();
+    CHECK(afterStop.ResetRevision() == resetRevision);
+    REQUIRE(afterStop.GpuEmitters().size() == 1);
+    CHECK(afterStop.GpuEmitters().front().Handle == second);
+
+    const auto replacement = world->Activate({effect, 1, {3.0F, 0.0F, 0.0F}});
+    REQUIRE(replacement);
+    CHECK(replacement.Index() == first.Index());
+    CHECK(replacement.Generation() != first.Generation());
+    const auto afterReuse = world->CaptureRenderSnapshot();
+    REQUIRE(afterReuse.GpuEmitters().size() == 2);
+    CHECK(afterReuse.GpuEmitters()[0].Handle == replacement);
+    CHECK(afterReuse.GpuEmitters()[1].Handle == second);
+    CHECK(afterReuse.ResetRevision() == resetRevision);
+
+    world->Clear();
+    CHECK(world->CaptureRenderSnapshot().ResetRevision() > resetRevision);
+}
+
+TEST_CASE("Incompatible GPU VFX reloads reset only the reloaded emitter")
+{
+    auto definition = EffectDefinition();
+    Keire::VfxWorldSpecification specification;
+    specification.Backend = Keire::VfxBackend::Gpu;
+    specification.MaximumEffects = 2;
+    specification.MaximumParticles = 64;
+    auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+    const auto first = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition), 1});
+    const auto second = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition), 1});
+    REQUIRE(first);
+    REQUIRE(second);
+    world->Update(0.1F);
+
+    const auto before = world->CaptureRenderSnapshot();
+    REQUIRE(before.GpuEmitters().size() == 2);
+    const auto resetRevision = before.ResetRevision();
+    const auto simulationRevision = before.GpuEmitters()[0].SimulationRevision;
+    const auto survivorSimulationRevision = before.GpuEmitters()[1].SimulationRevision;
+
+    auto compatible = definition;
+    compatible.Name = "Compatible reload";
+    REQUIRE(world->Reload(first, Keire::CreateRef<Keire::VfxEffectAsset>(compatible), 2));
+    auto afterReload = world->CaptureRenderSnapshot();
+    REQUIRE(afterReload.GpuEmitters().size() == 2);
+    CHECK(afterReload.GpuEmitters()[0].SimulationRevision == simulationRevision);
+    CHECK(afterReload.ResetRevision() == resetRevision);
+
+    auto incompatible = compatible;
+    incompatible.EmitterId = Id(900);
+    REQUIRE(world->Reload(first, Keire::CreateRef<Keire::VfxEffectAsset>(incompatible), 3));
+    afterReload = world->CaptureRenderSnapshot();
+    REQUIRE(afterReload.GpuEmitters().size() == 2);
+    CHECK(afterReload.GpuEmitters()[0].SimulationRevision != simulationRevision);
+    CHECK(afterReload.GpuEmitters()[0].SpawnSequence == 0);
+    CHECK(afterReload.GpuEmitters()[1].SimulationRevision == survivorSimulationRevision);
+    CHECK(afterReload.ResetRevision() == resetRevision);
+}
+
+TEST_CASE("Non-looping GPU VFX effects remain alive while particles drain and then release")
+{
+    auto definition = EffectDefinition();
+    definition.Loop = false;
+    definition.Duration = 0.1F;
+    definition.Modules.erase(definition.Modules.begin() + 1);
+    auto& initialize = std::get<Keire::VfxInitializeModule>(definition.Modules[2].Payload);
+    initialize.LifetimeMinimum = 0.25F;
+    initialize.LifetimeMaximum = 0.25F;
+
+    Keire::VfxWorldSpecification specification;
+    specification.Backend = Keire::VfxBackend::Gpu;
+    specification.MaximumEffects = 1;
+    specification.MaximumParticles = 64;
+    auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+    const auto handle = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)});
+    REQUIRE(handle);
+
+    world->Update(0.1F);
+    CHECK(world->IsAlive(handle));
+    world->Update(0.2F);
+    CHECK(world->IsAlive(handle));
+    world->Update(0.1F);
+    CHECK_FALSE(world->IsAlive(handle));
 }
 
 TEST_CASE("Headless rendering consumes immutable VFX packets without advertising GPU support")

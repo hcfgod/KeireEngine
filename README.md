@@ -177,7 +177,10 @@ hovered; the Scene viewport retains its independent editor camera and navigation
 Use **Build > Build Scripts** or `Ctrl+Shift+B` to compile gameplay assemblies immediately. The editor also schedules
 an initial script build when opening a project and writes compiler diagnostics to the Console.
 Source checkouts compile `Keire.Managed` into the same immutable script generation before gameplay assemblies; packaged
-editors copy their bundled API into that generation. Reload therefore never combines new scripts with a stale API DLL.
+editors copy their bundled API into that generation. Repository build launchers also rebuild the managed runtime API
+before native targets. Generated Ninja, Make, Visual Studio, and Xcode projects carry the same input-aware dependency,
+so direct project builds cannot consume a stale API DLL either. Reload therefore never combines new scripts with a
+stale API DLL.
 
 Managed gameplay now receives one shared opaque world identity per runtime scene instead of a Behaviour-instance ID.
 `Input.Held`, `Input.Pressed`, and `Input.Released` expose action phases, scene-safe entity cloning and deferred
@@ -251,10 +254,11 @@ interpolation, immutable DSP graphs, meters, and deterministic offline interleav
 hardware. Invalid graph replacement remains transactional. `.keiremixer` assets define a stable Master-rooted bus
 hierarchy, ordered effect racks, pre/post-fader sends, snapshots, sidechain ducking, and convolution dependencies.
 Create mixers and Audio Reverb Zones from the normal Project and component menus. Double-click a mixer to open its
-dockable bus, routing, effects, sends, snapshots, and ducking editor; preview controls remain disabled until the live
-device DSP path can route through the selected stable bus. Project settings select the default mixer that becomes a
-cook root. The current live device path still routes through the compatible string bus; mixer graph execution,
-selected-bus audition, and reverb-zone evaluation remain the next Audio runtime slice.
+dockable bus, routing, effects, sends, snapshots, and ducking editor. Scene playback resolves mixer revisions into
+scoped transactional routing snapshots; stable bus IDs drive fader, mute, solo, and parent-bus gain on both device
+and headless paths, with bus names retained as a compatibility fallback. Project settings select the default mixer that
+becomes a cook root. Mixer effect/send graph execution, selected-bus audition, and reverb-zone evaluation remain the
+next Audio runtime slice, so preview controls stay disabled until preview can match that complete runtime path.
 
 Physics Play sessions and cooked runtimes create their scene-owned Jolt world eagerly. Fixed simulation runs gameplay
 `FixedUpdate`, pushes authored and kinematic state, steps Jolt, pulls dynamic transforms, then dispatches ordered
@@ -295,11 +299,14 @@ shapes, initialization, forces, size curves, color gradients, collision, and spr
 `VfxWorld` supplies generation-safe handles, fixed global/effect budgets, pooled steady-state simulation, revision-aware
 reload, diagnostics, and immutable debug/render snapshots. The deterministic CPU path is active on every backend;
 GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
-Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed; textured
-the deterministic compatibility backend. GPU compute simulation and indirect sprite output are active; ribbons,
-decals, mesh particles, and volumetrics remain explicit advanced-output slices. Double-click a VFX asset to author its
-modules, curves, and gradients in a dockable typed document; live scene preview remains explicitly unavailable until
-the editor owns a transient preview-world boundary.
+Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed. GPU compute
+simulation and indirect sprite output are active; ribbons, decals, mesh particles, and volumetrics remain explicit
+advanced-output slices. Double-click a VFX asset to open the dockable Graph, Runtime Modules, Blackboard, and Effect
+Settings workflows. The authoring preview defaults to the stable CPU backend and can switch to the runtime GPU backend.
+In a scene, enable **Preview In Edit Mode** on a VFX Emitter to synchronize its assigned effect, revision, seed,
+simulation speed, enabled state, and world position/rotation without entering Play Mode or dirtying the scene.
+The [VFX Authoring And Runtime guide](docs/Vfx.md) covers the complete graph workflow, Runtime Modules, visual
+diagrams, scene setup, C++ and C# control, backend differences, recipes, and troubleshooting.
 
 ## Windowing And Configuration
 
@@ -308,13 +315,21 @@ the editor owns a transient preview-world boundary.
 VFX effects publish schema-v2 graph documents with stable systems, nodes, pins, connections, contexts, and typed
 blackboard parameters. Opening or previewing a schema-v1 module effect is non-destructive; the compatibility adapter
 publishes schema v2 only when the user saves. Render-capable scene sessions use persistent structure-of-arrays GPU
-buffers, free/alive lists, compute spawn/update/compaction, and indirect sprite draws. Headless sessions and unsupported
-features use the deterministic bounded CPU backend and report degradation instead of silently changing behavior.
+buffers, free/alive lists, compute spawn/update/compaction, Local-space transform following, generation-qualified
+per-handle retirement, and indirect sprite draws. Stopping or restarting one GPU effect preserves unrelated emitters;
+`VfxWorld::Clear` remains the explicit world-wide reset. Headless sessions and unsupported features use the
+deterministic bounded CPU backend and report degradation instead of silently changing behavior.
 
-The VFX Effect panel exposes graph topology plus separate **Compile Graph** and **Validate CPU Fallback** actions.
-`VfxEmitterComponent` provides quality, culling, bounds, seed, speed, Play On Awake, Edit Mode preview, and
-auto-destroy authoring. Managed scripts can control emitters through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`,
-`Vfx.Restart`, `Vfx.Stop`, and generation-safe `VfxEmitterHandle` values.
+The VFX Effect panel authors systems, draggable context cards, typed pins and links, custom HLSL source, and typed
+blackboard defaults with stable IDs, undo/redo, automatic incident-link cleanup, and truthful CPU/GPU compile
+diagnostics. Context cards also summarize the executable modular stack, which remains the runtime behavior source for
+this milestone. The toolbar provides restart, pause/resume, looping, backend, speed, active-particle, and dropped-particle
+controls. `VfxEmitterComponent` provides quality, culling, bounds, seed, speed, Play On Awake, Edit Mode preview, and
+auto-destroy authoring. Managed scripts can control emitters through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, and
+`Vfx.Stop`; entity-scoped `VfxEmitterHandle` values also provide `Restart`. Native `VfxHandle` values are
+generation-safe. Operator catalogs, executable cable
+semantics, subgraphs, events, ribbons, trails, decals, and volumetric outputs remain later compiler/runtime milestones;
+the editor does not present stored topology as executable behavior.
 
 Animation-only FBX/glTF imports now publish `AnimationSourceAsset` as their effective primary type and retain stable
 skeleton, rig, and clip subasset IDs. They never pass through mesh vertex validation. Reimport changes metadata,
@@ -346,6 +361,8 @@ mutating authored UI or audio components.
 
 Selecting an audio asset shows codec, channel, sample-rate, duration, frame-count, and streaming metadata in Inspector,
 with Preview, Stop, and Reimport controls. Project thumbnails display a waveform for resident and streaming clips.
+The sandbox's two PCM examples are deterministic repository-owned test tones; regenerate them with
+`Scripts/Assets/generate-sample-audio.ps1`.
 Audio Source schema 2 exposes clip, mixer, stable bus identity with the legacy bus-name fallback, gain, pitch, priority,
 looping, spatialization, min/max distance, a reusable attenuation curve, and Play On Awake through the normal component
 Inspector, scene serialization, undo, and prefab-override workflow. Existing schema-1 sources migrate without changing
@@ -503,10 +520,10 @@ production surface uses base-color, +Y normal, packed metallic-roughness, separa
 emissive semantics with neutral fallbacks. Edits are range-checked, previewed through live immutable revisions, saved
 atomically at the edit boundary, persisted to the catalog in the background, and recorded in project-asset undo.
 
-The Sandbox startup scene uses an imported textured monster from `Assets/Meshes/Monster/base.fbx` and a UV-mapped
-pyramid through the same renderer-owned resource caches used by the editor. Dist cooking follows
-scene-to-material-to-shader/texture dependencies and emits a
-runtime manifest; omit `--frames` to run the cooked scene as the normal standalone player.
+The Sandbox startup scene uses an imported humanoid model from `Assets/Meshes/T-Pose.fbx`, an Idle animation source,
+and a UV-mapped pyramid through the same renderer-owned resource caches used by the editor. Dist cooking follows
+scene-to-controller-to-clip and scene-to-material-to-shader/texture dependencies and emits a runtime manifest; omit
+`--frames` to run the cooked scene as the normal standalone player.
 
 ## Projects And Scenes
 

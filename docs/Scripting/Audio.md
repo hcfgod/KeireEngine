@@ -72,11 +72,17 @@ if (!source.Play())
     Debug.Warn("Audio Source playback was rejected.");
 ```
 
+An `AudioSourceHandle` never creates a missing component. Its property getters and setters throw
+`InvalidOperationException` when the entity does not have an Audio Source, so check `IsValid` or add the component
+explicitly. `Volume` must be finite and between `0.0` and `16.0`; `Pitch` must be finite, greater than `0.01`, and at
+most `8.0`. Invalid scalar assignments throw `ArgumentOutOfRangeException` before native state is changed.
+
 Control playback:
 
 ```csharp
 source.Pause();
-source.Time = 0.5f;
+if (!source.Seek(0.5f))
+    Debug.Warn("Audio Source seek was rejected.");
 source.Resume();
 source.Stop();
 ```
@@ -92,7 +98,8 @@ if (source.IsPlaying)
 ```
 
 `Pause` preserves the playhead. `Seek` and assigning `Time` require a finite, non-negative time. Native playback may
-still reject a valid command when the source or voice cannot perform it; the methods return `bool`.
+still reject a valid command when the source or voice cannot perform it; `Seek` returns `false`, while assigning `Time`
+throws `InvalidOperationException`.
 
 ## Playback Patterns
 
@@ -136,7 +143,7 @@ Check the return value when playback failure matters to the game.
 
 | Property | Default | Valid contract |
 | --- | --- | --- |
-| `Bus` | `"SFX"` | Non-empty, at most 128 characters |
+| `Bus` | `"SFX"` | Non-empty, at most 128 UTF-8 bytes |
 | `Mixer` | Invalid reference | Optional typed `AssetReference<AudioMixer>` |
 | `BusId` | Invalid ID | Optional stable mixer bus identity |
 | `Gain` | `1.0` | Finite, `0.0` through `16.0` |
@@ -171,8 +178,11 @@ AudioPlaybackOptions options = new()
 };
 ```
 
-The bus name remains the compatibility fallback. Prefer stable bus identity for authored mixer routing when the caller
-has it, while keeping a valid non-empty fallback name.
+When the mixer asset is available, `BusId` selects its compiled fader, mute, solo, and parent-bus routing even if the
+bus was renamed. If the stable ID is empty or no longer exists, the runtime looks up `Bus`; if neither resolves, it
+routes to that mixer's Master bus. Until a referenced mixer is loaded, playback uses the legacy bus-name path. Mixer
+asset revisions replace the routing snapshot transactionally, so voices already playing observe a valid hot reload.
+Runtime diagnostics and legacy string controls use the bus's currently resolved authored name after a rename.
 
 ## Animation-Driven Audio
 
@@ -226,6 +236,7 @@ input handler.
 | Cannot compare the clip with `null` | `AssetReference<T>` is a value type | Check `.IsValid` |
 | `Play()` returns `false` | Source, voice, or runtime playback rejected the command | Validate the entity, component, clip, and runtime state |
 | `Audio.Play` throws for the clip | The reference ID is invalid | Guard with `.IsValid` |
+| Audio Source property throws | The handle is invalid or the value is outside its documented range | Check `source.IsValid` and validate the value |
 | Options throw | Gain, pitch, priority, bus, or distance range violates the contract | Validate values before constructing the request |
 | Audio is unexpectedly spatial | Default `Spatial` is `true` | Set `Spatial = false` for UI/global audio |
 

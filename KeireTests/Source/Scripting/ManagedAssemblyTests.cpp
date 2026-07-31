@@ -1,7 +1,9 @@
 #include "Keire/ECS/Component.h"
+#include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
+#include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <doctest/doctest.h>
 
@@ -49,6 +51,45 @@ TEST_CASE("Managed assembly definitions round trip and expose dependencies")
     const auto importer = Keire::CreateManagedAssemblyAssetImporter();
     const auto output = importer.ContextualImport({}, Keire::ManagedAssemblyAsset::Encode(definition));
     CHECK(output.AssetDependencies == definition.References);
+}
+
+TEST_CASE("Managed SDK settings preserve project data and resolve a validated custom SDK")
+{
+    const auto root = std::filesystem::temp_directory_path() / ("Keire-ManagedSdk-" + TestAsset(89).ToString());
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{root};
+    const auto settings = root / "ProjectSettings/Scripting.keiresettings";
+    const auto sdkRoot = root / "CustomSdk";
+#if defined(_WIN32)
+    const auto dotnet = sdkRoot / "dotnet.exe";
+#else
+    const auto dotnet = sdkRoot / "dotnet";
+#endif
+    std::filesystem::create_directories(settings.parent_path());
+    std::filesystem::create_directories(sdkRoot / "sdk/10.0.100");
+    std::ofstream(settings) << R"({"unrelated":17,"sdkSelection":"custom","customSdkExecutable":")"
+                            << dotnet.generic_string() << R"("})";
+    std::ofstream(dotnet, std::ios::binary) << "fixture";
+
+    const auto loaded = Keire::Detail::ReadManagedSdkConfiguration(root, {});
+    CHECK(loaded.Selection == Keire::ManagedSdkSelection::Custom);
+    CHECK(loaded.CustomExecutable == dotnet);
+    CHECK(Keire::Detail::ResolveDotnet(loaded.CustomExecutable, loaded.Selection, root, {}) ==
+          std::filesystem::absolute(dotnet).lexically_normal());
+
+    Keire::Detail::WriteManagedSdkConfiguration(root, {Keire::ManagedSdkSelection::SystemPath, dotnet});
+    const auto rewritten = ReadBytes(settings);
+    const std::string text(reinterpret_cast<const char*>(rewritten.data()), rewritten.size());
+    CHECK(text.find(R"("unrelated": 17)") != std::string::npos);
+    CHECK(text.find(R"("sdkSelection": "systemPath")") != std::string::npos);
+    CHECK(text.find(dotnet.generic_string()) != std::string::npos);
 }
 
 TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
@@ -286,8 +327,43 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\")] "
                   "public float Speed = 7.5f; "
                   "[SerializeField] public float ConsumedSpeed = -1.0f; "
+                  "[SerializeField] public bool SeekFailureObserved = false; "
+                  "[SerializeField] public bool ClipFailureObserved = false; "
+                  "[SerializeField] public bool ClipDidNotAddSource = false; "
+                  "[SerializeField] public bool Utf8BusLimitObserved = false; "
+                  "[SerializeField] public bool Utf8BusBoundaryAccepted = false; "
+                  "[SerializeField] public bool RunAudioScalarValidation = false; "
+                  "[SerializeField] public bool VolumeValidationObserved = false; "
+                  "[SerializeField] public bool PitchValidationObserved = false; "
                   "protected override void Awake() { Speed += 1.0f; } "
-                  "protected override void FixedUpdate() { ConsumedSpeed = Speed; } "
+                  "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
+                  "try { var source = Entity.AudioSource; source.Time = 0.5f; } "
+                  "catch (System.InvalidOperationException) { SeekFailureObserved = true; } "
+                  "if (RunAudioScalarValidation) ValidateAudioScalars(); "
+                  "else { ValidateMissingAudioSource(); ValidateAudioBusNames(); } } "
+                  "private void ValidateMissingAudioSource() { "
+                  "try { var source = Entity.AudioSource; "
+                  "source.Clip = new AssetReference<AudioClip>(new AssetId(1, 2)); } "
+                  "catch (System.InvalidOperationException) { ClipFailureObserved = true; } "
+                  "ClipDidNotAddSource = !Entity.HasComponent<AudioSourceComponent>(); } "
+                  "private void ValidateAudioBusNames() { var clip = new AssetId(1, 2); "
+                  "try { Audio.Play(Entity, clip, new AudioPlaybackOptions { "
+                  "Bus = new string('\\u00e9', 65) }); } "
+                  "catch (System.ArgumentException) { Utf8BusLimitObserved = true; } "
+                  "try { _ = Audio.Play(Entity, clip, new AudioPlaybackOptions { "
+                  "Bus = new string('\\u00e9', 64) }); Utf8BusBoundaryAccepted = true; } "
+                  "catch (System.ArgumentException) { } } "
+                  "private void ValidateAudioScalars() { var source = Entity.AudioSource; "
+                  "source.Volume = 16.0f; var volumeFailures = 0; "
+                  "foreach (var value in new float[] { float.NaN, -0.01f, 16.01f }) { "
+                  "try { source.Volume = value; } "
+                  "catch (System.ArgumentOutOfRangeException) { volumeFailures++; } } "
+                  "VolumeValidationObserved = volumeFailures == 3 && source.Volume == 16.0f; "
+                  "source.Pitch = 8.0f; var pitchFailures = 0; "
+                  "foreach (var value in new float[] { float.PositiveInfinity, 0.01f, 8.01f }) { "
+                  "try { source.Pitch = value; } "
+                  "catch (System.ArgumentOutOfRangeException) { pitchFailures++; } } "
+                  "PitchValidationObserved = pitchFailures == 3 && source.Pitch == 8.0f; } "
                   "protected override void OnBeforeReload() { Speed += 1.0f; } "
                   "protected override void OnAfterReload() { Speed += 1.0f; } } "
                   "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
@@ -392,7 +468,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     INFO(play->Diagnostic().Message);
     REQUIRE(play->State() == Keire::ScenePlayState::Playing);
     REQUIRE(play->RuntimeScene());
-    const auto runtimeEntity = play->RuntimeScene()->FindEntity(scriptedEntity.Id());
+    auto runtimeEntity = play->RuntimeScene()->FindEntity(scriptedEntity.Id());
     REQUIRE(runtimeEntity);
     const auto runtimeComponent = runtimeEntity.GetComponent(componentType);
     REQUIRE(runtimeComponent);
@@ -415,14 +491,37 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto consumedValues = registration->Serialize(*runtimeComponent);
     REQUIRE(consumedValues.contains("Speed"));
     REQUIRE(consumedValues.contains("ConsumedSpeed"));
+    REQUIRE(consumedValues.contains("SeekFailureObserved"));
+    REQUIRE(consumedValues.contains("ClipFailureObserved"));
+    REQUIRE(consumedValues.contains("ClipDidNotAddSource"));
+    REQUIRE(consumedValues.contains("Utf8BusLimitObserved"));
+    REQUIRE(consumedValues.contains("Utf8BusBoundaryAccepted"));
     CHECK(std::get<double>(consumedValues.at("Speed")) == doctest::Approx(12.25));
     CHECK(std::get<double>(consumedValues.at("ConsumedSpeed")) == doctest::Approx(12.25));
+    CHECK(std::get<bool>(consumedValues.at("SeekFailureObserved")));
+    CHECK(std::get<bool>(consumedValues.at("ClipFailureObserved")));
+    CHECK(std::get<bool>(consumedValues.at("ClipDidNotAddSource")));
+    CHECK(std::get<bool>(consumedValues.at("Utf8BusLimitObserved")));
+    CHECK(std::get<bool>(consumedValues.at("Utf8BusBoundaryAccepted")));
+    CHECK_FALSE(runtimeEntity.HasComponent<Keire::AudioSourceComponent>());
+
+    REQUIRE(runtimeEntity.AddComponent<Keire::AudioSourceComponent>());
+    auto scalarValidationValues = consumedValues;
+    scalarValidationValues.insert_or_assign("RunAudioScalarValidation", true);
+    registration->Deserialize(*runtimeComponent, scalarValidationValues, registration->SchemaVersion);
+    CHECK_NOTHROW(play->FixedUpdate(1.0F / 60.0F));
+    const auto scalarResults = registration->Serialize(*runtimeComponent);
+    REQUIRE(scalarResults.contains("VolumeValidationObserved"));
+    REQUIRE(scalarResults.contains("PitchValidationObserved"));
+    CHECK(std::get<bool>(scalarResults.at("VolumeValidationObserved")));
+    CHECK(std::get<bool>(scalarResults.at("PitchValidationObserved")));
 
     const auto editingValues = registration->Serialize(*editingComponent);
     REQUIRE(editingValues.contains("managedState"));
     REQUIRE(editingValues.contains("Speed"));
     CHECK(std::get<std::string>(editingValues.at("managedState")) == editingStateBeforePlay);
     CHECK(std::get<double>(editingValues.at("Speed")) == doctest::Approx(5.0));
+    CHECK_FALSE(scriptedEntity.HasComponent<Keire::AudioSourceComponent>());
     CHECK_FALSE(editingScene->Dirty());
     play->Stop();
     CHECK(std::get<double>(registration->Serialize(*editingComponent).at("Speed")) == doctest::Approx(5.0));

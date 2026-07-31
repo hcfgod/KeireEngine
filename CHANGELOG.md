@@ -1,10 +1,57 @@
 # Changelog
 
+All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic
+version tags.
+
+## Unreleased
+
+- Made the normal Windows, Linux, and macOS test entrypoints compile the complete client, repaired the relocated
+  Animator Controller regression fixture, and added cross-platform checks for both safeguards.
+- Replaced undocumented sandbox music with small deterministic repository-owned PCM test tones while preserving the
+  scene's audio asset identities, and documented their reproducible generator and licensing provenance.
+- Made AssetTool worker import deadlines configurable, separated managed SDK selection and discovery from the
+  managed runtime implementation, and added focused configuration, resolution, and script regression coverage.
+- Fixed edit-mode VFX duplication when an open asset draft and a matching scene emitter were previewed together. The
+  live draft now replaces one selected/deterministic matching scene handle at its world position and rotation, while
+  unrelated emitters remain visible. Moving a World-space emitter restarts only its editor preview so old particle
+  history cannot remain beside the gizmo. GPU Local-space particles now follow emitter transforms, and
+  generation-qualified retirement and per-handle simulation revisions keep stop, restart, and incompatible reload
+  from resetting unrelated GPU effects; `Clear` remains world-wide. Added an extensive visual, editor, C++, and C# VFX
+  guide plus public API documentation.
+- Fixed edit-mode VFX preview flicker and disappearing effects by wiring `Preview In Edit Mode` to an editor-owned
+  world that synchronizes enabled scene emitters by entity, effect revision, seed, simulation speed, and world
+  position/rotation. Asset-authoring and scene previews now coexist, pause independently, and stop deterministically
+  across panel, scene, and Play Mode transitions.
+- Rebuilt the VFX Effect editor as a context-colored node graph with systems, draggable cards, typed pins and links,
+  blackboard properties, runtime-module context summaries, focused inspectors, truthful compile results, and
+  restart/pause/loop/backend/speed/statistics preview controls.
+- Added transactional, undoable VFX graph mutations with stable-ID enforcement and incident-link cleanup, connected
+  starter graphs for new effects, and correct non-looping GPU effect drainage.
 - Added a comprehensive C# scripting documentation section covering managed assemblies, lifecycle and reload,
   serialization, entities and components, assets and ScriptableObjects, gameplay services, audio, animation, UI and
   events, async diagnostics, troubleshooting, and managed API lookup.
 - Added typed managed audio mixer, animation clip, and Animator Controller references; stateful Audio Source
   play/pause/resume/seek/status and live properties; and Animator play/cross-fade/stop/pause/speed/state controls.
+- Fixed paused audio voices retaining an audible virtualization slot and muting lower-priority voices that were still
+  actively playing.
+- Made `AudioSourceHandle.Time` assignments report native seek rejection instead of silently discarding it.
+- Prevented invalid `AudioSourceHandle.Clip` assignments from creating missing components, matched managed bus-name
+  validation to the native 128-byte UTF-8 limit, and validated Audio Source volume and pitch before native mutation.
+- Routed device and headless voices through scoped, revisioned Audio Mixer bus snapshots so stable bus IDs survive
+  renames, authored fader/mute/solo hierarchies hot-apply, malformed replacements retain the last valid routing, and
+  cleared presentations cannot leak stale registrations. Muted routes now yield scarce audible voice slots.
+- Ensured repository build launchers and generated Ninja, Make, Visual Studio, and Xcode projects refresh the managed
+  runtime API before native compilation, preventing direct builds and managed integration tests from consuming a
+  stale `Keire.Managed.dll`.
+- Made AssetTool import and cook use the packaged private asset worker, and taught cooking to restore validated
+  dependency-free outputs from the persistent cache, so FFmpeg-backed audio sources cook without exposing the private
+  codec backend through public engine or SDK boundaries. Linux and macOS worker codec lookup now uses their respective
+  relocatable `$ORIGIN` and `@loader_path`/`@rpath` conventions.
+- Bounded transactional cook/staging token lengths and made Windows native renames extended-path aware, preventing
+  content-addressed pack publication from failing when package staging paths cross the legacy 260-character limit.
+- Removed a Windows package-smoke race by explicitly owning, waiting, reading, and disposing the short-lived
+  invalid-option client process instead of querying a `Start-Process` object after the client had already exited.
+- Removed three orphaned Sandbox metadata sidecars left behind by temporary and backup source files.
 - Matched SDL's GPU presentation queue to Kéire's configured frames-in-flight policy and split command-recording
   statistics into skinning, VFX, draw preparation, shadows, Forward+, scene, depth, tone mapping, and residual overhead.
 - Recorded steady-state skinning, instancing, and Forward+ uploads directly into the frame command buffer, removing the
@@ -247,10 +294,6 @@
   project trash mutations avoid full worker imports, restore collisions discard stale trash, and complete folder cards
   accept asset and GameObject drops.
 
-All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic version tags.
-
-## Unreleased
-
 - Fixed animated mesh corruption by retaining same-frame GPU upload transfer buffers until the consuming frame fence
   completes, with safe failure/shutdown cleanup and bounded CPU skin deformation.
 - Preserved authored animation tracks for bind-compatible exact-name skeletons and restored GPU skinning on D3D12,
@@ -409,8 +452,8 @@ All notable template changes are documented here. The format follows Keep a Chan
 ### Fixed
 
 - Successful imports now atomically advance compatible `.keiremeta` importer versions without rewriting stable IDs,
-  settings, dependencies, or project-owned fields; failed imports leave metadata byte-identical. The Sandbox contains
-  one organized monster FBX at `Assets/Meshes/Monster/base.fbx` with its active scene identity preserved.
+  settings, dependencies, or project-owned fields; failed imports leave metadata byte-identical. Sandbox validation
+  now checks the current T-Pose model and Idle animation metadata against their scene and controller references.
 - Asset move, folder, trash/restore, and cooked-publication renames now retry only transient sharing/permission
   failures with bounded backoff and resolved-path diagnostics. Script harnesses rely on compiled editor behavior tests
   instead of stale implementation-text probes while still proving top-level launcher failure propagation.

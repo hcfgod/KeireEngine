@@ -29,4 +29,6 @@ project(ProjectConfig.TESTS_TARGET)
 
     LinkKeireCore()
 
+    AddKeireManagedRuntimeDependency()
+
     LinkSDL3()

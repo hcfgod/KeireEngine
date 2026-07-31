@@ -7,6 +7,7 @@
 #include <atomic>
 #include <exception>
 #include <mutex>
+#include <string>
 #include <thread>
 
 namespace Keire
@@ -50,8 +51,13 @@ namespace Keire
             if (profile.Strict && record.Importer != ImporterName(record.Type) &&
                 !database.m_Impl->FindImporter(record))
                 throw std::runtime_error("Strict cooking rejected an unsupported importer: " + record.Importer);
-            auto cached = database.m_Impl->TakeCookInput(record);
-            auto imported = cached ? std::move(*cached) : database.m_Impl->Import(record);
+            AssetImportOutput imported;
+            if (auto cached = database.m_Impl->TakeCookInput(record))
+                imported = std::move(*cached);
+            else if (auto restored = database.m_Impl->RestoreCachedImport(record))
+                imported = std::move(*restored);
+            else
+                imported = database.m_Impl->Import(record);
             auto dependencies = record.Dependencies;
             for (const auto dependency : imported.AssetDependencies)
             {
@@ -263,7 +269,10 @@ namespace Keire
             }
         }
         const auto destination = std::filesystem::absolute(outputDirectory).lexically_normal();
-        const auto temporary = Detail::PathWithSuffix(destination, ".tmp-" + AssetId::Generate().ToString());
+        auto temporaryToken = AssetId::Generate().ToString();
+        std::erase(temporaryToken, '-');
+        temporaryToken.resize(20);
+        const auto temporary = Detail::PathWithSuffix(destination, ".tmp-" + temporaryToken);
         std::filesystem::create_directories(temporary);
 
         AssetCookResult result;

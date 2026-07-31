@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
+#include "KeireClient/Editor/EditModeVfxPreview.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -49,6 +50,7 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -1926,6 +1928,30 @@ std::string_view EditorWorkspaceLayer::VfxEffectPreviewDiagnostic() const noexce
     return m_VfxEffectPreviewDiagnostic;
 }
 
+KeireEditor::VfxEffectPreviewStatus EditorWorkspaceLayer::VfxEffectPreviewState() const noexcept
+{
+    KeireEditor::VfxEffectPreviewStatus result;
+    result.Active = m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
+                    m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle);
+    result.Paused = m_VfxEffectPreviewPaused;
+    result.AutoRestart = m_VfxEffectPreviewAutoRestart;
+    result.Backend = m_VfxEffectPreviewBackend;
+    result.Speed = m_VfxEffectPreviewSpeed;
+    if (m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle)
+    {
+        const auto snapshot = m_VfxEffectPreviewWorld->CaptureDebugSnapshot();
+        for (std::size_t index = 0; index < snapshot.EffectCount; ++index)
+        {
+            if (snapshot.Effects[index].Handle != m_VfxEffectPreviewHandle)
+                continue;
+            result.ActiveParticles = snapshot.Effects[index].ActiveParticles;
+            result.DroppedParticles = snapshot.Effects[index].DroppedParticles;
+            break;
+        }
+    }
+    return result;
+}
+
 void EditorWorkspaceLayer::ActivateVfxEffectHistory() noexcept
 {
     m_ActiveUndoContext = m_VfxEffectDocument->UndoContext();
@@ -1985,15 +2011,371 @@ Keire::VfxRenderSnapshot EditorWorkspaceLayer::SceneViewportEditVfx() const
     return m_VfxEffectPreviewWorld ? m_VfxEffectPreviewWorld->CaptureRenderSnapshot() : Keire::VfxRenderSnapshot{};
 }
 
-void EditorWorkspaceLayer::StopVfxEffectPreview() noexcept
+void EditorWorkspaceLayer::EnsureEditorVfxPreviewWorld(const std::uint32_t minimumParticleCapacity)
+{
+    constexpr std::uint32_t defaultParticleCapacity =
+        static_cast<std::uint32_t>(Keire::VfxRenderSnapshot::MaximumParticles);
+    const auto capacity = std::max(defaultParticleCapacity, minimumParticleCapacity);
+    if (m_VfxEffectPreviewWorld && m_VfxEffectPreviewCapacity >= capacity)
+        return;
+
+    ResetEditorVfxPreviewWorld();
+    Keire::VfxWorldSpecification specification;
+    specification.Backend = m_VfxEffectPreviewBackend;
+    specification.MaximumEffects = 512;
+    specification.MaximumParticles = capacity;
+    m_VfxEffectPreviewWorld = Keire::CreateRef<Keire::VfxWorld>(std::move(specification));
+    m_VfxEffectPreviewCapacity = capacity;
+
+    if (!m_VfxEffectPreviewEffect)
+        return;
+    if (m_VfxEffectPreviewRevision == 0)
+        m_VfxEffectPreviewRevision = 1;
+    m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
+        {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition, m_VfxEffectPreviewRotation,
+         m_VfxEffectPreviewSeedOffset});
+    if (!m_VfxEffectPreviewHandle)
+        throw std::runtime_error("The editor VFX preview world rejected the authored effect.");
+    m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle,
+                                                m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
+}
+
+void EditorWorkspaceLayer::ResetEditorVfxPreviewWorld() noexcept
 {
     if (m_VfxEffectPreviewWorld)
         m_VfxEffectPreviewWorld->Clear();
     m_VfxEffectPreviewWorld.Reset();
     m_VfxEffectPreviewHandle = {};
-    m_VfxEffectPreviewAsset = {};
-    m_VfxEffectPreviewRevision = 0;
     m_VfxEffectPreviewCapacity = 0;
+    m_VfxEffectPreviewRestartHandle = {};
+    m_VfxEffectPreviewRestartTransformInitialized = false;
+    for (auto& [entity, preview] : m_EditModeVfxPreviews)
+    {
+        (void)entity;
+        preview.Handle = {};
+        preview.Revision = 0;
+        preview.RestartTransformInitialized = false;
+    }
+}
+
+void EditorWorkspaceLayer::StopEditModeVfxPreviews() noexcept
+{
+    if (m_VfxEffectPreviewWorld)
+    {
+        for (const auto& [entity, preview] : m_EditModeVfxPreviews)
+        {
+            (void)entity;
+            try
+            {
+                if (preview.Handle && m_VfxEffectPreviewWorld->IsAlive(preview.Handle))
+                    m_VfxEffectPreviewWorld->Stop(preview.Handle);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+    m_EditModeVfxPreviews.clear();
+    m_EditModeVfxPreviewScene.Reset();
+}
+
+void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
+{
+    const auto scene = m_SceneDocument ? m_SceneDocument->EditingScene() : Keire::Ref<Keire::Scene>{};
+    const auto assets = Owner().Assets();
+    if (!scene || !assets)
+    {
+        StopEditModeVfxPreviews();
+        return;
+    }
+
+    if (const auto previousScene = m_EditModeVfxPreviewScene.Lock(); previousScene != scene)
+    {
+        StopEditModeVfxPreviews();
+        m_EditModeVfxPreviewScene = scene;
+    }
+
+    const auto stopPreview = [this](EditModeVfxPreviewState& preview) noexcept
+    {
+        try
+        {
+            if (m_VfxEffectPreviewWorld && preview.Handle && m_VfxEffectPreviewWorld->IsAlive(preview.Handle))
+                m_VfxEffectPreviewWorld->Stop(preview.Handle);
+        }
+        catch (...)
+        {
+        }
+        preview.Handle = {};
+        preview.Revision = 0;
+        preview.RestartTransformInitialized = false;
+    };
+
+    const auto emitters = KeireEditor::CollectEditModeVfxEmitters(scene);
+    const auto preferred =
+        m_SceneDocument->Selection() ? Keire::EntityId(m_SceneDocument->Selection()) : Keire::EntityId{};
+    const auto draftHost = m_VfxEffectPreviewEffect
+                               ? KeireEditor::SelectEditModeVfxDraftHost(emitters, m_VfxEffectPreviewAsset, preferred)
+                               : std::optional<KeireEditor::EditModeVfxEmitterSnapshot>{};
+    if (draftHost)
+    {
+        if (const auto existing = m_EditModeVfxPreviews.find(draftHost->Entity);
+            existing != m_EditModeVfxPreviews.end())
+        {
+            stopPreview(existing->second);
+            m_EditModeVfxPreviews.erase(existing);
+        }
+    }
+
+    if (m_VfxEffectPreviewEffect && m_VfxEffectPreviewAsset)
+    {
+        const Keire::EntityId routedEntity = draftHost ? draftHost->Entity : Keire::EntityId{};
+        const Keire::Vector3 position = draftHost ? draftHost->Position : Keire::Vector3{};
+        const Keire::Quaternion rotation = draftHost ? draftHost->Rotation : Keire::Quaternion{};
+        const std::uint32_t seedOffset = draftHost ? draftHost->SeedOffset : 0;
+        const bool alive = m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
+                           m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle);
+        const bool routeChanged =
+            m_VfxEffectPreviewRoutedEntity != routedEntity || m_VfxEffectPreviewSeedOffset != seedOffset;
+        const auto space = m_VfxEffectPreviewEffect->Definition().Space;
+        const bool restartForTransform =
+            m_VfxEffectPreviewRestartTransformInitialized &&
+            KeireEditor::EditModeVfxPreviewRequiresRestart(space, m_VfxEffectPreviewRestartPosition,
+                                                           m_VfxEffectPreviewRestartRotation, position, rotation);
+        const bool shouldActivate = KeireEditor::EditModeVfxDraftShouldActivate(
+            alive, routeChanged || restartForTransform, m_VfxEffectPreviewAutoRestart);
+        if (alive && shouldActivate)
+        {
+            m_VfxEffectPreviewWorld->Stop(m_VfxEffectPreviewHandle);
+            m_VfxEffectPreviewHandle = {};
+        }
+
+        EnsureEditorVfxPreviewWorld(static_cast<std::uint32_t>(
+            std::clamp<std::size_t>(m_VfxEffectPreviewEffect->Definition().Capacity, 1U, 1'000'000U)));
+        bool currentAlive = m_VfxEffectPreviewHandle && m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle);
+        bool activated = false;
+        if (!currentAlive && shouldActivate)
+        {
+            m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
+                {m_VfxEffectPreviewEffect, std::max<std::uint64_t>(m_VfxEffectPreviewRevision, 1), position, rotation,
+                 seedOffset});
+            currentAlive = m_VfxEffectPreviewHandle && m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle);
+            activated = currentAlive;
+        }
+        if (currentAlive)
+        {
+            m_VfxEffectPreviewWorld->SetTransform(m_VfxEffectPreviewHandle, position, rotation);
+            m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle,
+                                                        m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
+        }
+        else
+        {
+            m_VfxEffectPreviewHandle = {};
+        }
+        const bool newlyActivated = currentAlive && m_VfxEffectPreviewRestartHandle != m_VfxEffectPreviewHandle;
+        m_VfxEffectPreviewRoutedEntity = routedEntity;
+        m_VfxEffectPreviewPosition = position;
+        m_VfxEffectPreviewRotation = rotation;
+        m_VfxEffectPreviewSeedOffset = seedOffset;
+        if (space == Keire::VfxSimulationSpace::Local || routeChanged || activated || newlyActivated ||
+            (!m_VfxEffectPreviewRestartTransformInitialized && currentAlive))
+        {
+            m_VfxEffectPreviewRestartHandle = currentAlive ? m_VfxEffectPreviewHandle : Keire::VfxHandle{};
+            m_VfxEffectPreviewRestartPosition = position;
+            m_VfxEffectPreviewRestartRotation = rotation;
+            m_VfxEffectPreviewRestartTransformInitialized = true;
+        }
+    }
+
+    std::unordered_set<Keire::EntityId> seen;
+    seen.reserve(emitters.size());
+    for (const auto& emitter : emitters)
+    {
+        if (draftHost && emitter.Entity == draftHost->Entity)
+            continue;
+        seen.emplace(emitter.Entity);
+        auto preview = m_EditModeVfxPreviews.find(emitter.Entity);
+
+        try
+        {
+            if (preview == m_EditModeVfxPreviews.end() || preview->second.Effect != emitter.Effect ||
+                preview->second.SeedOffset != emitter.SeedOffset)
+            {
+                auto effectHandle = assets->Load<Keire::VfxEffectAsset>(emitter.Effect, Keire::AssetPriority::High);
+                if (preview != m_EditModeVfxPreviews.end())
+                    stopPreview(preview->second);
+                EditModeVfxPreviewState replacement;
+                replacement.Effect = emitter.Effect;
+                replacement.EffectHandle = std::move(effectHandle);
+                replacement.SeedOffset = emitter.SeedOffset;
+                preview = m_EditModeVfxPreviews.insert_or_assign(emitter.Entity, std::move(replacement)).first;
+            }
+
+            const auto effect = preview->second.EffectHandle.TryGetLoaded();
+            if (!effect)
+            {
+                stopPreview(preview->second);
+                continue;
+            }
+
+            EnsureEditorVfxPreviewWorld(1);
+            auto& state = preview->second;
+            const auto revision = std::max<std::uint64_t>(state.EffectHandle.Revision(), 1);
+            const bool worldSpaceRelocation =
+                state.RestartTransformInitialized && KeireEditor::EditModeVfxPreviewRequiresRestart(
+                                                         effect->Definition().Space, state.RestartPosition,
+                                                         state.RestartRotation, emitter.Position, emitter.Rotation);
+            if (worldSpaceRelocation && state.Handle && m_VfxEffectPreviewWorld->IsAlive(state.Handle))
+                stopPreview(state);
+
+            if (!state.Handle || !m_VfxEffectPreviewWorld->IsAlive(state.Handle))
+            {
+                state.Handle = {};
+                state.RestartTransformInitialized = false;
+                state.Handle = m_VfxEffectPreviewWorld->Activate(
+                    {effect, revision, emitter.Position, emitter.Rotation, emitter.SeedOffset});
+                state.Revision = revision;
+            }
+            else if (revision != state.Revision)
+            {
+                if (!m_VfxEffectPreviewWorld->Reload(state.Handle, effect, revision))
+                {
+                    stopPreview(state);
+                    state.Handle = m_VfxEffectPreviewWorld->Activate(
+                        {effect, revision, emitter.Position, emitter.Rotation, emitter.SeedOffset});
+                }
+                state.Revision = revision;
+            }
+
+            if (state.Handle)
+            {
+                m_VfxEffectPreviewWorld->SetTransform(state.Handle, emitter.Position, emitter.Rotation);
+                m_VfxEffectPreviewWorld->SetSimulationSpeed(state.Handle, emitter.SimulationSpeed);
+                if (effect->Definition().Space == Keire::VfxSimulationSpace::Local ||
+                    !state.RestartTransformInitialized)
+                {
+                    state.RestartPosition = emitter.Position;
+                    state.RestartRotation = emitter.Rotation;
+                    state.RestartTransformInitialized = true;
+                }
+            }
+        }
+        catch (...)
+        {
+            if (const auto failed = m_EditModeVfxPreviews.find(emitter.Entity); failed != m_EditModeVfxPreviews.end())
+            {
+                stopPreview(failed->second);
+            }
+        }
+    }
+
+    for (auto preview = m_EditModeVfxPreviews.begin(); preview != m_EditModeVfxPreviews.end();)
+    {
+        if (seen.contains(preview->first))
+        {
+            ++preview;
+            continue;
+        }
+        stopPreview(preview->second);
+        preview = m_EditModeVfxPreviews.erase(preview);
+    }
+}
+
+void EditorWorkspaceLayer::RestartVfxEffectPreview()
+{
+    if (!m_VfxEffectDocument || !m_VfxEffectDocument->IsOpen())
+        return;
+    const auto paused = m_VfxEffectPreviewPaused;
+    const auto autoRestart = m_VfxEffectPreviewAutoRestart;
+    const auto speed = m_VfxEffectPreviewSpeed;
+    const auto backend = m_VfxEffectPreviewBackend;
+    const auto routedEntity = m_VfxEffectPreviewRoutedEntity;
+    const auto position = m_VfxEffectPreviewPosition;
+    const auto rotation = m_VfxEffectPreviewRotation;
+    const auto seedOffset = m_VfxEffectPreviewSeedOffset;
+    const auto asset = m_VfxEffectDocument->Asset();
+    StopVfxEffectPreview();
+    m_VfxEffectPreviewPaused = paused;
+    m_VfxEffectPreviewAutoRestart = autoRestart;
+    m_VfxEffectPreviewSpeed = speed;
+    m_VfxEffectPreviewBackend = backend;
+    m_VfxEffectPreviewAsset = asset;
+    m_VfxEffectPreviewRoutedEntity = routedEntity;
+    m_VfxEffectPreviewPosition = position;
+    m_VfxEffectPreviewRotation = rotation;
+    m_VfxEffectPreviewSeedOffset = seedOffset;
+    PreviewVfxEffect(asset, m_VfxEffectDocument->Definition());
+}
+
+void EditorWorkspaceLayer::SetVfxEffectPreviewPaused(const bool paused) noexcept
+{
+    m_VfxEffectPreviewPaused = paused;
+    try
+    {
+        if (m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
+            m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
+        {
+            m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle,
+                                                        paused ? 0.0F : m_VfxEffectPreviewSpeed);
+        }
+    }
+    catch (...)
+    {
+    }
+}
+
+void EditorWorkspaceLayer::SetVfxEffectPreviewAutoRestart(const bool enabled) noexcept
+{
+    m_VfxEffectPreviewAutoRestart = enabled;
+}
+
+void EditorWorkspaceLayer::SetVfxEffectPreviewBackend(const Keire::VfxBackend backend)
+{
+    if (backend != Keire::VfxBackend::Cpu && backend != Keire::VfxBackend::Gpu)
+        throw std::invalid_argument("VFX preview backend is unsupported.");
+    if (m_VfxEffectPreviewBackend == backend)
+        return;
+    m_VfxEffectPreviewBackend = backend;
+    ResetEditorVfxPreviewWorld();
+    RestartVfxEffectPreview();
+}
+
+void EditorWorkspaceLayer::SetVfxEffectPreviewSpeed(const float speed)
+{
+    if (!std::isfinite(speed) || speed < 0.05F || speed > 4.0F)
+        throw std::invalid_argument("VFX preview speed must be finite and in the range 0.05..4.");
+    m_VfxEffectPreviewSpeed = speed;
+    if (m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
+        m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
+    {
+        m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle, m_VfxEffectPreviewPaused ? 0.0F : speed);
+    }
+}
+
+void EditorWorkspaceLayer::StopVfxEffectPreview() noexcept
+{
+    try
+    {
+        if (m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
+            m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
+        {
+            m_VfxEffectPreviewWorld->Stop(m_VfxEffectPreviewHandle);
+        }
+    }
+    catch (...)
+    {
+    }
+    m_VfxEffectPreviewHandle = {};
+    m_VfxEffectPreviewAsset = {};
+    m_VfxEffectPreviewEffect.Reset();
+    m_VfxEffectPreviewRevision = 0;
+    m_VfxEffectPreviewRoutedEntity = {};
+    m_VfxEffectPreviewPosition = {};
+    m_VfxEffectPreviewRotation = {};
+    m_VfxEffectPreviewSeedOffset = 0;
+    m_VfxEffectPreviewRestartHandle = {};
+    m_VfxEffectPreviewRestartPosition = {};
+    m_VfxEffectPreviewRestartRotation = {};
+    m_VfxEffectPreviewRestartTransformInitialized = false;
     m_VfxEffectPreviewDiagnostic.clear();
 }
 
@@ -2003,32 +2385,67 @@ void EditorWorkspaceLayer::PreviewVfxEffect(const Keire::AssetId asset, const Ke
 {
     try
     {
-        (void)Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        const auto compiled = Keire::CompileVfxEffect(definition, m_VfxEffectPreviewBackend);
+        if (!compiled.Valid)
+            throw std::runtime_error(compiled.Diagnostics.empty() ? "VFX preview compilation failed."
+                                                                  : compiled.Diagnostics.front().Message);
         const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(definition);
         const auto capacity = static_cast<std::uint32_t>(std::clamp<std::size_t>(definition.Capacity, 1U, 1'000'000U));
-        if (!m_VfxEffectPreviewWorld || m_VfxEffectPreviewAsset != asset || !m_VfxEffectPreviewHandle ||
-            m_VfxEffectPreviewCapacity != capacity)
+        const bool sameAsset = m_VfxEffectPreviewAsset == asset;
+        if (!sameAsset)
         {
-            Keire::VfxWorldSpecification specification;
-            specification.Backend = Keire::VfxBackend::Gpu;
-            specification.MaximumEffects = 1;
-            specification.MaximumParticles = capacity;
-            m_VfxEffectPreviewWorld = Keire::CreateRef<Keire::VfxWorld>(std::move(specification));
-            m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate({effect});
-            if (!m_VfxEffectPreviewHandle)
-                throw std::runtime_error("The transient VFX preview world rejected the effect.");
-            m_VfxEffectPreviewRevision = 1;
-            m_VfxEffectPreviewCapacity = capacity;
+            m_VfxEffectPreviewRoutedEntity = {};
+            m_VfxEffectPreviewPosition = {};
+            m_VfxEffectPreviewRotation = {};
+            m_VfxEffectPreviewSeedOffset = 0;
+            m_VfxEffectPreviewRestartHandle = {};
+            m_VfxEffectPreviewRestartPosition = {};
+            m_VfxEffectPreviewRestartRotation = {};
+            m_VfxEffectPreviewRestartTransformInitialized = false;
         }
-        else
+        const bool canReload = m_VfxEffectPreviewWorld && sameAsset && m_VfxEffectPreviewHandle &&
+                               m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle) &&
+                               m_VfxEffectPreviewCapacity >= capacity;
+        if (!canReload)
+        {
+            if (m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
+                m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
+            {
+                m_VfxEffectPreviewWorld->Stop(m_VfxEffectPreviewHandle);
+            }
+            m_VfxEffectPreviewHandle = {};
+            m_VfxEffectPreviewRestartHandle = {};
+            m_VfxEffectPreviewRestartTransformInitialized = false;
+        }
+
+        m_VfxEffectPreviewAsset = asset;
+        m_VfxEffectPreviewEffect = effect;
+        if (canReload)
         {
             if (++m_VfxEffectPreviewRevision == 0)
                 ++m_VfxEffectPreviewRevision;
-            (void)m_VfxEffectPreviewWorld->Reload(m_VfxEffectPreviewHandle, effect, m_VfxEffectPreviewRevision);
+            if (!m_VfxEffectPreviewWorld->Reload(m_VfxEffectPreviewHandle, effect, m_VfxEffectPreviewRevision))
+                throw std::runtime_error("The editor VFX preview world rejected the authored effect update.");
         }
-        m_VfxEffectPreviewAsset = asset;
+        else
+        {
+            m_VfxEffectPreviewRevision = 1;
+            EnsureEditorVfxPreviewWorld(capacity);
+            if (!m_VfxEffectPreviewHandle)
+            {
+                m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
+                    {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition,
+                     m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset});
+            }
+            if (!m_VfxEffectPreviewHandle)
+                throw std::runtime_error("The editor VFX preview world rejected the authored effect.");
+        }
+        m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle,
+                                                    m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
         m_VfxEffectPreviewDiagnostic =
-            "Live GPU preview is active in the Scene viewport. Preview state is transient and scene-safe.";
+            m_VfxEffectPreviewBackend == Keire::VfxBackend::Cpu
+                ? "Stable CPU authoring preview is active. Switch to GPU to inspect runtime compute behavior."
+                : "GPU runtime preview is active. Preview transport is independent of Play Mode.";
     }
     catch (const std::exception& error)
     {

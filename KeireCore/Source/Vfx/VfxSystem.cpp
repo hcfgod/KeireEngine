@@ -107,6 +107,7 @@ namespace Keire
             std::uint32_t ActiveParticles = 0;
             std::uint64_t DroppedParticles = 0;
             std::uint64_t GpuSpawnSequence = 0;
+            std::uint64_t GpuSimulationRevision = 1;
             double GpuLastDeathTime = 0.0;
             float SimulationSpeed = 1.0F;
             VfxRuntimeDiagnostic Diagnostics = VfxRuntimeDiagnostic::None;
@@ -437,7 +438,10 @@ namespace Keire
         {
             auto& slot = Effects[effectIndex];
             if (!slot.Emitting)
+            {
+                slot.Elapsed += deltaSeconds;
                 return;
+            }
             const auto& definition = slot.Effect->Definition();
             const auto previous = slot.Elapsed;
             auto effectiveDelta = static_cast<double>(deltaSeconds);
@@ -627,6 +631,7 @@ namespace Keire
         slot.ActiveParticles = 0;
         slot.DroppedParticles = 0;
         slot.GpuSpawnSequence = 0;
+        slot.GpuSimulationRevision = 1;
         slot.GpuLastDeathTime = 0.0;
         slot.SimulationSpeed = 1.0F;
         slot.Diagnostics = diagnostics;
@@ -642,8 +647,6 @@ namespace Keire
         if (!m_Impl->IsAlive(handle))
             return;
         m_Impl->ReleaseEffect(handle.Index());
-        if (m_Impl->Specification.Backend == VfxBackend::Gpu)
-            ++m_Impl->ResetRevision;
         ++m_Impl->SnapshotRevision;
     }
 
@@ -691,9 +694,10 @@ namespace Keire
             const auto random = slot.Effect->Definition().Seed ^ slot.SeedOffset;
             slot.Random = random == 0 ? 0x9e3779b9U : random;
             slot.GpuSpawnSequence = 0;
+            slot.GpuSimulationRevision = slot.GpuSimulationRevision == std::numeric_limits<std::uint64_t>::max()
+                                             ? 1
+                                             : slot.GpuSimulationRevision + 1;
             slot.GpuLastDeathTime = 0.0;
-            if (m_Impl->Specification.Backend == VfxBackend::Gpu)
-                ++m_Impl->ResetRevision;
         }
         else if (m_Impl->Specification.Backend == VfxBackend::Cpu)
         {
@@ -827,7 +831,8 @@ namespace Keire
                      definition.Seed ^ slot.SeedOffset,
                      shape ? shape->Shape : VfxShape::Point,
                      definition.Space,
-                     renderer ? renderer->Type : VfxRendererType::Sprite});
+                     renderer ? renderer->Type : VfxRendererType::Sprite,
+                     slot.GpuSimulationRevision});
             }
             return result;
         }

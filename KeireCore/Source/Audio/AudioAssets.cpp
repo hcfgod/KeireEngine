@@ -594,7 +594,6 @@ namespace Keire
             if (!bus->Parent || !buses.contains(bus->Parent))
                 throw std::invalid_argument("Audio mixer bus parent is unavailable.");
         }
-
         std::map<AssetId, std::vector<AssetId>> routing;
         for (const auto& [id, bus] : buses)
         {
@@ -624,6 +623,19 @@ namespace Keire
         {
             (void)bus;
             visit(visit, id);
+        }
+        for (const auto& [id, bus] : buses)
+        {
+            (void)bus;
+            auto gain = 1.0;
+            auto current = id;
+            while (current)
+            {
+                gain *= buses.at(current)->Gain;
+                if (!std::isfinite(gain) || gain > std::numeric_limits<float>::max())
+                    throw std::invalid_argument("Audio mixer effective bus gain exceeds the runtime range.");
+                current = buses.at(current)->Parent;
+            }
         }
 
         for (const auto& snapshot : definition.Snapshots)

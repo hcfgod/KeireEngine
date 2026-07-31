@@ -9,6 +9,7 @@
 #include "Keire/ECS/Entity.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireInternal/Scripting/ManagedSdk.h"
 
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -28,7 +29,6 @@
 #include <atomic>
 #include <cctype>
 #include <condition_variable>
-#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <fstream>
@@ -110,183 +110,6 @@ namespace Keire
             std::ofstream stream(path, std::ios::binary | std::ios::trunc);
             if (!stream || !stream.write(value.data(), static_cast<std::streamsize>(value.size())))
                 throw std::runtime_error("Managed build could not write '" + PathText(path) + "'.");
-        }
-
-        [[nodiscard]] bool HasDotnet10Sdk(const std::filesystem::path& executable)
-        {
-            const auto sdk = executable.parent_path() / "sdk";
-            if (!std::filesystem::is_directory(sdk))
-                return false;
-            return std::ranges::any_of(std::filesystem::directory_iterator(sdk),
-                                       [](const std::filesystem::directory_entry& entry)
-                                       {
-                                           const auto name = entry.path().filename().string();
-                                           return entry.is_directory() && name.starts_with("10.");
-                                       });
-        }
-
-        [[nodiscard]] ManagedSdkConfiguration ReadManagedSdkConfiguration(const std::filesystem::path& projectRoot,
-                                                                          ManagedSdkConfiguration fallback)
-        {
-            const auto settingsPath = projectRoot / "ProjectSettings" / "Scripting.keiresettings";
-            if (!std::filesystem::is_regular_file(settingsPath))
-                return fallback;
-
-            const auto document = nlohmann::json::parse(Detail::ReadTextFile(settingsPath, 1024U * 1024U));
-            const auto selection = document.value("sdkSelection", std::string{"bundled"});
-            if (selection == "systemPath")
-                fallback.Selection = ManagedSdkSelection::SystemPath;
-            else if (selection == "custom")
-                fallback.Selection = ManagedSdkSelection::Custom;
-            else
-                fallback.Selection = ManagedSdkSelection::Bundled;
-            if (const auto iterator = document.find("customSdkExecutable");
-                iterator != document.end() && iterator->is_string())
-            {
-                fallback.CustomExecutable = Detail::PathFromUtf8(iterator->get<std::string>());
-            }
-            return fallback;
-        }
-
-        void WriteManagedSdkConfiguration(const std::filesystem::path& projectRoot,
-                                          const ManagedSdkConfiguration& configuration)
-        {
-            const auto settingsPath = projectRoot / "ProjectSettings" / "Scripting.keiresettings";
-            nlohmann::json document = nlohmann::json::object();
-            if (std::filesystem::is_regular_file(settingsPath))
-                document = nlohmann::json::parse(Detail::ReadTextFile(settingsPath, 1024U * 1024U));
-
-            switch (configuration.Selection)
-            {
-            case ManagedSdkSelection::Bundled:
-                document["sdkSelection"] = "bundled";
-                break;
-            case ManagedSdkSelection::SystemPath:
-                document["sdkSelection"] = "systemPath";
-                break;
-            case ManagedSdkSelection::Custom:
-                document["sdkSelection"] = "custom";
-                break;
-            }
-            document["customSdkExecutable"] = Detail::PathToUtf8(configuration.CustomExecutable);
-            Detail::WriteTextFileAtomically(settingsPath, document.dump(2) + '\n');
-        }
-
-        [[nodiscard]] std::filesystem::path ResolveDotnet(const std::filesystem::path& configured,
-                                                          const ManagedSdkSelection selection,
-                                                          const std::filesystem::path& projectRoot,
-                                                          const std::filesystem::path& runtimeRoot)
-        {
-            constexpr std::string_view executableName =
-#if defined(_WIN32)
-                "dotnet.exe";
-#else
-                "dotnet";
-#endif
-
-            if (selection == ManagedSdkSelection::Custom)
-            {
-                if (configured.empty())
-                    throw std::runtime_error(
-                        "A custom .NET SDK was selected, but no dotnet executable was configured.");
-                const auto resolved = std::filesystem::absolute(configured).lexically_normal();
-                if (!std::filesystem::is_regular_file(resolved) || !HasDotnet10Sdk(resolved))
-                    throw std::runtime_error("The configured dotnet executable does not provide the .NET 10 SDK.");
-                return resolved;
-            }
-
-            if (selection == ManagedSdkSelection::Bundled)
-            {
-                std::vector<std::filesystem::path> roots;
-                roots.reserve(16);
-                const auto appendAncestors = [&roots](std::filesystem::path root)
-                {
-                    if (root.empty())
-                        return;
-                    root = std::filesystem::absolute(root).lexically_normal();
-                    for (std::size_t depth = 0; depth < 8 && !root.empty(); ++depth)
-                    {
-                        roots.push_back(root);
-                        const auto parent = root.parent_path();
-                        if (parent == root)
-                            break;
-                        root = parent;
-                    }
-                };
-                appendAncestors(std::filesystem::current_path());
-                appendAncestors(projectRoot);
-
-                std::vector<std::filesystem::path> candidates;
-                candidates.reserve(roots.size() * 2 + 1);
-                if (!runtimeRoot.empty())
-                    candidates.push_back(runtimeRoot / executableName);
-                for (const auto& root : roots)
-                {
-                    candidates.push_back(root / "Build" / "Dependencies" / "dotnet-sdk" / executableName);
-                    candidates.push_back(root / "Library" / "DotnetSdk10" / "sdk" / executableName);
-                }
-
-                for (const auto& candidate : candidates)
-                {
-                    if (std::filesystem::is_regular_file(candidate) && HasDotnet10Sdk(candidate))
-                        return std::filesystem::absolute(candidate).lexically_normal();
-                }
-                throw std::runtime_error(
-                    "The bundled .NET 10 SDK was not found. Install the engine SDK dependency or choose System PATH "
-                    "or Custom in Project Settings > Scripting.");
-            }
-
-#if defined(_WIN32)
-            char* rawDotnetRoot = nullptr;
-            std::size_t dotnetRootSize = 0;
-            if (_dupenv_s(&rawDotnetRoot, &dotnetRootSize, "DOTNET_ROOT") != 0)
-                rawDotnetRoot = nullptr;
-            const std::unique_ptr<char, decltype(&std::free)> dotnetRoot(rawDotnetRoot, &std::free);
-            const char* dotnetRootValue = dotnetRoot ? dotnetRoot.get() : nullptr;
-#else
-            const char* dotnetRoot = std::getenv("DOTNET_ROOT");
-            const char* dotnetRootValue = dotnetRoot;
-#endif
-            if (dotnetRootValue)
-            {
-                const auto candidate = std::filesystem::path(dotnetRootValue) / executableName;
-                if (std::filesystem::is_regular_file(candidate) && HasDotnet10Sdk(candidate))
-                    return std::filesystem::absolute(candidate).lexically_normal();
-            }
-
-#if defined(_WIN32)
-            char* rawEnvironment = nullptr;
-            std::size_t environmentSize = 0;
-            if (_dupenv_s(&rawEnvironment, &environmentSize, "PATH") != 0)
-                rawEnvironment = nullptr;
-            const std::unique_ptr<char, decltype(&std::free)> environment(rawEnvironment, &std::free);
-            const std::string paths = environment ? std::string(environment.get()) : std::string{};
-#else
-            const char* environment = std::getenv("PATH");
-            const std::string paths = environment ? std::string(environment) : std::string{};
-#endif
-            if (paths.empty())
-                throw std::runtime_error("dotnet was not found because PATH is unavailable.");
-#if defined(_WIN32)
-            constexpr char separator = ';';
-            const std::filesystem::path executable = executableName;
-#else
-            constexpr char separator = ':';
-            const std::filesystem::path executable = executableName;
-#endif
-            std::size_t begin = 0;
-            while (begin <= paths.size())
-            {
-                const auto end = paths.find(separator, begin);
-                const auto candidate = std::filesystem::path(paths.substr(begin, end - begin)) / executable;
-                if (std::filesystem::is_regular_file(candidate) && HasDotnet10Sdk(candidate))
-                    return std::filesystem::absolute(candidate).lexically_normal();
-                if (end == std::string::npos)
-                    break;
-                begin = end + 1;
-            }
-            throw std::runtime_error(
-                "The .NET 10 SDK was not found on PATH. Choose Bundled or Custom in Project Settings > Scripting.");
         }
 
         [[nodiscard]] std::vector<ManagedBuildDiagnostic> ParseDiagnostics(const std::string& output,
@@ -2732,12 +2555,10 @@ namespace Keire
         {
             try
             {
-                auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
-                if (!entity)
-                    return 0;
-                auto source = entity.GetComponent<AudioSourceComponent>();
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                const auto source = entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
                 if (!source)
-                    source = entity.AddComponent<AudioSourceComponent>();
+                    return 0;
                 source->SetClip(AssetId(clipHigh, clipLow));
                 return 1;
             }
@@ -3643,8 +3464,8 @@ namespace Keire
         m_Impl->ProjectRoot = std::filesystem::absolute(specification.ProjectRoot).lexically_normal();
         if (!std::filesystem::is_directory(m_Impl->ProjectRoot))
             throw std::invalid_argument("ScriptSystem project root does not exist.");
-        const auto sdk = ReadManagedSdkConfiguration(m_Impl->ProjectRoot,
-                                                     {specification.SdkSelection, specification.DotnetExecutable});
+        const auto sdk = Detail::ReadManagedSdkConfiguration(
+            m_Impl->ProjectRoot, {specification.SdkSelection, specification.DotnetExecutable});
         m_Impl->Specification.SdkSelection = sdk.Selection;
         m_Impl->Specification.DotnetExecutable = sdk.CustomExecutable;
         m_Impl->OutputRoot = (m_Impl->ProjectRoot / specification.AssemblyDirectory).lexically_normal();
@@ -3655,10 +3476,11 @@ namespace Keire
             if (!std::filesystem::is_regular_file(m_Impl->ManagedApi))
                 throw std::invalid_argument("The Keire.Managed API assembly does not exist.");
         }
-        m_Impl->Dotnet = m_Impl->Specification.DotnetExecutable.empty()
-                             ? std::filesystem::path{}
-                             : ResolveDotnet(m_Impl->Specification.DotnetExecutable, m_Impl->Specification.SdkSelection,
-                                             m_Impl->ProjectRoot, m_Impl->Specification.RuntimeRootDirectory);
+        m_Impl->Dotnet =
+            m_Impl->Specification.DotnetExecutable.empty()
+                ? std::filesystem::path{}
+                : Detail::ResolveDotnet(m_Impl->Specification.DotnetExecutable, m_Impl->Specification.SdkSelection,
+                                        m_Impl->ProjectRoot, m_Impl->Specification.RuntimeRootDirectory);
         m_Impl->InitializeRuntime();
     }
 
@@ -3734,8 +3556,8 @@ namespace Keire
         }
         if (m_Impl->Dotnet.empty())
             m_Impl->Dotnet =
-                ResolveDotnet(m_Impl->Specification.DotnetExecutable, m_Impl->Specification.SdkSelection,
-                              m_Impl->Specification.ProjectRoot, m_Impl->Specification.RuntimeRootDirectory);
+                Detail::ResolveDotnet(m_Impl->Specification.DotnetExecutable, m_Impl->Specification.SdkSelection,
+                                      m_Impl->Specification.ProjectRoot, m_Impl->Specification.RuntimeRootDirectory);
 
         const ManagedBuildOperationId operation(m_Impl->NextOperation++);
         {
@@ -3806,8 +3628,8 @@ namespace Keire
         m_Impl->Specification.SdkSelection = selection;
         m_Impl->Specification.DotnetExecutable = std::move(customExecutable);
         m_Impl->Dotnet.clear();
-        WriteManagedSdkConfiguration(m_Impl->ProjectRoot,
-                                     {m_Impl->Specification.SdkSelection, m_Impl->Specification.DotnetExecutable});
+        Detail::WriteManagedSdkConfiguration(
+            m_Impl->ProjectRoot, {m_Impl->Specification.SdkSelection, m_Impl->Specification.DotnetExecutable});
     }
 
     bool ScriptSystem::RuntimeHostAvailable() const noexcept { return IsOpen() && m_Impl->RuntimeInitialized; }

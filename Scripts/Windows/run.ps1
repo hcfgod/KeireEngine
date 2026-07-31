@@ -81,9 +81,25 @@ try {
             $cliExitCode = $LASTEXITCODE
             if ($cliExitCode -ne 0) { throw "KeireClient $option failed with exit code $cliExitCode." }
         }
-        $invalidOutput = Join-Path $cliRoot "invalid.txt"
-        $invalid = Start-Process -FilePath $ClientExe -ArgumentList "--invalid" -WorkingDirectory $cliRoot -NoNewWindow -Wait -PassThru -RedirectStandardError $invalidOutput
-        if ($invalid.ExitCode -ne 2) { throw "KeireClient invalid option returned $($invalid.ExitCode), expected 2." }
+        $invalidStart = [Diagnostics.ProcessStartInfo]::new()
+        $invalidStart.FileName = $ClientExe
+        $invalidStart.Arguments = "--invalid"
+        $invalidStart.WorkingDirectory = $cliRoot
+        $invalidStart.UseShellExecute = $false
+        $invalidStart.CreateNoWindow = $true
+        $invalidStart.RedirectStandardError = $true
+        $invalid = [Diagnostics.Process]::new()
+        $invalid.StartInfo = $invalidStart
+        try {
+            if (-not $invalid.Start()) { throw "KeireClient invalid option probe did not start." }
+            $invalidDiagnostic = $invalid.StandardError.ReadToEnd()
+            $invalid.WaitForExit()
+            $invalidExitCode = $invalid.ExitCode
+        }
+        finally { $invalid.Dispose() }
+        if ($invalidExitCode -ne 2) {
+            throw "KeireClient invalid option returned $invalidExitCode, expected 2. Diagnostic: $invalidDiagnostic"
+        }
         if (Test-Path (Join-Path $cliRoot "Logs")) { throw "Informational KeireClient commands created logs." }
     }
     finally {

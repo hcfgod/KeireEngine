@@ -17,6 +17,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, navigation, and current scope | Rendering and editor authors |
 | [Project Settings](ProjectSettings.md) | Tracked rendering environment settings, validation, defaults, and editor workflow | Technical artists and editor authors |
 | [Shaders And Materials](ShadersAndMaterials.md) | Shader manifests, compiler boundary, reflection, materials, and target cooking | Technical artists and rendering authors |
+| [VFX Authoring And Runtime](Vfx.md) | Visual graph workflow, executable modules, scene emitters, C++/C# control, diagnostics, and backend capabilities | Technical artists, gameplay programmers, and VFX/runtime authors |
 | [Asset Browser](AssetBrowser.md) | Folder navigation, List/Grid modes, thumbnails, selection, and file operations | Designers and editor authors |
 | [Project System](ProjectSystem.md) | Project identity, directory isolation, locks, templates, and recent registry | Editor and tooling authors |
 | [Project Hub](ProjectHub.md) | Create/open/reveal workflows, launcher behavior, and smoke modes | Artists, designers, and editor authors |

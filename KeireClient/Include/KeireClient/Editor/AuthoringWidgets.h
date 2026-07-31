@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace KeireEditor
@@ -20,6 +21,7 @@ namespace KeireEditor
         Keire::Vector2 Position;
         Keire::Vector2 Size{180.0F, 72.0F};
         Keire::UiColor Color{0.18F, 0.2F, 0.24F, 1.0F};
+        std::string Subtitle;
 
         bool operator==(const NodeGraphNode&) const = default;
     };
@@ -40,6 +42,18 @@ namespace KeireEditor
         std::optional<StableNodeId> MovedNode;
         bool BackgroundActivated = false;
         bool Changed = false;
+        std::optional<StableNodeId> MoveCompletedNode;
+    };
+
+    class StableNodeGraphIdMap final
+    {
+      public:
+        [[nodiscard]] StableNodeId Assign(Keire::AssetId source, StableNodeId preferred);
+        [[nodiscard]] std::optional<StableNodeId> Find(Keire::AssetId source) const noexcept;
+
+      private:
+        std::vector<std::pair<Keire::AssetId, StableNodeId>> m_Assignments;
+        std::vector<StableNodeId> m_Used;
     };
 
     class StableNodeGraphCanvas final
@@ -65,6 +79,8 @@ namespace KeireEditor
         float m_Zoom = 1.0F;
         std::optional<StableNodeId> m_Selection;
         std::optional<StableNodeId> m_Dragging;
+        Keire::Vector2 m_DragPosition;
+        bool m_DragMoved = false;
     };
 
     class AuthoringValueEditors final

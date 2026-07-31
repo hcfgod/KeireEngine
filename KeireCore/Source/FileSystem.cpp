@@ -173,6 +173,31 @@ namespace Keire::Detail
 #endif
         }
 
+#if defined(_WIN32)
+        [[nodiscard]] std::wstring ExtendedLengthPath(const std::filesystem::path& path)
+        {
+            auto value = std::filesystem::absolute(path).lexically_normal().native();
+            if (value.starts_with(LR"(\\?\)"))
+                return value;
+            if (value.starts_with(LR"(\\)"))
+                return LR"(\\?\UNC\)" + value.substr(2);
+            return LR"(\\?\)" + value;
+        }
+
+        void RenameNativePath(const std::filesystem::path& source, const std::filesystem::path& destination,
+                              std::error_code& error)
+        {
+            const auto extendedSource = ExtendedLengthPath(source);
+            const auto extendedDestination = ExtendedLengthPath(destination);
+            if (MoveFileExW(extendedSource.c_str(), extendedDestination.c_str(), MOVEFILE_WRITE_THROUGH))
+            {
+                error.clear();
+                return;
+            }
+            error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
+        }
+#endif
+
         [[nodiscard]] bool IsTransientRenameError(const std::error_code& error) noexcept
         {
             if (error == std::errc::permission_denied || error == std::errc::device_or_resource_busy)
@@ -222,7 +247,13 @@ namespace Keire::Detail
         const auto rename = operation
                                 ? operation
                                 : RenamePathOperation{[](const auto& from, const auto& to, std::error_code& result)
-                                                      { std::filesystem::rename(from, to, result); }};
+                                                      {
+#if defined(_WIN32)
+                                                          RenameNativePath(from, to, result);
+#else
+                                                          std::filesystem::rename(from, to, result);
+#endif
+                                                      }};
         constexpr std::array delays{std::chrono::milliseconds(10), std::chrono::milliseconds(20),
                                     std::chrono::milliseconds(40), std::chrono::milliseconds(80),
                                     std::chrono::milliseconds(160)};

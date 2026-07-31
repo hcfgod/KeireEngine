@@ -29,6 +29,8 @@ $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\P
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
+$testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
+Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
 $launcherFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-launcher-exit-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force (Join-Path $launcherFixture "Scripts\Windows") | Out-Null
@@ -148,6 +150,8 @@ $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Co
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
 Assert-True ($windowsCommon.Contains('KEIRE_VSDEV_ENVIRONMENT_KEY')) "Idempotent Visual Studio environment setup"
+Assert-True ($windowsCommon.Contains('"KeireManaged"') -and
+             $windowsCommon.Contains('".csproj"')) "Managed source project-generation inventory"
 $imguiPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\DearImGui.lua") -Raw
 Assert-True ($imguiPremake.Contains('project(DearImGuiProject)') -and $imguiPremake.Contains('kind "StaticLib"') -and $imguiPremake.Contains('targetname(DearImGuiLibrary)')) "Dear ImGui static project"
 Assert-True ($imguiPremake.Contains('imgui_impl_sdl3.cpp') -and $imguiPremake.Contains('imgui_impl_sdlgpu3.cpp') -and $imguiPremake.Contains('imgui_stdlib.cpp') -and $imguiPremake.Contains('warnings "Off"')) "Premake Dear ImGui source policy"
@@ -161,9 +165,82 @@ $corePremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\premake5.l
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
 $hubPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\premake5.lua") -Raw
 $testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5.lua") -Raw
+$assetToolPremake = Get-Content (Join-Path (Get-RepositoryRoot) "AssetTool\premake5.lua") -Raw
+$assetToolSource = Get-Content (Join-Path (Get-RepositoryRoot) "AssetTool\Source\Main.cpp") -Raw
+$assetWorkerPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireAssetWorker\premake5.lua") -Raw
+$managedPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Managed.lua") -Raw
+$unixFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\ffmpeg.sh") -Raw
+$windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
+$windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
+$windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
 Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
 Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
 Assert-True ($hubPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET }')) "Hub rebuilds its editor runtime dependency"
+Assert-True ($assetToolPremake.Contains('dependson { AssetWorkerTarget }')) "AssetTool builds its private importer worker"
+Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
+             $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
+Assert-True ($assetWorkerPremake.Contains('filter { "system:linux"') -and
+             $assetWorkerPremake.Contains('"-Wl,-rpath,$ORIGIN"') -and
+             $assetWorkerPremake.Contains('filter { "system:macosx"') -and
+             $assetWorkerPremake.Contains('"-Wl,-rpath,@loader_path"') -and
+             -not $assetWorkerPremake.Contains('"system:linux or macosx"') -and
+             $unixFfmpegBuild.Contains('--install-name-dir=@rpath')) "Relocatable Linux and macOS asset-worker codecs"
+Assert-True ($clientPremake.Contains('AddKeireManagedRuntimeDependency()') -and
+             $testsPremake.Contains('AddKeireManagedRuntimeDependency()')) "Managed runtime API consumer dependencies"
+Assert-True ($managedPremake.Contains('dependson { KeireManagedProject }') -and
+             $managedPremake.Contains('links { KeireManagedProject }') -and
+             $managedPremake.Contains('kind "StaticLib"') -and
+             $managedPremake.Contains('kind "Utility"') -and
+             $managedPremake.Contains('ManagedBuildAnchor.cpp')) "Cross-generator managed runtime API project"
+Assert-True ($managedPremake.Contains('buildinputs(managedBuildInputs)') -and
+             $managedPremake.Contains('buildoutputs { managedOutput }') -and
+             $managedPremake.Contains('linkbuildoutputs "Off"')) "Input-aware managed runtime API custom build"
+Assert-True ($managedPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "ManagedRuntimeApi"') -and
+             $managedPremake.Contains('addManagedBuildInput(managedSourceRoot)') -and
+             $managedPremake.Contains('os.matchdirs')) "Collision-free managed source inventory dependencies"
+Assert-True ($managedPremake.Contains('Scripts/Windows/build-managed.ps1') -and
+             $managedPremake.Contains('Scripts/Unix/build-managed.sh') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Premake\ManagedBuildAnchor.cpp'))) "Managed runtime API wrapper integration"
+Assert-Equal ([regex]::Matches($windowsBuild, '(?m)^\s+Invoke-ManagedBuild\s*$').Count) 3 "Managed runtime API build launcher coverage"
+Assert-True ($windowsBuild.Contains('"build-managed.ps1"') -and
+             $windowsManagedBuild.Contains('"Keire.Managed.dll"') -and
+             $windowsManagedBuild.Contains('LastWriteTimeUtc')) "Managed runtime API freshness and output validation"
+Assert-True ($windowsRun.Contains('[Diagnostics.ProcessStartInfo]::new()') -and
+             $windowsRun.Contains('$invalid.StandardError.ReadToEnd()') -and
+             $windowsRun.Contains('$invalid.WaitForExit()') -and
+             $windowsRun.Contains('$invalid.Dispose()') -and
+             -not $windowsRun.Contains('Start-Process -FilePath $ClientExe -ArgumentList "--invalid"')) "Race-free client CLI rejection probe"
+$managedFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-build-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force (Join-Path $managedFixture "Scripts\Windows"),
+        (Join-Path $managedFixture "KeireManaged"), (Join-Path $managedFixture "Build\Managed") | Out-Null
+    Copy-Item (Join-Path $Windows "build-managed.ps1") (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
+    $managedSource = Join-Path $managedFixture "KeireManaged\RuntimeApi.cs"
+    $managedAssembly = Join-Path $managedFixture "Build\Managed\Keire.Managed.dll"
+    "source" | Set-Content $managedSource -Encoding ASCII
+    "assembly" | Set-Content $managedAssembly -Encoding ASCII
+    (Get-Item (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")).LastWriteTimeUtc =
+        [DateTime]::UtcNow.AddMinutes(-3)
+    (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
+    (Get-Item (Join-Path $managedFixture "KeireManaged")).LastWriteTimeUtc =
+        [DateTime]::UtcNow.AddMinutes(-2)
+    (Get-Item $managedAssembly).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-1)
+    $global:LASTEXITCODE = 37
+    & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
+    Assert-Equal $LASTEXITCODE 0 "Current managed runtime API launcher exit code"
+    (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow
+    Assert-Throws {
+        & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
+    } "Stale managed runtime API without SDK"
+    (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
+    (Get-Item (Join-Path $managedFixture "KeireManaged")).LastWriteTimeUtc = [DateTime]::UtcNow
+    Assert-Throws {
+        & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
+    } "Changed managed source inventory without SDK"
+}
+finally {
+    Remove-Item $managedFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') -and $corePremake.Contains('Source/ECS/Components/MeshRendererComponent.cpp')) "Explicit built-in component translation units"
 Assert-True ($corePremake.Contains('builtin-shaders.ps1') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
@@ -226,12 +303,61 @@ Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('S
 $sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
 $sampleSceneDocument = $sampleScene | ConvertFrom-Json
 Assert-True ([int]$sampleSceneDocument.schemaVersion -ge 2 -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Current-schema component sample scene"
-$monsterMeshes = @(Get-ChildItem (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets") -Filter "base.fbx" -File -Recurse)
-Assert-Equal $monsterMeshes.Count 1 "Organized monster source count"
+$sampleAssets = Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets"
+$sampleMeshes = Join-Path $sampleAssets "Meshes"
+$sampleAudio = Join-Path $sampleAssets "Audio"
+$orphanedMetadata = @(Get-ChildItem (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets") -File -Recurse |
+    Where-Object { $_.Name -like "*.tmp.*.keiremeta" -or $_.Name -like "*~.keiremeta" })
+Assert-Equal $orphanedMetadata.Count 0 "Temporary and backup asset metadata sidecars"
+$sampleAudioSources = @(Get-ChildItem $sampleAudio -File | Where-Object Extension -eq ".wav")
+Assert-Equal $sampleAudioSources.Count 2 "Repository-owned sample audio sources"
+foreach ($sampleAudioSource in $sampleAudioSources) {
+    $header = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($sampleAudioSource.FullName), 0, 12)
+    Assert-True ($header.StartsWith("RIFF") -and $header.EndsWith("WAVE")) "Valid generated sample audio"
+}
+$interfaceAudioMetadata = Get-Content (Join-Path $sampleAudio "InterfaceConfirm.wav.keiremeta") -Raw | ConvertFrom-Json
+$spatialAudioMetadata = Get-Content (Join-Path $sampleAudio "SpatialEmitter.wav.keiremeta") -Raw | ConvertFrom-Json
+Assert-True ($interfaceAudioMetadata.id -eq "f42ee69b-dc11-4212-ae66-17bff0be7945" -and
+             $spatialAudioMetadata.id -eq "d09e3f28-06e6-49eb-a714-0261348f5eee") "Sample audio scene identities"
+$sampleMedia = @(Get-ChildItem $sampleAssets -File -Recurse |
+    Where-Object Extension -in @(".mp4", ".mkv", ".webm"))
+Assert-Equal $sampleMedia.Count 0 "Undocumented third-party sample media"
+$humanoidModel = Join-Path $sampleMeshes "T-Pose.fbx"
+$humanoidAnimation = Join-Path $sampleMeshes "Idle.fbx"
+Assert-True ((Test-Path -LiteralPath $humanoidModel -PathType Leaf) -and
+             (Test-Path -LiteralPath $humanoidAnimation -PathType Leaf)) "Humanoid model and animation source organization"
 $duplicateMeshContent = @(Get-ChildItem (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets") -Filter "*.fbx" -File -Recurse | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash } | Group-Object | Where-Object Count -gt 1)
 Assert-Equal $duplicateMeshContent.Count 0 "Duplicate FBX content"
-$monsterMetadata = Get-Content ($monsterMeshes[0].FullName + ".keiremeta") -Raw
-Assert-True ($monsterMetadata.Contains('c506e2a8-62f9-44f0-8831-b66755cc9b9b') -and -not $monsterMetadata.Contains('070fedd0-9e84-435e-83ae-21b4530159f3')) "Active monster identity preservation"
+$modelMetadata = Get-Content ($humanoidModel + ".keiremeta") -Raw | ConvertFrom-Json
+$animationMetadata = Get-Content ($humanoidAnimation + ".keiremeta") -Raw | ConvertFrom-Json
+$animatorControllerPath = Join-Path $sampleAssets "NewAnimatorController.keireanimgraph"
+$animatorController = Get-Content $animatorControllerPath -Raw | ConvertFrom-Json
+$animatorControllerMetadata = Get-Content ($animatorControllerPath + ".keiremeta") -Raw | ConvertFrom-Json
+$humanoidEntity = @($sampleSceneDocument.entities | Where-Object name -eq 'T-Pose')
+Assert-Equal $humanoidEntity.Count 1 "Humanoid sample scene entity"
+$humanoidMeshRenderer = @($humanoidEntity[0].components | Where-Object type -eq '4b454952-454d-4553-4852-454e44455201')
+$humanoidAnimator = @($humanoidEntity[0].components | Where-Object type -eq '4b454952-4541-4e49-4d41-544f52000001')
+Assert-Equal $humanoidMeshRenderer.Count 1 "Humanoid sample mesh renderer"
+Assert-Equal $humanoidAnimator.Count 1 "Humanoid sample animator"
+Assert-True ($modelMetadata.id -eq '51cd8956-a6c4-4d63-b990-7d86829f92ff' -and
+             $modelMetadata.importSettings.contentType -eq 'model' -and
+             $modelMetadata.type -eq '4b454952-454d-4553-4841-535345540001' -and
+             @($modelMetadata.subAssets) -contains 'c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08' -and
+             @($modelMetadata.subAssets) -contains '78c8dbe3-2951-54b9-b34e-9221c49c506b' -and
+             $humanoidMeshRenderer[0].data.mesh -eq '51cd8956-a6c4-4d63-b990-7d86829f92ff' -and
+             $humanoidAnimator[0].data.skeleton -eq 'c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08' -and
+             $humanoidAnimator[0].data.skinnedMesh -eq '78c8dbe3-2951-54b9-b34e-9221c49c506b') "Humanoid model identity wiring"
+Assert-True ($animationMetadata.id -eq '51116f66-15b6-4dee-acdf-653223e2f491' -and
+             $animationMetadata.importSettings.contentType -eq 'animation' -and
+             $animationMetadata.type -eq '4b454952-4541-4e49-4d53-4f5552434501' -and
+             @($animationMetadata.subAssets) -contains '803c0e5b-d937-521c-821e-92de5a986179' -and
+             $animatorController.layers[0].states[0].motion.clip -eq '803c0e5b-d937-521c-821e-92de5a986179') "Humanoid animation identity wiring"
+Assert-True ($animatorControllerMetadata.id -eq '9ec01b6f-4862-443e-8cfd-efa2f23ef04a' -and
+             $humanoidAnimator[0].data.graph -eq $animatorControllerMetadata.id) "Humanoid Animator Controller identity wiring"
+Assert-True ($sampleScene.Contains($interfaceAudioMetadata.id) -and
+             $sampleScene.Contains($spatialAudioMetadata.id)) "Sample audio scene wiring"
+Assert-True (-not ($sampleScene.Contains('c506e2a8-62f9-44f0-8831-b66755cc9b9b') -or
+                   $sampleScene.Contains('070fedd0-9e84-435e-83ae-21b4530159f3'))) "Retired monster scene identities"
 $publicHeaders = (Get-ChildItem (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire") -File -Recurse | Get-Content -Raw) -join "`n"
 Assert-True ($publicHeaders.Contains('class KEIRE_API UndoService')) "Shared undo service"
 Assert-True (-not ($publicHeaders -match 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image')) "Public dependency isolation"

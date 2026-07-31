@@ -18,6 +18,8 @@ try {
     $stages = @(
         @{ Stage = "compute"; Entry = "CSInitialize"; Name = "Initialize" },
         @{ Stage = "compute"; Entry = "CSReset"; Name = "Reset" },
+        @{ Stage = "compute"; Entry = "CSKill"; Name = "Kill" },
+        @{ Stage = "compute"; Entry = "CSTransform"; Name = "Transform" },
         @{ Stage = "compute"; Entry = "CSSimulate"; Name = "Simulate" },
         @{ Stage = "compute"; Entry = "CSSpawn"; Name = "Spawn" },
         @{ Stage = "compute"; Entry = "CSFinalize"; Name = "Finalize" },

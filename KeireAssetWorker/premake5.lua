@@ -55,15 +55,29 @@ project(AssetWorkerTarget)
                 CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/bin")
             }
 
-        filter { "system:linux or macosx", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+        filter { "system:linux", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             linkoptions { "-Wl,-rpath,$ORIGIN" }
             prelinkcommands
             {
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/lib")
             }
 
-        filter { "system:linux or macosx", "configurations:Release or Dist" }
+        filter { "system:linux", "configurations:Release or Dist" }
             linkoptions { "-Wl,-rpath,$ORIGIN" }
+            prelinkcommands
+            {
+                CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/lib")
+            }
+
+        filter { "system:macosx", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+            linkoptions { "-Wl,-rpath,@loader_path" }
+            prelinkcommands
+            {
+                CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/lib")
+            }
+
+        filter { "system:macosx", "configurations:Release or Dist" }
+            linkoptions { "-Wl,-rpath,@loader_path" }
             prelinkcommands
             {
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/lib")

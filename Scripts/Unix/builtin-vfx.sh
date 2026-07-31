@@ -18,6 +18,8 @@ trap 'rm -rf "$temporary"' EXIT
 stages=(
   "compute CSInitialize Initialize"
   "compute CSReset Reset"
+  "compute CSKill Kill"
+  "compute CSTransform Transform"
   "compute CSSimulate Simulate"
   "compute CSSpawn Spawn"
   "compute CSFinalize Finalize"

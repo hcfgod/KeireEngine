@@ -15,7 +15,7 @@ SOURCE="$ROOT/Vendor/ffmpeg"
 OUTPUT="$ROOT/Build/Dependencies/ffmpeg/$CONFIGURATION"
 INSTALL="$OUTPUT/install"
 STAMP="$OUTPUT/keire-ffmpeg.stamp"
-EXPECTED="$COMMIT|$CONFIGURATION|shared-lgpl-avformat-avcodec-swresample-avutil-v1"
+EXPECTED="$COMMIT|$CONFIGURATION|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
 
 [[ -x "$SOURCE/configure" ]] || {
   printf 'Vendor/ffmpeg is unavailable. Initialize the locked submodule first.\n' >&2
@@ -41,6 +41,10 @@ debug_options=(--disable-debug)
 if [[ "$CONFIGURATION" == Debug ]]; then
   debug_options=(--enable-debug=3 --disable-optimizations)
 fi
+platform_options=()
+if [[ "$(uname -s)" == Darwin ]]; then
+  platform_options=(--install-name-dir=@rpath)
+fi
 (
   cd "$OUTPUT"
   "$SOURCE/configure" \
@@ -63,6 +67,7 @@ fi
     --enable-avutil \
     --enable-encoder=flac \
     --enable-muxer=flac \
+    "${platform_options[@]}" \
     "${debug_options[@]}"
   make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf 1)"
   make install
