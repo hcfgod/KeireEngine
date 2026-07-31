@@ -201,7 +201,9 @@ namespace Keire::RenderBackend
                 !Math::IsFinite(emitter.ColorEnd) || !std::isfinite(emitter.LifetimeMinimum) ||
                 !std::isfinite(emitter.LifetimeMaximum) || emitter.LifetimeMinimum <= 0.0F ||
                 emitter.LifetimeMaximum < emitter.LifetimeMinimum || !std::isfinite(emitter.SizeStart) ||
-                !std::isfinite(emitter.SizeEnd) || emitter.Renderer > VfxRendererType::Mesh)
+                !std::isfinite(emitter.SizeEnd) || !std::isfinite(emitter.SimulationDeltaSeconds) ||
+                emitter.SimulationDeltaSeconds < 0.0F || emitter.SimulationDeltaSeconds > 80.0F ||
+                emitter.Renderer > VfxRendererType::Mesh)
             {
                 throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX emitter.");
             }

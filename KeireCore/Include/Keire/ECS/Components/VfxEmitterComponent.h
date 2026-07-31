@@ -2,8 +2,11 @@
 
 #include "Keire/ECS/Component.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Vfx/VfxSystem.h"
 
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace Keire
 {
@@ -58,6 +61,11 @@ namespace Keire
         [[nodiscard]] Vector3 BoundsExtent() const noexcept { return m_BoundsExtent; }
         /// Whether this emitter is visualized in the edit-scene viewport.
         [[nodiscard]] bool EditModePreview() const noexcept { return m_EditModePreview; }
+        /// Per-emitter Blackboard overrides keyed by stable parameter ID.
+        [[nodiscard]] std::span<const VfxParameterOverride> ParameterOverrides() const noexcept
+        {
+            return m_ParameterOverrides;
+        }
 
         /// Assigns a VFX effect asset. An empty ID clears the assignment.
         void SetEffect(AssetId effect);
@@ -77,6 +85,12 @@ namespace Keire
         void SetBounds(Vector3 center, Vector3 extent);
         /// Enables or disables the transient editor Scene-view preview.
         void SetEditModePreview(bool value);
+        /// Adds or replaces one serialized Blackboard override.
+        void SetParameterOverride(VfxParameterOverride value);
+        /// Removes one override and returns whether it existed.
+        bool RemoveParameterOverride(AssetId parameter);
+        /// Returns every parameter to its effect-asset default.
+        void ClearParameterOverrides();
 
       private:
         friend ComponentRegistration CreateVfxEmitterComponentRegistration();
@@ -91,6 +105,7 @@ namespace Keire
         Vector3 m_BoundsCenter;
         Vector3 m_BoundsExtent{5.0F, 5.0F, 5.0F};
         bool m_EditModePreview = false;
+        std::vector<VfxParameterOverride> m_ParameterOverrides;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateVfxEmitterComponentRegistration();

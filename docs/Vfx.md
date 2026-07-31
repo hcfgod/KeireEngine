@@ -1,59 +1,70 @@
 # VFX Authoring And Runtime
 
-Kéire's VFX system combines a visual authoring document, a bounded modular particle runtime, scene components, native
-C++ control, and managed C# gameplay control. This guide covers the complete supported workflow and calls out the
-features that are authored today but are not executable yet.
+Kéire's VFX system combines an executable visual graph, bounded modular particle payloads, typed Blackboard
+parameters, Portable Custom HLSL, scene components, native C++ control, and managed C# playback control. This guide
+covers the complete supported workflow and identifies the deliberately bounded parts of the graph runtime.
 
 Related guides cover [Scene Authoring](SceneAuthoring.md), [Rendering](Rendering.md), and
 [managed Gameplay Services](Scripting/GameplayServices.md).
 
-The most important rule is simple:
+The execution badge in the VFX Effect panel is authoritative:
 
-> **Runtime Modules drive particle behavior today.** Graph systems, context cards, typed pins, links, Custom HLSL, and
-> blackboard properties are persisted and validated authoring data, but they do not yet compile into runtime operators.
-
-That boundary keeps saved graph work forward-compatible without presenting unfinished cable execution as working
-behavior.
+> **Schema-v3 Graph assets execute their connected graph. LegacyModules assets execute the compatibility module
+> stack.** Conversion is explicit, deterministic, and undoable; merely saving an older asset does not silently change
+> its behavior.
 
 ## Mental Model
 
-Every `.keirevfx` asset contains one `Keire::VfxEffectDefinition` with four major parts:
+Every `.keirevfx` asset contains one `Keire::VfxEffectDefinition` with four major parts and an explicit
+`VfxExecutionSource`:
 
 ```mermaid
-flowchart LR
-    Settings["Effect Settings<br/>duration, loop, space, seed, capacity"] --> Asset[".keirevfx asset"]
-    Modules["Runtime Modules<br/><b>executable today</b>"] --> Asset
-    Graph["Systems, contexts, pins, links<br/>stored and validated"] --> Asset
-    Blackboard["Blackboard defaults<br/>stored; no runtime binding yet"] --> Asset
-    Asset --> CPU["Deterministic CPU simulation"]
-    Asset --> GPU["GPU compute simulation<br/>partial feature parity"]
+flowchart TD
+    Asset[".keirevfx schema 3"] --> Source{"Execution Source"}
+    Source -->|"LegacyModules"| Legacy["Enabled module stack<br/>compatibility schedule"]
+    Source -->|"Graph"| Graph["One connected ParticleStream graph<br/>stable topological schedule"]
+    Payloads["Runtime Module payloads"] --> Legacy
+    Payloads --> ModuleNodes["Module nodes<br/>reference payload IDs"]
+    ModuleNodes --> Graph
+    Blackboard["Blackboard defaults + overrides"] --> ParameterNodes["Parameter nodes<br/>stable-ID bindings"]
+    ParameterNodes --> Graph
+    Custom["Portable Custom HLSL nodes"] --> Graph
+    Legacy --> Program["Deterministic compiled program"]
+    Graph --> Program
+    Program --> CPU["CPU simulation"]
+    Program --> GPU["GPU compute simulation"]
 ```
 
-The graph and module stack are related visually, but they are not the same data:
+The graph and module payload list are related, but they are not interchangeable:
 
-- A graph **system** is an authoring container. Multiple systems do not currently create multiple runtime emitters.
-- A graph **context card** describes a stage such as Spawn or Update.
-- The card's **Executable Runtime Blocks** list summarizes every Runtime Module whose type belongs to that context.
-- A **Runtime Module** is the data the CPU and GPU particle implementations actually read.
-- Blackboard parameters, graph links, Event contexts, and Custom HLSL are reserved for the future typed operator
-  compiler.
+- A Graph asset has exactly one executable particle **system**. Multiple systems and Event execution are not supported.
+- **Context nodes** delimit Spawn, Initialize, Update, and Output stages.
+- A **Module node** references one stable Runtime Module payload. In Graph mode, an unreferenced payload does not run.
+- `ParticleStream` cables establish executable flow and deterministic node order.
+- A **Parameter node** references a Blackboard parameter by stable ID. Its typed cable binds a module property or
+  Portable Custom HLSL input.
+- A **Custom HLSL node** lowers a small, verified statement language into the same bounded instructions on CPU and GPU.
+- LegacyModules mode ignores graph scheduling and directly lowers enabled module payloads for source compatibility.
 
 ## Quick Start
 
 Use this workflow for a first effect:
 
 1. In the Project panel, open the create menu and choose **VFX Effect**.
-2. Name the asset. Kéire creates a `.keirevfx` file with a connected Spawn, Initialize, Update, and Output graph.
+2. Name the asset. Kéire creates a schema-v3 Graph asset with connected Spawn, Initialize, Update, and Output contexts
+   and module nodes for its default payloads.
 3. Double-click the asset to open the **VFX Effect** panel.
-4. Open **Runtime Modules**. Configure emission, initialization, lifetime changes, and output here.
-5. Open **Effect Settings**. Choose Loop, Duration, Simulation Space, Seed, and Capacity.
-6. Use the default **CPU (Authoring)** preview while tuning the effect.
-7. Add a **VFX Emitter** component to a scene entity.
-8. Assign the `.keirevfx` asset to its **Effect** field.
-9. Enable **Preview In Edit Mode** to see the scene emitter without entering Play Mode.
-10. Choose **Local** simulation space for an aura or other effect that must follow the entity. Choose **World** for
+4. Confirm the header says **EXECUTION: GRAPH**.
+5. Open **Runtime Modules** to edit payload values. In Graph mode, only payloads represented by connected Module nodes
+   execute.
+6. In **Graph**, use **Add Node** to add Module, Blackboard, or Custom HLSL nodes and connect their typed pins.
+7. Open **Effect Settings**. Choose Loop, Duration, Simulation Space, Seed, and Capacity.
+8. Select **Compile**, then use the default **CPU (Authoring)** preview while tuning the effect.
+9. Add a **VFX Emitter** component to a scene entity and assign the `.keirevfx` asset.
+10. Enable **Preview In Edit Mode** to see the scene emitter without entering Play Mode.
+11. Choose **Local** simulation space for an aura or other effect that must follow the entity. Choose **World** for
     smoke, sparks, or trails that should remain where they were emitted.
-11. Enter Play Mode and verify the effect on the GPU runtime backend.
+12. Enter Play Mode and verify the effect on the GPU runtime backend.
 
 The default asset already contains an enabled Emission Rate module and Renderer, so it is valid immediately. Saving is
 not required to see a transient authoring preview, but it is required to publish changes to the asset source.
@@ -95,8 +106,11 @@ Edits are transactional. Kéire validates a candidate definition and its transie
 draft. If validation or preview creation fails, the document keeps its last-good state. Removing a node or pin removes
 its incident links in the same undoable transaction.
 
-The Compile button does not turn graph cables into executable operators yet. It validates the complete schema, encodes
-canonical IR, computes its stable hash, and reports backend compatibility diagnostics.
+Compile validates and lowers the selected execution source. For Graph assets it checks canonical node shapes,
+references, cable types, stage order, acyclic topology, the connected main particle stream, parameter bindings, and
+Portable Custom HLSL before producing a backend-labeled program and canonical IR. `Hash` changes with program values;
+`StateLayoutHash` identifies topology/layout compatibility. Runtime GPU-baked value changes can separately require a
+handle-local simulation restart.
 
 ### Preview Toolbar
 
@@ -150,21 +164,26 @@ flowchart TD
 
 ## Graph Workflow
 
-The Graph tab is the visual authoring surface for systems, contexts, typed pins, and connections.
+The Graph tab is the executable authoring surface for schema-v3 Graph assets. It shows the current schema and execution
+source in the Systems pane. If the header says **EXECUTION: LEGACY RUNTIME MODULES**, graph edits remain descriptive
+until the asset is explicitly converted.
 
 ### Systems And Contexts
 
-The left pane lists graph systems and their node counts. Use **+ Add System** to create another authoring system, select
-one to display its canvas, and use **Remove** to delete it. Rename the selected system in the Inspector.
-
-Use **Add Context** above the canvas to add one of the five context types:
+The left pane lists systems and node counts. The current graph compiler requires exactly one executable particle system;
+one effect asset still creates one emitter. Multiple executable systems, system-to-system events, and Event contexts are
+not implemented. A Graph asset therefore needs one system containing one canonical context for every supported stage:
 
 ```mermaid
 flowchart LR
-    Spawn["Spawn Context<br/>Emission Rate<br/>Burst"] --> Initialize["Initialize Context<br/>Shape<br/>Initialize"]
-    Initialize --> Update["Update Context<br/>Force<br/>Size over Lifetime<br/>Color over Lifetime<br/>Collision"]
-    Update --> Output["Output Context<br/>Renderer"]
-    Event["Event Context<br/>stored only"] -. "future event execution" .-> Spawn
+    Spawn["Spawn Context"] --> SpawnModules["Emission Rate / Burst nodes"]
+    SpawnModules --> Initialize["Initialize Context"]
+    Initialize --> InitModules["Shape / Initialize nodes"]
+    InitModules --> Update["Update Context"]
+    Update --> UpdateModules["Force / Size / Color / Collision nodes"]
+    UpdateModules --> Renderer["Renderer node<br/>Output context"]
+    Renderer --> Output["Output Context"]
+    Event["Event Context"] -. "not executable" .-> Spawn
 ```
 
 The context colors are consistent throughout the editor:
@@ -175,8 +194,65 @@ The context colors are consistent throughout the editor:
 - Output: orange
 - Event: red
 
-A context card subtitle reports its context, pin count, and matching Runtime Module count. That count is a summary, not
-proof that the graph topology executes.
+The Context enum is part of executable semantics, not just presentation. `ParticleStream` cables may stay in the same
+stage or move forward from Spawn to Initialize to Update to Output; they may not travel backward. Event nodes are
+persistable in LegacyModules documents, but selecting Graph execution with an Event node fails compilation.
+The four canonical Graph Context nodes are structural anchors and cannot be deleted.
+
+### Execution Source And Migration
+
+New effects are Graph assets. Schema-v1 and schema-v2 effects always open as `LegacyModules`, even if schema-v2 contains
+an older presentation graph. Saving such an effect publishes schema 3 with `executionSource: "legacyModules"` and
+preserves compatibility behavior; Save alone does not opt in to cable execution.
+
+Select **Convert Runtime Modules to Graph** in the header to migrate:
+
+```mermaid
+flowchart TD
+    Old["Schema 1/2 or schema-3 LegacyModules asset"] --> Convert["Convert Runtime Modules to Graph"]
+    Convert --> Keep["Preserve emitter, module, and Blackboard stable IDs<br/>and all payload/default values"]
+    Convert --> Replace["Replace old Systems with one canonical Particle System"]
+    Replace --> Contexts["Create Spawn / Initialize / Update / Output contexts"]
+    Replace --> Nodes["Create one Module node per payload"]
+    Replace --> Cables["Connect one ParticleStream path"]
+    Replace --> Params["Create stable-ID Parameter nodes"]
+    Keep --> Graph["Schema-3 Graph draft"]
+    Contexts --> Graph
+    Nodes --> Graph
+    Cables --> Graph
+    Params --> Graph
+    Graph --> Compile["Validate and compile"]
+```
+
+Conversion is deterministic and undoable. It replaces the previous `Systems` collection instead of trying to infer
+execution from arbitrary old node names or decorative links. If an older presentation graph contains design notes you
+want to retain, duplicate the asset before conversion or inspect the converted draft before saving.
+
+There is no ambiguous automatic mode selection: `VfxExecutionSource::LegacyModules` executes enabled payloads directly,
+while `VfxExecutionSource::Graph` executes only the program reachable through the validated graph.
+Native import or migration tools can perform the same conversion with
+`Keire::ConvertVfxEffectToGraph(legacyDefinition)`.
+
+### Node Kinds
+
+Use **Add Node** above the canvas in Graph mode:
+
+| Node kind | Purpose | Executable requirements |
+| --- | --- | --- |
+| Context | Delimits Spawn, Initialize, Update, or Output | Canonical `ParticleStream` pins; exactly one of each supported stage |
+| Module | Runs a Runtime Module payload | References one payload stable ID; canonical flow pins and property-input pins |
+| Blackboard Parameter | Supplies one typed value | References a Blackboard stable ID and has one typed `value` output |
+| Custom HLSL | Mutates bounded particle attributes | Flow input/output, optional typed value inputs, and valid Portable Custom HLSL |
+
+A Module node is not a copy of its payload. The Runtime Modules tab remains the payload editor, while the graph stores
+the payload's stable ID in `VfxGraphNode::Reference`. Deleting the graph node stops that payload from executing in Graph
+mode; deleting the payload also makes its referencing node invalid. The same payload may not be referenced by two nodes
+in the executable system.
+
+Adding a new Runtime Module payload does not automatically place it on an existing Graph. Add the matching
+**Module / ...** node; the editor transactionally splices it into the particle stream at its canonical context
+boundary. Adding a Custom HLSL node similarly splices it at the selected stage. Conversely, an unreferenced payload can
+remain in the asset as inactive authoring data.
 
 ### Canvas Navigation
 
@@ -191,24 +267,18 @@ Use the canvas controls as follows:
 
 The Inspector also exposes **Graph Position** for precise placement.
 
-### Editing A Context
+### Editing A Node
 
-Selecting a context card opens these properties in the Inspector:
+Selecting a node opens its stable identity, reference where applicable, stage, graph position, typed pins, and touching
+connections. Context and Custom HLSL nodes can be renamed. Module and Parameter labels come from their referenced
+payload or Blackboard property so a display rename does not break the stable-ID binding.
 
-- **Node Name**
-- **Context**
-- **Graph Position**
-- **Custom HLSL**
-- Typed pins
-- Connections touching the selected context
-- Matching executable Runtime Modules
-- **Delete Context**
+Module node contexts and property semantics are compiler-owned and match the referenced payload type. Custom HLSL nodes
+may select Spawn, Initialize, Update, or Output. Moving a card changes editor layout only; changing a stage changes
+program order and must still satisfy the forward-flow rules.
 
-Changing the Context changes which Runtime Modules are summarized under **Executable Runtime Blocks**. It does not move
-or convert those modules.
-
-Custom HLSL is saved with the node. The CPU compiler reports that it cannot execute Custom HLSL. The current GPU
-runtime also does not execute graph-authored HLSL because graph operator compilation is not implemented yet.
+Deleting a Module or Custom HLSL node removes its incident cables and reconnects its particle-stream predecessor to its
+successor in the same undoable edit. Canonical Context nodes are not deletable. Parameter nodes may remain unconnected.
 
 ### Typed Pins
 
@@ -218,82 +288,156 @@ Each pin has:
 - A display name
 - A `VfxValueType`
 - An Input or Output direction
+- A compiler semantic such as `particles`, `value`, `gravityMultiplier`, or a Custom HLSL input identifier
+- An optional typed fallback for a Custom HLSL input
 
-Available value types are Boolean, Integer, Scalar, Vector 2, Vector 3, Color, Texture, Mesh, and Asset.
+Available graph types are Boolean, Integer, Scalar, Vector 2, Vector 3, Color, Texture, Mesh, Asset, and
+`ParticleStream`. `ParticleStream` represents execution flow; it is not a Blackboard value and has no literal default.
 
-Use **+ Add Input** or **+ Add Output** to add a Scalar pin. Edit its name, type, and direction directly in the
-Inspector. Changing a pin's type or direction removes its existing links so the document cannot retain incompatible
-topology. **Remove Pin** removes the pin and all incident links in one undoable edit.
+Context, Module, Parameter, and flow pins have canonical compiler-owned shapes. Custom HLSL value inputs are editable
+and may be Scalar, Vector 2, Vector 3, or Color. Their semantic is the identifier used in source. An unconnected Custom
+HLSL input uses its typed fallback; a connected input must be driven by a matching Parameter node.
+
+Editing a Runtime Module payload refreshes its Module node's canonical property-pin defaults without replacing stable
+pin IDs. Context, Module, Parameter, and stream pins are read-only; only Custom HLSL data inputs can be added, renamed,
+retyped, assigned a fallback, or removed.
 
 ### Creating A Link
 
 Links are created from an output pin to a compatible input pin:
 
-1. Select the source context.
+1. Select the source node.
 2. Click **Start Link** on its output pin.
-3. Select the target context.
+3. Select the target node.
 4. Find an input pin with the same value type.
 5. Click **Connect Here**.
 
-The editor disables **Connect Here** when the source is missing, the directions are invalid, the value types differ, or
-that exact connection already exists. Use **Cancel Link** above the canvas to abandon an in-progress link.
+The editor disables **Connect Here** when the source is missing, direction is invalid, value types differ, or that exact
+connection already exists. Connecting to an input that already has a writer replaces its old cable transactionally.
+Compile additionally rejects multiple drivers in hand-authored data, cycles, backward flow, invalid node/pin ownership,
+and value cables whose source is not a Parameter node. Use **Cancel Link** above the canvas to abandon an in-progress
+link.
 
-Connections touching the selected context appear under **CONNECTIONS**. Use **Remove Link** to delete one. Deleting a
-context automatically deletes every connection that references it.
+Connections touching the selected node appear under **CONNECTIONS**. Use **Remove Link** to delete one. Deleting a node
+automatically deletes every connection that references it.
 
-### Recommended Current Layout
+### Building The Main Particle Stream
 
-Use the graph to communicate the intended lifetime of the effect even though the cables do not execute yet:
+Every Context, Module, and Custom HLSL node that should execute must be on one connected `ParticleStream` path from
+Spawn to Output. Cables determine the schedule; screen position does not.
 
-```text
-Spawn Context                Initialize Context           Update Context              Output Context
-┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐        ┌──────────────────┐
-│ Emission Rate    │ Asset   │ Shape            │ Asset   │ Forces           │ Asset  │ Renderer         │
-│ Bursts           ├────────>│ Initialize       ├────────>│ Size / Color     ├───────>│                  │
-│ Output: Particles│         │ In/Out: Particles│         │ Collision        │        │ Input: Particles │
-└──────────────────┘         └──────────────────┘         └──────────────────┘        └──────────────────┘
+```mermaid
+flowchart LR
+    Spawn["Spawn<br/>Context"] --> Rate["Emission Rate<br/>Module"]
+    Rate --> InitContext["Initialize<br/>Context"]
+    InitContext --> Shape["Shape<br/>Module"]
+    Shape --> Initialize["Initialize<br/>Module"]
+    Initialize --> UpdateContext["Update<br/>Context"]
+    UpdateContext --> Force["Force<br/>Module"]
+    Force --> Custom["Custom HLSL<br/>Update"]
+    Custom --> Renderer["Renderer<br/>Module"]
+    Renderer --> Output["Output<br/>Context"]
+    Accel["Acceleration<br/>Parameter"] -->|"Vector3"| Custom
+    Gravity["Gravity Scale<br/>Parameter"] -->|"Scalar"| Force
 ```
 
-New assets create this four-card layout with `Asset`-typed `Particles` pins and three links. A migrated or older graph
-may contain context cards without pins. Add the missing input/output pins in the Inspector, set them to the same type,
-and link them using **Start Link** and **Connect Here**.
+The compiler performs a stable topological sort; stable IDs break ties when independent parameter nodes are ready at the
+same time. It then lowers enabled connected Module nodes in that order. Graph compilation still requires at least one
+connected enabled Emission Rate or Burst payload and one connected enabled Renderer payload.
 
-Rename contexts to communicate purpose, such as `Muzzle Spawn`, `Spark Initialize`, or `Smoke Output`, while retaining
-the correct Context enum. Keep Event contexts separate until runtime event execution exists. Use Compile before Save to
-catch broken pin references or type mismatches.
+Built-in payload types retain their defined stage semantics: emission schedules Spawn, shape/initialization configure
+creation, force/collision/curves run Update, and Renderer supplies Output. Within those constraints, cables control
+reachability and deterministic Module/Custom operation order; they do not turn a payload into an arbitrary operator or
+move it outside its canonical context.
 
-### Graph Limitations
+Use Compile before Save. The editor's candidate-preview validation is transactional, so an invalid edit reports an
+error and retains the last-good draft instead of publishing half-valid topology.
 
-The following graph data is real, saved, validated, undoable, and available to future compilers:
+### Portable Custom HLSL
 
-- Systems
-- Context cards
-- Typed pins
-- Links
-- Custom HLSL text
-- Event contexts
-- Blackboard properties
+Portable Custom HLSL is a deliberately small HLSL-like statement language, not unrestricted shader source. It lowers
+to verified, backend-neutral instructions and executes on both CPU and GPU. This keeps authoring deterministic and
+avoids runtime shader compilation, arbitrary resource access, or backend-specific behavior.
 
-It does not currently:
+Write semicolon-separated assignment statements:
 
-- Schedule Runtime Modules according to cable topology
-- Evaluate typed operators
-- Read blackboard values at runtime
-- Dispatch Event contexts
-- Compile Custom HLSL into GPU shaders
-- Create separate emitters for multiple graph systems
-- Support subgraphs, ribbons, trails, decals, or volumetric outputs
+```hlsl
+Velocity += Acceleration * DeltaTime;
+Position += float3(0.0, 0.25, 0.0) * DeltaTime;
+Tint *= float4(1.0, 0.8, 0.5, 1.0);
+Size = 0.75;
+Rotation += SpinDegrees * DeltaTime;
+```
 
-Use Runtime Modules for every behavior that must affect the current preview or game.
+`Acceleration` and `SpinDegrees` are Custom HLSL input-pin semantics. Cable those inputs from matching Parameter nodes,
+or give each input a typed fallback.
+
+The supported grammar is:
+
+```text
+Statement := Target Operator Operand [ "*" "DeltaTime" ]
+Target    := Position | Velocity | Rotation | Tint | Size
+Operator  := "=" | "+=" | "*="
+Operand   := InputSemantic | ScalarLiteral | float2(...) | float3(...) | float4(...)
+```
+
+Statements are separated by semicolons; a newline by itself is only whitespace. The optional `* DeltaTime` must be the
+trailing form shown above. Names and literal constructors are case-sensitive. `DeltaTime * value`, compound
+expressions, and multiple operands are not accepted.
+
+| Target | Native value | Accepted operand |
+| --- | --- | --- |
+| `Position` | `Vector3` | Scalar broadcast or `float3` / Vector3 input |
+| `Velocity` | `Vector3` | Scalar broadcast or `float3` / Vector3 input |
+| `Rotation` | Particle Z Euler/billboard rotation in degrees | Scalar |
+| `Tint` | `Color` | Scalar broadcast or `float4` / Color input |
+| `Size` | Scalar | Scalar |
+
+Numeric literals must be finite and have magnitude at most `1,000,000`. Custom inputs may be Scalar, Vector 2,
+Vector 3, or Color, but a Vector 2 operand currently has no matching writable target. Input semantics must be unique
+identifier names using letters, digits, and underscores, and may not begin with a digit.
+
+The limit is eight non-empty Custom HLSL statements across the entire effect, not eight per node. Empty programs are
+invalid. The following are intentionally forbidden:
+
+- Functions, declarations, structs, macros, `#include`, and preprocessor directives
+- `if`, `switch`, loops, recursion, and function calls other than the literal forms `float2/3/4(...)`
+- Textures, samplers, buffers, atomics, thread IDs, and other resource access
+- Swizzles, indexing, arbitrary arithmetic expressions, and chained operators
+- Writes to particle age, lifetime, identity, renderer, free lists, or emission counts
+- Cables from non-Parameter value nodes
+
+Portable instructions execute at their compiled cable position within the selected stage. Spawn, Initialize, and the
+first Output evaluation run when a particle is created; Update and Output run during per-frame simulation. `DeltaTime`
+is zero in creation stages and is the effect's scaled step in Update/Output. Local-space Position and Velocity writes
+use local semantics on both backends.
+
+On GPU, Custom instructions and built-in Modules execute together in cable order inside that emitter's normal spawn or
+simulation dispatch. Each active emitter uses one handle-filtered simulation dispatch over the world particle
+capacity, even when it owns few live particles. The cost therefore grows with
+`world particle capacity × active emitters`. Keep world capacities intentional and profile scenes with many emitters.
+
+### Current Graph Limits
+
+Graph execution currently supports:
+
+- One particle system with Spawn, Initialize, Update, and Output contexts
+- Module payload references scheduled by `ParticleStream` cables
+- Blackboard Parameter nodes bound to canonical module-property inputs
+- Portable Custom HLSL nodes and typed defaults or Parameter inputs
+- Deterministic CPU and GPU lowering from the same canonical program
+
+It does not currently support multiple executable systems, Event contexts, general arithmetic/operator nodes,
+subgraphs, ribbons, trails, decals, volumetric outputs, arbitrary shader HLSL, or custom GPU resources.
 
 ## Runtime Modules
 
-The Runtime Modules tab contains the executable effect stack. The left pane selects, adds, removes, and reorders module
-records. The right pane edits the selected module.
+The Runtime Modules tab edits module payload records. The left pane selects, adds, removes, and reorders them; the right
+pane edits the selected payload.
 
 Every module has a stable ID and an **Enabled** checkbox. A disabled module remains in the asset but is ignored by
-simulation. The runtime currently resolves modules by type, so Up and Down are useful for organization and future
-operator ordering but do not change the fixed Spawn, Initialize, Update, and Output execution stages.
+simulation. In LegacyModules mode, enabled payloads lower directly in stack order. In Graph mode, only enabled payloads
+referenced by connected Module nodes lower into the program, and cable topology supplies their deterministic order.
 
 ### Module Multiplicity
 
@@ -443,10 +587,12 @@ path currently produces indirect tinted billboard output; GPU indirect Mesh outp
 
 ## Blackboard
 
-The Blackboard tab authors typed properties intended for graph operators and future per-emitter bindings.
+The Blackboard tab authors typed defaults for graph bindings and per-emitter overrides.
 
 The left pane lists properties. Use **+ Add Property** to create one, select it to edit, and use **Remove Property** to
-delete it. The Graph tab's Systems pane also provides a compact blackboard list and **+ Parameter** shortcut.
+delete it. The Graph tab's Systems pane also provides a compact list and **+ Parameter** shortcut. Use
+**Add Node / Blackboard / _Name_** to create a Parameter node for a property, then cable its output to a same-typed
+Module or Custom HLSL input.
 
 | Blackboard type | C++ default-value type |
 | --- | --- |
@@ -466,13 +612,89 @@ Each property contains:
 - A unique, non-empty Name
 - A Type
 - A type-matching Default value
-- An **Exposed** flag
+- An **Exposed** flag that controls whether activation/live overrides are accepted and whether a stored component
+  override is applied
 
 Changing Type resets Default to that type's zero value. Texture and Mesh defaults use typed asset filtering; general
 Asset accepts any asset type. Asset-valued defaults participate in VFX dependency extraction and cooking.
 
-Blackboard values do not currently feed Runtime Modules or graph pins. Exposed is persisted, but there is no scene
-emitter override or managed/native runtime parameter-binding API yet.
+Renaming or retyping a property updates every referencing Parameter node's output name/type. Incompatible outgoing
+cables are removed in the same undoable edit. Removing a property removes its Parameter nodes and all incident cables.
+
+Names are display-only. Parameter nodes, scene components, activation overrides, and live runtime calls all bind by the
+parameter's stable `AssetId`, so renaming a property does not break its consumers. Changing or regenerating that ID does.
+
+### Binding A Module Property
+
+Module nodes expose canonical typed property inputs. Connect a Parameter node directly to one of these inputs:
+
+| Module | Bindable property inputs |
+| --- | --- |
+| Emission Rate | Particles Per Second |
+| Burst | Time, Count, Cycles, Interval |
+| Shape | Box Half Extent, Radius, Cone Angle, Cone Length, Mesh, Volume |
+| Initialize | Lifetime Minimum/Maximum, Velocity Minimum/Maximum, Rotation Minimum/Maximum |
+| Force | Force, Gravity Multiplier |
+| Size over Lifetime | Size |
+| Color over Lifetime | Color |
+| Collision | Restitution, Kill On Collision |
+| Renderer | Sprite, Mesh |
+
+The cable type must match exactly. Shape type, collision mode, renderer type, module Enabled, and other structural
+choices are not bindable. A bound Size value replaces the authored size curve with a constant for that emitter; a bound
+Color value likewise replaces the gradient with a constant. Leave those inputs unconnected when the full curve or
+gradient should remain authoritative.
+
+```mermaid
+flowchart LR
+    Default["Blackboard default"] --> Resolve{"Exposed override supplied?"}
+    Activation["VfxActivation override"] --> Resolve
+    Component["VfxEmitterComponent override"] --> Resolve
+    Live["VfxWorld::SetParameter"] --> Resolve
+    Resolve --> Slot["Typed compiled parameter slot"]
+    Slot --> Binding["Module property binding"]
+    Slot --> Custom["Portable Custom HLSL operand"]
+    Binding --> CPU["Resolved CPU definition"]
+    Binding --> GPU["Resolved GPU emitter descriptor"]
+    Custom --> CPU
+    Custom --> GPU
+```
+
+Hidden parameters may still drive graph bindings, but external overrides are rejected. Overrides must use a known,
+Exposed stable ID and an exactly matching `VfxParameterValue` alternative. Duplicate IDs, non-finite values, unknown
+IDs, hidden parameters, and type mismatches are rejected transactionally by direct `VfxWorld` APIs.
+
+### Scene-Component Overrides
+
+`VfxEmitterComponent` stores overrides with the scene and synchronizes them into Edit Mode and Play Mode instances.
+Use the native component API for typed authoring:
+
+```cpp
+#include <Keire/Core.h>
+
+void ConfigureAura(Keire::VfxEmitterComponent& emitter, const Keire::AssetId intensityParameter,
+                   const Keire::AssetId tintParameter)
+{
+    emitter.SetParameterOverride({intensityParameter, 48.0F});
+    emitter.SetParameterOverride({tintParameter, Keire::Color{0.2F, 0.6F, 1.0F, 1.0F}});
+
+    // Remove one value to reveal the asset default again.
+    (void)emitter.RemoveParameterOverride(intensityParameter);
+
+    // Or reset every serialized override.
+    emitter.ClearParameterOverrides();
+}
+```
+
+The component schema stores a bounded canonical stable-ID array in its `Parameter Overrides` text property. In the
+scene Inspector, assign an effect and use the generated type-appropriate controls for its Exposed parameters. Each
+active override shows the authored default and a **Reset** action. Overrides whose stable ID was removed, hidden, or
+changed to an incompatible type remain visible as stale entries until **Remove** is selected. Scene loading and preview
+synchronization apply only overrides that are still known, Exposed, and type-compatible with the assigned effect.
+Asset-valued component overrides participate in scene dependency extraction and cooking.
+
+The managed C# VFX service currently exposes playback controls, not Blackboard mutation. Use native component/world
+APIs for parameter changes in this milestone.
 
 ## Effect Settings
 
@@ -572,6 +794,7 @@ the component registry.
 | **Bounds Center** | Authored culling center. Validated and persisted, but not consumed yet. |
 | **Bounds Extent** | Positive authored culling extents. Validated and persisted, but not consumed yet. |
 | **Preview In Edit Mode** | Enables transient preview for this scene emitter outside Play Mode. |
+| **Parameter Overrides** | Typed controls for the assigned effect's Exposed Blackboard parameters, with default reset and stale-entry cleanup; serialized canonically by stable ID. |
 
 ### Edit-Mode Eligibility
 
@@ -585,11 +808,11 @@ A scene emitter is previewed only while all of these are true:
 - The effect is available as the open matching draft or as a successfully loaded persisted asset revision.
 - The entity's world transform can be decomposed into finite position and rotation.
 
-The editor synchronizes scene identity, entity identity, effect and revision, seed offset, simulation speed, enabled
-state, and world position/rotation. It routes the open draft to one selected or deterministic matching host and suppresses
-only that host's persisted duplicate. It also restarts a World-space edit preview when an authored position/rotation
-change would otherwise leave an old particle cloud behind. It stops the preview when the emitter is unchecked, disabled,
-deleted, moved to a different scene, or superseded by Play Mode.
+The editor synchronizes scene identity, entity identity, effect and revision, compatible parameter overrides, seed
+offset, simulation speed, enabled state, and world position/rotation. It routes the open draft to one selected or
+deterministic matching host and suppresses only that host's persisted duplicate. It also restarts a World-space edit
+preview when an authored position/rotation change would otherwise leave an old particle cloud behind. It stops the
+preview when the emitter is unchecked, disabled, deleted, moved to a different scene, or superseded by Play Mode.
 
 On the GPU preview backend, that restart is handle-scoped. The renderer retires only particles carrying the restarted
 handle's index and generation, so moving one World-space editor emitter does not clear, replay, or blink unrelated
@@ -599,7 +822,7 @@ emitters in the shared editor world.
 
 Play Mode clones the edit scene and creates a scene-owned `Keire::VfxWorld`. Every active, enabled VFX Emitter with
 Play On Awake and a loaded Effect receives a runtime handle. The session synchronizes effect revisions, world
-position/rotation, Seed Offset, and Simulation Speed.
+position/rotation, compatible parameter overrides, Seed Offset, and Simulation Speed.
 
 The current scene session selects the GPU backend when it is constructed with an Asset System and the bounded CPU
 backend for its headless compatibility configuration. Use a directly owned `VfxWorld` when a tool or test needs an
@@ -800,6 +1023,86 @@ flowchart LR
     Stop --> Reuse["slot release<br/>generation increments"]
 ```
 
+### Build A Parameter Binding In C++
+
+The graph schema is public through `<Keire/Core.h>`. This example adds an exposed Scalar parameter and connects its
+Parameter node to the default Emission Rate Module node:
+
+```cpp
+#include <Keire/Core.h>
+
+#include <algorithm>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <variant>
+
+namespace MyGame
+{
+    // One-time authoring helper: encode and save the result so generated graph IDs remain stable.
+    [[nodiscard]] Keire::VfxEffectDefinition MakeRateControlledEffect(const Keire::AssetId rateParameter)
+    {
+        auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+        definition.Name = "Rate Controlled";
+        definition.Blackboard.push_back(
+            {.Id = rateParameter,
+             .Name = "Spawn Rate",
+             .Type = Keire::VfxValueType::Scalar,
+             .DefaultValue = 24.0F,
+             .Exposed = true});
+
+        auto& system = definition.Systems.front();
+        const auto emission = std::ranges::find_if(
+            definition.Modules, [](const Keire::VfxModuleDefinition& module)
+            { return std::holds_alternative<Keire::VfxEmissionRateModule>(module.Payload); });
+        if (emission == definition.Modules.end())
+            throw std::runtime_error("The effect has no Emission Rate payload.");
+
+        const auto emissionNode =
+            std::ranges::find(system.Nodes, emission->Id, &Keire::VfxGraphNode::Reference);
+        if (emissionNode == system.Nodes.end())
+            throw std::runtime_error("The Emission Rate payload is not represented in the graph.");
+
+        const auto rateInput =
+            std::ranges::find(emissionNode->Pins, std::string("particlesPerSecond"), &Keire::VfxGraphPin::Semantic);
+        if (rateInput == emissionNode->Pins.end())
+            throw std::runtime_error("The Emission Rate node has no canonical rate input.");
+        const auto emissionNodeId = emissionNode->Id;
+        const auto rateInputId = rateInput->Id;
+
+        Keire::VfxGraphNode parameterNode;
+        parameterNode.Id = Keire::AssetId::Generate();
+        parameterNode.Type = "Spawn Rate";
+        parameterNode.Context = Keire::VfxContextType::Spawn;
+        parameterNode.EditorPosition = {-280.0F, -120.0F};
+        parameterNode.Kind = Keire::VfxGraphNodeKind::Parameter;
+        parameterNode.Reference = rateParameter;
+        parameterNode.Pins.push_back({Keire::AssetId::Generate(),
+                                      "Spawn Rate",
+                                      Keire::VfxValueType::Scalar,
+                                      false,
+                                      "value",
+                                      std::nullopt});
+
+        const auto parameterNodeId = parameterNode.Id;
+        const auto parameterPinId = parameterNode.Pins.front().Id;
+        system.Nodes.push_back(std::move(parameterNode));
+        system.Connections.push_back({Keire::AssetId::Generate(),
+                                      parameterNodeId,
+                                      parameterPinId,
+                                      emissionNodeId,
+                                      rateInputId});
+
+        Keire::ValidateVfxEffect(definition);
+        return definition;
+    }
+} // namespace MyGame
+```
+
+Stable IDs are serialized program identity. Generate them once while authoring and keep them in the saved asset; do not
+regenerate IDs each time a source-built definition loads.
+
 ### Create, Activate, Update, And Stop
 
 ```cpp
@@ -882,6 +1185,11 @@ namespace MyGame
 The renderer consumes the immutable `VfxRenderSnapshot`. CPU snapshots contain `VfxRenderParticle` values. GPU
 snapshots contain compact `VfxGpuEmitter` work descriptors and cumulative spawn sequences; the renderer owns the
 persistent GPU particle buffers. Call `VfxWorld::Update` once per owning world frame, not once per active handle.
+`Revision()` identifies any snapshot-visible change, while `SimulationStepRevision()` advances only after a positive
+`Update`. The GPU renderer applies lifecycle, transform, restart, and spawn-sequence changes from each new snapshot, but
+consumes a simulation delta only once per Simulation Step Revision. A newer mutation-only snapshot rebuilds the alive
+index with a zero delta. Replaying an equal or stale snapshot leaves persistent GPU buffers unchanged, so it cannot
+advance or hide newer particles.
 
 ### `VfxWorldSpecification`
 
@@ -904,6 +1212,7 @@ Construction rejects zero capacities, more than `1,000,000` effects, or more tha
 - Finite Position
 - Finite, non-zero Rotation
 - Seed Offset
+- Optional `std::vector<VfxParameterOverride>` values keyed by exposed Blackboard stable ID
 
 The world normalizes Rotation and retains the Effect reference for the active slot. `Activate` throws for invalid
 activation data. It returns an empty handle, increments `DroppedEffects`, and leaves the world unchanged when no effect
@@ -915,6 +1224,69 @@ slot is available.
 - `Stop` is idempotent for stale handles.
 - `SetTransform` and `SetSimulationSpeed` throw for a stale handle.
 - Reusing a pool index increments its generation so an old handle cannot target the new effect.
+
+### Activation And Live Parameter Overrides
+
+Supply initial values in `VfxActivation::ParameterOverrides`, or mutate a live handle without restarting it:
+
+```cpp
+#include <Keire/Core.h>
+
+#include <array>
+#include <cstdint>
+#include <stdexcept>
+#include <utility>
+
+namespace MyGame
+{
+    [[nodiscard]] Keire::VfxHandle StartParameterizedEffect(
+        const Keire::Ref<Keire::VfxWorld>& world, Keire::Ref<const Keire::VfxEffectAsset> effect,
+        const std::uint64_t revision, const Keire::AssetId rateParameter, const Keire::AssetId tintParameter)
+    {
+        const auto handle = world->Activate(
+            {.Effect = std::move(effect),
+             .Revision = revision,
+             .Position = {},
+             .Rotation = {},
+             .SeedOffset = 0,
+             .ParameterOverrides = {
+                 {rateParameter, 40.0F},
+                 {tintParameter, Keire::Color{1.0F, 0.35F, 0.1F, 1.0F}},
+             }});
+        if (!handle)
+            throw std::runtime_error("The VFX world effect budget is exhausted.");
+
+        world->SetParameter(handle, rateParameter, 72.0F);
+        world->ResetParameter(handle, tintParameter);
+
+        const std::array replacements{
+            Keire::VfxParameterOverride{rateParameter, 16.0F},
+            Keire::VfxParameterOverride{tintParameter, Keire::Color{0.2F, 0.8F, 1.0F, 1.0F}},
+        };
+        world->SetParameterOverrides(handle, replacements);
+        return handle;
+    }
+} // namespace MyGame
+```
+
+`SetParameter` adds or replaces one override. `ResetParameter` removes one override so the asset default becomes
+visible again. `SetParameterOverrides` replaces the complete override set as one transaction. All three require a live
+handle. An unknown, hidden, duplicate, or type-mismatched parameter rejects the candidate and leaves the previous
+resolved values intact.
+
+Parameter changes immediately rebuild that handle's resolved module values and Portable Custom HLSL operands. They do
+not change the source asset or another handle using the same asset. Emission and creation properties affect future
+work. CPU simulation reads resolved Force, Size, Color, and Collision module values on later updates. The GPU path
+bakes Force, size/color endpoints, and Renderer data into particles when they spawn; changing one of those values
+advances only that handle's GPU simulation revision and retires its prior particles so stale baked state is not mixed
+with the new value. Other creation-property changes affect future GPU particles. Portable Custom HLSL Update/Output
+operands are resolved per emitter and affect existing particles on both backends without a handle restart.
+
+On `Reload`, compatible overrides with the same stable ID, exact type, and Exposed status are preserved. Removed,
+hidden, or type-changed parameters fall back to the new asset and set
+`VfxRuntimeDiagnostic::ParameterOverrideRejected`. Program layout changes can restart that handle's simulation while
+value-only changes preserve compatible state except for GPU-baked Force, Size, Color, or Renderer changes, which
+intentionally restart only that GPU handle.
 
 ### Handle-Scoped GPU Lifetime
 
@@ -956,11 +1328,14 @@ Reload returns false when:
 - The effect reference is empty
 - The revision is not newer than the active revision
 
-When the old and new definitions have the same Emitter ID, the runtime preserves elapsed time and compatible live
-particles; the CPU backend also trims particles if Capacity shrank. Changing Emitter ID resets emission and random state
-for that handle. CPU particles owned by the handle are released immediately. On GPU, the handle's simulation revision
-advances, so the next render preparation kills only particles belonging to that handle and resets only its spawn
-tracking. Other handles in the shared world keep their particles and progress.
+When the old and new definitions have the same Emitter ID and compiled `StateLayoutHash`, the runtime preserves elapsed
+time and compatible live particles; the CPU backend also trims particles if Capacity shrank. On GPU, compatible reload
+also requires unchanged baked Force, Size, Color, and Renderer state. Changing the Emitter ID, Simulation Space, Seed,
+renderer representation/type, graph schedule, parameter layout, binding layout, portable instruction shape, or GPU-baked
+state resets emission and random state for the affected handle. CPU particles owned by an incompatible handle are
+released immediately. On GPU, the handle's simulation revision advances, so the next render preparation kills only
+particles belonging to that handle and resets only its spawn tracking. Other handles in the shared world keep their
+particles and progress.
 
 ### Render, Debug, And Statistics APIs
 
@@ -1032,14 +1407,23 @@ currently install a Mesh/Volume ShapeSample callback.
 
 `Keire::CompileVfxEffect` returns `Keire::VfxCompiledProgram`:
 
-- `Valid` reports whether validation and encoding succeeded.
-- `Hash` is a deterministic byte hash of canonical IR.
+- `Valid` reports whether schema validation and lowering succeeded.
+- `Hash` is a deterministic byte hash of canonical executable IR, including current defaults and payload values.
+- `StateLayoutHash` identifies topology/layout compatibility for revision-aware reload.
 - `Backend` records the requested backend.
-- `CanonicalIr` stores the encoded canonical definition.
+- `CanonicalIr` stores the lowered execution source, parameters, payload references, bindings, custom instructions,
+  and interleaved operation schedule.
+- `Parameters` contains stable-ID slots and typed defaults.
+- `Modules` contains the connected, enabled Runtime Module payload references.
+- `Bindings` maps parameter slots to canonical module properties.
+- `CustomInstructions` contains verified Portable Custom HLSL operations.
+- `Operations` is the authoritative cable-ordered Module/Custom execution schedule.
 - `Diagnostics` contains Information, Warning, or Error entries with optional node/module stable IDs.
 
-CPU compilation warns when a graph node contains Custom HLSL. It also warns when GPU Depth collision is authored for
-the CPU compatibility backend.
+Both backends compile the same graph and Portable Custom HLSL semantics. CPU compilation warns when GPU Depth collision
+must degrade to the configured CPU collision query. Structural graph, binding, and portable-language errors set
+`Valid` to false and are returned as Error diagnostics instead of partially executing the program. Bound Blackboard
+defaults are resolved during compilation and must leave every affected module within its normal validation range.
 
 ### Runtime Diagnostics
 
@@ -1053,6 +1437,7 @@ Each `VfxDebugEffect` contains a `VfxRuntimeDiagnostic` bit field. Test flags wi
 | `CollisionQueryUnavailable` | Collision was requested but no query was installed, the callback failed, or it returned invalid data. |
 | `ShapeAssetSamplerUnavailable` | Mesh/Volume sampling had no usable shape sampler. |
 | `SimulationValueInvalid` | Non-finite particle state was detected; affected particles are dropped safely. |
+| `ParameterOverrideRejected` | Reload discarded an override whose stable ID, Exposed status, or type no longer matches. |
 
 Example:
 
@@ -1084,7 +1469,7 @@ Example:
 
 - An effect reaches its Capacity
 - The CPU world reaches `MaximumParticles`
-- A newly spawned particle produces a non-finite position or velocity
+- A newly spawned or simulated particle produces a non-finite position, velocity, rotation, tint, or size
 
 `VfxRenderPacketCopyResult::Dropped`, `VfxRenderSnapshot::DroppedParticles`, and the debug snapshot's dropped-sample
 fields separately report values that did not fit their requested presentation or sampling bounds. Those truncation
@@ -1114,10 +1499,14 @@ The GPU backend is a runtime acceleration path, not a promise that every authore
 | Per-handle stop, restart, and incompatible-reload isolation | Yes | Yes; matching handle generation only |
 | Exact active particle count | Yes | Spawn-based estimate |
 | Per-particle debug samples | Yes | No |
-| Graph cable execution | No | No |
-| Blackboard runtime binding | No | No |
-| Custom HLSL execution | No | No |
+| Schema-v3 Graph cable scheduling | Yes | Yes |
+| Module-property Blackboard binding | Yes | Yes |
+| Activation/component/live parameter overrides | Yes | Yes |
+| Live module override on existing particles | Update modules are read on later CPU steps | Force/Size/Color/Renderer changes restart only that handle; other creation fields affect future particles |
+| Portable Custom HLSL | Yes; bounded instructions run in cable order inside particle loops | Yes; cable-ordered Module and Custom operations share the per-emitter spawn/simulation dispatches |
 | Event contexts | No | No |
+| Multiple executable graph systems | No | No |
+| Arbitrary shader HLSL/resources | No | No |
 
 Author and diagnose on CPU, then deliberately verify the effect on GPU. If a required feature is absent from the GPU
 column, keep that effect on a supported compatibility path until parity is implemented.
@@ -1183,9 +1572,12 @@ column, keep that effect on a supported compatibility path until parity is imple
 | The open draft appears at world origin | No eligible scene emitter using that asset is available. Assign the open effect to an active, enabled emitter and check Preview In Edit Mode to host the draft at that emitter. |
 | No edit-mode particles | Assign Effect, activate the entity hierarchy, enable the component, and check Preview In Edit Mode. |
 | No Play Mode particles | Enable Play On Awake or call `Vfx.Play`; then allow the asset to finish loading. |
-| Graph changes do not alter the effect | Configure Runtime Modules. Cable/operator execution is not implemented yet. |
-| Blackboard values do nothing | Runtime parameter bindings and per-emitter overrides are not implemented yet. |
-| Custom HLSL does nothing | It is persisted but not compiled into either runtime backend yet. |
+| Graph changes do not alter the effect | Check the header execution badge. LegacyModules ignores graph scheduling until explicit conversion. In Graph mode, put the enabled Module node on the Spawn-to-Output `ParticleStream` path and Compile. |
+| A new Runtime Module has no effect in Graph mode | Adding a payload does not add an executable node. Use **Add Node / Module** to splice it into the main stream, then Compile. |
+| Blackboard changes do nothing | Add a Parameter node and cable its typed output to a canonical Module or Custom HLSL input. A property existing only in the Blackboard has no consumer. |
+| A parameter override is rejected | Use the parameter's stable ID, exact `VfxParameterValue` type, and an Exposed parameter. Direct world APIs also reject duplicate IDs and stale handles. |
+| Custom HLSL does nothing | Confirm Graph mode, connect the node to the main `ParticleStream`, use only the portable grammar, and Compile. `DeltaTime` is zero in creation stages; use Update for per-frame motion. |
+| GPU effects are expensive with many emitters | Each active emitter uses one handle-filtered, world-capacity simulation dispatch. Reduce active emitters or lower the owning world's particle capacity. |
 | Mesh or Volume particles spawn at the emitter origin | The current world has no `ShapeSample` callback. |
 | GPU preview differs from CPU | Consult the capability matrix; several advanced module fields have partial GPU parity. |
 | Restarting one GPU effect disturbs another | This is not expected. Stop and restart are isolated by handle generation, while incompatible reload uses a per-handle simulation revision; `Clear()` is the world-wide reset operation. |
@@ -1196,7 +1588,10 @@ column, keep that effect on a supported compatibility path until parity is imple
 | Collision has no effect | Use CPU, provide a CollisionQuery or Play Mode physics world, and inspect runtime diagnostics. |
 | Compile reports an invalid header | Check Name, Duration, Capacity, module count, enabled emission, and Renderer. |
 | Compile reports duplicate stable IDs | Do not hand-copy IDs between modules, systems, nodes, pins, links, or parameters. |
-| A link cannot be completed | Output/input direction and `VfxValueType` must match, and the exact link must not already exist. |
+| Compile requires one particle system | Graph execution supports exactly one system. Remove extra systems or keep the asset in LegacyModules compatibility mode. |
+| Compile reports a disconnected executable node | Cable every Module and Custom HLSL node that should execute into the one Spawn-to-Output `ParticleStream` path. |
+| Compile reports a cycle or backward context | Remove the cycle and keep flow ordered Spawn → Initialize → Update → Output. |
+| A link cannot be completed | Output/input direction and `VfxValueType` must match. An input may have only one driver, and executable value inputs accept Parameter-node sources. |
 | Reload does not apply | The revision must increase; the editor also refuses source reload over unsaved local changes. |
 | Pause then Resume loses a custom speed in C# | Managed Resume currently restores Simulation Speed to `1.0`. |
 
@@ -1213,6 +1608,8 @@ modify them; hand editing can easily break stable identity.
 | Graph nodes across all systems | 4,096 |
 | Graph connections across all systems | 16,384 |
 | Blackboard parameters | 1,024 |
+| Serialized scene-component parameter overrides | 1,024 |
+| Portable Custom HLSL instructions per executable Graph effect | 8 |
 | Burst modules | 32 |
 | Cycles per Burst | 1,024 |
 | Name, system, node, pin, or parameter name | 128 UTF-8 bytes |
@@ -1221,10 +1618,23 @@ modify them; hand editing can easily break stable identity.
 
 Stable IDs must be non-empty and globally unique across the emitter, modules, systems, nodes, pins, links, and
 blackboard parameters in one definition. Blackboard names must also be unique. Every connection must reference existing
-pins, originate at an output, terminate at an input, and connect equal `VfxValueType` values.
+pins, originate at an output, terminate at an input, connect equal `VfxValueType` values, and be the only driver of its
+input.
 
-Schema versions 1 and 2 are readable. Saving publishes schema version 2. A schema-1 module asset is adapted in memory;
-opening or previewing it does not rewrite the source by itself.
+Graph execution adds these publish-time requirements:
+
+- Exactly one system and exactly one Spawn, Initialize, Update, and Output Context node
+- No Event nodes, cycles, backward `ParticleStream` stage transitions, or disconnected executable nodes
+- One connected Spawn-to-Output particle stream
+- Unique valid Module references with canonical context, flow pins, property semantics, and types
+- Valid Parameter references whose output type matches the Blackboard definition
+- Parameter-only value sources for Module and Custom HLSL inputs
+- At least one connected enabled emission payload and one connected enabled Renderer
+- At most eight valid Portable Custom HLSL statements
+
+Schema versions 1, 2, and 3 are readable. Saving publishes schema version 3. Schema 1/2 always decode as
+`LegacyModules`; opening, previewing, or saving does not convert execution. Use the explicit conversion command to
+replace old Systems with a schema-v3 executable Graph.
 
 ## API And Implementation Reference
 
@@ -1233,17 +1643,23 @@ Use these files as the final source of truth:
 | Area | Source |
 | --- | --- |
 | Public definitions, modules, graph schema, compiler, world, handles, snapshots | `KeireCore/Include/Keire/Vfx/VfxSystem.h` |
-| Validation, encoding, decoding, dependencies, canonical compile result | `KeireCore/Source/Vfx/VfxAssets.cpp` |
-| CPU/GPU scheduling, pooling, reload, statistics, snapshots | `KeireCore/Source/Vfx/VfxSystem.cpp` |
+| Validation, schema migration, graph lowering, Portable Custom HLSL, encoding, and dependencies | `KeireCore/Source/Vfx/VfxAssets.cpp` |
+| Shared compiled-binding resolution and executable payload materialization | `KeireCore/Source/Vfx/VfxExecutionInternal.h` |
+| CPU execution, parameter resolution, pooling, reload, statistics, and snapshots | `KeireCore/Source/Vfx/VfxSystem.cpp` |
+| GPU portable-instruction implementation | `KeireCore/Shaders/BuiltinVfx.hlsl` |
+| GPU operation schedule upload, per-emitter dispatch, and render handoff | `KeireCore/Source/Rendering/RenderSceneRecording.cpp` |
 | Scene component API | `KeireCore/Include/Keire/ECS/Components/VfxEmitterComponent.h` |
 | Component validation and serialized Inspector fields | `KeireCore/Source/ECS/Components/VfxEmitterComponent.cpp` |
+| Scene and override dependency extraction | `KeireCore/Source/Scenes/SceneAsset.cpp` |
 | Play Mode VFX session API | `KeireCore/Include/Keire/Scenes/Scene.h` |
 | Play Mode emitter synchronization and C++ control | `KeireCore/Source/Scenes/SceneRuntime.cpp` |
 | Transactional editor document | `KeireClient/Include/KeireClient/Editor/VfxEffectDocument.h` |
 | Graph, module, blackboard, settings, and preview UI | `KeireClient/Source/Editor/VfxEffectPanel.cpp` |
+| Typed scene-emitter Blackboard override Inspector | `KeireClient/Include/KeireClient/Editor/VfxEmitterInspector.h`, `KeireClient/Source/Editor/VfxEmitterInspector.cpp` |
 | Edit-mode emitter eligibility | `KeireClient/Include/KeireClient/Editor/EditModeVfxPreview.h` |
 | Editor asset and scene preview ownership | `KeireClient/Source/Editor/EditorWorkspaceAssets.cpp` |
 | Managed VFX API | `KeireManaged/RuntimeApi.cs` |
 | Managed VFX component marker | `KeireManaged/BuiltInComponents.cs` |
 | Runtime and schema tests | `KeireTests/Source/Vfx/VfxTests.cpp` |
+| Executable graph, cable order, binding, Custom HLSL, and component override tests | `KeireTests/Source/Vfx/VfxGraphRuntimeTests.cpp` |
 | Editor document and edit-preview tests | `KeireEditorTests/Source/VfxEffectDocumentTests.cpp` |

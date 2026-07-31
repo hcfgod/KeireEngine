@@ -80,6 +80,24 @@ namespace KeireEditor
             EnumEntry{Keire::VfxValueType::Mesh, std::string_view("Mesh")},
             EnumEntry{Keire::VfxValueType::Asset, std::string_view("Asset")},
         };
+        constexpr std::array GraphValueTypes{
+            EnumEntry{Keire::VfxValueType::Boolean, std::string_view("Boolean")},
+            EnumEntry{Keire::VfxValueType::Integer, std::string_view("Integer")},
+            EnumEntry{Keire::VfxValueType::Scalar, std::string_view("Scalar")},
+            EnumEntry{Keire::VfxValueType::Vector2, std::string_view("Vector 2")},
+            EnumEntry{Keire::VfxValueType::Vector3, std::string_view("Vector 3")},
+            EnumEntry{Keire::VfxValueType::Color, std::string_view("Color")},
+            EnumEntry{Keire::VfxValueType::Texture, std::string_view("Texture")},
+            EnumEntry{Keire::VfxValueType::Mesh, std::string_view("Mesh")},
+            EnumEntry{Keire::VfxValueType::Asset, std::string_view("Asset")},
+            EnumEntry{Keire::VfxValueType::ParticleStream, std::string_view("Particle Stream")},
+        };
+        constexpr std::array CustomHlslValueTypes{
+            EnumEntry{Keire::VfxValueType::Scalar, std::string_view("Scalar")},
+            EnumEntry{Keire::VfxValueType::Vector2, std::string_view("Vector 2")},
+            EnumEntry{Keire::VfxValueType::Vector3, std::string_view("Vector 3")},
+            EnumEntry{Keire::VfxValueType::Color, std::string_view("Color")},
+        };
 
         template <typename Value, std::size_t Size>
         [[nodiscard]] std::string_view EnumName(const Value value, const std::array<EnumEntry<Value>, Size>& entries)
@@ -160,6 +178,38 @@ namespace KeireEditor
             return {0.2F, 0.24F, 0.3F, 1.0F};
         }
 
+        [[nodiscard]] std::string_view NodeKindName(const Keire::VfxGraphNodeKind kind) noexcept
+        {
+            switch (kind)
+            {
+            case Keire::VfxGraphNodeKind::Context:
+                return "Context";
+            case Keire::VfxGraphNodeKind::Module:
+                return "Runtime Module";
+            case Keire::VfxGraphNodeKind::Parameter:
+                return "Blackboard Parameter";
+            case Keire::VfxGraphNodeKind::CustomHlsl:
+                return "Custom HLSL";
+            }
+            return "Unsupported";
+        }
+
+        [[nodiscard]] Keire::UiColor NodeColor(const Keire::VfxGraphNode& node) noexcept
+        {
+            switch (node.Kind)
+            {
+            case Keire::VfxGraphNodeKind::Context:
+                return ContextColor(node.Context);
+            case Keire::VfxGraphNodeKind::Module:
+                return {0.14F, 0.42F, 0.68F, 1.0F};
+            case Keire::VfxGraphNodeKind::Parameter:
+                return {0.12F, 0.52F, 0.36F, 1.0F};
+            case Keire::VfxGraphNodeKind::CustomHlsl:
+                return {0.56F, 0.24F, 0.62F, 1.0F};
+            }
+            return {0.2F, 0.24F, 0.3F, 1.0F};
+        }
+
         [[nodiscard]] Keire::VfxParameterValue DefaultParameterValue(const Keire::VfxValueType type)
         {
             switch (type)
@@ -180,6 +230,8 @@ namespace KeireEditor
             case Keire::VfxValueType::Mesh:
             case Keire::VfxValueType::Asset:
                 return Keire::AssetId{};
+            case Keire::VfxValueType::ParticleStream:
+                break;
             }
             throw std::invalid_argument("VFX parameter type is unsupported.");
         }
@@ -193,10 +245,65 @@ namespace KeireEditor
             result.Context = context;
             result.EditorPosition = position;
             if (context != Keire::VfxContextType::Spawn && context != Keire::VfxContextType::Event)
-                result.Pins.push_back({Keire::AssetId::Generate(), "Particles", Keire::VfxValueType::Asset, true});
+            {
+                result.Pins.push_back(
+                    {Keire::AssetId::Generate(), "Particles", Keire::VfxValueType::ParticleStream, true, "particles"});
+            }
             if (context != Keire::VfxContextType::Output)
-                result.Pins.push_back({Keire::AssetId::Generate(), "Particles", Keire::VfxValueType::Asset, false});
+            {
+                result.Pins.push_back(
+                    {Keire::AssetId::Generate(), "Particles", Keire::VfxValueType::ParticleStream, false, "particles"});
+            }
             return result;
+        }
+
+        [[nodiscard]] Keire::VfxGraphNode NewParameterNode(const Keire::VfxBlackboardParameter& parameter,
+                                                           const Keire::Vector2 position)
+        {
+            Keire::VfxGraphNode result;
+            result.Id = Keire::AssetId::Generate();
+            result.Type = "Blackboard Parameter";
+            result.EditorPosition = position;
+            result.Kind = Keire::VfxGraphNodeKind::Parameter;
+            result.Reference = parameter.Id;
+            result.Pins.push_back(
+                {Keire::AssetId::Generate(), parameter.Name, parameter.Type, false, "value", std::nullopt});
+            return result;
+        }
+
+        [[nodiscard]] Keire::VfxGraphNode NewCustomHlslNode(const Keire::Vector2 position)
+        {
+            Keire::VfxGraphNode result;
+            result.Id = Keire::AssetId::Generate();
+            result.Type = "Custom HLSL";
+            result.Context = Keire::VfxContextType::Update;
+            result.EditorPosition = position;
+            result.Kind = Keire::VfxGraphNodeKind::CustomHlsl;
+            result.Pins = {
+                {Keire::AssetId::Generate(), "Particles", Keire::VfxValueType::ParticleStream, true, "particles"},
+                {Keire::AssetId::Generate(), "Particles", Keire::VfxValueType::ParticleStream, false, "particles"},
+            };
+            result.CustomHlsl = "Size *= 1.0;";
+            return result;
+        }
+
+        [[nodiscard]] std::string NodeLabel(const Keire::VfxEffectDefinition& definition,
+                                            const Keire::VfxGraphNode& node)
+        {
+            if (node.Kind == Keire::VfxGraphNodeKind::Module)
+            {
+                const auto module =
+                    std::ranges::find(definition.Modules, node.Reference, &Keire::VfxModuleDefinition::Id);
+                return module == definition.Modules.end() ? "Missing Runtime Module"
+                                                          : std::string(ModuleName(module->Payload));
+            }
+            if (node.Kind == Keire::VfxGraphNodeKind::Parameter)
+            {
+                const auto parameter =
+                    std::ranges::find(definition.Blackboard, node.Reference, &Keire::VfxBlackboardParameter::Id);
+                return parameter == definition.Blackboard.end() ? "Missing Blackboard Parameter" : parameter->Name;
+            }
+            return node.Type;
         }
 
         [[nodiscard]] bool ModuleRunsInContext(const Keire::VfxModulePayload& payload,
@@ -336,6 +443,20 @@ namespace KeireEditor
         ui.TextColored(theme.Accent, "VFX GRAPH");
         ui.SameLine();
         ui.Text(record ? record->RelativePath.generic_string() + (document.Dirty() ? " *" : "") : "Missing asset");
+        const bool legacy = document.Definition().ExecutionSource == Keire::VfxExecutionSource::LegacyModules;
+        ui.TextColored(legacy ? theme.Warning : theme.Success,
+                       legacy ? "EXECUTION: LEGACY RUNTIME MODULES" : "EXECUTION: GRAPH");
+        if (legacy)
+        {
+            ui.SameLine();
+            if (ui.Button("Convert Runtime Modules to Graph"))
+            {
+                (void)ApplyAction("Converted Runtime Modules to executable graph",
+                                  [&document] { return document.ConvertToGraph(); });
+            }
+            ui.TextColored(theme.MutedText,
+                           "Conversion is undoable. It creates executable module/context nodes and typed cables.");
+        }
 
         const auto save = [this]
         {
@@ -562,6 +683,10 @@ namespace KeireEditor
 
         ui.TextColored(theme.Accent, "SYSTEMS");
         ui.TextColored(theme.MutedText, "Schema v" + std::to_string(definition.SchemaVersion));
+        ui.TextColored(definition.ExecutionSource == Keire::VfxExecutionSource::Graph ? theme.Success : theme.Warning,
+                       definition.ExecutionSource == Keire::VfxExecutionSource::Graph
+                           ? "Graph nodes and cables are the executable program."
+                           : "Runtime Modules remain authoritative until this asset is converted.");
         for (const auto& system : definition.Systems)
         {
             auto id = ui.PushId(system.Id.ToString());
@@ -574,22 +699,26 @@ namespace KeireEditor
                 m_GraphCanvas.Select(std::nullopt);
             }
         }
-        if (ui.Button("+ Add System"))
+        const bool executableGraph = definition.ExecutionSource == Keire::VfxExecutionSource::Graph;
+        if (auto disabled = ui.BeginDisabled(executableGraph); disabled)
         {
-            Keire::VfxGraphSystem system;
-            system.Id = Keire::AssetId::Generate();
-            system.Name = UniqueName(definition.Systems, "Particle System", &Keire::VfxGraphSystem::Name);
-            const auto id = system.Id;
-            if (ApplyAction("Added VFX graph system", [&document, system = std::move(system)]() mutable
-                            { return document.AddSystem(std::move(system)); }))
+            if (ui.Button("+ Add System"))
             {
-                m_SelectedSystem = id;
-                m_SelectedNode = {};
-                return;
+                Keire::VfxGraphSystem system;
+                system.Id = Keire::AssetId::Generate();
+                system.Name = UniqueName(definition.Systems, "Particle System", &Keire::VfxGraphSystem::Name);
+                const auto id = system.Id;
+                if (ApplyAction("Added VFX graph system", [&document, system = std::move(system)]() mutable
+                                { return document.AddSystem(std::move(system)); }))
+                {
+                    m_SelectedSystem = id;
+                    m_SelectedNode = {};
+                    return;
+                }
             }
         }
         ui.SameLine();
-        if (auto disabled = ui.BeginDisabled(!m_SelectedSystem); disabled)
+        if (auto disabled = ui.BeginDisabled(!m_SelectedSystem || executableGraph); disabled)
         {
             if (ui.Button("Remove") && ApplyAction("Removed VFX graph system", [&document, system = m_SelectedSystem]
                                                    { return document.RemoveSystem(system); }))
@@ -600,10 +729,12 @@ namespace KeireEditor
                 return;
             }
         }
+        if (executableGraph)
+            ui.TextColored(theme.MutedText, "Executable Graph mode owns one particle system.");
 
         ui.Separator();
         ui.TextColored(theme.Accent, "BLACKBOARD");
-        ui.TextColored(theme.MutedText, "Exposed graph inputs");
+        ui.TextColored(theme.MutedText, "Drag into the graph from Add Node / Blackboard");
         for (const auto& parameter : definition.Blackboard)
         {
             auto id = ui.PushId(parameter.Id.ToString());
@@ -634,10 +765,11 @@ namespace KeireEditor
             nodes += system.Nodes.size();
             links += system.Connections.size();
         }
-        ui.TextColored(theme.MutedText, std::to_string(nodes) + " nodes  |  " + std::to_string(links) + " links");
-        ui.TextColored(theme.Warning,
-                       "Graph topology is persisted and validated. Runtime behavior is currently driven by the "
-                       "Runtime Modules tab.");
+        ui.TextColored(theme.MutedText, std::to_string(nodes) + " nodes  |  " + std::to_string(links) + " cables");
+        if (definition.ExecutionSource == Keire::VfxExecutionSource::Graph)
+            ui.TextColored(theme.Success, "Connected graph nodes execute on the selected preview backend.");
+        else
+            ui.TextColored(theme.Warning, "Convert this legacy asset before graph edits affect simulation.");
     }
 
     void VfxEffectPanel::DrawGraphCanvas(Keire::UiFrame& ui)
@@ -654,29 +786,97 @@ namespace KeireEditor
 
         ui.TextColored(theme.Accent, system->Name);
         ui.SameLine();
-        if (auto add = ui.BeginCombo("Add Context", "Choose..."); add)
+        if (auto disabled = ui.BeginDisabled(definition.ExecutionSource != Keire::VfxExecutionSource::Graph); disabled)
         {
-            for (std::size_t contextIndex = 0; contextIndex < ContextTypes.size(); ++contextIndex)
+            if (auto add = ui.BeginCombo("Add Node", "Choose..."); add)
             {
-                const auto& context = ContextTypes[contextIndex];
-                if (!ui.MenuItem(context.Name))
-                    continue;
-                const auto count =
-                    static_cast<float>(std::ranges::count(system->Nodes, context.Type, &Keire::VfxGraphNode::Context));
-                const auto column = static_cast<float>(contextIndex);
-                auto node = NewContextNode(context.Type, {column * 280.0F, count * 128.0F});
-                const auto id = node.Id;
-                if (ApplyAction("Added VFX graph node",
-                                [&document, graph = system->Id, node = std::move(node)]() mutable
-                                { return document.AddNode(graph, std::move(node)); }))
+                for (std::size_t contextIndex = 0; contextIndex < ContextTypes.size(); ++contextIndex)
                 {
-                    m_SelectedNode = id;
+                    const auto& context = ContextTypes[contextIndex];
+                    const bool represented = std::ranges::any_of(
+                        system->Nodes, [&](const Keire::VfxGraphNode& node)
+                        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == context.Type; });
+                    if (context.Type == Keire::VfxContextType::Event || represented)
+                        continue;
+                    if (!ui.MenuItem("Context / " + std::string(context.Name)))
+                        continue;
+                    const auto count = static_cast<float>(
+                        std::ranges::count(system->Nodes, context.Type, &Keire::VfxGraphNode::Context));
+                    const auto column = static_cast<float>(contextIndex);
+                    auto node = NewContextNode(context.Type, {column * 280.0F, count * 128.0F});
+                    const auto id = node.Id;
+                    if (ApplyAction("Added VFX context node",
+                                    [&document, graph = system->Id, node = std::move(node)]() mutable
+                                    { return document.AddNode(graph, std::move(node)); }))
+                    {
+                        m_SelectedNode = id;
+                        ui.CloseCurrentPopup();
+                        return;
+                    }
                     ui.CloseCurrentPopup();
-                    return;
+                    break;
                 }
-                ui.CloseCurrentPopup();
-                break;
+
+                for (const auto& module : definition.Modules)
+                {
+                    const bool represented = std::ranges::any_of(
+                        system->Nodes, [&](const Keire::VfxGraphNode& node)
+                        { return node.Kind == Keire::VfxGraphNodeKind::Module && node.Reference == module.Id; });
+                    if (represented || !ui.MenuItem("Module / " + std::string(ModuleName(module.Payload))))
+                        continue;
+                    auto node = Keire::CreateVfxGraphModuleNode(
+                        module, {280.0F, 120.0F * static_cast<float>(system->Nodes.size())});
+                    const auto id = node.Id;
+                    if (ApplyAction("Added VFX Runtime Module node",
+                                    [&document, graph = system->Id, node = std::move(node)]() mutable
+                                    { return document.AddNode(graph, std::move(node)); }))
+                    {
+                        m_SelectedNode = id;
+                        ui.CloseCurrentPopup();
+                        return;
+                    }
+                    ui.CloseCurrentPopup();
+                    break;
+                }
+
+                for (const auto& parameter : definition.Blackboard)
+                {
+                    if (!ui.MenuItem("Blackboard / " + parameter.Name))
+                        continue;
+                    auto node = NewParameterNode(parameter, {40.0F, 120.0F * static_cast<float>(system->Nodes.size())});
+                    const auto id = node.Id;
+                    if (ApplyAction("Added VFX Blackboard node",
+                                    [&document, graph = system->Id, node = std::move(node)]() mutable
+                                    { return document.AddNode(graph, std::move(node)); }))
+                    {
+                        m_SelectedNode = id;
+                        ui.CloseCurrentPopup();
+                        return;
+                    }
+                    ui.CloseCurrentPopup();
+                    break;
+                }
+
+                if (ui.MenuItem("Custom HLSL"))
+                {
+                    auto node = NewCustomHlslNode({560.0F, 120.0F * static_cast<float>(system->Nodes.size())});
+                    const auto id = node.Id;
+                    if (ApplyAction("Added Custom HLSL node",
+                                    [&document, graph = system->Id, node = std::move(node)]() mutable
+                                    { return document.AddNode(graph, std::move(node)); }))
+                    {
+                        m_SelectedNode = id;
+                        ui.CloseCurrentPopup();
+                        return;
+                    }
+                    ui.CloseCurrentPopup();
+                }
             }
+        }
+        if (definition.ExecutionSource != Keire::VfxExecutionSource::Graph)
+        {
+            ui.SameLine();
+            ui.TextColored(theme.Warning, "Convert to Graph to add executable nodes.");
         }
 
         std::vector<NodeGraphNode> nodes;
@@ -684,17 +884,14 @@ namespace KeireEditor
         StableNodeGraphIdMap nodeIds;
         for (const auto& node : system->Nodes)
         {
-            const auto blockCount =
-                std::ranges::count_if(definition.Modules, [&node](const Keire::VfxModuleDefinition& module)
-                                      { return ModuleRunsInContext(module.Payload, node.Context); });
             nodes.push_back({.Id = nodeIds.Assign(node.Id, PreferredCanvasId(node.Id, 0x5646584e4f444501ULL)),
-                             .Label = node.Type,
+                             .Label = NodeLabel(definition, node),
                              .Position = node.EditorPosition,
                              .Size = {210.0F, std::max(88.0F, 62.0F + static_cast<float>(node.Pins.size()) * 12.0F)},
-                             .Color = ContextColor(node.Context),
-                             .Subtitle = std::string(EnumName(node.Context, ContextTypes)) + "  |  " +
-                                         std::to_string(node.Pins.size()) + " pins  |  " + std::to_string(blockCount) +
-                                         " runtime blocks"});
+                             .Color = NodeColor(node),
+                             .Subtitle = std::string(NodeKindName(node.Kind)) + "  |  " +
+                                         std::string(EnumName(node.Context, ContextTypes)) + "  |  " +
+                                         std::to_string(node.Pins.size()) + " pins"});
         }
         std::vector<NodeGraphConnection> connections;
         connections.reserve(system->Connections.size());
@@ -784,18 +981,32 @@ namespace KeireEditor
         if (selected == system->Nodes.end())
         {
             ui.TextColored(theme.Accent, "GRAPH INSPECTOR");
-            ui.TextColored(theme.MutedText, "Select a context card to edit its properties and typed connections.");
+            ui.TextColored(theme.MutedText, "Select a node to inspect its executable references, pins, and cables.");
             return;
         }
 
         auto node = *selected;
         bool changed = false;
-        ui.TextColored(ContextColor(node.Context), std::string(EnumName(node.Context, ContextTypes)) + " CONTEXT");
+        ui.TextColored(NodeColor(node), std::string(NodeKindName(node.Kind)));
         ui.TextColored(theme.MutedText, "Stable ID: " + node.Id.ToString());
-        changed |= ui.InputText("Node Name", node.Type);
-        changed |= DrawEnum(ui, "Context", node.Context, ContextTypes);
+        if (node.Reference)
+            ui.TextColored(theme.MutedText, "Reference: " + node.Reference.ToString());
+        if (node.Kind == Keire::VfxGraphNodeKind::Context || node.Kind == Keire::VfxGraphNodeKind::CustomHlsl)
+            changed |= ui.InputText("Node Name", node.Type);
+        else
+            ui.Text("Source: " + NodeLabel(definition, node));
+        if (node.Kind == Keire::VfxGraphNodeKind::Context || node.Kind == Keire::VfxGraphNodeKind::CustomHlsl)
+            changed |= DrawEnum(ui, "Context", node.Context, ContextTypes);
+        else
+            ui.Text("Context: " + std::string(EnumName(node.Context, ContextTypes)));
         changed |= ui.DragVector2("Graph Position", node.EditorPosition, 1.0F);
-        changed |= ui.InputText("Custom HLSL", node.CustomHlsl);
+        if (node.Kind == Keire::VfxGraphNodeKind::CustomHlsl)
+        {
+            changed |= ui.InputText("Custom HLSL", node.CustomHlsl);
+            ui.TextColored(theme.MutedText,
+                           "Portable statements write Position, Velocity, Rotation, Tint, or Size. Pin semantics are "
+                           "the generated input names.");
+        }
         if (changed)
         {
             (void)ApplyAction("Edited VFX graph node",
@@ -810,14 +1021,94 @@ namespace KeireEditor
 
         ui.Separator();
         ui.TextColored(theme.Accent, "TYPED PINS");
+        const bool customPins = selected->Kind == Keire::VfxGraphNodeKind::CustomHlsl;
         for (const auto& pin : selected->Pins)
         {
             auto id = ui.PushId(pin.Id.ToString());
             auto candidate = pin;
             bool pinChanged = false;
-            pinChanged |= ui.InputText("Name", candidate.Name);
-            pinChanged |= DrawEnum(ui, "Type", candidate.Type, ValueTypes);
-            pinChanged |= ui.Checkbox("Input", candidate.Input);
+            const bool pinEditable = customPins && pin.Type != Keire::VfxValueType::ParticleStream;
+            if (pinEditable)
+            {
+                pinChanged |= ui.InputText("Name", candidate.Name);
+                const auto previousType = candidate.Type;
+                pinChanged |= DrawEnum(ui, "Type", candidate.Type, CustomHlslValueTypes);
+                pinChanged |= ui.InputText("Semantic", candidate.Semantic);
+                if (candidate.Type != previousType)
+                    candidate.DefaultValue = DefaultParameterValue(candidate.Type);
+
+                if (candidate.Input)
+                {
+                    if (!candidate.DefaultValue)
+                        candidate.DefaultValue = DefaultParameterValue(candidate.Type);
+                    switch (candidate.Type)
+                    {
+                    case Keire::VfxValueType::Boolean:
+                        pinChanged |= ui.Checkbox("Fallback", std::get<bool>(*candidate.DefaultValue));
+                        break;
+                    case Keire::VfxValueType::Integer:
+                        pinChanged |= ui.DragInteger("Fallback", std::get<std::int64_t>(*candidate.DefaultValue));
+                        break;
+                    case Keire::VfxValueType::Scalar:
+                    {
+                        double value = std::get<float>(*candidate.DefaultValue);
+                        if (ui.DragScalar("Fallback", value, 0.01))
+                        {
+                            candidate.DefaultValue = static_cast<float>(value);
+                            pinChanged = true;
+                        }
+                        break;
+                    }
+                    case Keire::VfxValueType::Vector2:
+                        pinChanged |=
+                            ui.DragVector2("Fallback", std::get<Keire::Vector2>(*candidate.DefaultValue), 0.01F);
+                        break;
+                    case Keire::VfxValueType::Vector3:
+                        pinChanged |=
+                            ui.DragVector3("Fallback", std::get<Keire::Vector3>(*candidate.DefaultValue), 0.01F);
+                        break;
+                    case Keire::VfxValueType::Color:
+                    {
+                        auto& value = std::get<Keire::Color>(*candidate.DefaultValue);
+                        Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
+                        if (ui.ColorEdit("Fallback", color))
+                        {
+                            value = {color.Red, color.Green, color.Blue, color.Alpha};
+                            pinChanged = true;
+                        }
+                        break;
+                    }
+                    case Keire::VfxValueType::Texture:
+                    case Keire::VfxValueType::Mesh:
+                    case Keire::VfxValueType::Asset:
+                    {
+                        auto& value = std::get<Keire::AssetId>(*candidate.DefaultValue);
+                        std::optional<Keire::AssetTypeId> expected;
+                        if (candidate.Type == Keire::VfxValueType::Texture)
+                            expected = Keire::Texture2DAsset::StaticType();
+                        else if (candidate.Type == Keire::VfxValueType::Mesh)
+                            expected = Keire::MeshAsset::StaticType();
+                        AssetPickerOptions options{
+                            .Label = "Fallback",
+                            .ExpectedType = expected,
+                            .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealVfxEffectAsset(asset); },
+                        };
+                        pinChanged |=
+                            m_AssetPicker.Draw(ui, m_Controller.VfxEffectAssetRecords(), value, std::move(options));
+                        break;
+                    }
+                    case Keire::VfxValueType::ParticleStream:
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                ui.Text(pin.Name + " : " + std::string(EnumName(pin.Type, GraphValueTypes)) +
+                        (pin.Input ? " [Input]" : " [Output]"));
+                if (!pin.Semantic.empty())
+                    ui.TextColored(theme.MutedText, "Semantic: " + pin.Semantic);
+            }
             if (pinChanged)
             {
                 const bool topologyChanged = candidate.Type != pin.Type || candidate.Input != pin.Input;
@@ -869,10 +1160,13 @@ namespace KeireEditor
                                                                       connection.InputNode == selected->Id &&
                                                                       connection.InputPin == pin.Id;
                                                            });
+                const bool hasWriter = std::ranges::any_of(
+                    system->Connections, [&](const Keire::VfxGraphConnection& connection)
+                    { return connection.InputNode == selected->Id && connection.InputPin == pin.Id; });
                 const bool compatible = outputPin && !outputPin->Input && outputPin->Type == pin.Type && !duplicate;
                 if (auto disabled = ui.BeginDisabled(!compatible); disabled)
                 {
-                    if (ui.Button("Connect Here"))
+                    if (ui.Button(hasWriter ? "Replace Input" : "Connect Here"))
                     {
                         Keire::VfxGraphConnection connection{Keire::AssetId::Generate(), m_PendingOutput->first,
                                                              m_PendingOutput->second, selected->Id, pin.Id};
@@ -886,30 +1180,37 @@ namespace KeireEditor
                     }
                 }
             }
-            ui.SameLine();
-            if (ui.Button("Remove Pin"))
+            if (pinEditable)
             {
-                (void)ApplyAction("Removed VFX graph pin",
-                                  [&document, graph = system->Id, nodeId = selected->Id, pinId = pin.Id]
-                                  { return document.RemovePin(graph, nodeId, pinId); });
-                m_PendingOutput.reset();
-                return;
+                ui.SameLine();
+                if (ui.Button("Remove Pin"))
+                {
+                    (void)ApplyAction("Removed VFX graph pin",
+                                      [&document, graph = system->Id, nodeId = selected->Id, pinId = pin.Id]
+                                      { return document.RemovePin(graph, nodeId, pinId); });
+                    m_PendingOutput.reset();
+                    return;
+                }
             }
             ui.Separator();
         }
 
-        const auto addPin = [&](const bool input)
+        const auto addPin = [&]
         {
-            Keire::VfxGraphPin pin{Keire::AssetId::Generate(), input ? "Input" : "Output", Keire::VfxValueType::Scalar,
-                                   input};
+            const auto dataInputs =
+                std::ranges::count_if(selected->Pins, [](const Keire::VfxGraphPin& pin)
+                                      { return pin.Input && pin.Type != Keire::VfxValueType::ParticleStream; });
+            Keire::VfxGraphPin pin{Keire::AssetId::Generate(),
+                                   "Input",
+                                   Keire::VfxValueType::Scalar,
+                                   true,
+                                   "Input" + std::to_string(dataInputs + 1),
+                                   0.0F};
             return ApplyAction("Added VFX graph pin",
                                [&document, graph = system->Id, nodeId = selected->Id, pin = std::move(pin)]() mutable
                                { return document.AddPin(graph, nodeId, std::move(pin)); });
         };
-        if (ui.Button("+ Add Input") && addPin(true))
-            return;
-        ui.SameLine();
-        if (ui.Button("+ Add Output") && addPin(false))
+        if (customPins && ui.Button("+ Add Data Input") && addPin())
             return;
 
         ui.Separator();
@@ -935,33 +1236,61 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, "No links on this context.");
 
         ui.Separator();
-        ui.TextColored(theme.Accent, "EXECUTABLE RUNTIME BLOCKS");
-        bool hasBlocks = false;
-        for (const auto& module : definition.Modules)
+        if (selected->Kind == Keire::VfxGraphNodeKind::Context)
         {
-            if (!ModuleRunsInContext(module.Payload, selected->Context))
-                continue;
-            hasBlocks = true;
-            auto id = ui.PushId(module.Id.ToString());
-            if (ui.Selectable(std::string(module.Enabled ? "" : "[Disabled] ") +
-                                  std::string(ModuleName(module.Payload)),
-                              module.Id == m_SelectedModule))
+            ui.TextColored(theme.Accent, "AVAILABLE RUNTIME MODULES");
+            bool hasBlocks = false;
+            for (const auto& module : definition.Modules)
             {
-                m_SelectedModule = module.Id;
+                if (!ModuleRunsInContext(module.Payload, selected->Context))
+                    continue;
+                hasBlocks = true;
+                auto id = ui.PushId(module.Id.ToString());
+                if (ui.Selectable(std::string(module.Enabled ? "" : "[Disabled] ") +
+                                      std::string(ModuleName(module.Payload)),
+                                  module.Id == m_SelectedModule))
+                {
+                    m_SelectedModule = module.Id;
+                }
             }
+            if (!hasBlocks)
+                ui.TextColored(theme.MutedText, "No runtime modules are available for this context.");
         }
-        if (!hasBlocks)
-            ui.TextColored(theme.MutedText, "No runtime modules assigned to this context.");
+        else if (selected->Kind == Keire::VfxGraphNodeKind::Module)
+        {
+            ui.TextColored(theme.Accent, "REFERENCED RUNTIME MODULE");
+            const auto module =
+                std::ranges::find(definition.Modules, selected->Reference, &Keire::VfxModuleDefinition::Id);
+            if (module == definition.Modules.end())
+                ui.TextColored(theme.Error, "The referenced Runtime Module is missing.");
+            else if (ui.Selectable(std::string(ModuleName(module->Payload)), module->Id == m_SelectedModule))
+                m_SelectedModule = module->Id;
+        }
+        else if (selected->Kind == Keire::VfxGraphNodeKind::Parameter)
+        {
+            ui.TextColored(theme.Accent, "REFERENCED BLACKBOARD PROPERTY");
+            const auto parameter =
+                std::ranges::find(definition.Blackboard, selected->Reference, &Keire::VfxBlackboardParameter::Id);
+            if (parameter == definition.Blackboard.end())
+                ui.TextColored(theme.Error, "The referenced Blackboard property is missing.");
+            else
+                ui.Text(parameter->Name + " : " + std::string(EnumName(parameter->Type, ValueTypes)));
+        }
 
         ui.Separator();
-        if (ui.Button("Delete Context") &&
-            ApplyAction("Removed VFX graph node", [&document, graph = system->Id, nodeId = selected->Id]
-                        { return document.RemoveNode(graph, nodeId); }))
+        if (auto disabled = ui.BeginDisabled(selected->Kind == Keire::VfxGraphNodeKind::Context); disabled)
         {
-            m_SelectedNode = {};
-            m_PendingOutput.reset();
-            m_GraphCanvas.Select(std::nullopt);
+            if (ui.Button("Delete Node") &&
+                ApplyAction("Removed VFX graph node", [&document, graph = system->Id, nodeId = selected->Id]
+                            { return document.RemoveNode(graph, nodeId); }))
+            {
+                m_SelectedNode = {};
+                m_PendingOutput.reset();
+                m_GraphCanvas.Select(std::nullopt);
+            }
         }
+        if (selected->Kind == Keire::VfxGraphNodeKind::Context)
+            ui.TextColored(theme.MutedText, "Executable stage contexts cannot be deleted.");
     }
 
     void VfxEffectPanel::DrawBlackboard(Keire::UiFrame& ui)
@@ -980,7 +1309,9 @@ namespace KeireEditor
         if (auto list = ui.BeginChild("VfxBlackboardList", {260.0F, 0.0F}, true); list)
         {
             ui.TextColored(theme.Accent, "EXPOSED PROPERTIES");
-            ui.TextColored(theme.MutedText, "Typed values available to graph operators and future runtime bindings.");
+            ui.TextColored(theme.MutedText,
+                           "Drag properties into the graph as executable nodes. Exposed values support emitter "
+                           "overrides.");
             for (const auto& parameter : definition.Blackboard)
             {
                 auto id = ui.PushId(parameter.Id.ToString());
@@ -1123,7 +1454,13 @@ namespace KeireEditor
 
         if (auto stack = ui.BeginChild("VfxModuleStack", {270.0F, 0.0F}, true); stack)
         {
-            ui.TextColored(m_Controller.VfxEffectTheme().Accent, "MODULE STACK");
+            ui.TextColored(m_Controller.VfxEffectTheme().Accent,
+                           definition.ExecutionSource == Keire::VfxExecutionSource::Graph ? "MODULE PAYLOADS"
+                                                                                          : "MODULE STACK");
+            ui.TextColored(m_Controller.VfxEffectTheme().MutedText,
+                           definition.ExecutionSource == Keire::VfxExecutionSource::Graph
+                               ? "Graph mode executes only payloads referenced by Module nodes."
+                               : "Legacy mode executes enabled modules directly in stack order.");
             for (const auto& module : definition.Modules)
             {
                 auto id = ui.PushId(module.Id.ToString());

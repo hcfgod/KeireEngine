@@ -5,6 +5,7 @@
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Vfx/VfxSystem.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <optional>
@@ -21,6 +22,7 @@ namespace KeireEditor
         float SimulationSpeed = 1.0F;
         Keire::Vector3 Position;
         Keire::Quaternion Rotation;
+        std::vector<Keire::VfxParameterOverride> ParameterOverrides;
 
         bool operator==(const EditModeVfxEmitterSnapshot&) const = default;
     };
@@ -98,8 +100,56 @@ namespace KeireEditor
             if (!Keire::Math::DecomposeTransform(transform->WorldMatrix(), position, rotation, scale))
                 continue;
 
-            result.push_back({entity.Id(), emitter->Effect(), emitter->SeedOffset(), emitter->SimulationSpeed(),
-                              position, rotation});
+            result.push_back({entity.Id(),
+                              emitter->Effect(),
+                              emitter->SeedOffset(),
+                              emitter->SimulationSpeed(),
+                              position,
+                              rotation,
+                              {emitter->ParameterOverrides().begin(), emitter->ParameterOverrides().end()}});
+        }
+        return result;
+    }
+
+    [[nodiscard]] inline std::vector<Keire::VfxParameterOverride>
+    CompatibleEditModeVfxOverrides(const Keire::VfxEffectDefinition& definition,
+                                   const std::span<const Keire::VfxParameterOverride> authored)
+    {
+        const auto matches = [](const Keire::VfxValueType type, const Keire::VfxParameterValue& value) noexcept
+        {
+            switch (type)
+            {
+            case Keire::VfxValueType::Boolean:
+                return std::holds_alternative<bool>(value);
+            case Keire::VfxValueType::Integer:
+                return std::holds_alternative<std::int64_t>(value);
+            case Keire::VfxValueType::Scalar:
+                return std::holds_alternative<float>(value);
+            case Keire::VfxValueType::Vector2:
+                return std::holds_alternative<Keire::Vector2>(value);
+            case Keire::VfxValueType::Vector3:
+                return std::holds_alternative<Keire::Vector3>(value);
+            case Keire::VfxValueType::Color:
+                return std::holds_alternative<Keire::Color>(value);
+            case Keire::VfxValueType::Texture:
+            case Keire::VfxValueType::Mesh:
+            case Keire::VfxValueType::Asset:
+                return std::holds_alternative<Keire::AssetId>(value);
+            case Keire::VfxValueType::ParticleStream:
+                return false;
+            }
+            return false;
+        };
+
+        std::vector<Keire::VfxParameterOverride> result;
+        result.reserve(authored.size());
+        for (const auto& overrideValue : authored)
+        {
+            const auto parameter =
+                std::ranges::find(definition.Blackboard, overrideValue.Parameter, &Keire::VfxBlackboardParameter::Id);
+            if (parameter != definition.Blackboard.end() && parameter->Exposed &&
+                matches(parameter->Type, overrideValue.Value))
+                result.push_back(overrideValue);
         }
         return result;
     }

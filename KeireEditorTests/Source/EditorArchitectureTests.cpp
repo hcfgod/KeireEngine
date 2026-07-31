@@ -18,6 +18,7 @@
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/Editor/SelectionRange.h"
 #include "KeireClient/Editor/ThumbnailService.h"
+#include "KeireClient/Editor/VfxEmitterInspector.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 #include "KeireClient/Editor/ViewportInputRouting.h"
 
@@ -52,63 +53,75 @@ namespace
 #endif
     }
 
-    class TestPropertyEditor final : public KeireEditor::IPropertyEditor
+    class TestPropertyEditor : public KeireEditor::IPropertyEditor
     {
       public:
         bool EditBoolean(std::string_view, bool& value) override
         {
+            EditKinds.emplace_back("boolean");
             value = !value;
             return true;
         }
         bool EditInteger(std::string_view, std::int64_t& value, double, std::optional<double>,
                          std::optional<double>) override
         {
+            EditKinds.emplace_back("integer");
             ++value;
             return true;
         }
         bool EditChoice(std::string_view, std::int64_t& value, std::span<const std::string_view>) override
         {
+            EditKinds.emplace_back("choice");
             ++value;
             return true;
         }
         bool EditScalar(std::string_view, double& value, double, std::optional<double>, std::optional<double>) override
         {
+            EditKinds.emplace_back("scalar");
             value = Scalar;
             return true;
         }
         bool EditText(std::string_view, std::string& value) override
         {
+            EditKinds.emplace_back("text");
             value = "edited";
             return true;
         }
         bool EditVector2(std::string_view, Keire::Vector2& value, double) override
         {
+            EditKinds.emplace_back("vector2");
             value.X += 1.0F;
             return true;
         }
         bool EditVector3(std::string_view, Keire::Vector3& value, double) override
         {
+            EditKinds.emplace_back("vector3");
             value.X += 1.0F;
             return true;
         }
         bool EditVector4(std::string_view, Keire::Vector4& value, double) override
         {
+            EditKinds.emplace_back("vector4");
             value.X += 1.0F;
             return true;
         }
         bool EditQuaternion(std::string_view, Keire::Quaternion& value, double) override
         {
+            EditKinds.emplace_back("quaternion");
             value = {};
             return true;
         }
         bool EditColor(std::string_view, Keire::Color& value) override
         {
+            EditKinds.emplace_back("color");
             value.Red = 0.5F;
             return true;
         }
         bool EditAsset(std::string_view, Keire::AssetId& value, std::optional<Keire::AssetTypeId> expectedType) override
         {
+            EditKinds.emplace_back("asset");
             ExpectedAssetType = expectedType;
+            ExpectedAssetTypes.push_back(expectedType);
             value = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000010");
             return true;
         }
@@ -127,6 +140,8 @@ namespace
 
         double Scalar = 3.0;
         std::optional<Keire::AssetTypeId> ExpectedAssetType;
+        std::vector<std::optional<Keire::AssetTypeId>> ExpectedAssetTypes;
+        std::vector<std::string> EditKinds;
         std::vector<Keire::ShaderTextureSemantic> TextureSemantics;
     };
 
@@ -809,6 +824,144 @@ TEST_CASE("generic property drawers cover every component property kind")
     for (auto [property, value] : properties)
         CHECK(drawers.Draw(editor, CustomComponent::StaticType(), property, value));
     CHECK(editor.ExpectedAssetType == assetType);
+}
+
+TEST_CASE("VFX Emitter inspector edits exposed typed parameters and removes stale overrides")
+{
+    const auto id = [](const std::uint64_t value) { return Keire::AssetId(0x564658494e535045ULL, value); };
+    Keire::VfxEffectDefinition effect;
+    effect.Blackboard = {
+        {id(1), "Enabled", Keire::VfxValueType::Boolean, false, true},
+        {id(2), "Count", Keire::VfxValueType::Integer, std::int64_t{2}, true},
+        {id(3), "Rate", Keire::VfxValueType::Scalar, 2.0F, true},
+        {id(4), "Offset", Keire::VfxValueType::Vector2, Keire::Vector2{}, true},
+        {id(5), "Direction", Keire::VfxValueType::Vector3, Keire::Vector3{}, true},
+        {id(6), "Tint", Keire::VfxValueType::Color, Keire::Color{}, true},
+        {id(7), "Texture", Keire::VfxValueType::Texture, Keire::AssetId{}, true},
+        {id(8), "Mesh", Keire::VfxValueType::Mesh, Keire::AssetId{}, true},
+        {id(9), "Asset", Keire::VfxValueType::Asset, Keire::AssetId{}, true},
+        {id(10), "Internal", Keire::VfxValueType::Scalar, 1.0F, false},
+    };
+    std::vector<Keire::VfxParameterOverride> overrides{
+        {id(99), 5.0F},
+        {id(10), 4.0F},
+        {id(3), 7.0F},
+    };
+    CHECK(KeireEditor::VfxEmitterInspector::VisibleEntryCount(effect, overrides) == 11);
+
+    std::vector<Keire::AssetId> staleRemoved;
+    std::vector<std::pair<std::string, bool>> statuses;
+    KeireEditor::VfxEmitterInspectorCallbacks callbacks;
+    callbacks.Status = [&statuses](const Keire::AssetId, const std::string_view message, const bool warning)
+    { statuses.emplace_back(message, warning); };
+    callbacks.Reset = [rate = id(3)](const Keire::AssetId parameter) { return parameter == rate; };
+    callbacks.RemoveStale = [&staleRemoved](const Keire::AssetId parameter)
+    {
+        staleRemoved.push_back(parameter);
+        return true;
+    };
+
+    TestPropertyEditor editor;
+    REQUIRE(KeireEditor::VfxEmitterInspector{}.Draw(editor, effect, overrides, callbacks));
+    const std::vector<std::string> expectedKinds{
+        "boolean", "integer", "scalar", "vector2", "vector3", "color", "asset", "asset", "asset",
+    };
+    CHECK(editor.EditKinds == expectedKinds);
+    REQUIRE(editor.ExpectedAssetTypes.size() == 3);
+    CHECK(editor.ExpectedAssetTypes[0] == Keire::Texture2DAsset::StaticType());
+    CHECK(editor.ExpectedAssetTypes[1] == Keire::MeshAsset::StaticType());
+    CHECK_FALSE(editor.ExpectedAssetTypes[2].has_value());
+    CHECK(std::ranges::none_of(overrides, [rate = id(3)](const auto& value) { return value.Parameter == rate; }));
+    CHECK(std::ranges::none_of(overrides, [hidden = id(10)](const auto& value) { return value.Parameter == hidden; }));
+    CHECK(
+        std::ranges::none_of(overrides, [unknown = id(99)](const auto& value) { return value.Parameter == unknown; }));
+    CHECK(std::ranges::is_sorted(overrides, {}, &Keire::VfxParameterOverride::Parameter));
+    CHECK(staleRemoved == std::vector<Keire::AssetId>{id(10), id(99)});
+    CHECK(std::ranges::count(statuses, true, &std::pair<std::string, bool>::second) == 2);
+}
+
+TEST_CASE("VFX Emitter inspector reports and removes an exposed type-mismatched override")
+{
+    class PassiveIntegerEditor final : public TestPropertyEditor
+    {
+      public:
+        bool EditInteger(std::string_view, std::int64_t&, double, std::optional<double>, std::optional<double>) override
+        {
+            return false;
+        }
+    };
+
+    const auto parameter = Keire::AssetId(0x564658494e535045ULL, 0x200);
+    Keire::VfxEffectDefinition effect;
+    effect.Blackboard = {{parameter, "Count", Keire::VfxValueType::Integer, std::int64_t{2}, true}};
+    std::vector<Keire::VfxParameterOverride> overrides{{parameter, 5.0F}};
+    std::size_t warnings = 0;
+    KeireEditor::VfxEmitterInspectorCallbacks callbacks;
+    callbacks.Status = [&warnings](const Keire::AssetId, const std::string_view, const bool warning)
+    {
+        if (warning)
+            ++warnings;
+    };
+    callbacks.RemoveStale = [parameter](const Keire::AssetId value) { return value == parameter; };
+
+    PassiveIntegerEditor editor;
+    REQUIRE(KeireEditor::VfxEmitterInspector{}.Draw(editor, effect, overrides, callbacks));
+    CHECK(overrides.empty());
+    CHECK(warnings == 1);
+}
+
+TEST_CASE("VFX Emitter inspector values commit through the scene undo history")
+{
+    const auto parameter = Keire::AssetId(0x564658494e535045ULL, 0x100);
+    Keire::VfxEffectDefinition effect;
+    effect.Blackboard = {{parameter, "Rate", Keire::VfxValueType::Scalar, 2.0F, true}};
+
+    const auto components = Keire::ComponentRegistry::CreateDefault();
+    const auto registration = components->Find(Keire::VfxEmitterComponent::StaticType());
+    REQUIRE(registration);
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId(0x564658494e535045ULL, 0x101),
+                                                Keire::SceneAsset::EmptyDefinition("VFX Inspector Undo"), components);
+    auto entity = scene->CreateEntity("Emitter");
+    const auto component = entity.AddComponent(Keire::VfxEmitterComponent::StaticType());
+    REQUIRE(component);
+
+    std::vector<Keire::VfxParameterOverride> overrides;
+    TestPropertyEditor editor;
+    editor.Scalar = 6.0;
+    REQUIRE(KeireEditor::VfxEmitterInspector{}.Draw(editor, effect, overrides, {}));
+    const auto values = registration->Serialize(*component);
+    const auto before = std::get<std::string>(values.at("parameterOverrides"));
+    const auto after = KeireEditor::VfxEmitterInspector::SerializeOverrides(*registration, values, overrides);
+
+    const auto undoService = Keire::CreateRef<Keire::UndoService>();
+    const auto history = undoService->CreateContext({.Name = "VFX Inspector"});
+    KeireEditor::SceneDocument document;
+    document.Open(scene, scene->Asset(), {}, history);
+    const auto apply = [&document, entityId = entity.Id()](const std::string& serialized)
+    {
+        document.SetComponentProperty(entityId, Keire::VfxEmitterComponent::StaticType(), "parameterOverrides",
+                                      serialized);
+    };
+    history->RecordApplied(Keire::CreateUndoCommand(
+        "Change Parameter Overrides", [apply, after] { apply(after); }, [apply, before] { apply(before); },
+        before.size() + after.size()));
+    apply(after);
+
+    const auto currentEmitter = [&document, entityId = entity.Id()]
+    { return document.ActiveScene()->FindEntity(entityId).GetComponent<Keire::VfxEmitterComponent>(); };
+    REQUIRE(currentEmitter());
+    REQUIRE(currentEmitter()->ParameterOverrides().size() == 1);
+    CHECK(std::get<float>(currentEmitter()->ParameterOverrides().front().Value) == doctest::Approx(6.0F));
+    CHECK(history->UndoCount() == 1);
+    REQUIRE(history->Undo());
+    CHECK(currentEmitter()->ParameterOverrides().empty());
+    REQUIRE(history->Redo());
+    REQUIRE(currentEmitter()->ParameterOverrides().size() == 1);
+    CHECK(std::get<float>(currentEmitter()->ParameterOverrides().front().Value) == doctest::Approx(6.0F));
+
+    document.Close();
+    history->Close();
+    undoService->Close();
 }
 
 TEST_CASE("material documents expose every shader texture property without hardcoded slots")

@@ -48,6 +48,30 @@ TEST_CASE("GPU skinning output slots stay bounded by frames in flight")
     CHECK(SkinningOutputSlot(10, 0) == 0);
 }
 
+TEST_CASE("GPU VFX sequencing distinguishes document snapshots from simulation steps")
+{
+    Keire::RenderBackend::GpuVfxWorldResources resources;
+
+    CHECK(resources.ShouldApplySnapshot(1));
+    CHECK(resources.ShouldConsumeSimulationStep(1));
+    resources.MarkSnapshotApplied(1);
+    resources.MarkSimulationStepConsumed(1);
+
+    CHECK_FALSE(resources.ShouldApplySnapshot(1));
+    CHECK_FALSE(resources.ShouldConsumeSimulationStep(1));
+    CHECK(resources.ShouldApplySnapshot(2));
+    CHECK_FALSE(resources.ShouldConsumeSimulationStep(1));
+    resources.MarkSnapshotApplied(2);
+
+    CHECK_FALSE(resources.ShouldApplySnapshot(1));
+    CHECK(resources.ShouldConsumeSimulationStep(2));
+    resources.MarkSimulationStepConsumed(2);
+    resources.InvalidateSequencing();
+
+    CHECK(resources.ShouldApplySnapshot(2));
+    CHECK(resources.ShouldConsumeSimulationStep(2));
+}
+
 TEST_CASE("SDL frame scheduling follows its bounded device queue")
 {
     using Keire::RenderBackend::SdlAllowedFramesInFlight;
