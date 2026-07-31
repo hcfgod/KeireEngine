@@ -722,8 +722,40 @@ namespace Keire::RenderBackend
         std::uint32_t Capacity = 0;
         std::uint64_t ResetRevision = 0;
         std::uint64_t LastPreparedFrame = 0;
+        std::uint64_t LastAppliedSnapshotRevision = 0;
+        std::uint64_t LastConsumedSimulationStepRevision = 0;
+        bool HasAppliedSnapshot = false;
+        bool HasConsumedSimulationStep = false;
 
         [[nodiscard]] bool Empty() const noexcept { return Particles == nullptr; }
+        [[nodiscard]] bool ShouldApplySnapshot(const std::uint64_t revision) const noexcept
+        {
+            return !HasAppliedSnapshot || revision > LastAppliedSnapshotRevision;
+        }
+        [[nodiscard]] bool ShouldConsumeSimulationStep(const std::uint64_t revision) const noexcept
+        {
+            return !HasConsumedSimulationStep || revision > LastConsumedSimulationStepRevision;
+        }
+        void MarkSnapshotApplied(const std::uint64_t revision) noexcept
+        {
+            LastAppliedSnapshotRevision = revision;
+            HasAppliedSnapshot = true;
+        }
+        void MarkSimulationStepConsumed(const std::uint64_t revision) noexcept
+        {
+            LastConsumedSimulationStepRevision = revision;
+            HasConsumedSimulationStep = true;
+        }
+        void InvalidateSequencing() noexcept
+        {
+            Emitters.clear();
+            ResetRevision = 0;
+            LastPreparedFrame = 0;
+            LastAppliedSnapshotRevision = 0;
+            LastConsumedSimulationStepRevision = 0;
+            HasAppliedSnapshot = false;
+            HasConsumedSimulationStep = false;
+        }
     };
 
     enum class SceneDrawPhase : std::uint8_t

@@ -9,6 +9,7 @@
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Vfx/VfxSystem.h"
 #include "KeireInternal/RenderInternal.h"
 
 #include <SDL3/SDL.h>
@@ -24,6 +25,7 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -178,6 +180,148 @@ namespace
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
     };
+
+    struct VfxChannelSignal final
+    {
+        float Weight = 0.0F;
+        float WeightedX = 0.0F;
+
+        [[nodiscard]] float CentroidX() const noexcept { return Weight > 0.0F ? WeightedX / Weight : 0.0F; }
+    };
+
+    struct VfxGraphCaptureResults final
+    {
+        std::vector<std::vector<std::uint8_t>> Frames;
+        Keire::RenderStatistics Statistics;
+        bool HasStatistics = false;
+    };
+
+    [[nodiscard]] VfxChannelSignal MeasureChannelSignal(const std::vector<std::uint8_t>& pixels,
+                                                        const std::size_t channel)
+    {
+        REQUIRE(pixels.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
+        REQUIRE(channel < 3);
+        VfxChannelSignal result;
+        for (std::uint32_t y = 0; y < SurfaceSize; ++y)
+        {
+            for (std::uint32_t x = 0; x < SurfaceSize; ++x)
+            {
+                const auto offset = static_cast<std::size_t>((y * SurfaceSize + x) * 4);
+                const auto firstOther = (channel + 1) % 3;
+                const auto secondOther = (channel + 2) % 3;
+                const auto value = static_cast<float>(pixels[offset + channel]);
+                const auto other =
+                    static_cast<float>(std::max(pixels[offset + firstOther], pixels[offset + secondOther]));
+                const auto weight = std::max(value - other, 0.0F) / 255.0F;
+                result.Weight += weight;
+                result.WeightedX += weight * static_cast<float>(x);
+            }
+        }
+        return result;
+    }
+
+    [[nodiscard]] constexpr Keire::AssetId RenderVfxId(const std::uint64_t value) noexcept
+    {
+        return Keire::AssetId(0x4750555658464752ULL, value);
+    }
+
+    [[nodiscard]] Keire::Ref<Keire::VfxEffectAsset> RenderedGraphEffect(const bool customBeforeForce)
+    {
+        const auto base = customBeforeForce ? 100ULL : 200ULL;
+        Keire::VfxEffectDefinition definition;
+        definition.EmitterId = RenderVfxId(base);
+        definition.Name = customBeforeForce ? "GPU graph custom before force" : "GPU graph custom after force";
+        definition.Duration = 2.0F;
+        definition.Capacity = 4;
+        definition.Modules = {
+            {RenderVfxId(base + 1), true, Keire::VfxBurstModule{0.0F, 1, 1, 0.1F}},
+            {RenderVfxId(base + 2), true, Keire::VfxShapeModule{}},
+            {RenderVfxId(base + 3), true, Keire::VfxInitializeModule{5.0F, 5.0F, {}, {}, {}, {}}},
+            {RenderVfxId(base + 4), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(0.8F)}},
+            {RenderVfxId(base + 5), true,
+             Keire::VfxColorOverLifetimeModule{Keire::ColorGradient::Constant({1.0F, 0.0F, 0.0F, 1.0F})}},
+            {RenderVfxId(base + 6), true, Keire::VfxForceModule{{4.0F, 0.0F, 0.0F}, 0.0F}},
+            {RenderVfxId(base + 7), true, Keire::VfxRendererModule{}},
+        };
+        definition.Blackboard = {
+            {RenderVfxId(base + 20), "Tint Override", Keire::VfxValueType::Color, Keire::Color{0.0F, 0.0F, 1.0F, 1.0F},
+             true},
+        };
+        definition = Keire::ConvertVfxEffectToGraph(definition);
+
+        auto& system = definition.Systems.front();
+        const auto force = std::ranges::find(system.Nodes, RenderVfxId(base + 6), &Keire::VfxGraphNode::Reference);
+        if (force == system.Nodes.end())
+            throw std::logic_error("Converted GPU VFX graph is missing its Force module.");
+        const auto forceInput =
+            std::ranges::find_if(force->Pins, [](const Keire::VfxGraphPin& pin)
+                                 { return pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+        const auto forceOutput =
+            std::ranges::find_if(force->Pins, [](const Keire::VfxGraphPin& pin)
+                                 { return !pin.Input && pin.Type == Keire::VfxValueType::ParticleStream; });
+        if (forceInput == force->Pins.end() || forceOutput == force->Pins.end())
+            throw std::logic_error("Converted GPU VFX Force module has malformed flow pins.");
+        const auto forceNode = force->Id;
+        const auto forceInputPin = forceInput->Id;
+        const auto forceOutputPin = forceOutput->Id;
+
+        const auto parameter = std::ranges::find(system.Nodes, RenderVfxId(base + 20), &Keire::VfxGraphNode::Reference);
+        if (parameter == system.Nodes.end() || parameter->Pins.empty())
+            throw std::logic_error("Converted GPU VFX graph is missing its Blackboard parameter.");
+        const auto parameterNode = parameter->Id;
+        const auto parameterOutputPin = parameter->Pins.front().Id;
+
+        const auto customNode = RenderVfxId(base + 30);
+        const auto customFlowInput = RenderVfxId(base + 31);
+        const auto customTintInput = RenderVfxId(base + 32);
+        const auto customFlowOutput = RenderVfxId(base + 33);
+        system.Nodes.push_back(
+            {customNode,
+             "Portable Order And Tint",
+             Keire::VfxContextType::Update,
+             {900.0F, 180.0F},
+             {{customFlowInput, "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
+              {customTintInput, "Tint Override", Keire::VfxValueType::Color, true, "TintOverride", std::nullopt},
+              {customFlowOutput, "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt}},
+             "Velocity = float3(0.0, 0.0, 0.0);\nTint = TintOverride;",
+             Keire::VfxGraphNodeKind::CustomHlsl,
+             {}});
+
+        const auto flowPin = customBeforeForce ? forceInputPin : forceOutputPin;
+        const auto flowConnection = std::ranges::find_if(
+            system.Connections, [customBeforeForce, flowPin](const Keire::VfxGraphConnection& connection)
+            { return (customBeforeForce ? connection.InputPin : connection.OutputPin) == flowPin; });
+        if (flowConnection == system.Connections.end())
+            throw std::logic_error("Converted GPU VFX graph is missing the Force flow cable.");
+
+        if (customBeforeForce)
+        {
+            flowConnection->InputNode = customNode;
+            flowConnection->InputPin = customFlowInput;
+            system.Connections.push_back(
+                {RenderVfxId(base + 34), customNode, customFlowOutput, forceNode, forceInputPin});
+        }
+        else
+        {
+            const auto successorNode = flowConnection->InputNode;
+            const auto successorPin = flowConnection->InputPin;
+            flowConnection->InputNode = customNode;
+            flowConnection->InputPin = customFlowInput;
+            system.Connections.push_back(
+                {RenderVfxId(base + 34), customNode, customFlowOutput, successorNode, successorPin});
+        }
+        system.Connections.push_back(
+            {RenderVfxId(base + 35), parameterNode, parameterOutputPin, customNode, customTintInput});
+
+        Keire::ValidateVfxEffect(definition);
+        const auto compiled = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        if (!compiled.Valid)
+            throw std::logic_error("Rendered schema-v3 GPU VFX graph did not compile.");
+        const auto persisted = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(definition));
+        if (!persisted)
+            throw std::logic_error("Rendered schema-v3 GPU VFX graph did not survive persistence.");
+        return persisted;
+    }
 
     class RenderAssetFixture final
     {
@@ -548,6 +692,137 @@ namespace
         Keire::Ref<Keire::DirectionalLightComponent> m_Light;
         Keire::RenderEnvironmentSettings m_Environment;
         std::size_t m_NextCapture = 0;
+        bool m_Submitted = false;
+    };
+
+    class VfxGraphGpuCaptureLayer final : public Keire::Layer
+    {
+      public:
+        explicit VfxGraphGpuCaptureLayer(std::shared_ptr<VfxGraphCaptureResults> results)
+            : Layer("Schema-v3 GPU VFX graph capture"), m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000014"),
+                                                     Keire::SceneAsset::EmptyDefinition("GPU VFX graph tests"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "GPU VFX graph tests";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.Depth = true;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {}, {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+            m_Environment.SkyVisible = false;
+            m_Environment.AmbientIntensity = 0.0F;
+
+            StartVariant(false);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (Owner().Renderer())
+                CaptureStatistics();
+            m_World.Reset();
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (!m_Submitted)
+            {
+                Submit();
+                m_Submitted = true;
+                return;
+            }
+
+            m_Results->Frames.push_back(
+                Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+            CaptureStatistics();
+            switch (m_Phase)
+            {
+            case Phase::AfterForceSpawn:
+                m_World->Update(0.5F);
+                m_Phase = Phase::AfterForceSimulated;
+                Submit();
+                break;
+            case Phase::AfterForceSimulated:
+                StartVariant(true);
+                m_Phase = Phase::BeforeForceSpawn;
+                Submit();
+                break;
+            case Phase::BeforeForceSpawn:
+                m_World->Update(0.5F);
+                m_Phase = Phase::BeforeForceSimulated;
+                Submit();
+                break;
+            case Phase::BeforeForceSimulated:
+                Owner().RequestExit();
+                break;
+            }
+        }
+
+      private:
+        enum class Phase : std::uint8_t
+        {
+            AfterForceSpawn,
+            AfterForceSimulated,
+            BeforeForceSpawn,
+            BeforeForceSimulated
+        };
+
+        void StartVariant(const bool customBeforeForce)
+        {
+            m_World = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
+                .MaximumEffects = 1, .MaximumParticles = 4, .Backend = Keire::VfxBackend::Gpu});
+            const auto effect = RenderedGraphEffect(customBeforeForce);
+            const auto handle = m_World->Activate(
+                {effect,
+                 1,
+                 {},
+                 {},
+                 0,
+                 {{RenderVfxId((customBeforeForce ? 100ULL : 200ULL) + 20), Keire::Color{0.0F, 1.0F, 0.0F, 1.0F}}}});
+            if (!handle)
+                throw std::logic_error("Could not activate the rendered schema-v3 GPU VFX graph.");
+            m_World->Update(0.01F);
+        }
+
+        void Submit()
+        {
+            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+        }
+
+        void CaptureStatistics() noexcept
+        {
+            const auto statistics = Owner().Renderer()->Statistics();
+            m_Results->Statistics.VfxComputeDispatches =
+                std::max(m_Results->Statistics.VfxComputeDispatches, statistics.VfxComputeDispatches);
+            m_Results->Statistics.VfxIndirectDraws =
+                std::max(m_Results->Statistics.VfxIndirectDraws, statistics.VfxIndirectDraws);
+            m_Results->Statistics.VfxGpuWorlds = std::max(m_Results->Statistics.VfxGpuWorlds, statistics.VfxGpuWorlds);
+            m_Results->HasStatistics = true;
+        }
+
+        std::shared_ptr<VfxGraphCaptureResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::VfxWorld> m_World;
+        Keire::RenderEnvironmentSettings m_Environment;
+        Phase m_Phase = Phase::AfterForceSpawn;
         bool m_Submitted = false;
     };
 
@@ -1580,6 +1855,43 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
     CHECK(at(CaptureKind::ExposureHigh).Luminance() > at(CaptureKind::ExposureLow).Luminance() + MinimumBehaviorDelta);
     CHECK(std::abs(at(CaptureKind::NormalIdentity).Luminance() - at(CaptureKind::NormalTransformed).Luminance()) >
           ColorTolerance);
+}
+
+TEST_CASE("schema-v3 graph order Blackboard overrides and Portable HLSL drive rendered GPU VFX particles")
+{
+    const auto results = std::make_shared<VfxGraphCaptureResults>();
+    {
+        Keire::Application application(RenderTestSpecification());
+        (void)application.PushLayer(std::make_unique<VfxGraphGpuCaptureLayer>(results));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE(results->Frames.size() == 4);
+    const auto afterSpawnRed = MeasureChannelSignal(results->Frames[0], 0);
+    const auto afterSpawnGreen = MeasureChannelSignal(results->Frames[0], 1);
+    const auto afterSimulatedRed = MeasureChannelSignal(results->Frames[1], 0);
+    const auto afterSimulatedGreen = MeasureChannelSignal(results->Frames[1], 1);
+    const auto beforeSpawnRed = MeasureChannelSignal(results->Frames[2], 0);
+    const auto beforeSpawnGreen = MeasureChannelSignal(results->Frames[2], 1);
+    const auto beforeSimulatedRed = MeasureChannelSignal(results->Frames[3], 0);
+    const auto beforeSimulatedGreen = MeasureChannelSignal(results->Frames[3], 1);
+
+    REQUIRE(afterSpawnRed.Weight > 10.0F);
+    REQUIRE(beforeSpawnRed.Weight > 10.0F);
+    CHECK(afterSpawnRed.Weight > afterSpawnGreen.Weight + 10.0F);
+    CHECK(beforeSpawnRed.Weight > beforeSpawnGreen.Weight + 10.0F);
+
+    REQUIRE(afterSimulatedGreen.Weight > 10.0F);
+    REQUIRE(beforeSimulatedGreen.Weight > 10.0F);
+    CHECK(afterSimulatedGreen.Weight > afterSimulatedRed.Weight + 10.0F);
+    CHECK(beforeSimulatedGreen.Weight > beforeSimulatedRed.Weight + 10.0F);
+
+    CHECK(std::abs(afterSimulatedGreen.CentroidX() - afterSpawnRed.CentroidX()) < 4.0F);
+    CHECK(std::abs(beforeSimulatedGreen.CentroidX() - beforeSpawnRed.CentroidX()) > 20.0F);
+    CHECK(std::abs(beforeSimulatedGreen.CentroidX() - afterSimulatedGreen.CentroidX()) > 20.0F);
+
+    REQUIRE(results->HasStatistics);
+    CHECK(results->Statistics.VfxGpuWorlds > 0);
 }
 
 TEST_CASE("submitted scene data remains valid when the scene closes before end frame")

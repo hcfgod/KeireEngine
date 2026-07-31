@@ -8,9 +8,11 @@
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/VfxEmitterInspector.h"
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
+#include "Keire/ECS/Components/VfxEmitterComponent.h"
 
 #include <algorithm>
 #include <array>
@@ -201,7 +203,10 @@ namespace
 
         [[nodiscard]] bool EditBoundary() const noexcept { return m_EditBoundary; }
 
-        bool EditBoolean(const std::string_view label, bool& value) override { return m_Ui.Checkbox(label, value); }
+        bool EditBoolean(const std::string_view label, bool& value) override
+        {
+            return Track(m_Ui.Checkbox(label, value));
+        }
 
         bool EditInteger(const std::string_view label, std::int64_t& value, const double step,
                          const std::optional<double> minimum, const std::optional<double> maximum) override
@@ -210,7 +215,7 @@ namespace
                 minimum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*minimum)) : std::nullopt;
             const auto upper =
                 maximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*maximum)) : std::nullopt;
-            return m_Ui.DragInteger(label, value, step, lower, upper);
+            return Track(m_Ui.DragInteger(label, value, step, lower, upper));
         }
 
         bool EditChoice(const std::string_view label, std::int64_t& value,
@@ -231,7 +236,7 @@ namespace
                     }
                 }
             }
-            return changed;
+            return Track(changed);
         }
 
         bool EditScalar(const std::string_view label, double& value, const double step,
@@ -242,7 +247,7 @@ namespace
 
         bool EditText(const std::string_view label, std::string& value) override
         {
-            return m_Ui.InputText(label, value);
+            return Track(m_Ui.InputText(label, value));
         }
         bool EditVector2(const std::string_view label, Keire::Vector2& value, const double step) override
         {
@@ -258,7 +263,7 @@ namespace
         }
         bool EditQuaternion(const std::string_view label, Keire::Quaternion& value, const double step) override
         {
-            return m_Ui.DragQuaternion(label, value, static_cast<float>(step));
+            return Track(m_Ui.DragQuaternion(label, value, static_cast<float>(step)));
         }
         bool EditColor(const std::string_view label, Keire::Color& value) override
         {
@@ -290,7 +295,7 @@ namespace
             const bool changed = m_AssetPicker.Draw(m_Ui, m_Assets, value, options);
             if (changed)
                 m_EditBoundary = true;
-            return changed;
+            return Track(changed);
         }
         bool EditTextureAsset(const std::string_view label, Keire::AssetId& value,
                               const Keire::ShaderTextureSemantic semantic) override
@@ -985,6 +990,45 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 const auto registration = scene->Components()->Find(component->Type());
                 if (!registration)
                     continue;
+                auto vfxEmitter = Keire::Ref<Keire::VfxEmitterComponent>{};
+                auto vfxEffect = Keire::Ref<const Keire::VfxEffectAsset>{};
+                std::string vfxEffectDiagnostic;
+                bool vfxEffectDiagnosticWarning = false;
+                if (registration->Type == Keire::VfxEmitterComponent::StaticType())
+                {
+                    vfxEmitter = Keire::DynamicRefCast<Keire::VfxEmitterComponent>(component);
+                    if (!vfxEmitter)
+                    {
+                        vfxEffectDiagnostic = "The VFX Emitter registration returned an incompatible component.";
+                        vfxEffectDiagnosticWarning = true;
+                    }
+                    else if (!vfxEmitter->Effect())
+                    {
+                        vfxEffectDiagnostic = "Assign a VFX effect to edit exposed Blackboard parameters.";
+                    }
+                    else if (!assets)
+                    {
+                        vfxEffectDiagnostic = "The asset system is unavailable; serialized overrides are preserved.";
+                        vfxEffectDiagnosticWarning = true;
+                    }
+                    else
+                    {
+                        try
+                        {
+                            vfxEffect =
+                                assets->Load<Keire::VfxEffectAsset>(vfxEmitter->Effect(), Keire::AssetPriority::High)
+                                    .TryGetLoaded();
+                            if (!vfxEffect)
+                                vfxEffectDiagnostic = "Loading VFX Blackboard metadata...";
+                        }
+                        catch (const std::exception& error)
+                        {
+                            vfxEffectDiagnostic =
+                                std::string("VFX Blackboard metadata is unavailable: ") + error.what();
+                            vfxEffectDiagnosticWarning = true;
+                        }
+                    }
+                }
                 ui.Spacing();
                 auto& expanded = expansion(registration->Type.ToString());
                 const auto cardId = "ComponentCard##" + registration->Type.ToString();
@@ -1000,9 +1044,16 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         previousGroup = property.Group;
                     }
                 }
+                const auto vfxEntries = vfxEffect ? KeireEditor::VfxEmitterInspector::VisibleEntryCount(
+                                                        vfxEffect->Definition(), vfxEmitter->ParameterOverrides())
+                                                  : std::size_t{0};
+                const float vfxInspectorHeight =
+                    vfxEmitter
+                        ? std::min(720.0F, 26.0F + static_cast<float>(std::max<std::size_t>(vfxEntries, 1U)) * 48.0F)
+                        : 0.0F;
                 const float cardHeight =
                     expanded ? std::max(115.0F, 80.0F + anchorPickerHeight + registration->Properties.size() * 34.0F +
-                                                    groupRows * 22.0F)
+                                                    groupRows * 22.0F + vfxInspectorHeight)
                              : 38.0F;
                 if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                 {
@@ -1085,9 +1136,65 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 throw std::invalid_argument("The component omitted a declared property.");
                             auto candidate = found->second;
                             bool changed = false;
+                            bool editBoundary = false;
                             const bool localLight = registration->Type == Keire::PointLightComponent::StaticType() ||
                                                     registration->Type == Keire::SpotLightComponent::StaticType();
-                            if (localLight && property.Key == "shadows")
+                            const bool vfxOverrides = registration->Type == Keire::VfxEmitterComponent::StaticType() &&
+                                                      property.Key == "parameterOverrides";
+                            if (vfxOverrides)
+                            {
+                                if (!vfxEffect)
+                                {
+                                    ui.TextColored(vfxEffectDiagnosticWarning ? theme.Warning : theme.MutedText,
+                                                   vfxEffectDiagnostic);
+                                }
+                                else
+                                {
+                                    auto overrides = std::vector<Keire::VfxParameterOverride>(
+                                        vfxEmitter->ParameterOverrides().begin(),
+                                        vfxEmitter->ParameterOverrides().end());
+                                    if (KeireEditor::VfxEmitterInspector::VisibleEntryCount(vfxEffect->Definition(),
+                                                                                            overrides) == 0)
+                                    {
+                                        ui.TextColored(theme.MutedText,
+                                                       "This effect has no exposed Blackboard parameters.");
+                                    }
+                                    bool actionBoundary = false;
+                                    KeireEditor::VfxEmitterInspectorCallbacks callbacks;
+                                    callbacks.Status = [&ui, &theme](const Keire::AssetId,
+                                                                     const std::string_view message, const bool warning)
+                                    { ui.TextColored(warning ? theme.Warning : theme.MutedText, message); };
+                                    callbacks.Reset = [&ui, &actionBoundary](const Keire::AssetId parameter)
+                                    {
+                                        ui.SameLine();
+                                        auto id = ui.PushId("VfxBlackboardReset-" + parameter.ToString());
+                                        if (!ui.Button("Reset"))
+                                            return false;
+                                        actionBoundary = true;
+                                        return true;
+                                    };
+                                    callbacks.RemoveStale = [&ui, &actionBoundary](const Keire::AssetId parameter)
+                                    {
+                                        ui.SameLine();
+                                        auto id = ui.PushId("VfxBlackboardRemoveStale-" + parameter.ToString());
+                                        if (!ui.Button("Remove"))
+                                            return false;
+                                        actionBoundary = true;
+                                        return true;
+                                    };
+                                    InspectorPropertyEditor vfxPropertyEditor(ui, records, assets, scene,
+                                                                              *m_AssetPicker);
+                                    changed = KeireEditor::VfxEmitterInspector{}.Draw(
+                                        vfxPropertyEditor, vfxEffect->Definition(), overrides, callbacks);
+                                    editBoundary = actionBoundary || vfxPropertyEditor.EditBoundary();
+                                    if (changed)
+                                    {
+                                        candidate = KeireEditor::VfxEmitterInspector::SerializeOverrides(
+                                            *registration, values, overrides);
+                                    }
+                                }
+                            }
+                            else if (localLight && property.Key == "shadows")
                             {
                                 const auto* current = std::get_if<std::int64_t>(&candidate);
                                 if (!current || *current < 0 || *current > 2)
@@ -1108,7 +1215,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             }
                             else
                                 changed = propertyDrawers.Draw(propertyEditor, registration->Type, property, candidate);
-                            if (!property.Tooltip.empty() && ui.LastItemState().Hovered)
+                            if (!vfxOverrides && !property.Tooltip.empty() && ui.LastItemState().Hovered)
                                 ui.SetTooltip(property.Tooltip, {.Delayed = true});
                             if (changed)
                             {
@@ -1119,7 +1226,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 sceneDocument.SetComponentProperty(entity.Id(), registration->Type, property.Key,
                                                                    std::move(candidate));
                             }
-                            if (changed && ui.LastItemState().DeactivatedAfterEdit)
+                            if (changed && (editBoundary || ui.LastItemState().DeactivatedAfterEdit))
                                 ++m_EditSerial;
                         }
                         catch (const std::exception& error)

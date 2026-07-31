@@ -548,6 +548,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::Vector3 m_VfxEffectPreviewPosition;
     Keire::Quaternion m_VfxEffectPreviewRotation;
     std::uint32_t m_VfxEffectPreviewSeedOffset = 0;
+    std::vector<Keire::VfxParameterOverride> m_VfxEffectPreviewParameterOverrides;
     Keire::VfxHandle m_VfxEffectPreviewRestartHandle;
     Keire::Vector3 m_VfxEffectPreviewRestartPosition;
     Keire::Quaternion m_VfxEffectPreviewRestartRotation;
@@ -559,6 +560,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         Keire::VfxHandle Handle;
         std::uint64_t Revision = 0;
         std::uint32_t SeedOffset = 0;
+        std::vector<Keire::VfxParameterOverride> ParameterOverrides;
         Keire::Vector3 RestartPosition;
         Keire::Quaternion RestartRotation;
         bool RestartTransformInitialized = false;

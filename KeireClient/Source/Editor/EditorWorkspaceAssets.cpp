@@ -2033,7 +2033,7 @@ void EditorWorkspaceLayer::EnsureEditorVfxPreviewWorld(const std::uint32_t minim
         m_VfxEffectPreviewRevision = 1;
     m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
         {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition, m_VfxEffectPreviewRotation,
-         m_VfxEffectPreviewSeedOffset});
+         m_VfxEffectPreviewSeedOffset, m_VfxEffectPreviewParameterOverrides});
     if (!m_VfxEffectPreviewHandle)
         throw std::runtime_error("The editor VFX preview world rejected the authored effect.");
     m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle,
@@ -2132,10 +2132,15 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
         const Keire::Vector3 position = draftHost ? draftHost->Position : Keire::Vector3{};
         const Keire::Quaternion rotation = draftHost ? draftHost->Rotation : Keire::Quaternion{};
         const std::uint32_t seedOffset = draftHost ? draftHost->SeedOffset : 0;
+        const auto parameterOverrides =
+            draftHost ? KeireEditor::CompatibleEditModeVfxOverrides(m_VfxEffectPreviewEffect->Definition(),
+                                                                    draftHost->ParameterOverrides)
+                      : std::vector<Keire::VfxParameterOverride>{};
         const bool alive = m_VfxEffectPreviewWorld && m_VfxEffectPreviewHandle &&
                            m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle);
         const bool routeChanged =
             m_VfxEffectPreviewRoutedEntity != routedEntity || m_VfxEffectPreviewSeedOffset != seedOffset;
+        const bool parametersChanged = m_VfxEffectPreviewParameterOverrides != parameterOverrides;
         const auto space = m_VfxEffectPreviewEffect->Definition().Space;
         const bool restartForTransform =
             m_VfxEffectPreviewRestartTransformInitialized &&
@@ -2157,12 +2162,14 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
         {
             m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
                 {m_VfxEffectPreviewEffect, std::max<std::uint64_t>(m_VfxEffectPreviewRevision, 1), position, rotation,
-                 seedOffset});
+                 seedOffset, parameterOverrides});
             currentAlive = m_VfxEffectPreviewHandle && m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle);
             activated = currentAlive;
         }
         if (currentAlive)
         {
+            if (parametersChanged)
+                m_VfxEffectPreviewWorld->SetParameterOverrides(m_VfxEffectPreviewHandle, parameterOverrides);
             m_VfxEffectPreviewWorld->SetTransform(m_VfxEffectPreviewHandle, position, rotation);
             m_VfxEffectPreviewWorld->SetSimulationSpeed(m_VfxEffectPreviewHandle,
                                                         m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
@@ -2176,6 +2183,7 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
         m_VfxEffectPreviewPosition = position;
         m_VfxEffectPreviewRotation = rotation;
         m_VfxEffectPreviewSeedOffset = seedOffset;
+        m_VfxEffectPreviewParameterOverrides = parameterOverrides;
         if (space == Keire::VfxSimulationSpace::Local || routeChanged || activated || newlyActivated ||
             (!m_VfxEffectPreviewRestartTransformInitialized && currentAlive))
         {
@@ -2216,6 +2224,8 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
                 stopPreview(preview->second);
                 continue;
             }
+            const auto parameterOverrides =
+                KeireEditor::CompatibleEditModeVfxOverrides(effect->Definition(), emitter.ParameterOverrides);
 
             EnsureEditorVfxPreviewWorld(1);
             auto& state = preview->second;
@@ -2232,8 +2242,9 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
                 state.Handle = {};
                 state.RestartTransformInitialized = false;
                 state.Handle = m_VfxEffectPreviewWorld->Activate(
-                    {effect, revision, emitter.Position, emitter.Rotation, emitter.SeedOffset});
+                    {effect, revision, emitter.Position, emitter.Rotation, emitter.SeedOffset, parameterOverrides});
                 state.Revision = revision;
+                state.ParameterOverrides = parameterOverrides;
             }
             else if (revision != state.Revision)
             {
@@ -2241,13 +2252,18 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
                 {
                     stopPreview(state);
                     state.Handle = m_VfxEffectPreviewWorld->Activate(
-                        {effect, revision, emitter.Position, emitter.Rotation, emitter.SeedOffset});
+                        {effect, revision, emitter.Position, emitter.Rotation, emitter.SeedOffset, parameterOverrides});
                 }
                 state.Revision = revision;
             }
 
             if (state.Handle)
             {
+                if (state.ParameterOverrides != parameterOverrides)
+                {
+                    m_VfxEffectPreviewWorld->SetParameterOverrides(state.Handle, parameterOverrides);
+                    state.ParameterOverrides = parameterOverrides;
+                }
                 m_VfxEffectPreviewWorld->SetTransform(state.Handle, emitter.Position, emitter.Rotation);
                 m_VfxEffectPreviewWorld->SetSimulationSpeed(state.Handle, emitter.SimulationSpeed);
                 if (effect->Definition().Space == Keire::VfxSimulationSpace::Local ||
@@ -2292,6 +2308,7 @@ void EditorWorkspaceLayer::RestartVfxEffectPreview()
     const auto position = m_VfxEffectPreviewPosition;
     const auto rotation = m_VfxEffectPreviewRotation;
     const auto seedOffset = m_VfxEffectPreviewSeedOffset;
+    const auto parameterOverrides = m_VfxEffectPreviewParameterOverrides;
     const auto asset = m_VfxEffectDocument->Asset();
     StopVfxEffectPreview();
     m_VfxEffectPreviewPaused = paused;
@@ -2303,6 +2320,7 @@ void EditorWorkspaceLayer::RestartVfxEffectPreview()
     m_VfxEffectPreviewPosition = position;
     m_VfxEffectPreviewRotation = rotation;
     m_VfxEffectPreviewSeedOffset = seedOffset;
+    m_VfxEffectPreviewParameterOverrides = parameterOverrides;
     PreviewVfxEffect(asset, m_VfxEffectDocument->Definition());
 }
 
@@ -2372,6 +2390,7 @@ void EditorWorkspaceLayer::StopVfxEffectPreview() noexcept
     m_VfxEffectPreviewPosition = {};
     m_VfxEffectPreviewRotation = {};
     m_VfxEffectPreviewSeedOffset = 0;
+    m_VfxEffectPreviewParameterOverrides.clear();
     m_VfxEffectPreviewRestartHandle = {};
     m_VfxEffectPreviewRestartPosition = {};
     m_VfxEffectPreviewRestartRotation = {};
@@ -2398,6 +2417,7 @@ void EditorWorkspaceLayer::PreviewVfxEffect(const Keire::AssetId asset, const Ke
             m_VfxEffectPreviewPosition = {};
             m_VfxEffectPreviewRotation = {};
             m_VfxEffectPreviewSeedOffset = 0;
+            m_VfxEffectPreviewParameterOverrides.clear();
             m_VfxEffectPreviewRestartHandle = {};
             m_VfxEffectPreviewRestartPosition = {};
             m_VfxEffectPreviewRestartRotation = {};
@@ -2435,7 +2455,7 @@ void EditorWorkspaceLayer::PreviewVfxEffect(const Keire::AssetId asset, const Ke
             {
                 m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
                     {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition,
-                     m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset});
+                     m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset, m_VfxEffectPreviewParameterOverrides});
             }
             if (!m_VfxEffectPreviewHandle)
                 throw std::runtime_error("The editor VFX preview world rejected the authored effect.");

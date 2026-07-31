@@ -1,10 +1,18 @@
 #include "Keire/Vfx/VfxSystem.h"
 
+#include "VfxExecutionInternal.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstring>
+#include <limits>
+#include <map>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -436,6 +444,56 @@ namespace Keire
             throw std::runtime_error("VFX context type is unsupported.");
         }
 
+        [[nodiscard]] std::string_view ExecutionSourceName(const VfxExecutionSource value)
+        {
+            switch (value)
+            {
+            case VfxExecutionSource::LegacyModules:
+                return "legacyModules";
+            case VfxExecutionSource::Graph:
+                return "graph";
+            }
+            throw std::invalid_argument("VFX execution source is unsupported.");
+        }
+
+        [[nodiscard]] VfxExecutionSource ParseExecutionSource(const std::string_view value)
+        {
+            if (value == "legacyModules")
+                return VfxExecutionSource::LegacyModules;
+            if (value == "graph")
+                return VfxExecutionSource::Graph;
+            throw std::runtime_error("VFX execution source is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view NodeKindName(const VfxGraphNodeKind value)
+        {
+            switch (value)
+            {
+            case VfxGraphNodeKind::Context:
+                return "context";
+            case VfxGraphNodeKind::Module:
+                return "module";
+            case VfxGraphNodeKind::Parameter:
+                return "parameter";
+            case VfxGraphNodeKind::CustomHlsl:
+                return "customHlsl";
+            }
+            throw std::invalid_argument("VFX graph node kind is unsupported.");
+        }
+
+        [[nodiscard]] VfxGraphNodeKind ParseNodeKind(const std::string_view value)
+        {
+            if (value == "context")
+                return VfxGraphNodeKind::Context;
+            if (value == "module")
+                return VfxGraphNodeKind::Module;
+            if (value == "parameter")
+                return VfxGraphNodeKind::Parameter;
+            if (value == "customHlsl")
+                return VfxGraphNodeKind::CustomHlsl;
+            throw std::runtime_error("VFX graph node kind is unsupported.");
+        }
+
         [[nodiscard]] std::string_view ValueTypeName(const VfxValueType value)
         {
             switch (value)
@@ -458,6 +516,8 @@ namespace Keire
                 return "mesh";
             case VfxValueType::Asset:
                 return "asset";
+            case VfxValueType::ParticleStream:
+                return "particleStream";
             }
             throw std::invalid_argument("VFX value type is unsupported.");
         }
@@ -482,34 +542,38 @@ namespace Keire
                 return VfxValueType::Mesh;
             if (value == "asset")
                 return VfxValueType::Asset;
+            if (value == "particleStream")
+                return VfxValueType::ParticleStream;
             throw std::runtime_error("VFX value type is unsupported.");
         }
 
-        [[nodiscard]] Json EncodeParameterValue(const VfxBlackboardParameter& parameter)
+        [[nodiscard]] Json EncodeTypedValue(const VfxValueType type, const VfxParameterValue& value)
         {
-            switch (parameter.Type)
+            switch (type)
             {
             case VfxValueType::Boolean:
-                return std::get<bool>(parameter.DefaultValue);
+                return std::get<bool>(value);
             case VfxValueType::Integer:
-                return std::get<std::int64_t>(parameter.DefaultValue);
+                return std::get<std::int64_t>(value);
             case VfxValueType::Scalar:
-                return std::get<float>(parameter.DefaultValue);
+                return std::get<float>(value);
             case VfxValueType::Vector2:
             {
-                const auto value = std::get<Vector2>(parameter.DefaultValue);
-                return Json::array({value.X, value.Y});
+                const auto vector = std::get<Vector2>(value);
+                return Json::array({vector.X, vector.Y});
             }
             case VfxValueType::Vector3:
-                return EncodeVector(std::get<Vector3>(parameter.DefaultValue));
+                return EncodeVector(std::get<Vector3>(value));
             case VfxValueType::Color:
-                return EncodeColor(std::get<Color>(parameter.DefaultValue));
+                return EncodeColor(std::get<Color>(value));
             case VfxValueType::Texture:
             case VfxValueType::Mesh:
             case VfxValueType::Asset:
-                return IdText(std::get<AssetId>(parameter.DefaultValue));
+                return IdText(std::get<AssetId>(value));
+            case VfxValueType::ParticleStream:
+                break;
             }
-            throw std::invalid_argument("VFX blackboard value type is unsupported.");
+            throw std::invalid_argument("VFX typed value is unsupported.");
         }
 
         [[nodiscard]] VfxParameterValue DecodeParameterValue(const VfxValueType type, const Json& value)
@@ -537,8 +601,10 @@ namespace Keire
                 const auto text = value.get<std::string>();
                 return text.empty() ? AssetId{} : AssetId::Parse(text);
             }
+            case VfxValueType::ParticleStream:
+                break;
             }
-            throw std::runtime_error("VFX blackboard default value is malformed.");
+            throw std::runtime_error("VFX typed default value is malformed.");
         }
 
         [[nodiscard]] Json EncodeSystems(const std::span<const VfxGraphSystem> systems)
@@ -551,16 +617,22 @@ namespace Keire
                 {
                     auto pins = Json::array();
                     for (const auto& pin : node.Pins)
-                        pins.push_back({{"id", IdText(pin.Id)},
-                                        {"name", pin.Name},
-                                        {"type", ValueTypeName(pin.Type)},
-                                        {"input", pin.Input}});
+                    {
+                        Json encodedPin{
+                            {"id", IdText(pin.Id)}, {"name", pin.Name},         {"type", ValueTypeName(pin.Type)},
+                            {"input", pin.Input},   {"semantic", pin.Semantic}, {"default", nullptr}};
+                        if (pin.DefaultValue)
+                            encodedPin["default"] = EncodeTypedValue(pin.Type, *pin.DefaultValue);
+                        pins.push_back(std::move(encodedPin));
+                    }
                     nodes.push_back({{"id", IdText(node.Id)},
                                      {"type", node.Type},
                                      {"context", ContextName(node.Context)},
                                      {"position", Json::array({node.EditorPosition.X, node.EditorPosition.Y})},
                                      {"pins", std::move(pins)},
-                                     {"customHlsl", node.CustomHlsl}});
+                                     {"customHlsl", node.CustomHlsl},
+                                     {"kind", NodeKindName(node.Kind)},
+                                     {"reference", IdText(node.Reference)}});
                 }
                 auto connections = Json::array();
                 for (const auto& connection : system.Connections)
@@ -577,7 +649,7 @@ namespace Keire
             return encodedSystems;
         }
 
-        [[nodiscard]] std::vector<VfxGraphSystem> DecodeSystems(const Json& value)
+        [[nodiscard]] std::vector<VfxGraphSystem> DecodeSystems(const Json& value, const std::uint32_t schemaVersion)
         {
             if (!value.is_array())
                 throw std::runtime_error("VFX graph systems must be an array.");
@@ -596,10 +668,24 @@ namespace Keire
                     const auto& position = encodedNode.at("position");
                     node.EditorPosition = {position.at(0).get<float>(), position.at(1).get<float>()};
                     node.CustomHlsl = encodedNode.value("customHlsl", std::string{});
+                    if (schemaVersion >= 3)
+                    {
+                        node.Kind = ParseNodeKind(encodedNode.value("kind", std::string("context")));
+                        node.Reference = ParseId(encodedNode, "reference");
+                    }
                     for (const auto& encodedPin : encodedNode.at("pins"))
-                        node.Pins.push_back({ParseId(encodedPin, "id"), encodedPin.at("name").get<std::string>(),
-                                             ParseValueType(encodedPin.at("type").get<std::string>()),
-                                             encodedPin.value("input", true)});
+                    {
+                        VfxGraphPin pin{ParseId(encodedPin, "id"), encodedPin.at("name").get<std::string>(),
+                                        ParseValueType(encodedPin.at("type").get<std::string>()),
+                                        encodedPin.value("input", true)};
+                        if (schemaVersion >= 3)
+                        {
+                            pin.Semantic = encodedPin.value("semantic", std::string{});
+                            if (encodedPin.contains("default") && !encodedPin.at("default").is_null())
+                                pin.DefaultValue = DecodeParameterValue(pin.Type, encodedPin.at("default"));
+                        }
+                        node.Pins.push_back(std::move(pin));
+                    }
                     system.Nodes.push_back(std::move(node));
                 }
                 for (const auto& encodedConnection : encodedSystem.at("connections"))
@@ -633,7 +719,7 @@ namespace Keire
                 result.push_back({{"id", IdText(parameter.Id)},
                                   {"name", parameter.Name},
                                   {"type", ValueTypeName(parameter.Type)},
-                                  {"default", EncodeParameterValue(parameter)},
+                                  {"default", EncodeTypedValue(parameter.Type, parameter.DefaultValue)},
                                   {"exposed", parameter.Exposed}});
             return result;
         }
@@ -683,15 +769,1046 @@ namespace Keire
                                                   key.Value.Alpha <= MaximumAuthoredScalar;
                                        });
         }
+
+        [[nodiscard]] bool ValueMatchesType(const VfxValueType type, const VfxParameterValue& value) noexcept
+        {
+            switch (type)
+            {
+            case VfxValueType::Boolean:
+                return std::holds_alternative<bool>(value);
+            case VfxValueType::Integer:
+                return std::holds_alternative<std::int64_t>(value);
+            case VfxValueType::Scalar:
+                return std::holds_alternative<float>(value) && std::isfinite(std::get<float>(value));
+            case VfxValueType::Vector2:
+                return std::holds_alternative<Vector2>(value) && Math::IsFinite(std::get<Vector2>(value));
+            case VfxValueType::Vector3:
+                return std::holds_alternative<Vector3>(value) && Math::IsFinite(std::get<Vector3>(value));
+            case VfxValueType::Color:
+                return std::holds_alternative<Color>(value) && Math::IsFinite(std::get<Color>(value));
+            case VfxValueType::Texture:
+            case VfxValueType::Mesh:
+            case VfxValueType::Asset:
+                return std::holds_alternative<AssetId>(value);
+            case VfxValueType::ParticleStream:
+                return false;
+            }
+            return false;
+        }
+
+        [[nodiscard]] VfxContextType ModuleContext(const VfxModulePayload& payload) noexcept
+        {
+            return std::visit(
+                Overloaded{
+                    [](const VfxEmissionRateModule&) { return VfxContextType::Spawn; },
+                    [](const VfxBurstModule&) { return VfxContextType::Spawn; },
+                    [](const VfxShapeModule&) { return VfxContextType::Initialize; },
+                    [](const VfxInitializeModule&) { return VfxContextType::Initialize; },
+                    [](const VfxForceModule&) { return VfxContextType::Update; },
+                    [](const VfxSizeOverLifetimeModule&) { return VfxContextType::Update; },
+                    [](const VfxColorOverLifetimeModule&) { return VfxContextType::Update; },
+                    [](const VfxCollisionModule&) { return VfxContextType::Update; },
+                    [](const VfxRendererModule&) { return VfxContextType::Output; },
+                },
+                payload);
+        }
+
+        struct ModulePinSpecification
+        {
+            std::string_view Name;
+            std::string_view Semantic;
+            VfxValueType Type = VfxValueType::Scalar;
+            VfxModuleProperty Property = VfxModuleProperty::None;
+            VfxParameterValue DefaultValue = 0.0F;
+        };
+
+        [[nodiscard]] std::vector<ModulePinSpecification> ModulePinSpecifications(const VfxModulePayload& payload)
+        {
+            return std::visit(
+                Overloaded{
+                    [](const VfxEmissionRateModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Particles Per Second", "particlesPerSecond", VfxValueType::Scalar,
+                             VfxModuleProperty::EmissionParticlesPerSecond, value.ParticlesPerSecond}};
+                    },
+                    [](const VfxBurstModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Time", "time", VfxValueType::Scalar, VfxModuleProperty::BurstTime, value.Time},
+                            {"Count", "count", VfxValueType::Integer, VfxModuleProperty::BurstCount,
+                             static_cast<std::int64_t>(value.Count)},
+                            {"Cycles", "cycles", VfxValueType::Integer, VfxModuleProperty::BurstCycles,
+                             static_cast<std::int64_t>(value.Cycles)},
+                            {"Interval", "interval", VfxValueType::Scalar, VfxModuleProperty::BurstInterval,
+                             value.Interval}};
+                    },
+                    [](const VfxShapeModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Box Half Extent", "boxHalfExtent", VfxValueType::Vector3,
+                             VfxModuleProperty::ShapeBoxHalfExtent, value.BoxHalfExtent},
+                            {"Radius", "radius", VfxValueType::Scalar, VfxModuleProperty::ShapeRadius, value.Radius},
+                            {"Cone Angle", "coneAngleDegrees", VfxValueType::Scalar,
+                             VfxModuleProperty::ShapeConeAngleDegrees, value.ConeAngleDegrees},
+                            {"Cone Length", "coneLength", VfxValueType::Scalar, VfxModuleProperty::ShapeConeLength,
+                             value.ConeLength},
+                            {"Mesh", "mesh", VfxValueType::Mesh, VfxModuleProperty::ShapeMesh, value.Mesh},
+                            {"Volume", "volume", VfxValueType::Asset, VfxModuleProperty::ShapeVolume, value.Volume}};
+                    },
+                    [](const VfxInitializeModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Lifetime Minimum", "lifetimeMinimum", VfxValueType::Scalar,
+                             VfxModuleProperty::InitializeLifetimeMinimum, value.LifetimeMinimum},
+                            {"Lifetime Maximum", "lifetimeMaximum", VfxValueType::Scalar,
+                             VfxModuleProperty::InitializeLifetimeMaximum, value.LifetimeMaximum},
+                            {"Velocity Minimum", "velocityMinimum", VfxValueType::Vector3,
+                             VfxModuleProperty::InitializeVelocityMinimum, value.VelocityMinimum},
+                            {"Velocity Maximum", "velocityMaximum", VfxValueType::Vector3,
+                             VfxModuleProperty::InitializeVelocityMaximum, value.VelocityMaximum},
+                            {"Rotation Minimum", "rotationMinimum", VfxValueType::Vector3,
+                             VfxModuleProperty::InitializeRotationMinimum, value.RotationMinimum},
+                            {"Rotation Maximum", "rotationMaximum", VfxValueType::Vector3,
+                             VfxModuleProperty::InitializeRotationMaximum, value.RotationMaximum}};
+                    },
+                    [](const VfxForceModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Force", "force", VfxValueType::Vector3, VfxModuleProperty::ForceVector, value.Force},
+                            {"Gravity Multiplier", "gravityMultiplier", VfxValueType::Scalar,
+                             VfxModuleProperty::ForceGravityMultiplier, value.GravityMultiplier}};
+                    },
+                    [](const VfxSizeOverLifetimeModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{{"Size", "size", VfxValueType::Scalar,
+                                                                    VfxModuleProperty::SizeConstant,
+                                                                    value.Size.Evaluate(0.0F)}};
+                    },
+                    [](const VfxColorOverLifetimeModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{{"Color", "color", VfxValueType::Color,
+                                                                    VfxModuleProperty::ColorConstant,
+                                                                    value.Color.Evaluate(0.0F)}};
+                    },
+                    [](const VfxCollisionModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Restitution", "restitution", VfxValueType::Scalar,
+                             VfxModuleProperty::CollisionRestitution, value.Restitution},
+                            {"Kill On Collision", "killOnCollision", VfxValueType::Boolean,
+                             VfxModuleProperty::CollisionKillOnCollision, value.KillOnCollision}};
+                    },
+                    [](const VfxRendererModule& value)
+                    {
+                        return std::vector<ModulePinSpecification>{
+                            {"Sprite", "sprite", VfxValueType::Texture, VfxModuleProperty::RendererSprite,
+                             value.Sprite},
+                            {"Mesh", "mesh", VfxValueType::Mesh, VfxModuleProperty::RendererMesh, value.Mesh}};
+                    },
+                },
+                payload);
+        }
+
+        [[nodiscard]] std::uint32_t ContextOrder(const VfxContextType context)
+        {
+            switch (context)
+            {
+            case VfxContextType::Spawn:
+                return 0;
+            case VfxContextType::Initialize:
+                return 1;
+            case VfxContextType::Update:
+                return 2;
+            case VfxContextType::Output:
+                return 3;
+            case VfxContextType::Event:
+                break;
+            }
+            throw std::invalid_argument("VFX Event contexts are not executable.");
+        }
+
+        [[nodiscard]] const VfxGraphPin* FindPin(const VfxGraphNode& node, const bool input, const VfxValueType type,
+                                                 const std::string_view semantic) noexcept
+        {
+            const auto found =
+                std::ranges::find_if(node.Pins, [input, type, semantic](const VfxGraphPin& pin)
+                                     { return pin.Input == input && pin.Type == type && pin.Semantic == semantic; });
+            return found == node.Pins.end() ? nullptr : std::addressof(*found);
+        }
+
+        [[nodiscard]] std::uint64_t HashBytes(const std::span<const std::byte> bytes) noexcept
+        {
+            std::uint64_t hash = 1469598103934665603ULL;
+            for (const auto value : bytes)
+            {
+                hash ^= std::to_integer<std::uint8_t>(value);
+                hash *= 1099511628211ULL;
+            }
+            return hash;
+        }
+
+        [[nodiscard]] std::vector<std::byte> JsonBytes(const Json& value)
+        {
+            const auto encoded = value.dump();
+            std::vector<std::byte> result(encoded.size());
+            std::memcpy(result.data(), encoded.data(), encoded.size());
+            return result;
+        }
+
+        [[nodiscard]] AssetId AllocateDerivedId(const AssetId source, std::uint64_t salt, std::set<AssetId>& used)
+        {
+            for (;; ++salt)
+            {
+                const auto candidate = DerivedGraphId(source, salt);
+                if (candidate && used.insert(candidate).second)
+                    return candidate;
+            }
+        }
+
+        [[nodiscard]] std::string_view Trim(std::string_view value) noexcept
+        {
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0)
+                value.remove_prefix(1);
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0)
+                value.remove_suffix(1);
+            return value;
+        }
+
+        [[nodiscard]] bool IsIdentifier(const std::string_view value) noexcept
+        {
+            if (value.empty() || (std::isalpha(static_cast<unsigned char>(value.front())) == 0 && value.front() != '_'))
+                return false;
+            return std::ranges::all_of(
+                value.substr(1), [](const char character)
+                { return std::isalnum(static_cast<unsigned char>(character)) != 0 || character == '_'; });
+        }
+
+        [[nodiscard]] float ParsePortableFloat(std::string_view value)
+        {
+            value = Trim(value);
+            if (!value.empty() && (value.back() == 'f' || value.back() == 'F'))
+                value.remove_suffix(1);
+            float result = 0.0F;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);
+            if (value.empty() || parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+                !std::isfinite(result) || std::abs(result) > MaximumAuthoredScalar)
+            {
+                throw std::invalid_argument("Portable Custom HLSL contains an invalid numeric literal.");
+            }
+            return result;
+        }
+
+        struct PortableLiteral
+        {
+            VfxValueType Type = VfxValueType::Scalar;
+            VfxParameterValue Value = 0.0F;
+        };
+
+        [[nodiscard]] PortableLiteral ParsePortableLiteral(std::string_view value)
+        {
+            value = Trim(value);
+            std::size_t componentCount = 0;
+            if (value.starts_with("float2(") && value.ends_with(')'))
+                componentCount = 2;
+            else if (value.starts_with("float3(") && value.ends_with(')'))
+                componentCount = 3;
+            else if (value.starts_with("float4(") && value.ends_with(')'))
+                componentCount = 4;
+            else
+                return {VfxValueType::Scalar, ParsePortableFloat(value)};
+
+            value.remove_prefix(7);
+            value.remove_suffix(1);
+            std::array<float, 4> components{};
+            for (std::size_t index = 0; index < componentCount; ++index)
+            {
+                const auto comma = value.find(',');
+                if ((index + 1 < componentCount && comma == std::string_view::npos) ||
+                    (index + 1 == componentCount && comma != std::string_view::npos))
+                {
+                    throw std::invalid_argument("Portable Custom HLSL vector literals have invalid arity.");
+                }
+                const auto component = index + 1 < componentCount ? value.substr(0, comma) : value;
+                components[index] = ParsePortableFloat(component);
+                if (index + 1 < componentCount)
+                    value.remove_prefix(comma + 1);
+            }
+            if (componentCount == 2)
+                return {VfxValueType::Vector2, Vector2{components[0], components[1]}};
+            if (componentCount == 3)
+                return {VfxValueType::Vector3, Vector3{components[0], components[1], components[2]}};
+            return {VfxValueType::Color, Color{components[0], components[1], components[2], components[3]}};
+        }
+
+        struct PortableTarget
+        {
+            VfxCustomTarget Target = VfxCustomTarget::Velocity;
+            VfxValueType Type = VfxValueType::Vector3;
+        };
+
+        [[nodiscard]] PortableTarget ParsePortableTarget(const std::string_view value)
+        {
+            if (value == "Position")
+                return {VfxCustomTarget::Position, VfxValueType::Vector3};
+            if (value == "Velocity")
+                return {VfxCustomTarget::Velocity, VfxValueType::Vector3};
+            if (value == "Rotation")
+                return {VfxCustomTarget::Rotation, VfxValueType::Scalar};
+            if (value == "Tint")
+                return {VfxCustomTarget::Tint, VfxValueType::Color};
+            if (value == "Size")
+                return {VfxCustomTarget::Size, VfxValueType::Scalar};
+            throw std::invalid_argument("Portable Custom HLSL targets Position, Velocity, Rotation, Tint, or Size.");
+        }
+
+        struct PortableInput
+        {
+            VfxValueType Type = VfxValueType::Scalar;
+            std::uint32_t ParameterSlot = ~std::uint32_t{0};
+            std::optional<VfxParameterValue> DefaultValue;
+        };
+
+        [[nodiscard]] bool PortableOperandMatches(const VfxValueType target, const VfxValueType operand) noexcept
+        {
+            return operand == VfxValueType::Scalar || operand == target;
+        }
+
+        [[nodiscard]] std::vector<VfxCompiledCustomInstruction>
+        CompilePortableCustomHlsl(const VfxGraphNode& node, const std::map<std::string, PortableInput>& inputs)
+        {
+            std::vector<VfxCompiledCustomInstruction> result;
+            std::size_t start = 0;
+            while (start <= node.CustomHlsl.size())
+            {
+                const auto separator = node.CustomHlsl.find_first_of(";\r\n", start);
+                auto statement =
+                    Trim(std::string_view(node.CustomHlsl)
+                             .substr(start, separator == std::string::npos ? std::string::npos : separator - start));
+                start = separator == std::string::npos ? node.CustomHlsl.size() + 1 : separator + 1;
+                if (statement.empty())
+                    continue;
+                if (result.size() >= 8)
+                    throw std::invalid_argument("Portable Custom HLSL exceeds the eight-instruction limit.");
+
+                std::size_t operationPosition = statement.find("+=");
+                auto operation = VfxCustomOperation::Add;
+                std::size_t operationLength = 2;
+                if (operationPosition == std::string_view::npos)
+                {
+                    operationPosition = statement.find("*=");
+                    operation = VfxCustomOperation::Multiply;
+                }
+                if (operationPosition == std::string_view::npos)
+                {
+                    operationPosition = statement.find('=');
+                    operation = VfxCustomOperation::Assign;
+                    operationLength = 1;
+                }
+                if (operationPosition == std::string_view::npos)
+                    throw std::invalid_argument("Portable Custom HLSL statement has no supported assignment.");
+
+                const auto target = ParsePortableTarget(Trim(statement.substr(0, operationPosition)));
+                auto operandText = Trim(statement.substr(operationPosition + operationLength));
+                bool scaleByDeltaTime = false;
+                constexpr std::string_view deltaTime = "DeltaTime";
+                if (operandText.ends_with(deltaTime))
+                {
+                    auto prefix = Trim(operandText.substr(0, operandText.size() - deltaTime.size()));
+                    if (prefix.empty() || prefix.back() != '*')
+                        throw std::invalid_argument(
+                            "Portable Custom HLSL uses DeltaTime in an unsupported expression.");
+                    prefix.remove_suffix(1);
+                    operandText = Trim(prefix);
+                    scaleByDeltaTime = true;
+                }
+                if (operandText.empty())
+                    throw std::invalid_argument("Portable Custom HLSL statement has an empty operand.");
+
+                VfxCompiledCustomInstruction instruction;
+                instruction.Node = node.Id;
+                instruction.Context = node.Context;
+                instruction.Target = target.Target;
+                instruction.Operation = operation;
+                instruction.ScaleByDeltaTime = scaleByDeltaTime;
+                if (IsIdentifier(operandText))
+                {
+                    const auto input = inputs.find(std::string(operandText));
+                    if (input == inputs.end())
+                        throw std::invalid_argument("Portable Custom HLSL references an unknown input semantic.");
+                    instruction.OperandType = input->second.Type;
+                    instruction.ParameterSlot = input->second.ParameterSlot;
+                    if (instruction.ParameterSlot == ~std::uint32_t{0})
+                    {
+                        if (!input->second.DefaultValue)
+                            throw std::invalid_argument(
+                                "Portable Custom HLSL input must be connected or have a typed default.");
+                        instruction.Literal = *input->second.DefaultValue;
+                    }
+                }
+                else
+                {
+                    const auto literal = ParsePortableLiteral(operandText);
+                    instruction.OperandType = literal.Type;
+                    instruction.Literal = literal.Value;
+                }
+                if (!PortableOperandMatches(target.Type, instruction.OperandType))
+                    throw std::invalid_argument("Portable Custom HLSL operand type does not match its target.");
+                result.push_back(std::move(instruction));
+            }
+            if (result.empty())
+                throw std::invalid_argument("Portable Custom HLSL nodes require at least one instruction.");
+            return result;
+        }
+
+        struct LoweredPlan
+        {
+            std::vector<VfxCompiledParameter> Parameters;
+            std::vector<VfxCompiledModule> Modules;
+            std::vector<VfxCompiledBinding> Bindings;
+            std::vector<VfxCompiledCustomInstruction> CustomInstructions;
+            std::vector<VfxCompiledOperation> Operations;
+        };
+
+        [[nodiscard]] std::vector<VfxCompiledParameter>
+        CompileParameters(const std::span<const VfxBlackboardParameter> blackboard)
+        {
+            std::vector<const VfxBlackboardParameter*> sorted;
+            sorted.reserve(blackboard.size());
+            for (const auto& parameter : blackboard)
+                sorted.push_back(std::addressof(parameter));
+            std::ranges::sort(sorted, {}, [](const VfxBlackboardParameter* parameter) { return parameter->Id; });
+
+            std::vector<VfxCompiledParameter> result;
+            result.reserve(sorted.size());
+            for (std::uint32_t slot = 0; slot < sorted.size(); ++slot)
+            {
+                const auto& parameter = *sorted[slot];
+                result.push_back({parameter.Id, parameter.Type, parameter.DefaultValue, slot, parameter.Exposed});
+            }
+            return result;
+        }
+
+        [[nodiscard]] LoweredPlan LowerLegacyModules(const VfxEffectDefinition& definition)
+        {
+            LoweredPlan result;
+            result.Parameters = CompileParameters(definition.Blackboard);
+            for (std::uint32_t index = 0; index < definition.Modules.size(); ++index)
+            {
+                const auto& module = definition.Modules[index];
+                if (module.Enabled)
+                {
+                    const auto context = ModuleContext(module.Payload);
+                    const auto operationIndex = static_cast<std::uint32_t>(result.Modules.size());
+                    result.Modules.push_back({module.Id, module.Id, context, index});
+                    result.Operations.push_back({module.Id, context, VfxCompiledOperationKind::Module, operationIndex});
+                }
+            }
+            return result;
+        }
+
+        struct LocatedPin
+        {
+            const VfxGraphNode* Node = nullptr;
+            const VfxGraphPin* Pin = nullptr;
+        };
+
+        [[nodiscard]] std::size_t CountFlowPins(const VfxGraphNode& node, const bool input) noexcept
+        {
+            return std::ranges::count_if(node.Pins, [input](const VfxGraphPin& pin)
+                                         { return pin.Input == input && pin.Type == VfxValueType::ParticleStream; });
+        }
+
+        void ValidateContextNode(const VfxGraphNode& node)
+        {
+            const auto expectedInputs = node.Context == VfxContextType::Spawn ? 0U : 1U;
+            const auto expectedOutputs = node.Context == VfxContextType::Output ? 0U : 1U;
+            if (node.Reference || !node.CustomHlsl.empty() || node.Pins.size() != expectedInputs + expectedOutputs ||
+                CountFlowPins(node, true) != expectedInputs || CountFlowPins(node, false) != expectedOutputs)
+            {
+                throw std::invalid_argument("VFX context nodes require canonical particle-stream pins.");
+            }
+            for (const auto& pin : node.Pins)
+                if (pin.Semantic != "particles")
+                    throw std::invalid_argument("VFX context nodes require the particles pin semantic.");
+        }
+
+        void ValidateModuleNode(const VfxGraphNode& node, const VfxModuleDefinition& module)
+        {
+            const auto specifications = ModulePinSpecifications(module.Payload);
+            if (!node.Reference || node.Context != ModuleContext(module.Payload) || !node.CustomHlsl.empty() ||
+                CountFlowPins(node, true) != 1 || CountFlowPins(node, false) != 1 ||
+                node.Pins.size() != specifications.size() + 2)
+            {
+                throw std::invalid_argument("VFX module node does not match its referenced Runtime Module.");
+            }
+            std::set<std::string> semantics;
+            for (const auto& pin : node.Pins)
+            {
+                if (!semantics.insert(pin.Semantic).second && pin.Type != VfxValueType::ParticleStream)
+                    throw std::invalid_argument("VFX module node contains a duplicate input semantic.");
+                if (pin.Type == VfxValueType::ParticleStream)
+                {
+                    if (pin.Semantic != "particles" || pin.DefaultValue)
+                        throw std::invalid_argument("VFX module flow pins are malformed.");
+                    continue;
+                }
+                if (!pin.Input)
+                    throw std::invalid_argument("VFX module property pins must be inputs.");
+                const auto specification =
+                    std::ranges::find(specifications, pin.Semantic, &ModulePinSpecification::Semantic);
+                if (specification == specifications.end() || specification->Type != pin.Type || !pin.DefaultValue ||
+                    !ValueMatchesType(pin.Type, *pin.DefaultValue) || *pin.DefaultValue != specification->DefaultValue)
+                {
+                    throw std::invalid_argument(
+                        "VFX module node contains an unknown, stale, or type-mismatched property pin.");
+                }
+            }
+            for (const auto& specification : specifications)
+            {
+                if (!FindPin(node, true, specification.Type, specification.Semantic))
+                    throw std::invalid_argument("VFX module node is missing a canonical property pin.");
+            }
+        }
+
+        void ValidateParameterNode(const VfxGraphNode& node, const VfxBlackboardParameter& parameter)
+        {
+            if (!node.Reference || !node.CustomHlsl.empty() || node.Pins.size() != 1)
+                throw std::invalid_argument("VFX parameter nodes require one canonical output pin.");
+            const auto& pin = node.Pins.front();
+            if (pin.Input || pin.Type != parameter.Type || pin.Type == VfxValueType::ParticleStream ||
+                pin.Semantic != "value" || pin.DefaultValue)
+            {
+                throw std::invalid_argument("VFX parameter node output does not match its Blackboard parameter.");
+            }
+        }
+
+        void ValidateCustomNode(const VfxGraphNode& node)
+        {
+            if (node.Reference || node.CustomHlsl.empty() || CountFlowPins(node, true) != 1 ||
+                CountFlowPins(node, false) != 1)
+            {
+                throw std::invalid_argument("Portable Custom HLSL nodes require particle-stream input and output.");
+            }
+            std::set<std::string> semantics;
+            for (const auto& pin : node.Pins)
+            {
+                if (pin.Type == VfxValueType::ParticleStream)
+                {
+                    if (pin.Semantic != "particles" || pin.DefaultValue)
+                        throw std::invalid_argument("Portable Custom HLSL flow pins are malformed.");
+                    continue;
+                }
+                if (!pin.Input || !IsIdentifier(pin.Semantic) || !semantics.insert(pin.Semantic).second ||
+                    pin.Type == VfxValueType::Boolean || pin.Type == VfxValueType::Integer ||
+                    pin.Type >= VfxValueType::Texture ||
+                    (pin.DefaultValue && !ValueMatchesType(pin.Type, *pin.DefaultValue)))
+                {
+                    throw std::invalid_argument("Portable Custom HLSL contains an invalid typed input pin.");
+                }
+            }
+        }
+
+        [[nodiscard]] LoweredPlan LowerGraph(const VfxEffectDefinition& definition)
+        {
+            if (definition.Systems.size() != 1)
+                throw std::invalid_argument("Executable VFX graphs require exactly one particle system.");
+            const auto& system = definition.Systems.front();
+
+            std::map<AssetId, std::pair<const VfxModuleDefinition*, std::uint32_t>> modules;
+            for (std::uint32_t index = 0; index < definition.Modules.size(); ++index)
+                modules.emplace(definition.Modules[index].Id,
+                                std::pair{std::addressof(definition.Modules[index]), index});
+            std::map<AssetId, const VfxBlackboardParameter*> parameters;
+            for (const auto& parameter : definition.Blackboard)
+                parameters.emplace(parameter.Id, std::addressof(parameter));
+
+            LoweredPlan result;
+            result.Parameters = CompileParameters(definition.Blackboard);
+            std::map<AssetId, std::uint32_t> parameterSlots;
+            for (const auto& parameter : result.Parameters)
+                parameterSlots.emplace(parameter.Parameter, parameter.Slot);
+
+            std::map<AssetId, const VfxGraphNode*> nodes;
+            std::map<AssetId, LocatedPin> pins;
+            std::array<const VfxGraphNode*, 4> contexts{};
+            std::set<AssetId> referencedModules;
+            for (const auto& node : system.Nodes)
+            {
+                nodes.emplace(node.Id, std::addressof(node));
+                if (node.Context == VfxContextType::Event)
+                    throw std::invalid_argument("VFX Event contexts are not supported by the particle compiler.");
+                for (const auto& pin : node.Pins)
+                    pins.emplace(pin.Id, LocatedPin{std::addressof(node), std::addressof(pin)});
+                switch (node.Kind)
+                {
+                case VfxGraphNodeKind::Context:
+                {
+                    ValidateContextNode(node);
+                    const auto index = ContextOrder(node.Context);
+                    if (contexts[index])
+                        throw std::invalid_argument("Executable VFX graphs require one context of each stage.");
+                    contexts[index] = std::addressof(node);
+                    break;
+                }
+                case VfxGraphNodeKind::Module:
+                {
+                    const auto module = modules.find(node.Reference);
+                    if (module == modules.end() || !referencedModules.insert(node.Reference).second)
+                        throw std::invalid_argument(
+                            "VFX module node has an unknown or duplicate Runtime Module reference.");
+                    ValidateModuleNode(node, *module->second.first);
+                    break;
+                }
+                case VfxGraphNodeKind::Parameter:
+                {
+                    const auto parameter = parameters.find(node.Reference);
+                    if (parameter == parameters.end())
+                        throw std::invalid_argument("VFX parameter node references an unknown Blackboard parameter.");
+                    ValidateParameterNode(node, *parameter->second);
+                    break;
+                }
+                case VfxGraphNodeKind::CustomHlsl:
+                    ValidateCustomNode(node);
+                    break;
+                }
+            }
+            if (std::ranges::any_of(contexts, [](const VfxGraphNode* context) { return context == nullptr; }))
+                throw std::invalid_argument(
+                    "Executable VFX graphs require Spawn, Initialize, Update, and Output contexts.");
+
+            std::map<AssetId, const VfxGraphConnection*> inputDrivers;
+            std::map<AssetId, std::size_t> indegree;
+            std::map<AssetId, std::vector<AssetId>> adjacency;
+            std::map<AssetId, std::vector<AssetId>> flowAdjacency;
+            std::map<AssetId, std::vector<AssetId>> reverseFlowAdjacency;
+            for (const auto& node : system.Nodes)
+                indegree.emplace(node.Id, 0);
+            for (const auto& connection : system.Connections)
+            {
+                const auto output = pins.find(connection.OutputPin);
+                const auto input = pins.find(connection.InputPin);
+                if (output == pins.end() || input == pins.end() || output->second.Node->Id != connection.OutputNode ||
+                    input->second.Node->Id != connection.InputNode)
+                {
+                    throw std::invalid_argument("VFX graph connection references a mismatched node or pin.");
+                }
+                if (!inputDrivers.emplace(connection.InputPin, std::addressof(connection)).second)
+                    throw std::invalid_argument("VFX graph input pins may have at most one cable.");
+                ++indegree.at(connection.InputNode);
+                adjacency[connection.OutputNode].push_back(connection.InputNode);
+                if (output->second.Pin->Type == VfxValueType::ParticleStream)
+                {
+                    if (ContextOrder(output->second.Node->Context) > ContextOrder(input->second.Node->Context))
+                        throw std::invalid_argument(
+                            "VFX particle-stream cables cannot travel backwards across contexts.");
+                    flowAdjacency[connection.OutputNode].push_back(connection.InputNode);
+                    reverseFlowAdjacency[connection.InputNode].push_back(connection.OutputNode);
+                }
+            }
+
+            std::set<AssetId> ready;
+            for (const auto& [node, count] : indegree)
+                if (count == 0)
+                    ready.insert(node);
+            std::vector<AssetId> topologicalOrder;
+            topologicalOrder.reserve(nodes.size());
+            while (!ready.empty())
+            {
+                const auto node = *ready.begin();
+                ready.erase(ready.begin());
+                topologicalOrder.push_back(node);
+                for (const auto destination : adjacency[node])
+                {
+                    auto& count = indegree.at(destination);
+                    if (--count == 0)
+                        ready.insert(destination);
+                }
+            }
+            if (topologicalOrder.size() != nodes.size())
+                throw std::invalid_argument("VFX graph must be a directed acyclic graph.");
+
+            const auto visitFlow = [](const AssetId start, const std::map<AssetId, std::vector<AssetId>>& edges)
+            {
+                std::set<AssetId> visited;
+                std::queue<AssetId> pending;
+                visited.insert(start);
+                pending.push(start);
+                while (!pending.empty())
+                {
+                    const auto node = pending.front();
+                    pending.pop();
+                    const auto destinations = edges.find(node);
+                    if (destinations == edges.end())
+                        continue;
+                    for (const auto destination : destinations->second)
+                    {
+                        if (visited.insert(destination).second)
+                            pending.push(destination);
+                    }
+                }
+                return visited;
+            };
+            const auto fromSpawn = visitFlow(contexts[0]->Id, flowAdjacency);
+            const auto toOutput = visitFlow(contexts[3]->Id, reverseFlowAdjacency);
+            for (const auto* context : contexts)
+                if (!fromSpawn.contains(context->Id) || !toOutput.contains(context->Id))
+                    throw std::invalid_argument("VFX contexts must share one connected particle-stream path.");
+
+            bool hasEmission = false;
+            bool hasRenderer = false;
+            for (const auto nodeId : topologicalOrder)
+            {
+                const auto& node = *nodes.at(nodeId);
+                if (node.Kind != VfxGraphNodeKind::Module && node.Kind != VfxGraphNodeKind::CustomHlsl)
+                    continue;
+                if (!fromSpawn.contains(node.Id) || !toOutput.contains(node.Id))
+                    throw std::invalid_argument("Executable VFX nodes must be connected to the main particle stream.");
+                if (node.Kind == VfxGraphNodeKind::Module)
+                {
+                    const auto [module, index] = modules.at(node.Reference);
+                    if (!module->Enabled)
+                        continue;
+                    const auto operationIndex = static_cast<std::uint32_t>(result.Modules.size());
+                    result.Modules.push_back({node.Id, module->Id, node.Context, index});
+                    result.Operations.push_back(
+                        {node.Id, node.Context, VfxCompiledOperationKind::Module, operationIndex});
+                    hasEmission |= std::holds_alternative<VfxEmissionRateModule>(module->Payload) ||
+                                   std::holds_alternative<VfxBurstModule>(module->Payload);
+                    hasRenderer |= std::holds_alternative<VfxRendererModule>(module->Payload);
+
+                    const auto specifications = ModulePinSpecifications(module->Payload);
+                    for (const auto& specification : specifications)
+                    {
+                        const auto* input = FindPin(node, true, specification.Type, specification.Semantic);
+                        const auto driver = inputDrivers.find(input->Id);
+                        if (driver == inputDrivers.end())
+                            continue;
+                        const auto& source = *nodes.at(driver->second->OutputNode);
+                        if (source.Kind != VfxGraphNodeKind::Parameter)
+                            throw std::invalid_argument("VFX module properties may only bind Blackboard parameters.");
+                        const auto& output = *pins.at(driver->second->OutputPin).Pin;
+                        if (output.Type != specification.Type)
+                            throw std::invalid_argument("VFX module binding type does not match its property.");
+                        result.Bindings.push_back(
+                            {node.Id, module->Id, specification.Property, parameterSlots.at(source.Reference)});
+                    }
+                }
+                else
+                {
+                    std::map<std::string, PortableInput> inputs;
+                    for (const auto& input : node.Pins)
+                    {
+                        if (!input.Input || input.Type == VfxValueType::ParticleStream)
+                            continue;
+                        PortableInput source;
+                        source.Type = input.Type;
+                        source.DefaultValue = input.DefaultValue;
+                        const auto driver = inputDrivers.find(input.Id);
+                        if (driver != inputDrivers.end())
+                        {
+                            const auto& outputNode = *nodes.at(driver->second->OutputNode);
+                            if (outputNode.Kind != VfxGraphNodeKind::Parameter)
+                                throw std::invalid_argument(
+                                    "Portable Custom HLSL inputs may only bind Blackboard parameters.");
+                            source.ParameterSlot = parameterSlots.at(outputNode.Reference);
+                        }
+                        inputs.emplace(input.Semantic, std::move(source));
+                    }
+                    auto instructions = CompilePortableCustomHlsl(node, inputs);
+                    if (result.CustomInstructions.size() + instructions.size() > 8)
+                        throw std::invalid_argument("VFX graph exceeds the eight-instruction Custom HLSL budget.");
+                    for (auto& instruction : instructions)
+                    {
+                        const auto operationIndex = static_cast<std::uint32_t>(result.CustomInstructions.size());
+                        result.CustomInstructions.push_back(std::move(instruction));
+                        result.Operations.push_back(
+                            {node.Id, node.Context, VfxCompiledOperationKind::CustomHlsl, operationIndex});
+                    }
+                }
+            }
+            if (!hasEmission || !hasRenderer)
+                throw std::invalid_argument("Executable VFX graphs require connected emission and renderer modules.");
+            return result;
+        }
+
+        [[nodiscard]] LoweredPlan LowerEffect(const VfxEffectDefinition& definition)
+        {
+            if (definition.ExecutionSource == VfxExecutionSource::Graph)
+                return LowerGraph(definition);
+            return LowerLegacyModules(definition);
+        }
+
+        [[nodiscard]] Json EncodeCompiledParameters(const std::span<const VfxCompiledParameter> parameters,
+                                                    const bool includeDefaults)
+        {
+            auto result = Json::array();
+            for (const auto& parameter : parameters)
+            {
+                Json encoded{{"id", IdText(parameter.Parameter)},
+                             {"type", ValueTypeName(parameter.Type)},
+                             {"slot", parameter.Slot},
+                             {"exposed", parameter.Exposed}};
+                if (includeDefaults)
+                    encoded["default"] = EncodeTypedValue(parameter.Type, parameter.DefaultValue);
+                result.push_back(std::move(encoded));
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeCompiledModules(const VfxEffectDefinition& definition,
+                                                 const std::span<const VfxCompiledModule> modules,
+                                                 const bool includePayload)
+        {
+            auto result = Json::array();
+            for (const auto& module : modules)
+            {
+                Json encoded{{"node", IdText(module.Node)},
+                             {"module", IdText(module.Module)},
+                             {"context", ContextName(module.Context)}};
+                if (includePayload)
+                {
+                    if (module.ModuleIndex >= definition.Modules.size() ||
+                        definition.Modules[module.ModuleIndex].Id != module.Module)
+                    {
+                        throw std::invalid_argument("VFX compiled module index is invalid.");
+                    }
+                    encoded["payload"] = EncodeModule(definition.Modules[module.ModuleIndex]);
+                }
+                else
+                    encoded["type"] = ModuleTypeName(definition.Modules[module.ModuleIndex].Payload);
+                result.push_back(std::move(encoded));
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeCompiledBindings(const std::span<const VfxCompiledBinding> bindings)
+        {
+            auto result = Json::array();
+            for (const auto& binding : bindings)
+                result.push_back({{"node", IdText(binding.Node)},
+                                  {"module", IdText(binding.Module)},
+                                  {"property", static_cast<std::uint32_t>(binding.Property)},
+                                  {"slot", binding.ParameterSlot}});
+            return result;
+        }
+
+        [[nodiscard]] Json
+        EncodeCompiledCustomInstructions(const std::span<const VfxCompiledCustomInstruction> instructions,
+                                         const bool includeOperands)
+        {
+            auto result = Json::array();
+            for (const auto& instruction : instructions)
+            {
+                Json encoded{{"node", IdText(instruction.Node)},
+                             {"context", ContextName(instruction.Context)},
+                             {"target", static_cast<std::uint32_t>(instruction.Target)},
+                             {"operation", static_cast<std::uint32_t>(instruction.Operation)},
+                             {"operandType", ValueTypeName(instruction.OperandType)},
+                             {"deltaTime", instruction.ScaleByDeltaTime}};
+                if (includeOperands)
+                {
+                    encoded["slot"] = instruction.ParameterSlot;
+                    if (instruction.ParameterSlot == ~std::uint32_t{0})
+                        encoded["literal"] = EncodeTypedValue(instruction.OperandType, instruction.Literal);
+                }
+                result.push_back(std::move(encoded));
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeCompiledOperations(const std::span<const VfxCompiledOperation> operations)
+        {
+            auto result = Json::array();
+            for (const auto& operation : operations)
+            {
+                result.push_back({{"node", IdText(operation.Node)},
+                                  {"context", ContextName(operation.Context)},
+                                  {"kind", static_cast<std::uint32_t>(operation.Kind)},
+                                  {"index", operation.Index}});
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::vector<std::byte> BuildCanonicalIr(const VfxEffectDefinition& definition,
+                                                              const LoweredPlan& plan)
+        {
+            return JsonBytes({{"emitterId", IdText(definition.EmitterId)},
+                              {"loop", definition.Loop},
+                              {"duration", definition.Duration},
+                              {"space", SpaceName(definition.Space)},
+                              {"seed", definition.Seed},
+                              {"capacity", definition.Capacity},
+                              {"executionSource", ExecutionSourceName(definition.ExecutionSource)},
+                              {"parameters", EncodeCompiledParameters(plan.Parameters, true)},
+                              {"modules", EncodeCompiledModules(definition, plan.Modules, true)},
+                              {"bindings", EncodeCompiledBindings(plan.Bindings)},
+                              {"customInstructions", EncodeCompiledCustomInstructions(plan.CustomInstructions, true)},
+                              {"operations", EncodeCompiledOperations(plan.Operations)}});
+        }
+
+        [[nodiscard]] std::uint64_t BuildStateLayoutHash(const VfxEffectDefinition& definition, const LoweredPlan& plan)
+        {
+            const auto renderer = std::ranges::find_if(plan.Modules,
+                                                       [&definition](const VfxCompiledModule& compiled)
+                                                       {
+                                                           return compiled.ModuleIndex < definition.Modules.size() &&
+                                                                  std::holds_alternative<VfxRendererModule>(
+                                                                      definition.Modules[compiled.ModuleIndex].Payload);
+                                                       });
+            if (renderer == plan.Modules.end())
+                throw std::invalid_argument("VFX compiled program has no renderer representation.");
+            const auto rendererType =
+                std::get<VfxRendererModule>(definition.Modules[renderer->ModuleIndex].Payload).Type;
+            const auto bytes =
+                JsonBytes({{"emitterId", IdText(definition.EmitterId)},
+                           {"space", SpaceName(definition.Space)},
+                           {"seed", definition.Seed},
+                           {"rendererType", static_cast<std::uint32_t>(rendererType)},
+                           {"parameters", EncodeCompiledParameters(plan.Parameters, false)},
+                           {"modules", EncodeCompiledModules(definition, plan.Modules, false)},
+                           {"bindings", EncodeCompiledBindings(plan.Bindings)},
+                           {"customInstructions", EncodeCompiledCustomInstructions(plan.CustomInstructions, false)},
+                           {"operations", EncodeCompiledOperations(plan.Operations)}});
+            return HashBytes(bytes);
+        }
     } // namespace
+
+    namespace Internal
+    {
+        VfxEffectDefinition ResolveVfxExecutableDefinition(const VfxEffectDefinition& source,
+                                                           const VfxCompiledProgram& program,
+                                                           const std::span<const VfxParameterValue> parameters)
+        {
+            auto result = source;
+            result.ExecutionSource = VfxExecutionSource::LegacyModules;
+            result.Systems.clear();
+            result.Blackboard.clear();
+            result.Modules.clear();
+            result.Modules.reserve(program.Modules.size());
+            for (const auto& compiled : program.Modules)
+            {
+                if (compiled.ModuleIndex >= source.Modules.size())
+                    throw std::invalid_argument("VFX compiled module index is invalid.");
+                const auto& module = source.Modules[compiled.ModuleIndex];
+                if (module.Id != compiled.Module)
+                    throw std::invalid_argument("VFX compiled module identity is invalid.");
+                result.Modules.push_back(module);
+            }
+
+            for (const auto& binding : program.Bindings)
+            {
+                const auto module = std::ranges::find(result.Modules, binding.Module, &VfxModuleDefinition::Id);
+                if (module == result.Modules.end() || binding.ParameterSlot >= parameters.size())
+                    throw std::invalid_argument("VFX compiled binding is invalid.");
+                const auto& value = parameters[binding.ParameterSlot];
+                switch (binding.Property)
+                {
+                case VfxModuleProperty::EmissionParticlesPerSecond:
+                    std::get<VfxEmissionRateModule>(module->Payload).ParticlesPerSecond = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::BurstTime:
+                    std::get<VfxBurstModule>(module->Payload).Time = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::BurstCount:
+                {
+                    const auto integer = std::get<std::int64_t>(value);
+                    if (integer < 0 || integer > std::numeric_limits<std::uint32_t>::max())
+                        throw std::invalid_argument("VFX burst count override is outside the supported range.");
+                    std::get<VfxBurstModule>(module->Payload).Count = static_cast<std::uint32_t>(integer);
+                    break;
+                }
+                case VfxModuleProperty::BurstCycles:
+                {
+                    const auto integer = std::get<std::int64_t>(value);
+                    if (integer < 0 || integer > std::numeric_limits<std::uint32_t>::max())
+                        throw std::invalid_argument("VFX burst cycle override is outside the supported range.");
+                    std::get<VfxBurstModule>(module->Payload).Cycles = static_cast<std::uint32_t>(integer);
+                    break;
+                }
+                case VfxModuleProperty::BurstInterval:
+                    std::get<VfxBurstModule>(module->Payload).Interval = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::ShapeBoxHalfExtent:
+                    std::get<VfxShapeModule>(module->Payload).BoxHalfExtent = std::get<Vector3>(value);
+                    break;
+                case VfxModuleProperty::ShapeRadius:
+                    std::get<VfxShapeModule>(module->Payload).Radius = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::ShapeConeAngleDegrees:
+                    std::get<VfxShapeModule>(module->Payload).ConeAngleDegrees = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::ShapeConeLength:
+                    std::get<VfxShapeModule>(module->Payload).ConeLength = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::ShapeMesh:
+                    std::get<VfxShapeModule>(module->Payload).Mesh = std::get<AssetId>(value);
+                    break;
+                case VfxModuleProperty::ShapeVolume:
+                    std::get<VfxShapeModule>(module->Payload).Volume = std::get<AssetId>(value);
+                    break;
+                case VfxModuleProperty::InitializeLifetimeMinimum:
+                    std::get<VfxInitializeModule>(module->Payload).LifetimeMinimum = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::InitializeLifetimeMaximum:
+                    std::get<VfxInitializeModule>(module->Payload).LifetimeMaximum = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::InitializeVelocityMinimum:
+                    std::get<VfxInitializeModule>(module->Payload).VelocityMinimum = std::get<Vector3>(value);
+                    break;
+                case VfxModuleProperty::InitializeVelocityMaximum:
+                    std::get<VfxInitializeModule>(module->Payload).VelocityMaximum = std::get<Vector3>(value);
+                    break;
+                case VfxModuleProperty::InitializeRotationMinimum:
+                    std::get<VfxInitializeModule>(module->Payload).RotationMinimum = std::get<Vector3>(value);
+                    break;
+                case VfxModuleProperty::InitializeRotationMaximum:
+                    std::get<VfxInitializeModule>(module->Payload).RotationMaximum = std::get<Vector3>(value);
+                    break;
+                case VfxModuleProperty::ForceVector:
+                    std::get<VfxForceModule>(module->Payload).Force = std::get<Vector3>(value);
+                    break;
+                case VfxModuleProperty::ForceGravityMultiplier:
+                    std::get<VfxForceModule>(module->Payload).GravityMultiplier = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::SizeConstant:
+                    std::get<VfxSizeOverLifetimeModule>(module->Payload).Size =
+                        Curve1D::Constant(std::get<float>(value));
+                    break;
+                case VfxModuleProperty::ColorConstant:
+                    std::get<VfxColorOverLifetimeModule>(module->Payload).Color =
+                        ColorGradient::Constant(std::get<Color>(value));
+                    break;
+                case VfxModuleProperty::CollisionRestitution:
+                    std::get<VfxCollisionModule>(module->Payload).Restitution = std::get<float>(value);
+                    break;
+                case VfxModuleProperty::CollisionKillOnCollision:
+                    std::get<VfxCollisionModule>(module->Payload).KillOnCollision = std::get<bool>(value);
+                    break;
+                case VfxModuleProperty::RendererSprite:
+                    std::get<VfxRendererModule>(module->Payload).Sprite = std::get<AssetId>(value);
+                    break;
+                case VfxModuleProperty::RendererMesh:
+                    std::get<VfxRendererModule>(module->Payload).Mesh = std::get<AssetId>(value);
+                    break;
+                case VfxModuleProperty::None:
+                    throw std::invalid_argument("VFX graph binding has no executable module property.");
+                }
+            }
+
+            ValidateVfxEffect(result);
+            return result;
+        }
+    } // namespace Internal
 
     void ValidateVfxEffect(const VfxEffectDefinition& definition)
     {
-        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) || !definition.EmitterId ||
+        if ((definition.SchemaVersion < 1 || definition.SchemaVersion > 3) || !definition.EmitterId ||
             definition.Name.empty() || definition.Name.size() > MaximumNameBytes ||
             !std::isfinite(definition.Duration) || definition.Duration < 0.001F || definition.Duration > 3600.0F ||
             definition.Capacity == 0 || definition.Capacity > 1'000'000 || definition.Modules.empty() ||
-            definition.Modules.size() > MaximumModules)
+            definition.Modules.size() > MaximumModules || definition.ExecutionSource > VfxExecutionSource::Graph ||
+            (definition.SchemaVersion < 3 && definition.ExecutionSource != VfxExecutionSource::LegacyModules))
         {
             throw std::invalid_argument("VFX effect header is invalid.");
         }
@@ -815,7 +1932,8 @@ namespace Keire
             throw std::invalid_argument("VFX effect contains an invalid module multiplicity.");
         }
 
-        if (definition.SchemaVersion == 2)
+        if (!definition.Systems.empty() || !definition.Blackboard.empty() ||
+            definition.ExecutionSource == VfxExecutionSource::Graph)
         {
             if (definition.Systems.size() > MaximumSystems ||
                 definition.Blackboard.size() > MaximumBlackboardParameters)
@@ -825,21 +1943,10 @@ namespace Keire
             std::set<std::string> parameterNames;
             for (const auto& parameter : definition.Blackboard)
             {
-                const bool valueMatches =
-                    (parameter.Type == VfxValueType::Boolean && std::holds_alternative<bool>(parameter.DefaultValue)) ||
-                    (parameter.Type == VfxValueType::Integer &&
-                     std::holds_alternative<std::int64_t>(parameter.DefaultValue)) ||
-                    (parameter.Type == VfxValueType::Scalar && std::holds_alternative<float>(parameter.DefaultValue)) ||
-                    (parameter.Type == VfxValueType::Vector2 &&
-                     std::holds_alternative<Vector2>(parameter.DefaultValue)) ||
-                    (parameter.Type == VfxValueType::Vector3 &&
-                     std::holds_alternative<Vector3>(parameter.DefaultValue)) ||
-                    (parameter.Type == VfxValueType::Color && std::holds_alternative<Color>(parameter.DefaultValue)) ||
-                    (parameter.Type >= VfxValueType::Texture &&
-                     std::holds_alternative<AssetId>(parameter.DefaultValue));
                 if (!parameter.Id || !stableIds.insert(parameter.Id).second || parameter.Name.empty() ||
                     parameter.Name.size() > MaximumNameBytes || !parameterNames.insert(parameter.Name).second ||
-                    !valueMatches)
+                    parameter.Type >= VfxValueType::ParticleStream ||
+                    !ValueMatchesType(parameter.Type, parameter.DefaultValue))
                     throw std::invalid_argument("VFX blackboard contains an invalid parameter.");
             }
             for (const auto& system : definition.Systems)
@@ -855,12 +1962,18 @@ namespace Keire
                 {
                     if (!node.Id || !stableIds.insert(node.Id).second || !nodeIds.insert(node.Id).second ||
                         node.Type.empty() || node.Type.size() > MaximumNameBytes ||
-                        !Math::IsFinite(node.EditorPosition) || node.CustomHlsl.size() > MaximumDocumentBytes)
+                        !Math::IsFinite(node.EditorPosition) || node.CustomHlsl.size() > MaximumDocumentBytes ||
+                        node.Context > VfxContextType::Event || node.Kind > VfxGraphNodeKind::CustomHlsl)
                         throw std::invalid_argument("VFX graph contains an invalid node.");
                     for (const auto& pin : node.Pins)
+                    {
                         if (!pin.Id || !stableIds.insert(pin.Id).second || !pinIds.insert(pin.Id).second ||
-                            pin.Name.empty() || pin.Name.size() > MaximumNameBytes || pin.Type > VfxValueType::Asset)
+                            pin.Name.empty() || pin.Name.size() > MaximumNameBytes ||
+                            pin.Semantic.size() > MaximumNameBytes || pin.Type > VfxValueType::ParticleStream ||
+                            (pin.DefaultValue && (pin.Type == VfxValueType::ParticleStream ||
+                                                  !ValueMatchesType(pin.Type, *pin.DefaultValue))))
                             throw std::invalid_argument("VFX graph contains an invalid pin.");
+                    }
                 }
                 const auto findPin = [&system](const AssetId nodeId, const AssetId pinId) -> const VfxGraphPin*
                 {
@@ -895,6 +2008,8 @@ namespace Keire
             { return module.Enabled && std::holds_alternative<VfxRendererModule>(module.Payload); });
         if (!hasEnabledEmission || !hasEnabledRenderer)
             throw std::invalid_argument("VFX effect requires enabled emission and renderer modules.");
+        if (definition.ExecutionSource == VfxExecutionSource::Graph)
+            (void)LowerGraph(definition);
     }
 
     std::vector<AssetId> VfxEffectDependencies(const VfxEffectDefinition& definition)
@@ -926,6 +2041,12 @@ namespace Keire
         for (const auto& parameter : definition.Blackboard)
             if (const auto* asset = std::get_if<AssetId>(&parameter.DefaultValue); asset && *asset)
                 result.push_back(*asset);
+        for (const auto& system : definition.Systems)
+            for (const auto& node : system.Nodes)
+                for (const auto& pin : node.Pins)
+                    if (pin.DefaultValue)
+                        if (const auto* asset = std::get_if<AssetId>(&*pin.DefaultValue); asset && *asset)
+                            result.push_back(*asset);
         std::ranges::sort(result);
         result.erase(std::unique(result.begin(), result.end()), result.end());
         return result;
@@ -938,28 +2059,34 @@ namespace Keire
         try
         {
             ValidateVfxEffect(definition);
-            result.CanonicalIr = VfxEffectAsset::Encode(definition);
-            std::uint64_t hash = 1469598103934665603ULL;
-            for (const auto value : result.CanonicalIr)
+            auto plan = LowerEffect(definition);
+            result.CanonicalIr = BuildCanonicalIr(definition, plan);
+            result.Hash = HashBytes(result.CanonicalIr);
+            result.StateLayoutHash = BuildStateLayoutHash(definition, plan);
+            result.Parameters = std::move(plan.Parameters);
+            result.Modules = std::move(plan.Modules);
+            result.Bindings = std::move(plan.Bindings);
+            result.CustomInstructions = std::move(plan.CustomInstructions);
+            result.Operations = std::move(plan.Operations);
+            std::vector<VfxParameterValue> defaultParameters(result.Parameters.size());
+            std::vector<bool> assignedDefaults(result.Parameters.size());
+            for (const auto& parameter : result.Parameters)
             {
-                hash ^= std::to_integer<std::uint8_t>(value);
-                hash *= 1099511628211ULL;
+                if (parameter.Slot >= defaultParameters.size() || assignedDefaults[parameter.Slot])
+                    throw std::invalid_argument("VFX compiled parameter layout is invalid.");
+                defaultParameters[parameter.Slot] = parameter.DefaultValue;
+                assignedDefaults[parameter.Slot] = true;
             }
-            result.Hash = hash;
+            (void)Internal::ResolveVfxExecutableDefinition(definition, result, defaultParameters);
             if (backend == VfxBackend::Cpu)
             {
-                for (const auto& system : definition.Systems)
-                    for (const auto& node : system.Nodes)
-                        if (!node.CustomHlsl.empty())
-                            result.Diagnostics.push_back(
-                                {VfxCompileDiagnosticSeverity::Warning, node.Id,
-                                 "Custom HLSL is unavailable in the deterministic CPU compatibility backend."});
-                for (const auto& module : definition.Modules)
+                for (const auto& compiled : result.Modules)
                 {
+                    const auto& module = definition.Modules.at(compiled.ModuleIndex);
                     if (const auto* collision = std::get_if<VfxCollisionModule>(&module.Payload);
                         collision && collision->Mode == VfxCollisionMode::GpuDepth)
                         result.Diagnostics.push_back(
-                            {VfxCompileDiagnosticSeverity::Warning, module.Id,
+                            {VfxCompileDiagnosticSeverity::Warning, compiled.Node,
                              "GPU depth collision degrades to the configured CPU collision query."});
                 }
             }
@@ -969,6 +2096,140 @@ namespace Keire
         {
             result.Diagnostics.push_back({VfxCompileDiagnosticSeverity::Error, {}, error.what()});
         }
+        return result;
+    }
+
+    VfxGraphNode CreateVfxGraphModuleNode(const VfxModuleDefinition& module, const Vector2 editorPosition)
+    {
+        if (!module.Id)
+            throw std::invalid_argument("VFX module nodes require a valid Runtime Module reference.");
+        VfxGraphNode result;
+        result.Id = AssetId::Generate();
+        result.Type = std::string(ModuleTypeName(module.Payload));
+        result.Context = ModuleContext(module.Payload);
+        result.EditorPosition = editorPosition;
+        result.Kind = VfxGraphNodeKind::Module;
+        result.Reference = module.Id;
+        result.Pins.push_back(
+            {AssetId::Generate(), "Particles", VfxValueType::ParticleStream, true, "particles", std::nullopt});
+        for (const auto& specification : ModulePinSpecifications(module.Payload))
+        {
+            result.Pins.push_back({AssetId::Generate(), std::string(specification.Name), specification.Type, true,
+                                   std::string(specification.Semantic), specification.DefaultValue});
+        }
+        result.Pins.push_back(
+            {AssetId::Generate(), "Particles", VfxValueType::ParticleStream, false, "particles", std::nullopt});
+        return result;
+    }
+
+    VfxEffectDefinition ConvertVfxEffectToGraph(const VfxEffectDefinition& definition)
+    {
+        ValidateVfxEffect(definition);
+        if (definition.ExecutionSource == VfxExecutionSource::Graph)
+            return definition;
+        auto result = definition;
+        result.SchemaVersion = 3;
+        result.ExecutionSource = VfxExecutionSource::Graph;
+        result.Systems.clear();
+
+        std::set<AssetId> used{result.EmitterId};
+        for (const auto& module : result.Modules)
+            used.insert(module.Id);
+        for (const auto& parameter : result.Blackboard)
+            used.insert(parameter.Id);
+
+        VfxGraphSystem system;
+        system.Id = AllocateDerivedId(result.EmitterId, 0x1000, used);
+        system.Name = "Particle System";
+        float cursorX = 0.0F;
+        std::uint64_t connectionSalt = 0x8000;
+        AssetId previousNode;
+        AssetId previousOutput;
+
+        const auto connect = [&](const AssetId inputNode, const AssetId inputPin)
+        {
+            if (!previousNode || !previousOutput)
+                throw std::logic_error("VFX graph conversion has no particle-stream source.");
+            system.Connections.push_back({AllocateDerivedId(result.EmitterId, connectionSalt++, used), previousNode,
+                                          previousOutput, inputNode, inputPin});
+        };
+
+        const auto appendContext = [&](const VfxContextType context)
+        {
+            VfxGraphNode node;
+            node.Id = AllocateDerivedId(result.EmitterId, 0x2000 + ContextOrder(context) * 0x100, used);
+            node.Type = std::string(ContextName(context)) + " Context";
+            node.Context = context;
+            node.EditorPosition = {cursorX, 0.0F};
+            node.Kind = VfxGraphNodeKind::Context;
+            cursorX += 280.0F;
+            if (context != VfxContextType::Spawn)
+            {
+                node.Pins.push_back({AllocateDerivedId(node.Id, 1, used), "Particles", VfxValueType::ParticleStream,
+                                     true, "particles", std::nullopt});
+                connect(node.Id, node.Pins.back().Id);
+            }
+            if (context != VfxContextType::Output)
+            {
+                node.Pins.push_back({AllocateDerivedId(node.Id, 2, used), "Particles", VfxValueType::ParticleStream,
+                                     false, "particles", std::nullopt});
+                previousNode = node.Id;
+                previousOutput = node.Pins.back().Id;
+            }
+            system.Nodes.push_back(std::move(node));
+        };
+
+        const auto appendModules = [&](const VfxContextType context)
+        {
+            for (const auto& module : result.Modules)
+            {
+                if (ModuleContext(module.Payload) != context)
+                    continue;
+                auto node = CreateVfxGraphModuleNode(module, {cursorX, 0.0F});
+                node.Id = AllocateDerivedId(module.Id, 0x3000, used);
+                for (std::size_t pinIndex = 0; pinIndex < node.Pins.size(); ++pinIndex)
+                    node.Pins[pinIndex].Id = AllocateDerivedId(module.Id, 0x3100 + pinIndex, used);
+                cursorX += 280.0F;
+                const auto* input = FindPin(node, true, VfxValueType::ParticleStream, "particles");
+                const auto* output = FindPin(node, false, VfxValueType::ParticleStream, "particles");
+                connect(node.Id, input->Id);
+                previousNode = node.Id;
+                previousOutput = output->Id;
+                system.Nodes.push_back(std::move(node));
+            }
+        };
+
+        appendContext(VfxContextType::Spawn);
+        appendModules(VfxContextType::Spawn);
+        appendContext(VfxContextType::Initialize);
+        appendModules(VfxContextType::Initialize);
+        appendContext(VfxContextType::Update);
+        appendModules(VfxContextType::Update);
+        appendModules(VfxContextType::Output);
+        appendContext(VfxContextType::Output);
+
+        std::vector<const VfxBlackboardParameter*> sortedParameters;
+        sortedParameters.reserve(result.Blackboard.size());
+        for (const auto& parameter : result.Blackboard)
+            sortedParameters.push_back(std::addressof(parameter));
+        std::ranges::sort(sortedParameters, {}, [](const VfxBlackboardParameter* parameter) { return parameter->Id; });
+        float parameterY = 0.0F;
+        for (const auto* parameter : sortedParameters)
+        {
+            VfxGraphNode node;
+            node.Id = AllocateDerivedId(parameter->Id, 0x4000, used);
+            node.Type = parameter->Name;
+            node.Context = VfxContextType::Update;
+            node.EditorPosition = {-360.0F, parameterY};
+            node.Kind = VfxGraphNodeKind::Parameter;
+            node.Reference = parameter->Id;
+            node.Pins.push_back({AllocateDerivedId(parameter->Id, 0x4100, used), parameter->Name, parameter->Type,
+                                 false, "value", std::nullopt});
+            system.Nodes.push_back(std::move(node));
+            parameterY += 150.0F;
+        }
+        result.Systems.push_back(std::move(system));
+        ValidateVfxEffect(result);
         return result;
     }
 
@@ -999,7 +2260,7 @@ namespace Keire
                 result +=
                     node.Type.capacity() + node.CustomHlsl.capacity() + node.Pins.capacity() * sizeof(VfxGraphPin);
                 for (const auto& pin : node.Pins)
-                    result += pin.Name.capacity();
+                    result += pin.Name.capacity() + pin.Semantic.capacity();
             }
         }
         for (const auto& parameter : m_Definition.Blackboard)
@@ -1021,42 +2282,8 @@ namespace Keire
             {AssetId(0x5646584445464155ULL, 6), true, VfxColorOverLifetimeModule{}},
             {AssetId(0x5646584445464155ULL, 7), true, VfxRendererModule{}},
         };
-        definition.Systems = {
-            {AssetId(0x5646584445464155ULL, 8),
-             "Particle System",
-             {{AssetId(0x5646584445464155ULL, 9),
-               "Spawn Context",
-               VfxContextType::Spawn,
-               {0.0F, 0.0F},
-               {{AssetId(0x5646584445464155ULL, 13), "Particles", VfxValueType::Asset, false}}},
-              {AssetId(0x5646584445464155ULL, 10),
-               "Initialize Context",
-               VfxContextType::Initialize,
-               {280.0F, 0.0F},
-               {{AssetId(0x5646584445464155ULL, 14), "Particles", VfxValueType::Asset, true},
-                {AssetId(0x5646584445464155ULL, 15), "Particles", VfxValueType::Asset, false}}},
-              {AssetId(0x5646584445464155ULL, 11),
-               "Update Context",
-               VfxContextType::Update,
-               {560.0F, 0.0F},
-               {{AssetId(0x5646584445464155ULL, 16), "Particles", VfxValueType::Asset, true},
-                {AssetId(0x5646584445464155ULL, 17), "Particles", VfxValueType::Asset, false}}},
-              {AssetId(0x5646584445464155ULL, 12),
-               "Output Context",
-               VfxContextType::Output,
-               {840.0F, 0.0F},
-               {{AssetId(0x5646584445464155ULL, 18), "Particles", VfxValueType::Asset, true}}}},
-             {{AssetId(0x5646584445464155ULL, 19), AssetId(0x5646584445464155ULL, 9),
-               AssetId(0x5646584445464155ULL, 13), AssetId(0x5646584445464155ULL, 10),
-               AssetId(0x5646584445464155ULL, 14)},
-              {AssetId(0x5646584445464155ULL, 20), AssetId(0x5646584445464155ULL, 10),
-               AssetId(0x5646584445464155ULL, 15), AssetId(0x5646584445464155ULL, 11),
-               AssetId(0x5646584445464155ULL, 16)},
-              {AssetId(0x5646584445464155ULL, 21), AssetId(0x5646584445464155ULL, 11),
-               AssetId(0x5646584445464155ULL, 17), AssetId(0x5646584445464155ULL, 12),
-               AssetId(0x5646584445464155ULL, 18)}}},
-        };
-        return definition;
+        definition.ExecutionSource = VfxExecutionSource::LegacyModules;
+        return ConvertVfxEffectToGraph(definition);
     }
 
     Ref<VfxEffectAsset> VfxEffectAsset::Default() { return CreateRef<VfxEffectAsset>(DefaultDefinition()); }
@@ -1070,11 +2297,14 @@ namespace Keire
             const auto document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                               reinterpret_cast<const char*>(bytes.data() + bytes.size()));
             const auto schemaVersion = document.value("schemaVersion", 0U);
-            if (!document.is_object() || (schemaVersion != 1U && schemaVersion != 2U))
+            if (!document.is_object() || schemaVersion < 1U || schemaVersion > 3U)
                 throw std::runtime_error("VFX effect asset has an unsupported schema.");
 
             VfxEffectDefinition definition;
             definition.SchemaVersion = schemaVersion;
+            definition.ExecutionSource = schemaVersion < 3
+                                             ? VfxExecutionSource::LegacyModules
+                                             : ParseExecutionSource(document.at("executionSource").get<std::string>());
             definition.EmitterId = ParseId(document, "emitterId");
             definition.Name = document.value("name", std::string("VFX Effect"));
             definition.Loop = document.value("loop", false);
@@ -1088,9 +2318,9 @@ namespace Keire
             definition.Modules.reserve(modules.size());
             for (const auto& module : modules)
                 definition.Modules.push_back(DecodeModule(module));
-            if (schemaVersion == 2)
+            if (schemaVersion >= 2)
             {
-                definition.Systems = DecodeSystems(document.at("systems"));
+                definition.Systems = DecodeSystems(document.at("systems"), schemaVersion);
                 definition.Blackboard = DecodeBlackboard(document.value("blackboard", Json::array()));
             }
             return CreateRef<VfxEffectAsset>(std::move(definition));
@@ -1104,28 +2334,14 @@ namespace Keire
     std::vector<std::byte> VfxEffectAsset::Encode(const VfxEffectDefinition& definition)
     {
         auto published = definition;
-        published.SchemaVersion = 2;
-        if (published.Systems.empty())
-        {
-            const auto systemId = DerivedGraphId(published.EmitterId, 1);
-            published.Systems = {
-                {systemId,
-                 "Migrated Particle System",
-                 {{DerivedGraphId(published.EmitterId, 2), "Spawn Context", VfxContextType::Spawn, {0.0F, 0.0F}},
-                  {DerivedGraphId(published.EmitterId, 3),
-                   "Initialize Context",
-                   VfxContextType::Initialize,
-                   {280.0F, 0.0F}},
-                  {DerivedGraphId(published.EmitterId, 4), "Update Context", VfxContextType::Update, {560.0F, 0.0F}},
-                  {DerivedGraphId(published.EmitterId, 5), "Output Context", VfxContextType::Output, {840.0F, 0.0F}}},
-                 {}},
-            };
-        }
+        if (published.SchemaVersion < 3)
+            published.ExecutionSource = VfxExecutionSource::LegacyModules;
+        published.SchemaVersion = 3;
         ValidateVfxEffect(published);
         auto modules = Json::array();
         for (const auto& module : published.Modules)
             modules.push_back(EncodeModule(module));
-        const Json document{{"schemaVersion", 2},
+        const Json document{{"schemaVersion", 3},
                             {"emitterId", IdText(published.EmitterId)},
                             {"name", published.Name},
                             {"loop", published.Loop},
@@ -1133,6 +2349,7 @@ namespace Keire
                             {"space", SpaceName(published.Space)},
                             {"seed", published.Seed},
                             {"capacity", published.Capacity},
+                            {"executionSource", ExecutionSourceName(published.ExecutionSource)},
                             {"modules", std::move(modules)},
                             {"systems", EncodeSystems(published.Systems)},
                             {"blackboard", EncodeBlackboard(published.Blackboard)}};
@@ -1146,7 +2363,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.VfxEffect";
-        result.Version = 2;
+        result.Version = 3;
         result.Type = VfxEffectAsset::StaticType();
         result.Extensions = {".keirevfx"};
         result.Import = [](const std::span<const std::byte> bytes)

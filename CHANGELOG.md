@@ -5,6 +5,14 @@ version tags.
 
 ## Unreleased
 
+- Made schema-v3 VFX graphs executable on CPU and GPU: typed `ParticleStream` cables now schedule stable-ID Module
+  payload references, Blackboard Parameter nodes bind canonical module properties, and bounded Portable Custom HLSL
+  lowers to the same verified instructions on both backends. Added explicit LegacyModules-to-Graph conversion,
+  per-activation and live native parameter overrides, serialized scene-emitter overrides with Edit/Play
+  synchronization, a typed exposed-parameter scene inspector with reset and stale-override cleanup, deterministic
+  override serialization, reload compatibility diagnostics, and cable-ordered GPU Module/Custom execution in each
+  emitter's normal spawn and simulation dispatches. Collision nodes now preserve their cable-defined integration point,
+  and immutable GPU snapshot replay cannot consume the same simulation step twice.
 - Made the normal Windows, Linux, and macOS test entrypoints compile the complete client, repaired the relocated
   Animator Controller regression fixture, and added cross-platform checks for both safeguards.
 - Replaced undocumented sandbox music with small deterministic repository-owned PCM test tones while preserving the

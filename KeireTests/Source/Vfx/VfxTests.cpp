@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -35,6 +36,7 @@ namespace
         definition.Space = Keire::VfxSimulationSpace::World;
         definition.Seed = 42;
         definition.Capacity = 16;
+        definition.ExecutionSource = Keire::VfxExecutionSource::LegacyModules;
         definition.Modules = {
             {Id(2), true, Keire::VfxEmissionRateModule{10.0F}},
             {Id(3), true, Keire::VfxBurstModule{0.0F, 2, 2, 0.25F}},
@@ -58,6 +60,34 @@ namespace
         std::vector<std::byte> result(value.size());
         std::memcpy(result.data(), value.data(), value.size());
         return result;
+    }
+
+    void BindGraphDefault(Keire::VfxEffectDefinition& definition, const std::uint64_t idBase,
+                          const Keire::AssetId moduleId, const std::string& semantic, const Keire::VfxValueType type,
+                          Keire::VfxParameterValue value)
+    {
+        auto& system = definition.Systems.front();
+        const auto module =
+            std::ranges::find(system.Nodes, moduleId, [](const Keire::VfxGraphNode& node) { return node.Reference; });
+        if (module == system.Nodes.end())
+            throw std::logic_error("Test graph module node was not found.");
+        const auto input = std::ranges::find(module->Pins, semantic, &Keire::VfxGraphPin::Semantic);
+        if (input == module->Pins.end())
+            throw std::logic_error("Test graph module input was not found.");
+        const auto moduleNodeId = module->Id;
+        const auto moduleInputId = input->Id;
+
+        definition.Blackboard.push_back(
+            {Id(idBase), "Bound default " + std::to_string(idBase), type, std::move(value), true});
+        system.Nodes.push_back({Id(idBase + 1),
+                                "Bound default",
+                                module->Context,
+                                {},
+                                {{Id(idBase + 2), "Value", type, false, "value", std::nullopt}},
+                                {},
+                                Keire::VfxGraphNodeKind::Parameter,
+                                Id(idBase)});
+        system.Connections.push_back({Id(idBase + 3), Id(idBase + 1), Id(idBase + 2), moduleNodeId, moduleInputId});
     }
 
     struct HeadlessRenderProbe final
@@ -143,7 +173,8 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     const auto encoded = Keire::VfxEffectAsset::Encode(definition);
     const auto decoded = Keire::VfxEffectAsset::Decode(encoded);
     REQUIRE(decoded);
-    CHECK(decoded->Definition().SchemaVersion == 2);
+    CHECK(decoded->Definition().SchemaVersion == 3);
+    CHECK(decoded->Definition().ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
     CHECK(decoded->Definition().EmitterId == Id(1));
     CHECK(decoded->Definition().Name == "Sparks");
     REQUIRE(decoded->Definition().Modules.size() == 9);
@@ -161,7 +192,7 @@ TEST_CASE("VFX schema round trips deterministically and preserves stable module 
     CHECK(renamed->Definition().Modules[0].Id == Id(2));
 }
 
-TEST_CASE("VFX schema one definitions publish as schema two without mutating the source definition")
+TEST_CASE("VFX schema one definitions publish as schema three legacy programs without mutating the source")
 {
     auto legacy = EffectDefinition();
     legacy.SchemaVersion = 1;
@@ -171,28 +202,185 @@ TEST_CASE("VFX schema one definitions publish as schema two without mutating the
     const auto published = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(legacy));
     CHECK(legacy.SchemaVersion == 1);
     CHECK(legacy.Systems.empty());
-    CHECK(published->Definition().SchemaVersion == 2);
-    REQUIRE(published->Definition().Systems.size() == 1);
-    CHECK(published->Definition().Systems.front().Nodes.size() == 4);
+    CHECK(published->Definition().SchemaVersion == 3);
+    CHECK(published->Definition().ExecutionSource == Keire::VfxExecutionSource::LegacyModules);
+    CHECK(published->Definition().Systems.empty());
 }
 
 TEST_CASE("Default VFX effects expose a connected authoring context graph")
 {
     const auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    CHECK(definition.SchemaVersion == 3);
+    CHECK(definition.ExecutionSource == Keire::VfxExecutionSource::Graph);
     REQUIRE(definition.Systems.size() == 1);
     const auto& system = definition.Systems.front();
-    REQUIRE(system.Nodes.size() == 4);
-    REQUIRE(system.Connections.size() == 3);
-    CHECK(system.Nodes[0].Pins.size() == 1);
-    CHECK(system.Nodes[1].Pins.size() == 2);
-    CHECK(system.Nodes[2].Pins.size() == 2);
-    CHECK(system.Nodes[3].Pins.size() == 1);
+    CHECK(system.Nodes.size() == definition.Modules.size() + 4);
+    CHECK(system.Connections.size() == definition.Modules.size() + 3);
+    CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Context, &Keire::VfxGraphNode::Kind) == 4);
+    CHECK(std::ranges::count(system.Nodes, Keire::VfxGraphNodeKind::Module, &Keire::VfxGraphNode::Kind) ==
+          definition.Modules.size());
 
     const auto cpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
     const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
     CHECK(cpu.Valid);
     CHECK(gpu.Valid);
+    CHECK(cpu.Modules.size() == definition.Modules.size());
     CHECK(cpu.CanonicalIr == gpu.CanonicalIr);
+}
+
+TEST_CASE("VFX legacy conversion produces deterministic executable schema-three topology")
+{
+    const auto first = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+    const auto second = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+    CHECK(first.ExecutionSource == Keire::VfxExecutionSource::Graph);
+    CHECK(first.Systems == second.Systems);
+
+    const auto roundTrip = Keire::VfxEffectAsset::Decode(Keire::VfxEffectAsset::Encode(first));
+    REQUIRE(roundTrip);
+    CHECK(roundTrip->Definition() == first);
+
+    const auto compiled = Keire::CompileVfxEffect(first, Keire::VfxBackend::Cpu);
+    REQUIRE(compiled.Valid);
+    CHECK(compiled.Modules.size() == first.Modules.size());
+
+    auto presentationOnly = first;
+    presentationOnly.Systems.front().Name = "Renamed presentation";
+    std::ranges::reverse(presentationOnly.Systems.front().Nodes);
+    std::ranges::reverse(presentationOnly.Systems.front().Connections);
+    for (auto& node : presentationOnly.Systems.front().Nodes)
+    {
+        node.Type += " renamed";
+        node.EditorPosition.X += 1000.0F;
+        node.EditorPosition.Y -= 250.0F;
+    }
+    const auto presentationCompile = Keire::CompileVfxEffect(presentationOnly, Keire::VfxBackend::Cpu);
+    REQUIRE(presentationCompile.Valid);
+    CHECK(presentationCompile.Hash == compiled.Hash);
+    CHECK(presentationCompile.StateLayoutHash == compiled.StateLayoutHash);
+}
+
+TEST_CASE("VFX graph compiler lowers Blackboard bindings and bounded Portable Custom HLSL")
+{
+    auto definition = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+    definition.Blackboard.push_back({Id(200), "Gravity", Keire::VfxValueType::Scalar, 2.0F, true});
+    auto& system = definition.Systems.front();
+    system.Nodes.push_back({Id(201),
+                            "Gravity",
+                            Keire::VfxContextType::Update,
+                            {-300.0F, 0.0F},
+                            {{Id(202), "Gravity", Keire::VfxValueType::Scalar, false, "value", std::nullopt}},
+                            {},
+                            Keire::VfxGraphNodeKind::Parameter,
+                            Id(200)});
+
+    const auto forceNode =
+        std::ranges::find(system.Nodes, Id(6), [](const Keire::VfxGraphNode& node) { return node.Reference; });
+    REQUIRE(forceNode != system.Nodes.end());
+    const auto gravityPin =
+        std::ranges::find(forceNode->Pins, std::string("gravityMultiplier"), &Keire::VfxGraphPin::Semantic);
+    REQUIRE(gravityPin != forceNode->Pins.end());
+    const auto forceNodeId = forceNode->Id;
+    const auto gravityPinId = gravityPin->Id;
+    system.Connections.push_back({Id(203), Id(201), Id(202), forceNodeId, gravityPinId});
+
+    const auto updateContext = std::ranges::find_if(
+        system.Nodes, [](const Keire::VfxGraphNode& node)
+        { return node.Kind == Keire::VfxGraphNodeKind::Context && node.Context == Keire::VfxContextType::Update; });
+    REQUIRE(updateContext != system.Nodes.end());
+    const auto updateCable =
+        std::ranges::find(system.Connections, updateContext->Id, &Keire::VfxGraphConnection::OutputNode);
+    REQUIRE(updateCable != system.Connections.end());
+    const auto previousInputNode = updateCable->InputNode;
+    const auto previousInputPin = updateCable->InputPin;
+    system.Nodes.push_back(
+        {Id(204),
+         "Portable Custom HLSL",
+         Keire::VfxContextType::Update,
+         {800.0F, 200.0F},
+         {{Id(205), "Particles", Keire::VfxValueType::ParticleStream, true, "particles", std::nullopt},
+          {Id(206), "Particles", Keire::VfxValueType::ParticleStream, false, "particles", std::nullopt}},
+         "Velocity += float3(0.0, 1.0, 0.0) * DeltaTime;\nSize *= 0.5;",
+         Keire::VfxGraphNodeKind::CustomHlsl,
+         {}});
+    updateCable->InputNode = Id(204);
+    updateCable->InputPin = Id(205);
+    system.Connections.push_back({Id(207), Id(204), Id(206), previousInputNode, previousInputPin});
+
+    const auto compiled = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+    REQUIRE(compiled.Valid);
+    REQUIRE(compiled.Parameters.size() == 1);
+    CHECK(compiled.Parameters.front().Parameter == Id(200));
+    REQUIRE(compiled.Bindings.size() == 1);
+    CHECK(compiled.Bindings.front().Property == Keire::VfxModuleProperty::ForceGravityMultiplier);
+    REQUIRE(compiled.CustomInstructions.size() == 2);
+    CHECK(compiled.CustomInstructions[0].Target == Keire::VfxCustomTarget::Velocity);
+    CHECK(compiled.CustomInstructions[0].ScaleByDeltaTime);
+    CHECK(compiled.CustomInstructions[1].Target == Keire::VfxCustomTarget::Size);
+
+    auto duplicateDriver = definition;
+    duplicateDriver.Systems.front().Connections.push_back({Id(208), Id(201), Id(202), forceNodeId, gravityPinId});
+    CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(duplicateDriver), "VFX graph input pins may have at most one cable.",
+                         std::invalid_argument);
+
+    auto invalidHlsl = definition;
+    const auto custom = std::ranges::find(invalidHlsl.Systems.front().Nodes, Id(204), &Keire::VfxGraphNode::Id);
+    REQUIRE(custom != invalidHlsl.Systems.front().Nodes.end());
+    custom->CustomHlsl = "result = 1.0;";
+    CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(invalidHlsl),
+                         "Portable Custom HLSL targets Position, Velocity, Rotation, Tint, or Size.",
+                         std::invalid_argument);
+}
+
+TEST_CASE("VFX graph compilation rejects defaults that invalidate resolved executable modules")
+{
+    const auto checkCompileError = [](const Keire::VfxEffectDefinition& definition, const std::string& message)
+    {
+        const auto compiled = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+        CHECK_FALSE(compiled.Valid);
+        const auto error = std::ranges::find(compiled.Diagnostics, Keire::VfxCompileDiagnosticSeverity::Error,
+                                             &Keire::VfxCompileDiagnostic::Severity);
+        REQUIRE(error != compiled.Diagnostics.end());
+        CHECK(error->Message == message);
+    };
+
+    SUBCASE("Scalar range")
+    {
+        auto definition = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+        BindGraphDefault(definition, 300, Id(2), "particlesPerSecond", Keire::VfxValueType::Scalar, -1.0F);
+        checkCompileError(definition, "VFX emission rate is invalid.");
+    }
+
+    SUBCASE("Burst count")
+    {
+        auto definition = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+        BindGraphDefault(definition, 310, Id(3), "count", Keire::VfxValueType::Integer, std::int64_t{0});
+        checkCompileError(definition, "VFX burst is invalid.");
+    }
+
+    SUBCASE("Burst cycles")
+    {
+        auto definition = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+        BindGraphDefault(definition, 320, Id(3), "cycles", Keire::VfxValueType::Integer, std::int64_t{0});
+        checkCompileError(definition, "VFX burst is invalid.");
+    }
+
+    SUBCASE("Required asset")
+    {
+        auto definition = EffectDefinition();
+        auto& shape = std::get<Keire::VfxShapeModule>(definition.Modules[2].Payload);
+        shape.Shape = Keire::VfxShape::Mesh;
+        shape.Mesh = Id(350);
+        definition = Keire::ConvertVfxEffectToGraph(definition);
+        BindGraphDefault(definition, 330, Id(4), "mesh", Keire::VfxValueType::Mesh, Keire::AssetId{});
+        checkCompileError(definition, "VFX shape module is invalid.");
+    }
+
+    SUBCASE("Cross-property range")
+    {
+        auto definition = Keire::ConvertVfxEffectToGraph(EffectDefinition());
+        BindGraphDefault(definition, 340, Id(5), "lifetimeMinimum", Keire::VfxValueType::Scalar, 3.0F);
+        checkCompileError(definition, "VFX initialize module is invalid.");
+    }
 }
 
 TEST_CASE("VFX validation rejects malformed assets and invalid stable topology")
@@ -241,6 +429,7 @@ TEST_CASE("VFX importer canonicalizes source and extracts sorted dependencies")
     const auto source = Keire::VfxEffectAsset::Encode(definition);
     const auto importer = Keire::CreateVfxEffectAssetImporter();
     CHECK(importer.Name == "Keire.VfxEffect");
+    CHECK(importer.Version == 3);
     CHECK(importer.Type == Keire::VfxEffectAsset::StaticType());
     CHECK(importer.Extensions == std::vector<std::string>{".keirevfx"});
     REQUIRE(importer.Import);
@@ -358,6 +547,52 @@ TEST_CASE("GPU VFX simulation publishes compact emitter work without allocating 
     REQUIRE(render.GpuEmitters().size() == 1);
     CHECK(render.GpuEmitters().front().Position == Keire::Vector3{1.0F, 2.0F, 3.0F});
     CHECK(render.GpuEmitters().front().Renderer == Keire::VfxRendererType::Sprite);
+}
+
+TEST_CASE("GPU VFX snapshots publish the scaled simulation delta for each handle")
+{
+    Keire::VfxWorldSpecification specification;
+    specification.Backend = Keire::VfxBackend::Gpu;
+    specification.MaximumEffects = 2;
+    specification.MaximumParticles = 64;
+    auto world = Keire::CreateRef<Keire::VfxWorld>(specification);
+    const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(EffectDefinition());
+    const auto paused = world->Activate({effect});
+    const auto accelerated = world->Activate({effect});
+    REQUIRE(paused);
+    REQUIRE(accelerated);
+
+    world->SetSimulationSpeed(paused, 0.0F);
+    world->SetSimulationSpeed(accelerated, 2.0F);
+    world->Update(0.25F);
+
+    auto snapshot = world->CaptureRenderSnapshot();
+    const auto firstSimulationStepRevision = snapshot.SimulationStepRevision();
+    CHECK(firstSimulationStepRevision > 0);
+    CHECK(snapshot.DeltaSeconds() == doctest::Approx(0.25F));
+    REQUIRE(snapshot.GpuEmitters().size() == 2);
+    CHECK(snapshot.GpuEmitters()[0].Handle == paused);
+    CHECK(snapshot.GpuEmitters()[0].SimulationDeltaSeconds == 0.0F);
+    CHECK(snapshot.GpuEmitters()[1].Handle == accelerated);
+    CHECK(snapshot.GpuEmitters()[1].SimulationDeltaSeconds == doctest::Approx(0.5F));
+
+    const auto snapshotRevision = snapshot.Revision();
+    world->SetTransform(paused, {1.0F, 2.0F, 3.0F}, {});
+    snapshot = world->CaptureRenderSnapshot();
+    CHECK(snapshot.Revision() > snapshotRevision);
+    CHECK(snapshot.SimulationStepRevision() == firstSimulationStepRevision);
+
+    world->Update(0.0F);
+    CHECK(world->CaptureRenderSnapshot().SimulationStepRevision() == firstSimulationStepRevision);
+
+    world->SetSimulationSpeed(paused, 1.0F);
+    world->SetSimulationSpeed(accelerated, 0.5F);
+    world->Update(0.2F);
+    snapshot = world->CaptureRenderSnapshot();
+    CHECK(snapshot.SimulationStepRevision() > firstSimulationStepRevision);
+    REQUIRE(snapshot.GpuEmitters().size() == 2);
+    CHECK(snapshot.GpuEmitters()[0].SimulationDeltaSeconds == doctest::Approx(0.2F));
+    CHECK(snapshot.GpuEmitters()[1].SimulationDeltaSeconds == doctest::Approx(0.1F));
 }
 
 TEST_CASE("Stopping one GPU VFX handle preserves unrelated world state")
@@ -565,6 +800,117 @@ TEST_CASE("VFX revision reload preserves compatible state and safely restarts in
     CHECK(snapshot.Effects[0].Emitting);
 }
 
+TEST_CASE("VFX reload restarts CPU and GPU state when space seed or renderer representation changes")
+{
+    auto definition = EffectDefinition();
+    definition.Modules.erase(definition.Modules.begin() + 1);
+
+    std::array<Keire::VfxEffectDefinition, 3> incompatible{definition, definition, definition};
+    incompatible[0].Space = Keire::VfxSimulationSpace::Local;
+    ++incompatible[1].Seed;
+    auto& renderer = std::get<Keire::VfxRendererModule>(incompatible[2].Modules.back().Payload);
+    renderer.Type = Keire::VfxRendererType::Mesh;
+    renderer.Mesh = Id(600);
+
+    const auto baselineProgram = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+    REQUIRE(baselineProgram.Valid);
+    for (const auto& candidate : incompatible)
+    {
+        const auto candidateProgram = Keire::CompileVfxEffect(candidate, Keire::VfxBackend::Cpu);
+        REQUIRE(candidateProgram.Valid);
+        CHECK(candidateProgram.StateLayoutHash != baselineProgram.StateLayoutHash);
+    }
+
+    SUBCASE("CPU particles and deterministic timeline restart")
+    {
+        for (const auto& candidate : incompatible)
+        {
+            auto world = Keire::CreateRef<Keire::VfxWorld>(
+                Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 64});
+            const auto handle = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)});
+            REQUIRE(handle);
+            world->Update(0.25F);
+            REQUIRE(world->Statistics().ActiveParticles > 0);
+
+            REQUIRE(world->Reload(handle, Keire::CreateRef<Keire::VfxEffectAsset>(candidate), 2));
+            CHECK(world->Statistics().ActiveParticles == 0);
+            const auto snapshot = world->CaptureDebugSnapshot();
+            REQUIRE(snapshot.EffectCount == 1);
+            CHECK(snapshot.Effects[0].ElapsedSeconds == doctest::Approx(0.0F));
+            CHECK(snapshot.Effects[0].Emitting);
+        }
+    }
+
+    SUBCASE("GPU emitter state restarts without disturbing world reset ownership")
+    {
+        for (const auto& candidate : incompatible)
+        {
+            auto world = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
+                .MaximumEffects = 1, .MaximumParticles = 64, .Backend = Keire::VfxBackend::Gpu});
+            const auto handle = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)});
+            REQUIRE(handle);
+            world->Update(0.25F);
+            const auto before = world->CaptureRenderSnapshot();
+            REQUIRE(before.GpuEmitters().size() == 1);
+            REQUIRE(before.GpuEmitters().front().SpawnSequence > 0);
+            const auto simulationRevision = before.GpuEmitters().front().SimulationRevision;
+            const auto resetRevision = before.ResetRevision();
+
+            REQUIRE(world->Reload(handle, Keire::CreateRef<Keire::VfxEffectAsset>(candidate), 2));
+            const auto after = world->CaptureRenderSnapshot();
+            REQUIRE(after.GpuEmitters().size() == 1);
+            CHECK(after.GpuEmitters().front().SimulationRevision != simulationRevision);
+            CHECK(after.GpuEmitters().front().SpawnSequence == 0);
+            CHECK(after.ResetRevision() == resetRevision);
+        }
+    }
+}
+
+TEST_CASE("GPU stored-state parameter changes restart a draining non-looping effect coherently")
+{
+    auto definition = EffectDefinition();
+    definition.Loop = false;
+    definition.Duration = 0.25F;
+    definition.Modules.erase(definition.Modules.begin() + 1);
+    auto& initialize = std::get<Keire::VfxInitializeModule>(definition.Modules[2].Payload);
+    initialize.LifetimeMinimum = 2.0F;
+    initialize.LifetimeMaximum = 2.0F;
+    definition = Keire::ConvertVfxEffectToGraph(definition);
+    BindGraphDefault(definition, 700, Id(6), "force", Keire::VfxValueType::Vector3, Keire::Vector3{0.0F, 1.0F, 0.0F});
+
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 64, .Backend = Keire::VfxBackend::Gpu});
+    const auto handle = world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)});
+    REQUIRE(handle);
+    world->Update(0.25F);
+
+    const auto before = world->CaptureRenderSnapshot();
+    REQUIRE(before.GpuEmitters().size() == 1);
+    REQUIRE(before.GpuEmitters().front().SpawnSequence > 0);
+    const auto simulationRevision = before.GpuEmitters().front().SimulationRevision;
+    auto debug = world->CaptureDebugSnapshot();
+    REQUIRE(debug.EffectCount == 1);
+    CHECK_FALSE(debug.Effects[0].Emitting);
+    CHECK(debug.Effects[0].ElapsedSeconds == doctest::Approx(0.25F));
+
+    world->SetParameter(handle, Id(700), Keire::Vector3{0.0F, 2.0F, 0.0F});
+    const auto restarted = world->CaptureRenderSnapshot();
+    REQUIRE(restarted.GpuEmitters().size() == 1);
+    CHECK(restarted.GpuEmitters().front().SimulationRevision != simulationRevision);
+    CHECK(restarted.GpuEmitters().front().SpawnSequence == 0);
+    debug = world->CaptureDebugSnapshot();
+    REQUIRE(debug.EffectCount == 1);
+    CHECK(debug.Effects[0].ElapsedSeconds == doctest::Approx(0.0F));
+    CHECK(debug.Effects[0].ActiveParticles == 0);
+    CHECK(debug.Effects[0].Emitting);
+
+    world->Update(0.25F);
+    const auto replayed = world->CaptureRenderSnapshot();
+    REQUIRE(replayed.GpuEmitters().size() == 1);
+    CHECK(replayed.GpuEmitters().front().SpawnSequence == before.GpuEmitters().front().SpawnSequence);
+    CHECK(world->IsAlive(handle));
+}
+
 TEST_CASE("CPU VFX reports collision fallback and consumes a provided collision query")
 {
     auto definition = EffectDefinition();
@@ -621,20 +967,23 @@ TEST_CASE("VFX Emitter component schema exposes typed effect authoring")
 {
     const auto registration = Keire::CreateVfxEmitterComponentRegistration();
     CHECK(registration.Type == Keire::VfxEmitterComponent::StaticType());
-    CHECK(registration.SchemaVersion == 1);
+    CHECK(registration.SchemaVersion == 2);
     CHECK(registration.RequiredComponents ==
           std::vector<Keire::ComponentTypeId>{Keire::TransformComponent::StaticType()});
-    REQUIRE(registration.Properties.size() == 10);
+    REQUIRE(registration.Properties.size() == 11);
     CHECK(registration.Properties.front().ExpectedAssetType == Keire::VfxEffectAsset::StaticType());
+    CHECK(registration.Properties.back().Key == "parameterOverrides");
+    REQUIRE(registration.Migrate);
 
     const auto component = registration.Factory();
-    registration.Deserialize(*component,
-                             {{"effect", Id(100)},
-                              {"playOnAwake", false},
-                              {"autoDestroy", true},
-                              {"simulationSpeed", 2.0},
-                              {"seedOffset", std::int64_t{99}}},
-                             1);
+    const auto migrated = registration.Migrate({{"effect", Id(100)},
+                                                {"playOnAwake", false},
+                                                {"autoDestroy", true},
+                                                {"simulationSpeed", 2.0},
+                                                {"seedOffset", std::int64_t{99}}},
+                                               1);
+    CHECK(std::get<std::string>(migrated.at("parameterOverrides")) == "[]");
+    registration.Deserialize(*component, migrated, 2);
     const auto& emitter = dynamic_cast<const Keire::VfxEmitterComponent&>(*component);
     CHECK(emitter.Effect() == Id(100));
     CHECK_FALSE(emitter.PlayOnAwake());
@@ -642,6 +991,6 @@ TEST_CASE("VFX Emitter component schema exposes typed effect authoring")
     CHECK(emitter.SimulationSpeed() == doctest::Approx(2.0F));
     CHECK(emitter.SeedOffset() == 99);
     CHECK(std::get<Keire::AssetId>(registration.Serialize(*component).at("effect")) == Id(100));
-    CHECK_THROWS_WITH_AS(registration.Deserialize(*component, {}, 2),
+    CHECK_THROWS_WITH_AS(registration.Deserialize(*component, {}, 3),
                          "Unsupported VFX Emitter component schema version.", std::invalid_argument);
 }

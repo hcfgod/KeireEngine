@@ -56,6 +56,7 @@ namespace KeireEditor
 
         [[nodiscard]] bool Edit(std::string_view name,
                                 const std::function<void(Keire::VfxEffectDefinition&)>& operation);
+        [[nodiscard]] bool ConvertToGraph();
         [[nodiscard]] bool AddModule(Keire::VfxModuleDefinition module);
         [[nodiscard]] bool EditModule(Keire::AssetId module,
                                       const std::function<void(Keire::VfxModuleDefinition&)>& operation);

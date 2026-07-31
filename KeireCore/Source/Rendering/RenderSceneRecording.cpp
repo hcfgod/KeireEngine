@@ -15,6 +15,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -364,6 +365,26 @@ namespace Keire::RenderBackend
         if (resources.LastPreparedFrame == Statistics.Frame)
             return;
 
+        static_assert(VfxGpuEmitter::MaximumCustomInstructions == 8);
+        static_assert(static_cast<std::uint32_t>(VfxContextType::Initialize) == 1);
+        static_assert(static_cast<std::uint32_t>(VfxContextType::Update) == 2);
+        static_assert(static_cast<std::uint32_t>(VfxContextType::Output) == 3);
+        static_assert(static_cast<std::uint32_t>(VfxCustomTarget::Position) == 0);
+        static_assert(static_cast<std::uint32_t>(VfxCustomTarget::Velocity) == 1);
+        static_assert(static_cast<std::uint32_t>(VfxCustomTarget::Rotation) == 2);
+        static_assert(static_cast<std::uint32_t>(VfxCustomTarget::Tint) == 3);
+        static_assert(static_cast<std::uint32_t>(VfxCustomTarget::Size) == 4);
+        static_assert(static_cast<std::uint32_t>(VfxCustomOperation::Assign) == 0);
+        static_assert(static_cast<std::uint32_t>(VfxCustomOperation::Add) == 1);
+        static_assert(static_cast<std::uint32_t>(VfxCustomOperation::Multiply) == 2);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Shape) == 0);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Initialize) == 1);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Force) == 2);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Size) == 3);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Color) == 4);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Collision) == 5);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::Renderer) == 6);
+        static_assert(static_cast<std::uint32_t>(VfxGpuEmitter::ParticleOperationKind::CustomHlsl) == 7);
         struct alignas(16) Dispatch final
         {
             std::uint32_t Capacity = 0;
@@ -382,11 +403,74 @@ namespace Keire::RenderBackend
             std::array<float, 4> PreviousPosition{};
             std::array<float, 4> PreviousRotation{};
             std::array<std::uint32_t, 4> Identity{};
+            std::array<std::uint32_t, 4> CustomInstructionMetadata{};
+            std::array<std::array<std::uint32_t, 4>, VfxGpuEmitter::MaximumCustomInstructions>
+                CustomInstructionControls{};
+            std::array<std::array<float, 4>, VfxGpuEmitter::MaximumCustomInstructions> CustomInstructionOperands{};
+            std::array<std::uint32_t, 4> ParticleOperationMetadata{};
+            std::array<std::array<std::uint32_t, 4>, VfxGpuEmitter::MaximumParticleOperations>
+                ParticleOperationControls{};
         };
-        static_assert(sizeof(Dispatch) == 208);
+        static_assert(offsetof(Dispatch, Identity) == 192);
+        static_assert(offsetof(Dispatch, CustomInstructionMetadata) == 208);
+        static_assert(offsetof(Dispatch, CustomInstructionControls) == 224);
+        static_assert(offsetof(Dispatch, CustomInstructionOperands) == 352);
+        static_assert(offsetof(Dispatch, ParticleOperationMetadata) == 480);
+        static_assert(offsetof(Dispatch, ParticleOperationControls) == 496);
+        static_assert(sizeof(Dispatch) == 736);
         Dispatch dispatch;
         dispatch.Capacity = resources.Capacity;
-        dispatch.DeltaSeconds = std::clamp(snapshot.DeltaSeconds(), 0.0F, 0.1F);
+        const auto simulationDelta = [](const VfxGpuEmitter& emitter) noexcept
+        {
+            constexpr auto maximumDeltaSeconds = 10.0F * 8.0F;
+            return std::isfinite(emitter.SimulationDeltaSeconds)
+                       ? std::clamp(emitter.SimulationDeltaSeconds, 0.0F, maximumDeltaSeconds)
+                       : 0.0F;
+        };
+
+        const auto setCustomInstructions = [&dispatch](const VfxGpuEmitter& emitter)
+        {
+            dispatch.CustomInstructionMetadata = {};
+            dispatch.CustomInstructionControls = {};
+            dispatch.CustomInstructionOperands = {};
+            const auto count =
+                std::min<std::size_t>(emitter.CustomInstructionCount, VfxGpuEmitter::MaximumCustomInstructions);
+            dispatch.CustomInstructionMetadata[0] = static_cast<std::uint32_t>(count);
+            for (std::size_t index = 0; index < count; ++index)
+            {
+                const auto& instruction = emitter.CustomInstructions[index];
+                dispatch.CustomInstructionControls[index] = {
+                    static_cast<std::uint32_t>(instruction.Context),
+                    static_cast<std::uint32_t>(instruction.Target),
+                    static_cast<std::uint32_t>(instruction.Operation),
+                    instruction.ScaleByDeltaTime ? 1U : 0U,
+                };
+                dispatch.CustomInstructionOperands[index] = {
+                    instruction.Operand.X,
+                    instruction.Operand.Y,
+                    instruction.Operand.Z,
+                    instruction.Operand.W,
+                };
+            }
+        };
+        const auto setParticleOperations = [&dispatch](const VfxGpuEmitter& emitter)
+        {
+            dispatch.ParticleOperationMetadata = {};
+            dispatch.ParticleOperationControls = {};
+            const auto count =
+                std::min<std::size_t>(emitter.ParticleOperationCount, VfxGpuEmitter::MaximumParticleOperations);
+            dispatch.ParticleOperationMetadata[0] = static_cast<std::uint32_t>(count);
+            for (std::size_t index = 0; index < count; ++index)
+            {
+                const auto& operation = emitter.ParticleOperations[index];
+                dispatch.ParticleOperationControls[index] = {
+                    static_cast<std::uint32_t>(operation.Context),
+                    static_cast<std::uint32_t>(operation.Kind),
+                    operation.Index,
+                    0U,
+                };
+            }
+        };
 
         const std::array writeBindings{
             SDL_GPUStorageBufferReadWriteBinding{resources.Particles, false},
@@ -408,109 +492,154 @@ namespace Keire::RenderBackend
             ++Statistics.VfxComputeDispatches;
         };
 
-        const auto resetWorld = resources.ResetRevision != snapshot.ResetRevision();
+        const auto applySnapshot = resources.ShouldApplySnapshot(snapshot.Revision());
+        if (!applySnapshot)
+        {
+            resources.LastPreparedFrame = Statistics.Frame;
+            Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
+            Statistics.VfxGpuBufferBytes =
+                static_cast<std::uint64_t>(resources.Capacity) * (128U + sizeof(std::uint32_t) * 2U) +
+                5U * sizeof(std::uint32_t) + sizeof(SDL_GPUIndirectDrawCommand);
+            return;
+        }
+        const auto consumeSimulation = resources.ShouldConsumeSimulationStep(snapshot.SimulationStepRevision());
+        const auto resetWorld = applySnapshot && resources.ResetRevision != snapshot.ResetRevision();
         auto nextEmitters = resetWorld ? decltype(resources.Emitters){} : resources.Emitters;
         if (resetWorld)
             dispatchCompute(VfxInitializePipeline, (resources.Capacity + 255U) / 256U);
 
-        std::unordered_set<std::uint64_t> activeEmitterKeys;
-        activeEmitterKeys.reserve(snapshot.GpuEmitters().size());
-        for (const auto& emitter : snapshot.GpuEmitters())
+        if (applySnapshot)
         {
-            activeEmitterKeys.emplace((static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) |
-                                      emitter.Handle.Generation());
-        }
-        std::vector<std::uint64_t> retiredEmitterKeys;
-        retiredEmitterKeys.reserve(nextEmitters.size());
-        for (const auto& [key, state] : nextEmitters)
-        {
-            (void)state;
-            if (!activeEmitterKeys.contains(key))
-                retiredEmitterKeys.push_back(key);
-        }
-        for (const auto key : retiredEmitterKeys)
-        {
-            dispatch.Identity = {static_cast<std::uint32_t>(key >> 32U), static_cast<std::uint32_t>(key), 0U, 0U};
-            dispatchCompute(VfxKillPipeline, (resources.Capacity + 255U) / 256U);
-            nextEmitters.erase(key);
-        }
-        for (const auto& emitter : snapshot.GpuEmitters())
-        {
-            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
-            const auto previous = nextEmitters.find(key);
-            if (previous == nextEmitters.end() || previous->second.SimulationRevision == emitter.SimulationRevision)
+            std::unordered_set<std::uint64_t> activeEmitterKeys;
+            activeEmitterKeys.reserve(snapshot.GpuEmitters().size());
+            for (const auto& emitter : snapshot.GpuEmitters())
             {
-                continue;
+                activeEmitterKeys.emplace((static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) |
+                                          emitter.Handle.Generation());
             }
-            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
-            dispatchCompute(VfxKillPipeline, (resources.Capacity + 255U) / 256U);
-            nextEmitters.erase(previous);
-        }
-        for (const auto& emitter : snapshot.GpuEmitters())
-        {
-            if (emitter.Space != VfxSimulationSpace::Local)
-                continue;
-            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
-            const auto previous = nextEmitters.find(key);
-            if (previous == nextEmitters.end() || previous->second.Space != VfxSimulationSpace::Local ||
-                (previous->second.Position == emitter.Position && previous->second.Rotation == emitter.Rotation))
+            std::vector<std::uint64_t> retiredEmitterKeys;
+            retiredEmitterKeys.reserve(nextEmitters.size());
+            for (const auto& [key, state] : nextEmitters)
             {
-                continue;
+                (void)state;
+                if (!activeEmitterKeys.contains(key))
+                    retiredEmitterKeys.push_back(key);
             }
-            dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
-            dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
-            dispatch.PreviousPosition = {previous->second.Position.X, previous->second.Position.Y,
-                                         previous->second.Position.Z, 0.0F};
-            dispatch.PreviousRotation = {previous->second.Rotation.X, previous->second.Rotation.Y,
-                                         previous->second.Rotation.Z, previous->second.Rotation.W};
-            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
-            dispatchCompute(VfxTransformPipeline, (resources.Capacity + 255U) / 256U);
+            for (const auto key : retiredEmitterKeys)
+            {
+                dispatch.Identity = {static_cast<std::uint32_t>(key >> 32U), static_cast<std::uint32_t>(key), 0U, 0U};
+                dispatchCompute(VfxKillPipeline, (resources.Capacity + 255U) / 256U);
+                nextEmitters.erase(key);
+            }
+            for (const auto& emitter : snapshot.GpuEmitters())
+            {
+                const auto key =
+                    (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+                const auto previous = nextEmitters.find(key);
+                if (previous == nextEmitters.end() || previous->second.SimulationRevision == emitter.SimulationRevision)
+                {
+                    continue;
+                }
+                dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
+                dispatchCompute(VfxKillPipeline, (resources.Capacity + 255U) / 256U);
+                nextEmitters.erase(previous);
+            }
+            for (const auto& emitter : snapshot.GpuEmitters())
+            {
+                if (emitter.Space != VfxSimulationSpace::Local)
+                    continue;
+                const auto key =
+                    (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+                const auto previous = nextEmitters.find(key);
+                if (previous == nextEmitters.end() || previous->second.Space != VfxSimulationSpace::Local ||
+                    (previous->second.Position == emitter.Position && previous->second.Rotation == emitter.Rotation))
+                {
+                    continue;
+                }
+                dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
+                dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
+                dispatch.PreviousPosition = {previous->second.Position.X, previous->second.Position.Y,
+                                             previous->second.Position.Z, 0.0F};
+                dispatch.PreviousRotation = {previous->second.Rotation.X, previous->second.Rotation.Y,
+                                             previous->second.Rotation.Z, previous->second.Rotation.W};
+                dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
+                dispatchCompute(VfxTransformPipeline, (resources.Capacity + 255U) / 256U);
+            }
         }
 
         dispatchCompute(VfxResetPipeline, 1);
-        dispatchCompute(VfxSimulatePipeline, (resources.Capacity + 255U) / 256U);
-
         for (const auto& emitter : snapshot.GpuEmitters())
         {
-            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
-            auto& state = nextEmitters[key];
-            const auto requested = emitter.SpawnSequence >= state.SpawnSequence
-                                       ? emitter.SpawnSequence - state.SpawnSequence
-                                       : emitter.SpawnSequence;
-            state.SpawnSequence = emitter.SpawnSequence;
-            state.SimulationRevision = emitter.SimulationRevision;
-            state.Position = emitter.Position;
-            state.Rotation = emitter.Rotation;
-            state.Space = emitter.Space;
-            if (requested == 0)
-                continue;
-            dispatch.SpawnCount = static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, resources.Capacity));
-            dispatch.Seed = emitter.Seed;
+            dispatch.DeltaSeconds = consumeSimulation ? simulationDelta(emitter) : 0.0F;
             dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
             dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
-            dispatch.ShapeExtentRadius = {emitter.ShapeExtent.X, emitter.ShapeExtent.Y, emitter.ShapeExtent.Z,
-                                          emitter.ShapeRadius};
-            dispatch.VelocityMinimumLifetime = {emitter.VelocityMinimum.X, emitter.VelocityMinimum.Y,
-                                                emitter.VelocityMinimum.Z, emitter.LifetimeMinimum};
-            dispatch.VelocityMaximumLifetime = {emitter.VelocityMaximum.X, emitter.VelocityMaximum.Y,
-                                                emitter.VelocityMaximum.Z, emitter.LifetimeMaximum};
-            dispatch.AccelerationShape = {emitter.Acceleration.X, emitter.Acceleration.Y, emitter.Acceleration.Z,
-                                          std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Shape))};
+            dispatch.AccelerationShape = {emitter.Acceleration.X, emitter.Acceleration.Y, emitter.Acceleration.Z, 0.0F};
             dispatch.ColorStart = {emitter.ColorStart.Red, emitter.ColorStart.Green, emitter.ColorStart.Blue,
                                    emitter.ColorStart.Alpha};
             dispatch.ColorEnd = {emitter.ColorEnd.Red, emitter.ColorEnd.Green, emitter.ColorEnd.Blue,
                                  emitter.ColorEnd.Alpha};
             dispatch.Size = {emitter.SizeStart, emitter.SizeEnd,
                              std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Space)), 0.0F};
-            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(),
-                                 static_cast<std::uint32_t>(emitter.SpawnSequence),
-                                 static_cast<std::uint32_t>(emitter.Renderer)};
-            dispatchCompute(VfxSpawnPipeline, (dispatch.SpawnCount + 255U) / 256U);
+            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
+            setCustomInstructions(emitter);
+            setParticleOperations(emitter);
+            dispatchCompute(VfxSimulatePipeline, (resources.Capacity + 255U) / 256U);
+        }
+
+        if (applySnapshot)
+        {
+            for (const auto& emitter : snapshot.GpuEmitters())
+            {
+                const auto key =
+                    (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+                auto& state = nextEmitters[key];
+                const auto requested = emitter.SpawnSequence >= state.SpawnSequence
+                                           ? emitter.SpawnSequence - state.SpawnSequence
+                                           : emitter.SpawnSequence;
+                state.SpawnSequence = emitter.SpawnSequence;
+                state.SimulationRevision = emitter.SimulationRevision;
+                state.Position = emitter.Position;
+                state.Rotation = emitter.Rotation;
+                state.Space = emitter.Space;
+                if (requested == 0)
+                    continue;
+                dispatch.SpawnCount =
+                    static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, resources.Capacity));
+                dispatch.Seed = emitter.Seed;
+                dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
+                dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
+                dispatch.ShapeExtentRadius = {emitter.ShapeExtent.X, emitter.ShapeExtent.Y, emitter.ShapeExtent.Z,
+                                              emitter.ShapeRadius};
+                dispatch.VelocityMinimumLifetime = {emitter.VelocityMinimum.X, emitter.VelocityMinimum.Y,
+                                                    emitter.VelocityMinimum.Z, emitter.LifetimeMinimum};
+                dispatch.VelocityMaximumLifetime = {emitter.VelocityMaximum.X, emitter.VelocityMaximum.Y,
+                                                    emitter.VelocityMaximum.Z, emitter.LifetimeMaximum};
+                dispatch.AccelerationShape = {emitter.Acceleration.X, emitter.Acceleration.Y, emitter.Acceleration.Z,
+                                              std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Shape))};
+                dispatch.ColorStart = {emitter.ColorStart.Red, emitter.ColorStart.Green, emitter.ColorStart.Blue,
+                                       emitter.ColorStart.Alpha};
+                dispatch.ColorEnd = {emitter.ColorEnd.Red, emitter.ColorEnd.Green, emitter.ColorEnd.Blue,
+                                     emitter.ColorEnd.Alpha};
+                dispatch.Size = {emitter.SizeStart, emitter.SizeEnd,
+                                 std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Space)), 0.0F};
+                dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(),
+                                     static_cast<std::uint32_t>(emitter.SpawnSequence),
+                                     static_cast<std::uint32_t>(emitter.Renderer)};
+                setCustomInstructions(emitter);
+                setParticleOperations(emitter);
+                dispatchCompute(VfxSpawnPipeline, (dispatch.SpawnCount + 255U) / 256U);
+            }
         }
 
         dispatchCompute(VfxFinalizePipeline, 1);
         resources.Emitters = std::move(nextEmitters);
-        resources.ResetRevision = snapshot.ResetRevision();
+        if (applySnapshot)
+        {
+            resources.ResetRevision = snapshot.ResetRevision();
+            resources.MarkSnapshotApplied(snapshot.Revision());
+        }
+        if (consumeSimulation)
+            resources.MarkSimulationStepConsumed(snapshot.SimulationStepRevision());
         resources.LastPreparedFrame = Statistics.Frame;
         Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
         Statistics.VfxGpuBufferBytes =
@@ -2101,9 +2230,7 @@ namespace Keire::RenderBackend
                 (void)worldId;
                 if (resources.LastPreparedFrame != Statistics.Frame)
                     continue;
-                resources.Emitters.clear();
-                resources.ResetRevision = 0;
-                resources.LastPreparedFrame = 0;
+                resources.InvalidateSequencing();
             }
             FrameActive = false;
             ActiveGpuSubmissionSerial = 0;
