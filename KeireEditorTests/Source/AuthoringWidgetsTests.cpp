@@ -18,6 +18,42 @@ TEST_CASE("Stable node graph validation protects local identity and references")
     auto missingTarget = connections;
     missingTarget.front().Target = 99;
     CHECK_THROWS_AS(KeireEditor::StableNodeGraphCanvas::Validate(nodes, missingTarget), std::invalid_argument);
+
+    const std::vector<KeireEditor::NodeGraphNode> loopNode{{4, "Feedback", {0.0F, 0.0F}}};
+    const std::vector<KeireEditor::NodeGraphConnection> loop{{5, 4, 4, "Feedback"}};
+    CHECK_NOTHROW(KeireEditor::StableNodeGraphCanvas::Validate(loopNode, loop));
+}
+
+TEST_CASE("Stable node graph local IDs remap zero and collisions without losing source identity")
+{
+    KeireEditor::StableNodeGraphIdMap ids;
+    const Keire::AssetId first(1, 2);
+    const Keire::AssetId second(3, 4);
+    const auto firstCanvasId = ids.Assign(first, 0);
+    const auto secondCanvasId = ids.Assign(second, firstCanvasId);
+
+    CHECK(firstCanvasId != 0);
+    CHECK(secondCanvasId != 0);
+    CHECK(secondCanvasId != firstCanvasId);
+    CHECK(ids.Assign(first, 99) == firstCanvasId);
+    CHECK(ids.Find(first) == firstCanvasId);
+    CHECK_FALSE(ids.Find(Keire::AssetId(5, 6)).has_value());
+}
+
+TEST_CASE("Stable node graph presentation metadata remains optional")
+{
+    const KeireEditor::NodeGraphNode legacyNode{1, "Legacy", {0.0F, 0.0F}};
+    CHECK(legacyNode.Subtitle.empty());
+
+    auto contextualNode = legacyNode;
+    contextualNode.Subtitle = "Update Context";
+    CHECK(contextualNode != legacyNode);
+    CHECK_NOTHROW(KeireEditor::StableNodeGraphCanvas::Validate(std::span{&contextualNode, std::size_t{1}}, {}));
+
+    const KeireEditor::NodeGraphCanvasResult legacyResult{std::nullopt, std::nullopt, true, true};
+    CHECK(legacyResult.BackgroundActivated);
+    CHECK(legacyResult.Changed);
+    CHECK_FALSE(legacyResult.MoveCompletedNode.has_value());
 }
 
 TEST_CASE("Stable node graph focus deterministically frames authored nodes")

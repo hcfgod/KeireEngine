@@ -17,10 +17,63 @@ run_fast=0; run_integration=0
 assert_equal() { [[ "$1" == "$2" ]] || { printf '%s: expected %s, got %s\n' "$3" "$2" "$1" >&2; exit 1; }; }
 assert_true() { "$@" || { printf 'Assertion failed: %s\n' "$*" >&2; exit 1; }; }
 assert_false() { if "$@"; then printf 'Expected failure: %s\n' "$*" >&2; exit 1; fi; }
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+  else
+    shasum -a 256 "$1"
+  fi | awk '{print $1}'
+}
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
 assert_true test -n "$PROJECT_IDENTIFIER"
+managed_fixture="$(mktemp -d)"
+trap 'rm -rf "$managed_fixture"' EXIT
+mkdir -p "$managed_fixture/Scripts/Unix" "$managed_fixture/Build/Dependencies/dotnet-sdk" \
+  "$managed_fixture/KeireManaged"
+cp "$ROOT/Scripts/Unix/build-managed.sh" "$managed_fixture/Scripts/Unix/build-managed.sh"
+printf '%s\n' marker-one > "$managed_fixture/KeireManaged/RuntimeApi.cs"
+cat > "$managed_fixture/Build/Dependencies/dotnet-sdk/dotnet" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+output=
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output) output="${2:?--output requires a directory}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$output" ]]
+mkdir -p "$output"
+cp "$root/KeireManaged/RuntimeApi.cs" "$output/Keire.Managed.dll"
+printf '%s\n' invoked >> "$root/invocations"
+EOF
+chmod +x "$managed_fixture/Build/Dependencies/dotnet-sdk/dotnet"
+bash "$managed_fixture/Scripts/Unix/build-managed.sh"
+assert_equal "$(cat "$managed_fixture/Build/Managed/Keire.Managed.dll")" marker-one \
+  'initial managed runtime API build'
+sleep 1
+printf '%s\n' marker-two > "$managed_fixture/KeireManaged/RuntimeApi.cs"
+bash "$managed_fixture/Scripts/Unix/build-managed.sh"
+assert_equal "$(cat "$managed_fixture/Build/Managed/Keire.Managed.dll")" marker-two \
+  'managed runtime API rebuild after source edit'
+bash "$managed_fixture/Scripts/Unix/build-managed.sh"
+assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 2 \
+  'incremental managed runtime API launcher invocation count'
+sleep 1
+mkdir "$managed_fixture/KeireManaged/Gameplay"
+printf '%s\n' extra > "$managed_fixture/KeireManaged/Gameplay/Extra.cs"
+bash "$managed_fixture/Scripts/Unix/build-managed.sh"
+sleep 1
+rm "$managed_fixture/KeireManaged/Gameplay/Extra.cs"
+rmdir "$managed_fixture/KeireManaged/Gameplay"
+bash "$managed_fixture/Scripts/Unix/build-managed.sh"
+assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 4 \
+  'managed runtime API source inventory invocation count'
+rm -rf "$managed_fixture"
+trap - EXIT
 launcher_fixture="$(mktemp -d)"
 mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux"
 cp "$ROOT/Scripts/project.sh" "$launcher_fixture/Scripts/project.sh"
@@ -170,6 +223,33 @@ assert_false grep -q 'imgui.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_false grep -q 'AddDearImGuiSources' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireClient/premake5.lua"
 assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireTests/premake5.lua"
+assert_true grep -q 'AddKeireManagedRuntimeDependency()' "$ROOT/KeireClient/premake5.lua"
+assert_true grep -q 'AddKeireManagedRuntimeDependency()' "$ROOT/KeireTests/premake5.lua"
+assert_true grep -q 'dependson { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'links { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'kind "StaticLib"' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'kind "Utility"' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'ManagedBuildAnchor.cpp' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'ProjectConfig.PROJECT_NAMESPACE .. "ManagedRuntimeApi"' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'addManagedBuildInput(managedSourceRoot)' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'os.matchdirs' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'buildinputs(managedBuildInputs)' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'buildoutputs { managedOutput }' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'linkbuildoutputs "Off"' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -F -q -- '-newer "$assembly"' "$ROOT/Scripts/Unix/build-managed.sh"
+assert_true test -f "$ROOT/Scripts/Premake/ManagedBuildAnchor.cpp"
+assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Mac/build.sh"
+assert_true grep -q 'KeireManaged Scripts/Premake' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q -- "-name '*.csproj'" "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -F -q 'dependson { AssetWorkerTarget }' "$ROOT/AssetTool/premake5.lua"
+assert_true grep -F -q 'filter { "system:linux"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -F -q '"-Wl,-rpath,$ORIGIN"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -F -q 'filter { "system:macosx"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -F -q '"-Wl,-rpath,@loader_path"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_false grep -F -q '"system:linux or macosx"' "$ROOT/KeireAssetWorker/premake5.lua"
+assert_true grep -F -q -- '--install-name-dir=@rpath' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true test -z "$(find "$ROOT/KeireCore/Source" "$ROOT/KeireClient/Source" "$ROOT/KeireHub/Source" "$ROOT/KeireTests/Source" "$ROOT/AssetTool/Source" "$ROOT/KeireRuntime/Source" -type f -name '*.h' -print -quit)"
 assert_true test -f "$ROOT/KeireCore/Include/Keire/Assets/Asset.h"
 assert_true test -f "$ROOT/KeireCore/Source/Assets/AssetSystem.cpp"
@@ -217,14 +297,51 @@ assert_true grep -q 'CreateSystemTray' "$ROOT/KeireHub/Source/HubApplication.cpp
 assert_true grep -q 'Show Hub' "$ROOT/KeireHub/Source/HubApplication.cpp"
 assert_true grep -q '"schemaVersion": 2' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true grep -q '"components"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
-assert_equal "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f -name base.fbx | wc -l | tr -d ' ')" 1 'organized monster source count'
-assert_equal "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f -name '*.fbx' -exec sha256sum {} + | awk '{print $1}' | sort | uniq -d | wc -l | tr -d ' ')" 0 'duplicate FBX content'
-assert_true grep -q 'c506e2a8-62f9-44f0-8831-b66755cc9b9b' "$ROOT/Samples/KeireSandbox/Assets/Meshes/Monster/base.fbx.keiremeta"
-assert_false grep -R -q '070fedd0-9e84-435e-83ae-21b4530159f3' "$ROOT/Samples/KeireSandbox/Assets"
+assert_true test -z "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f \
+  \( -name '*.tmp.*.keiremeta' -o -name '*~.keiremeta' \) -print -quit)"
+sample_audio="$ROOT/Samples/KeireSandbox/Assets/Audio"
+assert_true test -f "$sample_audio/InterfaceConfirm.wav"
+assert_true test -f "$sample_audio/SpatialEmitter.wav"
+assert_equal "$(find "$sample_audio" -maxdepth 1 -type f -name '*.wav' | wc -l | tr -d ' ')" 2 \
+  'repository-owned sample audio sources'
+assert_true grep -a -q '^RIFF....WAVE' "$sample_audio/InterfaceConfirm.wav"
+assert_true grep -a -q '^RIFF....WAVE' "$sample_audio/SpatialEmitter.wav"
+assert_true grep -q 'f42ee69b-dc11-4212-ae66-17bff0be7945' "$sample_audio/InterfaceConfirm.wav.keiremeta"
+assert_true grep -q 'd09e3f28-06e6-49eb-a714-0261348f5eee' "$sample_audio/SpatialEmitter.wav.keiremeta"
+assert_true test -z "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f \
+  \( -name '*.mp4' -o -name '*.mkv' -o -name '*.webm' \) -print -quit)"
+humanoid_model="$ROOT/Samples/KeireSandbox/Assets/Meshes/T-Pose.fbx"
+humanoid_animation="$ROOT/Samples/KeireSandbox/Assets/Meshes/Idle.fbx"
+assert_true test -f "$humanoid_model"
+assert_true test -f "$humanoid_animation"
+duplicate_fbx_hashes="$(
+  while IFS= read -r -d '' source; do
+    sha256_file "$source"
+  done < <(find "$ROOT/Samples/KeireSandbox/Assets" -type f -name '*.fbx' -print0) |
+    sort | uniq -d | wc -l | tr -d ' '
+)"
+assert_equal "$duplicate_fbx_hashes" 0 'duplicate FBX content'
+assert_true grep -q '51cd8956-a6c4-4d63-b990-7d86829f92ff' "$humanoid_model.keiremeta"
+assert_true grep -q '"contentType": "model"' "$humanoid_model.keiremeta"
+assert_true grep -q 'c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08' "$humanoid_model.keiremeta"
+assert_true grep -q '78c8dbe3-2951-54b9-b34e-9221c49c506b' "$humanoid_model.keiremeta"
+assert_true grep -q '"mesh": "51cd8956-a6c4-4d63-b990-7d86829f92ff"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
+assert_true grep -q '"skeleton": "c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
+assert_true grep -q '"skinnedMesh": "78c8dbe3-2951-54b9-b34e-9221c49c506b"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
+assert_true grep -q '51116f66-15b6-4dee-acdf-653223e2f491' "$humanoid_animation.keiremeta"
+assert_true grep -q '"contentType": "animation"' "$humanoid_animation.keiremeta"
+assert_true grep -q '803c0e5b-d937-521c-821e-92de5a986179' "$humanoid_animation.keiremeta"
+assert_true grep -q '"clip": "803c0e5b-d937-521c-821e-92de5a986179"' "$ROOT/Samples/KeireSandbox/Assets/NewAnimatorController.keireanimgraph"
+assert_true grep -q '9ec01b6f-4862-443e-8cfd-efa2f23ef04a' "$ROOT/Samples/KeireSandbox/Assets/NewAnimatorController.keireanimgraph.keiremeta"
+assert_true grep -q '"graph": "9ec01b6f-4862-443e-8cfd-efa2f23ef04a"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
+assert_false grep -E -q 'c506e2a8-62f9-44f0-8831-b66755cc9b9b|070fedd0-9e84-435e-83ae-21b4530159f3' \
+  "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_false grep -R -E '#include[[:space:]]*[<"]imgui|ImGui::|ImGui[A-Z]' "$ROOT/KeireClient"
 assert_false grep -R -E 'SDL3/|nlohmann/json|imgui|entt/|glm/|assimp/|stb_image' "$ROOT/KeireCore/Include/Keire"
+assert_true grep -q 'client_build_args=.*--target.*CLIENT_TARGET' "$ROOT/Scripts/Unix/run-target.sh"
 assert_true grep -q 'class KEIRE_API UiWorkspace' "$ROOT/KeireCore/Include/Keire/UiWorkspace.h"
 assert_true grep -q 'BuildFactoryLayout' "$ROOT/KeireClient/Source/ClientApplication.cpp"
+assert_true grep -q -- '--worker-timeout-seconds' "$ROOT/AssetTool/Source/Main.cpp"
 for exported_type in \
   Application ApplicationCommandLineArguments CommandLineError EventView EventSubscription EventBus Layer LayerStack \
   LoggerHandle Log Time UiError UiScope UiWindowScope UiChildScope UiMenuBarScope UiMenuScope UiTabBarScope \

@@ -61,6 +61,27 @@ namespace KeireEditor
                                       const std::function<void(Keire::VfxModuleDefinition&)>& operation);
         [[nodiscard]] bool RemoveModule(Keire::AssetId module);
         [[nodiscard]] bool MoveModule(Keire::AssetId module, std::size_t destination);
+        [[nodiscard]] bool AddSystem(Keire::VfxGraphSystem system);
+        [[nodiscard]] bool EditSystem(Keire::AssetId system,
+                                      const std::function<void(Keire::VfxGraphSystem&)>& operation);
+        [[nodiscard]] bool RemoveSystem(Keire::AssetId system);
+        [[nodiscard]] bool AddNode(Keire::AssetId system, Keire::VfxGraphNode node);
+        [[nodiscard]] bool EditNode(Keire::AssetId system, Keire::AssetId node,
+                                    const std::function<void(Keire::VfxGraphNode&)>& operation);
+        [[nodiscard]] bool RemoveNode(Keire::AssetId system, Keire::AssetId node);
+        [[nodiscard]] bool AddPin(Keire::AssetId system, Keire::AssetId node, Keire::VfxGraphPin pin);
+        [[nodiscard]] bool EditPin(Keire::AssetId system, Keire::AssetId node, Keire::AssetId pin,
+                                   const std::function<void(Keire::VfxGraphPin&)>& operation);
+        [[nodiscard]] bool RemovePin(Keire::AssetId system, Keire::AssetId node, Keire::AssetId pin);
+        [[nodiscard]] bool AddConnection(Keire::AssetId system, Keire::VfxGraphConnection connection);
+        [[nodiscard]] bool EditConnection(Keire::AssetId system, Keire::AssetId connection,
+                                          const std::function<void(Keire::VfxGraphConnection&)>& operation);
+        [[nodiscard]] bool RemoveConnection(Keire::AssetId system, Keire::AssetId connection);
+        [[nodiscard]] bool AddBlackboardParameter(Keire::VfxBlackboardParameter parameter);
+        [[nodiscard]] bool
+        EditBlackboardParameter(Keire::AssetId parameter,
+                                const std::function<void(Keire::VfxBlackboardParameter&)>& operation);
+        [[nodiscard]] bool RemoveBlackboardParameter(Keire::AssetId parameter);
 
       private:
         Host m_Host;

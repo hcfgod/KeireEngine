@@ -20,6 +20,8 @@
 
 namespace Keire
 {
+    struct AudioMixerDefinition;
+
     enum class AudioMode : std::uint8_t
     {
         Disabled,
@@ -106,6 +108,19 @@ namespace Keire
         std::uint64_t m_Value = 0;
     };
 
+    class KEIRE_API AudioMixerRoutingId final
+    {
+      public:
+        constexpr AudioMixerRoutingId() noexcept = default;
+        [[nodiscard]] constexpr explicit operator bool() const noexcept { return m_Value != 0; }
+        [[nodiscard]] constexpr auto operator<=>(const AudioMixerRoutingId&) const noexcept = default;
+
+      private:
+        friend class AudioSystem;
+        explicit constexpr AudioMixerRoutingId(const std::uint64_t value) noexcept : m_Value(value) {}
+        std::uint64_t m_Value = 0;
+    };
+
     struct AudioClipData
     {
         std::uint32_t SampleRate = 48000;
@@ -135,6 +150,7 @@ namespace Keire
         AssetId Mixer;
         AssetId BusId;
         Curve1D Attenuation = Curve1D::Constant(1.0F);
+        AudioMixerRoutingId MixerRouting;
     };
 
     using AudioPlaybackRequest = AudioVoiceSpecification;
@@ -157,6 +173,9 @@ namespace Keire
         bool Playing = false;
         bool Paused = false;
         bool Virtualized = false;
+        AssetId Mixer;
+        AssetId BusId;
+        AudioMixerRoutingId MixerRouting;
     };
 
     struct AudioMixerSnapshot
@@ -212,6 +231,11 @@ namespace Keire
         [[nodiscard]] bool Pause(AudioVoiceId voice, bool paused = true);
         [[nodiscard]] bool Seek(AudioVoiceId voice, std::uint64_t frame);
         [[nodiscard]] bool SetVoice(AudioVoiceId voice, AudioPlaybackRequest request);
+        void SubmitMixer(AssetId mixer, const AudioMixerDefinition& definition);
+        [[nodiscard]] bool RemoveMixer(AssetId mixer);
+        [[nodiscard]] AudioMixerRoutingId RegisterMixer(AssetId mixer, const AudioMixerDefinition& definition);
+        [[nodiscard]] bool UpdateMixer(AudioMixerRoutingId routing, const AudioMixerDefinition& definition);
+        [[nodiscard]] bool UnregisterMixer(AudioMixerRoutingId routing);
         [[nodiscard]] std::size_t StopAll(std::string_view bus = {});
         void SetBusGain(std::string bus, float gain);
         [[nodiscard]] float BusGain(std::string_view bus) const;

@@ -205,7 +205,7 @@ namespace Keire
         AssetImportResult result;
         bool failed = false;
         std::size_t completed = 0;
-        std::vector<std::pair<AssetId, std::uint32_t>> metadataUpgrades;
+        std::vector<std::pair<AssetSourceRecord, std::uint32_t>> metadataUpgrades;
         for (auto record : records)
         {
             ThrowIfOperationCancelled(cancellation);
@@ -262,7 +262,7 @@ namespace Keire
                 m_Impl->StoreCookInput(record, std::move(imported));
                 if (const auto* importer = m_Impl->FindImporter(record);
                     importer && importer->Version > record.ImporterVersion)
-                    metadataUpgrades.emplace_back(record.Id, importer->Version);
+                    metadataUpgrades.emplace_back(record, importer->Version);
             }
             catch (const std::exception& error)
             {
@@ -295,15 +295,23 @@ namespace Keire
                 result.CatalogPath = previous;
             return result;
         }
-        for (const auto& [id, version] : metadataUpgrades)
+        for (const auto& [previous, version] : metadataUpgrades)
         {
-            const auto record = Find(id);
+            const auto record = Find(previous.Id);
             if (!record || !UpgradeMetadataImporterVersion(record->MetadataPath, record->Importer, version))
                 continue;
             auto upgraded = *record;
             upgraded.ImporterVersion = version;
             const auto metadataBytes = ReadSource(upgraded.MetadataPath, 1024U * 1024U);
             upgraded.MetadataDigest = Detail::DigestToString(Detail::Sha256(metadataBytes));
+            auto imported = m_Impl->TakeCookInput(previous);
+            if (!imported)
+                throw std::logic_error(
+                    "A successfully imported asset lost its prepared output during metadata upgrade.");
+            const auto object = m_Impl->ObjectPath(upgraded, m_Impl->ImportDigest(upgraded, *imported));
+            if (!std::filesystem::exists(object))
+                Detail::WriteFileAtomically(object, imported->Bytes);
+            m_Impl->StoreCookInput(upgraded, std::move(*imported));
             m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(m_Impl->SourceRoot / record->RelativePath,
                                                                              record->MetadataPath));
         }

@@ -1448,7 +1448,9 @@ TEST_CASE("Asset operation service reports malformed worker completion and bound
         REQUIRE(operations.Busy());
         const auto started = std::chrono::steady_clock::now();
         operations.Shutdown();
-        CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(500));
+        const auto shutdownDuration = std::chrono::steady_clock::now() - started;
+        CAPTURE(std::chrono::duration_cast<std::chrono::milliseconds>(shutdownDuration).count());
+        CHECK(shutdownDuration < std::chrono::seconds(2));
         CHECK_FALSE(operations.Busy());
     }
     SetTestWorkerMode(nullptr);

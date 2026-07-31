@@ -20,6 +20,7 @@
 #include <memory>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -28,6 +29,8 @@ namespace
     {
         Initialize,
         Reset,
+        Kill,
+        Transform,
         Simulate,
         Spawn,
         Finalize,
@@ -57,6 +60,10 @@ namespace
             KEIRE_SELECT_VFX_SHADER(Initialize);
         case BuiltinVfxShaderStage::Reset:
             KEIRE_SELECT_VFX_SHADER(Reset);
+        case BuiltinVfxShaderStage::Kill:
+            KEIRE_SELECT_VFX_SHADER(Kill);
+        case BuiltinVfxShaderStage::Transform:
+            KEIRE_SELECT_VFX_SHADER(Transform);
         case BuiltinVfxShaderStage::Simulate:
             KEIRE_SELECT_VFX_SHADER(Simulate);
         case BuiltinVfxShaderStage::Spawn:
@@ -256,8 +263,8 @@ namespace Keire::RenderBackend
     bool RenderSharedState::EnsureGpuVfxPipelines()
     {
         if (VfxPipelinesAttempted)
-            return VfxInitializePipeline && VfxResetPipeline && VfxSimulatePipeline && VfxSpawnPipeline &&
-                   VfxFinalizePipeline;
+            return VfxInitializePipeline && VfxResetPipeline && VfxKillPipeline && VfxTransformPipeline &&
+                   VfxSimulatePipeline && VfxSpawnPipeline && VfxFinalizePipeline;
         VfxPipelinesAttempted = true;
 
         const auto supported = SDL_GetGPUShaderFormats(Device);
@@ -286,11 +293,13 @@ namespace Keire::RenderBackend
         };
         VfxInitializePipeline = create(BuiltinVfxShaderStage::Initialize, "CSInitialize", 256);
         VfxResetPipeline = create(BuiltinVfxShaderStage::Reset, "CSReset", 1);
+        VfxKillPipeline = create(BuiltinVfxShaderStage::Kill, "CSKill", 256);
+        VfxTransformPipeline = create(BuiltinVfxShaderStage::Transform, "CSTransform", 256);
         VfxSimulatePipeline = create(BuiltinVfxShaderStage::Simulate, "CSSimulate", 256);
         VfxSpawnPipeline = create(BuiltinVfxShaderStage::Spawn, "CSSpawn", 256);
         VfxFinalizePipeline = create(BuiltinVfxShaderStage::Finalize, "CSFinalize", 1);
-        return VfxInitializePipeline && VfxResetPipeline && VfxSimulatePipeline && VfxSpawnPipeline &&
-               VfxFinalizePipeline;
+        return VfxInitializePipeline && VfxResetPipeline && VfxKillPipeline && VfxTransformPipeline &&
+               VfxSimulatePipeline && VfxSpawnPipeline && VfxFinalizePipeline;
     }
 
     void RenderSharedState::ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept
@@ -354,7 +363,6 @@ namespace Keire::RenderBackend
         }
         if (resources.LastPreparedFrame == Statistics.Frame)
             return;
-        resources.LastPreparedFrame = Statistics.Frame;
 
         struct alignas(16) Dispatch final
         {
@@ -371,8 +379,11 @@ namespace Keire::RenderBackend
             std::array<float, 4> ColorStart{};
             std::array<float, 4> ColorEnd{};
             std::array<float, 4> Size{};
+            std::array<float, 4> PreviousPosition{};
+            std::array<float, 4> PreviousRotation{};
             std::array<std::uint32_t, 4> Identity{};
         };
+        static_assert(sizeof(Dispatch) == 208);
         Dispatch dispatch;
         dispatch.Capacity = resources.Capacity;
         dispatch.DeltaSeconds = std::clamp(snapshot.DeltaSeconds(), 0.0F, 0.1F);
@@ -384,38 +395,93 @@ namespace Keire::RenderBackend
             SDL_GPUStorageBufferReadWriteBinding{resources.Counters, false},
             SDL_GPUStorageBufferReadWriteBinding{resources.IndirectArguments, false},
         };
-        auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
-                                             static_cast<std::uint32_t>(writeBindings.size()));
-        if (!pass)
-            throw std::runtime_error("SDL_BeginGPUComputePass(VFX) failed: " + LastSdlError());
+        const auto dispatchCompute = [&](SDL_GPUComputePipeline* pipeline, const std::uint32_t groupCount)
+        {
+            auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
+                                                 static_cast<std::uint32_t>(writeBindings.size()));
+            if (!pass)
+                throw std::runtime_error("SDL_BeginGPUComputePass(VFX) failed: " + LastSdlError());
+            SDL_BindGPUComputePipeline(pass, pipeline);
+            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+            SDL_DispatchGPUCompute(pass, groupCount, 1, 1);
+            SDL_EndGPUComputePass(pass);
+            ++Statistics.VfxComputeDispatches;
+        };
 
         const auto resetWorld = resources.ResetRevision != snapshot.ResetRevision();
+        auto nextEmitters = resetWorld ? decltype(resources.Emitters){} : resources.Emitters;
         if (resetWorld)
-        {
-            resources.SpawnSequences.clear();
-            resources.ResetRevision = snapshot.ResetRevision();
-            SDL_BindGPUComputePipeline(pass, VfxInitializePipeline);
-            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
-            SDL_DispatchGPUCompute(pass, (resources.Capacity + 255U) / 256U, 1, 1);
-            ++Statistics.VfxComputeDispatches;
-        }
-        SDL_BindGPUComputePipeline(pass, VfxResetPipeline);
-        SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
-        SDL_DispatchGPUCompute(pass, 1, 1, 1);
-        ++Statistics.VfxComputeDispatches;
+            dispatchCompute(VfxInitializePipeline, (resources.Capacity + 255U) / 256U);
 
-        SDL_BindGPUComputePipeline(pass, VfxSimulatePipeline);
-        SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
-        SDL_DispatchGPUCompute(pass, (resources.Capacity + 255U) / 256U, 1, 1);
-        ++Statistics.VfxComputeDispatches;
+        std::unordered_set<std::uint64_t> activeEmitterKeys;
+        activeEmitterKeys.reserve(snapshot.GpuEmitters().size());
+        for (const auto& emitter : snapshot.GpuEmitters())
+        {
+            activeEmitterKeys.emplace((static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) |
+                                      emitter.Handle.Generation());
+        }
+        std::vector<std::uint64_t> retiredEmitterKeys;
+        retiredEmitterKeys.reserve(nextEmitters.size());
+        for (const auto& [key, state] : nextEmitters)
+        {
+            (void)state;
+            if (!activeEmitterKeys.contains(key))
+                retiredEmitterKeys.push_back(key);
+        }
+        for (const auto key : retiredEmitterKeys)
+        {
+            dispatch.Identity = {static_cast<std::uint32_t>(key >> 32U), static_cast<std::uint32_t>(key), 0U, 0U};
+            dispatchCompute(VfxKillPipeline, (resources.Capacity + 255U) / 256U);
+            nextEmitters.erase(key);
+        }
+        for (const auto& emitter : snapshot.GpuEmitters())
+        {
+            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+            const auto previous = nextEmitters.find(key);
+            if (previous == nextEmitters.end() || previous->second.SimulationRevision == emitter.SimulationRevision)
+            {
+                continue;
+            }
+            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
+            dispatchCompute(VfxKillPipeline, (resources.Capacity + 255U) / 256U);
+            nextEmitters.erase(previous);
+        }
+        for (const auto& emitter : snapshot.GpuEmitters())
+        {
+            if (emitter.Space != VfxSimulationSpace::Local)
+                continue;
+            const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
+            const auto previous = nextEmitters.find(key);
+            if (previous == nextEmitters.end() || previous->second.Space != VfxSimulationSpace::Local ||
+                (previous->second.Position == emitter.Position && previous->second.Rotation == emitter.Rotation))
+            {
+                continue;
+            }
+            dispatch.Position = {emitter.Position.X, emitter.Position.Y, emitter.Position.Z, 0.0F};
+            dispatch.Rotation = {emitter.Rotation.X, emitter.Rotation.Y, emitter.Rotation.Z, emitter.Rotation.W};
+            dispatch.PreviousPosition = {previous->second.Position.X, previous->second.Position.Y,
+                                         previous->second.Position.Z, 0.0F};
+            dispatch.PreviousRotation = {previous->second.Rotation.X, previous->second.Rotation.Y,
+                                         previous->second.Rotation.Z, previous->second.Rotation.W};
+            dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(), 0U, 0U};
+            dispatchCompute(VfxTransformPipeline, (resources.Capacity + 255U) / 256U);
+        }
+
+        dispatchCompute(VfxResetPipeline, 1);
+        dispatchCompute(VfxSimulatePipeline, (resources.Capacity + 255U) / 256U);
 
         for (const auto& emitter : snapshot.GpuEmitters())
         {
             const auto key = (static_cast<std::uint64_t>(emitter.Handle.Index()) << 32U) | emitter.Handle.Generation();
-            auto& previous = resources.SpawnSequences[key];
-            const auto requested =
-                emitter.SpawnSequence >= previous ? emitter.SpawnSequence - previous : emitter.SpawnSequence;
-            previous = emitter.SpawnSequence;
+            auto& state = nextEmitters[key];
+            const auto requested = emitter.SpawnSequence >= state.SpawnSequence
+                                       ? emitter.SpawnSequence - state.SpawnSequence
+                                       : emitter.SpawnSequence;
+            state.SpawnSequence = emitter.SpawnSequence;
+            state.SimulationRevision = emitter.SimulationRevision;
+            state.Position = emitter.Position;
+            state.Rotation = emitter.Rotation;
+            state.Space = emitter.Space;
             if (requested == 0)
                 continue;
             dispatch.SpawnCount = static_cast<std::uint32_t>(std::min<std::uint64_t>(requested, resources.Capacity));
@@ -434,21 +500,18 @@ namespace Keire::RenderBackend
                                    emitter.ColorStart.Alpha};
             dispatch.ColorEnd = {emitter.ColorEnd.Red, emitter.ColorEnd.Green, emitter.ColorEnd.Blue,
                                  emitter.ColorEnd.Alpha};
-            dispatch.Size = {emitter.SizeStart, emitter.SizeEnd, 0.0F, 0.0F};
+            dispatch.Size = {emitter.SizeStart, emitter.SizeEnd,
+                             std::bit_cast<float>(static_cast<std::uint32_t>(emitter.Space)), 0.0F};
             dispatch.Identity = {emitter.Handle.Index(), emitter.Handle.Generation(),
                                  static_cast<std::uint32_t>(emitter.SpawnSequence),
                                  static_cast<std::uint32_t>(emitter.Renderer)};
-            SDL_BindGPUComputePipeline(pass, VfxSpawnPipeline);
-            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
-            SDL_DispatchGPUCompute(pass, (dispatch.SpawnCount + 255U) / 256U, 1, 1);
-            ++Statistics.VfxComputeDispatches;
+            dispatchCompute(VfxSpawnPipeline, (dispatch.SpawnCount + 255U) / 256U);
         }
 
-        SDL_BindGPUComputePipeline(pass, VfxFinalizePipeline);
-        SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
-        SDL_DispatchGPUCompute(pass, 1, 1, 1);
-        ++Statistics.VfxComputeDispatches;
-        SDL_EndGPUComputePass(pass);
+        dispatchCompute(VfxFinalizePipeline, 1);
+        resources.Emitters = std::move(nextEmitters);
+        resources.ResetRevision = snapshot.ResetRevision();
+        resources.LastPreparedFrame = Statistics.Frame;
         Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
         Statistics.VfxGpuBufferBytes =
             static_cast<std::uint64_t>(resources.Capacity) * (128U + sizeof(std::uint32_t) * 2U) +
@@ -2032,6 +2095,16 @@ namespace Keire::RenderBackend
             for (auto* buffer : FrameTransientBuffers)
                 SDL_ReleaseGPUBuffer(Device, buffer);
             FrameTransientBuffers.clear();
+            // A canceled command buffer invalidates the emitter sequencing recorded for every world it touched.
+            for (auto& [worldId, resources] : GpuVfxWorlds)
+            {
+                (void)worldId;
+                if (resources.LastPreparedFrame != Statistics.Frame)
+                    continue;
+                resources.Emitters.clear();
+                resources.ResetRevision = 0;
+                resources.LastPreparedFrame = 0;
+            }
             FrameActive = false;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
@@ -2194,6 +2267,10 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUComputePipeline(Device, VfxSpawnPipeline);
         if (VfxSimulatePipeline)
             SDL_ReleaseGPUComputePipeline(Device, VfxSimulatePipeline);
+        if (VfxTransformPipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxTransformPipeline);
+        if (VfxKillPipeline)
+            SDL_ReleaseGPUComputePipeline(Device, VfxKillPipeline);
         if (VfxResetPipeline)
             SDL_ReleaseGPUComputePipeline(Device, VfxResetPipeline);
         if (VfxInitializePipeline)
@@ -2201,6 +2278,8 @@ namespace Keire::RenderBackend
         VfxFinalizePipeline = nullptr;
         VfxSpawnPipeline = nullptr;
         VfxSimulatePipeline = nullptr;
+        VfxTransformPipeline = nullptr;
+        VfxKillPipeline = nullptr;
         VfxResetPipeline = nullptr;
         VfxInitializePipeline = nullptr;
         VfxPipelinesAttempted = false;

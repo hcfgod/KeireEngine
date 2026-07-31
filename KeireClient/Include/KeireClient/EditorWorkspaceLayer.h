@@ -317,6 +317,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> VfxEffectDatabase() const noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> VfxEffectAssetRecords() const noexcept override;
     [[nodiscard]] std::string_view VfxEffectPreviewDiagnostic() const noexcept override;
+    [[nodiscard]] KeireEditor::VfxEffectPreviewStatus VfxEffectPreviewState() const noexcept override;
     void ActivateVfxEffectHistory() noexcept override;
     void SaveVfxEffectDocument() override;
     void DiscardVfxEffectDocument() override;
@@ -324,6 +325,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void UndoVfxEffectEdit() override;
     void RedoVfxEffectEdit() override;
     void RevealVfxEffectAsset(Keire::AssetId asset) override;
+    void RestartVfxEffectPreview() override;
+    void SetVfxEffectPreviewPaused(bool paused) noexcept override;
+    void SetVfxEffectPreviewAutoRestart(bool enabled) noexcept override;
+    void SetVfxEffectPreviewBackend(Keire::VfxBackend backend) override;
+    void SetVfxEffectPreviewSpeed(float speed) override;
     void StopVfxEffectPreview() noexcept override;
     void ReportVfxEffectError(std::string message) noexcept override;
     [[nodiscard]] bool CreateCSharpScript(std::string_view name);
@@ -355,6 +361,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveVfxEffect();
     void PersistVfxEffect(Keire::AssetId asset, std::span<const std::byte> bytes);
     void PreviewVfxEffect(Keire::AssetId asset, const Keire::VfxEffectDefinition& definition);
+    void EnsureEditorVfxPreviewWorld(std::uint32_t minimumParticleCapacity);
+    void ResetEditorVfxPreviewWorld() noexcept;
+    void SynchronizeEditModeVfxPreviews();
+    void StopEditModeVfxPreviews() noexcept;
     void OpenInputActions(Keire::AssetId asset);
     void SaveInputActions();
     void RecordInputUndo(std::string_view name = "Edit Input Actions");
@@ -533,6 +543,28 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::AssetId m_VfxEffectPreviewAsset;
     Keire::Ref<Keire::VfxWorld> m_VfxEffectPreviewWorld;
     Keire::VfxHandle m_VfxEffectPreviewHandle;
+    Keire::Ref<const Keire::VfxEffectAsset> m_VfxEffectPreviewEffect;
+    Keire::EntityId m_VfxEffectPreviewRoutedEntity;
+    Keire::Vector3 m_VfxEffectPreviewPosition;
+    Keire::Quaternion m_VfxEffectPreviewRotation;
+    std::uint32_t m_VfxEffectPreviewSeedOffset = 0;
+    Keire::VfxHandle m_VfxEffectPreviewRestartHandle;
+    Keire::Vector3 m_VfxEffectPreviewRestartPosition;
+    Keire::Quaternion m_VfxEffectPreviewRestartRotation;
+    bool m_VfxEffectPreviewRestartTransformInitialized = false;
+    struct EditModeVfxPreviewState
+    {
+        Keire::AssetId Effect;
+        Keire::AssetHandle<Keire::VfxEffectAsset> EffectHandle;
+        Keire::VfxHandle Handle;
+        std::uint64_t Revision = 0;
+        std::uint32_t SeedOffset = 0;
+        Keire::Vector3 RestartPosition;
+        Keire::Quaternion RestartRotation;
+        bool RestartTransformInitialized = false;
+    };
+    std::unordered_map<Keire::EntityId, EditModeVfxPreviewState> m_EditModeVfxPreviews;
+    Keire::WeakRef<Keire::Scene> m_EditModeVfxPreviewScene;
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ManagedDataUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
@@ -545,6 +577,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::uint64_t m_VfxEffectDocumentRevision = 0;
     std::uint64_t m_VfxEffectPreviewRevision = 0;
     std::uint32_t m_VfxEffectPreviewCapacity = 0;
+    float m_VfxEffectPreviewSpeed = 1.0F;
+    Keire::VfxBackend m_VfxEffectPreviewBackend = Keire::VfxBackend::Cpu;
     double m_AssetPollSeconds = 0.0;
     double m_ManagedBuildDebounceSeconds = -1.0;
     std::vector<std::pair<Keire::EntityId, Keire::AssetId>> m_PendingScriptAttachments;
@@ -554,6 +588,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_InputForwardToConsole = false;
     bool m_InputRecordReleases = false;
     bool m_PlayFaultReported = false;
+    bool m_VfxEffectPreviewPaused = false;
+    bool m_VfxEffectPreviewAutoRestart = true;
     bool m_ShowPerformanceOverlay = false;
     bool m_ProfilerPaused = false;
     bool m_ProfilerShowAllManagedCallbacks = false;

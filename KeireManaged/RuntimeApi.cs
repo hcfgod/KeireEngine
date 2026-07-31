@@ -332,21 +332,38 @@ public readonly record struct AudioPlaybackOptions
 
 public readonly record struct AudioSourceHandle(Entity Entity)
 {
-    public bool IsValid => Entity.HasComponent<AudioSourceComponent>();
+    public bool IsValid => Entity.IsValid && Entity.HasComponent<AudioSourceComponent>();
     public AssetReference<AudioClip> Clip
     {
         get => new(NativeRuntime.GetAudioSourceProperties(Entity).Clip);
-        set => NativeRuntime.SetAudioSourceClip(Entity, value.Id);
+        set
+        {
+            if (!IsValid)
+                throw new InvalidOperationException("The Audio Source is unavailable.");
+            NativeRuntime.SetAudioSourceClip(Entity, value.Id);
+        }
     }
     public float Volume
     {
         get => NativeRuntime.GetAudioSourceProperties(Entity).Gain;
-        set => NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Gain, value);
+        set
+        {
+            if (!float.IsFinite(value) || value < 0.0f || value > 16.0f)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    "Audio Source volume must be between zero and sixteen.");
+            NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Gain, value);
+        }
     }
     public float Pitch
     {
         get => NativeRuntime.GetAudioSourceProperties(Entity).Pitch;
-        set => NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Pitch, value);
+        set
+        {
+            if (!float.IsFinite(value) || value <= 0.01f || value > 8.0f)
+                throw new ArgumentOutOfRangeException(nameof(value),
+                    "Audio Source pitch must be greater than 0.01 and at most eight.");
+            NativeRuntime.SetAudioSourceScalar(Entity, AudioSourceScalarProperty.Pitch, value);
+        }
     }
     public bool Loop
     {
@@ -365,7 +382,11 @@ public readonly record struct AudioSourceHandle(Entity Entity)
     public float Time
     {
         get => Status.Time;
-        set => Seek(value);
+        set
+        {
+            if (!Seek(value))
+                throw new InvalidOperationException("The Audio Source seek was rejected.");
+        }
     }
     public float Duration => Status.Duration;
     public bool Play() => Audio.Play(Entity);
@@ -400,8 +421,8 @@ public static class Audio
             throw new ArgumentException("Audio playback requires a valid entity.", nameof(entity));
         if (!clip.IsValid)
             throw new ArgumentException("Audio playback requires a valid clip.", nameof(clip));
-        if (string.IsNullOrWhiteSpace(options.Bus) || options.Bus.Length > 128)
-            throw new ArgumentException("Audio bus names must contain between 1 and 128 characters.", nameof(options));
+        if (string.IsNullOrWhiteSpace(options.Bus) || System.Text.Encoding.UTF8.GetByteCount(options.Bus) > 128)
+            throw new ArgumentException("Audio bus names must contain between 1 and 128 UTF-8 bytes.", nameof(options));
         if (!float.IsFinite(options.Gain) || options.Gain < 0.0f || options.Gain > 16.0f)
             throw new ArgumentOutOfRangeException(nameof(options), "Audio gain must be between zero and sixteen.");
         if (!float.IsFinite(options.Pitch) || options.Pitch <= 0.01f || options.Pitch > 8.0f)
@@ -436,25 +457,54 @@ public static class Audio
     }
 }
 
+/// <summary>Typed reference target for a cooked <c>.keirevfx</c> asset.</summary>
 [StableAssetTypeId("4b454952-4556-4658-4546-464543540001")]
 public sealed class VfxEffect;
 
+/// <summary>
+/// Entity-scoped control surface for a scene VFX Emitter.
+/// </summary>
+/// <remarks>
+/// The managed handle identifies an entity, not a native VFX generation. <see cref="IsAlive"/> can remain false while
+/// the assigned effect loads asynchronously. Native generation safety is provided internally by <c>Keire::VfxHandle</c>.
+/// </remarks>
 public readonly record struct VfxEmitterHandle(Entity Entity)
 {
+    /// <summary>Whether the entity still exists and has a VFX Emitter component.</summary>
     public bool IsValid => Entity.IsValid && Entity.HasComponent<VfxEmitterComponent>();
+    /// <summary>Whether the runtime entity currently owns a live native effect instance.</summary>
     public bool IsAlive => IsValid && NativeRuntime.IsVfxAlive(Entity);
+    /// <summary>Pauses this emitter by setting its runtime simulation speed to zero.</summary>
     public bool Pause() => IsValid && NativeRuntime.PauseVfx(Entity, true);
+    /// <summary>Resumes this emitter at simulation speed 1.0.</summary>
     public bool Resume() => IsValid && NativeRuntime.PauseVfx(Entity, false);
+    /// <summary>
+    /// Stops this entity's playback without removing its VFX Emitter component or disturbing other emitters.
+    /// </summary>
     public bool Stop() => IsValid && NativeRuntime.StopVfx(Entity);
+    /// <summary>Assigns <paramref name="effect"/> and replaces only this entity's live instance.</summary>
     public bool Restart(AssetId effect) => IsValid && NativeRuntime.PlayVfx(Entity, effect, true);
+    /// <summary>Assigns <paramref name="effect"/> and replaces only this entity's live instance.</summary>
     public bool Restart(AssetReference<VfxEffect> effect) => Restart(effect.Id);
 }
 
+/// <summary>High-level Play Mode controls for entity-scoped VFX playback.</summary>
 public static class Vfx
 {
+    /// <summary>
+    /// Assigns and requests playback of <paramref name="effect"/> on <paramref name="entity"/>.
+    /// </summary>
+    /// <remarks>
+    /// The request can succeed before asynchronous asset loading creates a live native instance. Poll
+    /// <see cref="VfxEmitterHandle.IsAlive"/> when activation timing matters.
+    /// </remarks>
     public static VfxEmitterHandle Play(Entity entity, AssetReference<VfxEffect> effect, bool restart = false) =>
         Play(entity, effect.Id, restart);
 
+    /// <summary>
+    /// Assigns and requests playback of <paramref name="effect"/> on <paramref name="entity"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException">The entity or effect ID is invalid.</exception>
     public static VfxEmitterHandle Play(Entity entity, AssetId effect, bool restart = false)
     {
         if (!entity.IsValid)
@@ -464,9 +514,13 @@ public static class Vfx
         return NativeRuntime.PlayVfx(entity, effect, restart) ? new VfxEmitterHandle(entity) : default;
     }
 
+    /// <summary>Stops only the entity's runtime effect without removing its VFX Emitter component.</summary>
     public static bool Stop(Entity entity) => entity.IsValid && NativeRuntime.StopVfx(entity);
+    /// <summary>Pauses the entity's runtime effect.</summary>
     public static bool Pause(Entity entity) => entity.IsValid && NativeRuntime.PauseVfx(entity, true);
+    /// <summary>Resumes the entity's runtime effect at simulation speed 1.0.</summary>
     public static bool Resume(Entity entity) => entity.IsValid && NativeRuntime.PauseVfx(entity, false);
+    /// <summary>Reports whether the entity currently owns a live native effect instance.</summary>
     public static bool IsAlive(Entity entity) => entity.IsValid && NativeRuntime.IsVfxAlive(entity);
 }
 

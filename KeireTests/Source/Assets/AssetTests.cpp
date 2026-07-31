@@ -700,6 +700,75 @@ TEST_CASE("Dependency-free importers restore unchanged cached output without rer
     CHECK(importCalls.load() == 1);
 }
 
+TEST_CASE("Cooking restores dependency-free outputs cached by a separate importer process")
+{
+    TemporaryAssetProject project;
+    const auto id = Keire::AssetId::Generate();
+    const auto type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000013");
+    project.Write("Voice.private", "worker-produced audio");
+    project.Write("Voice.private.keiremeta", std::string("{\n") +
+                                                 "  \"schemaVersion\": 1,\n"
+                                                 "  \"id\": \"" +
+                                                 id.ToString() +
+                                                 "\",\n"
+                                                 "  \"type\": \"" +
+                                                 type.ToString() +
+                                                 "\",\n"
+                                                 "  \"importer\": \"Test.PrivateWorker\",\n"
+                                                 "  \"importerVersion\": 1,\n"
+                                                 "  \"dependencies\": [],\n"
+                                                 "  \"subAssets\": []\n"
+                                                 "}\n");
+    Keire::AssetImporterRegistration workerImporter;
+    workerImporter.Name = "Test.PrivateWorker";
+    workerImporter.Version = 2;
+    workerImporter.Type = type;
+    workerImporter.Extensions = {".private"};
+    workerImporter.ContextualImport = [](const Keire::AssetImportContext&, const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    workerImporter.RestoreCachedOutput = [](const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    {
+        auto workerDatabase = Keire::CreateRef<Keire::AssetDatabase>(
+            Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {workerImporter}});
+        const auto imported = workerDatabase->ImportAll();
+        CHECK(imported.Imported == 1);
+        REQUIRE(workerDatabase->Find(id));
+        CHECK(workerDatabase->Find(id)->ImporterVersion == 2);
+    }
+
+    std::atomic_size_t forbiddenImports = 0;
+    std::atomic_size_t restoredOutputs = 0;
+    auto toolImporter = workerImporter;
+    toolImporter.ContextualImport = [&forbiddenImports](const Keire::AssetImportContext&,
+                                                        const std::span<const std::byte>) -> Keire::AssetImportOutput
+    {
+        ++forbiddenImports;
+        throw std::runtime_error("the public tool importer cannot decode this source");
+    };
+    toolImporter.RestoreCachedOutput = [&restoredOutputs](const std::span<const std::byte> bytes)
+    {
+        ++restoredOutputs;
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        return output;
+    };
+    auto toolDatabase = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {std::move(toolImporter)}});
+    const auto cooked = Keire::AssetCooker::Cook(*toolDatabase, {}, project.Root / "CookFromWorkerCache");
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(cooked.CatalogPath));
+    CHECK(forbiddenImports.load() == 0);
+    CHECK(restoredOutputs.load() == 1);
+}
+
 TEST_CASE("Asset record snapshots remain responsive while an import operation is blocked")
 {
     TemporaryAssetProject project;
@@ -826,6 +895,32 @@ TEST_CASE("Strict cooking requires discovered managed types and retains the prev
     CHECK_NOTHROW(Keire::AssetCooker::Validate(cooked.CatalogPath));
     CHECK_FALSE(std::filesystem::exists(output / "last-good.txt"));
 }
+
+#if defined(_WIN32)
+TEST_CASE("Asset cooking bounds transactional paths below the legacy Windows limit")
+{
+    TemporaryAssetProject project;
+    project.Write("Payload.bin", "long publication path");
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    (void)database->ImportAll();
+
+    const auto packName = std::filesystem::path("content-" + std::string(64, '0') + "-0.keirepak");
+    auto output = project.Root / "Cook";
+    constexpr std::size_t desiredFinalPackPath = 230;
+    const auto initialLength = (output / packName).native().size();
+    REQUIRE(initialLength + 1 < desiredFinalPackPath);
+    output /= std::string(desiredFinalPackPath - initialLength - 1, 'p');
+    REQUIRE((output / packName).native().size() == desiredFinalPackPath);
+    CHECK((Keire::Detail::PathWithSuffix(output, ".tmp-" + Keire::AssetId::Generate().ToString()) / packName)
+              .native()
+              .size() >= 260);
+    CHECK((Keire::Detail::PathWithSuffix(output, ".tmp-" + std::string(20, '0')) / packName).native().size() < 260);
+
+    const auto cooked = Keire::AssetCooker::Cook(*database, {}, output);
+    CHECK_NOTHROW(Keire::AssetCooker::Validate(cooked.CatalogPath));
+}
+#endif
 
 TEST_CASE("Asset database preserves metadata identities and produces validated deterministic packs")
 {

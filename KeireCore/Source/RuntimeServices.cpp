@@ -1,5 +1,7 @@
 #include "Keire/Audio/AudioSystem.h"
 
+#include "Keire/Audio/AudioAssets.h"
+
 #include <miniaudio.h>
 
 #include <algorithm>
@@ -69,7 +71,7 @@ namespace Keire
                 specification.Clip->Samples.size() % specification.Clip->Channels != 0 ||
                 !std::ranges::all_of(specification.Clip->Samples,
                                      [](const float value) { return std::isfinite(value); }) ||
-                !std::isfinite(specification.Gain) || specification.Gain < 0.0F ||
+                !std::isfinite(specification.Gain) || specification.Gain < 0.0F || specification.Gain > 16.0F ||
                 !std::isfinite(specification.Pitch) || specification.Pitch <= 0.01F || specification.Pitch > 8.0F ||
                 !Math::IsFinite(specification.Position) || !Math::IsFinite(specification.Velocity) ||
                 !std::isfinite(specification.MinimumDistance) || !std::isfinite(specification.MaximumDistance) ||
@@ -153,6 +155,35 @@ namespace Keire
     class AudioSystem::Impl final
     {
       public:
+        struct MixerRoutingSnapshot final
+        {
+            AssetId MasterBus;
+            std::map<AssetId, float> BusGains;
+            std::map<AssetId, std::string> BusNamesById;
+            std::map<std::string, AssetId, std::less<>> BusIdsByName;
+        };
+
+        struct RegisteredMixer final
+        {
+            AssetId Mixer;
+            MixerRoutingSnapshot Routing;
+        };
+
+        struct MixerRegistrationView final
+        {
+            AssetId Mixer;
+            const MixerRoutingSnapshot* Routing = nullptr;
+        };
+
+        struct ResolvedVoiceBus final
+        {
+            AssetId Mixer;
+            AssetId Bus;
+            std::string_view Name;
+            float Gain = 1.0F;
+            bool Authored = false;
+        };
+
         struct Voice final
         {
             struct Native final
@@ -206,7 +237,73 @@ namespace Keire
                 throw std::logic_error("AudioSystem is closed.");
         }
 
-        [[nodiscard]] float BusGain(const std::string& bus) const noexcept
+        [[nodiscard]] static MixerRoutingSnapshot CompileMixer(const AudioMixerDefinition& definition)
+        {
+            ValidateAudioMixer(definition);
+
+            MixerRoutingSnapshot result;
+            result.MasterBus = definition.MasterBus;
+            std::map<AssetId, const AudioMixerBusDefinition*> buses;
+            std::set<AssetId> soloed;
+            for (const auto& bus : definition.Buses)
+            {
+                buses.emplace(bus.Id, &bus);
+                result.BusNamesById.emplace(bus.Id, bus.Name);
+                result.BusIdsByName.emplace(bus.Name, bus.Id);
+                if (bus.Solo)
+                    soloed.insert(bus.Id);
+            }
+
+            std::set<AssetId> audibleWhenSoloed;
+            for (const auto solo : soloed)
+            {
+                auto current = solo;
+                while (current)
+                {
+                    audibleWhenSoloed.insert(current);
+                    current = buses.at(current)->Parent;
+                }
+            }
+            for (const auto& [id, bus] : buses)
+            {
+                (void)bus;
+                auto current = id;
+                while (current)
+                {
+                    if (soloed.contains(current))
+                    {
+                        audibleWhenSoloed.insert(id);
+                        break;
+                    }
+                    current = buses.at(current)->Parent;
+                }
+            }
+
+            for (const auto& [id, bus] : buses)
+            {
+                auto gain = 1.0;
+                auto current = id;
+                while (current)
+                {
+                    const auto* routedBus = buses.at(current);
+                    if (routedBus->Mute)
+                    {
+                        gain = 0.0F;
+                        break;
+                    }
+                    gain *= routedBus->Gain;
+                    if (!std::isfinite(gain) || gain > std::numeric_limits<float>::max())
+                        throw std::invalid_argument("Audio mixer effective bus gain exceeds the runtime range.");
+                    current = routedBus->Parent;
+                }
+                if (!soloed.empty() && !audibleWhenSoloed.contains(id))
+                    gain = 0.0;
+                result.BusGains.emplace(id, static_cast<float>(gain));
+            }
+            return result;
+        }
+
+        [[nodiscard]] float LegacyBusGain(const std::string_view bus) const noexcept
         {
             const auto master = BusGains.find("Master");
             const auto selected = BusGains.find(bus);
@@ -214,6 +311,68 @@ namespace Keire
             if (bus == "Master")
                 return masterGain;
             return masterGain * (selected == BusGains.end() ? 1.0F : selected->second);
+        }
+
+        [[nodiscard]] MixerRegistrationView
+        FindMixerRegistration(const AudioVoiceSpecification& specification) const noexcept
+        {
+            if (specification.MixerRouting)
+            {
+                const auto registered = MixerRoutings.find(specification.MixerRouting);
+                if (registered == MixerRoutings.end() ||
+                    (specification.Mixer && registered->second.Mixer != specification.Mixer))
+                    return {};
+                return {.Mixer = registered->second.Mixer, .Routing = &registered->second.Routing};
+            }
+            const auto mixer = Mixers.find(specification.Mixer);
+            if (!specification.Mixer || mixer == Mixers.end())
+                return {};
+            return {.Mixer = mixer->first, .Routing = &mixer->second};
+        }
+
+        [[nodiscard]] ResolvedVoiceBus ResolveVoiceBus(const AudioVoiceSpecification& specification) const noexcept
+        {
+            const auto registration = FindMixerRegistration(specification);
+            if (registration.Routing)
+            {
+                const auto& routing = *registration.Routing;
+                auto bus = specification.BusId;
+                if (!bus || !routing.BusGains.contains(bus))
+                {
+                    const auto named = routing.BusIdsByName.find(specification.Bus);
+                    bus = named == routing.BusIdsByName.end() ? routing.MasterBus : named->second;
+                }
+                const auto gain = routing.BusGains.find(bus);
+                const auto name = routing.BusNamesById.find(bus);
+                return {.Mixer = registration.Mixer,
+                        .Bus = bus,
+                        .Name = name == routing.BusNamesById.end() ? std::string_view{} : name->second,
+                        .Gain = gain == routing.BusGains.end() ? 1.0F : gain->second,
+                        .Authored = true};
+            }
+            return {.Name = specification.Bus, .Gain = LegacyBusGain(specification.Bus)};
+        }
+
+        [[nodiscard]] float VoiceBusGain(const AudioVoiceSpecification& specification) const noexcept
+        {
+            const auto resolved = ResolveVoiceBus(specification);
+            if (!resolved.Authored)
+                return resolved.Gain;
+            const auto master = BusGains.find("Master");
+            const auto bus = resolved.Name == "Master" ? BusGains.end() : BusGains.find(resolved.Name);
+            const auto gain = static_cast<double>(resolved.Gain) *
+                              (master == BusGains.end() ? 1.0 : static_cast<double>(master->second)) *
+                              (bus == BusGains.end() ? 1.0 : static_cast<double>(bus->second));
+            return static_cast<float>(std::min(gain, static_cast<double>(std::numeric_limits<float>::max())));
+        }
+
+        [[nodiscard]] float VoiceGain(const AudioVoiceSpecification& specification) const noexcept
+        {
+            if (specification.Gain == 0.0F)
+                return 0.0F;
+            const auto gain = static_cast<double>(specification.Gain) * VoiceBusGain(specification) *
+                              (1.0 - static_cast<double>(specification.Occlusion) * 0.75);
+            return static_cast<float>(std::min(gain, static_cast<double>(std::numeric_limits<float>::max())));
         }
 
         void DestroyVoice(Voice& voice) noexcept
@@ -244,7 +403,12 @@ namespace Keire
             for (auto& [id, voice] : Voices)
             {
                 (void)id;
-                ranked.push_back(&voice);
+                const auto gain = VoiceGain(voice.Specification);
+                voice.Virtualized = voice.Paused || gain <= 0.0F;
+                if (!voice.Virtualized)
+                    ranked.push_back(&voice);
+                else if (voice.Device && voice.Device->SoundOpen)
+                    ma_sound_set_volume(&voice.Device->Sound, 0.0F);
             }
             std::ranges::sort(ranked,
                               [](const Voice* first, const Voice* second)
@@ -259,8 +423,7 @@ namespace Keire
                 voice.Virtualized = index >= MaximumVoices;
                 if (voice.Device && voice.Device->SoundOpen)
                 {
-                    const auto gain =
-                        voice.Virtualized ? 0.0F : voice.Specification.Gain * BusGain(voice.Specification.Bus);
+                    const auto gain = voice.Virtualized ? 0.0F : VoiceGain(voice.Specification);
                     ma_sound_set_volume(&voice.Device->Sound, gain);
                 }
             }
@@ -280,10 +443,7 @@ namespace Keire
                                   specification.Velocity.Z);
             ma_sound_set_min_distance(&voice.Device->Sound, specification.MinimumDistance);
             ma_sound_set_max_distance(&voice.Device->Sound, specification.MaximumDistance);
-            ma_sound_set_volume(&voice.Device->Sound, voice.Virtualized
-                                                          ? 0.0F
-                                                          : specification.Gain * BusGain(specification.Bus) *
-                                                                (1.0F - specification.Occlusion * 0.75F));
+            ma_sound_set_volume(&voice.Device->Sound, voice.Virtualized ? 0.0F : VoiceGain(specification));
         }
 
         RuntimeServiceState State{"AudioSystem"};
@@ -298,6 +458,8 @@ namespace Keire
         std::atomic<std::uint64_t> Revision{0};
         std::map<AudioVoiceId, Voice> Voices;
         AudioListenerState Listener;
+        std::map<AssetId, MixerRoutingSnapshot> Mixers;
+        std::map<AudioMixerRoutingId, RegisteredMixer> MixerRoutings;
         std::map<std::string, float, std::less<>> BusGains{{"Master", 1.0F}};
         std::map<std::string, float, std::less<>> SnapshotStart;
         std::map<std::string, float, std::less<>> SnapshotTarget;
@@ -305,6 +467,7 @@ namespace Keire
         std::chrono::duration<float> SnapshotDuration{};
         std::uint64_t SnapshotRevision = 0;
         std::uint64_t NextVoice = 1;
+        std::uint64_t NextMixerRouting = 1;
         std::uint64_t RenderedFrames = 0;
         std::uint64_t Underruns = 0;
         AudioMeterSnapshot Meters;
@@ -655,6 +818,7 @@ namespace Keire
                 throw std::runtime_error(paused ? "miniaudio voice pause failed." : "miniaudio voice resume failed.");
         }
         runtime.Paused = paused;
+        m_Impl->UpdateVirtualization();
         return true;
     }
 
@@ -698,6 +862,71 @@ namespace Keire
         return true;
     }
 
+    void AudioSystem::SubmitMixer(const AssetId mixer, const AudioMixerDefinition& definition)
+    {
+        m_Impl->RequireOwner("SubmitMixer");
+        if (!mixer)
+            throw std::invalid_argument("Audio mixer asset ID is empty.");
+        auto routing = AudioSystem::Impl::CompileMixer(definition);
+        std::scoped_lock lock(m_Impl->Mutex);
+        m_Impl->Mixers.insert_or_assign(mixer, std::move(routing));
+        m_Impl->UpdateVirtualization();
+    }
+
+    bool AudioSystem::RemoveMixer(const AssetId mixer)
+    {
+        m_Impl->RequireOwner("RemoveMixer");
+        if (!mixer)
+            return false;
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto removed = m_Impl->Mixers.erase(mixer) != 0;
+        if (removed)
+            m_Impl->UpdateVirtualization();
+        return removed;
+    }
+
+    AudioMixerRoutingId AudioSystem::RegisterMixer(const AssetId mixer, const AudioMixerDefinition& definition)
+    {
+        m_Impl->RequireOwner("RegisterMixer");
+        if (!mixer)
+            throw std::invalid_argument("Audio mixer asset ID is empty.");
+        auto routing = AudioSystem::Impl::CompileMixer(definition);
+        std::scoped_lock lock(m_Impl->Mutex);
+        auto id = AudioMixerRoutingId(m_Impl->NextMixerRouting++);
+        while (!id || m_Impl->MixerRoutings.contains(id))
+            id = AudioMixerRoutingId(m_Impl->NextMixerRouting++);
+        m_Impl->MixerRoutings.emplace(
+            id, AudioSystem::Impl::RegisteredMixer{.Mixer = mixer, .Routing = std::move(routing)});
+        return id;
+    }
+
+    bool AudioSystem::UpdateMixer(const AudioMixerRoutingId routing, const AudioMixerDefinition& definition)
+    {
+        m_Impl->RequireOwner("UpdateMixer");
+        if (!routing)
+            return false;
+        auto replacement = AudioSystem::Impl::CompileMixer(definition);
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->MixerRoutings.find(routing);
+        if (found == m_Impl->MixerRoutings.end())
+            return false;
+        found->second.Routing = std::move(replacement);
+        m_Impl->UpdateVirtualization();
+        return true;
+    }
+
+    bool AudioSystem::UnregisterMixer(const AudioMixerRoutingId routing)
+    {
+        m_Impl->RequireOwner("UnregisterMixer");
+        if (!routing)
+            return false;
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto removed = m_Impl->MixerRoutings.erase(routing) != 0;
+        if (removed)
+            m_Impl->UpdateVirtualization();
+        return removed;
+    }
+
     std::size_t AudioSystem::StopAll(const std::string_view bus)
     {
         m_Impl->RequireOwner("StopAll");
@@ -705,7 +934,7 @@ namespace Keire
         std::size_t stopped = 0;
         for (auto iterator = m_Impl->Voices.begin(); iterator != m_Impl->Voices.end();)
         {
-            if (!bus.empty() && iterator->second.Specification.Bus != bus)
+            if (!bus.empty() && m_Impl->ResolveVoiceBus(iterator->second.Specification).Name != bus)
             {
                 ++iterator;
                 continue;
@@ -733,7 +962,7 @@ namespace Keire
         if (bus.empty())
             throw std::invalid_argument("Audio bus name is empty.");
         std::scoped_lock lock(m_Impl->Mutex);
-        return m_Impl->BusGain(std::string(bus));
+        return m_Impl->LegacyBusGain(bus);
     }
 
     std::vector<AudioBusInfo> AudioSystem::Buses() const
@@ -885,7 +1114,7 @@ namespace Keire
             const auto clipFrames = samples->size() / clip.Channels;
             if (clipFrames == 0)
                 continue;
-            float leftGain = voice.Specification.Gain * m_Impl->BusGain(voice.Specification.Bus);
+            float leftGain = m_Impl->VoiceGain(voice.Specification);
             float rightGain = leftGain;
             double pitch = static_cast<double>(voice.Specification.Pitch) * clip.SampleRate / 48'000.0;
             if (voice.Specification.Spatial)
@@ -919,8 +1148,6 @@ namespace Keire
                     static_cast<double>((SpeedOfSound + listenerRadial) / std::max(1.0F, SpeedOfSound + sourceRadial)),
                     0.5, 2.0);
             }
-            leftGain *= 1.0F - voice.Specification.Occlusion * 0.75F;
-            rightGain *= 1.0F - voice.Specification.Occlusion * 0.75F;
             for (std::uint64_t frame = 0; frame < frameCount; ++frame)
             {
                 auto sourceFrame = static_cast<std::uint64_t>(voice.Frame);
@@ -981,17 +1208,23 @@ namespace Keire
         if (found == m_Impl->Voices.end())
             return std::nullopt;
         const auto& runtime = found->second;
+        const auto resolved = m_Impl->ResolveVoiceBus(runtime.Specification);
         const auto frames = runtime.Specification.Clip->Frames == 0
                                 ? runtime.Specification.Clip->Samples.size() / runtime.Specification.Clip->Channels
                                 : runtime.Specification.Clip->Frames;
-        return AudioVoiceInfo{voice,
-                              runtime.Specification.Bus,
-                              static_cast<std::uint64_t>(runtime.Frame),
-                              frames,
-                              runtime.Specification.Priority,
-                              !runtime.Paused,
-                              runtime.Paused,
-                              runtime.Virtualized};
+        return AudioVoiceInfo{
+            voice,
+            std::string(resolved.Name),
+            static_cast<std::uint64_t>(runtime.Frame),
+            frames,
+            runtime.Specification.Priority,
+            !runtime.Paused,
+            runtime.Paused,
+            runtime.Virtualized,
+            resolved.Mixer,
+            resolved.Bus,
+            runtime.Specification.MixerRouting,
+        };
     }
 
     std::vector<AudioVoiceInfo> AudioSystem::Voices() const
@@ -1002,11 +1235,13 @@ namespace Keire
         result.reserve(m_Impl->Voices.size());
         for (const auto& [id, voice] : m_Impl->Voices)
         {
+            const auto resolved = m_Impl->ResolveVoiceBus(voice.Specification);
             const auto frames = voice.Specification.Clip->Frames == 0
                                     ? voice.Specification.Clip->Samples.size() / voice.Specification.Clip->Channels
                                     : voice.Specification.Clip->Frames;
-            result.push_back({id, voice.Specification.Bus, static_cast<std::uint64_t>(voice.Frame), frames,
-                              voice.Specification.Priority, !voice.Paused, voice.Paused, voice.Virtualized});
+            result.push_back({id, std::string(resolved.Name), static_cast<std::uint64_t>(voice.Frame), frames,
+                              voice.Specification.Priority, !voice.Paused, voice.Paused, voice.Virtualized,
+                              resolved.Mixer, resolved.Bus, voice.Specification.MixerRouting});
         }
         return result;
     }
@@ -1064,6 +1299,8 @@ namespace Keire
             m_Impl->DestroyVoice(voice);
         }
         m_Impl->Voices.clear();
+        m_Impl->Mixers.clear();
+        m_Impl->MixerRoutings.clear();
         m_Impl->Meters = {};
         if (std::exchange(m_Impl->EngineOpen, false))
             ma_engine_uninit(&m_Impl->Engine);

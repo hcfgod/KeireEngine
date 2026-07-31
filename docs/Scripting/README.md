@@ -85,6 +85,7 @@ These C# guides focus on runtime code. Use the existing authoring documentation 
 
 - [Input System](../InputSystem.md) and [Input Actions Editor](../InputActionsEditor.md)
 - [Animation And Rigging](../AnimationRigging.md)
+- [VFX Authoring And Runtime](../Vfx.md)
 - [Scene Authoring](../SceneAuthoring.md)
 - [Asset Pipeline](../AssetPipeline.md)
 - [Weapon Authoring](../WeaponAuthoring.md)

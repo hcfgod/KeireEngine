@@ -142,10 +142,16 @@ namespace Keire
         [[nodiscard]] SceneRuntimeDiagnostic Diagnostic() const;
         [[nodiscard]] Ref<ScenePresentationRuntime> Presentation() const noexcept;
         [[nodiscard]] Ref<PhysicsWorld> Physics() const noexcept;
+        /// Returns the Play Mode scene-owned VFX world, or null when the runtime session is not active.
         [[nodiscard]] Ref<VfxWorld> Vfx() const noexcept;
+        /// Assigns effect to the runtime entity and requests playback. restart replaces only that entity's live
+        /// instance; other emitters in the scene-owned VfxWorld continue unchanged.
         [[nodiscard]] bool PlayVfx(EntityId entity, AssetId effect, bool restart = false);
+        /// Stops only the runtime entity's VFX instance without removing its component.
         [[nodiscard]] bool StopVfx(EntityId entity);
+        /// Pauses with a zero simulation multiplier or resumes at 1.0.
         [[nodiscard]] bool PauseVfx(EntityId entity, bool paused);
+        /// Reports whether the runtime entity currently owns a live native VfxHandle.
         [[nodiscard]] bool IsVfxAlive(EntityId entity) const noexcept;
         [[nodiscard]] std::vector<ScenePhysicsQueryHit> RayCast(const PhysicsRayQuery& query,
                                                                 EntityId ignoredEntity = {}) const;

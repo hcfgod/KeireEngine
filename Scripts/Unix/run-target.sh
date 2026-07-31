@@ -54,6 +54,13 @@ if [[ "$MODE" == test ]]; then
     editor_tests="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$editor_tests_target/$editor_tests_target"
     [[ -x "$editor_tests" ]] || { printf 'Editor tests executable not found: %s\n' "$editor_tests" >&2; exit 1; }
     (cd "$ROOT" && "$editor_tests")
+
+    printf '==> Building complete client compile gate\n'
+    client_build_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$CLIENT_TARGET")
+    [[ $CI -eq 1 ]] && client_build_args+=(--ci)
+    [[ $UPDATE -eq 1 ]] && client_build_args+=(--update)
+    [[ $FORCE -eq 1 ]] && client_build_args+=(--force)
+    bash "$ROOT/Scripts/$PLATFORM/build.sh" "${client_build_args[@]}"
 fi
 if [[ "$MODE" == test && "$CONFIGURATION" =~ ^(Debug|Release)$ ]]; then
     render_tests_target="${PROJECT_NAMESPACE}RenderTests"

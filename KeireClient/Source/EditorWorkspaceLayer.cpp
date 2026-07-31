@@ -981,6 +981,8 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_InputActionsPanel->ResetTransientState();
     m_AudioMixerPanel->StopTransientPreview();
     m_VfxEffectPanel->StopTransientPreview();
+    StopEditModeVfxPreviews();
+    ResetEditorVfxPreviewWorld();
     m_InputContext.Reset();
     if (m_InputActionsDocument->UndoContext())
         m_InputActionsDocument->UndoContext()->Close();
@@ -1054,8 +1056,39 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
             m_PlayFaultReported = true;
         }
     }
-    if (m_VfxEffectPreviewWorld)
-        m_VfxEffectPreviewWorld->Update(static_cast<float>(time.DeltaTime().Seconds()));
+    if (m_SceneDocument->PlaySession())
+    {
+        StopEditModeVfxPreviews();
+    }
+    else
+    {
+        try
+        {
+            SynchronizeEditModeVfxPreviews();
+        }
+        catch (const std::exception& error)
+        {
+            StopEditModeVfxPreviews();
+            ReportError("VFX", std::string("Edit-mode VFX preview synchronization failed: ") + error.what());
+        }
+        if (m_VfxEffectPreviewWorld)
+        {
+            const auto deltaSeconds = static_cast<float>(std::clamp(time.UnscaledDeltaTime().Seconds(), 0.0, 0.1));
+            m_VfxEffectPreviewWorld->Update(deltaSeconds);
+            if (m_VfxEffectPreviewAutoRestart && m_VfxEffectPreviewEffect &&
+                !m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
+            {
+                m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
+                    {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition,
+                     m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset});
+                if (m_VfxEffectPreviewHandle)
+                {
+                    m_VfxEffectPreviewWorld->SetSimulationSpeed(
+                        m_VfxEffectPreviewHandle, m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
+                }
+            }
+        }
+    }
     CompleteSaveSceneAs();
     {
         Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");

@@ -704,12 +704,21 @@ namespace Keire::RenderBackend
 
     struct GpuVfxWorldResources final
     {
+        struct EmitterState final
+        {
+            std::uint64_t SpawnSequence = 0;
+            std::uint64_t SimulationRevision = 0;
+            Vector3 Position;
+            Quaternion Rotation;
+            VfxSimulationSpace Space = VfxSimulationSpace::World;
+        };
+
         SDL_GPUBuffer* Particles = nullptr;
         SDL_GPUBuffer* FreeIndices = nullptr;
         SDL_GPUBuffer* AliveIndices = nullptr;
         SDL_GPUBuffer* Counters = nullptr;
         SDL_GPUBuffer* IndirectArguments = nullptr;
-        std::unordered_map<std::uint64_t, std::uint64_t> SpawnSequences;
+        std::unordered_map<std::uint64_t, EmitterState> Emitters;
         std::uint32_t Capacity = 0;
         std::uint64_t ResetRevision = 0;
         std::uint64_t LastPreparedFrame = 0;
@@ -906,6 +915,8 @@ namespace Keire::RenderBackend
         bool SkinningPipelineAttempted = false;
         SDL_GPUComputePipeline* VfxInitializePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxKillPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxTransformPipeline = nullptr;
         SDL_GPUComputePipeline* VfxSimulatePipeline = nullptr;
         SDL_GPUComputePipeline* VfxSpawnPipeline = nullptr;
         SDL_GPUComputePipeline* VfxFinalizePipeline = nullptr;

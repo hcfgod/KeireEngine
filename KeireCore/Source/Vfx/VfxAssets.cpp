@@ -980,7 +980,9 @@ namespace Keire
     std::size_t VfxEffectAsset::ResidentBytes() const noexcept
     {
         auto result = sizeof(*this) + m_Definition.Name.capacity() +
-                      m_Definition.Modules.capacity() * sizeof(VfxModuleDefinition);
+                      m_Definition.Modules.capacity() * sizeof(VfxModuleDefinition) +
+                      m_Definition.Systems.capacity() * sizeof(VfxGraphSystem) +
+                      m_Definition.Blackboard.capacity() * sizeof(VfxBlackboardParameter);
         for (const auto& module : m_Definition.Modules)
         {
             if (const auto* size = std::get_if<VfxSizeOverLifetimeModule>(&module.Payload))
@@ -988,6 +990,20 @@ namespace Keire
             if (const auto* color = std::get_if<VfxColorOverLifetimeModule>(&module.Payload))
                 result += color->Color.Keys().size() * sizeof(ColorGradientKey);
         }
+        for (const auto& system : m_Definition.Systems)
+        {
+            result += system.Name.capacity() + system.Nodes.capacity() * sizeof(VfxGraphNode) +
+                      system.Connections.capacity() * sizeof(VfxGraphConnection);
+            for (const auto& node : system.Nodes)
+            {
+                result +=
+                    node.Type.capacity() + node.CustomHlsl.capacity() + node.Pins.capacity() * sizeof(VfxGraphPin);
+                for (const auto& pin : node.Pins)
+                    result += pin.Name.capacity();
+            }
+        }
+        for (const auto& parameter : m_Definition.Blackboard)
+            result += parameter.Name.capacity();
         return result;
     }
 
@@ -1008,11 +1024,37 @@ namespace Keire
         definition.Systems = {
             {AssetId(0x5646584445464155ULL, 8),
              "Particle System",
-             {{AssetId(0x5646584445464155ULL, 9), "Spawn Context", VfxContextType::Spawn, {0.0F, 0.0F}},
-              {AssetId(0x5646584445464155ULL, 10), "Initialize Context", VfxContextType::Initialize, {280.0F, 0.0F}},
-              {AssetId(0x5646584445464155ULL, 11), "Update Context", VfxContextType::Update, {560.0F, 0.0F}},
-              {AssetId(0x5646584445464155ULL, 12), "Output Context", VfxContextType::Output, {840.0F, 0.0F}}},
-             {}},
+             {{AssetId(0x5646584445464155ULL, 9),
+               "Spawn Context",
+               VfxContextType::Spawn,
+               {0.0F, 0.0F},
+               {{AssetId(0x5646584445464155ULL, 13), "Particles", VfxValueType::Asset, false}}},
+              {AssetId(0x5646584445464155ULL, 10),
+               "Initialize Context",
+               VfxContextType::Initialize,
+               {280.0F, 0.0F},
+               {{AssetId(0x5646584445464155ULL, 14), "Particles", VfxValueType::Asset, true},
+                {AssetId(0x5646584445464155ULL, 15), "Particles", VfxValueType::Asset, false}}},
+              {AssetId(0x5646584445464155ULL, 11),
+               "Update Context",
+               VfxContextType::Update,
+               {560.0F, 0.0F},
+               {{AssetId(0x5646584445464155ULL, 16), "Particles", VfxValueType::Asset, true},
+                {AssetId(0x5646584445464155ULL, 17), "Particles", VfxValueType::Asset, false}}},
+              {AssetId(0x5646584445464155ULL, 12),
+               "Output Context",
+               VfxContextType::Output,
+               {840.0F, 0.0F},
+               {{AssetId(0x5646584445464155ULL, 18), "Particles", VfxValueType::Asset, true}}}},
+             {{AssetId(0x5646584445464155ULL, 19), AssetId(0x5646584445464155ULL, 9),
+               AssetId(0x5646584445464155ULL, 13), AssetId(0x5646584445464155ULL, 10),
+               AssetId(0x5646584445464155ULL, 14)},
+              {AssetId(0x5646584445464155ULL, 20), AssetId(0x5646584445464155ULL, 10),
+               AssetId(0x5646584445464155ULL, 15), AssetId(0x5646584445464155ULL, 11),
+               AssetId(0x5646584445464155ULL, 16)},
+              {AssetId(0x5646584445464155ULL, 21), AssetId(0x5646584445464155ULL, 11),
+               AssetId(0x5646584445464155ULL, 17), AssetId(0x5646584445464155ULL, 12),
+               AssetId(0x5646584445464155ULL, 18)}}},
         };
         return definition;
     }

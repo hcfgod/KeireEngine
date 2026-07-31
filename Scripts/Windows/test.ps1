@@ -79,6 +79,13 @@ if ($exitCode -eq 0) {
     }
 }
 
+if ($exitCode -eq 0) {
+    Write-Host "==> Building complete client compile gate"
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI -Update:$Update `
+        -Generate:$Generate
+}
+
 if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
     $renderTestsTarget = "$($Project.PROJECT_NAMESPACE)RenderTests"
     $renderTestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$renderTestsTarget\$renderTestsTarget.exe"

@@ -89,6 +89,34 @@ TEST_CASE("filesystem rename bounds persistent transient failures")
                                 std::chrono::milliseconds(160)});
 }
 
+#if defined(_WIN32)
+TEST_CASE("filesystem rename supports extended-length Windows destinations")
+{
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto root = std::filesystem::temp_directory_path() / ("KeireLongRename-" + suffix);
+    auto directory = root;
+    for (std::size_t index = 0; index < 5; ++index)
+        directory /= std::string(30, static_cast<char>('a' + index));
+    std::filesystem::create_directories(directory);
+    const auto source = directory / "source.bin";
+    const auto destination = directory / (std::string(100, 'd') + ".bin");
+    REQUIRE(source.native().size() < 260);
+    REQUIRE(destination.native().size() >= 260);
+    {
+        std::ofstream stream(source, std::ios::binary | std::ios::trunc);
+        stream << "long-path rename";
+        REQUIRE(stream.good());
+    }
+
+    CHECK_NOTHROW(Keire::Detail::RenamePathWithRetry(source, destination));
+    CHECK_NOTHROW(Keire::Detail::RenamePathWithRetry(destination, source));
+    CHECK(Keire::Detail::ReadTextFile(source, 1024) == "long-path rename");
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+#endif
+
 TEST_CASE("atomic file publication replaces complete text and binary contents")
 {
     const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());

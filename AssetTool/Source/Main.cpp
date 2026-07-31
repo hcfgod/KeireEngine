@@ -12,6 +12,7 @@
 #include "Keire/Scripting/ManagedDataAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
 
+#include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
@@ -41,6 +42,7 @@ namespace
         std::filesystem::path Catalog;
         std::filesystem::path Input;
         Keire::AssetBuildProfile Profile;
+        std::chrono::seconds WorkerTimeout = std::chrono::minutes(10);
     };
 
     [[nodiscard]] std::uint64_t ParseUnsigned(const std::string_view value, const char* option)
@@ -100,6 +102,15 @@ namespace
                     static_cast<int>(ParseUnsigned(requireValue(), "--compression-level"));
             else if (option == "--pack-mib")
                 result.Profile.MaximumPackBytes = ParseUnsigned(requireValue(), "--pack-mib") * 1024ULL * 1024ULL;
+            else if (option == "--worker-timeout-seconds")
+            {
+                const auto seconds = ParseUnsigned(requireValue(), "--worker-timeout-seconds");
+                if (seconds == 0 || seconds > static_cast<std::uint64_t>(std::chrono::seconds::max().count()))
+                {
+                    throw std::invalid_argument("--worker-timeout-seconds must be greater than zero.");
+                }
+                result.WorkerTimeout = std::chrono::seconds(static_cast<std::chrono::seconds::rep>(seconds));
+            }
             else if (option == "--target")
                 result.Profile.Target = ParseTarget(requireValue());
             else
@@ -113,9 +124,10 @@ namespace
         std::cout << "Kéire Asset Tool\n\n"
                      "Usage:\n"
                      "  KeireAssetTool scan [--project <path>]\n"
-                     "  KeireAssetTool import [--project <path>]\n"
+                     "  KeireAssetTool import [--project <path>] [--worker-timeout-seconds <seconds>]\n"
                      "  KeireAssetTool cook [--project <path>] [--output <path>] [--profile <name>]\n"
                      "                      [--compression-level <level>] [--pack-mib <size>]\n"
+                     "                      [--worker-timeout-seconds <seconds>]\n"
                      "                      [--target <host|windows|linux|macos>]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
@@ -130,6 +142,74 @@ namespace
         std::vector<std::byte> result(characters.size());
         std::ranges::transform(characters, result.begin(), [](const char value) { return std::byte(value); });
         return result;
+    }
+
+    [[nodiscard]] Keire::AssetImportResult ImportAssetsWithWorker(const std::filesystem::path& projectRoot,
+                                                                  const std::filesystem::path& executable,
+                                                                  const std::chrono::seconds timeout)
+    {
+        const auto normalizedProject = std::filesystem::absolute(projectRoot).lexically_normal();
+        const auto worker = Keire::Detail::ResolveCompanionExecutable(executable, "KeireAssetWorker");
+        const auto operationId = Keire::AssetId::Generate().ToString();
+        const auto operation = normalizedProject / "Library/AssetOperations" / operationId;
+        std::filesystem::create_directories(operation);
+        const auto requestPath = operation / "request.json";
+        const auto progressPath = operation / "progress.json";
+        const auto resultPath = operation / "result.json";
+        const auto cancelPath = operation / "cancel";
+        const auto logPath = operation / "worker.log";
+
+        Keire::Detail::AssetWorkerRequest request;
+        request.OperationId = operationId;
+        request.Kind = Keire::Detail::AssetWorkerOperationKind::ImportAll;
+        request.ProjectRoot = normalizedProject;
+        request.SourceIndexPath = normalizedProject / "Library/AssetCache/Runtime/source-index.json";
+        Keire::Detail::WriteAssetWorkerRequest(requestPath, request);
+        const std::vector<std::string> arguments{
+            "--request", Keire::Detail::PathToUtf8(requestPath), "--progress", Keire::Detail::PathToUtf8(progressPath),
+            "--result",  Keire::Detail::PathToUtf8(resultPath),  "--cancel",   Keire::Detail::PathToUtf8(cancelPath)};
+        const auto process = Keire::Detail::RunProcess(worker, arguments, normalizedProject, timeout);
+        Keire::Detail::WriteTextFileAtomically(logPath, process.Output);
+        if (process.TimedOut)
+        {
+            throw std::runtime_error("Asset worker import timed out after " + std::to_string(timeout.count()) +
+                                     " seconds. See " + Keire::Detail::PathToUtf8(logPath) + ".");
+        }
+        if (!std::filesystem::is_regular_file(resultPath))
+        {
+            throw std::runtime_error("Asset worker exited with code " + std::to_string(process.ExitCode) +
+                                     " before writing a result. See " + Keire::Detail::PathToUtf8(logPath) + ".");
+        }
+
+        auto result = Keire::Detail::ReadAssetWorkerResult(resultPath);
+        if (process.ExitCode != 0 || !result.Success)
+        {
+            const auto diagnostic =
+                result.Diagnostic.empty() ? "no diagnostic was produced" : std::move(result.Diagnostic);
+            throw std::runtime_error("Asset worker import failed: " + diagnostic + " See " +
+                                     Keire::Detail::PathToUtf8(logPath) + ".");
+        }
+        if (const auto failed = std::ranges::find(result.Import.Statuses, Keire::AssetImportState::Failed,
+                                                  &Keire::AssetImportStatus::State);
+            failed != result.Import.Statuses.end())
+        {
+            const auto detail = failed->Diagnostics.empty() ? std::string("no diagnostic was produced")
+                                                            : failed->Diagnostics.front().Message;
+            const auto source = !failed->Diagnostics.empty() && !failed->Diagnostics.front().RelativePath.empty()
+                                    ? Keire::Detail::PathToUtf8(failed->Diagnostics.front().RelativePath)
+                                    : failed->Id.ToString();
+            throw std::runtime_error("Asset worker import rejected '" + source + "': " + detail + ". See " +
+                                     Keire::Detail::PathToUtf8(logPath) + ".");
+        }
+
+        std::error_code cleanupError;
+        std::filesystem::remove_all(operation, cleanupError);
+        if (cleanupError)
+        {
+            std::cerr << "warning: Could not remove successful asset-worker operation '"
+                      << Keire::Detail::PathToUtf8(operation) << "': " << cleanupError.message() << '\n';
+        }
+        return std::move(result.Import);
     }
 
     struct ManagedCookBuild final
@@ -380,6 +460,7 @@ namespace
             }
 
             const auto project = Keire::Project::Open(commandLine.Project);
+            const auto executable = std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])).lexically_normal();
             Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
             databaseSpecification.Importers = Keire::CreateBuiltinAssetImporters();
             auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
@@ -389,12 +470,13 @@ namespace
             }
             else if (commandLine.Command == "import")
             {
-                const auto result = database->ImportAll();
+                const auto result = ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
                 std::cout << "Imported " << result.Imported << " assets (" << result.CacheHits
                           << " cache hits). Catalog: " << result.CatalogPath.string() << '\n';
             }
             else if (commandLine.Command == "cook")
             {
+                (void)ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
                 (void)database->Refresh();
                 commandLine.Profile.Roots = {project->Descriptor().StartupScene};
                 if (project->Descriptor().DefaultInput)
@@ -409,18 +491,18 @@ namespace
                 const bool containsManagedData =
                     std::ranges::any_of(database->Records(), [](const Keire::AssetSourceRecord& record)
                                         { return record.Type == Keire::ManagedDataAsset::StaticType(); });
-                const auto managed =
-                    BuildManagedAssemblies(*database, *project, commandLine.Profile.Name,
-                                           std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])),
-                                           commandLine.Profile.Strict && containsManagedData);
+                const auto managed = BuildManagedAssemblies(*database, *project, commandLine.Profile.Name, executable,
+                                                            commandLine.Profile.Strict && containsManagedData);
                 if (commandLine.Profile.Strict && containsManagedData)
                 {
                     commandLine.Profile.ManagedTypeDiscoveryComplete = true;
                     commandLine.Profile.ManagedTypeCatalog = Keire::EncodeManagedAssetTypeCatalog(managed.AssetTypes);
                 }
 
-                const auto staging =
-                    Keire::Detail::PathWithSuffix(output, ".runtime-staging-" + Keire::AssetId::Generate().ToString());
+                auto stagingToken = Keire::AssetId::Generate().ToString();
+                std::erase(stagingToken, '-');
+                stagingToken.resize(20);
+                const auto staging = Keire::Detail::PathWithSuffix(output, ".runtime-staging-" + stagingToken);
                 std::error_code cleanupError;
                 std::filesystem::remove_all(staging, cleanupError);
                 if (cleanupError)

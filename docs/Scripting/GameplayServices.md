@@ -207,6 +207,8 @@ handle.Restart(_impact);
 ```
 
 Handles validate their entity and required component. An effect reference must be valid before `Play` or `Restart`.
+For effect authoring, graph navigation, Runtime Modules, scene-emitter setup, native C++ integration, backend
+capabilities, and troubleshooting, see [VFX Authoring And Runtime](../Vfx.md).
 
 ## Cursor Ownership
 

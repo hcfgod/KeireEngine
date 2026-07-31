@@ -59,8 +59,11 @@ Rename moves source and metadata as one rollback-capable operation. Duplicate co
 Delete is represented by `MoveToTrash()`, which moves both files under `Library/Trash/<asset-id>` for recovery. Public
 operations confine destinations below the configured source root.
 
-The Sandbox keeps its single monster source at `Assets/Meshes/Monster/base.fbx`; its metadata retains AssetId
-`c506e2a8-62f9-44f0-8831-b66755cc9b9b`, which is the identity referenced by the startup scene.
+The Sandbox keeps its humanoid model and animation sources at `Assets/Meshes/T-Pose.fbx` and
+`Assets/Meshes/Idle.fbx`. The startup scene references model AssetId
+`51cd8956-a6c4-4d63-b990-7d86829f92ff`, skeleton subasset `c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08`, and skinned-mesh
+subasset `78c8dbe3-2951-54b9-b34e-9221c49c506b`; the Animator Controller references Idle clip subasset
+`803c0e5b-d937-521c-821e-92de5a986179`.
 
 `MoveAsset`, `MoveFolder`, `DuplicateFolder`, `TrashAsset`, `TrashFolder`, `RestoreTrash`, and
 `PermanentlyDeleteTrash` provide the Project panel's transactional file boundary. Folder operations include metadata
@@ -115,6 +118,17 @@ exchanges atomic documents below `Library/AssetOperations`. Successful work publ
 `Library/AssetCache/Runtime/source-index.json`, which the editor validates and reloads without scanning or hashing the
 project again. Operation documents and captured worker logs remain available for diagnostics; the worker is packaged
 with the editor but is not a supported SDK or importer plug-in API.
+
+Command-line imports and cooks allow the worker deadline to be adjusted with
+`--worker-timeout-seconds <seconds>`. The default remains 600 seconds; the value must be greater than zero. This keeps
+small-project behavior bounded while allowing large production imports or slower build machines to select an explicit
+deadline.
+`KeireAssetTool import` and `cook` also run their import phase through the adjacent worker. This keeps private codec
+backends such as FFmpeg out of the public tool boundary while allowing the cooker to restore the worker's validated,
+dependency-free canonical output from the persistent object cache. Worker failures remain fatal for command-line
+imports and distribution cooking; successful command-line operation documents are removed.
+Packaged Linux workers resolve copied shared codecs through `$ORIGIN`; macOS workers use `@loader_path`, and the
+private FFmpeg dylibs are built with `@rpath` install names so relocating the package does not retain a build prefix.
 Independent editor/tool database instances serialize mutations with a project-scoped, OS-released file lock. Database
 startup remains compatible with the legacy directory-swap journal and repairs an interrupted `prepared`, `backedUp`, or
 `published` state before exposing records. New publications never rename a live runtime directory. Asset protocol paths
@@ -128,6 +142,9 @@ versioned `AssetBuildProfile`, target platform, and shards packs at a 2 GiB defa
 relative content-addressed pack paths, bounded offsets/sizes, type, SHA-256, and dependency IDs. Output is assembled in
 a sibling temporary directory, immutable packs are installed, and the catalog is switched atomically. The accompanying
 `build-profile.json` records schema, profile name, compression algorithm/level, shard limit, and strictness.
+Transactional cook and runtime-staging names use compact 80-bit tokens so nested content-addressed filenames remain
+below the legacy Windows path limit in normal package layouts. The native Windows rename boundary also accepts
+extended-length paths for user-selected roots that exceed that limit.
 
 `AssetCooker::Validate()` independently checks schema, identity uniqueness, dependency closure/cycles, pack headers,
 ranges, decompression sizes, and SHA-256. Distribution tooling should validate immediately after cooking and ship only
@@ -148,7 +165,8 @@ Target values are `host`, `windows`, `linux`, and `macos`; contextual cook trans
 variants. Windows keeps DXIL and SPIR-V for its D3D12 and Vulkan backends, Linux keeps SPIR-V, and macOS keeps MSL. A
 project cook roots the graph at its startup scene and default input, and writes `runtime-manifest.json`
 beside the catalog with startup and rendering settings. Optional cook controls are `--compression-level` and
-`--pack-mib`. SDK archives include this tool and the asset public
+`--pack-mib`. The import and cook commands require the matching `KeireAssetWorker` beside the tool in a package or in
+the sibling configuration target directory of a source build. SDK archives include this tool and the asset public
 headers; they carry the private `KeireZstd` archive transitively through `Keire::Core` but do not redistribute Zstandard
 headers.
 

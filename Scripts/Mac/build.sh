@@ -26,6 +26,8 @@ if [[ $FORCE -eq 1 || $UPDATE -eq 1 || ! -e "$ROOT/$generated" || ! -f "$stamp" 
     bash "$ROOT/Scripts/Mac/generate.sh" "${args[@]}"
 fi
 
+bash "$ROOT/Scripts/Unix/build-managed.sh"
+
 case "$GENERATOR" in
     xcode4)
         printf '==> Building %s %s for %s with Xcode\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"

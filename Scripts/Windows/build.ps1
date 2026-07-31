@@ -44,11 +44,18 @@ function Get-NinjaExecutable {
     throw "Ninja was not found. Run bootstrap for the Ninja generator."
 }
 
+function Invoke-ManagedBuild {
+    Write-Host "==> Building managed runtime API"
+    & (Join-Path $PSScriptRoot "build-managed.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "Managed runtime API build failed with exit code $LASTEXITCODE." }
+}
+
 switch ($Generator) {
     { $_ -like "vs*" } {
         $majorVersion = Get-VisualStudioMajorVersion $Generator
         $solutionName = if ($Generator -eq "vs2026") { "$WorkspaceName.slnx" } else { "$WorkspaceName.sln" }
         Invoke-GenerationIfNeeded $solutionName
+        Invoke-ManagedBuild
         $environment = Get-VSBuildEnvironment $majorVersion
         $platform = Get-MSBuildPlatform $Architecture
         Write-Host "==> Building $Target $Configuration for $Architecture with $Generator"
@@ -60,6 +67,7 @@ switch ($Generator) {
     }
     "ninja" {
         Invoke-GenerationIfNeeded "build.ninja"
+        Invoke-ManagedBuild
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         Write-Host "==> Building $Target $Configuration for $Architecture with Ninja"
         & (Get-NinjaExecutable) -C $Root -f build.ninja "$($Target)_$Configuration"
@@ -68,6 +76,7 @@ switch ($Generator) {
     }
     "gmake" {
         Invoke-GenerationIfNeeded "Makefile"
+        Invoke-ManagedBuild
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         $make = Get-Command mingw32-make, make -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $make) {

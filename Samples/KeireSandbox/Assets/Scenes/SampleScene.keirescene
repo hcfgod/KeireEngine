@@ -210,10 +210,10 @@
               1.5814927816390991
             ],
             "rotation": [
-              0.8806512951850891,
-              0.11315173655748367,
-              -0.3761037588119507,
-              0.26494553685188293
+              0.8806511759757996,
+              0.11315172165632248,
+              -0.3761036992073059,
+              0.26494550704956055
             ],
             "scale": [
               1.0,
@@ -455,7 +455,7 @@
       "parent": null
     },
     {
-      "active": true,
+      "active": false,
       "components": [
         {
           "data": {
@@ -985,6 +985,62 @@
       ],
       "id": "b814c702-6a84-47a1-90fb-777fadf4cb98",
       "name": "T-Pose",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              12.698086738586426,
+              2.491081714630127,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "87bb30db-3865-429e-8a4b-b3b5f9dc5a03",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 1
+        }
+      ],
+      "id": "7a2f2b21-84a6-4790-b1a9-529da68fe10b",
+      "name": "Vfx",
       "parent": null
     }
   ],
