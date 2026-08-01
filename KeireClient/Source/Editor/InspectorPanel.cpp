@@ -535,12 +535,29 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
         auto entity = scene->FindEntity(Keire::EntityId(inspectedEntity));
         if (entity)
         {
-            auto name = entity.Name();
-            if (ui.InputText("Entity Name", name))
+            const auto currentName = entity.Name();
+            if (m_EntityNameTarget != entity.Id().Value() || !m_EntityNameEditing)
             {
-                m_Controller.RecordInspectorUndo();
-                sceneDocument.RenameEntity(entity.Id(), std::move(name));
+                m_EntityNameTarget = entity.Id().Value();
+                m_EntityNameDraft = currentName;
             }
+            (void)ui.InputText("Entity Name", m_EntityNameDraft);
+            const auto nameState = ui.LastItemState();
+            const bool validEntityName = SceneDocument::IsValidEntityName(m_EntityNameDraft);
+            if (nameState.DeactivatedAfterEdit)
+            {
+                if (validEntityName && m_EntityNameDraft != currentName)
+                {
+                    m_Controller.RecordInspectorUndo();
+                    sceneDocument.RenameEntity(entity.Id(), m_EntityNameDraft);
+                }
+                else if (!validEntityName)
+                    m_EntityNameDraft = currentName;
+            }
+            if (nameState.Active && !validEntityName)
+                ui.TextColored(theme.Error, m_EntityNameDraft.empty() ? "Entity name cannot be empty."
+                                                                      : "Entity name cannot exceed 256 UTF-8 bytes.");
+            m_EntityNameEditing = nameState.Active;
             auto active = entity.ActiveSelf();
             if (ui.Checkbox("Active", active))
             {

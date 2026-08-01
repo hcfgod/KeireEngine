@@ -44,6 +44,7 @@ public readonly record struct Entity(ulong World, EntityId Id)
     public IReadOnlyList<Entity> Children => NativeRuntime.GetEntityChildren(this);
     public TransformHandle Transform => new(this);
     public AnimatorHandle Animator => new(this);
+    public CharacterControllerHandle CharacterController => new(this);
     public ComponentHandle GetComponent(ComponentTypeId type) =>
         NativeRuntime.ComponentExists(this, type) ? new ComponentHandle(this, type) : default;
     public ComponentHandle GetComponent<T>() => GetComponent(ComponentType.Of<T>());
@@ -132,9 +133,10 @@ public readonly record struct TransformHandle(Entity Entity)
     }
 
     public Vector3 Position => NativeRuntime.GetWorldPosition(Entity);
-    public Vector3 Forward => LocalRotation * Vector3.Forward;
-    public Vector3 Right => LocalRotation * Vector3.Right;
-    public Vector3 Up => LocalRotation * Vector3.Up;
+    public Quaternion Rotation => NativeRuntime.GetWorldRotation(Entity);
+    public Vector3 Forward => Rotation * Vector3.Forward;
+    public Vector3 Right => Rotation * Vector3.Right;
+    public Vector3 Up => Rotation * Vector3.Up;
 }
 
 public static class ComponentType

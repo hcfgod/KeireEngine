@@ -221,7 +221,14 @@ namespace Keire::RenderBackend
         packet.DrawGrid = request.DrawGrid;
         packet.Vfx = std::move(request.Vfx);
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
-        packet.DrawItems.reserve(renderEntities.size());
+        const auto meshParticleCount = std::ranges::count_if(packet.Vfx.Particles(),
+                                                             [](const auto& particle)
+                                                             {
+                                                                 return particle.Renderer == VfxRendererType::Mesh &&
+                                                                        static_cast<bool>(particle.Mesh) &&
+                                                                        particle.Size > 0.0F;
+                                                             });
+        packet.DrawItems.reserve(renderEntities.size() + static_cast<std::size_t>(meshParticleCount));
         for (const auto& entity : renderEntities)
         {
             if (!entity.ActiveInHierarchy())
@@ -249,6 +256,11 @@ namespace Keire::RenderBackend
                                         std::move(skinPalette),
                                         renderer->CastShadows(),
                                         renderer->ReceiveShadows()});
+        }
+        for (const auto& particle : packet.Vfx.Particles())
+        {
+            if (auto item = VfxMeshDrawItem(particle))
+                packet.DrawItems.push_back(std::move(*item));
         }
         Requests.push_back({std::move(packet), &surface});
         Statistics.CpuPreparationMilliseconds =

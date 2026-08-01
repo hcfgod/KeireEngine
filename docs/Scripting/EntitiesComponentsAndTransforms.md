@@ -187,7 +187,7 @@ Managed marker types support presence, enabled-state, add, and remove operations
 layout. They include:
 
 - transform, camera, mesh renderer, and animator;
-- collider and rigid body;
+- collider, rigid body, and character controller;
 - audio source and listener;
 - VFX emitter;
 - directional, point, and spot lights;
@@ -195,6 +195,9 @@ layout. They include:
 
 These markers are deliberately empty. System-specific state uses façades such as `Entity.Animator`,
 `Entity.AudioSource`, `RuntimeUi`, and `Vfx`.
+
+`Entity.CharacterController` is the typed movement façade. It queues collision-resolved displacement and reads the
+last grounded, ground-normal, and velocity state without exposing native physics ownership.
 
 ## Safe Reference Pattern
 

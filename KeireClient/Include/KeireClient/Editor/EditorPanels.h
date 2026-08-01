@@ -238,6 +238,9 @@ namespace KeireEditor
         {
             m_ComponentExpansion.clear();
             m_AssetInspector->ClearState();
+            m_EntityNameTarget = {};
+            m_EntityNameDraft.clear();
+            m_EntityNameEditing = false;
         }
 
       private:
@@ -250,6 +253,9 @@ namespace KeireEditor
         std::uint64_t m_EditSerial = 0;
         Keire::AssetId m_LockedEntity;
         Keire::AssetId m_LockedAsset;
+        Keire::AssetId m_EntityNameTarget;
+        std::string m_EntityNameDraft;
+        bool m_EntityNameEditing = false;
         bool m_UniformScale = false;
     };
 

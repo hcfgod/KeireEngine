@@ -1,0 +1,11 @@
+{
+  "dependencies": [
+    "a70cd455-45a1-49e7-9167-591f7896f048"
+  ],
+  "id": "c27fbc8b-ef96-40ad-a5bc-30c688438f3c",
+  "importer": "Keire.VfxEffect",
+  "importerVersion": 4,
+  "schemaVersion": 1,
+  "subAssets": [],
+  "type": "4b454952-4556-4658-4546-464543540001"
+}

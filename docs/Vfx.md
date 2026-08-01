@@ -1060,6 +1060,18 @@ is replaced internally with a fixed non-zero random state.
 
 ## VFX Emitter Component
 
+### Material-aware mesh examples
+
+`Assets/Vfx/EmberShardCyclone.keirevfx` and `Assets/Vfx/ArcaneSigilOrbit.keirevfx` demonstrate mesh output with custom
+repository-owned glTF sources. Each glTF embeds its geometry and PBR material; mesh import publishes the material as a
+stable generated subasset and records it in the mesh's default material slot. CPU VFX mesh particles enter the ordinary
+scene material path, so tint, emissive/metallic/roughness properties, depth, and receiving lights behave like authored
+Mesh Renderer geometry.
+
+These two templates are intentionally CPU-only today. Their graph remains valid and editable, while GPU compilation
+reports Mesh output as unsupported rather than silently drawing a sprite or dropping the renderer. Use the CPU preview
+backend when studying them. Sprite effects remain the production GPU indirect-output path.
+
 Add **VFX Emitter** from the Effects component category. A Transform component is required and is added or enforced by
 the component registry.
 

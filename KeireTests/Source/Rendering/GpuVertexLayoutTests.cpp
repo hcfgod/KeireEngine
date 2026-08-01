@@ -28,6 +28,36 @@ TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
     CHECK(offsetof(GpuRenderVertex, Normal) == 32);
 }
 
+TEST_CASE("CPU mesh VFX particles enter material-aware scene rendering")
+{
+    Keire::VfxRenderParticle particle;
+    particle.Renderer = Keire::VfxRendererType::Mesh;
+    particle.Mesh = Keire::AssetId::Parse("e83e979d-d16f-4c8b-935d-29611f209a15");
+    particle.Position = {1.0F, 2.0F, 3.0F};
+    particle.Rotation = {15.0F, 30.0F, 45.0F};
+    particle.Size = 0.75F;
+    particle.Tint = {1.0F, 0.25F, 0.05F, 0.8F};
+
+    const auto item = Keire::RenderBackend::VfxMeshDrawItem(particle);
+    REQUIRE(item);
+    CHECK(item->Mesh == particle.Mesh);
+    CHECK(item->Materials.empty());
+    CHECK(item->Tint == particle.Tint);
+    CHECK_FALSE(item->CastShadows);
+    CHECK(item->ReceiveShadows);
+    Keire::Vector3 position;
+    Keire::Quaternion rotation;
+    Keire::Vector3 scale;
+    REQUIRE(Keire::Math::DecomposeTransform(item->World, position, rotation, scale));
+    CHECK(position == particle.Position);
+    CHECK(scale.X == doctest::Approx(particle.Size));
+    CHECK(scale.Y == doctest::Approx(particle.Size));
+    CHECK(scale.Z == doctest::Approx(particle.Size));
+
+    particle.Renderer = Keire::VfxRendererType::Sprite;
+    CHECK_FALSE(Keire::RenderBackend::VfxMeshDrawItem(particle));
+}
+
 TEST_CASE("GPU linear blend skinning uses supported compute backends")
 {
     using Keire::RenderBackend::SupportsComputeSkinning;

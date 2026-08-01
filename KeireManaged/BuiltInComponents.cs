@@ -18,6 +18,9 @@ public sealed class ColliderComponent;
 [StableComponentId("4b454952-4552-4947-4944-424f44590001")]
 public sealed class RigidBodyComponent;
 
+[StableComponentId("4b454952-4543-4841-5241-435445520001")]
+public sealed class CharacterControllerComponent;
+
 [StableComponentId("4b454952-4541-5544-494f-535243000001")]
 public sealed class AudioSourceComponent;
 

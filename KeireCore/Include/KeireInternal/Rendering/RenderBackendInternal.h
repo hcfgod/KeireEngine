@@ -537,6 +537,24 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* SkinnedBuiltinVertices = nullptr;
     };
 
+    [[nodiscard]] inline std::optional<SceneDrawItem> VfxMeshDrawItem(const VfxRenderParticle& particle)
+    {
+        if (particle.Renderer != VfxRendererType::Mesh || !particle.Mesh || particle.Size <= 0.0F)
+            return std::nullopt;
+        return SceneDrawItem{particle.Mesh,
+                             {},
+                             Math::ComposeTransform(particle.Position,
+                                                    Math::EulerDegreesToQuaternion(particle.Rotation),
+                                                    {particle.Size, particle.Size, particle.Size}),
+                             particle.Tint,
+                             {},
+                             {},
+                             {},
+                             {},
+                             false,
+                             true};
+    }
+
     enum class SceneLocalLightType : std::uint8_t
     {
         Point,

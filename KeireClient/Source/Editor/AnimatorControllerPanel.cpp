@@ -191,78 +191,15 @@ namespace KeireEditor
             return std::fmod(normalizedTime, 1.0F);
         }
 
-        void DrawStateGraph(Keire::UiFrame& ui, const Keire::AnimationLayerDefinition& layer,
-                            const std::string_view selectedState, const Keire::AnimatorLayerDebugState* playback,
-                            const Keire::UiThemeDefinition& theme)
+        [[nodiscard]] StableNodeId AnimatorCanvasId(const std::string_view value, const std::uint64_t salt) noexcept
         {
-            const auto canvas = ui.ContentRect();
-            ui.DrawFilledRectangle(canvas, {0.055F, 0.065F, 0.078F, 1.0F}, 5.0F);
-            for (float x = canvas.Minimum.X; x < canvas.Maximum.X; x += 32.0F)
-                ui.DrawLine({x, canvas.Minimum.Y}, {x, canvas.Maximum.Y}, {0.12F, 0.14F, 0.17F, 0.6F});
-            for (float y = canvas.Minimum.Y; y < canvas.Maximum.Y; y += 32.0F)
-                ui.DrawLine({canvas.Minimum.X, y}, {canvas.Maximum.X, y}, {0.12F, 0.14F, 0.17F, 0.6F});
-
-            const auto nodeRect = [&](const Keire::AnimationStateDefinition& state, const std::size_t index)
+            std::uint64_t hash = 1469598103934665603ULL ^ salt;
+            for (const auto character : value)
             {
-                const auto position = DisplayPosition(state, index);
-                const float x = canvas.Minimum.X + 28.0F + position.X;
-                const float y = canvas.Minimum.Y + 34.0F + position.Y;
-                return Keire::UiItemRect{{x, y}, {x + 154.0F, y + 58.0F}};
-            };
-            for (std::size_t sourceIndex = 0; sourceIndex < layer.States.size(); ++sourceIndex)
-            {
-                const auto& source = layer.States[sourceIndex];
-                const auto sourceRect = nodeRect(source, sourceIndex);
-                for (const auto& transition : source.Transitions)
-                {
-                    const auto destination =
-                        std::ranges::find(layer.States, transition.DestinationId, &Keire::AnimationStateDefinition::Id);
-                    if (destination == layer.States.end())
-                        continue;
-                    const auto destinationIndex =
-                        static_cast<std::size_t>(std::distance(layer.States.begin(), destination));
-                    const auto destinationRect = nodeRect(*destination, destinationIndex);
-                    ui.DrawLine(
-                        {sourceRect.Maximum.X, (sourceRect.Minimum.Y + sourceRect.Maximum.Y) * 0.5F},
-                        {destinationRect.Minimum.X, (destinationRect.Minimum.Y + destinationRect.Maximum.Y) * 0.5F},
-                        theme.MutedText, 2.0F);
-                }
+                hash ^= static_cast<std::uint8_t>(character);
+                hash *= 1099511628211ULL;
             }
-            for (std::size_t index = 0; index < layer.States.size(); ++index)
-            {
-                const auto& state = layer.States[index];
-                const auto rectangle = nodeRect(state, index);
-                const bool entry = state.Id == layer.EntryStateId;
-                const bool selected = state.Id == selectedState;
-                const bool active = playback && state.Id == playback->StateId;
-                const Keire::UiColor fill = active     ? Keire::UiColor{0.08F, 0.37F, 0.29F, 1.0F}
-                                            : selected ? Keire::UiColor{0.10F, 0.34F, 0.52F, 1.0F}
-                                            : entry    ? Keire::UiColor{0.10F, 0.31F, 0.22F, 1.0F}
-                                                       : Keire::UiColor{0.12F, 0.14F, 0.18F, 1.0F};
-                ui.DrawFilledRectangle(rectangle, fill, 7.0F);
-                const auto outline = active     ? Keire::UiColor{0.20F, 0.92F, 0.62F, 1.0F}
-                                     : selected ? theme.Accent
-                                                : theme.MutedText;
-                ui.DrawRectangle(rectangle, outline, active || selected ? 2.0F : 1.0F, 7.0F);
-                ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 10.0F}, {1, 1, 1, 1},
-                                   state.Name);
-                const auto status =
-                    active  ? "PLAYING " +
-                                  std::to_string(static_cast<int>(TimelineFraction(playback->NormalizedTime) * 100.0F)) +
-                                  "%"
-                    : entry ? std::string("ENTRY")
-                            : std::string(MotionTypeNames[static_cast<std::size_t>(state.Motion.Type)]);
-                ui.DrawOverlayText({rectangle.Minimum.X + 12.0F, rectangle.Minimum.Y + 32.0F},
-                                   active ? Keire::UiColor{0.55F, 1.0F, 0.77F, 1.0F} : theme.MutedText, status);
-                if (active)
-                {
-                    const float width =
-                        (rectangle.Maximum.X - rectangle.Minimum.X - 8.0F) * TimelineFraction(playback->NormalizedTime);
-                    const Keire::UiItemRect progress{{rectangle.Minimum.X + 4.0F, rectangle.Maximum.Y - 5.0F},
-                                                     {rectangle.Minimum.X + 4.0F + width, rectangle.Maximum.Y - 2.0F}};
-                    ui.DrawFilledRectangle(progress, {0.20F, 0.92F, 0.62F, 1.0F}, 2.0F);
-                }
-            }
+            return hash == 0 ? salt | 1ULL : hash;
         }
     } // namespace
 
@@ -671,8 +608,14 @@ namespace KeireEditor
     void AnimatorControllerPanel::ResetTransientState() noexcept
     {
         m_Preview->Stop();
+        m_GraphCanvas.CancelInteractions();
+        m_GraphCanvas.Select(std::nullopt);
+        m_GraphCanvas.SelectConnection(std::nullopt);
+        m_GraphContext.reset();
         m_SelectedTransition.clear();
+        m_GraphLayer.clear();
         m_Message.clear();
+        m_FocusGraph = true;
     }
 
     void AnimatorControllerPanel::Draw(Keire::UiFrame& ui)
@@ -985,15 +928,17 @@ namespace KeireEditor
                         layer->States[index].EditorPosition = {static_cast<float>(index % 3) * 190.0F,
                                                                static_cast<float>(index / 3) * 104.0F};
                     }
+                    m_FocusGraph = true;
                     markChanged("Auto Layout Animator States");
                 }
             }
             ui.Separator();
 
-            const auto canvas = ui.ContentRect();
+            std::vector<NodeGraphNode> graphNodes;
+            std::vector<NodeGraphConnection> graphConnections;
+            const Keire::AnimatorLayerDebugState* layerPlayback = nullptr;
             if (layer)
             {
-                const Keire::AnimatorLayerDebugState* layerPlayback = nullptr;
                 if (playbackSnapshot)
                 {
                     const auto found =
@@ -1001,13 +946,330 @@ namespace KeireEditor
                     if (found != playbackSnapshot->Layers.end())
                         layerPlayback = &*found;
                 }
-                DrawStateGraph(ui, *layer, selectedState, layerPlayback, theme);
+
+                graphNodes.reserve(layer->States.size());
+                for (std::size_t index = 0; index < layer->States.size(); ++index)
+                {
+                    const auto& state = layer->States[index];
+                    const bool entry = state.Id == layer->EntryStateId;
+                    const bool active = layerPlayback && state.Id == layerPlayback->StateId;
+                    std::string subtitle;
+                    if (active)
+                    {
+                        subtitle =
+                            "PLAYING  " +
+                            std::to_string(static_cast<int>(TimelineFraction(layerPlayback->NormalizedTime) * 100.0F)) +
+                            "%";
+                    }
+                    else if (entry)
+                    {
+                        subtitle = "ENTRY  |  ";
+                        subtitle += MotionTypeNames[static_cast<std::size_t>(state.Motion.Type)];
+                    }
+                    else
+                    {
+                        subtitle = MotionTypeNames[static_cast<std::size_t>(state.Motion.Type)];
+                        subtitle += "  |  ";
+                        subtitle += std::to_string(state.Transitions.size());
+                        subtitle += state.Transitions.size() == 1 ? " TRANSITION" : " TRANSITIONS";
+                    }
+
+                    NodeGraphNode node{
+                        .Id = AnimatorCanvasId(state.Id, 0x414e494d4e4f4445ULL),
+                        .Label = state.Name,
+                        .Position = DisplayPosition(state, index),
+                        .Size = {214.0F, 86.0F},
+                        .Color = active  ? Keire::UiColor{0.08F, 0.48F, 0.33F, 1.0F}
+                                 : entry ? Keire::UiColor{0.10F, 0.40F, 0.30F, 1.0F}
+                                         : Keire::UiColor{0.10F, 0.32F, 0.52F, 1.0F},
+                        .Subtitle = std::move(subtitle),
+                    };
+                    node.Pins.push_back({.Id = AnimatorCanvasId(state.Id, 0x414e494d494e5054ULL),
+                                         .Label = "Enter",
+                                         .Direction = NodeGraphPinDirection::Input,
+                                         .Type = 1,
+                                         .Color = {0.24F, 0.78F, 1.0F, 1.0F}});
+                    node.Pins.push_back({.Id = AnimatorCanvasId(state.Id, 0x414e494d4f555450ULL),
+                                         .Label = "Transition",
+                                         .Direction = NodeGraphPinDirection::Output,
+                                         .Type = 1,
+                                         .Color = {0.24F, 0.78F, 1.0F, 1.0F}});
+                    graphNodes.push_back(std::move(node));
+                }
+                for (const auto& source : layer->States)
+                {
+                    for (const auto& transition : source.Transitions)
+                    {
+                        const auto destination = std::ranges::find(layer->States, transition.DestinationId,
+                                                                   &Keire::AnimationStateDefinition::Id);
+                        if (destination == layer->States.end())
+                            continue;
+                        std::string label = std::to_string(transition.Conditions.size());
+                        label += transition.Conditions.size() == 1 ? " condition" : " conditions";
+                        if (transition.HasExitTime)
+                            label += "  |  exit";
+                        graphConnections.push_back(
+                            {.Id = AnimatorCanvasId(transition.Id, 0x414e494d4c494e4bULL),
+                             .Source = AnimatorCanvasId(source.Id, 0x414e494d4e4f4445ULL),
+                             .Target = AnimatorCanvasId(destination->Id, 0x414e494d4e4f4445ULL),
+                             .Label = std::move(label),
+                             .SourcePin = AnimatorCanvasId(source.Id, 0x414e494d4f555450ULL),
+                             .TargetPin = AnimatorCanvasId(destination->Id, 0x414e494d494e5054ULL)});
+                    }
+                }
             }
-            else
+
+            const auto findStateByCanvasId = [&](const StableNodeId id) -> Keire::AnimationStateDefinition*
             {
-                ui.DrawFilledRectangle(canvas, {0.055F, 0.065F, 0.078F, 1.0F}, 5.0F);
+                if (!layer)
+                    return nullptr;
+                const auto found =
+                    std::ranges::find_if(layer->States, [&](const auto& state)
+                                         { return AnimatorCanvasId(state.Id, 0x414e494d4e4f4445ULL) == id; });
+                return found == layer->States.end() ? nullptr : std::addressof(*found);
+            };
+            const auto findTransitionByCanvasId = [&](const StableNodeId id)
+                -> std::optional<std::pair<Keire::AnimationStateDefinition*, Keire::AnimationTransition*>>
+            {
+                if (!layer)
+                    return std::nullopt;
+                for (auto& state : layer->States)
+                {
+                    const auto transition =
+                        std::ranges::find_if(state.Transitions, [&](const auto& candidate)
+                                             { return AnimatorCanvasId(candidate.Id, 0x414e494d4c494e4bULL) == id; });
+                    if (transition != state.Transitions.end())
+                        return std::pair{std::addressof(state), std::addressof(*transition)};
+                }
+                return std::nullopt;
+            };
+            const auto removeState = [&](const std::string_view stateId)
+            {
+                if (!layer)
+                    return;
+                RemoveStateReferences(*layer, stateId);
+                std::erase_if(layer->States, [&](const auto& candidate) { return candidate.Id == stateId; });
+                if (layer->EntryStateId == stateId)
+                    layer->EntryStateId = layer->States.empty() ? std::string{} : layer->States.front().Id;
+                selectedState.clear();
+                m_SelectedTransition.clear();
+                m_GraphCanvas.Select(std::nullopt);
+                m_GraphCanvas.SelectConnection(std::nullopt);
+                markChanged("Delete Animator State");
+            };
+
+            m_GraphCanvas.Select(selectedState.empty()
+                                     ? std::nullopt
+                                     : std::optional{AnimatorCanvasId(selectedState, 0x414e494d4e4f4445ULL)});
+            m_GraphCanvas.SelectConnection(
+                m_SelectedTransition.empty()
+                    ? std::nullopt
+                    : std::optional{AnimatorCanvasId(m_SelectedTransition, 0x414e494d4c494e4bULL)});
+            if (m_GraphLayer != selectedLayer)
+            {
+                m_GraphLayer = selectedLayer;
+                m_FocusGraph = true;
+            }
+            if (m_FocusGraph)
+            {
+                m_GraphCanvas.Focus(graphNodes, ui.ContentAvailable());
+                m_FocusGraph = false;
+            }
+            NodeGraphCanvasOptions graphOptions{
+                .Editable = layer != nullptr,
+                .InteractiveConnections = layer != nullptr,
+                .ValidateConnection =
+                    [&](const NodeGraphConnectionRequest& request)
+                {
+                    const auto* source = findStateByCanvasId(request.SourceNode);
+                    const auto* destination = findStateByCanvasId(request.TargetNode);
+                    if (!source || !destination)
+                    {
+                        return NodeGraphConnectionValidation{NodeGraphConnectionValidationStatus::Reject,
+                                                             "A transition endpoint is unavailable."};
+                    }
+                    if (source == destination)
+                    {
+                        return NodeGraphConnectionValidation{NodeGraphConnectionValidationStatus::Reject,
+                                                             "Self-transitions are not supported."};
+                    }
+                    if (std::ranges::any_of(source->Transitions, [&](const auto& transition)
+                                            { return transition.DestinationId == destination->Id; }))
+                    {
+                        return NodeGraphConnectionValidation{NodeGraphConnectionValidationStatus::AcceptWithWarning,
+                                                             "Adds another transition between these states."};
+                    }
+                    return NodeGraphConnectionValidation{NodeGraphConnectionValidationStatus::Accept, {}};
+                },
+            };
+            const auto graphResult =
+                m_GraphCanvas.Draw(ui, "AnimatorStateGraphCanvas", graphNodes, graphConnections, graphOptions);
+            const auto canvas = ui.LastItemRect();
+            if (!layer)
+            {
                 ui.DrawOverlayText({canvas.Minimum.X + 24.0F, canvas.Minimum.Y + 24.0F}, theme.MutedText,
                                    "Create a layer, then drag animation clips here.");
+            }
+            if (graphResult.ActivatedNode)
+            {
+                if (const auto* state = findStateByCanvasId(*graphResult.ActivatedNode); state)
+                {
+                    selectedParameter.clear();
+                    selectedState = state->Id;
+                    m_SelectedTransition.clear();
+                }
+            }
+            if (graphResult.ActivatedConnection)
+            {
+                if (const auto transition = findTransitionByCanvasId(*graphResult.ActivatedConnection); transition)
+                {
+                    selectedParameter.clear();
+                    selectedState = transition->first->Id;
+                    m_SelectedTransition = transition->second->Id;
+                }
+            }
+            if (graphResult.BackgroundActivated)
+            {
+                selectedState.clear();
+                m_SelectedTransition.clear();
+            }
+            if (graphResult.MoveCompletedNode)
+            {
+                auto state = findStateByCanvasId(*graphResult.MoveCompletedNode);
+                const auto node = std::ranges::find(graphNodes, *graphResult.MoveCompletedNode, &NodeGraphNode::Id);
+                if (state && node != graphNodes.end() && state->EditorPosition != node->Position)
+                {
+                    state->EditorPosition = node->Position;
+                    markChanged("Move Animator State");
+                }
+            }
+            if (graphResult.ConnectionRequested)
+            {
+                auto* source = findStateByCanvasId(graphResult.ConnectionRequested->SourceNode);
+                auto* destination = findStateByCanvasId(graphResult.ConnectionRequested->TargetNode);
+                if (source && destination && source != destination)
+                {
+                    Keire::AnimationTransition transition;
+                    transition.Id = Keire::AssetId::Generate().ToString();
+                    transition.DestinationId = destination->Id;
+                    transition.Destination = destination->Name;
+                    m_SelectedTransition = transition.Id;
+                    selectedParameter.clear();
+                    selectedState = source->Id;
+                    source->Transitions.push_back(std::move(transition));
+                    markChanged("Connect Animator States");
+                }
+            }
+            if (graphResult.DeleteConnectionRequested)
+            {
+                if (const auto transition = findTransitionByCanvasId(*graphResult.DeleteConnectionRequested);
+                    transition)
+                {
+                    const auto transitionId = transition->second->Id;
+                    std::erase_if(transition->first->Transitions,
+                                  [&](const auto& candidate) { return candidate.Id == transitionId; });
+                    m_SelectedTransition.clear();
+                    markChanged("Delete Animator Transition");
+                }
+            }
+            if (graphResult.DeleteNodeRequested)
+            {
+                if (const auto* state = findStateByCanvasId(*graphResult.DeleteNodeRequested); state)
+                    removeState(state->Id);
+            }
+            if (graphResult.ContextRequested)
+            {
+                m_GraphContext = graphResult.ContextRequested;
+                ui.OpenPopup("AnimatorGraphContext");
+            }
+
+            if (auto popup = ui.BeginPopup("AnimatorGraphContext"); popup)
+            {
+                if (!m_GraphContext)
+                {
+                    ui.TextColored(theme.MutedText, "The graph item is no longer available.");
+                }
+                else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Background)
+                {
+                    ui.TextColored(theme.Accent, "STATE MACHINE");
+                    ui.TextColored(theme.MutedText, "Drop animation clips to create states.");
+                    ui.Separator();
+                    if (ui.MenuItem("Frame All States"))
+                        m_GraphCanvas.Focus(graphNodes, canvas.Size());
+                }
+                else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Node)
+                {
+                    if (auto* state = findStateByCanvasId(m_GraphContext->Node); state)
+                    {
+                        ui.TextColored(theme.Accent, state->Name);
+                        ui.TextColored(theme.MutedText, MotionTypeNames[static_cast<std::size_t>(state->Motion.Type)]);
+                        ui.Separator();
+                        if (ui.MenuItem("Set As Entry", false, state->Id != layer->EntryStateId))
+                        {
+                            layer->EntryStateId = state->Id;
+                            markChanged("Set Animator Entry State");
+                        }
+                        if (ui.MenuItem("Remove All Transitions", false, !state->Transitions.empty()))
+                        {
+                            state->Transitions.clear();
+                            m_SelectedTransition.clear();
+                            markChanged("Remove Animator State Transitions");
+                        }
+                        ui.Separator();
+                        if (ui.MenuItem("Delete State"))
+                            removeState(state->Id);
+                    }
+                }
+                else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Connection)
+                {
+                    if (const auto transition = findTransitionByCanvasId(m_GraphContext->Connection); transition)
+                    {
+                        ui.TextColored(theme.Accent, "TRANSITION");
+                        ui.TextColored(theme.MutedText,
+                                       transition->first->Name + "  ->  " + transition->second->Destination);
+                        ui.Separator();
+                        if (ui.MenuItem("Delete Transition"))
+                        {
+                            const auto transitionId = transition->second->Id;
+                            std::erase_if(transition->first->Transitions,
+                                          [&](const auto& candidate) { return candidate.Id == transitionId; });
+                            m_SelectedTransition.clear();
+                            markChanged("Delete Animator Transition");
+                        }
+                    }
+                }
+                else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Pin)
+                {
+                    if (auto* state = findStateByCanvasId(m_GraphContext->Node); state)
+                    {
+                        const bool output = m_GraphContext->Pin == AnimatorCanvasId(state->Id, 0x414e494d4f555450ULL);
+                        ui.TextColored(theme.Accent, output ? "TRANSITION OUTPUT" : "STATE INPUT");
+                        ui.TextColored(theme.MutedText, state->Name);
+                        ui.Separator();
+                        if (output && ui.MenuItem("Unlink Outgoing", false, !state->Transitions.empty()))
+                        {
+                            state->Transitions.clear();
+                            m_SelectedTransition.clear();
+                            markChanged("Unlink Animator State Output");
+                        }
+                        if (!output)
+                        {
+                            const bool connected = std::ranges::any_of(
+                                layer->States,
+                                [&](const auto& source)
+                                {
+                                    return std::ranges::any_of(source.Transitions, [&](const auto& transition)
+                                                               { return transition.DestinationId == state->Id; });
+                                });
+                            if (ui.MenuItem("Unlink Incoming", false, connected))
+                            {
+                                RemoveStateReferences(*layer, state->Id);
+                                m_SelectedTransition.clear();
+                                markChanged("Unlink Animator State Input");
+                            }
+                        }
+                    }
+                }
             }
 
             if (auto target = ui.BeginDragTarget(canvas, "AnimatorControllerClipDrop"); target)
@@ -1085,9 +1347,9 @@ namespace KeireEditor
                             state.Name = UniqueName(layer->States, clip.Name, &Keire::AnimationStateDefinition::Name);
                             state.Clip = clip.Id;
                             state.Motion.Clip = clip.Id;
-                            const auto index = layer->States.size();
-                            state.EditorPosition = {static_cast<float>(index % 3) * 190.0F,
-                                                    static_cast<float>(index / 3) * 104.0F};
+                            state.EditorPosition = {
+                                graphResult.PointerGraphPosition.X + static_cast<float>(added) * 36.0F,
+                                graphResult.PointerGraphPosition.Y + static_cast<float>(added) * 28.0F};
                             selectedState = state.Id;
                             if (layer->EntryStateId.empty())
                                 layer->EntryStateId = state.Id;

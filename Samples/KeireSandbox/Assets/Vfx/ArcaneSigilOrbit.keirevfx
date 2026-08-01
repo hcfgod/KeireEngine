@@ -1,0 +1,720 @@
+{
+  "blackboard": [
+    {
+      "default": 18.0,
+      "exposed": true,
+      "id": "4b565846-5349-4749-0000-000000000100",
+      "name": "Sigil Rate",
+      "type": "scalar"
+    },
+    {
+      "default": [
+        0.0,
+        0.11999999731779099,
+        0.0
+      ],
+      "exposed": true,
+      "id": "4b565846-5349-4749-0000-000000000101",
+      "name": "Aether Lift",
+      "type": "vector3"
+    }
+  ],
+  "capacity": 384,
+  "compatibilityMode": "nativeSchema4",
+  "duration": 3.0,
+  "emitterId": "4b565846-5349-4749-0000-000000000001",
+  "executionSource": "graph",
+  "loop": true,
+  "modules": [
+    {
+      "enabled": true,
+      "id": "4b565846-5349-4749-0000-000000000002",
+      "particlesPerSecond": 18.0,
+      "type": "emissionRate"
+    },
+    {
+      "count": 12,
+      "cycles": 1,
+      "enabled": true,
+      "id": "4b565846-5349-4749-0000-000000000003",
+      "interval": 0.0,
+      "time": 0.0,
+      "type": "burst"
+    },
+    {
+      "boxHalfExtent": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "coneAngleDegrees": 25.0,
+      "coneLength": 1.0,
+      "enabled": true,
+      "id": "4b565846-5349-4749-0000-000000000004",
+      "mesh": "",
+      "radius": 1.100000023841858,
+      "shape": "sphere",
+      "type": "shape",
+      "volume": ""
+    },
+    {
+      "enabled": true,
+      "id": "4b565846-5349-4749-0000-000000000005",
+      "lifetimeMaximum": 3.799999952316284,
+      "lifetimeMinimum": 2.200000047683716,
+      "rotationMaximum": [
+        22.0,
+        180.0,
+        180.0
+      ],
+      "rotationMinimum": [
+        -22.0,
+        -180.0,
+        -180.0
+      ],
+      "type": "initialize",
+      "velocityMaximum": [
+        0.3499999940395355,
+        0.44999998807907104,
+        0.3499999940395355
+      ],
+      "velocityMinimum": [
+        -0.3499999940395355,
+        0.05000000074505806,
+        -0.3499999940395355
+      ]
+    },
+    {
+      "enabled": true,
+      "force": [
+        0.0,
+        0.11999999731779099,
+        0.0
+      ],
+      "gravityMultiplier": 0.07999999821186066,
+      "id": "4b565846-5349-4749-0000-000000000006",
+      "type": "force"
+    },
+    {
+      "curve": [
+        {
+          "inTangent": 0.0,
+          "interpolation": "linear",
+          "outTangent": 0.0,
+          "time": 0.0,
+          "value": 0.6200000047683716
+        },
+        {
+          "inTangent": 0.0,
+          "interpolation": "linear",
+          "outTangent": 0.0,
+          "time": 1.0,
+          "value": 0.07999999821186066
+        }
+      ],
+      "enabled": true,
+      "id": "4b565846-5349-4749-0000-000000000007",
+      "type": "sizeOverLifetime"
+    },
+    {
+      "enabled": true,
+      "gradient": {
+        "interpolation": "linear",
+        "keys": [
+          {
+            "color": [
+              0.20000000298023224,
+              0.8999999761581421,
+              1.0,
+              0.949999988079071
+            ],
+            "time": 0.0
+          },
+          {
+            "color": [
+              0.3400000035762787,
+              0.029999999329447746,
+              1.0,
+              0.0
+            ],
+            "time": 1.0
+          }
+        ]
+      },
+      "id": "4b565846-5349-4749-0000-000000000008",
+      "type": "colorOverLifetime"
+    },
+    {
+      "enabled": true,
+      "id": "4b565846-5349-4749-0000-000000000009",
+      "mesh": "a70cd455-45a1-49e7-9167-591f7896f048",
+      "renderer": "mesh",
+      "sprite": "",
+      "type": "renderer"
+    }
+  ],
+  "name": "Arcane Sigil Orbit",
+  "schemaVersion": 4,
+  "seed": 659918,
+  "space": "world",
+  "systems": [
+    {
+      "connections": [
+        {
+          "id": "0c041916-1b1f-5111-8000-000000008001",
+          "inputBlock": "",
+          "inputNode": "0c041916-1b1f-5111-8000-000000002101",
+          "inputPin": "4b565846-5349-5749-8000-000000002100",
+          "outputBlock": "",
+          "outputNode": "0c041916-1b1f-5111-8000-000000002001",
+          "outputPin": "4b565846-5349-5749-8000-000000002003"
+        },
+        {
+          "id": "0c041916-1b1f-5111-8000-000000008000",
+          "inputBlock": "",
+          "inputNode": "0c041916-1b1f-5111-8000-000000002201",
+          "inputPin": "4b565846-5349-5749-8000-000000002200",
+          "outputBlock": "",
+          "outputNode": "0c041916-1b1f-5111-8000-000000002101",
+          "outputPin": "4b565846-5349-5749-8000-000000002103"
+        },
+        {
+          "id": "0c041916-1b1f-5111-8000-000000008003",
+          "inputBlock": "",
+          "inputNode": "0c041916-1b1f-5111-8000-000000002301",
+          "inputPin": "4b565846-5349-5749-8000-000000002300",
+          "outputBlock": "",
+          "outputNode": "0c041916-1b1f-5111-8000-000000002201",
+          "outputPin": "4b565846-5349-5749-8000-000000002203"
+        },
+        {
+          "id": "4b565846-5349-4749-0000-000000007100",
+          "inputBlock": "0c041916-1b1f-5111-8000-000000003002",
+          "inputNode": "0c041916-1b1f-5111-8000-000000002001",
+          "inputPin": "0c041916-1b1f-5111-8000-000000003103",
+          "outputBlock": "",
+          "outputNode": "0c041916-1b1f-5111-8000-000000004100",
+          "outputPin": "0c041916-1b1f-5111-8000-000000004000"
+        },
+        {
+          "id": "4b565846-5349-4749-0000-000000007101",
+          "inputBlock": "0c041916-1b1f-5111-8000-000000003006",
+          "inputNode": "0c041916-1b1f-5111-8000-000000002201",
+          "inputPin": "0c041916-1b1f-5111-8000-000000003116",
+          "outputBlock": "",
+          "outputNode": "0c041916-1b1f-5111-8000-000000004101",
+          "outputPin": "0c041916-1b1f-5111-8000-000000004001"
+        }
+      ],
+      "id": "0c041916-1b1f-5111-8000-000000001001",
+      "name": "Particle System",
+      "nodes": [
+        {
+          "blocks": [
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003002",
+              "pins": [
+                {
+                  "default": 18.0,
+                  "id": "0c041916-1b1f-5111-8000-000000003103",
+                  "input": true,
+                  "name": "Particles Per Second",
+                  "semantic": "particlesPerSecond",
+                  "type": "scalar"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000002",
+              "type": "emissionRate",
+              "typeId": "keire.block.emission-rate"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003003",
+              "pins": [
+                {
+                  "default": 0.0,
+                  "id": "0c041916-1b1f-5111-8000-000000003102",
+                  "input": true,
+                  "name": "Time",
+                  "semantic": "time",
+                  "type": "scalar"
+                },
+                {
+                  "default": 12,
+                  "id": "0c041916-1b1f-5111-8000-000000003101",
+                  "input": true,
+                  "name": "Count",
+                  "semantic": "count",
+                  "type": "integer"
+                },
+                {
+                  "default": 1,
+                  "id": "0c041916-1b1f-5111-8000-000000003100",
+                  "input": true,
+                  "name": "Cycles",
+                  "semantic": "cycles",
+                  "type": "integer"
+                },
+                {
+                  "default": 0.0,
+                  "id": "0c041916-1b1f-5111-8000-000000003107",
+                  "input": true,
+                  "name": "Interval",
+                  "semantic": "interval",
+                  "type": "scalar"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000003",
+              "type": "burst",
+              "typeId": "keire.block.burst"
+            }
+          ],
+          "context": "spawn",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "0c041916-1b1f-5111-8000-000000002001",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "4b565846-5349-5749-8000-000000002003",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            0.0,
+            0.0
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "spawn Context",
+          "typeId": "keire.context.spawn"
+        },
+        {
+          "blocks": [
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003004",
+              "pins": [
+                {
+                  "default": [
+                    0.5,
+                    0.5,
+                    0.5
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-000000003105",
+                  "input": true,
+                  "name": "Box Half Extent",
+                  "semantic": "boxHalfExtent",
+                  "type": "vector3"
+                },
+                {
+                  "default": 1.100000023841858,
+                  "id": "0c041916-1b1f-5111-8000-000000003106",
+                  "input": true,
+                  "name": "Radius",
+                  "semantic": "radius",
+                  "type": "scalar"
+                },
+                {
+                  "default": 25.0,
+                  "id": "0c041916-1b1f-5111-8000-00000000310c",
+                  "input": true,
+                  "name": "Cone Angle",
+                  "semantic": "coneAngleDegrees",
+                  "type": "scalar"
+                },
+                {
+                  "default": 1.0,
+                  "id": "0c041916-1b1f-5111-8000-00000000310d",
+                  "input": true,
+                  "name": "Cone Length",
+                  "semantic": "coneLength",
+                  "type": "scalar"
+                },
+                {
+                  "default": "",
+                  "id": "0c041916-1b1f-5111-8000-00000000310e",
+                  "input": true,
+                  "name": "Mesh",
+                  "semantic": "mesh",
+                  "type": "mesh"
+                },
+                {
+                  "default": "",
+                  "id": "0c041916-1b1f-5111-8000-00000000310f",
+                  "input": true,
+                  "name": "Volume",
+                  "semantic": "volume",
+                  "type": "asset"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000004",
+              "type": "shape",
+              "typeId": "keire.block.shape"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003005",
+              "pins": [
+                {
+                  "default": 2.200000047683716,
+                  "id": "0c041916-1b1f-5111-8000-000000003104",
+                  "input": true,
+                  "name": "Lifetime Minimum",
+                  "semantic": "lifetimeMinimum",
+                  "type": "scalar"
+                },
+                {
+                  "default": 3.799999952316284,
+                  "id": "0c041916-1b1f-5111-8000-000000003109",
+                  "input": true,
+                  "name": "Lifetime Maximum",
+                  "semantic": "lifetimeMaximum",
+                  "type": "scalar"
+                },
+                {
+                  "default": [
+                    -0.3499999940395355,
+                    0.05000000074505806,
+                    -0.3499999940395355
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-000000003108",
+                  "input": true,
+                  "name": "Velocity Minimum",
+                  "semantic": "velocityMinimum",
+                  "type": "vector3"
+                },
+                {
+                  "default": [
+                    0.3499999940395355,
+                    0.44999998807907104,
+                    0.3499999940395355
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-00000000310b",
+                  "input": true,
+                  "name": "Velocity Maximum",
+                  "semantic": "velocityMaximum",
+                  "type": "vector3"
+                },
+                {
+                  "default": [
+                    -22.0,
+                    -180.0,
+                    -180.0
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-00000000310a",
+                  "input": true,
+                  "name": "Rotation Minimum",
+                  "semantic": "rotationMinimum",
+                  "type": "vector3"
+                },
+                {
+                  "default": [
+                    22.0,
+                    180.0,
+                    180.0
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-000000003115",
+                  "input": true,
+                  "name": "Rotation Maximum",
+                  "semantic": "rotationMaximum",
+                  "type": "vector3"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000005",
+              "type": "initialize",
+              "typeId": "keire.block.initialize"
+            }
+          ],
+          "context": "initialize",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "0c041916-1b1f-5111-8000-000000002101",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "4b565846-5349-5749-8000-000000002100",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": null,
+              "id": "4b565846-5349-5749-8000-000000002103",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            280.0,
+            0.0
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "initialize Context",
+          "typeId": "keire.context.initialize"
+        },
+        {
+          "blocks": [
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003006",
+              "pins": [
+                {
+                  "default": [
+                    0.0,
+                    0.11999999731779099,
+                    0.0
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-000000003116",
+                  "input": true,
+                  "name": "Force",
+                  "semantic": "force",
+                  "type": "vector3"
+                },
+                {
+                  "default": 0.07999999821186066,
+                  "id": "0c041916-1b1f-5111-8000-000000003117",
+                  "input": true,
+                  "name": "Gravity Multiplier",
+                  "semantic": "gravityMultiplier",
+                  "type": "scalar"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000006",
+              "type": "force",
+              "typeId": "keire.block.force"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "4b565846-5349-4749-0000-000000007000",
+              "pins": [],
+              "properties": [
+                {
+                  "name": "Source",
+                  "type": "string",
+                  "value": "Velocity += float3(0.22, 0.18, -0.2) * DeltaTime;\nRotation += 140.0 * DeltaTime;"
+                }
+              ],
+              "reference": "",
+              "type": "Portable Custom HLSL",
+              "typeId": "keire.block.portable-hlsl"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003007",
+              "pins": [
+                {
+                  "default": 0.6200000047683716,
+                  "id": "0c041916-1b1f-5111-8000-000000003114",
+                  "input": true,
+                  "name": "Size",
+                  "semantic": "size",
+                  "type": "scalar"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000007",
+              "type": "sizeOverLifetime",
+              "typeId": "keire.block.size-over-lifetime"
+            },
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003008",
+              "pins": [
+                {
+                  "default": [
+                    0.20000000298023224,
+                    0.8999999761581421,
+                    1.0,
+                    0.949999988079071
+                  ],
+                  "id": "0c041916-1b1f-5111-8000-000000003118",
+                  "input": true,
+                  "name": "Color",
+                  "semantic": "color",
+                  "type": "color"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000008",
+              "type": "colorOverLifetime",
+              "typeId": "keire.block.color-over-lifetime"
+            }
+          ],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "0c041916-1b1f-5111-8000-000000002201",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "4b565846-5349-5749-8000-000000002200",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            },
+            {
+              "default": null,
+              "id": "4b565846-5349-5749-8000-000000002203",
+              "input": false,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            560.0,
+            0.0
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "update Context",
+          "typeId": "keire.context.update"
+        },
+        {
+          "blocks": [
+            {
+              "definitionVersion": 1,
+              "enabled": true,
+              "id": "0c041916-1b1f-5111-8000-000000003009",
+              "pins": [
+                {
+                  "default": "",
+                  "id": "0c041916-1b1f-5111-8000-000000003119",
+                  "input": true,
+                  "name": "Sprite",
+                  "semantic": "sprite",
+                  "type": "texture"
+                },
+                {
+                  "default": "a70cd455-45a1-49e7-9167-591f7896f048",
+                  "id": "0c041916-1b1f-5111-8000-00000000311b",
+                  "input": true,
+                  "name": "Mesh",
+                  "semantic": "mesh",
+                  "type": "mesh"
+                }
+              ],
+              "properties": [],
+              "reference": "4b565846-5349-4749-0000-000000000009",
+              "type": "renderer",
+              "typeId": "keire.output.renderer"
+            }
+          ],
+          "context": "output",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "0c041916-1b1f-5111-8000-000000002301",
+          "kind": "context",
+          "pins": [
+            {
+              "default": null,
+              "id": "4b565846-5349-5749-8000-000000002300",
+              "input": true,
+              "name": "Particles",
+              "semantic": "particles",
+              "type": "particleStream"
+            }
+          ],
+          "position": [
+            840.0,
+            0.0
+          ],
+          "properties": [],
+          "reference": "",
+          "resolvedSignature": [],
+          "type": "output Context",
+          "typeId": "keire.context.output"
+        },
+        {
+          "blocks": [],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "0c041916-1b1f-5111-8000-000000004100",
+          "kind": "parameter",
+          "pins": [
+            {
+              "default": null,
+              "id": "0c041916-1b1f-5111-8000-000000004000",
+              "input": false,
+              "name": "Sigil Rate",
+              "semantic": "value",
+              "type": "scalar"
+            }
+          ],
+          "position": [
+            -360.0,
+            0.0
+          ],
+          "properties": [],
+          "reference": "4b565846-5349-4749-0000-000000000100",
+          "resolvedSignature": [],
+          "type": "Sigil Rate",
+          "typeId": "keire.parameter"
+        },
+        {
+          "blocks": [],
+          "context": "update",
+          "customHlsl": "",
+          "definitionVersion": 1,
+          "dynamicPinOrder": [],
+          "id": "0c041916-1b1f-5111-8000-000000004101",
+          "kind": "parameter",
+          "pins": [
+            {
+              "default": null,
+              "id": "0c041916-1b1f-5111-8000-000000004001",
+              "input": false,
+              "name": "Aether Lift",
+              "semantic": "value",
+              "type": "vector3"
+            }
+          ],
+          "position": [
+            -360.0,
+            150.0
+          ],
+          "properties": [],
+          "reference": "4b565846-5349-4749-0000-000000000101",
+          "resolvedSignature": [],
+          "type": "Aether Lift",
+          "typeId": "keire.parameter"
+        }
+      ]
+    }
+  ]
+}

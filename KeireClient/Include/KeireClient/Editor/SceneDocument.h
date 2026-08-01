@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace KeireEditor
@@ -14,6 +15,8 @@ namespace KeireEditor
     class SceneDocument final
     {
       public:
+        static constexpr std::size_t MaximumEntityNameBytes = 256;
+
         struct TransformValues final
         {
             std::optional<Keire::Vector3> Position;
@@ -50,6 +53,7 @@ namespace KeireEditor
         void SetSelections(std::span<const Keire::AssetId> selections) noexcept;
         void SynchronizeSelection() noexcept;
         void ClearSelection() noexcept;
+        [[nodiscard]] static bool IsValidEntityName(std::string_view name) noexcept;
         void RenameEntity(Keire::EntityId entity, std::string name);
         [[nodiscard]] Keire::EntityId CreateEntity(std::string name = "GameObject", Keire::EntityId parent = {},
                                                    Keire::ComponentTypeId component = {});

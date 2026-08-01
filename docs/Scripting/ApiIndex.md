@@ -11,6 +11,7 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `ComponentTypeId` | Stable component type identity | [Entities](EntitiesComponentsAndTransforms.md) |
 | `ComponentHandle`, `ComponentHandle<T>` | Presence, enabled-state, and removal views | [Entities](EntitiesComponentsAndTransforms.md) |
 | `TransformHandle` | Local transform mutation and world-position read | [Entities](EntitiesComponentsAndTransforms.md) |
+| `CharacterControllerHandle`, `CharacterControllerState` | Collision-resolved movement and grounded-state access | [Gameplay Services](GameplayServices.md) |
 | `AssetId` | Stable untyped asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `AssetReference<T>` | Typed serialized asset identity | [Assets](AssetsAndScriptableObjects.md) |
 | `ScriptableObject` | Managed data base type and transient clone API | [Assets](AssetsAndScriptableObjects.md) |
@@ -88,6 +89,7 @@ Children
 Transform
 Animator
 AudioSource
+CharacterController
 ```
 
 Methods:
@@ -107,7 +109,7 @@ Destroy
 | Area | Types |
 | --- | --- |
 | Scene/rendering | `TransformComponent`, `CameraComponent`, `MeshRendererComponent`, `AnimatorComponent` |
-| Physics | `ColliderComponent`, `RigidBodyComponent` |
+| Physics | `ColliderComponent`, `RigidBodyComponent`, `CharacterControllerComponent` |
 | Audio | `AudioSourceComponent`, `AudioListenerComponent` |
 | VFX | `VfxEmitterComponent` |
 | Lighting | `DirectionalLightComponent`, `PointLightComponent`, `SpotLightComponent` |

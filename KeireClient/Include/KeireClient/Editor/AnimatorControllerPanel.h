@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/AuthoringWidgets.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace KeireEditor
@@ -43,9 +45,13 @@ namespace KeireEditor
         struct PreviewState;
 
         IAnimatorControllerPanelController& m_Controller;
+        StableNodeGraphCanvas m_GraphCanvas;
         Keire::UiPanelRegistration m_Registration;
         std::unique_ptr<PreviewState> m_Preview;
+        std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_SelectedTransition;
+        std::string m_GraphLayer;
         std::string m_Message;
+        bool m_FocusGraph = true;
     };
 } // namespace KeireEditor

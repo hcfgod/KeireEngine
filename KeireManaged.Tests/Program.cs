@@ -12,7 +12,15 @@ var tests = new (string Name, Action Run)[]
     ("Ballistic zero-time and invalid steps", BallisticZeroTimeAndInvalidSteps),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
+    ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
 };
+
+static void CharacterControllerStableContract()
+{
+    Keire.ComponentTypeId id = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
+    Assert(id.High == 0x4b45495245434841UL, "Character Controller stable ID high lane changed.");
+    Assert(id.Low == 0x5241435445520001UL, "Character Controller stable ID low lane changed.");
+}
 
 int failed = 0;
 foreach ((string name, Action run) in tests)

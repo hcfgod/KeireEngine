@@ -7,7 +7,7 @@ namespace KeireSandbox;
 public sealed class FirstPersonCamera : Behaviour
 {
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000031")]
-    private float _movementSpeed = 12.0f;
+    private float _movementSpeed = 6.5f;
 
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000032")]
     private float _lookSensitivity = 2.12f;
@@ -27,6 +27,27 @@ public sealed class FirstPersonCamera : Behaviour
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000037")]
     private float _lookSharpness = 30.0f;
 
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000038")]
+    private float _sprintMultiplier = 1.65f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000039")]
+    private float _airControl = 0.28f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003a")]
+    private float _gravity = 24.0f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003b")]
+    private float _jumpHeight = 1.15f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003c")]
+    private float _coyoteTime = 0.12f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003d")]
+    private float _jumpBufferTime = 0.12f;
+
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-00000000003e")]
+    private float _groundStickSpeed = 2.0f;
+
     [HotReloadState]
     private float _yaw;
 
@@ -40,7 +61,16 @@ public sealed class FirstPersonCamera : Behaviour
     private float _targetPitch;
 
     [HotReloadState]
-    private Vector3 _velocity;
+    private Vector3 _horizontalVelocity;
+
+    [HotReloadState]
+    private float _verticalVelocity;
+
+    [HotReloadState]
+    private float _coyoteRemaining;
+
+    [HotReloadState]
+    private float _jumpBufferRemaining;
 
     [HotReloadState]
     private bool _escapeWasDown;
@@ -50,16 +80,19 @@ public sealed class FirstPersonCamera : Behaviour
 
     private IDisposable? _cursorCapture;
     private bool _uiVisible;
+    private Entity _motorEntity;
 
     protected override void Awake()
     {
+        ResolveMotor();
         _targetYaw = _yaw;
         _targetPitch = _pitch;
-        Debug.Log($"{nameof(FirstPersonCamera)} attached.");
+        Debug.Log($"{nameof(FirstPersonCamera)} attached to Character Controller '{_motorEntity.Name}'.");
     }
 
     protected override void OnEnable()
     {
+        ResolveMotor();
         SubscribeUiVisibility();
         SetCaptureEnabled(_captureEnabled);
     }
@@ -80,6 +113,7 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void OnAfterReload()
     {
+        ResolveMotor();
         SubscribeUiVisibility();
         SetCaptureEnabled(_captureEnabled);
     }
@@ -87,25 +121,65 @@ public sealed class FirstPersonCamera : Behaviour
     protected override void Update()
     {
         bool escapeDown = Input.Button("Escape");
-        if (_uiVisible || Cursor.VisibilityRequested)
-        {
-            _escapeWasDown = escapeDown;
-            _velocity = default;
-            return;
-        }
-        if (escapeDown && !_escapeWasDown)
+        if (!_uiVisible && !Cursor.VisibilityRequested && escapeDown && !_escapeWasDown)
             SetCaptureEnabled(!_captureEnabled);
         _escapeWasDown = escapeDown;
 
         float deltaTime = Time.DeltaTime;
-        if (deltaTime <= 0.0f)
+        if (deltaTime <= 0.0f || !_motorEntity.IsValid)
             return;
-        if (!_captureEnabled)
+
+        bool acceptsInput = _captureEnabled && !_uiVisible && !Cursor.VisibilityRequested;
+        if (acceptsInput)
+            UpdateLook(deltaTime);
+
+        var motor = _motorEntity.CharacterController;
+        if (!motor.IsValid)
+            return;
+
+        Vector2 move = acceptsInput ? Input.Axis2D("Move") : default;
+        if (move.LengthSquared > 1.0f)
+            move = move.Normalized;
+
+        float yawRadians = DegreesToRadians(_yaw);
+        Vector3 right = new(MathF.Cos(yawRadians), 0.0f, -MathF.Sin(yawRadians));
+        Vector3 forward = new(MathF.Sin(yawRadians), 0.0f, MathF.Cos(yawRadians));
+        float speed = _movementSpeed * (acceptsInput && Input.Held("Sprint") ? _sprintMultiplier : 1.0f);
+        Vector3 desiredVelocity = (right * move.X + forward * move.Y) * speed;
+        float control = motor.Grounded ? 1.0f : Math.Clamp(_airControl, 0.0f, 1.0f);
+        float movementBlend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _movementSharpness) * control * deltaTime);
+        _horizontalVelocity += (desiredVelocity - _horizontalVelocity) * movementBlend;
+
+        if (motor.Grounded)
         {
-            _velocity = default;
-            return;
+            _coyoteRemaining = MathF.Max(0.0f, _coyoteTime);
+            if (_verticalVelocity < 0.0f)
+                _verticalVelocity = -MathF.Max(0.0f, _groundStickSpeed);
+        }
+        else
+        {
+            _coyoteRemaining = MathF.Max(0.0f, _coyoteRemaining - deltaTime);
         }
 
+        if (acceptsInput && Input.Pressed("Jump"))
+            _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferTime);
+        else
+            _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferRemaining - deltaTime);
+
+        if (_jumpBufferRemaining > 0.0f && _coyoteRemaining > 0.0f)
+        {
+            _verticalVelocity = MathF.Sqrt(2.0f * MathF.Max(0.0f, _gravity) * MathF.Max(0.0f, _jumpHeight));
+            _jumpBufferRemaining = 0.0f;
+            _coyoteRemaining = 0.0f;
+        }
+        _verticalVelocity -= MathF.Max(0.0f, _gravity) * deltaTime;
+
+        Vector3 frameVelocity = _horizontalVelocity + Vector3.Up * _verticalVelocity;
+        motor.Move(frameVelocity * deltaTime);
+    }
+
+    private void UpdateLook(float deltaTime)
+    {
         Vector2 look = Input.Axis2D("Look");
         float horizontalLook = look.X * (_invertHorizontal ? -1.0f : 1.0f);
         float verticalLook = look.Y * (_invertVertical ? -1.0f : 1.0f);
@@ -116,22 +190,19 @@ public sealed class FirstPersonCamera : Behaviour
         _yaw += (_targetYaw - _yaw) * lookBlend;
         _pitch += (_targetPitch - _pitch) * lookBlend;
 
-        var transform = Entity.Transform;
+        TransformHandle motorTransform = _motorEntity.Transform;
+        motorTransform.LocalRotation = Quaternion.Euler(0.0f, _yaw);
         Vector3 recoil = WeaponController.CameraRecoil;
-        transform.LocalRotation = CreateRotation(_pitch + recoil.X, _yaw + recoil.Y);
+        TransformHandle cameraTransform = Entity.Transform;
+        cameraTransform.LocalRotation = Quaternion.Euler(_pitch + recoil.X, recoil.Y);
+    }
 
-        Vector2 move = Input.Axis2D("Move");
-        float magnitude = MathF.Sqrt((move.X * move.X) + (move.Y * move.Y));
-        if (magnitude > 1.0f)
-            move = new Vector2(move.X / magnitude, move.Y / magnitude);
-
-        float yawRadians = DegreesToRadians(_yaw);
-        Vector3 right = new(MathF.Cos(yawRadians), 0.0f, -MathF.Sin(yawRadians));
-        Vector3 forward = new(MathF.Sin(yawRadians), 0.0f, MathF.Cos(yawRadians));
-        Vector3 desiredVelocity = (right * move.X + forward * move.Y) * _movementSpeed;
-        float blend = 1.0f - MathF.Exp(-MathF.Max(0.0f, _movementSharpness) * deltaTime);
-        _velocity += (desiredVelocity - _velocity) * blend;
-        transform.LocalPosition = transform.LocalPosition + (_velocity * deltaTime);
+    private void ResolveMotor()
+    {
+        _motorEntity = Entity.Parent;
+        if (!_motorEntity.IsValid || !_motorEntity.CharacterController.IsValid)
+            throw new InvalidOperationException(
+                $"{nameof(FirstPersonCamera)} requires its camera Entity to be parented to an enabled Character Controller.");
     }
 
     private void SubscribeUiVisibility()
@@ -151,7 +222,7 @@ public sealed class FirstPersonCamera : Behaviour
     {
         _uiVisible = visible;
         if (visible)
-            _velocity = default;
+            _horizontalVelocity = default;
     }
 
     private void SetCaptureEnabled(bool enabled)
@@ -167,21 +238,6 @@ public sealed class FirstPersonCamera : Behaviour
     {
         _cursorCapture?.Dispose();
         _cursorCapture = null;
-    }
-
-    private static Quaternion CreateRotation(float pitch, float yaw)
-    {
-        float halfPitch = DegreesToRadians(pitch) * 0.5f;
-        float halfYaw = DegreesToRadians(yaw) * 0.5f;
-        float sinPitch = MathF.Sin(halfPitch);
-        float cosPitch = MathF.Cos(halfPitch);
-        float sinYaw = MathF.Sin(halfYaw);
-        float cosYaw = MathF.Cos(halfYaw);
-        return new Quaternion(
-            sinPitch * cosYaw,
-            cosPitch * sinYaw,
-            -sinPitch * sinYaw,
-            cosPitch * cosYaw);
     }
 
     private static float DegreesToRadians(float degrees) => degrees * (MathF.PI / 180.0f);

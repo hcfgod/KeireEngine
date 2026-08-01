@@ -499,6 +499,11 @@ snapshots. The editor owns only an `AnimatorControllerDocument` draft and panel 
 temporarily incomplete, but Save canonicalizes and validates the complete graph before atomically replacing the source;
 failed validation therefore cannot replace the last-good imported asset.
 
+Animator state presentation reuses `StableNodeGraphCanvas`; the panel maps serialized string IDs to deterministic local
+canvas IDs, then translates completed node drags, typed pin connections, cable deletion, and context actions back into
+one document transaction. Canvas selection and popup state never enter the asset. Runtime state order and transition
+evaluation are therefore independent of layout, zoom, pan, or editor interaction state.
+
 ## Skeletal Deformation And Rig Authoring
 
 `SkeletonAsset`, `RigDefinitionAsset`, `SkinnedMeshAsset`, and `AnimationClipAsset` are independent immutable assets.
@@ -553,6 +558,13 @@ the configured 32-slot collision matrix in body broad-phase filters and query pa
 The editor writes collider handle changes through `SceneDocument`, so a drag is one undoable authoring operation.
 `PhysicsDebugSnapshot` copies bounded body, contact, and query-ring state only when capture is enabled; the shipping
 default records nothing. Physics Material and collision-mesh references remain ordinary asset dependencies.
+
+Character movement queues value displacements from scripts and consumes them at the scene physics boundary. The runtime
+uses closest-hit capsule casts with the controller body excluded, skin padding, bounded sweep/slide iterations,
+walkable-normal tests, and an up/forward/down stair transaction. Authored capsule height is total tip-to-tip height;
+Jolt receives the derived cylinder half-height. Ground state and resolved velocity are copied back to the component
+after stepping. Managed code receives only values through `CharacterControllerHandle`; no Jolt shape or body handle
+crosses the scripting boundary.
 
 ## Managed Scripting
 

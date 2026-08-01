@@ -164,6 +164,27 @@ public sealed class AnimatorController;
 public readonly record struct AnimatorStateInfo(string State, float NormalizedTime, bool IsPlaying, bool IsPaused,
                                                 float Speed);
 
+public readonly record struct CharacterControllerState(bool Grounded, Vector3 GroundNormal, Vector3 Velocity);
+
+public readonly record struct CharacterControllerHandle(Entity Entity)
+{
+    public bool IsValid => Entity.IsValid && Entity.HasComponent<CharacterControllerComponent>();
+    public CharacterControllerState State =>
+        IsValid && NativeRuntime.TryGetCharacterControllerState(Entity, out CharacterControllerState state)
+            ? state
+            : default;
+    public bool Grounded => State.Grounded;
+    public Vector3 GroundNormal => State.GroundNormal;
+    public Vector3 Velocity => State.Velocity;
+
+    public bool Move(Vector3 displacement)
+    {
+        if (!float.IsFinite(displacement.X) || !float.IsFinite(displacement.Y) || !float.IsFinite(displacement.Z))
+            throw new ArgumentException("Character movement must be finite.", nameof(displacement));
+        return IsValid && NativeRuntime.MoveCharacterController(Entity, displacement);
+    }
+}
+
 public readonly record struct AnimatorHandle(Entity Entity)
 {
     public bool IsValid => Entity.HasComponent<AnimatorComponent>();

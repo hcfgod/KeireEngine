@@ -952,13 +952,115 @@ namespace Keire
                 if (!character || !character->Enabled() || !entity.ActiveInHierarchy() || !transform)
                     continue;
                 const auto displacement = character->ConsumeDesiredMovement();
-                auto& state = PhysicsBodies[entity.Id()];
-                state.CharacterVelocity = deltaSeconds > 0.0F
-                                              ? Vector3{displacement.X / deltaSeconds, displacement.Y / deltaSeconds,
-                                                        displacement.Z / deltaSeconds}
-                                              : Vector3{};
-                if (displacement != Vector3{})
-                    MoveTransformInWorld(entity, *transform, displacement);
+                auto runtimeState = PhysicsBodies.find(entity.Id());
+                if (runtimeState == PhysicsBodies.end() || !runtimeState->second.Body ||
+                    !runtimeState->second.HasDefinition)
+                {
+                    continue;
+                }
+                auto& state = runtimeState->second;
+                if (displacement == Vector3{})
+                {
+                    state.CharacterVelocity = {};
+                    continue;
+                }
+
+                Vector3 start;
+                Quaternion rotation;
+                Vector3 scale;
+                if (!Math::DecomposeTransform(transform->WorldMatrix(), start, rotation, scale))
+                    throw std::runtime_error("Character Controller Transform cannot be decomposed.");
+
+                const auto add = [](const Vector3 left, const Vector3 right) noexcept
+                { return Vector3{left.X + right.X, left.Y + right.Y, left.Z + right.Z}; };
+                const auto subtract = [](const Vector3 left, const Vector3 right) noexcept
+                { return Vector3{left.X - right.X, left.Y - right.Y, left.Z - right.Z}; };
+                const auto multiply = [](const Vector3 value, const float scalar) noexcept
+                { return Vector3{value.X * scalar, value.Y * scalar, value.Z * scalar}; };
+                const auto dot = [](const Vector3 left, const Vector3 right) noexcept
+                { return left.X * right.X + left.Y * right.Y + left.Z * right.Z; };
+                const auto length = [&](const Vector3 value) noexcept { return std::sqrt(dot(value, value)); };
+
+                const auto padding = std::min(character->SkinWidth(), state.Definition.Radius * 0.5F);
+                const auto castRadius = state.Definition.Radius - padding;
+                const auto castHeight = state.Definition.Height - padding * 2.0F;
+                const auto slopeNormal = std::cos(character->MaximumSlopeDegrees() * 3.14159265358979323846F / 180.0F);
+                Vector3 current = start;
+                const auto cast = [&](const Vector3 origin, const Vector3 movement)
+                {
+                    return PhysicsWorldService->CastCapsule({.Origin = origin,
+                                                             .Rotation = rotation,
+                                                             .Radius = castRadius,
+                                                             .Height = castHeight,
+                                                             .Displacement = movement,
+                                                             .Mask = character->Mask(),
+                                                             .IncludeTriggers = false,
+                                                             .Layer = character->Layer(),
+                                                             .IgnoreBody = state.Body});
+                };
+                const auto moveAndSlide = [&](Vector3 movement)
+                {
+                    for (std::size_t iteration = 0; iteration < 4; ++iteration)
+                    {
+                        const auto movementLength = length(movement);
+                        if (movementLength <= 0.00001F)
+                            break;
+                        const auto hit = cast(current, movement);
+                        if (!hit)
+                        {
+                            current = add(current, movement);
+                            break;
+                        }
+                        const auto safeDistance = std::max(0.0F, hit->Distance - padding);
+                        const auto safeFraction = std::clamp(safeDistance / movementLength, 0.0F, 1.0F);
+                        current = add(current, multiply(movement, safeFraction));
+                        movement = multiply(movement, 1.0F - safeFraction);
+                        const auto intoSurface = dot(movement, hit->Normal);
+                        if (intoSurface < 0.0F)
+                            movement = subtract(movement, multiply(hit->Normal, intoSurface));
+                    }
+                };
+
+                const Vector3 horizontal{displacement.X, 0.0F, displacement.Z};
+                bool stepped = false;
+                if (character->Grounded() && character->StepHeight() > 0.0F && length(horizontal) > 0.00001F)
+                {
+                    const auto obstruction = cast(current, horizontal);
+                    if (obstruction && obstruction->Normal.Y < slopeNormal)
+                    {
+                        const auto upwardDistance = character->StepHeight() + padding;
+                        const Vector3 upward{0.0F, upwardDistance, 0.0F};
+                        if (!cast(current, upward))
+                        {
+                            const auto elevated = add(current, upward);
+                            if (!cast(elevated, horizontal))
+                            {
+                                const auto forward = add(elevated, horizontal);
+                                const Vector3 downward{0.0F, -(upwardDistance + padding + 0.05F), 0.0F};
+                                const auto landing = cast(forward, downward);
+                                if (landing && landing->Normal.Y >= slopeNormal)
+                                {
+                                    const auto downDistance = std::max(0.0F, landing->Distance - padding);
+                                    current = add(forward, {0.0F, -downDistance, 0.0F});
+                                    stepped = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!stepped)
+                    moveAndSlide(horizontal);
+                moveAndSlide({0.0F, displacement.Y, 0.0F});
+
+                const auto applied = subtract(current, start);
+                state.CharacterVelocity = deltaSeconds > 0.0F ? multiply(applied, 1.0F / deltaSeconds) : Vector3{};
+                if (applied != Vector3{})
+                {
+                    MoveTransformInWorld(entity, *transform, applied);
+                    PhysicsWorldService->SetKinematicTarget(state.Body, current, rotation);
+                    state.Definition.Position = current;
+                    state.Definition.Rotation = rotation;
+                }
             }
         }
 
@@ -981,22 +1083,25 @@ namespace Keire
                 Vector3 worldScale;
                 if (!Math::DecomposeTransform(transform->WorldMatrix(), worldPosition, worldRotation, worldScale))
                     continue;
-                const auto distance = character->Height() * std::abs(worldScale.Y) * 0.5F + character->StepHeight() +
-                                      character->SkinWidth();
-                const PhysicsRayQuery query{worldPosition, {0.0F, -1.0F, 0.0F}, distance, character->Mask(), false};
                 bool grounded = false;
                 Vector3 normal{0.0F, 1.0F, 0.0F};
                 const auto minimumNormal = std::cos(character->MaximumSlopeDegrees() * Pi / 180.0F);
-                for (const auto& hit : PhysicsWorldService->RayCast(query))
+                const auto& definition = state->second.Definition;
+                const auto padding = std::min(character->SkinWidth(), definition.Radius * 0.5F);
+                const auto hit = PhysicsWorldService->CastCapsule(
+                    {.Origin = worldPosition,
+                     .Rotation = worldRotation,
+                     .Radius = definition.Radius - padding,
+                     .Height = definition.Height - padding * 2.0F,
+                     .Displacement = {0.0F, -(character->StepHeight() + padding + 0.05F), 0.0F},
+                     .Mask = character->Mask(),
+                     .IncludeTriggers = false,
+                     .Layer = character->Layer(),
+                     .IgnoreBody = state->second.Body});
+                if (hit && hit->Normal.Y >= minimumNormal)
                 {
-                    if (hit.Body == state->second.Body)
-                        continue;
-                    if (hit.Normal.Y >= minimumNormal)
-                    {
-                        grounded = true;
-                        normal = hit.Normal;
-                    }
-                    break;
+                    grounded = true;
+                    normal = hit->Normal;
                 }
                 character->ApplyRuntimeState(state->second.Generation, grounded, normal,
                                              state->second.CharacterVelocity);

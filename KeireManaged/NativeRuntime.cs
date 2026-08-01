@@ -254,6 +254,9 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetLocalRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetLocalRotationIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, byte> MoveCharacterControllerIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte*, Vector3*, Vector3*, byte>
+        GetCharacterControllerStateIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float, byte> SetAnimatorFloatIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, int, byte> SetAnimatorIntegerIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte, byte> SetAnimatorBooleanIcall;
@@ -279,6 +282,7 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetLocalScaleIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetWorldPositionIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetWorldRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> EntityExistsIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveInHierarchyIcall;
@@ -459,6 +463,24 @@ internal static unsafe class NativeRuntime
         GetLocalRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void SetLocalRotation(Entity entity, Quaternion value) =>
         SetLocalRotationIcall(entity.World, entity.Id.High, entity.Id.Low, value);
+    internal static Quaternion GetWorldRotation(Entity entity) =>
+        GetWorldRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static bool MoveCharacterController(Entity entity, Vector3 displacement) =>
+        MoveCharacterControllerIcall(entity.World, entity.Id.High, entity.Id.Low, displacement) != 0;
+    internal static bool TryGetCharacterControllerState(Entity entity, out CharacterControllerState state)
+    {
+        byte grounded = 0;
+        Vector3 normal = default;
+        Vector3 velocity = default;
+        if (GetCharacterControllerStateIcall(entity.World, entity.Id.High, entity.Id.Low, &grounded, &normal,
+                                             &velocity) == 0)
+        {
+            state = default;
+            return false;
+        }
+        state = new CharacterControllerState(grounded != 0, normal, velocity);
+        return true;
+    }
 
     private static void RequireAnimatorResult(byte result)
     {

@@ -18,6 +18,7 @@
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
@@ -228,8 +229,9 @@ namespace Keire
         class QueryBodyFilter final : public JPH::BodyFilter
         {
           public:
-            QueryBodyFilter(const std::uint32_t mask, const std::uint32_t layer, const bool includeTriggers) noexcept
-                : m_Mask(mask), m_Layer(layer), m_IncludeTriggers(includeTriggers)
+            QueryBodyFilter(const std::uint32_t mask, const std::uint32_t layer, const bool includeTriggers,
+                            const std::uint64_t ignoredBody = 0) noexcept
+                : m_Mask(mask), m_Layer(layer), m_IgnoredBody(ignoredBody), m_IncludeTriggers(includeTriggers)
             {
             }
 
@@ -237,12 +239,13 @@ namespace Keire
             {
                 const auto& group = body.GetCollisionGroup();
                 return (group.GetGroupID() & m_Mask) != 0 && (group.GetSubGroupID() & m_Layer) != 0 &&
-                       (m_IncludeTriggers || !body.IsSensor());
+                       (m_IncludeTriggers || !body.IsSensor()) && body.GetUserData() != m_IgnoredBody;
             }
 
           private:
             std::uint32_t m_Mask;
             std::uint32_t m_Layer;
+            std::uint64_t m_IgnoredBody;
             bool m_IncludeTriggers;
         };
 
@@ -626,6 +629,21 @@ namespace Keire
             PushQueryTrace(std::move(trace));
         }
 
+        void RecordCapsuleCast(const PhysicsCapsuleCastQuery& query, const std::optional<PhysicsQueryHit>& hit) const
+        {
+            if (!DebugCapture.Enabled)
+                return;
+            PhysicsDebugQueryTrace trace;
+            trace.Sequence = NextQuerySequence++;
+            trace.Kind = PhysicsDebugQueryKind::CapsuleCast;
+            trace.Capsule = query;
+            if (hit && DebugCapture.MaximumHitsPerQuery > 0)
+                trace.Hits.push_back(*hit);
+            else if (hit)
+                trace.DroppedHits = 1;
+            PushQueryTrace(std::move(trace));
+        }
+
         void RecordOverlapQuery(const Vector3 center, const float radius, const std::uint32_t mask,
                                 const std::uint32_t layer, const std::vector<PhysicsBodyId>& overlaps) const
         {
@@ -705,7 +723,10 @@ namespace Keire
             shape = new JPH::SphereShape(definition.Radius);
             break;
         case ColliderShape::Capsule:
-            shape = new JPH::CapsuleShape(definition.Height * 0.5F, definition.Radius);
+            if (definition.Height < definition.Radius * 2.0F)
+                throw std::invalid_argument("Physics capsule height must contain the capsule diameter.");
+            shape =
+                new JPH::CapsuleShape(std::max(0.0F, definition.Height * 0.5F - definition.Radius), definition.Radius);
             break;
         case ColliderShape::ConvexMesh:
         case ColliderShape::TriangleMesh:
@@ -851,6 +872,48 @@ namespace Keire
             result, [](const PhysicsQueryHit& left, const PhysicsQueryHit& right)
             { return left.Distance < right.Distance || (left.Distance == right.Distance && left.Body < right.Body); });
         m_Impl->RecordRayQuery(query, result);
+        return result;
+    }
+
+    std::optional<PhysicsQueryHit> PhysicsWorld::CastCapsule(const PhysicsCapsuleCastQuery& query) const
+    {
+        m_Impl->RequireOwner("CastCapsule");
+        const auto displacementLengthSquared = LengthSquared(query.Displacement);
+        if (!Math::IsFinite(query.Origin) || !Math::IsFinite(query.Rotation) || !Math::IsFinite(query.Displacement) ||
+            !std::isfinite(query.Radius) || query.Radius <= 0.0F || !std::isfinite(query.Height) ||
+            query.Height < 0.0F || displacementLengthSquared <= std::numeric_limits<float>::epsilon() ||
+            !std::has_single_bit(query.Layer))
+        {
+            throw std::invalid_argument("Physics capsule cast is invalid.");
+        }
+
+        if (query.Height < query.Radius * 2.0F)
+            throw std::invalid_argument("Physics capsule cast height must contain the capsule diameter.");
+        const JPH::CapsuleShape capsule(std::max(0.0F, query.Height * 0.5F - query.Radius), query.Radius);
+        const JPH::RShapeCast cast(&capsule, JPH::Vec3::sOne(),
+                                   JPH::RMat44::sRotationTranslation(ToJolt(query.Rotation), ToJolt(query.Origin)),
+                                   ToJolt(query.Displacement));
+        JPH::ShapeCastSettings settings;
+        settings.mReturnDeepestPoint = true;
+        JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+        const QueryBodyFilter bodyFilter(query.Mask, query.Layer, query.IncludeTriggers, query.IgnoreBody.m_Value);
+        m_Impl->Native.GetNarrowPhaseQuery().CastShape(cast, settings, JPH::RVec3::sZero(), collector, {}, {},
+                                                       bodyFilter);
+
+        std::optional<PhysicsQueryHit> result;
+        if (collector.HadHit())
+        {
+            const auto& hit = collector.mHit;
+            JPH::BodyLockRead lock(m_Impl->Native.GetBodyLockInterface(), hit.mBodyID2);
+            if (lock.Succeeded())
+            {
+                const auto normal = -hit.mPenetrationAxis.NormalizedOr(JPH::Vec3::sAxisY());
+                result =
+                    PhysicsQueryHit{PhysicsBodyId(lock.GetBody().GetUserData()), FromJoltVector(hit.mContactPointOn2),
+                                    FromJoltVector(normal), hit.mFraction * std::sqrt(displacementLengthSquared)};
+            }
+        }
+        m_Impl->RecordCapsuleCast(query, result);
         return result;
     }
 

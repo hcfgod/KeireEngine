@@ -5,6 +5,16 @@ version tags.
 
 ## Unreleased
 
+- Fixed Inspector entity renaming so an empty or over-limit in-progress text draft remains local to the field, displays
+  validation feedback, and restores the previous name when editing ends instead of throwing through the editor frame.
+- Upgraded Animator Controller authoring to the shared production node canvas with zoom/pan, Bezier transition cables,
+  draggable state pins, gesture-level node movement, cable selection/deletion, right-click unlink and entry-state menus,
+  live playback state styling, and clip drops at the pointer position. Added a native/managed Character Controller move
+  and state API, capsule casts with debug traces and self-filtering, corrected total-height capsule geometry, bounded
+  sweep/slide, walkable-slope grounding, skin padding, and stair stepping. KeireSandbox now contains a parented FPS
+  player with sprint, gravity, buffered jump, coyote time, air control, and world-correct camera directions. CPU mesh
+  VFX now enter the material-aware scene draw path, and two schema-4 examples ship with generated emissive glTF meshes
+  and imported material subassets: Ember Shard Cyclone and Arcane Sigil Orbit.
 - Introduced the schema-4 VFX foundation with stable descriptor-backed node IDs, typed properties and ranges, ordered
   Context Blocks, block-pin endpoints, deterministic SSA-style CPU value evaluation, core Range/Random/Remap and
   math/logic/vector Operators, explicit backend diagnostics, and in-memory schema 1-3 migration. Added transactional

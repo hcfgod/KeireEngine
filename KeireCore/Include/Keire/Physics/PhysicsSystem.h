@@ -136,6 +136,19 @@ namespace Keire
         std::uint32_t Layer = 1;
     };
 
+    struct PhysicsCapsuleCastQuery
+    {
+        Vector3 Origin;
+        Quaternion Rotation;
+        float Radius = 0.5F;
+        float Height = 1.0F;
+        Vector3 Displacement;
+        std::uint32_t Mask = ~0U;
+        bool IncludeTriggers = false;
+        std::uint32_t Layer = 1;
+        PhysicsBodyId IgnoreBody;
+    };
+
     struct PhysicsQueryHit
     {
         PhysicsBodyId Body;
@@ -165,7 +178,8 @@ namespace Keire
     enum class PhysicsDebugQueryKind : std::uint8_t
     {
         RayCast,
-        SphereOverlap
+        SphereOverlap,
+        CapsuleCast
     };
 
     struct PhysicsDebugBody
@@ -190,6 +204,7 @@ namespace Keire
         std::uint64_t Sequence = 0;
         PhysicsDebugQueryKind Kind = PhysicsDebugQueryKind::RayCast;
         PhysicsRayQuery Ray;
+        PhysicsCapsuleCastQuery Capsule;
         Vector3 SphereCenter;
         float SphereRadius = 0.0F;
         std::uint32_t Mask = ~0U;
@@ -231,6 +246,7 @@ namespace Keire
         void SetGravityEnabled(PhysicsBodyId body, bool enabled);
         [[nodiscard]] std::optional<PhysicsBodyState> TryGetBody(PhysicsBodyId body) const;
         [[nodiscard]] std::vector<PhysicsQueryHit> RayCast(const PhysicsRayQuery& query) const;
+        [[nodiscard]] std::optional<PhysicsQueryHit> CastCapsule(const PhysicsCapsuleCastQuery& query) const;
         [[nodiscard]] std::vector<PhysicsBodyId> OverlapSphere(Vector3 center, float radius, std::uint32_t mask = ~0U,
                                                                std::uint32_t layer = 1) const;
         void Step(float deltaSeconds);

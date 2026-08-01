@@ -82,6 +82,30 @@ The returned hit contains the hit entity, point, normal, and distance.
 
 Layer masks use the project's 32-layer collision configuration.
 
+## Character Controller
+
+Place a Character Controller on a player root and parent the camera to that root. Scripts submit displacement rather
+than writing the player Transform directly:
+
+```csharp
+CharacterControllerHandle motor = Entity.CharacterController;
+if (!motor.IsValid)
+    return;
+
+Vector3 horizontal = (Entity.Transform.Forward * move.Y + Entity.Transform.Right * move.X) * speed;
+float verticalSpeed = motor.Grounded ? -2.0f : fallingSpeed;
+motor.Move((horizontal + Vector3.Up * verticalSpeed) * Time.DeltaTime);
+```
+
+`Move` queues a finite world-space displacement and returns false if the bounded command queue is full or the component
+is unavailable. During physics, Kéire capsule-casts that displacement, ignores the controller's own body, slides along
+blocking surfaces, climbs authored steps when grounded, and rejects slopes above **Maximum Slope**. `Grounded`,
+`GroundNormal`, and `Velocity` report the last resolved physics state. The controller is kinematic: gameplay supplies
+gravity and jumping explicitly, as demonstrated by `FirstPersonCamera.cs` in KeireSandbox.
+
+`TransformHandle.Rotation`, `Forward`, `Right`, and `Up` are world-space. This matters for a camera parented under a
+yawing FPS root; `LocalRotation` remains available for pitch and recoil.
+
 ## Collision And Trigger Callbacks
 
 Override the matching callbacks:

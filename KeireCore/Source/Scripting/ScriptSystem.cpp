@@ -5,6 +5,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
 #include "Keire/Vfx/VfxSystem.h"
@@ -1660,6 +1661,58 @@ namespace Keire
                 {
                 }
             }
+        }
+
+        [[nodiscard]] static Quaternion RuntimeGetWorldRotation(const std::uint64_t world, const std::uint64_t high,
+                                                                const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            if (!transform)
+                return Quaternion{};
+            Vector3 position;
+            Quaternion rotation;
+            Vector3 scale;
+            return Math::DecomposeTransform(transform->WorldMatrix(), position, rotation, scale) ? rotation
+                                                                                                 : Quaternion{};
+        }
+
+        [[nodiscard]] static Ref<CharacterControllerComponent>
+        RuntimeCharacterController(const std::uint64_t world, const std::uint64_t high,
+                                   const std::uint64_t low) noexcept
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            return entity ? entity.GetComponent<CharacterControllerComponent>() : Ref<CharacterControllerComponent>{};
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeMoveCharacterController(const std::uint64_t world,
+                                                                         const std::uint64_t high,
+                                                                         const std::uint64_t low,
+                                                                         const Vector3 displacement) noexcept
+        {
+            try
+            {
+                const auto character = RuntimeCharacterController(world, high, low);
+                return character && character->Enabled() && character->QueueDesiredMovement(displacement) ? 1 : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetCharacterControllerState(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
+                                           std::uint8_t* grounded, Vector3* normal, Vector3* velocity) noexcept
+        {
+            const auto character = RuntimeCharacterController(world, high, low);
+            if (!character || !grounded || !normal || !velocity)
+                return 0;
+            const auto state = character->RuntimeState();
+            *grounded = state.Grounded ? 1 : 0;
+            *normal = state.GroundNormal;
+            *velocity = state.Velocity;
+            return 1;
         }
 
         [[nodiscard]] static Ref<AnimatorComponent> RuntimeAnimator(const std::uint64_t world, const std::uint64_t high,
@@ -3818,6 +3871,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetLocalRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetLocalRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetLocalRotation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "MoveCharacterControllerIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeMoveCharacterController));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetCharacterControllerStateIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetCharacterControllerState));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorFloatIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFloat));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorIntegerIcall",
@@ -3892,6 +3949,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetLocalScale));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldPositionIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetWorldPosition));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldRotationIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetWorldRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "CloneEntityIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeCloneEntity));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DestroyEntityIcall",

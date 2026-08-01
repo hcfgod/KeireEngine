@@ -438,6 +438,11 @@ TEST_CASE("scene document commands validate and target the active scene")
     const auto parent = document.CreateEntity("Parent");
     const auto child = document.CreateEntity("Child", parent, Keire::PointLightComponent::StaticType());
     document.Select(child.Value());
+    CHECK_FALSE(KeireEditor::SceneDocument::IsValidEntityName(""));
+    CHECK(KeireEditor::SceneDocument::IsValidEntityName(std::string(256, 'a')));
+    CHECK_FALSE(KeireEditor::SceneDocument::IsValidEntityName(std::string(257, 'a')));
+    CHECK_THROWS_AS(document.RenameEntity(child, ""), std::invalid_argument);
+    CHECK(scene->FindEntity(child).Name() == "Child");
     document.RenameEntity(child, "Authored light");
     document.SetEntityActive(child, false);
     document.SetTransform(child, {.Position = Keire::Vector3{1.0F, 2.0F, 3.0F}});

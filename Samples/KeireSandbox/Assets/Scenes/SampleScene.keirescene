@@ -7,14 +7,60 @@
           "data": {
             "position": [
               -6.255000114440918,
-              16.9689998626709,
+              1.399999976158142,
               -12.371999740600586
             ],
             "rotation": [
-              0.31315189599990845,
-              -0.00828761886805296,
-              0.002732848050072789,
-              0.9496630430221558
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "height": 1.7999999523162842,
+            "layer": 1,
+            "mask": 4294967295,
+            "maximumSlope": 50.0,
+            "radius": 0.3499999940395355,
+            "runtimeId": "9baf5883-8cc8-4a3c-b918-bf7069d9d7e7",
+            "skinWidth": 0.03999999910593033,
+            "stepHeight": 0.3499999940395355
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4841-5241-435445520001",
+          "version": 2
+        }
+      ],
+      "id": "d6e7aa06-b25a-4e19-a84c-00635691a83a",
+      "name": "FPS Player",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.0,
+              0.6499999761581421,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
             ],
             "scale": [
               1.0,
@@ -66,14 +112,21 @@
         },
         {
           "data": {
+            "_airControl": 0.28,
+            "_coyoteTime": 0.12,
+            "_gravity": 24.0,
+            "_groundStickSpeed": 2.0,
             "_invertHorizontal": false,
             "_invertVertical": false,
+            "_jumpBufferTime": 0.12,
+            "_jumpHeight": 1.15,
             "_lookSensitivity": 1.0,
             "_lookSharpness": 30.0,
             "_maximumPitch": 89.0,
             "_movementSharpness": 14.0,
-            "_movementSpeed": 12.0,
-            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":12.0},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":30.0}],\"version\":1}"
+            "_movementSpeed": 6.5,
+            "_sprintMultiplier": 1.65,
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":6.5},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":30.0},{\"Aliases\":[],\"Name\":\"_sprintMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.65},{\"Aliases\":[],\"Name\":\"_airControl\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.28},{\"Aliases\":[],\"Name\":\"_gravity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":24.0},{\"Aliases\":[],\"Name\":\"_jumpHeight\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.15},{\"Aliases\":[],\"Name\":\"_coyoteTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_jumpBufferTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_groundStickSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":2.0}],\"version\":1}"
           },
           "enabled": true,
           "type": "73616e64-626f-4078-8000-000000000030",
@@ -95,7 +148,7 @@
       ],
       "id": "a1b2c3d4-1000-4000-8000-000000000001",
       "name": "Main Camera",
-      "parent": null
+      "parent": "d6e7aa06-b25a-4e19-a84c-00635691a83a"
     },
     {
       "active": true,
@@ -210,10 +263,10 @@
               1.5814927816390991
             ],
             "rotation": [
-              0.8806511759757996,
-              0.11315172165632248,
-              -0.3761036992073059,
-              0.26494550704956055
+              0.8806512951850891,
+              0.11315173655748367,
+              -0.3761037588119507,
+              0.26494553685188293
             ],
             "scale": [
               1.0,
@@ -993,6 +1046,208 @@
         {
           "data": {
             "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        }
+      ],
+      "id": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8",
+      "name": "Vfx",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              18.235937118530273,
+              2.491081714630127,
+              -7.571257591247559
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "c27fbc8b-ef96-40ad-a5bc-30c688438f3c",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "56438164-b589-4350-970b-a13b0223fdf2",
+      "name": "SigilOrbit",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              24.81574821472168,
+              2.491081714630127,
+              -7.571257591247559
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "2cd9a41b-120c-4bbc-988d-3d719fc4d264",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "ced92197-6be1-439d-8051-26609c6f294b",
+      "name": "Shard Cylicone",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              24.81574821472168,
+              2.491081714630127,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "b8da08ac-aa68-44a9-859d-6d36e96f58b2",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "204e7db8-1f11-4d1f-b7e1-d091830ac5d4",
+      "name": "Arcane nova",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
               12.698086738586426,
               2.491081714630127,
               0.0
@@ -1028,7 +1283,7 @@
             ],
             "culling": 0,
             "editModePreview": true,
-            "effect": "518e44da-1d18-4197-8ebd-ca805295869e",
+            "effect": "2bc4f762-0ca3-4a1d-a6bf-f7eb5ee4f09e",
             "parameterOverrides": "[]",
             "playOnAwake": true,
             "quality": 2,
@@ -1041,8 +1296,65 @@
         }
       ],
       "id": "7a2f2b21-84a6-4790-b1a9-529da68fe10b",
-      "name": "Vfx",
-      "parent": null
+      "name": "Mist",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              18.346534729003906,
+              2.491081714630127,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "boundsExtent": [
+              5.0,
+              5.0,
+              5.0
+            ],
+            "culling": 0,
+            "editModePreview": true,
+            "effect": "6f17db40-57f3-4e48-9d54-a4a69b1d7c01",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 0,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        }
+      ],
+      "id": "c2c43e14-f374-4f0e-8516-93b5e507e10c",
+      "name": "Sparks",
+      "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
     }
   ],
   "name": "SampleScene",

@@ -1794,8 +1794,15 @@ namespace Keire::RenderBackend
         std::vector<PreparedParticle> prepared;
         prepared.reserve(particles.size());
         for (const auto& particle : particles)
-            prepared.push_back(
-                {std::addressof(particle), Math::TransformPoint(packet.Camera.View, particle.Position).Z});
+        {
+            if (particle.Renderer == VfxRendererType::Sprite)
+            {
+                prepared.push_back(
+                    {std::addressof(particle), Math::TransformPoint(packet.Camera.View, particle.Position).Z});
+            }
+        }
+        if (prepared.empty())
+            return;
         std::ranges::stable_sort(prepared, [](const auto& left, const auto& right)
                                  { return Detail::TransparentBackToFront(left.Depth, right.Depth); });
 
@@ -1864,28 +1871,6 @@ namespace Keire::RenderBackend
                 SDL_DrawGPUPrimitives(pass, 6, 1, value.SpriteFirstVertex, 0);
                 ++Statistics.DrawCalls;
                 Statistics.Triangles += 2;
-                continue;
-            }
-
-            const auto& mesh = ResolveMesh(particle.Mesh);
-            if (mesh.Empty())
-                continue;
-            const auto model =
-                Math::ComposeTransform(particle.Position, Math::EulerDegreesToQuaternion(particle.Rotation),
-                                       {particle.Size, particle.Size, particle.Size});
-            const ObjectUniforms object =
-                MakeObjectUniforms(Math::Multiply(viewProjection, model), model, packet.Camera.View, particle.Tint,
-                                   packet.Lighting, packet.Environment, false);
-            const SDL_GPUBufferBinding vertexBinding{mesh.Vertices, 0};
-            const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
-            SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-            SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
-            SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-            for (const auto& submesh : mesh.Submeshes)
-            {
-                SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
-                ++Statistics.DrawCalls;
-                Statistics.Triangles += submesh.IndexCount / 3U;
             }
         }
     }

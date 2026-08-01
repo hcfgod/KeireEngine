@@ -72,6 +72,22 @@
           "valueType": "Boolean"
         },
         {
+          "id": "73616e64-626f-4078-8000-000000000208",
+          "interactions": [],
+          "name": "Jump",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "73616e64-626f-4078-8000-000000000209",
+          "interactions": [],
+          "name": "Sprint",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
           "id": "73616e64-626f-4078-8000-000000000202",
           "interactions": [],
           "name": "FireMode",
@@ -325,6 +341,58 @@
           "name": "",
           "part": "",
           "path": "<Mouse>/rightButton",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000208",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000218",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/space",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000208",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "73616e64-626f-4078-8000-000000000219",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/buttonSouth",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000209",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "73616e64-626f-4078-8000-00000000021a",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/leftShift",
+          "processors": []
+        },
+        {
+          "action": "73616e64-626f-4078-8000-000000000209",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "73616e64-626f-4078-8000-00000000021b",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/leftStickPress",
           "processors": []
         },
         {

@@ -286,7 +286,9 @@ exposed through first-party types. Create an **Animator Controller** from the Pr
 dockable state-machine editor, then drag imported clips, Animation Sources, or animated models onto the graph. Source
 and model drops expand their generated clip subassets into states. Parameters, layers, entry states,
 transitions, conditions, blend trees, avatar masks, node layout, validation, and undo/redo are authored without editing
-JSON. Managed scripts can set or query typed parameters and layer weights and submit named IK goals through `Animator`.
+JSON. State nodes use the production graph canvas: drag their Transition pin to another state's Enter pin, select or
+Delete a Bezier cable, right-click nodes/pins/cables to set entry state or unlink, middle-drag to pan, and use the wheel
+to zoom. Managed scripts can set or query typed parameters and layer weights and submit named IK goals through `Animator`.
 Select a scene object using the controller to inspect live state and normalized progress. Outside Play Mode, the
 controller toolbar can preview, pause, restart, stop, and scrub the animation directly on that object. Preview poses are
 transient; the assigned skinned mesh determines the compatible target skeleton for playback and retargeting.
@@ -306,8 +308,11 @@ A scene-owned `VfxWorld` supplies generation-safe handles, fixed global/effect b
 revision-aware reload, diagnostics, and immutable debug/render snapshots.
 GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
 Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed. GPU compute
-simulation and indirect sprite output are active; Events, multiple executable graph systems, ribbons, decals, mesh
-particles, and volumetrics remain explicit future slices. Double-click a VFX asset to open the dockable Graph, Runtime
+simulation and indirect sprite output are active; Events, multiple executable graph systems, ribbons, decals, GPU mesh
+particles, and volumetrics remain explicit future slices. CPU mesh output is material-aware and resolves each imported
+mesh's default material slots. The sample VFX folder includes Ember Shard Cyclone and Arcane Sigil Orbit with
+repository-owned emissive glTF geometry and generated material subassets; their GPU compile badge intentionally remains
+unsupported until GPU mesh indirect output exists. Double-click a VFX asset to open the dockable Graph, Runtime
 Modules, Blackboard, and Effect Settings workflows. The authoring preview defaults to the stable CPU backend and can
 switch to the runtime GPU backend. In a scene, enable **Preview In Edit Mode** on a VFX Emitter to synchronize its
 assigned effect, revision, compatible parameter overrides, seed, simulation speed, enabled state, and world
@@ -590,7 +595,7 @@ publishes `Application::Input()` after window events and asset completions once 
 stable map/action lookup, polling, RAII phase callbacks, users and exclusive/shared pairing, control schemes, hot
 reload, interactive rebinding, and atomic profile overrides without exposing SDL.
 
-`Samples/KeireSandbox/Assets/Input/DefaultInput.keireinput` provides Player Move/Look/Fire and UI
+`Samples/KeireSandbox/Assets/Input/DefaultInput.keireinput` provides Player Move/Look/Jump/Sprint/Fire and UI
 Navigate/Submit/Cancel/Point/Click/Scroll maps
 for keyboard/mouse and gamepad. KeireClient enables Development Assets and Input for its editor. Create or select a
 `.keireinput` asset, then open the dockable Input Actions panel from Inspector, Project double-click/context menu, or

@@ -71,6 +71,44 @@ TEST_CASE("physics queries use narrow-phase geometry and bounded opt-in traces")
     CHECK(snapshot->Queries.back().Overlaps.front() == triggerBody);
 }
 
+TEST_CASE("capsule casts return walkable surface normals and can ignore the controller body")
+{
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld();
+
+    Keire::PhysicsBodyDefinition wall;
+    wall.Position = {3.0F, 1.0F, 0.0F};
+    wall.HalfExtent = {0.25F, 2.0F, 3.0F};
+    const auto wallBody = world->CreateBody(wall);
+
+    Keire::PhysicsBodyDefinition character;
+    character.Motion = Keire::PhysicsMotionType::Kinematic;
+    character.Shape = Keire::ColliderShape::Capsule;
+    character.Position = {0.0F, 1.0F, 0.0F};
+    character.Radius = 0.4F;
+    character.Height = 1.0F;
+    const auto characterBody = world->CreateBody(character);
+
+    const auto hit = world->CastCapsule({.Origin = character.Position,
+                                         .Radius = character.Radius,
+                                         .Height = character.Height,
+                                         .Displacement = {5.0F, 0.0F, 0.0F},
+                                         .IgnoreBody = characterBody});
+    REQUIRE(hit);
+    CHECK(hit->Body == wallBody);
+    CHECK(hit->Distance == doctest::Approx(2.35F).epsilon(0.01));
+    CHECK(hit->Normal.X == doctest::Approx(-1.0F).epsilon(0.001));
+    CHECK(hit->Normal.Y == doctest::Approx(0.0F).epsilon(0.001));
+
+    const auto selfHit = world->CastCapsule({.Origin = character.Position,
+                                             .Radius = character.Radius,
+                                             .Height = character.Height,
+                                             .Displacement = {0.1F, 0.0F, 0.0F}});
+    REQUIRE(selfHit);
+    CHECK(selfHit->Body == characterBody);
+    CHECK_THROWS_AS((void)world->CastCapsule({.Radius = -1.0F, .Displacement = {1.0F, 0.0F}}), std::invalid_argument);
+}
+
 TEST_CASE("physics contacts expose narrow-phase data and enforce reciprocal masks")
 {
     const auto system = CreatePhysics();

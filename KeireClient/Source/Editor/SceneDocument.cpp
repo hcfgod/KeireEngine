@@ -89,8 +89,15 @@ namespace KeireEditor
         m_Selections.clear();
     }
 
+    bool SceneDocument::IsValidEntityName(const std::string_view name) noexcept
+    {
+        return !name.empty() && name.size() <= MaximumEntityNameBytes;
+    }
+
     void SceneDocument::RenameEntity(const Keire::EntityId entity, std::string name)
     {
+        if (!IsValidEntityName(name))
+            throw std::invalid_argument("Entity name is empty or exceeds 256 UTF-8 bytes.");
         const auto scene = ActiveScene();
         auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
         if (!target)

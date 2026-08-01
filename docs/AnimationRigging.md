@@ -58,6 +58,19 @@ models into the graph; container assets expand their generated clip subassets in
 transitions, masks, and blend trees, then assign the controller to an Animator component. Runtime sampling,
 events, root motion, transitions, and skinning occur in scene-safe order.
 
+The state machine uses the same stable production canvas as VFX authoring:
+
+- Drag a state's **Transition** output pin onto another state's **Enter** input pin to create a transition.
+- Click a cable to inspect its duration, exit time, destination, and conditions; press Delete to unlink it.
+- Drag a state card to move it. One completed gesture produces one undoable layout edit.
+- Right-click a state to make it the entry state, unlink its outgoing transitions, or delete it.
+- Right-click an input pin to unlink incoming transitions, or right-click a cable to delete that exact transition.
+- Middle-drag to pan, use the wheel to zoom, and choose **Frame All** after a large layout change.
+- Drop clips at the intended graph position. Multi-clip drops are offset so newly created states remain selectable.
+
+Self-transitions are rejected. A second transition between the same two states is allowed with a warning because its
+conditions or exit timing can be distinct. Deleting a state also removes every incident transition transactionally.
+
 Select the animated scene object while its controller is open to use the controller transport. In Edit Mode, Preview,
 Pause, Restart, Stop, and Timeline scrub evaluate the graph on the selected object without serializing the preview pose.
 In Play Mode, the same strip reports the live state and normalized progress, and the active graph state is highlighted.
