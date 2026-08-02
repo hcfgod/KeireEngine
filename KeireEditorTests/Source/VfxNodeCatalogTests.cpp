@@ -198,3 +198,29 @@ TEST_CASE("VFX node catalog adapts compiler descriptors without owning execution
     CHECK(unavailableEntry.DisabledReason == unavailable.DisabledReason);
     CHECK(KeireEditor::VfxNodeCatalogSupportBadge(unavailableEntry) == "Unsupported");
 }
+
+TEST_CASE("VFX node catalog exposes type-correct Split variants for filtered search")
+{
+    KeireEditor::VfxNodeSearchIndex catalog;
+    for (const auto typeId : {"keire.operator.split-vector2", "keire.operator.split-vector3",
+                              "keire.operator.split-vector4", "keire.operator.split-color"})
+    {
+        const auto* descriptor = Keire::FindVfxNodeDescriptor(typeId);
+        REQUIRE(descriptor != nullptr);
+        (void)catalog.Add(KeireEditor::BuildVfxNodeCatalogEntry(*descriptor));
+    }
+
+    const auto vector2Matches = catalog.Search({.Text = "split",
+                                                .PinType = Keire::VfxValueType::Vector2,
+                                                .PinDirection = KeireEditor::VfxNodeCatalogPinDirection::Input});
+    REQUIRE(vector2Matches.size() == 1);
+    CHECK(catalog.Entries()[vector2Matches.front().EntryIndex].Id == "keire.operator.split-vector2");
+    CHECK(catalog.Entries()[vector2Matches.front().EntryIndex].OutputTypes ==
+          std::vector<Keire::VfxValueType>{Keire::VfxValueType::Scalar});
+
+    const auto colorMatches = catalog.Search({.Text = "components",
+                                              .PinType = Keire::VfxValueType::Color,
+                                              .PinDirection = KeireEditor::VfxNodeCatalogPinDirection::Input});
+    REQUIRE(colorMatches.size() == 1);
+    CHECK(catalog.Entries()[colorMatches.front().EntryIndex].Id == "keire.operator.split-color");
+}

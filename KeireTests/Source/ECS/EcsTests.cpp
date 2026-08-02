@@ -159,6 +159,32 @@ TEST_CASE("Kéire math and Transform preserve stable public types across a priva
     CHECK(scale.Z == doctest::Approx(4.0F));
 }
 
+TEST_CASE("Transform scale edits preserve invertible matrices transactionally")
+{
+    Keire::TransformComponent transform;
+    transform.SetLocalScale({2.0F, -3.0F, 4.0F});
+    const auto previousScale = transform.LocalScale();
+
+    CHECK(Keire::TransformComponent::IsValidLocalScale(previousScale));
+    CHECK_FALSE(Keire::TransformComponent::IsValidLocalScale({1.0F, 0.0F, 1.0F}));
+    CHECK_FALSE(Keire::TransformComponent::IsValidLocalScale({1.0F, 0.0000001F, 1.0F}));
+    CHECK_THROWS_AS(transform.SetLocalScale({1.0F, 0.0F, 1.0F}), std::invalid_argument);
+    CHECK(transform.LocalScale() == previousScale);
+
+    const Keire::Vector3 tinyScale{0.0001F, 0.0002F, 0.0003F};
+    REQUIRE(Keire::TransformComponent::IsValidLocalScale(tinyScale));
+    const auto tinyMatrix = Keire::Math::ComposeTransform({}, {}, tinyScale);
+    const auto inverse = Keire::Math::Inverse(tinyMatrix);
+    const Keire::Vector3 point{4.0F, 5.0F, 6.0F};
+    const auto roundTripped = Keire::Math::TransformPoint(inverse, Keire::Math::TransformPoint(tinyMatrix, point));
+    CHECK(roundTripped.X == doctest::Approx(point.X).epsilon(0.0001));
+    CHECK(roundTripped.Y == doctest::Approx(point.Y).epsilon(0.0001));
+    CHECK(roundTripped.Z == doctest::Approx(point.Z).epsilon(0.0001));
+
+    const auto singular = Keire::Math::ComposeTransform({}, {}, {1.0F, 0.0F, 1.0F});
+    CHECK_THROWS_AS((void)Keire::Math::Inverse(singular), std::invalid_argument);
+}
+
 TEST_CASE("Entities own required Transforms and stale handles become inert after hierarchy destruction")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
@@ -335,6 +361,47 @@ TEST_CASE("Play lifecycle observes eager physics before Awake and OnEnable inclu
     session->Stop();
     CHECK_FALSE(replacementWorld->IsOpen());
     observations->Session = nullptr;
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("Character Controller smoothing tails stay below capsule-query resolution without faulting Play Mode")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Controller"));
+    auto floor = scene->CreateEntity("Floor");
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, -0.5F, 0.0F});
+    const auto floorCollider = floor.AddComponent<Keire::ColliderComponent>();
+    floorCollider->SetHalfExtent({5.0F, 0.5F, 5.0F});
+
+    auto player = scene->CreateEntity("Player");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.0F, 0.0F});
+    const auto controller = player.AddComponent<Keire::CharacterControllerComponent>();
+    controller->ConfigureCapsule(0.35F, 1.8F, 0.35F, 0.04F);
+
+    Keire::PhysicsSystemSpecification physicsSpecification;
+    physicsSpecification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(physicsSpecification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    REQUIRE(runtimePlayer);
+    const auto runtimeController = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    REQUIRE(runtimeController);
+
+    REQUIRE(runtimeController->QueueDesiredMovement({0.0001F, 0.0F, 0.0F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    CHECK(session->State() == Keire::ScenePlayState::Playing);
+    CHECK(session->Diagnostic().Message.empty());
+
+    REQUIRE(runtimeController->QueueDesiredMovement({0.25F, 0.0F, 0.0F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    CHECK(runtimePlayer.GetComponent<Keire::TransformComponent>()->LocalPosition().X > 0.2F);
+
+    session->Stop();
     physics->Close();
     scene->Close();
 }

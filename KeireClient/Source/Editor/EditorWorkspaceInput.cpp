@@ -312,6 +312,21 @@ bool EditorWorkspaceLayer::IsManagedVfxAlive(const Keire::AssetId entity) const 
     }
 }
 
+bool EditorWorkspaceLayer::SendManagedVfxEvent(const Keire::AssetId entity, const std::string_view eventName,
+                                               const std::uint32_t spawnCount) noexcept
+{
+    try
+    {
+        const auto session =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        return session && session->SendVfxEvent(Keire::EntityId(entity), eventName, spawnCount);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 bool EditorWorkspaceLayer::SetManagedVfxParameter(const Keire::AssetId entity,
                                                   const Keire::VfxParameterOverride& value) noexcept
 {
@@ -419,12 +434,8 @@ void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
             }
         };
         if (mode == Keire::CursorMode::RelativeLocked && previousMode != Keire::CursorMode::RelativeLocked)
-        {
             centerCursor();
-        }
         windows->SetCursorMode(window->Id(), mode);
-        if (previousMode == Keire::CursorMode::RelativeLocked && mode != Keire::CursorMode::RelativeLocked)
-            centerCursor();
     }
     catch (...)
     {

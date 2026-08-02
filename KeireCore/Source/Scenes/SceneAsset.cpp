@@ -854,7 +854,8 @@ namespace Keire
                     ++transformCount;
                     const auto transform = ParseTransformData(data);
                     if (!Math::IsFinite(transform.Position) || !Math::IsFinite(transform.Rotation) ||
-                        !Math::IsFinite(transform.Scale) || std::abs(Math::Length(transform.Rotation) - 1.0F) > 0.001F)
+                        !TransformComponent::IsValidLocalScale(transform.Scale) ||
+                        std::abs(Math::Length(transform.Rotation) - 1.0F) > 0.001F)
                         throw std::invalid_argument("Scene Transform contains invalid or non-normalized values.");
                 }
             }
@@ -862,7 +863,7 @@ namespace Keire
                 throw std::invalid_argument("Scene entity contains more than one Transform component.");
 
             if (!Math::IsFinite(object.Transform.Position) || !Math::IsFinite(object.Transform.Rotation) ||
-                !Math::IsFinite(object.Transform.Scale) ||
+                !TransformComponent::IsValidLocalScale(object.Transform.Scale) ||
                 std::abs(Math::Length(object.Transform.Rotation) - 1.0F) > 0.001F)
                 throw std::invalid_argument("Scene compatibility transform contains invalid values.");
             depths.emplace(object.Id, depth);
@@ -900,7 +901,8 @@ namespace Keire
                     break;
                 case PrefabOverrideKind::SetObjectTransform:
                     if (!value.Object || !Math::IsFinite(value.Transform.Position) ||
-                        !Math::IsFinite(value.Transform.Rotation) || !Math::IsFinite(value.Transform.Scale) ||
+                        !Math::IsFinite(value.Transform.Rotation) ||
+                        !TransformComponent::IsValidLocalScale(value.Transform.Scale) ||
                         std::abs(Math::Length(value.Transform.Rotation) - 1.0F) > 0.001F)
                         throw std::invalid_argument("Prefab transform override is invalid.");
                     break;

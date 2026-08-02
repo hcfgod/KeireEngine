@@ -817,6 +817,7 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.ToneMapMilliseconds) + " ms tone map / " +
                         std::to_string(statistics.CommandRecordingUnattributedMilliseconds) + " ms other");
                 ui.Text("Scheduling " + std::to_string(statistics.AllowedFramesInFlight) + " frames in flight / " +
+                        std::to_string(statistics.GpuFenceWaitMilliseconds) + " ms fence wait / " +
                         std::to_string(statistics.SwapchainWaitMilliseconds) + " ms swapchain wait");
                 ui.Text("Frame uploads " + std::to_string(statistics.FrameUploadMilliseconds) + " ms / " +
                         std::to_string(statistics.FrameUploadSubmissions) + " submissions / " +
@@ -825,8 +826,16 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.ForwardPlusCacheHits) + " cache hits");
                 ui.Text("GPU VFX " + std::to_string(statistics.VfxGpuWorlds) + " worlds / " +
                         std::to_string(statistics.VfxComputeDispatches) + " dispatches / " +
+                        std::to_string(statistics.VfxComputeThreadGroups) + " thread groups / " +
                         std::to_string(statistics.VfxIndirectDraws) + " indirect draws / " +
+                        std::to_string(statistics.VfxGpuParticleCapacity) + " particle slots / " +
                         std::to_string(statistics.VfxGpuBufferBytes) + " bytes");
+                if (statistics.VfxPipelineWarmupPending)
+                    ui.TextColored(m_Theme.Warning, "GPU VFX pipelines are compiling asynchronously");
+                else if (statistics.VfxPipelinesReady)
+                    ui.TextColored(m_Theme.Success, "GPU VFX pipelines ready  " +
+                                                        std::to_string(statistics.VfxPipelineWarmupMilliseconds) +
+                                                        " ms warmup");
                 ui.TextColored(
                     statistics.GpuTimingSupported ? m_Theme.Success : m_Theme.MutedText,
                     statistics.GpuTimingSupported

@@ -56,7 +56,9 @@ the failed phase. Stop closes the runtime clone, invokes teardown, and discards 
 Transform stores local position, a normalized quaternion rotation, and scale. Euler degrees are an editor convenience
 converted through `Keire::Math`. World matrices are cached and dirtied through descendants when a local or hierarchy
 value changes. Reparenting rejects cycles and preserves the world transform by default; failure restores the original
-hierarchy transactionally.
+hierarchy transactionally. Every local scale axis must be finite and have a magnitude of at least
+`TransformComponent::MinimumScaleMagnitude`; setters reject an invalid scale before mutation so world transforms stay
+invertible. Negative axes remain supported for intentional mirroring.
 
 Directional Light enabled state, linear color, intensity, optional color temperature, shadow mode, strength, and bias
 are authorable and serializable. The built-in renderer consumes transform orientation, color, intensity, and temperature

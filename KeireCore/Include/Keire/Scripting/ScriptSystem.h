@@ -132,6 +132,10 @@ namespace Keire
         [[nodiscard]] virtual bool StopManagedVfx(AssetId) noexcept { return false; }
         [[nodiscard]] virtual bool PauseManagedVfx(AssetId, bool) noexcept { return false; }
         [[nodiscard]] virtual bool IsManagedVfxAlive(AssetId) const noexcept { return false; }
+        [[nodiscard]] virtual bool SendManagedVfxEvent(AssetId, std::string_view, std::uint32_t) noexcept
+        {
+            return false;
+        }
         /// Atomically updates an exposed parameter on both the runtime entity component and its live VFX instance.
         [[nodiscard]] virtual bool SetManagedVfxParameter(AssetId, const VfxParameterOverride&) noexcept
         {

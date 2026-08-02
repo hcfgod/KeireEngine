@@ -1,8 +1,10 @@
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 #include <stdexcept>
 #include <utility>
@@ -158,11 +160,92 @@ namespace KeireEditor
     void SceneDocument::MoveEntity(const Keire::EntityId entity, const Keire::EntityId parent,
                                    const Keire::EntityId beforeSibling, const bool keepWorldTransform)
     {
+        const std::array entities{entity};
+        (void)MoveEntities(entities, parent, beforeSibling, keepWorldTransform);
+    }
+
+    std::vector<Keire::EntityId> SceneDocument::MoveEntities(const std::span<const Keire::EntityId> entities,
+                                                             const Keire::EntityId parent,
+                                                             const Keire::EntityId beforeSibling,
+                                                             const bool keepWorldTransform)
+    {
         const auto scene = ActiveScene();
-        if (!scene || !scene->FindEntity(entity) || (parent && !scene->FindEntity(parent)) ||
-            (beforeSibling && !scene->FindEntity(beforeSibling)))
+        if (!scene || (parent && !scene->FindEntity(parent)) || (beforeSibling && !scene->FindEntity(beforeSibling)))
             throw std::invalid_argument("Cannot move entities outside the active scene.");
-        scene->MoveEntity(entity, parent, beforeSibling, keepWorldTransform);
+
+        std::vector<Keire::EntityId> requested;
+        requested.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            if (!entity || !scene->FindEntity(entity))
+                throw std::invalid_argument("Cannot move entities outside the active scene.");
+            if (std::ranges::find(requested, entity) == requested.end())
+                requested.push_back(entity);
+        }
+        if (requested.empty())
+            return {};
+        if (beforeSibling && std::ranges::find(requested, beforeSibling) != requested.end())
+            throw std::invalid_argument("The insertion target cannot be part of the moved selection.");
+
+        if (beforeSibling)
+        {
+            const auto siblingParent = scene->FindEntity(beforeSibling).Parent();
+            if ((parent && (!siblingParent || siblingParent.Id() != parent)) || (!parent && siblingParent))
+                throw std::invalid_argument("The insertion sibling must belong to the requested parent.");
+        }
+
+        for (auto destination = parent ? scene->FindEntity(parent) : Keire::Entity{}; destination;
+             destination = destination.Parent())
+        {
+            if (std::ranges::find(requested, destination.Id()) != requested.end())
+                throw std::invalid_argument("Entities cannot be moved below themselves or their descendants.");
+        }
+
+        std::vector<Keire::EntityId> roots;
+        roots.reserve(requested.size());
+        for (const auto entity : requested)
+        {
+            bool selectedAncestor = false;
+            for (auto ancestor = scene->FindEntity(entity).Parent(); ancestor; ancestor = ancestor.Parent())
+            {
+                if (std::ranges::find(requested, ancestor.Id()) != requested.end())
+                {
+                    selectedAncestor = true;
+                    break;
+                }
+            }
+            if (!selectedAncestor)
+                roots.push_back(entity);
+        }
+
+        Keire::Matrix4 destinationInverse;
+        if (parent && keepWorldTransform)
+        {
+            const auto parentTransform = scene->FindEntity(parent).GetComponent<Keire::TransformComponent>();
+            if (!parentTransform)
+                throw std::invalid_argument("The destination parent has no Transform.");
+            destinationInverse = Keire::Math::Inverse(parentTransform->WorldMatrix());
+        }
+        if (keepWorldTransform)
+        {
+            for (const auto entity : roots)
+            {
+                const auto transform = scene->FindEntity(entity).GetComponent<Keire::TransformComponent>();
+                if (!transform)
+                    throw std::invalid_argument("Every moved entity must have a Transform.");
+                const auto local = parent ? Keire::Math::Multiply(destinationInverse, transform->WorldMatrix())
+                                          : transform->WorldMatrix();
+                Keire::Vector3 position;
+                Keire::Quaternion rotation;
+                Keire::Vector3 scale;
+                if (!Keire::Math::DecomposeTransform(local, position, rotation, scale))
+                    throw std::invalid_argument("Moving the selection would produce a non-decomposable Transform.");
+            }
+        }
+
+        for (const auto entity : roots)
+            scene->MoveEntity(entity, parent, beforeSibling, keepWorldTransform);
+        return roots;
     }
 
     void SceneDocument::SetTransform(const Keire::EntityId entity, const TransformValues& values)
@@ -172,6 +255,12 @@ namespace KeireEditor
         const auto transform = target ? target.GetComponent<Keire::TransformComponent>() : nullptr;
         if (!transform)
             throw std::invalid_argument("Transform editing requires an entity in the active scene.");
+        if (values.Position && !Keire::Math::IsFinite(*values.Position))
+            throw std::invalid_argument("Transform position must be finite.");
+        if (values.EulerDegrees && !Keire::Math::IsFinite(*values.EulerDegrees))
+            throw std::invalid_argument("Transform Euler angles must be finite.");
+        if (values.Scale && !Keire::TransformComponent::IsValidLocalScale(*values.Scale))
+            throw std::invalid_argument("Transform scale axes must be finite with a magnitude of at least 0.000001.");
         if (values.Position)
             transform->SetLocalPosition(*values.Position);
         if (values.EulerDegrees)

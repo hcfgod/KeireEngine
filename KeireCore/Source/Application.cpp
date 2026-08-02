@@ -428,10 +428,22 @@ namespace Keire
                                                             static_cast<double>(statistics.VfxGpuWorlds));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU buffer bytes",
                                                             static_cast<double>(statistics.VfxGpuBufferBytes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU particle capacity",
+                                                            static_cast<double>(statistics.VfxGpuParticleCapacity));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX compute dispatches",
                                                             static_cast<double>(statistics.VfxComputeDispatches));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX compute thread groups",
+                                                            static_cast<double>(statistics.VfxComputeThreadGroups));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX indirect draws",
                                                             static_cast<double>(statistics.VfxIndirectDraws));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX pipeline warmup pending",
+                                                            statistics.VfxPipelineWarmupPending ? 1.0 : 0.0);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX pipelines ready",
+                                                            statistics.VfxPipelinesReady ? 1.0 : 0.0);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX pipeline warmup (ms)",
+                                                            statistics.VfxPipelineWarmupMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU fence wait (ms)",
+                                                            statistics.GpuFenceWaitMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Swapchain wait (ms)",
                                                             statistics.SwapchainWaitMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Allowed frames in flight",

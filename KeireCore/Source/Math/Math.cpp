@@ -115,10 +115,16 @@ namespace Keire::Math
     Matrix4 Multiply(const Matrix4& left, const Matrix4& right) noexcept { return FromGlm(ToGlm(left) * ToGlm(right)); }
     Matrix4 Inverse(const Matrix4& value)
     {
-        const auto matrix = ToGlm(value);
-        if (std::abs(glm::determinant(matrix)) <= 0.000001F)
+        if (!IsFinite(value))
             throw std::invalid_argument("Matrix is singular and cannot be inverted.");
-        return FromGlm(glm::inverse(matrix));
+        const auto matrix = ToGlm(value);
+        const float determinant = glm::determinant(matrix);
+        if (!std::isfinite(determinant) || determinant == 0.0F)
+            throw std::invalid_argument("Matrix is singular and cannot be inverted.");
+        const auto inverse = FromGlm(glm::inverse(matrix));
+        if (!IsFinite(inverse))
+            throw std::invalid_argument("Matrix is singular and cannot be inverted.");
+        return inverse;
     }
     Vector3 TransformPoint(const Matrix4& matrix, const Vector3 point) noexcept
     {

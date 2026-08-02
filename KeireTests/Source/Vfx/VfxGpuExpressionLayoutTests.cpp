@@ -159,10 +159,7 @@ TEST_CASE("GPU expression compilation packs Range bounds for particle-domain Por
     Connect(system, storedRandom, "out", initialize, storedPortable, "DynamicSize");
 
     const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
-    CHECK_FALSE(program.Valid);
-    CHECK(std::ranges::any_of(
-        program.Diagnostics, [node = storedRandom.Id](const Keire::VfxCompileDiagnostic& diagnostic)
-        { return diagnostic.Node == node && diagnostic.Message.find("CPU-only") != std::string::npos; }));
+    CHECK(program.Valid);
     REQUIRE(program.GpuValueProgram.Instructions.size() == 1);
     REQUIRE(program.GpuValueProgram.Sources.size() == 1);
     REQUIRE(program.GpuValueProgram.Constants.size() == 1);
@@ -180,6 +177,68 @@ TEST_CASE("GPU expression compilation packs Range bounds for particle-domain Por
         std::ranges::find(program.CustomInstructions, storedPortable.Id, &Keire::VfxCompiledCustomInstruction::Node);
     REQUIRE(custom != program.CustomInstructions.end());
     CHECK(custom->ValueRegister == instruction.Output[0]);
+}
+
+TEST_CASE("GPU expression compilation preserves Vector 2 and Vector 4 component operations")
+{
+    auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    auto& system = definition.Systems.front();
+    const Keire::VfxBlackboardParameter vector{Keire::AssetId::Generate(), "Direction 2D", Keire::VfxValueType::Vector2,
+                                               Keire::Vector2{3.0F, 5.0F}, true};
+    definition.Blackboard.push_back(vector);
+
+    Keire::VfxGraphNode parameter;
+    parameter.Id = Keire::AssetId::Generate();
+    parameter.Type = vector.Name;
+    parameter.Context = Keire::VfxContextType::Spawn;
+    parameter.Kind = Keire::VfxGraphNodeKind::Parameter;
+    parameter.Reference = vector.Id;
+    parameter.TypeId = {"keire.parameter"};
+    parameter.Pins.push_back({Keire::AssetId::Generate(), vector.Name, vector.Type, false, "value", std::nullopt});
+    auto splitVector2 = Keire::CreateVfxGraphOperatorNode("keire.operator.split-vector2");
+    splitVector2.Context = Keire::VfxContextType::Spawn;
+    auto totalTime = Keire::CreateVfxGraphOperatorNode("keire.operator.time");
+    totalTime.Context = Keire::VfxContextType::Spawn;
+    auto combineVector4 = Keire::CreateVfxGraphOperatorNode("keire.operator.combine-vector4");
+    combineVector4.Context = Keire::VfxContextType::Spawn;
+    Pin(combineVector4, "z", true).DefaultValue = 7.0F;
+    Pin(combineVector4, "w", true).DefaultValue = 11.0F;
+    auto splitVector4 = Keire::CreateVfxGraphOperatorNode("keire.operator.split-vector4");
+    splitVector4.Context = Keire::VfxContextType::Spawn;
+
+    system.Nodes.push_back(std::move(parameter));
+    system.Nodes.push_back(std::move(splitVector2));
+    system.Nodes.push_back(std::move(totalTime));
+    system.Nodes.push_back(std::move(combineVector4));
+    system.Nodes.push_back(std::move(splitVector4));
+    const auto& parameterNode = system.Nodes[system.Nodes.size() - 5];
+    const auto& splitVector2Node = system.Nodes[system.Nodes.size() - 4];
+    const auto& totalTimeNode = system.Nodes[system.Nodes.size() - 3];
+    const auto& combineVector4Node = system.Nodes[system.Nodes.size() - 2];
+    const auto& splitVector4Node = system.Nodes.back();
+    Connect(system, parameterNode, "value", splitVector2Node, "input");
+    Connect(system, totalTimeNode, "out", combineVector4Node, "x");
+    Connect(system, splitVector2Node, "y", combineVector4Node, "y");
+    Connect(system, combineVector4Node, "out", splitVector4Node, "input");
+    auto& spawn = Context(definition, Keire::VfxContextType::Spawn);
+    auto& emission = Block<Keire::VfxEmissionRateModule>(definition, Keire::VfxContextType::Spawn);
+    Connect(system, splitVector4Node, "w", spawn, emission, "particlesPerSecond");
+
+    const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(program.Valid);
+    REQUIRE(program.GpuValueProgram.Instructions.size() == 4);
+    CHECK(program.GpuValueProgram.Instructions[0].Header[0] == static_cast<std::uint32_t>(Keire::VfxValueOpcode::Time));
+    CHECK(program.GpuValueProgram.Instructions[1].Header[0] ==
+          static_cast<std::uint32_t>(Keire::VfxValueOpcode::Split));
+    CHECK(program.GpuValueProgram.Instructions[1].Output[1] == 1);
+    CHECK(program.GpuValueProgram.Instructions[2].Header[0] ==
+          static_cast<std::uint32_t>(Keire::VfxValueOpcode::Combine));
+    CHECK(program.GpuValueProgram.Instructions[2].Header[1] ==
+          static_cast<std::uint32_t>(Keire::VfxValueType::Vector4));
+    CHECK(program.GpuValueProgram.Instructions[2].Output[3] == 4);
+    CHECK(program.GpuValueProgram.Instructions[3].Header[0] ==
+          static_cast<std::uint32_t>(Keire::VfxValueOpcode::Split));
+    CHECK(program.GpuValueProgram.Instructions[3].Output[1] == 3);
 }
 
 TEST_CASE("GPU expression layout limits identify the exact overflowing node")

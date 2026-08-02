@@ -67,37 +67,80 @@ that immutable pair transactionally rather than resolving a process-global API a
 
 ## GPU VFX And Media Import Boundaries
 
+Play Mode treats VFX backend rejection as a recoverable failure. When a GPU-incompatible effect compiles for CPU,
+`SceneRuntimeSession` transactionally rebuilds its scene-owned VFX world on CPU and restarts the emitters. Effects
+invalid on both backends are isolated: the runtime logs the entity/effect identity once, suppresses repeated activation
+attempts for the same asset revision and Blackboard override set, and retries after publication of a new revision. The
+scene remains `Playing` in both cases; only a failure of the shared VFX world update remains a session-level fault.
+
 `VfxWorld` remains the backend-neutral scene facade. Render-capable scene sessions select the GPU backend; headless
 tests and explicit compatibility policy select deterministic CPU simulation. GPU snapshots contain only immutable
 per-emitter work descriptors, cumulative spawn sequences, per-handle simulation revisions, a world simulation-step
 revision, a world reset revision, and aggregate limits, including resolved bounded custom instructions. They never
 contain per-particle CPU snapshots. The renderer owns persistent particle, free-list, alive-list, counter, event,
-dispatch, and indirect-draw buffers and mutates them only inside an active render frame.
+dispatch, and indirect-draw buffers and mutates them only inside an active render frame. Each emitter additionally owns
+a bounded filtered-index buffer and an indexed-compatible indirect-argument buffer. A handle-filtering pass rebuilds
+that view every frame; spawn allocation uses its atomic count to enforce the effect's authored capacity before
+committing a shared-pool particle.
+The renderer treats the world's maximum as a logical safety ceiling rather than an eager allocation request. It sums
+the capacities of immutable live-system descriptors, selects an amortized power-of-two physical pool with a bounded
+minimum, and only grows that pool during the world's lifetime. This keeps capacity diagnostics and million-particle
+effects intact without making small scenes allocate or scan a million 160-byte particle records. Newly accepted spawn
+indices are compacted through the per-emitter output buffer, so the ordered Initialize, first Output, and strip-link
+kernels dispatch by spawn count. Post-simulation compaction is also reused when an emitter has no new particles.
+Physical growth is an explicit simulation-layout restart and produces a capacity diagnostic; pools never shrink while
+the world remains resident, avoiding allocation churn when emitters stop.
+The prior frame's per-emitter filtered indices are the next frame's simulation work list. Update and Output therefore
+dispatch by bounded emitter capacity and reject threads beyond the prior live count, while all emitters finish reading
+their views before compaction overwrites them. The global alive list cannot exceed the saturating sum of active emitter
+capacities, so handle-filtering dispatches use that aggregate bound rather than the larger amortized physical pool.
 Generation-qualified kill passes retire particles for one stopped, restarted, naturally completed, or incompatibly
 reloaded handle without clearing unrelated emitters. A transform pass applies Local-space emitter position/rotation
 deltas to that handle's existing position, velocity, and acceleration state. Only `VfxWorld::Clear` advances the
 world-wide reset revision. Compute world initialization, handle retirement, Local transforms, alive-list reset,
-handle-filtered per-emitter simulation, spawn, compaction, and indirect argument finalization precede one indirect
-output draw. Cable-ordered Module and Custom operations execute together in the relevant emitter spawn or simulation
-dispatch. Each active emitter adds one filtered dispatch over the world particle capacity; this explicit cost avoids
+handle-filtered per-system simulation, bounded spawn, compaction, and indirect argument finalization precede one
+indirect output draw per system. Sprite and Ribbon output bind either the authored texture or the procedural fallback;
+Ribbon segments connect consecutive live identities inside each bounded strip, and generation-qualified links prevent
+recycled pool slots from joining unrelated strips. Volumetric uses an analytic density impostor. Sprite, Ribbon, and
+Volumetric output compose particle tint with the assigned material Tint, primary texture, and alpha state through the
+built-in particle surface contract. Mesh output binds asset vertex/index buffers and compatible composed material
+shaders with per-particle size, full Euler rotation, tint, and Forward+ lighting. Mesh-surface and sparse-volume
+spawn resources are uploaded as weighted tables, and GPU Depth collision receives sampled scene depth plus camera
+matrices. Immutable constants and live parameters share one value table, while shape headers and samples share one
+fixed-stride table, keeping execution within SDL's eight-readonly-storage-buffer compute contract. Cable-ordered Module
+and Custom operations execute together in the relevant spawn or simulation dispatch. Update and Output evaluation use
+separate compute kernels so large schema-4 programs retain ordered semantics without exceeding practical D3D12 register
+pressure. Spawn, Initialize, and initial Output evaluation likewise run as three ordered kernels; deterministic module
+random state is carried in particle state until the particle is committed to the alive list, so a rejected stage returns
+the allocation exactly once without publishing a partially initialized particle.
+Each active system adds one filtered dispatch over the world particle capacity; this explicit cost avoids
 effect-specific pipeline creation while retaining deterministic cross-backend semantics. Shutdown releases pipelines
 before the device and treats repeated close as inert.
 
-Schema-v3 `.keirevfx` documents make execution explicit with `LegacyModules` or `Graph`. The graph compiler accepts one
-particle system with canonical Spawn, Initialize, Update, and Output contexts; stable-ID Module and Parameter
-references; typed, single-driver, forward `ParticleStream` flow; and a directed acyclic topology. Module nodes reference
-payload records rather than copying them, so only connected enabled references enter the Graph schedule. Blackboard
-parameters lower into stable-ID-sorted typed slots, and cables bind those slots to canonical module properties or
-Portable Custom HLSL inputs. Activation, component, and live-world overrides are resolved transactionally per handle;
-unknown, hidden, duplicate, or type-mismatched values cannot partially replace the previous state.
+The editor requests GPU VFX pipeline warmup when its rendered workspace attaches. A low-priority compiler thread creates
+the complete backend pipeline set and publishes it atomically, so render recording never observes a partial set and Play
+Mode does not wait on driver pipeline creation. Shutdown joins that worker before releasing the GPU device. Clients that
+own a loading screen can request the same non-blocking work through `RenderSystem::RequestGpuVfxPipelineWarmup`; clients
+that do not request it retain synchronous first-use creation for source compatibility. `RenderStatistics` exposes the
+pending/ready state and elapsed warmup time. While an explicitly requested warmup is pending, GPU VFX presentation is
+deferred without blocking the frame; simulation and unrelated rendering remain live.
+
+Schema-4 `.keirevfx` documents make execution explicit with `LegacyModules` or `Graph`. The graph compiler accepts
+multiple particle systems with Spawn or named Event sources and canonical Initialize, Update, and Output contexts;
+stable-ID Block, Operator, and Parameter references; typed, single-driver, forward `ParticleStream` flow; and a directed
+acyclic topology. Context stacks lower every Block occurrence to its own execution ID even when payload references
+repeat. Blackboard parameters and SSA-style value expressions lower into typed slots/registers, and a generic property
+ABI connects defaults, literals, parameters, or particle-varying registers to CPU and GPU Block execution. Activation,
+component, live-world overrides, reload, transform, Stop, and events are transactional through one root handle that
+owns bounded internal system slots.
 
 Portable Custom HLSL is a bounded backend-neutral instruction language, not arbitrary shader compilation. The compiler
-accepts at most eight verified assignments to Position, Velocity, billboard Rotation, Tint, or Size using `=`, `+=`,
-or `*=`, a literal or typed parameter operand, and optional trailing `* DeltaTime`. Both simulation backends consume
-the lowered instruction array. Event contexts, multiple executable systems, arbitrary resources, branches, loops, and
-general expression graphs remain outside this boundary.
+accepts up to 4,096 verified assignments to Position, Velocity, billboard Rotation, Tint, or Size using `=`, `+=`, or
+`*=`, a literal or typed expression operand, and optional trailing `* DeltaTime`. Both simulation backends consume the
+dynamic lowered instruction stream. Unrestricted Unity-style HLSL, arbitrary resources, branches, loops, subgraphs,
+decals, and froxel injection remain explicit capability tiers.
 
-Schema 1/2 module documents remain readable and always decode as `LegacyModules`. Save publishes schema 3 without
+Schema 1-3 module documents remain readable and always decode as `LegacyModules`. Explicit Save publishes schema 4 without
 changing their execution source; the explicit deterministic conversion operation replaces previous presentation
 systems with one canonical graph while preserving emitter, payload, and Blackboard stable IDs. CPU-incompatible
 features produce diagnostics rather than implicit substitutions. Managed VFX calls cross `IScriptRuntimeServices`,
@@ -278,13 +321,21 @@ snapshots, and named commands through narrow contracts; none retain, friend, or 
 resizing, or collapsing, while selection-driven client panels retain only stable entity or asset IDs and validate them
 before each draw.
 During Play Mode, Scene and Game retain separate camera and input ownership: Scene always renders through its persistent
-editor camera, while managed runtime input and cursor capture are active only when the Game image is both focused and
-hovered. Hovering Scene therefore routes navigation exclusively to the editor camera without mutating runtime camera
-state.
+editor camera. The editor disables automatic input-user joining and explicitly pairs the fixed keyboard and mouse to its
+owned user; pairing failures are fatal during workspace initialization instead of producing a zero-valued gameplay
+context. The `Player` map and UI-capture override are validated before the Play session starts. Game input engages from
+hover or a runtime capture request, even while dock focus is settling, and remains latched while its panel owns focus.
+Losing application focus releases native capture without changing the requested runtime mode. Escape has a global,
+editor-owned safety release when managed input fails; clicking the Game image re-engages that suspended capture without
+warping the pointer. Hovering Scene therefore routes navigation exclusively to the editor camera without mutating
+runtime camera state.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
 All authoring mutations, including menu primitives and viewport mesh/material drops, cross `SceneDocument`; workspace
 code may inspect an active scene for presentation and picking but does not create, destroy, or edit scene objects itself.
+Hierarchy multi-moves validate every source, destination, insertion sibling, cycle, and preserved world transform before
+mutation. Selected descendants collapse under their selected root, and the validated roots move in payload order as one
+editor transaction.
 KeireClient owns the separate Scene gizmo controller and uses only the public UI drawing facade, so neither ImGui draw
 lists nor GPU handles cross into client code.
 
@@ -479,6 +530,10 @@ Perfetto/Chrome-trace-compatible snapshot. Renderer timings remain explicitly CP
 timestamp queries; `GpuTimingSupported` prevents recording or displaying synthetic GPU measurements. Managed callback
 timing uses fixed per-instance accumulators on the owner thread. The editor performs bounded type/lifecycle aggregation
 only at its throttled presentation refresh and limits default-open row submission to reduce profiler observer overhead.
+The renderer separately reports oldest-frame GPU fence wait, swapchain acquisition wait, VFX physical particle
+capacity, compute dispatches, and compute thread groups. Fence wait is measured at the frames-in-flight boundary, so a
+large `Render begin` span can be attributed to GPU/present back-pressure without misclassifying it as scene-recording
+CPU time.
 
 Development `AssetDatabase` instances own a stoppable monitor thread. The monitor performs metadata/signature
 reconciliation away from the application thread and publishes a complete immutable candidate tagged with the source

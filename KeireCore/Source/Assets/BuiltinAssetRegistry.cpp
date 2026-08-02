@@ -11,6 +11,7 @@
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 #include "Keire/Vfx/VfxSystem.h"
+#include "Keire/Vfx/VfxVolumeAsset.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -40,6 +41,7 @@ namespace Keire
         result.emplace_back(CreatePhysicsMaterialAssetImporter());
         result.emplace_back(CreateManagedDataAssetImporter());
         result.emplace_back(CreateVfxEffectAssetImporter());
+        result.emplace_back(CreateVfxVolumeAssetImporter());
 
         std::unordered_set<std::string> names;
         std::unordered_set<std::string> extensions;
@@ -79,6 +81,7 @@ namespace Keire
         result.emplace_back(CreatePhysicsMaterialAssetDecoder());
         result.emplace_back(CreateManagedDataAssetDecoder());
         result.emplace_back(CreateVfxEffectAssetDecoder());
+        result.emplace_back(CreateVfxVolumeAssetDecoder());
 
         std::unordered_set<AssetTypeId> types;
         for (const auto& registration : result)

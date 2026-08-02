@@ -11,12 +11,16 @@
 #include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
+#include "Keire/Log.h"
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "Keire/Vfx/VfxSystem.h"
+#include "Keire/Vfx/VfxVolumeAsset.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -149,6 +153,25 @@ namespace Keire
             VfxHandle Handle;
             std::uint64_t Revision = 0;
             std::vector<VfxParameterOverride> Overrides;
+            std::uint64_t RejectedRevision = 0;
+            std::vector<VfxParameterOverride> RejectedOverrides;
+            std::string Diagnostic;
+        };
+
+        struct VfxMeshShapeState final
+        {
+            struct Triangle final
+            {
+                Vector3 A;
+                Vector3 B;
+                Vector3 C;
+                float CumulativeArea = 0.0F;
+            };
+
+            AssetHandle<MeshAsset> Handle;
+            std::vector<Triangle> Triangles;
+            std::uint64_t Revision = 0;
+            float TotalArea = 0.0F;
         };
 
         Impl(Ref<Scene> scene, Ref<AssetSystem> assets, Ref<AudioSystem> audio, Ref<PhysicsSystem> physics)
@@ -585,16 +608,121 @@ namespace Keire
             return VfxCollisionHit{hits.front().Position, hits.front().Normal};
         }
 
-        void InitializeVfx()
+        [[nodiscard]] static std::uint32_t HashVfxSample(std::uint32_t value) noexcept
+        {
+            value ^= value >> 16U;
+            value *= 0x7feb352dU;
+            value ^= value >> 15U;
+            value *= 0x846ca68bU;
+            value ^= value >> 16U;
+            return value;
+        }
+
+        [[nodiscard]] static float VfxSampleUnit(const std::uint32_t value) noexcept
+        {
+            return static_cast<float>(value >> 8U) * (1.0F / 16'777'216.0F);
+        }
+
+        [[nodiscard]] std::optional<Vector3> SampleVfxMesh(const AssetId asset, const std::uint32_t randomValue)
+        {
+            auto& state = VfxMeshShapes[asset];
+            Ref<const MeshAsset> mesh;
+            std::uint64_t revision = 1;
+            if (asset == MeshAsset::CubeId())
+            {
+                mesh = MeshAsset::Cube();
+            }
+            else
+            {
+                if (!Assets)
+                    return std::nullopt;
+                if (!state.Handle)
+                    state.Handle = Assets->Load<MeshAsset>(asset, AssetPriority::High);
+                mesh = state.Handle.TryGetLoaded();
+                revision = state.Handle.Revision();
+                if (!mesh)
+                    return std::nullopt;
+            }
+            if (state.Revision != revision)
+            {
+                std::vector<VfxMeshShapeState::Triangle> triangles;
+                triangles.reserve(mesh->Indices().size() / 3U);
+                double cumulativeArea = 0.0;
+                for (std::size_t index = 0; index + 2U < mesh->Indices().size(); index += 3U)
+                {
+                    const auto& a = mesh->Vertices()[mesh->Indices()[index]].Position;
+                    const auto& b = mesh->Vertices()[mesh->Indices()[index + 1U]].Position;
+                    const auto& c = mesh->Vertices()[mesh->Indices()[index + 2U]].Position;
+                    const auto edge0 = Vector3{b.X - a.X, b.Y - a.Y, b.Z - a.Z};
+                    const auto edge1 = Vector3{c.X - a.X, c.Y - a.Y, c.Z - a.Z};
+                    const auto cross =
+                        Vector3{edge0.Y * edge1.Z - edge0.Z * edge1.Y, edge0.Z * edge1.X - edge0.X * edge1.Z,
+                                edge0.X * edge1.Y - edge0.Y * edge1.X};
+                    const auto area = 0.5 * std::sqrt(static_cast<double>(cross.X) * cross.X +
+                                                      static_cast<double>(cross.Y) * cross.Y +
+                                                      static_cast<double>(cross.Z) * cross.Z);
+                    if (!std::isfinite(area) || area <= 0.0)
+                        continue;
+                    cumulativeArea += area;
+                    if (!std::isfinite(cumulativeArea) || cumulativeArea > std::numeric_limits<float>::max())
+                        return std::nullopt;
+                    triangles.push_back({a, b, c, static_cast<float>(cumulativeArea)});
+                }
+                if (triangles.empty())
+                    return std::nullopt;
+                state.Triangles = std::move(triangles);
+                state.TotalArea = static_cast<float>(cumulativeArea);
+                state.Revision = revision;
+            }
+            if (state.Triangles.empty() || state.TotalArea <= 0.0F)
+                return std::nullopt;
+            const auto selected = VfxSampleUnit(HashVfxSample(randomValue ^ 0x3c6ef372U)) * state.TotalArea;
+            const auto found = std::lower_bound(state.Triangles.begin(), state.Triangles.end(), selected,
+                                                [](const VfxMeshShapeState::Triangle& triangle, const float value)
+                                                { return triangle.CumulativeArea < value; });
+            const auto& triangle = found == state.Triangles.end() ? state.Triangles.back() : *found;
+            const auto root = std::sqrt(VfxSampleUnit(HashVfxSample(randomValue ^ 0xa54ff53aU)));
+            const auto barycentricA = 1.0F - root;
+            const auto barycentricB = root * (1.0F - VfxSampleUnit(HashVfxSample(randomValue ^ 0x510e527fU)));
+            const auto barycentricC = 1.0F - barycentricA - barycentricB;
+            return Vector3{triangle.A.X * barycentricA + triangle.B.X * barycentricB + triangle.C.X * barycentricC,
+                           triangle.A.Y * barycentricA + triangle.B.Y * barycentricB + triangle.C.Y * barycentricC,
+                           triangle.A.Z * barycentricA + triangle.B.Z * barycentricB + triangle.C.Z * barycentricC};
+        }
+
+        [[nodiscard]] std::optional<Vector3> SampleVfxShape(const AssetId asset, const std::uint32_t randomValue)
+        {
+            if (!Assets || !asset)
+                return std::nullopt;
+            const auto type =
+                asset == MeshAsset::CubeId() ? std::optional{MeshAsset::StaticType()} : Assets->TryGetType(asset);
+            if (type == MeshAsset::StaticType())
+                return SampleVfxMesh(asset, randomValue);
+            if (type != VfxVolumeAsset::StaticType())
+                return std::nullopt;
+            auto& handle = VfxVolumes[asset];
+            if (!handle)
+                handle = Assets->Load<VfxVolumeAsset>(asset, AssetPriority::High);
+            const auto volume = handle.TryGetLoaded();
+            return volume ? std::optional{volume->Sample(randomValue)} : std::nullopt;
+        }
+
+        void InitializeVfx(const VfxBackend backend)
         {
             ClearVfx();
             VfxWorldSpecification specification;
-            specification.Backend = Assets ? VfxBackend::Gpu : VfxBackend::Cpu;
-            specification.MaximumParticles = Assets ? 1'000'000U : VfxRenderSnapshot::MaximumParticles;
+            specification.Backend = backend;
+            specification.MaximumParticles =
+                backend == VfxBackend::Gpu ? 1'000'000U : VfxRenderSnapshot::MaximumParticles;
             specification.CollisionQuery = [this](const Vector3 start, const Vector3 end)
             { return QueryVfxCollision(start, end); };
+            specification.ShapeSample = [this](const AssetId asset, const std::uint32_t randomValue)
+            { return SampleVfxShape(asset, randomValue); };
             VfxWorldService = CreateRef<VfxWorld>(std::move(specification));
+            VfxBackendMode = backend;
         }
+
+        void InitializeVfx() { InitializeVfx(Assets ? VfxBackend::Gpu : VfxBackend::Cpu); }
 
         void SynchronizeVfx(const float deltaSeconds)
         {
@@ -602,6 +730,8 @@ namespace Keire
                 return;
 
             std::set<EntityId> seen;
+            bool fallbackToCpu = false;
+            std::string fallbackDiagnostic;
             for (const auto entity : Runtime->Query<VfxEmitterComponent>())
             {
                 const auto emitter = entity.GetComponent<VfxEmitterComponent>();
@@ -637,34 +767,106 @@ namespace Keire
                 Quaternion rotation;
                 Vector3 scale;
                 if (!Math::DecomposeTransform(transform->WorldMatrix(), position, rotation, scale))
-                    throw std::runtime_error("VFX Emitter Transform cannot be decomposed.");
-                const auto revision = state.EffectHandle.Revision();
-                if (!state.Handle || !VfxWorldService->IsAlive(state.Handle))
                 {
-                    state.Handle = VfxWorldService->Activate(
-                        {effect, revision, position, rotation, emitter->SeedOffset(), overrides});
-                    state.Revision = revision;
-                    state.Overrides = overrides;
-                }
-                else
-                {
-                    if (revision != state.Revision)
+                    constexpr std::string_view diagnostic = "VFX Emitter Transform cannot be decomposed.";
+                    if (state.Diagnostic != diagnostic)
                     {
-                        const auto reloadOverrides = CompatibleVfxOverrides(effect->Definition(), state.Overrides);
-                        (void)VfxWorldService->Reload(state.Handle, effect, revision);
-                        state.Revision = revision;
-                        if (overrides == reloadOverrides)
-                            state.Overrides = overrides;
+                        KEIRE_CORE_ERROR("VFX emitter '{}' (entity={}) is disabled: {}", entity.Name(),
+                                         entity.Id().Value().ToString(), diagnostic);
+                        state.Diagnostic = diagnostic;
                     }
-                    if (state.Overrides != overrides)
+                    continue;
+                }
+                const auto revision = state.EffectHandle.Revision();
+                if (state.RejectedRevision == revision && state.RejectedOverrides == overrides)
+                    continue;
+                try
+                {
+                    if (!state.Handle || !VfxWorldService->IsAlive(state.Handle))
                     {
-                        VfxWorldService->SetParameterOverrides(state.Handle, overrides);
+                        state.Handle = VfxWorldService->Activate(
+                            {effect, revision, position, rotation, emitter->SeedOffset(), overrides});
+                        state.Revision = revision;
                         state.Overrides = overrides;
                     }
-                    VfxWorldService->SetTransform(state.Handle, position, rotation);
+                    else
+                    {
+                        if (revision != state.Revision)
+                        {
+                            const auto reloadOverrides = CompatibleVfxOverrides(effect->Definition(), state.Overrides);
+                            (void)VfxWorldService->Reload(state.Handle, effect, revision);
+                            state.Revision = revision;
+                            if (overrides == reloadOverrides)
+                                state.Overrides = overrides;
+                        }
+                        if (state.Overrides != overrides)
+                        {
+                            VfxWorldService->SetParameterOverrides(state.Handle, overrides);
+                            state.Overrides = overrides;
+                        }
+                        VfxWorldService->SetTransform(state.Handle, position, rotation);
+                    }
+                    if (state.Handle)
+                        VfxWorldService->SetSimulationSpeed(state.Handle, emitter->SimulationSpeed());
+                    state.RejectedRevision = 0;
+                    state.RejectedOverrides.clear();
+                    state.Diagnostic.clear();
                 }
-                if (state.Handle)
-                    VfxWorldService->SetSimulationSpeed(state.Handle, emitter->SimulationSpeed());
+                catch (const std::exception& exception)
+                {
+                    if (VfxBackendMode == VfxBackend::Gpu)
+                    {
+                        const auto gpuPrograms = CompileVfxEffectSystems(effect->Definition(), VfxBackend::Gpu);
+                        const auto cpuPrograms = CompileVfxEffectSystems(effect->Definition(), VfxBackend::Cpu);
+                        const auto allValid = [](const std::vector<VfxCompiledProgram>& programs)
+                        { return !programs.empty() && std::ranges::all_of(programs, &VfxCompiledProgram::Valid); };
+                        if (!allValid(gpuPrograms) && allValid(cpuPrograms))
+                        {
+                            fallbackToCpu = true;
+                            fallbackDiagnostic = exception.what();
+                            break;
+                        }
+                    }
+                    if (state.Handle)
+                    {
+                        VfxWorldService->Stop(state.Handle);
+                        state.Handle = {};
+                    }
+                    state.RejectedRevision = revision;
+                    state.RejectedOverrides = overrides;
+                    if (state.Diagnostic != exception.what())
+                    {
+                        KEIRE_CORE_ERROR("VFX emitter '{}' (entity={}, effect={}) is disabled: {}", entity.Name(),
+                                         entity.Id().Value().ToString(), state.Effect.ToString(), exception.what());
+                        state.Diagnostic = exception.what();
+                    }
+                }
+                catch (...)
+                {
+                    if (state.Handle)
+                    {
+                        VfxWorldService->Stop(state.Handle);
+                        state.Handle = {};
+                    }
+                    state.RejectedRevision = revision;
+                    state.RejectedOverrides = overrides;
+                    constexpr std::string_view diagnostic = "VFX activation failed with a non-standard exception.";
+                    if (state.Diagnostic != diagnostic)
+                    {
+                        KEIRE_CORE_ERROR("VFX emitter '{}' (entity={}, effect={}) is disabled: {}", entity.Name(),
+                                         entity.Id().Value().ToString(), state.Effect.ToString(), diagnostic);
+                        state.Diagnostic = diagnostic;
+                    }
+                }
+            }
+
+            if (fallbackToCpu)
+            {
+                KEIRE_CORE_WARN("Scene VFX is falling back to the CPU backend because a GPU effect is unsupported: {}",
+                                fallbackDiagnostic);
+                InitializeVfx(VfxBackend::Cpu);
+                SynchronizeVfx(deltaSeconds);
+                return;
             }
 
             for (auto iterator = VfxEmitters.begin(); iterator != VfxEmitters.end();)
@@ -702,6 +904,8 @@ namespace Keire
         void ClearVfx() noexcept
         {
             VfxEmitters.clear();
+            VfxMeshShapes.clear();
+            VfxVolumes.clear();
             if (VfxWorldService)
             {
                 VfxWorldService->Clear();
@@ -980,14 +1184,18 @@ namespace Keire
                 const auto dot = [](const Vector3 left, const Vector3 right) noexcept
                 { return left.X * right.X + left.Y * right.Y + left.Z * right.Z; };
                 const auto length = [&](const Vector3 value) noexcept { return std::sqrt(dot(value, value)); };
+                const auto hasResolvableDisplacement = [&](const Vector3 value) noexcept
+                { return dot(value, value) > std::numeric_limits<float>::epsilon(); };
 
                 const auto padding = std::min(character->SkinWidth(), state.Definition.Radius * 0.5F);
                 const auto castRadius = state.Definition.Radius - padding;
                 const auto castHeight = state.Definition.Height - padding * 2.0F;
                 const auto slopeNormal = std::cos(character->MaximumSlopeDegrees() * 3.14159265358979323846F / 180.0F);
                 Vector3 current = start;
-                const auto cast = [&](const Vector3 origin, const Vector3 movement)
+                const auto cast = [&](const Vector3 origin, const Vector3 movement) -> std::optional<PhysicsQueryHit>
                 {
+                    if (!hasResolvableDisplacement(movement))
+                        return std::nullopt;
                     return PhysicsWorldService->CastCapsule({.Origin = origin,
                                                              .Rotation = rotation,
                                                              .Radius = castRadius,
@@ -1002,9 +1210,9 @@ namespace Keire
                 {
                     for (std::size_t iteration = 0; iteration < 4; ++iteration)
                     {
-                        const auto movementLength = length(movement);
-                        if (movementLength <= 0.00001F)
+                        if (!hasResolvableDisplacement(movement))
                             break;
+                        const auto movementLength = length(movement);
                         const auto hit = cast(current, movement);
                         if (!hit)
                         {
@@ -1023,7 +1231,7 @@ namespace Keire
 
                 const Vector3 horizontal{displacement.X, 0.0F, displacement.Z};
                 bool stepped = false;
-                if (character->Grounded() && character->StepHeight() > 0.0F && length(horizontal) > 0.00001F)
+                if (character->Grounded() && character->StepHeight() > 0.0F && hasResolvableDisplacement(horizontal))
                 {
                     const auto obstruction = cast(current, horizontal);
                     if (obstruction && obstruction->Normal.Y < slopeNormal)
@@ -1205,6 +1413,7 @@ namespace Keire
         Ref<PhysicsSystem> PhysicsService;
         Ref<PhysicsWorld> PhysicsWorldService;
         Ref<VfxWorld> VfxWorldService;
+        VfxBackend VfxBackendMode = VfxBackend::Cpu;
         std::thread::id OwnerThread;
         ScenePlayState PlayState = ScenePlayState::Stopped;
         SceneRuntimeDiagnostic Failure;
@@ -1212,6 +1421,8 @@ namespace Keire
         std::map<EntityId, std::unique_ptr<AnimationRuntimeState>> Animators;
         std::map<EntityId, PhysicsRuntimeState> PhysicsBodies;
         std::map<EntityId, VfxRuntimeState> VfxEmitters;
+        std::map<AssetId, VfxMeshShapeState> VfxMeshShapes;
+        std::map<AssetId, AssetHandle<VfxVolumeAsset>> VfxVolumes;
         float PresentationWidth = 1920.0F;
         float PresentationHeight = 1080.0F;
         RuntimeUiInsets SafeArea;
@@ -1299,6 +1510,17 @@ namespace Keire
         const auto state = m_Impl->VfxEmitters.find(entityId);
         return state != m_Impl->VfxEmitters.end() && state->second.Handle &&
                m_Impl->VfxWorldService->IsAlive(state->second.Handle);
+    }
+
+    bool SceneRuntimeSession::SendVfxEvent(const EntityId entityId, const std::string_view eventName,
+                                           const std::uint32_t spawnCount)
+    {
+        m_Impl->RequireOwner("SendVfxEvent");
+        if (!m_Impl->VfxWorldService)
+            return false;
+        const auto state = m_Impl->VfxEmitters.find(entityId);
+        return state != m_Impl->VfxEmitters.end() && state->second.Handle &&
+               m_Impl->VfxWorldService->SendEvent(state->second.Handle, eventName, spawnCount);
     }
 
     bool SceneRuntimeSession::SetVfxParameter(const EntityId entityId, const VfxParameterOverride& value)
@@ -1400,19 +1622,47 @@ namespace Keire
         m_Impl->RequireOwner("Play");
         if (m_Impl->PlayState != ScenePlayState::Stopped)
             return;
+        const auto startupBegan = std::chrono::steady_clock::now();
+        const auto elapsedMilliseconds = [](const auto began)
+        { return std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - began).count(); };
         m_Impl->Failure = {};
         m_Impl->ClearAnimation();
+        const auto cloneBegan = std::chrono::steady_clock::now();
         m_Impl->Runtime = CreateRef<Scene>(m_Impl->Edit->Asset(), m_Impl->Edit->Snapshot(), m_Impl->Edit->Components());
         m_Impl->Runtime->MarkSaved();
+        const float cloneMilliseconds = elapsedMilliseconds(cloneBegan);
         m_Impl->PlayState = ScenePlayState::Playing;
+        const auto physicsBegan = std::chrono::steady_clock::now();
         m_Impl->Invoke("Physics initialization", [&] { m_Impl->InitializePhysics(); });
+        const float physicsMilliseconds = elapsedMilliseconds(physicsBegan);
+        const auto scriptsBegan = std::chrono::steady_clock::now();
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("Awake/OnEnable", [&] { m_Impl->Runtime->BeginPlay(); });
+        const float scriptsMilliseconds = elapsedMilliseconds(scriptsBegan);
+        const auto vfxBegan = std::chrono::steady_clock::now();
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("VFX initialization", [&] { m_Impl->InitializeVfx(); });
+        const float vfxMilliseconds = elapsedMilliseconds(vfxBegan);
+        const auto presentationBegan = std::chrono::steady_clock::now();
         if (m_Impl->Presentation)
             m_Impl->Presentation->Synchronize(m_Impl->Runtime, m_Impl->PresentationWidth, m_Impl->PresentationHeight,
                                               true, m_Impl->SafeArea);
+        const float presentationMilliseconds = elapsedMilliseconds(presentationBegan);
+        const float totalMilliseconds = elapsedMilliseconds(startupBegan);
+        if (totalMilliseconds >= 100.0F)
+        {
+            KEIRE_CORE_WARN("Play Mode startup {:.2f} ms (scene clone {:.2f}, physics {:.2f}, scripts {:.2f}, VFX "
+                            "{:.2f}, presentation {:.2f}).",
+                            totalMilliseconds, cloneMilliseconds, physicsMilliseconds, scriptsMilliseconds,
+                            vfxMilliseconds, presentationMilliseconds);
+        }
+        else
+        {
+            KEIRE_CORE_INFO("Play Mode startup {:.2f} ms (scene clone {:.2f}, physics {:.2f}, scripts {:.2f}, VFX "
+                            "{:.2f}, presentation {:.2f}).",
+                            totalMilliseconds, cloneMilliseconds, physicsMilliseconds, scriptsMilliseconds,
+                            vfxMilliseconds, presentationMilliseconds);
+        }
     }
 
     void SceneRuntimeSession::Pause(const bool paused)

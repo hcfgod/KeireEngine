@@ -379,8 +379,8 @@ namespace KeireEditor
 
         void DrawCharacterControllerWireframe(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
                                               const Keire::CharacterControllerComponent& controller,
-                                              const Keire::Matrix4& viewProjection,
-                                              const Keire::UiItemRect viewport, const bool selected)
+                                              const Keire::Matrix4& viewProjection, const Keire::UiItemRect viewport,
+                                              const bool selected)
         {
             const auto world = transform.WorldMatrix();
             const auto base = controller.Grounded() ? GroundedControllerColor : ControllerColor;
@@ -391,13 +391,12 @@ namespace KeireEditor
             const Keire::Vector3 top{0.0F, halfSegment, 0.0F};
             const Keire::Vector3 bottom{0.0F, -halfSegment, 0.0F};
 
-            DrawLocalCircle(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, radius, viewProjection,
-                            viewport, color, thickness);
-            DrawLocalCircle(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, radius, viewProjection,
-                            viewport, color, thickness);
+            DrawLocalCircle(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, radius, viewProjection, viewport,
+                            color, thickness);
+            DrawLocalCircle(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 1.0F}, radius, viewProjection, viewport,
+                            color, thickness);
             constexpr std::array radialAxes{Keire::Vector3{1.0F, 0.0F, 0.0F}, Keire::Vector3{-1.0F, 0.0F, 0.0F},
-                                            Keire::Vector3{0.0F, 0.0F, 1.0F},
-                                            Keire::Vector3{0.0F, 0.0F, -1.0F}};
+                                            Keire::Vector3{0.0F, 0.0F, 1.0F}, Keire::Vector3{0.0F, 0.0F, -1.0F}};
             for (const auto radial : radialAxes)
             {
                 const auto topPoint = Keire::Math::TransformPoint(world, Add(top, Multiply(radial, radius)));
@@ -407,12 +406,12 @@ namespace KeireEditor
                 if (projectedTop && projectedBottom)
                     ui.DrawLine(*projectedTop, *projectedBottom, color, thickness);
             }
-            DrawLocalArc(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, radius, 0.0F, Pi,
-                         viewProjection, viewport, color, thickness);
+            DrawLocalArc(ui, world, top, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, radius, 0.0F, Pi, viewProjection,
+                         viewport, color, thickness);
             DrawLocalArc(ui, world, bottom, {1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, radius, Pi, Pi * 2.0F,
                          viewProjection, viewport, color, thickness);
-            DrawLocalArc(ui, world, top, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, radius, 0.0F, Pi,
-                         viewProjection, viewport, color, thickness);
+            DrawLocalArc(ui, world, top, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, radius, 0.0F, Pi, viewProjection,
+                         viewport, color, thickness);
             DrawLocalArc(ui, world, bottom, {0.0F, 0.0F, 1.0F}, {0.0F, 1.0F, 0.0F}, radius, Pi, Pi * 2.0F,
                          viewProjection, viewport, color, thickness);
         }
@@ -599,6 +598,8 @@ namespace KeireEditor
             Keire::Vector3 scale;
             if (!Keire::Math::DecomposeTransform(desiredLocal, position, rotation, scale))
                 continue;
+            if (!Keire::TransformComponent::IsValidLocalScale(scale))
+                continue;
             target.Transform->SetLocalPosition(position);
             target.Transform->SetLocalRotation(rotation);
             target.Transform->SetLocalScale(scale);
@@ -654,8 +655,7 @@ namespace KeireEditor
             m_Settings.LocalSpace = !m_Settings.LocalSpace;
         if (button("SceneSnap", Keire::UiIcon::Snap, "Toggle snapping", m_Settings.Snapping))
             m_Settings.Snapping = !m_Settings.Snapping;
-        if (button("ScenePhysicsGizmos", Keire::UiIcon::Filter, "Show physics gizmos",
-                   m_Settings.ShowPhysicsGizmos))
+        if (button("ScenePhysicsGizmos", Keire::UiIcon::Filter, "Show physics gizmos", m_Settings.ShowPhysicsGizmos))
             m_Settings.ShowPhysicsGizmos = !m_Settings.ShowPhysicsGizmos;
         if (button("SceneColliderEdit", Keire::UiIcon::Filter, "Edit collider shapes", m_Settings.EditColliders))
             m_Settings.EditColliders = !m_Settings.EditColliders;

@@ -572,7 +572,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             };
             auto& transformExpanded = expansion("transform");
             const float transformCardHeight =
-                transformExpanded ? (ui.ContentAvailable().Width < 325.0F ? 245.0F : 190.0F) : 38.0F;
+                transformExpanded ? (ui.ContentAvailable().Width < 325.0F ? 267.0F : 212.0F) : 38.0F;
             if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true); card)
             {
                 if (ui.Selectable(transformExpanded ? "v  TRANSFORM" : ">  TRANSFORM"))
@@ -616,6 +616,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             scale.Y = propagate(previousScale.Z, scale.Z, previousScale.Y);
                         }
                     }
+                    const bool validScale = Keire::TransformComponent::IsValidLocalScale(scale);
                     if (positionChanged)
                     {
                         m_Controller.RecordInspectorUndo("Change Position", "transform.position." +
@@ -630,12 +631,15 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                                 std::to_string(m_EditSerial));
                         sceneDocument.SetTransform(entity.Id(), {.EulerDegrees = rotation});
                     }
-                    if (scaleChanged)
+                    if (scaleChanged && validScale)
                     {
                         m_Controller.RecordInspectorUndo("Change Scale", "transform.scale." + entity.Id().ToString() +
                                                                              "." + std::to_string(m_EditSerial));
                         sceneDocument.SetTransform(entity.Id(), {.Scale = scale});
                     }
+                    if (scaleState.Active && !validScale)
+                        ui.TextColored(theme.Error,
+                                       "Scale axes need magnitude 0.000001 or greater. Finish typing to apply.");
                     if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
                         scaleState.DeactivatedAfterEdit)
                         ++m_EditSerial;

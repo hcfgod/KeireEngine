@@ -201,6 +201,7 @@ namespace KeireEditor
         IHierarchyController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_SelectionAnchor;
+        Keire::AssetId m_PendingSelectionCollapse;
         std::string m_Search;
     };
 

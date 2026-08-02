@@ -5,6 +5,83 @@ version tags.
 
 ## Unreleased
 
+- Removed the first-Play GPU VFX pipeline hitch. The editor now requests all schema-4 compute pipelines through a
+  low-priority background warmup while the workspace remains responsive; first-use compilation remains a compatible
+  fallback for runtime clients that do not prewarm. Renderer statistics and profiler captures expose warmup pending,
+  ready, and elapsed-time values, and Play startup logs now split scene clone, physics, scripts, VFX, and presentation
+  costs so transition stalls are attributable.
+- Optimized GPU VFX scheduling from profiler evidence. The renderer now sizes each physical particle pool from the
+  summed capacities of its live systems with power-of-two growth instead of allocating and scanning the scene's fixed
+  one-million-particle ceiling. Spawn Initialize/Output and strip linking consume a compact new-particle list, and
+  emitters without new spawns reuse their first post-simulation render compaction. Added physical particle-capacity,
+  compute-thread-group, and oldest-frame fence-wait statistics so GPU pressure and presentation pacing are separately
+  visible in profiler captures. A follow-up scheduling pass now drives Update/Output from each emitter's persistent
+  compacted particle view and bounds global compaction by the summed active-system capacity, reducing the six-system
+  sandbox's normal no-spawn workload from 1,160 to approximately 250 compute groups without changing its 26 ordered
+  dispatches.
+- Reworked the FPS VFX showcase into the event-driven VX-9 Plasma Lance. Holding Fire now sends rate-limited
+  `PlasmaFire` events that launch a tight, high-velocity plasma stream from the camera muzzle; releasing Fire stops new
+  emission while live bolts finish naturally. Added a generated alpha plasma-core texture, transparent emissive
+  material, heat-responsive Blackboard color/size control, and GPU-ready event graph content.
+- Fixed GPU VFX payload validation rejecting the supported Vector2, Vector4, and Color Combine/Split signatures before
+  dispatch. Renderer-side validation now mirrors the shader interpreter's typed component rules and accepts every
+  production vector width while retaining output-index and SSA source checks.
+- Upgraded the sandbox `VfxEffect` into the camera-mounted Aether Weapon Core showcase. Its schema-4 graph uses an
+  exposed color and a Vector2 size range routed through Split Vector 2 and Random, while a dedicated FPS behaviour
+  drives cyan idle energy, violet sprint response, and orange fire pulses through stable-ID managed Blackboard
+  overrides. Added a visual walkthrough plus native authored-default/override lookup and managed runtime-access
+  guidance.
+- Added production CPU/GPU Combine and Split Operators for Vector2, Vector4, and Color alongside the existing Vector3
+  pair. Each node exposes canonical typed component pins, searchable float/vector/RGBA aliases, deterministic constant
+  folding, packed GPU interpreter execution, and type-filtered editor catalog metadata so Vector2 cables resolve to a
+  supported Split Vector 2 node instead of the existing Vector3-only Split.
+- Fixed Inspector scale editing so clearing an axis while entering a replacement value remains an uncommitted draft
+  instead of publishing a singular world transform and crashing matrix inversion. Transform setters, component/scene
+  loading, prefab overrides, and gizmo edits now share an explicit finite non-zero scale invariant; rejected edits leave
+  the previous transform unchanged, while small valid invertible matrices remain supported.
+- Fixed schema-4 VFX assets authored before the Shape Volume and Renderer Material inputs were added. Their version-one
+  module layouts now upgrade deterministically in memory to version two, preserving every existing stable pin and cable
+  while allocating stable IDs for only the new resource inputs. Character Controller movement now also filters
+  sub-resolution smoothing tails before capsule casts, preventing valid FPS movement from faulting Play Mode after an
+  input transition.
+- Completed the next schema-4 VFX backend tranche across CPU, GPU, editor, assets, scenes, and managed scripting.
+  GPU simulation now samples imported mesh surfaces and cooked sparse-density `.keirevfxvolume` assets through bounded
+  weighted resource tables, performs swept scene-depth collision, evaluates every numeric Block input through the
+  generic typed property/register ABI, and renders compatible composed Mesh materials. Sprite, Ribbon, and Volumetric
+  output now compose material Tint, primary texture, alpha mode, and alpha cutoff on both backends. Repeated Blocks keep independent
+  execution identities instead of aliasing one fixed payload. Effects can own multiple transactional systems behind one
+  generation-safe root handle; named Event contexts route from native scene/world APIs and C#; Particle Strip identity
+  participates in deterministic random sampling; and Sprite, Mesh, adjacency-connected Ribbon, and analytic Volumetric
+  outputs run on CPU and GPU. GPU strip links are generation- and sequence-qualified so dead/reused pool slots break a
+  ribbon safely. Added per-output statistics, resource cooking/dependency coverage, shader-layout/readback probes,
+  scene-event tests, and explicit diagnostics for the remaining host-only tiers.
+  Packed execution data now stays within SDL's eight-readonly-buffer compute limit. Update/Output and
+  Spawn/Initialize/initial-Output expression evaluation use separate ordered kernels to avoid D3D12 register-pressure
+  hangs while preserving deterministic random state and transactional particle publication. Compute-pipeline creation rolls back
+  transactionally with entry-point diagnostics, and completed-frame retirement no longer recursively polls delayed GPU
+  query publication. D3D12/Vulkan AddressSanitizer readback tests cover weighted Mesh/Volume spawning, sampled-depth
+  collision, composed particle materials, strips/Ribbons, and Volumetric output.
+- Expanded implemented VFX CPU/GPU parity: every executable core value Operator now has validated packed GPU lowering;
+  nonlinear size curves and color gradients publish deterministic 64-sample GPU lookup tables; custom Sprite textures
+  render on CPU and GPU; and Mesh output now uses per-emitter GPU compaction, full Euler rotation, asset-backed indexed
+  indirect draws, vertex tint, and ambient/directional lighting. GPU emitters own bounded output buffers and atomically
+  enforce their authored capacity instead of competing without per-effect limits in the shared particle pool. Built-in
+  VFX shaders are generated for DXIL, SPIR-V, and MSL with stage-correct resource spaces, and D3D12/Vulkan readback
+  coverage exercises graph execution, CPU textured sprites, and GPU mesh particles.
+- Fixed Play Mode becoming globally faulted when one VFX Emitter cannot compile or activate. A GPU-incompatible effect
+  that has a valid CPU program now transactionally restarts the scene VFX world on CPU, while an effect invalid on both
+  backends is disabled with a stable entity/effect diagnostic and automatically retried after an asset revision.
+  Scripts, physics, rendering, and other valid VFX emitters continue in either case. GPU validation also no longer
+  reports Sprite-only X/Y rotation restrictions for Mesh outputs.
+- Hardened the editor-owned Play Mode Escape path against runtime faults and viewport routing failures by releasing
+  any native cursor capture directly from its actual window state.
+- Fixed Hierarchy multi-drag so dragging a selected row preserves and moves the complete ordered selection in one
+  validated undoable transaction, with selected-descendant filtering, cycle-safe parenting, stable before/after
+  reordering, multi-item previews, and explicit drop-zone feedback. Editor gameplay input now uses an explicitly paired
+  keyboard/mouse user instead of competing with automatic device joining, validates the Player action map before Play,
+  engages from runtime capture, and releases without cursor warping. Escape has an editor-owned safety release so a
+  broken project input asset or script can never trap the cursor; the sandbox FPS uses action edges for deterministic
+  capture toggling.
 - Fixed Inspector entity renaming so an empty or over-limit in-progress text draft remains local to the field, displays
   validation feedback, and restores the previous name when editing ends instead of throwing through the editor frame.
 - Upgraded Animator Controller authoring to the shared production node canvas with zoom/pan, Bezier transition cables,
@@ -19,8 +96,9 @@ version tags.
   Context Blocks, block-pin endpoints, deterministic SSA-style CPU value evaluation, core Range/Random/Remap and
   math/logic/vector Operators, explicit backend diagnostics, and in-memory schema 1-3 migration. Added transactional
   managed `VfxRange<T>` updates for exposed Play Mode parameters and a validated Unity 6.3 LTS parity manifest whose
-  unfinished catalog rows remain disabled with actionable reasons. Canonical validation now rejects stale disconnected
-  Operators, unsafe dynamic Burst values, malformed range overrides, and strip-scoped Random until strips are real.
+  unfinished catalog rows remain disabled with actionable reasons. Canonical validation rejects stale disconnected
+  Operators, unsafe dynamic Burst values, malformed range overrides, and strip-scoped Random outside Particle Strip
+  systems.
   The graph Inspector now exposes descriptor-constrained Operator contexts, typed Operator/Block inline values, and
   editable Random, Compare, and Remap settings instead of requiring source-level asset edits.
   Added scalar trigonometric, power/root/logarithmic, rounding, interpolation, Negate, and Sign Operators with
@@ -28,20 +106,19 @@ version tags.
   The offline parity tooling now preserves Unity's dynamic `<Attribute>` labels, enforces canonical UTF-8 JSON, and
   cross-checks every claimed implementation/support tier against the build-time runtime descriptor contract.
   Executable Operator results can now feed Portable Custom HLSL inputs through typed expression registers on CPU and
-  the packed GPU value interpreter. Descriptor backend badges now report CPU + GPU only where packed representation and
-  backend semantics are validated; structurally available opcodes with open differential cases remain CPU-only, and
+  the packed GPU value interpreter. Descriptor backend badges report CPU + GPU only where packed representation and
+  backend semantics are validated; the complete executable core opcode interval now meets that contract, while
   incomplete Unity parity rows remain disabled. Uniform work may still be folded or hoisted, particle-varying Portable
-  inputs execute in the shader, and generic Runtime Block properties without a lowered GPU binding remain explicit
-  node-linked compile errors. Dynamic Portable execution now uses the 4,096-instruction compiler safety bound; the
+  inputs execute in the shader, and generic numeric Runtime Block properties now use one reflected CPU/GPU property
+  ABI. Dynamic Portable execution uses the 4,096-instruction compiler safety bound; the
   fixed eight-instruction/fifteen-operation snapshot arrays are compatibility mirrors only. GPU compilation also rejects
-  unsupported resource shapes, nonlinear curve/gradient payloads, collision modes, renderer resources, and fixed ABI
-  overflows at the responsible Block instead of silently approximating or ignoring them. Point/Box/Sphere/Cone
-  initialization now consumes exact authored GPU shape data, Sprite Z-rotation is sampled on GPU, and global spawn
+  unsupported backend-specific collision modes and packed program safety-limit overflows at the responsible Block
+  instead of silently approximating or ignoring them. Point/Box/Sphere/Cone/Mesh/Volume initialization consumes exact
+  authored GPU shape data, Sprite Z-rotation is sampled on GPU, and global spawn
   identity keeps random initialization stable across dispatch batching. Schema-4 graphs may schedule multiple same-kind
-  compatibility Blocks; additive
-  emission rates execute on both backends, while fixed-payload GPU duplicates and duplicate Renderer outputs fail at
-  the exact Block. CPU/GPU activation and live parameter edits now transactionally revalidate resolved backend
-  capabilities, including unsupported custom Sprite resources and billboard X/Y rotation. A serialized schema-4
+  compatibility Blocks; additive emission rates and duplicate per-particle Blocks execute independently on both
+  backends. CPU/GPU activation and live parameter edits now transactionally revalidate resolved backend
+  capabilities, including billboard X/Y rotation. A serialized schema-4
   compatibility mode keeps migrated schemas 1-3 and explicit Runtime Module conversions warning-compatible while new
   native graphs enforce unsupported capabilities as errors.
 - Replaced the GPU VFX execution snapshot limits with validated dynamic expression, custom-instruction, particle-

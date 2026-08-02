@@ -207,6 +207,8 @@ Vfx.Pause
 Vfx.Resume
 Vfx.Stop
 Vfx.IsAlive
+Vfx.SendEvent
+Vfx.SetParameter (VfxRange<T>)
 ```
 
 See [Gameplay Services](GameplayServices.md#vfx).

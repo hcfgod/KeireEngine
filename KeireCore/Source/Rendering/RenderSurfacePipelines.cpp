@@ -413,6 +413,7 @@ namespace Keire::RenderBackend
                 surface.FailedWidth = 0;
                 surface.FailedHeight = 0;
                 surface.HasOutput = false;
+                surface.SampledDepthValid = false;
                 ++surface.Generation;
             }
             return;
@@ -445,6 +446,7 @@ namespace Keire::RenderBackend
             surface.FailedHeight = 0;
             ++surface.Generation;
             surface.HasOutput = false;
+            surface.SampledDepthValid = false;
         }
         catch (const std::exception& error)
         {
@@ -676,12 +678,18 @@ namespace Keire::RenderBackend
             result.Cube = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, true);
             result.Grid = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_LINELIST, false);
             result.Sky = CreateSkyPipeline(samples);
-            result.Vfx = CreatePipeline(samples, SDL_GPU_PRIMITIVETYPE_TRIANGLELIST, false, true);
+            result.Vfx = CreateCpuVfxPipeline(samples);
             result.GpuVfx = CreateGpuVfxPipeline(samples);
+            result.GpuVfxRibbon = CreateGpuVfxPipeline(samples, true);
+            result.GpuVfxMesh = CreateGpuVfxMeshPipeline(samples);
             return Pipelines.emplace_back(result);
         }
         catch (...)
         {
+            if (result.GpuVfxMesh)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.GpuVfxMesh);
+            if (result.GpuVfxRibbon)
+                SDL_ReleaseGPUGraphicsPipeline(Device, result.GpuVfxRibbon);
             if (result.GpuVfx)
                 SDL_ReleaseGPUGraphicsPipeline(Device, result.GpuVfx);
             if (result.Vfx)

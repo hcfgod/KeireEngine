@@ -318,6 +318,7 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> StopVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> PauseVfxIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> IsVfxAliveIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, uint, byte> SendVfxEventIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, float, float, byte> SetVfxScalarRangeIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, long, long, byte> SetVfxIntegerRangeIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, ulong, ulong, byte>
@@ -728,6 +729,12 @@ internal static unsafe class NativeRuntime
 
     internal static bool IsVfxAlive(Entity entity) =>
         IsVfxAliveIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+
+    internal static bool SendVfxEvent(Entity entity, string eventName, uint spawnCount)
+    {
+        using NativeString nativeEventName = eventName;
+        return SendVfxEventIcall(entity.World, entity.Id.High, entity.Id.Low, nativeEventName, spawnCount) != 0;
+    }
 
     internal static bool SetVfxParameter(Entity entity, AssetId parameter,
                                          VfxRange<float> value) => SetVfxScalarRangeIcall(entity.World, entity.Id.High,

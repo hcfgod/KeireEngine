@@ -2750,6 +2750,27 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint8_t RuntimeSendVfxEvent(const std::uint64_t world, const std::uint64_t entityHigh,
+                                                              const std::uint64_t entityLow,
+                                                              const Coral::String eventName,
+                                                              const std::uint32_t spawnCount) noexcept
+        {
+            if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+                return 0;
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
+                return entity && CurrentRuntime->Specification.RuntimeServices->SendManagedVfxEvent(
+                                     entity.Id().Value(), static_cast<std::string>(eventName), spawnCount)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static std::uint8_t
         RuntimeSetVfxParameter(const std::uint64_t world, const std::uint64_t entityHigh, const std::uint64_t entityLow,
                                const std::uint64_t parameterHigh, const std::uint64_t parameterLow,
@@ -3985,6 +4006,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimePauseVfx));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "IsVfxAliveIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeIsVfxAlive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SendVfxEventIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSendVfxEvent));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxScalarRangeIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetVfxScalarRange));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxIntegerRangeIcall",

@@ -450,10 +450,21 @@ TEST_CASE("scene document commands validate and target the active scene")
 
     auto entity = scene->FindEntity(child);
     REQUIRE(entity);
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(transform);
+    const auto previousScale = transform->LocalScale();
+    const auto previousPosition = transform->LocalPosition();
+    CHECK_THROWS_AS(document.SetTransform(child, {.Position = Keire::Vector3{9.0F, 9.0F, 9.0F},
+                                                  .Scale = Keire::Vector3{1.0F, 0.0F, 1.0F}}),
+                    std::invalid_argument);
+    CHECK(transform->LocalPosition() == previousPosition);
+    CHECK(transform->LocalScale() == previousScale);
+    CHECK_NOTHROW(document.SetTransform(child, {.Scale = Keire::Vector3{2.0F, 3.0F, 4.0F}}));
     CHECK(entity.Name() == "Authored light");
     CHECK_FALSE(entity.ActiveSelf());
     CHECK(entity.Parent().Id() == parent);
-    CHECK(entity.GetComponent<Keire::TransformComponent>()->LocalPosition() == Keire::Vector3{1.0F, 2.0F, 3.0F});
+    CHECK(transform->LocalPosition() == Keire::Vector3{1.0F, 2.0F, 3.0F});
+    CHECK(transform->LocalScale() == Keire::Vector3{2.0F, 3.0F, 4.0F});
     REQUIRE(entity.GetComponent<Keire::PointLightComponent>());
     CHECK(entity.GetComponent<Keire::PointLightComponent>()->Intensity() == doctest::Approx(12.0F));
 
@@ -471,6 +482,50 @@ TEST_CASE("scene document commands validate and target the active scene")
                     std::invalid_argument);
     CHECK_THROWS_AS(document.SetComponentProperty(child, Keire::PointLightComponent::StaticType(), "unknown", 1.0),
                     std::invalid_argument);
+    document.Close();
+}
+
+TEST_CASE("scene document moves hierarchy selections as one validated ordered transaction")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000071"),
+                                                Keire::SceneAsset::EmptyDefinition("Hierarchy multi-move"));
+    document.Open(scene);
+
+    const auto destination = document.CreateEntity("Destination");
+    const auto first = document.CreateEntity("First");
+    const auto second = document.CreateEntity("Second");
+    const std::array selection{first, second};
+    const auto moved = document.MoveEntities(selection, destination);
+    REQUIRE(moved.size() == 2);
+    CHECK(moved[0] == first);
+    CHECK(moved[1] == second);
+    CHECK(scene->FindEntity(first).Parent().Id() == destination);
+    CHECK(scene->FindEntity(second).Parent().Id() == destination);
+
+    std::vector<Keire::EntityId> destinationOrder;
+    for (const auto& object : scene->HierarchySnapshot().Objects)
+        if (object.Parent == destination.Value())
+            destinationOrder.emplace_back(object.Id);
+    REQUIRE(destinationOrder.size() == 2);
+    CHECK(destinationOrder[0] == first);
+    CHECK(destinationOrder[1] == second);
+
+    const auto group = document.CreateEntity("Group");
+    const auto nested = document.CreateEntity("Nested", group);
+    const std::array nestedSelection{group, nested};
+    const auto movedRoots = document.MoveEntities(nestedSelection, destination);
+    REQUIRE(movedRoots.size() == 1);
+    CHECK(movedRoots.front() == group);
+    CHECK(scene->FindEntity(group).Parent().Id() == destination);
+    CHECK(scene->FindEntity(nested).Parent().Id() == group);
+
+    CHECK_THROWS_AS((void)document.MoveEntities(std::span{&group, std::size_t{1}}, nested), std::invalid_argument);
+    CHECK(scene->FindEntity(group).Parent().Id() == destination);
+    CHECK(scene->FindEntity(nested).Parent().Id() == group);
+    CHECK_THROWS_AS((void)document.MoveEntities(selection, destination, second), std::invalid_argument);
+    CHECK(scene->FindEntity(first).Parent().Id() == destination);
+    CHECK(scene->FindEntity(second).Parent().Id() == destination);
     document.Close();
 }
 
@@ -1254,10 +1309,14 @@ TEST_CASE("scene and game viewports keep camera and input ownership separate dur
         CHECK(renderCamera.Projection.Elements[index] == doctest::Approx(expectedProjection.Elements[index]));
     }
 
-    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true));
-    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, false, false, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, true, false, false));
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true, true, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true, true, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, true, true, true));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, true, false, false, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, false, false, false));
 }
 
 TEST_CASE("scene camera single F frames and double F locks the selected entity")

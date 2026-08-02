@@ -688,6 +688,31 @@ namespace Keire::RenderBackend
             result.DefaultMaterials.reserve(mesh.MaterialSlots().size());
             for (const auto& slot : mesh.MaterialSlots())
                 result.DefaultMaterials.push_back(slot.DefaultMaterial);
+            result.ShapeSamples.reserve(mesh.Indices().size() / 3U);
+            double cumulativeArea = 0.0;
+            for (std::size_t index = 0; index + 2U < mesh.Indices().size(); index += 3U)
+            {
+                const auto& a = mesh.Vertices()[mesh.Indices()[index]].Position;
+                const auto& b = mesh.Vertices()[mesh.Indices()[index + 1U]].Position;
+                const auto& c = mesh.Vertices()[mesh.Indices()[index + 2U]].Position;
+                const auto edge0 = Vector3{b.X - a.X, b.Y - a.Y, b.Z - a.Z};
+                const auto edge1 = Vector3{c.X - a.X, c.Y - a.Y, c.Z - a.Z};
+                const auto cross = Vector3{edge0.Y * edge1.Z - edge0.Z * edge1.Y, edge0.Z * edge1.X - edge0.X * edge1.Z,
+                                           edge0.X * edge1.Y - edge0.Y * edge1.X};
+                const auto area =
+                    0.5 * std::sqrt(static_cast<double>(cross.X) * cross.X + static_cast<double>(cross.Y) * cross.Y +
+                                    static_cast<double>(cross.Z) * cross.Z);
+                if (!std::isfinite(area) || area <= 0.0)
+                    continue;
+                cumulativeArea += area;
+                if (!std::isfinite(cumulativeArea) || cumulativeArea > std::numeric_limits<float>::max())
+                    throw std::runtime_error("Mesh surface area exceeds the VFX sampling range.");
+                result.ShapeSamples.push_back({{a.X, a.Y, a.Z, 0.0F},
+                                               {b.X, b.Y, b.Z, 0.0F},
+                                               {c.X, c.Y, c.Z, static_cast<float>(cumulativeArea)}});
+            }
+            result.ShapeSampleWeight = static_cast<float>(cumulativeArea);
+            result.Revision = 1;
             return result;
         }
         catch (...)

@@ -1,0 +1,24 @@
+{
+  "properties": {
+    "EmissiveFactor": [
+      0.15,
+      2.5,
+      5.0,
+      1.0
+    ],
+    "MainTexture": "b2c4f70a-7f2f-47f0-b83e-a554a0bda703",
+    "Tint": [
+      0.35,
+      0.9,
+      1.0,
+      0.9
+    ]
+  },
+  "schemaVersion": 2,
+  "shader": "b1b2c3d4-1000-4000-8000-000000000001",
+  "surface": {
+    "alphaCutoff": 0.01,
+    "alphaMode": 2,
+    "doubleSided": true
+  }
+}

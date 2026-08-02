@@ -116,7 +116,7 @@ namespace Keire::Internal
 
         [[nodiscard]] std::optional<VfxParameterValue>
         ExecutePure(const VfxValueOpcode opcode, const std::span<const VfxParameterValue* const> inputs,
-                    const bool clampRemap, const VfxComparisonCondition comparison,
+                    const VfxValueType outputType, const bool clampRemap, const VfxComparisonCondition comparison,
                     const std::uint32_t outputIndex = 0) noexcept
         {
             const auto scalar = [&inputs](const std::size_t index) -> std::optional<float>
@@ -384,16 +384,46 @@ namespace Keire::Internal
             {
                 const auto x = scalar(0);
                 const auto y = scalar(1);
+                if (!x || !y)
+                    return std::nullopt;
+                if (outputType == VfxValueType::Vector2 && inputs.size() == 2)
+                    return Vector2{*x, *y};
                 const auto z = scalar(2);
-                return x && y && z ? std::optional<VfxParameterValue>(Vector3{*x, *y, *z}) : std::nullopt;
+                if (!z)
+                    return std::nullopt;
+                if (outputType == VfxValueType::Vector3 && inputs.size() == 3)
+                    return Vector3{*x, *y, *z};
+                const auto w = scalar(3);
+                if (!w || inputs.size() != 4)
+                    return std::nullopt;
+                if (outputType == VfxValueType::Vector4)
+                    return Vector4{*x, *y, *z, *w};
+                if (outputType == VfxValueType::Color)
+                    return Color{*x, *y, *z, *w};
+                return std::nullopt;
             }
             case VfxValueOpcode::Split:
             {
-                const auto input = vector3(0);
-                if (!input || outputIndex > 2)
+                if (outputType != VfxValueType::Scalar || inputs.size() != 1 || !inputs[0])
                     return std::nullopt;
-                const std::array values{input->X, input->Y, input->Z};
-                return values[outputIndex];
+                if (const auto* input = std::get_if<Vector2>(inputs[0]); input && outputIndex < 2)
+                    return outputIndex == 0 ? input->X : input->Y;
+                if (const auto* input = std::get_if<Vector3>(inputs[0]); input && outputIndex < 3)
+                {
+                    const std::array values{input->X, input->Y, input->Z};
+                    return values[outputIndex];
+                }
+                if (const auto* input = std::get_if<Vector4>(inputs[0]); input && outputIndex < 4)
+                {
+                    const std::array values{input->X, input->Y, input->Z, input->W};
+                    return values[outputIndex];
+                }
+                if (const auto* input = std::get_if<Color>(inputs[0]); input && outputIndex < 4)
+                {
+                    const std::array values{input->Red, input->Green, input->Blue, input->Alpha};
+                    return values[outputIndex];
+                }
+                return std::nullopt;
             }
             case VfxValueOpcode::Dot:
             case VfxValueOpcode::Cross:
@@ -742,7 +772,7 @@ namespace Keire::Internal
                             folded = ExecutePure(
                                 primitive.Opcode,
                                 std::span<const VfxParameterValue* const>(values.data(), primitive.Inputs.size()),
-                                false, VfxComparisonCondition::Less);
+                                VfxValueType::Scalar, false, VfxComparisonCondition::Less);
                         }
                     }
                     if (folded)
@@ -852,9 +882,9 @@ namespace Keire::Internal
                 {
                     for (std::size_t index = 0; index < inputs.size(); ++index)
                         values[index] = std::addressof(inputs[index].Literal);
-                    folded = ExecutePure(instruction.Opcode,
-                                         std::span<const VfxParameterValue* const>(values.data(), inputs.size()),
-                                         instruction.ClampRemap, instruction.Comparison, instruction.OutputIndex);
+                    folded = ExecutePure(
+                        instruction.Opcode, std::span<const VfxParameterValue* const>(values.data(), inputs.size()),
+                        instruction.Type, instruction.ClampRemap, instruction.Comparison, instruction.OutputIndex);
                 }
             }
 
@@ -1182,10 +1212,10 @@ namespace Keire::Internal
                     output = context.SpawnIndex;
                 else
                 {
-                    output =
-                        ExecutePure(instruction.Opcode,
-                                    std::span<const VfxParameterValue* const>(inputs.data(), instruction.Inputs.size()),
-                                    instruction.ClampRemap, instruction.Comparison, instruction.OutputIndex);
+                    output = ExecutePure(
+                        instruction.Opcode,
+                        std::span<const VfxParameterValue* const>(inputs.data(), instruction.Inputs.size()),
+                        instruction.Type, instruction.ClampRemap, instruction.Comparison, instruction.OutputIndex);
                 }
                 if (!output || !VfxValueMatchesType(instruction.Type, *output) || !IsFiniteVfxValue(*output))
                     return false;

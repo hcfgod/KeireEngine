@@ -224,13 +224,17 @@ Control playback:
 Vfx.Pause(Entity);
 Vfx.Resume(Entity);
 bool alive = Vfx.IsAlive(Entity);
+bool impactQueued = Vfx.SendEvent(Entity, "Impact", 24);
 Vfx.Stop(Entity);
 
 VfxEmitterHandle handle = new(Entity);
 handle.Restart(_impact);
+handle.SendEvent("Impact", 24);
 ```
 
 Handles validate their entity and required component. An effect reference must be valid before `Play` or `Restart`.
+Named events fan out to every exact-name Event Context in the entity's live effect. Names must be non-whitespace and no
+more than 256 UTF-8 bytes; counts must be in `1..1,000,000`. The call returns false if no live system accepts the event.
 For effect authoring, graph navigation, Runtime Modules, scene-emitter setup, native C++ integration, backend
 capabilities, and troubleshooting, see [VFX Authoring And Runtime](../Vfx.md).
 
@@ -266,6 +270,11 @@ protected override void OnDisable()
 priority while any are active; disposing the final visible request reveals any still-active capture request.
 
 Release requests on disable and before reload. See [UI And Events](UiAndEvents.md) for menu coordination.
+In the editor, a capture request can engage the Game panel as Play begins even while dock focus is settling. The editor
+validates and enables the `Player` map before starting the session, and the Game input latch lets a visible runtime UI
+continue receiving keyboard actions after the pointer leaves the image. Escape release does not warp the cursor. If a
+project input asset or script fails to process Escape, the editor independently suspends capture and restores its cursor;
+click the Game image to re-engage the still-requested runtime capture.
 
 ## Logging And Debug Drawing
 

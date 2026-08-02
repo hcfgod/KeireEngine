@@ -175,6 +175,8 @@ namespace Keire
         std::uint32_t DirectionalShadowCascades = 0;
         std::uint32_t VfxSpriteParticles = 0;
         std::uint32_t VfxMeshParticles = 0;
+        std::uint32_t VfxRibbonParticles = 0;
+        std::uint32_t VfxVolumetricParticles = 0;
         std::uint32_t PlannedFrameGraphPasses = 0;
         std::uint32_t ExecutedFrameGraphPasses = 0;
         std::uint32_t FrameGraphTransitions = 0;
@@ -187,9 +189,13 @@ namespace Keire
         std::uint64_t ForwardPlusUploadBytes = 0;
         std::uint64_t DroppedVfxParticles = 0;
         std::uint64_t VfxGpuBufferBytes = 0;
+        std::uint64_t VfxComputeThreadGroups = 0;
         std::uint32_t VfxComputeDispatches = 0;
         std::uint32_t VfxIndirectDraws = 0;
         std::uint32_t VfxGpuWorlds = 0;
+        std::uint32_t VfxGpuParticleCapacity = 0;
+        bool VfxPipelineWarmupPending = false;
+        bool VfxPipelinesReady = false;
         bool GpuTimingSupported = false;
         bool ForwardPlusGpuCullingSupported = false;
         bool SampledResolvedDepthAvailable = false;
@@ -206,11 +212,13 @@ namespace Keire
         float ToneMapMilliseconds = 0.0F;
         float CommandRecordingUnattributedMilliseconds = 0.0F;
         float FrameUploadMilliseconds = 0.0F;
+        float GpuFenceWaitMilliseconds = 0.0F;
         float SwapchainWaitMilliseconds = 0.0F;
         float UiRecordingMilliseconds = 0.0F;
         float GpuSubmissionMilliseconds = 0.0F;
         float GpuFrameMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
+        float VfxPipelineWarmupMilliseconds = 0.0F;
     };
 
     class KEIRE_API RenderSystem final : public RefCounted
@@ -224,6 +232,7 @@ namespace Keire
         [[nodiscard]] Ref<RenderSurface> CreateSurface(RenderSurfaceSpecification specification = {});
         [[nodiscard]] Ref<RenderView> CreateView(RenderSurfaceSpecification specification = {});
         void Submit(SceneRenderRequest request);
+        void RequestGpuVfxPipelineWarmup();
 
         [[nodiscard]] RenderMode Mode() const noexcept;
         [[nodiscard]] RenderCapabilities Capabilities() const noexcept;

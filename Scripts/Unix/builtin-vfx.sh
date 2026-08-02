@@ -21,10 +21,22 @@ stages=(
   "compute CSKill Kill"
   "compute CSTransform Transform"
   "compute CSSimulate Simulate"
+  "compute CSSimulateOutput SimulateOutput"
   "compute CSSpawn Spawn"
+  "compute CSSpawnInitialize SpawnInitialize"
+  "compute CSSpawnOutput SpawnOutput"
+  "compute CSMapStrips MapStrips"
+  "compute CSLinkStrips LinkStrips"
   "compute CSFinalize Finalize"
+  "compute CSResetRender ResetRender"
+  "compute CSFilterRender FilterRender"
   "vertex VSMain Vertex"
+  "vertex VSRibbon RibbonVertex"
   "fragment PSMain Fragment"
+  "vertex VSMesh MeshVertex"
+  "fragment PSMesh MeshFragment"
+  "vertex VSCpu CpuVertex"
+  "fragment PSCpu CpuFragment"
 )
 variants=("DXIL Dxil dxil" "SPIRV Spirv spv" "MSL Msl msl")
 

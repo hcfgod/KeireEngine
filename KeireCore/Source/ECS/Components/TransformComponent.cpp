@@ -22,6 +22,12 @@ namespace Keire
 
     TransformComponent::TransformComponent() : Component(StaticType()) {}
 
+    bool TransformComponent::IsValidLocalScale(const Vector3 value) noexcept
+    {
+        return Math::IsFinite(value) && std::abs(value.X) >= MinimumScaleMagnitude &&
+               std::abs(value.Y) >= MinimumScaleMagnitude && std::abs(value.Z) >= MinimumScaleMagnitude;
+    }
+
     Vector3 TransformComponent::LocalEulerAngles() const { return Math::QuaternionToEulerDegrees(m_LocalRotation); }
 
     void TransformComponent::SetLocalPosition(const Vector3 value)
@@ -47,8 +53,8 @@ namespace Keire
 
     void TransformComponent::SetLocalScale(const Vector3 value)
     {
-        if (!Math::IsFinite(value))
-            throw std::invalid_argument("Transform scale must be finite.");
+        if (!IsValidLocalScale(value))
+            throw std::invalid_argument("Transform scale axes must be finite with a magnitude of at least 0.000001.");
         m_LocalScale = value;
         NotifyChanged();
     }
@@ -117,11 +123,14 @@ namespace Keire
             if (version != 1)
                 throw std::invalid_argument("Unsupported Transform component schema version.");
             auto& transform = dynamic_cast<TransformComponent&>(component);
-            transform.m_LocalPosition = Read(values, "position", Vector3{});
-            transform.m_LocalRotation = Math::Normalize(Read(values, "rotation", Quaternion{}));
-            transform.m_LocalScale = Read(values, "scale", Vector3{1.0F, 1.0F, 1.0F});
-            if (!Math::IsFinite(transform.m_LocalPosition) || !Math::IsFinite(transform.m_LocalScale))
-                throw std::invalid_argument("Transform component contains non-finite values.");
+            const auto position = Read(values, "position", Vector3{});
+            const auto rotation = Math::Normalize(Read(values, "rotation", Quaternion{}));
+            const auto scale = Read(values, "scale", Vector3{1.0F, 1.0F, 1.0F});
+            if (!Math::IsFinite(position) || !TransformComponent::IsValidLocalScale(scale))
+                throw std::invalid_argument("Transform component contains invalid position or scale values.");
+            transform.m_LocalPosition = position;
+            transform.m_LocalRotation = rotation;
+            transform.m_LocalScale = scale;
         };
         return result;
     }

@@ -19,7 +19,8 @@ namespace Keire::RenderBackend
     {
         if (!Device)
             return;
-        while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
+
+        const auto releaseFrontFrame = [this]()
         {
             auto frame = std::move(InFlight.front());
             InFlight.pop_front();
@@ -40,14 +41,25 @@ namespace Keire::RenderBackend
             for (auto* transient : frame.TransientTransferBuffers)
                 SDL_ReleaseGPUTransferBuffer(Device, transient);
             SDL_ReleaseGPUFence(Device, frame.Fence);
-        }
+        };
+
+        while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
+            releaseFrontFrame();
         if (InFlight.size() < Specification.MaximumFramesInFlight)
             return;
 
         SDL_GPUFence* fence = InFlight.front().Fence;
+        const auto waitStart = std::chrono::steady_clock::now();
         if (!SDL_WaitForGPUFences(Device, true, &fence, 1))
             throw std::runtime_error("SDL_WaitForGPUFences failed: " + LastSdlError());
-        CollectCompletedFrames();
+        Statistics.GpuFenceWaitMilliseconds +=
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
+
+        // A successful wait is the completion contract. Retire that frame directly instead of polling recursively:
+        // some drivers publish the query result a moment later, and recursive polling can exhaust the CPU stack.
+        releaseFrontFrame();
+        while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
+            releaseFrontFrame();
     }
 
     void RenderSharedState::BeginFrame()
@@ -70,11 +82,16 @@ namespace Keire::RenderBackend
         Statistics.DirectionalShadowCascades = 0;
         Statistics.VfxSpriteParticles = 0;
         Statistics.VfxMeshParticles = 0;
+        Statistics.VfxRibbonParticles = 0;
+        Statistics.VfxVolumetricParticles = 0;
         Statistics.DroppedVfxParticles = 0;
+        Statistics.VfxComputeThreadGroups = 0;
         Statistics.VfxComputeDispatches = 0;
         Statistics.VfxIndirectDraws = 0;
         Statistics.VfxGpuWorlds = 0;
+        Statistics.VfxGpuParticleCapacity = 0;
         Statistics.VfxGpuBufferBytes = 0;
+        Statistics.GpuFenceWaitMilliseconds = 0.0F;
         Statistics.SampledResolvedDepthAvailable = false;
         Statistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
         Statistics.ExecutedFrameGraphPasses = 0;
@@ -174,16 +191,20 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("SceneRenderRequest exceeds the VFX particle packet bound.");
         for (const auto& particle : request.Vfx.Particles())
         {
-            if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.Rotation) ||
-                !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Size) || particle.Size < 0.0F ||
-                particle.Renderer > VfxRendererType::Mesh)
+            if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.PreviousPosition) ||
+                !Math::IsFinite(particle.Rotation) || !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Size) ||
+                particle.Size < 0.0F || particle.Renderer > VfxRendererType::Volumetric)
             {
                 throw std::invalid_argument("SceneRenderRequest contains an invalid VFX particle.");
             }
             if (particle.Renderer == VfxRendererType::Sprite)
                 ++Statistics.VfxSpriteParticles;
-            else
+            else if (particle.Renderer == VfxRendererType::Mesh)
                 ++Statistics.VfxMeshParticles;
+            else if (particle.Renderer == VfxRendererType::Ribbon)
+                ++Statistics.VfxRibbonParticles;
+            else
+                ++Statistics.VfxVolumetricParticles;
         }
         if (!request.Vfx.GpuEmitters().empty() &&
             (request.Vfx.WorldId() == 0 || request.Vfx.ParticleCapacity() == 0 ||
@@ -203,7 +224,12 @@ namespace Keire::RenderBackend
                 emitter.LifetimeMaximum < emitter.LifetimeMinimum || !std::isfinite(emitter.SizeStart) ||
                 !std::isfinite(emitter.SizeEnd) || !std::isfinite(emitter.SimulationDeltaSeconds) ||
                 emitter.SimulationDeltaSeconds < 0.0F || emitter.SimulationDeltaSeconds > 80.0F ||
-                emitter.Renderer > VfxRendererType::Mesh)
+                emitter.Renderer > VfxRendererType::Volumetric ||
+                emitter.DataType > VfxParticleDataType::ParticleStrip || emitter.ParticlesPerStrip == 0 ||
+                (emitter.Renderer == VfxRendererType::Ribbon &&
+                 emitter.DataType != VfxParticleDataType::ParticleStrip) ||
+                emitter.Capacity == 0 || emitter.Capacity > request.Vfx.ParticleCapacity() ||
+                (emitter.Renderer == VfxRendererType::Mesh && !emitter.Mesh))
             {
                 throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX emitter.");
             }
@@ -297,6 +323,7 @@ namespace Keire::RenderBackend
                 try
                 {
                     auto replacement = CreateMeshResources(*mesh);
+                    replacement.Revision = revision;
                     Retire(std::exchange(entry.Resources, replacement));
                     entry.LoadedRevision = revision;
                 }

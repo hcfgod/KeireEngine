@@ -6,15 +6,15 @@
         {
           "data": {
             "position": [
-              -6.255000114440918,
-              1.399999976158142,
-              -12.371999740600586
+              0.5301623344421387,
+              1.3600428104400635,
+              -2.593120813369751
             ],
             "rotation": [
               0.0,
+              -0.07845911383628845,
               0.0,
-              0.0,
-              1.0
+              0.9969173669815063
             ],
             "scale": [
               1.0,
@@ -33,7 +33,7 @@
             "mask": 4294967295,
             "maximumSlope": 50.0,
             "radius": 0.3499999940395355,
-            "runtimeId": "9baf5883-8cc8-4a3c-b918-bf7069d9d7e7",
+            "runtimeId": "ee0019cc-2d23-4d64-8b0a-3b5057f1b18d",
             "skinWidth": 0.03999999910593033,
             "stepHeight": 0.3499999940395355
           },
@@ -57,10 +57,10 @@
               0.0
             ],
             "rotation": [
+              0.13052618503570557,
               0.0,
               0.0,
-              0.0,
-              1.0
+              0.9914448857307434
             ],
             "scale": [
               1.0,
@@ -121,12 +121,12 @@
             "_jumpBufferTime": 0.12,
             "_jumpHeight": 1.15,
             "_lookSensitivity": 1.0,
-            "_lookSharpness": 30.0,
+            "_lookSharpness": 53.3,
             "_maximumPitch": 89.0,
             "_movementSharpness": 14.0,
             "_movementSpeed": 6.5,
             "_sprintMultiplier": 1.65,
-            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":6.5},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":30.0},{\"Aliases\":[],\"Name\":\"_sprintMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.65},{\"Aliases\":[],\"Name\":\"_airControl\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.28},{\"Aliases\":[],\"Name\":\"_gravity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":24.0},{\"Aliases\":[],\"Name\":\"_jumpHeight\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.15},{\"Aliases\":[],\"Name\":\"_coyoteTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_jumpBufferTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_groundStickSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":2.0}],\"version\":1}"
+            "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"_movementSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":6.5},{\"Aliases\":[],\"Name\":\"_lookSensitivity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.0},{\"Aliases\":[],\"Name\":\"_maximumPitch\",\"StableId\":\"\",\"Type\":\"\",\"Value\":89.0},{\"Aliases\":[],\"Name\":\"_movementSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":14.0},{\"Aliases\":[],\"Name\":\"_invertHorizontal\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_invertVertical\",\"StableId\":\"\",\"Type\":\"\",\"Value\":false},{\"Aliases\":[],\"Name\":\"_lookSharpness\",\"StableId\":\"\",\"Type\":\"\",\"Value\":53.3},{\"Aliases\":[],\"Name\":\"_sprintMultiplier\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.65},{\"Aliases\":[],\"Name\":\"_airControl\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.28},{\"Aliases\":[],\"Name\":\"_gravity\",\"StableId\":\"\",\"Type\":\"\",\"Value\":24.0},{\"Aliases\":[],\"Name\":\"_jumpHeight\",\"StableId\":\"\",\"Type\":\"\",\"Value\":1.15},{\"Aliases\":[],\"Name\":\"_coyoteTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_jumpBufferTime\",\"StableId\":\"\",\"Type\":\"\",\"Value\":0.12},{\"Aliases\":[],\"Name\":\"_groundStickSpeed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":2.0}],\"version\":1}"
           },
           "enabled": true,
           "type": "73616e64-626f-4078-8000-000000000030",
@@ -149,6 +149,71 @@
       "id": "a1b2c3d4-1000-4000-8000-000000000001",
       "name": "Main Camera",
       "parent": "d6e7aa06-b25a-4e19-a84c-00635691a83a"
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0.28,
+              -0.18,
+              0.65
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "autoDestroy": false,
+            "boundsCenter": [
+              0.0,
+              0.0,
+              1.5
+            ],
+            "boundsExtent": [
+              2.0,
+              2.0,
+              4.0
+            ],
+            "culling": 0,
+            "editModePreview": false,
+            "effect": "518e44da-1d18-4197-8ebd-ca805295869e",
+            "parameterOverrides": "[]",
+            "playOnAwake": true,
+            "quality": 2,
+            "seedOffset": 31415,
+            "simulationSpeed": 1.0
+          },
+          "enabled": true,
+          "type": "4b454952-4556-4658-454d-495454455201",
+          "version": 2
+        },
+        {
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          },
+          "enabled": true,
+          "type": "73616e64-626f-4078-8000-000000000050",
+          "version": 1
+        }
+      ],
+      "id": "a37594bf-28fd-4ad3-b613-cbb9b3b9df21",
+      "name": "VX-9 Plasma Lance Muzzle",
+      "parent": "a1b2c3d4-1000-4000-8000-000000000001"
     },
     {
       "active": true,
@@ -986,7 +1051,7 @@
           "data": {
             "position": [
               0.0,
-              0.0,
+              0.5040000081062317,
               0.0
             ],
             "rotation": [
@@ -996,9 +1061,9 @@
               1.0
             ],
             "scale": [
-              0.10000000149011612,
-              0.10000000149011612,
-              0.10000000149011612
+              0.02500000037252903,
+              0.02500000037252903,
+              0.02500000037252903
             ]
           },
           "enabled": true,

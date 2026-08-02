@@ -14,6 +14,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -96,7 +97,219 @@ namespace
         specification.Decoders.push_back(Keire::CreateVfxEffectAssetDecoder());
         return Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
     }
+
+    [[nodiscard]] Keire::VfxEffectDefinition GpuMeshEffect()
+    {
+        auto definition = SceneRuntimeEffect();
+        definition.CompatibilityMode = Keire::VfxCompatibilityMode::NativeSchema4;
+        auto initialize =
+            std::ranges::find_if(definition.Modules, [](const Keire::VfxModuleDefinition& module)
+                                 { return std::holds_alternative<Keire::VfxInitializeModule>(module.Payload); });
+        auto renderer =
+            std::ranges::find_if(definition.Modules, [](const Keire::VfxModuleDefinition& module)
+                                 { return std::holds_alternative<Keire::VfxRendererModule>(module.Payload); });
+        if (initialize == definition.Modules.end() || renderer == definition.Modules.end())
+            throw std::logic_error("Scene VFX test effect is missing required modules.");
+        auto& initializePayload = std::get<Keire::VfxInitializeModule>(initialize->Payload);
+        initializePayload.RotationMinimum = {-20.0F, -180.0F, -180.0F};
+        initializePayload.RotationMaximum = {20.0F, 180.0F, 180.0F};
+        auto& rendererPayload = std::get<Keire::VfxRendererModule>(renderer->Payload);
+        rendererPayload.Type = Keire::VfxRendererType::Mesh;
+        rendererPayload.Mesh = SceneVfxId(90);
+        for (auto& node : definition.Systems.front().Nodes)
+        {
+            for (auto& block : node.Blocks)
+            {
+                if (block.Reference == initialize->Id)
+                {
+                    for (auto& pin : block.Pins)
+                    {
+                        if (pin.Semantic == "rotationMinimum")
+                            pin.DefaultValue = initializePayload.RotationMinimum;
+                        else if (pin.Semantic == "rotationMaximum")
+                            pin.DefaultValue = initializePayload.RotationMaximum;
+                    }
+                }
+                else if (block.Reference == renderer->Id)
+                {
+                    const auto mesh = std::ranges::find(block.Pins, std::string("mesh"), &Keire::VfxGraphPin::Semantic);
+                    if (mesh != block.Pins.end())
+                        mesh->DefaultValue = rendererPayload.Mesh;
+                }
+            }
+        }
+        Keire::ValidateVfxEffect(definition);
+        return definition;
+    }
+
+    [[nodiscard]] Keire::VfxEffectDefinition SceneRuntimeEventEffect()
+    {
+        auto definition = SceneRuntimeEffect();
+        definition.Name = "Scene runtime event effect";
+        auto& system = definition.Systems.front();
+        const auto source = std::ranges::find_if(system.Nodes, [](const Keire::VfxGraphNode& node)
+                                                 { return node.Context == Keire::VfxContextType::Spawn; });
+        if (source == system.Nodes.end())
+            throw std::logic_error("Scene VFX test graph is missing its Spawn context.");
+        const auto sourceId = source->Id;
+        source->Context = Keire::VfxContextType::Event;
+        source->Type = "Impact";
+        source->TypeId.Value = "keire.context.event";
+        source->Blocks.clear();
+        std::erase_if(system.Connections, [sourceId](const Keire::VfxGraphConnection& connection)
+                      { return connection.InputNode == sourceId && connection.InputBlock; });
+        Keire::ValidateVfxEffect(definition);
+        return definition;
+    }
+
+    [[nodiscard]] Keire::VfxEffectDefinition InvalidAllBackendsEffect()
+    {
+        auto definition = SceneRuntimeEffect();
+        definition.CompatibilityMode = Keire::VfxCompatibilityMode::NativeSchema4;
+        const auto initialize =
+            std::ranges::find_if(definition.Modules, [](const Keire::VfxModuleDefinition& module)
+                                 { return std::holds_alternative<Keire::VfxInitializeModule>(module.Payload); });
+        if (initialize == definition.Modules.end())
+            throw std::logic_error("Scene VFX test effect is missing its Initialize module.");
+        auto& initializePayload = std::get<Keire::VfxInitializeModule>(initialize->Payload);
+        initializePayload.RotationMinimum = {45.0F, 0.0F, 0.0F};
+        initializePayload.RotationMaximum = initializePayload.RotationMinimum;
+        for (auto& node : definition.Systems.front().Nodes)
+        {
+            const auto block = std::ranges::find(node.Blocks, initialize->Id, &Keire::VfxGraphBlock::Reference);
+            if (block == node.Blocks.end())
+                continue;
+            for (auto& pin : block->Pins)
+            {
+                if (pin.Semantic == "rotationMinimum")
+                    pin.DefaultValue = initializePayload.RotationMinimum;
+                else if (pin.Semantic == "rotationMaximum")
+                    pin.DefaultValue = initializePayload.RotationMaximum;
+            }
+        }
+        Keire::ValidateVfxEffect(definition);
+        return definition;
+    }
 } // namespace
+
+TEST_CASE("Play-mode scene keeps mixed Sprite and Mesh VFX on the GPU backend")
+{
+    const auto meshEffectId = SceneVfxId(80);
+    const auto supportedEffectId = SceneVfxId(81);
+    auto assets = CreateSceneVfxAssets();
+    REQUIRE(assets->PublishDevelopmentAsset(meshEffectId, Keire::CreateRef<Keire::VfxEffectAsset>(GpuMeshEffect())));
+    REQUIRE(assets->PublishDevelopmentAsset(supportedEffectId,
+                                            Keire::CreateRef<Keire::VfxEffectAsset>(SceneRuntimeEffect())));
+
+    auto scene = Keire::CreateRef<Keire::Scene>(SceneVfxId(82),
+                                                Keire::SceneAsset::EmptyDefinition("Scene VFX failure isolation"));
+    auto meshEntity = scene->CreateEntity("GPU Mesh VFX");
+    auto meshEmitter = meshEntity.AddComponent<Keire::VfxEmitterComponent>();
+    REQUIRE(meshEmitter);
+    meshEmitter->SetEffect(meshEffectId);
+    auto supportedEntity = scene->CreateEntity("Supported GPU VFX");
+    auto supportedEmitter = supportedEntity.AddComponent<Keire::VfxEmitterComponent>();
+    REQUIRE(supportedEmitter);
+    supportedEmitter->SetEffect(supportedEffectId);
+
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{},
+                                                                Keire::Ref<Keire::PhysicsSystem>{});
+    session->Play();
+    session->Update(0.25F);
+
+    CHECK(session->State() == Keire::ScenePlayState::Playing);
+    CHECK(session->IsVfxAlive(meshEntity.Id()));
+    CHECK(session->IsVfxAlive(supportedEntity.Id()));
+    const auto world = session->Vfx();
+    REQUIRE(world);
+    const auto render = world->CaptureRenderSnapshot();
+    REQUIRE(render.GpuEmitters().size() == 2);
+    CHECK(render.Particles().empty());
+    CHECK(std::ranges::any_of(render.GpuEmitters(), [](const Keire::VfxGpuEmitter& emitter)
+                              { return emitter.Renderer == Keire::VfxRendererType::Mesh && emitter.Mesh; }));
+    CHECK(std::ranges::any_of(render.GpuEmitters(), [](const Keire::VfxGpuEmitter& emitter)
+                              { return emitter.Renderer == Keire::VfxRendererType::Sprite; }));
+
+    session->Stop();
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("Play-mode scene routes named VFX events into event systems")
+{
+    const auto effectId = SceneVfxId(86);
+    const auto definition = SceneRuntimeEventEffect();
+    auto assets = CreateSceneVfxAssets();
+    REQUIRE(assets->PublishDevelopmentAsset(effectId, Keire::CreateRef<Keire::VfxEffectAsset>(definition)));
+
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(SceneVfxId(87), Keire::SceneAsset::EmptyDefinition("Scene VFX event routing"));
+    auto entity = scene->CreateEntity("Event VFX");
+    const auto emitter = entity.AddComponent<Keire::VfxEmitterComponent>();
+    REQUIRE(emitter);
+    emitter->SetEffect(effectId);
+
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{},
+                                                                Keire::Ref<Keire::PhysicsSystem>{});
+    session->Play();
+    session->Update(0.01F);
+    CHECK_FALSE(session->SendVfxEvent(entity.Id(), "Missing", 2));
+    REQUIRE(session->SendVfxEvent(entity.Id(), "Impact", 2));
+    session->Update(0.01F);
+
+    const auto world = session->Vfx();
+    REQUIRE(world);
+    const auto render = world->CaptureRenderSnapshot();
+    REQUIRE(render.GpuEmitters().size() == 1);
+    CHECK(render.GpuEmitters().front().System == definition.Systems.front().Id);
+    CHECK(render.GpuEmitters().front().SpawnSequence == 2);
+
+    session->Stop();
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("Play-mode scene isolates VFX invalid on every backend without stopping gameplay")
+{
+    const auto rejectedEffectId = SceneVfxId(83);
+    const auto supportedEffectId = SceneVfxId(84);
+    auto assets = CreateSceneVfxAssets();
+    REQUIRE(assets->PublishDevelopmentAsset(rejectedEffectId,
+                                            Keire::CreateRef<Keire::VfxEffectAsset>(InvalidAllBackendsEffect())));
+    REQUIRE(assets->PublishDevelopmentAsset(supportedEffectId,
+                                            Keire::CreateRef<Keire::VfxEffectAsset>(SceneRuntimeEffect())));
+
+    auto scene = Keire::CreateRef<Keire::Scene>(SceneVfxId(85),
+                                                Keire::SceneAsset::EmptyDefinition("Scene VFX failure isolation"));
+    auto rejectedEntity = scene->CreateEntity("Unsupported VFX");
+    auto rejectedEmitter = rejectedEntity.AddComponent<Keire::VfxEmitterComponent>();
+    REQUIRE(rejectedEmitter);
+    rejectedEmitter->SetEffect(rejectedEffectId);
+    auto supportedEntity = scene->CreateEntity("Supported GPU VFX");
+    auto supportedEmitter = supportedEntity.AddComponent<Keire::VfxEmitterComponent>();
+    REQUIRE(supportedEmitter);
+    supportedEmitter->SetEffect(supportedEffectId);
+
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{},
+                                                                Keire::Ref<Keire::PhysicsSystem>{});
+    session->Play();
+    session->Update(0.25F);
+
+    CHECK(session->State() == Keire::ScenePlayState::Playing);
+    CHECK_FALSE(session->IsVfxAlive(rejectedEntity.Id()));
+    CHECK(session->IsVfxAlive(supportedEntity.Id()));
+
+    REQUIRE(assets->PublishDevelopmentAsset(rejectedEffectId,
+                                            Keire::CreateRef<Keire::VfxEffectAsset>(SceneRuntimeEffect())));
+    session->Update(0.25F);
+    CHECK(session->State() == Keire::ScenePlayState::Playing);
+    CHECK(session->IsVfxAlive(rejectedEntity.Id()));
+    CHECK(session->IsVfxAlive(supportedEntity.Id()));
+
+    session->Stop();
+    scene->Close();
+    assets->Close();
+}
 
 TEST_CASE("Play-mode scene VFX activates only compatible exposed Blackboard overrides")
 {

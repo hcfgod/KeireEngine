@@ -397,6 +397,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool StopManagedVfx(Keire::AssetId entity) noexcept override;
     [[nodiscard]] bool PauseManagedVfx(Keire::AssetId entity, bool paused) noexcept override;
     [[nodiscard]] bool IsManagedVfxAlive(Keire::AssetId entity) const noexcept override;
+    [[nodiscard]] bool SendManagedVfxEvent(Keire::AssetId entity, std::string_view eventName,
+                                           std::uint32_t spawnCount) noexcept override;
     [[nodiscard]] bool SetManagedVfxParameter(Keire::AssetId entity,
                                               const Keire::VfxParameterOverride& value) noexcept override;
     [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
@@ -519,6 +521,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_ManagedCursorVisible = true;
     bool m_ManagedCursorLocked = false;
     bool m_GameViewportInputActive = false;
+    bool m_GameViewportCaptureSuspended = false;
     std::uint32_t m_SuppressManagedLookFrames = 0;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;

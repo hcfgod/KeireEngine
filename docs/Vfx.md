@@ -16,8 +16,8 @@ The execution and backend badges in the VFX Effect panel are authoritative:
 A **CPU + GPU** badge means the node's lowering opcode and packed pin types have implementations on both value
 interpreters. It is not a blanket promise that every downstream Block, resource, or Context placement is available on
 GPU. Compilation still validates the complete graph and reports an unsupported consumer or ABI limit at its stable ID.
-A **CPU** badge also remains on structurally encoded shader opcodes whose edge semantics have not passed production
-differential/readback gates; authored effects must not rely on those nodes for GPU parity yet.
+A **CPU** badge is reserved for executable nodes that do not have a shader-side lowering. The current packed core value
+catalog has no such entries: every executable Operator in that catalog is available to both interpreters.
 
 ## Mental Model
 
@@ -79,7 +79,10 @@ The current executable value catalog includes:
 | Rounding | Ceiling, Floor, Round |
 | Interpolation | Lerp, Smoothstep, Step |
 | Logic | Compare, Branch, And, Or, Not |
+| Vector2 | Combine Vector 2, Split Vector 2 |
 | Vector3 | Combine, Split, Dot Product, Cross Product, Normalize, Length, Distance |
+| Vector4 | Combine Vector 4, Split Vector 4 |
+| Color | Combine Color, Split Color |
 | Casts | To Float, To Integer, To Unsigned Integer |
 | Built-ins | Total Time, Delta Time, Age, Lifetime, Particle ID, Spawn Index |
 
@@ -89,10 +92,9 @@ registers; the current GPU interpreter has a tighter cooked-program limit of 64 
 with at most 256 sources and 256 deduplicated constants. Limit diagnostics retain the responsible node. The GPU
 compiler packs supported Boolean, integer, scalar, vector, color, and range values into a cooked expression program.
 Its shader interpreter implements the current opcode interval from `Constant` through `Sign` (0–56); compile-time and
-uniform work may still be folded or hoisted before upload. Catalog promotion is deliberately stricter than structural
-opcode availability: Random/identity sequencing, Delta Time and Lifetime edges, negative-base Power,
-overflow-resistant Lerp/Waves, and 64-bit integer-to-float conversion retain CPU badges until focused differential and
-GPU-readback gates close them.
+uniform work may still be folded or hoisted before upload. The complete executable packed Operator catalog now carries
+CPU + GPU support, including deterministic Random/identity sequencing, Delta Time and Lifetime, contained Power,
+overflow-resistant Lerp/Waves, and saturating 64-bit integer conversions.
 
 Trigonometric inputs and outputs use radians; `Atan2` receives Y followed by X. `Lerp` is intentionally unclamped,
 `Step` returns one when Input equals Edge, `Fractional` follows shader `frac` behavior for negative values, and `Round`
@@ -102,9 +104,9 @@ zero-width Smoothstep all resolve to zero. These rules apply identically during 
 runtime evaluation. Operators promoted to CPU + GPU apply the same containment contract within documented
 floating-point tolerances.
 
-Particle-varying Operator inputs are currently scheduled for GPU Portable Custom HLSL consumers. A dynamic generic
-Runtime Block property without a lowered shader-side binding remains an explicit node-linked compile error even though
-the producing Operator correctly carries a CPU + GPU badge.
+Particle-varying Operator inputs are scheduled for Portable Custom HLSL and every numeric Runtime Block property through
+the same typed register ABI. Structural enum and resource settings remain compiler-reflected settings rather than
+numeric particle values.
 
 ### Unity 6.3 LTS parity manifest
 
@@ -114,17 +116,18 @@ Unity Editor 6000.3, `com.unity.visualeffectgraph` 17.3.0, and Unity Graphics co
 provenance, Kéire implementation ID, backend tier, tests, documentation, support state, and disabled reason for every
 catalogued Operator, Block, Context, and Output.
 
-The frozen snapshot currently contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Every row remains
-`Disabled` until its Unity type rules, settings, execution behavior, backend behavior, tests, and documentation meet the
-row's complete acceptance contract. A `keire` implementation mapping means related native functionality exists; it
-does not by itself claim Unity parity. Disabled entries remain visible to tooling but creation or compilation must
-reject them with their recorded reason.
+The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Ten rows now carry the
+explicit **Kéire Equivalent** tier for the implemented depth-collision, mesh-position sampling, core Context, Event,
+and renderer workflows; 268 remain `Disabled`. A `keire` implementation mapping alone means related native
+functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor, backend tier,
+focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries remain visible
+to tooling but creation or compilation must reject them with their recorded reason.
 
 The checked-in runtime catalog contract is consumed by `VfxNodeCatalog()` and the offline validator. Engine startup
 rejects any descriptor whose stable ID, label, class, support tier, or backend tier drifts from that contract, while
-manifest validation rejects mappings to IDs the runtime does not register. Legacy Runtime Module switches are not
-reported as descriptor-backed implementations until their Blocks are registered in the catalog. This keeps parity
-claims honest while that migration is still in progress. Dynamic Unity labels such as `<Attribute>` and `<Mode>` are
+manifest validation rejects mappings to IDs the runtime does not register. Executable Kéire Blocks, Contexts, and the
+generic particle Output are registered alongside Operators, so tooling no longer infers their existence from legacy
+switches. Dynamic Unity labels such as `<Attribute>` and `<Mode>` are
 preserved verbatim rather than interpreted as HTML.
 
 From the repository root, validate the checked-in manifest without a Unity checkout:
@@ -165,8 +168,8 @@ flowchart LR
 1. Right-click empty canvas space and search for **Range**.
 2. Enter inline Min and Max values, or cable Parameters/Operators into those pins.
 3. Add **Random Range** in the same evaluation Context and connect `Range` to `Range`.
-4. Choose Per Particle or Per VFX Component scope. Per Particle Strip is catalogued for parity, but compilation rejects
-   it explicitly until strip systems can provide a real strip identity.
+4. Choose Per Particle, Per VFX Component, or Per Particle Strip scope. Strip scope requires the owning system's
+   **Data Type** to be **Particle Strip** and hashes the stable strip index rather than the individual particle index.
 5. Enable **Constant** when the sample must remain stable for the effect rather than vary with simulation identity.
 6. Enable **Inclusive Maximum** only for Kéire convenience behavior. Unity-labelled integer Random retains its
    maximum-exclusive contract.
@@ -198,11 +201,11 @@ flowchart LR
 
 The compiler classifies each value by its earliest valid domain and records that domain in canonical IR. Literals fold
 at compile time; Blackboard-driven pure chains are hoisted per effect; Total Time and Delta Time chains are per frame;
-Initialize random is per spawn; Age and Lifetime are per-particle updates. The GPU value interpreter can evaluate the
-packed program in particle stages when the consumer has a lowered shader binding. Portable Custom HLSL provides that
-particle-varying path today; generic Runtime Block property bindings that lack one are rejected with the producing
-Operator's stable ID. Operator cables currently stay inside one Context except stable Blackboard Parameter outputs. A
-rejected cross-Context data cable leaves the document unchanged.
+Initialize random is per spawn; Age and Lifetime are per-particle updates. The CPU evaluator and GPU value interpreter
+both feed the generic typed Block-property ABI, so every numeric property can consume literals, Parameters, or
+particle-varying registers without a host approximation. Resource pins remain explicitly reflected rather than being
+treated as numeric registers. Operator cables currently stay inside one Context except stable Blackboard Parameter
+outputs. A rejected cross-Context data cable leaves the document unchanged.
 
 ### Ordered Context Blocks
 
@@ -358,9 +361,11 @@ until the asset is explicitly converted.
 
 ### Systems And Contexts
 
-The left pane lists systems and node counts. The current graph compiler requires exactly one executable particle system;
-one effect asset still creates one emitter. Multiple executable systems, system-to-system events, and Event contexts are
-not implemented. A Graph asset therefore needs one system containing one canonical context for every supported stage:
+The left pane lists systems and node counts and provides undoable **Add System** and **Remove** actions. One effect asset
+can compile several particle systems. Each system selects **Particle** or **Particle Strip** data and owns one source:
+either a normal Spawn Context or a named Event Context. Initialize, Update, and Output remain canonical downstream
+stages. A root `VfxHandle` owns every internal system slot, so Stop, transform, overrides, reload, and lifetime are
+transactional for the complete effect:
 
 ```mermaid
 flowchart LR
@@ -371,7 +376,7 @@ flowchart LR
     Update --> UpdateModules["Force / Size / Color / Collision nodes"]
     UpdateModules --> Renderer["Renderer node<br/>Output context"]
     Renderer --> Output["Output Context"]
-    Event["Event Context"] -. "not executable" .-> Spawn
+    Event["Named Event Context"] --> Initialize
 ```
 
 The context colors are consistent throughout the editor:
@@ -383,9 +388,10 @@ The context colors are consistent throughout the editor:
 - Event: red
 
 The Context enum is part of executable semantics, not just presentation. `ParticleStream` cables may stay in the same
-stage or move forward from Spawn to Initialize to Update to Output; they may not travel backward. Event nodes are
-persistable in LegacyModules documents, but selecting Graph execution with an Event node fails compilation.
-The four canonical Graph Context nodes are structural anchors and cannot be deleted.
+stage or move forward from Spawn/Event to Initialize to Update to Output; they may not travel backward. `OnPlay` Event
+sources receive one automatic activation event. Other names wait without spawning until `SendEvent` is called. One
+event call fans out to every system with the exact matching name inside that root effect. Context anchors cannot be
+deleted independently of their owning system.
 
 ### Execution Source And Migration
 
@@ -398,8 +404,10 @@ execution for unfinished work.
 
 Schema 4 records a `VfxCompatibilityMode`. Newly created graphs use `NativeSchema4`, where unsupported authored values
 are compile errors. Schema 1-3 migration and explicit Runtime Module conversion use `MigratedLegacyModules`, preserving
-historical execution while publishing explicit capability warnings. Hard ABI bounds and unsafe duplicate fixed-payload
-GPU Blocks remain errors in both modes. The mode is serialized so Save/reload cannot silently change compatibility.
+historical execution while publishing explicit capability warnings. Duplicate Blocks are legal: the compiler assigns
+each Block its own execution identity even when several Blocks reference the same authoring payload, so bindings and
+random streams cannot alias after reload or reordering. Bounded program/resource limits remain node-linked errors in
+both modes. The mode is serialized so Save/reload cannot silently change compatibility.
 
 Select **Convert Runtime Modules to Graph** in the header to migrate:
 
@@ -436,7 +444,7 @@ position. Results are filtered by Context, requested pin direction/type, backend
 
 | Node kind | Purpose | Executable requirements |
 | --- | --- | --- |
-| Context | Delimits Spawn, Initialize, Update, or Output | Canonical `ParticleStream` pins; exactly one of each supported stage |
+| Context | Delimits Spawn/Event, Initialize, Update, or Output | Canonical `ParticleStream` pins; one source and one of each downstream stage per system |
 | Block | Runs one ordered particle operation inside a Context | Canonical payload reference and typed inputs; vector order is execution order |
 | Operator | Produces a reusable typed value | Known descriptor ID/version, canonical settings/pins, and a valid evaluation Context |
 | Blackboard Parameter | Supplies one typed value | References a Blackboard stable ID and has one typed `value` output |
@@ -447,8 +455,9 @@ position. Results are filtered by Context, requested pin direction/type, backend
 A Block stores the compatibility payload stable ID in `VfxGraphBlock::Reference`, but its enabled state, inline pin
 values, incoming value cables, and position in the Context stack are authoritative for Graph execution. The payload
 retains structural choices and allows historical readers to preserve the operation. Deleting the Block removes its
-incident value cables and stops that operation. The same payload may not be referenced by two executable Blocks or
-legacy Module nodes in one system.
+incident value cables and stops that operation. Several Blocks may reference one payload: lowering copies the payload,
+assigns the Block stable ID as its execution identity, and preserves independent pins, bindings, random identity, and
+diagnostics for every occurrence.
 
 Adding payload data does not automatically schedule it. Right-click the target Context or choose its **Add Block**
 action, select a compatible payload, and reorder the resulting Block in that Context. Operator and Custom HLSL creation
@@ -519,6 +528,12 @@ Each pin has:
 Schema-4 graph types include Boolean, signed/unsigned Integer, Scalar, Vector2/3/4, Quaternion, Matrix, Color, Curve,
 Gradient, scalar/integer/vector/color Ranges, Texture/resource types, Mesh, generic Asset, and
 `ParticleStream`. `ParticleStream` represents execution flow; it is not a Blackboard value and has no literal default.
+
+Use the typed **Split Vector 2**, **Split**, **Split Vector 4**, and **Split Color** Operators to expose each component as
+a Scalar output. Their matching Combine Operators reconstruct the compound value from Scalar inputs. Vector pins use
+X/Y/Z/W names; Color uses R/G/B/A. These are exact typed connections on both CPU and GPU, so a Vector2 cable must connect
+to Split Vector 2 rather than the existing Vector3-only Split node. Searching for `split`, `components`, `float2`,
+`float3`, `float4`, or `rgba` finds the appropriate variant.
 
 Context, Block, Operator, Parameter, legacy Module, and flow pins have canonical compiler-owned shapes. Portable Custom
 HLSL value inputs are editable and may use its supported scalar/vector/color subset. Their semantic is the identifier
@@ -671,24 +686,35 @@ creation and the scaled step in Update/per-frame Output. Local-space Position an
 use local semantics on both backends.
 
 On GPU, Custom instructions and built-in Modules execute together in cable order inside that emitter's normal spawn or
-simulation dispatch. Each active emitter uses one handle-filtered simulation dispatch over the world particle
-capacity, even when it owns few live particles. The cost therefore grows with
-`world particle capacity × active emitters`. Keep world capacities intentional and profile scenes with many emitters.
+simulation dispatch. The world retains its authored logical particle ceiling, but the renderer selects a physical pool
+from the summed capacities of live systems, rounds growth up, never shrinks a live pool, and caps it at that ceiling.
+Crossing the reserved physical capacity is a storage-layout change: the renderer grows the pool, restarts that world's
+GPU simulation, and emits one explicit warning containing the old and new capacities. Author stable production scenes
+so their concurrently active system capacities are known at activation and the initial snapshot reserves them together.
+Each emitter retains its prior compacted index view. Update and per-frame Output dispatch against that emitter's
+authored capacity and early-out at its live compacted count instead of scanning the physical pool. Global render
+compaction scans only the sum of active-system capacities, which is a proven upper bound for the shared alive list.
+Spawn, Initialize, initial Output, and strip-link setup use a compact list of only the particles requested by that spawn.
+Profile **VFX GPU particle capacity**, **VFX compute thread groups**, and **GPU fence wait (ms)** together: the dispatch
+count alone does not show how many shader groups ran, while a fence wait identifies GPU/presentation back-pressure
+rather than application CPU work.
 
 ### Current Graph Limits
 
 Graph execution currently supports:
 
-- One particle system with Spawn, Initialize, Update, and Output Contexts
+- Multiple particle systems with Spawn or named Event sources and Initialize, Update, and Output Contexts
+- Particle and Particle Strip identities, including deterministic Per Particle Strip Random scope
 - Ordered Blocks referencing compatibility payloads for structural data
 - Blackboard Parameters and executable core Operators bound to canonical Block inputs
+- Independent duplicate Blocks and particle-varying numeric bindings through one typed CPU/GPU property ABI
 - Portable Custom HLSL Blocks with typed defaults, Parameter inputs, or executable Operator inputs
 - Deterministic CPU lowering and the packed core value-opcode interpreter on GPU
+- Sprite, Mesh, adjacency-connected Ribbon, and analytic Volumetric outputs on both backends
 
-It does not currently support multiple executable systems, Event contexts, the remainder of the Unity Operator/Block
-catalog,
-subgraphs, ribbons, trails, decals, volumetric outputs, unrestricted Custom HLSL, custom GPU resources, or
-generic particle-varying Runtime Block property bindings without a lowered shader-side binding. Those entries and
+It does not currently support the remainder of the Unity Operator/Block catalog, subgraphs, decals, froxel injection,
+unrestricted Unity-style Custom HLSL, or arbitrary custom GPU resources. Scene Physics collision remains CPU-required
+because it invokes the host physics world. Those entries and
 placements remain disabled, GPU-required, or explicit compile errors rather than changing behavior silently.
 
 ## Runtime Modules
@@ -760,16 +786,47 @@ Shape chooses the initial particle position relative to the emitter.
 | **Mesh** | Mesh sampled when Shape is Mesh. |
 | **Volume Asset** | Asset sampled when Shape is Volume. |
 
-Point needs no shape data. CPU Box, Sphere, and Cone sampling are built in. CPU Mesh and Volume sampling require a
-`VfxWorldSpecification::ShapeSample` callback. Without that callback, particles use the emitter origin and report
+Point needs no shape data. CPU Box, Sphere, and Cone sampling are built in. CPU Mesh and Volume sampling use the
+`VfxWorldSpecification::ShapeSample` callback; scene runtime installs an asset-backed implementation automatically.
+A directly owned world can install its own sampler. Without one, particles use the emitter origin and report
 `ShapeAssetSamplerUnavailable`.
 
-The GPU path supports Point, Box, uniformly distributed Sphere volume, and Cone volume directly with the authored cone
-angle and length. GPU compilation rejects Mesh and Volume sampling at the Shape Block because the compute path cannot
-consume those resource samplers yet. The current fixed GPU payload has one Shape, Initialize, Force, Size, Color, and
-Renderer slot; a schema-4 graph containing a duplicate of one of those scheduled per-particle Blocks is rejected at the
-first unrepresentable Block instead of reusing the wrong payload. Multiple Emission Rate and Burst Blocks remain
-supported.
+The GPU path supports Point, Box, uniformly distributed Sphere volume, and Cone volume directly. Mesh imports publish a
+triangle-area cumulative distribution, and `.keirevfxvolume` assets publish density-by-cell cumulative weights. The
+renderer uploads both through the reflected resource table and the spawn kernel draws deterministic weighted samples.
+Missing, malformed, empty, or over-budget resources produce an explicit compile/runtime diagnostic and preserve the
+last-good preview. Duplicate Shape, Initialize, Force, Size, Color, and Collision Blocks execute in authored order with
+separate Block IDs and separate generic property ranges; they no longer alias one fixed payload slot. Renderer remains
+the system's single structural output Block.
+
+#### Authoring a sparse volume asset
+
+Create a UTF-8 `.keirevfxvolume` file in the Assets folder. Each axis-aligned cell contributes
+`cell volume * density` to the sampling distribution; zero-density cells are valid but the total positive weight must
+be non-zero. Bounds and density must be finite, each maximum must be greater than its minimum, and the importer accepts
+at most 1,048,576 cells and 64 MiB of source JSON.
+
+```json
+{
+  "schemaVersion": 1,
+  "cells": [
+    {
+      "minimum": [-1.0, 0.0, -1.0],
+      "maximum": [1.0, 0.25, 1.0],
+      "density": 0.2
+    },
+    {
+      "minimum": [-0.35, 0.25, -0.35],
+      "maximum": [0.35, 2.5, 0.35],
+      "density": 1.0
+    }
+  ]
+}
+```
+
+After import, assign the asset to **Shape > Volume Asset** and choose **Volume**. Cooking records it as a typed
+dependency. CPU and GPU choose the same weighted cell deterministically; each backend then samples a point inside that
+cell. Reimport publishes the new table transactionally and keeps the previous loaded asset if validation fails.
 
 ### Initialize
 
@@ -784,9 +841,9 @@ Initialize chooses each new particle's lifetime, velocity, and Euler rotation fr
 The effect seed and emitter Seed Offset determine the random sequence. Equal definitions, seeds, offsets, activation
 transforms, and update deltas produce equal CPU particle results.
 
-GPU initialization uses lifetime, velocity, and Sprite Z-rotation ranges. CPU and GPU compilation reject non-zero X/Y
-initialization rotation when the selected output is Sprite, because billboards consume only Z rotation. CPU Mesh output
-accepts all three Euler components; GPU Mesh output remains unavailable.
+GPU initialization uses lifetime, velocity, and full Euler rotation ranges. CPU and GPU compilation reject non-zero
+X/Y initialization rotation when the selected output is Sprite, because billboards consume only Z rotation. Mesh
+output accepts and renders all three Euler components on both backends.
 
 ### Forces
 
@@ -808,9 +865,10 @@ normalized age = particle age / particle lifetime
 ```
 
 The CPU backend evaluates the full curve, including its keys and interpolation. Negative evaluated size is clamped to
-zero. The fixed GPU ABI represents one constant or one exact linear segment from normalized age zero to one. GPU
-compilation rejects intermediate non-collinear keys, constant/cubic segments, shifted endpoints, and nonlinear tangents
-at the Size Block instead of approximating them.
+zero. GPU snapshots sample the authoritative curve at 64 uniformly spaced normalized-age points; the compute kernel
+linearly interpolates adjacent samples and applies the same zero clamp. This bounded lookup supports multi-key,
+constant, linear, and cubic curves without changing particle state layout. The maximum temporal quantization interval
+is `1 / 63` of normalized lifetime.
 
 The current Inspector lists each existing curve key as editable **Time** and **Value** fields. Key times remain ordered
 and are clamped between their neighbors. The UI does not yet add/remove keys or expose interpolation/tangent editing;
@@ -819,8 +877,9 @@ multi-key curves created through the native asset API or existing source remain 
 ### Color Over Lifetime
 
 Color over Lifetime evaluates a `ColorGradient` using normalized particle age. The CPU backend evaluates the complete
-gradient. The fixed GPU ABI represents one constant or one exact linear gradient from normalized age zero to one. GPU
-compilation rejects constant interpolation, shifted endpoints, and non-collinear intermediate keys at the Color Block.
+gradient. GPU snapshots sample the authoritative gradient at 64 uniformly spaced normalized-age points and interpolate
+adjacent colors in compute. Multi-key and constant-interpolation gradients therefore remain bounded and deterministic;
+sharp transitions are quantized to at most one `1 / 63` lifetime interval.
 
 The current Inspector lists each existing gradient key as **Time** plus **Color**. Times remain ordered from zero to one.
 The UI does not yet add/remove gradient keys or expose gradient interpolation selection. Use alpha in existing keys to
@@ -828,7 +887,7 @@ fade particles in or out; multi-key gradients authored through the native asset 
 
 ### Collision
 
-Collision tests particle movement through the collision callback configured on the `VfxWorld`.
+Collision tests the swept segment from previous to current particle position.
 
 | Field | Meaning |
 | --- | --- |
@@ -841,9 +900,11 @@ The CPU implementation sends each non-None collision mode through
 physics world exists. If no query is available, the effect continues without collision and reports
 `CollisionQueryUnavailable`.
 
-The current GPU compute path has no collision implementation. GPU compilation therefore accepts only **None** and
-reports every other mode at the Collision Block. Use the CPU backend for CPU, GPU Depth compatibility, and Scene Physics
-collision modes.
+The GPU implementation supports **GPU Depth** directly. It samples the current scene depth pyramid input, reconstructs
+the hit position and normal from the camera matrices, applies restitution or kill, and uses a bounded swept search to
+avoid obvious tunneling. A missing depth input leaves simulation valid but reports the capability at render time.
+**CPU** and **Scene Physics** deliberately remain CPU-required because they invoke the host callback/physics world;
+selecting them for GPU compilation produces a node-linked error instead of a silent approximation.
 
 ### Renderer
 
@@ -851,16 +912,25 @@ Renderer selects particle output.
 
 | Field | Meaning |
 | --- | --- |
-| **Renderer** | Sprite or Mesh. |
-| **Sprite** | Texture asset retained for Sprite output. |
+| **Renderer** | Sprite, Mesh, Ribbon, or Volumetric. |
+| **Texture** | Texture asset retained for Sprite or Ribbon output. |
 | **Mesh** | Mesh asset required for Mesh output. |
+| **Material** | Optional particle material for every output type. |
 
-Both asset pickers remain visible, but only the asset selected by Renderer is used. CPU rendering supports untextured
-billboard Sprite particles and Mesh particles. The Sprite asset reference is persisted, emitted in legacy CPU render packets, and tracked
-as a dependency, but the current built-in billboard path does not sample a custom Sprite texture.
-Schema-4 CPU and GPU compilation therefore reject a non-empty custom Sprite at the Renderer Block; historical module
-assets remain readable and receive a warning. The GPU path also rejects Mesh output. Both backends reject duplicate
-scheduled Renderer Blocks until per-particle output selection has a real compiled representation.
+Only the assets used by the selected Renderer participate in cooking. CPU and GPU Sprite, Ribbon, and Volumetric
+outputs use the standard particle-surface contract: particle tint multiplies the material's `Tint`, the material's
+primary texture overrides the Renderer texture when present, and alpha mode/cutoff are applied after topology-specific
+soft falloff. With no texture, Sprite keeps its procedural soft-circle fallback. CPU Mesh particles enter the
+material-aware scene path. GPU Mesh particles use asset vertex/index buffers, vertex color, particle tint, size, full
+Euler rotation, Forward+ lighting, and an instancing-compatible material shader through an indexed indirect draw.
+Incompatible Mesh shaders emit a once-per-emitter diagnostic and retain deterministic fallback shading rather than
+dropping the effect.
+
+Ribbon requires **Particle Strip** data and renders camera-facing segments between consecutive live particles in the
+same system and strip. The first particle begins a new strip; a missing, dead, non-consecutive, or generation-mismatched
+predecessor breaks the strip instead of connecting recycled particle storage. Volumetric renders an analytic sphere-density impostor with depth-aware soft falloff on
+both backends; it is not froxel injection. A particle system owns one Renderer Block because output topology and
+resource bindings are structural system state; duplicate simulation Blocks remain independently ordered and bound.
 
 ## Blackboard
 
@@ -915,7 +985,7 @@ Blocks expose canonical typed property inputs. Connect a Parameter or Operator o
 | Size over Lifetime | Size |
 | Color over Lifetime | Color |
 | Collision | Restitution, Kill On Collision |
-| Renderer | Sprite, Mesh |
+| Renderer | Texture, Mesh, Material |
 
 The cable type must match exactly. Shape type, collision mode, renderer type, module Enabled, and other structural
 choices are not bindable. A bound Size value replaces the authored size curve with a constant for that emitter; a bound
@@ -964,6 +1034,33 @@ void ConfigureAura(Keire::VfxEmitterComponent& emitter, const Keire::AssetId int
     emitter.ClearParameterOverrides();
 }
 ```
+
+Reading is intentionally split between the authored default and the emitter's optional override. The component does
+not duplicate defaults, so code can distinguish "the scene overrode this value" from "use the asset value":
+
+```cpp
+#include <Keire/Core.h>
+
+std::optional<Keire::VfxParameterValue>
+FindOverride(const Keire::VfxEmitterComponent& emitter, const Keire::AssetId parameter)
+{
+    const auto values = emitter.ParameterOverrides();
+    const auto found = std::ranges::find(values, parameter, &Keire::VfxParameterOverride::Parameter);
+    return found == values.end() ? std::nullopt : std::optional{found->Value};
+}
+
+const Keire::VfxBlackboardParameter* FindAuthoredParameter(const Keire::VfxEffectAsset& effect,
+                                                           const Keire::AssetId parameter)
+{
+    const auto& blackboard = effect.Definition().Blackboard;
+    const auto found = std::ranges::find(blackboard, parameter, &Keire::VfxBlackboardParameter::Id);
+    return found == blackboard.end() ? nullptr : &*found;
+}
+```
+
+Use `std::get_if<T>` on the returned `VfxParameterValue` or authored `DefaultValue` after checking the parameter's
+declared type. This is the native read path; live writes use `SceneRuntimeSession::SetVfxParameter` or
+`VfxWorld::SetParameter` so the component and active CPU/GPU program update transactionally.
 
 The component schema stores a bounded canonical stable-ID array in its `Parameter Overrides` text property. In the
 scene Inspector, assign an effect and use the generated type-appropriate controls for its Exposed parameters. Each
@@ -1068,9 +1165,11 @@ stable generated subasset and records it in the mesh's default material slot. CP
 scene material path, so tint, emissive/metallic/roughness properties, depth, and receiving lights behave like authored
 Mesh Renderer geometry.
 
-These two templates are intentionally CPU-only today. Their graph remains valid and editable, while GPU compilation
-reports Mesh output as unsupported rather than silently drawing a sprite or dropping the renderer. Use the CPU preview
-backend when studying them. Sprite effects remain the production GPU indirect-output path.
+The templates compile on GPU when their other Blocks satisfy the GPU capability contract. GPU preview renders the same
+geometry with vertex color, particle tint, full Euler rotation, composed material parameters/textures, and the normal
+Forward+ lighting inputs. Material-shader compatibility is validated before drawing. An unsupported composition keeps
+the last-good simulation visible with deterministic built-in shading and emits one actionable emitter/material
+diagnostic instead of binding an incompatible pipeline.
 
 Add **VFX Emitter** from the Effects component category. A Transform component is required and is added or enforced by
 the component registry.
@@ -1173,6 +1272,12 @@ public sealed class ImpactVfx : Behaviour
             Debug.Warn("VFX resume was rejected.");
     }
 
+    public void TriggerSecondaryBurst(uint count = 12)
+    {
+        if (!_emitter.SendEvent("Impact", count))
+            Debug.Warn("No live VFX system accepted the Impact event.");
+    }
+
     protected override void OnDisable()
     {
         _emitter.Stop();
@@ -1184,6 +1289,14 @@ public sealed class ImpactVfx : Behaviour
 entity. A valid returned `VfxEmitterHandle` means the request was accepted. Asset loading is asynchronous, so
 `handle.IsAlive` may remain false until the native effect instance activates.
 
+### Named Events
+
+`Vfx.SendEvent(entity, name, count)` and `VfxEmitterHandle.SendEvent(name, count)` enqueue the requested spawn count for
+every Event Context whose name exactly matches inside that root effect. Event names must contain non-whitespace text and
+fit in 256 UTF-8 bytes; counts are bounded to `1..1,000,000`. Invalid arguments throw before native dispatch. A valid
+request returns `false` when the entity/effect is not live or no system has that name. Events are owner-thread scene
+operations and are consumed on the next positive simulation update.
+
 ### Runtime Range Parameters
 
 `VfxRange<T>` is the managed, inclusive Min/Max value used by range-typed Blackboard parameters. The constructor accepts
@@ -1192,6 +1305,24 @@ the Blackboard row's stable `AssetId`, not its display label; renaming a Blackbo
 retains the same stable ID. The public `readonly record struct VfxRange<T> where T : unmanaged` exposes
 `VfxRange(T first, T second)`, read-only `Minimum` and `Maximum` properties, and
 `Deconstruct(out T minimum, out T maximum)`.
+
+The managed API treats the stable `AssetId` as the Blackboard key. It currently exposes transactional live writes,
+not reverse readback of the asset default. Keep the gameplay value in a typed field when code owns it; use the Graph
+Parameter node when the particle program needs it. For a non-range Blackboard value, pass an exact `VfxRange<T>` whose
+two endpoints are equal:
+
+```csharp
+private static readonly AssetId EnergyColor =
+    new(0xeda50d666ff044de, 0xa8e8481e82a7a6c8);
+
+private Color _energyColor = new(0.08f, 0.72f, 1.0f, 1.0f);
+
+public bool ApplyEnergyColor(VfxEmitterHandle emitter)
+{
+    // _energyColor is the code-side readable value. The stable ID selects the Blackboard row.
+    return emitter.SetParameter(EnergyColor, new VfxRange<Color>(_energyColor, _energyColor));
+}
+```
 
 ```csharp
 using Keire;
@@ -1263,8 +1394,10 @@ bool paused = Vfx.Pause(entity);
 bool resumed = Vfx.Resume(entity);
 bool alive = Vfx.IsAlive(entity);
 bool stopped = Vfx.Stop(entity);
+bool eventQueued = Vfx.SendEvent(entity, "Impact", 24);
 
 bool handleAlive = handle.IsAlive;
+handle.SendEvent("Impact", 24);
 handle.Pause();
 handle.Resume();
 handle.Restart(effectReference);
@@ -1284,6 +1417,36 @@ Important behavior:
 - Pause sets Simulation Speed to zero.
 - Resume currently restores Simulation Speed to `1.0`, not an earlier custom speed.
 - Stop disables automatic playback and releases the runtime instance but leaves the component attached.
+
+### FPS VX-9 Plasma Lance Example
+
+The sandbox's `VfxEffect.keirevfx` is an event-driven example named **VX-9 Plasma Lance**. The scene parents its emitter
+under the FPS camera at a first-person muzzle offset. Its graph demonstrates this event and value path:
+
+```mermaid
+flowchart LR
+    Input["Left Mouse / Fire action"] --> Script["FpsVfxShowcase.cs"]
+    Script --> Event["PlasmaFire Event Context"]
+    Script --> Color["Energy Color Blackboard ID"]
+    Script --> Range["Particle Size Range Blackboard ID"]
+    Event --> Initialize["Tight cone + high forward velocity"]
+    Color --> ColorBlock["Color over Lifetime Block"]
+    Range --> Split["Split Vector 2"]
+    Split --> Random["Random Number Min / Max"]
+    Random --> SizeBlock["Size over Lifetime Block"]
+```
+
+- Holding Fire sends a bounded 30 Hz stream of `PlasmaFire` events; releasing Fire immediately stops new emission.
+- Already-fired particles keep moving and fading naturally instead of freezing or disappearing.
+- The tight cone and high forward velocity form a camera-aligned plasma line.
+- Sustained fire heats the core from cyan toward white and slightly broadens the bolt envelope.
+- A generated soft plasma-core texture and transparent emissive material replace square default sprites.
+- Stable IDs allow either Blackboard property to be renamed without breaking gameplay code.
+
+Open `Assets/Vfx/VfxEffect.keirevfx` to inspect the graph, then open
+`Assets/Scripts/Runtime/FpsVfxShowcase.cs` for the complete managed driver. In Play Mode, use WASD, Shift, and Fire to
+see the same live effect respond without graph recompilation or simulation restart.
+- SendEvent fans out to every same-named Event system owned by that effect and does not affect another entity.
 - Managed Blackboard mutation currently covers only the seven `VfxRange<T>` overloads documented above.
 - Range updates require an active, loaded Play Mode effect and return `false` transactionally on lifecycle, exposure,
   or exact-type mismatch.
@@ -1298,6 +1461,7 @@ The public native VFX API is exported through `<Keire/Core.h>`.
 ```cpp
 #include <Keire/Core.h>
 
+#include <cstdint>
 #include <stdexcept>
 
 namespace MyGame
@@ -1334,6 +1498,7 @@ persistent only through the normal scene-document save workflow.
 ```cpp
 #include <Keire/Core.h>
 
+#include <cstdint>
 #include <stdexcept>
 
 namespace MyGame
@@ -1354,6 +1519,13 @@ namespace MyGame
             throw std::runtime_error("VFX pause was rejected.");
     }
 
+    void TriggerImpact(const Keire::Ref<Keire::SceneRuntimeSession>& session, const Keire::EntityId entity,
+                       const std::uint32_t count)
+    {
+        if (!session->SendVfxEvent(entity, "Impact", count))
+            throw std::runtime_error("No live Impact Event system accepted the request.");
+    }
+
     [[nodiscard]] bool ImpactIsAlive(const Keire::Ref<Keire::SceneRuntimeSession>& session,
                                      const Keire::EntityId entity)
     {
@@ -1370,7 +1542,8 @@ namespace MyGame
 
 `PlayVfx` creates a VFX Emitter when the runtime entity does not already have one, sets Effect, enables Play On Awake,
 restores Simulation Speed to `1.0`, and enables the component. Passing `restart = true` first releases any current
-runtime instance. `IsVfxAlive` becomes true only after an actual native `VfxHandle` is active.
+runtime instance. `IsVfxAlive` becomes true only after an actual native `VfxHandle` is active. `SendVfxEvent` targets
+the entity's root effect handle and routes to every exact-name Event system inside it.
 
 Scene runtime operations belong to the session's owning application thread.
 
@@ -1575,13 +1748,15 @@ advance or hide newer particles.
 
 | Field | Default | Meaning |
 | --- | ---: | --- |
-| `MaximumEffects` | 256 | Number of simultaneously allocated effect slots. |
+| `MaximumEffects` | 256 | Number of simultaneously active root effect handles. |
+| `MaximumSystemsPerEffect` | 16 | Maximum compiled systems owned by one root effect. |
 | `MaximumParticles` | 65,536 | Global particle budget. |
 | `Backend` | CPU | CPU particle storage or GPU emitter-work publication. |
 | `CollisionQuery` | Empty | Optional segment query for CPU collision. |
 | `ShapeSample` | Empty | Optional Mesh/Volume asset sampler for CPU initialization. |
 
-Construction rejects zero capacities, more than `1,000,000` effects, or more than `10,000,000` particles.
+Construction rejects zero capacities, more than `1,000,000` effects, more than 256 systems per effect, more than
+`10,000,000` particles, or a root/system product that exceeds the internal bounded slot budget.
 
 ### Activation And Handles
 
@@ -1594,8 +1769,11 @@ Construction rejects zero capacities, more than `1,000,000` effects, or more tha
 - Seed Offset
 - Optional `std::vector<VfxParameterOverride>` values keyed by exposed Blackboard stable ID
 
-The world normalizes Rotation and retains the Effect reference for the active slot. `Activate` throws for invalid
-activation data. It returns an empty handle, increments `DroppedEffects`, and leaves the world unchanged when no effect
+The world normalizes Rotation and retains the Effect reference for every internal system slot. `Activate` compiles all
+systems first and publishes them as one transaction; failure cannot leave half an effect alive. The returned root
+handle controls every system. `SendEvent(handle, name, count)` routes to matching Event sources while Spawn sources keep
+their normal scheduling. `Activate` throws for invalid activation data. It returns an empty handle, increments
+`DroppedEffects`, and leaves the world unchanged when no effect
 slot is available.
 
 `VfxHandle` contains a pool index and generation:
@@ -1656,11 +1834,11 @@ resolved values intact.
 
 Parameter changes immediately rebuild that handle's resolved module values and Portable Custom HLSL operands. They do
 not change the source asset or another handle using the same asset. Emission and creation properties affect future
-work. CPU simulation reads resolved Force, Size, Color, and Collision module values on later updates. The GPU path
-bakes Force, size/color endpoints, and Renderer data into particles when they spawn; changing one of those values
-advances only that handle's GPU simulation revision and retires its prior particles so stale baked state is not mixed
-with the new value. Other creation-property changes affect future GPU particles. Portable Custom HLSL Update/Output
-operands are resolved per emitter and affect existing particles on both backends without a handle restart.
+work. CPU simulation reads resolved Force, Size, Color, and Collision module values on later updates. The GPU path reads
+Force, the sampled size/gradient tables, Renderer resources, and output metadata on later dispatches/draws, so those
+uniform changes affect existing particles without rebuilding world state. Lifetime, velocity, rotation, and shape
+creation properties affect future GPU particles. Portable Custom HLSL Update/Output operands are resolved per emitter
+and affect existing particles on both backends without a handle restart.
 
 Ranges are ordinary typed Blackboard values and use the same API:
 
@@ -1822,8 +2000,9 @@ and sample the corresponding mesh surface or volume. Callbacks must return finit
 exceptions and invalid results, marks the effect diagnostic, and continues safely. A collision normal is normalized
 before reflection.
 
-`SceneRuntimeSession` installs its physics ray-cast collision query when a Physics world is available. It does not
-currently install a Mesh/Volume ShapeSample callback.
+`SceneRuntimeSession` installs its physics ray-cast collision query when a Physics world is available and installs an
+asset-backed Mesh/Volume sampler. Mesh sampling uses imported triangle-area weights; volume sampling uses cooked
+`.keirevfxvolume` density-cell weights. A directly owned `VfxWorld` still supplies its own callbacks.
 
 ## Diagnostics
 
@@ -1845,12 +2024,17 @@ currently install a Mesh/Volume ShapeSample callback.
 - `Diagnostics` contains Information, Warning, or Error entries with optional node/module stable IDs.
 
 GPU compilation packs supported value instructions and their literal, Parameter, register, identity, and setting data
-for the shader interpreter. It rejects unsupported packed types, opcode/register/source/constant limits, or a
-particle-varying generic Runtime Block binding that has no shader-side property ABI. It also validates resolved Block
-defaults against the exact compute capabilities: unsupported resource shapes, nonlinear curves/gradients, collisions,
-renderer modes/resources, and packed expression-program limits are node-linked errors. CPU compilation warns when GPU Depth collision
-must degrade to the configured CPU collision query. Structural graph, binding, portable-language,
-and backend-capability errors set
+for the shader interpreter. It rejects unsupported packed types and bounded opcode/register/source/constant limits.
+Constants and live Parameters share one packed value buffer, and resource headers share a fixed-stride table with
+weighted shape samples, so the complete evaluator stays within SDL's eight-readonly-storage-buffer compute limit.
+Per-frame Update and Output evaluation run as ordered separate kernels; this preserves graph semantics while preventing
+large dynamic programs from exceeding practical D3D12 register pressure. Pipeline creation is transactional and names
+the failing shader entry point in its diagnostic.
+Every numeric Runtime Block property uses the reflected property ABI and can resolve from a default, literal,
+Blackboard slot, or particle-varying expression register. Resource-shape tables, collision mode, composed material, and
+output topology are validated against their exact backend capabilities. Duplicate Blocks carry their execution ID into
+diagnostics and never alias the referenced payload ID. CPU compilation warns when GPU Depth collision must degrade to
+the configured CPU collision query. Structural graph, binding, portable-language, and backend-capability errors set
 `Valid` to false instead of partially executing the program. Bound Blackboard
 defaults are resolved during compilation and must leave every affected Block within both its normal validation range
 and the selected backend's capability contract.
@@ -1862,7 +2046,7 @@ Each `VfxDebugEffect` contains a `VfxRuntimeDiagnostic` bit field. Test flags wi
 
 | Flag | Meaning |
 | --- | --- |
-| `GpuDepthFellBackToCpu` | GPU Depth was requested but true GPU depth collision is unavailable in the selected compatibility path. |
+| `GpuDepthFellBackToCpu` | A CPU-compiled effect requested GPU Depth, so the CPU collision query is used. |
 | `ScenePhysicsSelectedCpu` | Scene Physics collision requires the CPU collision-query path. |
 | `CollisionQueryUnavailable` | Collision was requested but no query was installed, the callback failed, or it returned invalid data. |
 | `ShapeAssetSamplerUnavailable` | Mesh/Volume sampling had no usable shape sampler. |
@@ -1909,22 +2093,26 @@ Treat sustained dropped counts as content or budget problems, not normal output.
 
 ## CPU And GPU Capability Matrix
 
-The GPU backend is a runtime acceleration path, not a promise that every authored field has CPU parity.
+Core particle execution is shared semantically across CPU and GPU. Inherently host- or render-specific features keep an
+explicit tier instead of changing behavior.
 
 | Feature | CPU backend | GPU backend |
 | --- | --- | --- |
 | Emission Rate and Burst scheduling | Yes | Yes, published as cumulative spawn work |
 | Point / Box / Sphere shape | Yes | Yes |
 | Cone shape | Full authored CPU cone | Full authored cone angle/length and volume distribution |
-| Mesh / Volume shape | With `ShapeSample` callback | Schema-4 compile error at the Shape Block |
+| Mesh / Volume shape | Scene asset sampler or custom `ShapeSample` callback | Cooked weighted mesh-surface and sparse-density resource tables |
 | Lifetime and velocity ranges | Yes | Yes |
-| Initial rotation ranges | Full Euler for Mesh; Z for Sprite | Z for Sprite; X/Y rejected explicitly |
+| Initial rotation ranges | Full Euler for Mesh; Z for Sprite | Full Euler for Mesh; Z for Sprite |
 | Forces and gravity | Yes | Yes |
-| Size curve | Full curve | Constant or exact linear 0..1 curve; nonlinear curves are rejected |
-| Color gradient | Full gradient | Constant or exact linear 0..1 gradient; nonlinear gradients are rejected |
-| Collision callback | Yes | No compute collision |
-| Sprite output | Tinted billboard; schema-4 custom textures are rejected | Indirect tinted billboard; custom textures are rejected |
-| Mesh particle output | Yes | No indirect Mesh output |
+| Size curve | Full curve | Deterministic 64-sample lookup with interpolation and zero clamp |
+| Color gradient | Full gradient | Deterministic 64-sample lookup with interpolation |
+| CPU / Scene Physics collision | Collision callback | Explicit GPU compile error; host physics is CPU-required |
+| GPU Depth collision | Uses configured CPU callback with diagnostic | Native swept scene-depth collision |
+| Sprite output | Procedural or textured tinted billboard | Per-emitter indirect procedural or textured tinted billboard |
+| Mesh particle output | Material-aware scene path | Asset-backed indexed indirect output through compatible composed material shading |
+| Ribbon output | Camera-facing adjacency-connected particle strips | Same sequence-qualified strip links through indirect procedural draws |
+| Volumetric output | Analytic density impostor | Analytic density impostor through indirect procedural draws |
 | Local-space following | Yes | Yes; rigid position/rotation changes transform existing particles |
 | Per-handle stop, restart, and incompatible-reload isolation | Yes | Yes; matching handle generation only |
 | Exact active particle count | Yes | Spawn-based estimate |
@@ -1933,11 +2121,14 @@ The GPU backend is a runtime acceleration path, not a promise that every authore
 | Module-property Blackboard binding | Yes | Yes |
 | Activation/component/live parameter overrides | Yes | Yes |
 | Core packed value Operators | Yes | Yes; opcode and pin support is shown by the CPU + GPU badge |
-| Particle-varying generic Block properties | Yes | Only properties with a lowered shader binding; otherwise a compile error |
+| Particle-varying numeric Block properties | Yes | Yes; typed property records resolve expression registers in each operation |
+| Duplicate Blocks | Yes; independent execution IDs | Yes; ordered independent property/sample ranges |
 | Live module override on existing particles | Update modules are read on later CPU steps | Force, Size, Color, and Renderer uniforms update without restarting existing particles; creation fields affect future particles |
 | Portable Custom HLSL | Yes; bounded instructions run in cable order inside particle loops | Yes; cable-ordered Module and Custom operations share the per-emitter spawn/simulation dispatches |
-| Event contexts | No | No |
-| Multiple executable graph systems | No | No |
+| Named Event contexts | Yes | Yes |
+| Multiple executable graph systems | Yes; one root handle owns all slots | Yes; one root handle publishes per-system emitters |
+| Particle Strip identity / strip-scoped RNG | Yes | Yes |
+| Neighbor-connected strip topology | No | No; explicit later topology tier |
 | Arbitrary shader HLSL/resources | No | No |
 
 Author and diagnose on CPU, then deliberately verify the effect on GPU. If a required feature is absent from the GPU
@@ -2016,17 +2207,18 @@ a queued per-step handoff is a remaining backend milestone.
 | A parameter override is rejected | Use the parameter's stable ID, exact `VfxParameterValue` type, and an Exposed parameter. Direct world APIs also reject duplicate IDs and stale handles. |
 | Custom HLSL does nothing | Confirm Graph mode, add or enable the Portable HLSL Block in the intended Context, use only the portable grammar, and Compile. Portable `*DeltaTime` is zero in creation stages; use Update for per-frame motion. |
 | GPU effects are expensive with many emitters | Each active emitter uses one handle-filtered, world-capacity simulation dispatch. Reduce active emitters or lower the owning world's particle capacity. |
-| Mesh or Volume particles spawn at the emitter origin | The current world has no `ShapeSample` callback. |
+| Mesh or Volume particles spawn at the emitter origin | The resource is still loading/invalid, or a directly owned CPU world has no `ShapeSample` callback. Scene runtime installs the asset sampler automatically. |
 | GPU preview differs from CPU | Consult the capability matrix; several advanced module fields have partial GPU parity. |
 | Restarting one GPU effect disturbs another | This is not expected. Stop and restart are isolated by handle generation, while incompatible reload uses a per-handle simulation revision; `Clear()` is the world-wide reset operation. |
 | A non-looping preview keeps restarting | Disable Loop Preview in the preview toolbar. |
 | A runtime entity unexpectedly disappears | Auto Destroy destroys the entire entity when its effect finishes. |
 | Dropped count increases | Reduce emission/lifetime, raise effect Capacity, or raise the owning world's particle budget. |
 | Scale has no visible effect | VFX synchronization uses position and rotation only. Author dimensions in VFX modules. |
-| Collision has no effect | Use CPU, provide a CollisionQuery or Play Mode physics world, and inspect runtime diagnostics. |
+| GPU Depth collision has no effect | Verify the Game/preview camera produced a valid sampled scene-depth input and inspect render diagnostics. |
+| Scene Physics collision has no effect | Use CPU, provide a `CollisionQuery` or Play Mode physics world, and inspect runtime diagnostics. |
 | Compile reports an invalid header | Check Name, Duration, Capacity, payload count, and the required enabled emission/renderer payloads or Blocks for the selected execution source. |
 | Compile reports duplicate stable IDs | Do not hand-copy IDs between modules, systems, nodes, pins, links, or parameters. |
-| Compile requires one particle system | Graph execution supports exactly one system. Remove extra systems or keep the asset in LegacyModules compatibility mode. |
+| Compile exceeds the system budget | Reduce graph systems or raise `MaximumSystemsPerEffect` within its bounded limit before creating the world. |
 | Compile reports a disconnected executable node | Connect the four Contexts. Reachable schema-3 Module/Custom nodes migrate into Blocks; new executable work must be an enabled Block in a connected Context. |
 | Compile reports a cycle or backward context | Remove the cycle and keep flow ordered Spawn → Initialize → Update → Output. |
 | A cable drag stays red | The endpoints have the same direction, different `VfxValueType`, already form that exact cable, or violate pin ownership. Read the live diagnostic and choose a compatible opposite pin. |
@@ -2065,20 +2257,27 @@ input.
 
 Graph execution adds these publish-time requirements:
 
-- Exactly one system and exactly one Spawn, Initialize, Update, and Output Context node
-- No Event nodes, cycles, backward `ParticleStream` stage transitions, or disconnected executable nodes
-- One connected Spawn-to-Output particle stream
-- Unique valid Block or compatibility Module references with canonical Context, property semantics, and types
+- One to 64 systems, each with one Spawn or named Event source plus one Initialize, Update, and Output Context
+- No cycles, backward `ParticleStream` stage transitions, or disconnected executable nodes
+- One connected source-to-Output particle stream per system
+- Unique Block IDs and valid compatibility payload references with canonical Context, property semantics, and types;
+  payload references may repeat
 - Canonical Operator type IDs, definition versions, resolved signatures, dynamic-pin order, settings, and typed pins
 - Valid Parameter references whose output type matches the Blackboard definition
 - Parameter or executable Operator value sources for Module/Block and Portable Custom HLSL inputs
-- At least one enabled emission Block/module and one enabled Renderer Block/module on the connected Context path
+- At least one enabled Renderer Block/module; Spawn systems also require emission, while Event systems consume the
+  explicit event count
 - Block endpoints identify the owning Context, Block, and pin; Context vector order is executable order
 - At most 4,096 valid Portable Custom HLSL statements
 
 Schema versions 1, 2, 3, and 4 are readable. Schemas 1–3 migrate in memory and explicit Save publishes schema 4.
 Historical compatibility assets retain `LegacyModules`; opening, previewing, or saving does not convert execution. Use
 the explicit conversion command to replace old Systems with a schema-4 executable Graph.
+
+Schema 4 also versions individual executable definitions. Older Shape and Renderer Blocks are upgraded in memory when
+new resource inputs are introduced: existing pin and cable IDs are preserved, missing canonical pins receive
+deterministic stable IDs, and explicit Save writes the current Block definition version. Unknown pins, type changes, or
+future definition versions remain hard errors instead of being discarded during repair.
 
 ## API And Implementation Reference
 

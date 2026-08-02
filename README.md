@@ -171,9 +171,14 @@ without requiring a system .NET installation. The .NET 10 SDK is required only f
 Managed Behaviours can write retained editor Console entries through `Debug.Log`, `Debug.Warn`, `Debug.Error`,
 `Debug.LogException`, and `Debug.Assert`. The sample `FirstPersonCamera` Behaviour uses the project `Player/Move` and
 `Player/Look` input actions and exposes movement, look, pitch, and smoothing settings in the Inspector.
-During Play Mode, gameplay temporarily overrides editor UI capture for the `Player` action map and releases that
-override on exit. Managed keyboard, mouse, and cursor capture are active only while the Game image is focused and
-hovered; the Scene viewport retains its independent editor camera and navigation throughout Play Mode.
+During Play Mode, gameplay temporarily overrides editor UI capture for the validated `Player` action map and releases
+that override on exit. The editor owns an explicitly paired keyboard/mouse input user, a runtime capture request can
+engage the Game view while its dock-focus request is still settling, and clicking the Game image re-engages a released
+capture. Escape always has an editor-level safety path that restores a visible, unlocked cursor when project input or
+scripts fail. The Scene viewport retains its independent editor camera and navigation throughout Play Mode.
+GPU-incompatible VFX effects that compile for CPU automatically move the scene VFX world to CPU; effects invalid on
+both backends are isolated and reported with their entity/effect identity. Neither case faults the whole Play session,
+so gameplay and other valid effects continue, and publishing a corrected effect revision retries an isolated emitter.
 Use **Build > Build Scripts** or `Ctrl+Shift+B` to compile gameplay assemblies immediately. The editor also schedules
 an initial script build when opening a project and writes compiler diagnostics to the Console.
 Source checkouts compile `Keire.Managed` into the same immutable script generation before gameplay assemblies; packaged
@@ -303,16 +308,24 @@ explicit Save; historical module-stack effects retain `LegacyModules` execution 
 Random/Random Range, Remap, core arithmetic/logic/vector Operators, and bounded CPU/GPU value interpreters form the
 current value release. Unsupported or GPU-required work reports an explicit diagnostic instead of acting as a no-op;
 compiled backend-limit diagnostics retain the responsible stable node ID. CPU + GPU catalog badges require validated
-packed representation and backend semantics; structurally present opcodes with open differential cases remain CPU-only.
+packed representation and backend semantics; every currently executable packed core Operator now satisfies that
+contract on both interpreters.
 A scene-owned `VfxWorld` supplies generation-safe handles, fixed global/effect budgets, pooled steady-state simulation,
 revision-aware reload, diagnostics, and immutable debug/render snapshots.
-GPU-depth and full-scene collision requests select the safe CPU path when their required capability is unavailable.
-Mesh and volume shapes likewise report and use their point fallback when no shape sampler is installed. GPU compute
-simulation and indirect sprite output are active; Events, multiple executable graph systems, ribbons, decals, GPU mesh
-particles, and volumetrics remain explicit future slices. CPU mesh output is material-aware and resolves each imported
-mesh's default material slots. The sample VFX folder includes Ember Shard Cyclone and Arcane Sigil Orbit with
-repository-owned emissive glTF geometry and generated material subassets; their GPU compile badge intentionally remains
-unsupported until GPU mesh indirect output exists. Double-click a VFX asset to open the dockable Graph, Runtime
+GPU Depth collision samples the scene depth buffer directly; Scene Physics collision remains an explicit CPU query.
+Mesh surfaces and sparse `.keirevfxvolume` density cells are sampled on both backends through deterministic weighted
+tables, with explicit runtime diagnostics while an asset is unavailable. GPU compute simulation and per-system indirect
+Sprite, Mesh, adjacency-connected Ribbon, and analytic Volumetric output are active. Sprite textures and standardized
+particle materials work on both backends: particle tint composes with material Tint, primary texture, alpha mode, and
+alpha cutoff for Sprite, Ribbon, and Volumetric output. GPU Mesh output uses the ordinary material-shader composition
+path when the assigned shader is instancing-compatible, with deterministic last-good fallback and diagnostics
+otherwise. Ribbon links are sequence- and generation-qualified so dead or recycled particles break the strip safely.
+A single root handle can own several compiled systems, including named Event sources and
+Particle Strip identity; named events are available from C++, scene runtime, and C#. Duplicate Context Blocks retain
+independent execution IDs and every numeric Block property can consume per-particle expression registers through the
+typed CPU/GPU property ABI. CPU mesh output is material-aware and resolves each imported mesh's default material slots.
+The sample VFX folder includes Ember Shard Cyclone and Arcane Sigil Orbit with repository-owned
+emissive glTF geometry and generated material subassets. Double-click a VFX asset to open the dockable Graph, Runtime
 Modules, Blackboard, and Effect Settings workflows. The authoring preview defaults to the stable CPU backend and can
 switch to the runtime GPU backend. In a scene, enable **Preview In Edit Mode** on a VFX Emitter to synchronize its
 assigned effect, revision, compatible parameter overrides, seed, simulation speed, enabled state, and world
@@ -334,12 +347,17 @@ single-driver value cables, acyclic forward Spawn-to-Output flow, stable-ID refe
 emission/renderer path.
 
 Render-capable scene sessions use persistent structure-of-arrays GPU buffers, free/alive lists, compute
-spawn/update/compaction, Local-space transform following, generation-qualified per-handle retirement, and indirect
-sprite draws. Portable Custom HLSL accepts up to the explicit 4,096-instruction compiler safety bound and publishes its
+spawn/update/compaction, Local-space transform following, generation-qualified per-handle retirement, per-emitter
+capacity enforcement, deterministic resource-shape sampling, scene-depth collision, and indirect textured-Sprite,
+indexed-Mesh, Ribbon, or analytic Volumetric draws. Portable Custom HLSL accepts up to the
+explicit 4,096-instruction compiler safety bound and publishes its
 dynamic records for CPU and GPU execution. The fixed eight-instruction and fifteen-operation snapshot arrays are
 compatibility mirrors, not execution limits. The GPU executes ordered Context Block and Portable Custom HLSL operations
 together in the relevant per-emitter spawn or handle-filtered, capacity-wide simulation dispatch. Stopping or restarting
 one GPU effect preserves unrelated emitters, and `VfxWorld::Clear` remains the explicit world-wide reset.
+The editor prewarms the complete GPU VFX compute-pipeline set on a low-priority worker when the workspace opens, keeping
+the first Play transition responsive. Standalone clients can call `RenderSystem::RequestGpuVfxPipelineWarmup()` during
+their loading flow; warmup progress and elapsed time are reported through `RenderStatistics` and profiler counters.
 
 The VFX Effect panel authors draggable Contexts and ordered Blocks, descriptor-backed value nodes and cables, typed
 Blackboard defaults, portable custom statements, stable IDs, undo/redo, automatic incident-link cleanup, and CPU/GPU
@@ -349,9 +367,10 @@ dropped-particle controls.
 and serialized stable-ID parameter overrides. The scene Inspector resolves the assigned effect and provides typed
 controls for exposed parameters, default reset, and stale-override cleanup. Native `VfxActivation`, `VfxWorld::SetParameter`,
 `SetParameterOverrides`, and `ResetParameter` provide typed per-handle control. Managed scripts can control playback
-through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, and `Vfx.Stop`, and can transactionally update exposed scalar, integer,
-vector, and color ranges through `VfxRange<T>`. Other managed Blackboard types, Event contexts, multiple executable
-systems, subgraphs, ribbons, trails, decals, and volumetric outputs remain later compiler/runtime milestones.
+through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, `Vfx.Stop`, and `Vfx.SendEvent`, and can transactionally update exposed
+scalar, integer, vector, and color ranges through `VfxRange<T>`. Subgraphs, decals, topology-connected multi-particle
+strip rendering, unrestricted Unity-style Custom HLSL, and arbitrary custom GPU resources remain explicit later
+compiler/runtime milestones.
 
 Animation-only FBX/glTF imports now publish `AnimationSourceAsset` as their effective primary type and retain stable
 skeleton, rig, and clip subasset IDs. They never pass through mesh vertex validation. Reimport changes metadata,
@@ -562,8 +581,10 @@ distinct generated type icons; all preview cache data remains under `Library/Thu
 
 `Ctrl/Cmd+D` duplicates selected scene roots as one undoable operation. Hierarchy rows accept drops in three zones: the
 upper and lower edges insert before or after a sibling, while the center parents the selection; dropping on blank
-Hierarchy space moves it to the scene root. The Scene toolbar camera button toggles a live main-camera preview in the
-lower-right corner without intercepting input elsewhere in the viewport.
+Hierarchy space moves it to the scene root. Dragging any selected row moves the complete selection in hierarchy order,
+keeps the selection active, filters selected descendants whose parent is already moving, and records one undo step.
+Drop highlights and labels distinguish reordering from parenting before release. The Scene toolbar camera button toggles
+a live main-camera preview in the lower-right corner without intercepting input elsewhere in the viewport.
 
 `ProjectSettings/Project.keireproject` is the fixed marker for an isolated Kéire project. `Project::Create` produces
 transactional Empty or Starter roots; `Project::Open` validates schema/version and the editor holds an OS-exclusive lock
@@ -696,6 +717,9 @@ unless the active backend explicitly reports GPU timestamp support. Managed scri
 skips, native/managed interop calls, cumulative callback time, and the maximum callback duration. A copyable managed
 callback table aggregates active instances by Behaviour type and lifecycle method at the profiler's throttled refresh
 rate. Default-open profiler tables use compact row budgets; `Show all` remains available for deep inspection.
+For GPU VFX captures, compare physical particle capacity and compute thread groups with buffer bytes and dispatches.
+Use `GPU fence wait (ms)` to identify frames blocked at the configured frames-in-flight boundary; it is distinct from
+swapchain acquisition and CPU command-recording time.
 
 Development asset discovery runs on a database-owned monitor. `PollChangedAssets()` only consumes an immutable
 published snapshot and never walks the project tree on the application frame. `ChangeMonitorInterval` controls

@@ -9,18 +9,22 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -189,6 +193,9 @@ namespace Keire::RenderBackend
         ForwardPlusGpuResources ForwardPlus;
         std::uint64_t ForwardPlusContentHash = 0;
         bool ForwardPlusContentValid = false;
+        Matrix4 SampledDepthViewProjection;
+        Matrix4 SampledDepthInverseViewProjection;
+        bool SampledDepthValid = false;
         std::uint64_t Generation = 0;
         bool Submitted = false;
         bool HasOutput = false;
@@ -196,6 +203,13 @@ namespace Keire::RenderBackend
 
     struct GpuMeshResources final
     {
+        struct ShapeSample final
+        {
+            Vector4 A;
+            Vector4 B;
+            Vector4 C;
+        };
+
         SDL_GPUBuffer* Vertices = nullptr;
         SDL_GPUBuffer* AssetVertices = nullptr;
         SDL_GPUBuffer* Indices = nullptr;
@@ -203,6 +217,9 @@ namespace Keire::RenderBackend
         std::vector<MeshSubmesh> Submeshes;
         std::vector<MeshLod> Lods;
         std::vector<AssetId> DefaultMaterials;
+        std::vector<ShapeSample> ShapeSamples;
+        float ShapeSampleWeight = 0.0F;
+        std::uint64_t Revision = 0;
 
         [[nodiscard]] bool Empty() const noexcept { return !Vertices && !AssetVertices && !Indices; }
     };
@@ -542,7 +559,7 @@ namespace Keire::RenderBackend
         if (particle.Renderer != VfxRendererType::Mesh || !particle.Mesh || particle.Size <= 0.0F)
             return std::nullopt;
         return SceneDrawItem{particle.Mesh,
-                             {},
+                             particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{},
                              Math::ComposeTransform(particle.Position,
                                                     Math::EulerDegreesToQuaternion(particle.Rotation),
                                                     {particle.Size, particle.Size, particle.Size}),
@@ -718,6 +735,8 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* Sky = nullptr;
         SDL_GPUGraphicsPipeline* Vfx = nullptr;
         SDL_GPUGraphicsPipeline* GpuVfx = nullptr;
+        SDL_GPUGraphicsPipeline* GpuVfxRibbon = nullptr;
+        SDL_GPUGraphicsPipeline* GpuVfxMesh = nullptr;
     };
 
     struct alignas(16) VfxGpuCustomInstructionRecord final
@@ -731,14 +750,40 @@ namespace Keire::RenderBackend
 
     struct alignas(16) VfxGpuParticleOperationRecord final
     {
-        /// Context, operation kind, custom-instruction index, reserved zero.
+        /// Context, operation kind, custom-instruction index, operation-specific setting.
         std::array<std::uint32_t, 4> Metadata{};
+        /// First property, property count, first lifetime sample, lifetime sample count.
+        std::array<std::uint32_t, 4> Payload{};
+    };
+
+    struct alignas(16) VfxGpuModulePropertyRecord final
+    {
+        /// VfxModuleProperty, VfxValueType, VfxGpuModulePropertySource, and source index.
+        std::array<std::uint32_t, 4> Metadata{};
+        VfxGpuValue LiteralValue;
     };
 
     static_assert(sizeof(VfxGpuCustomInstructionRecord) == 32);
     static_assert(alignof(VfxGpuCustomInstructionRecord) == 16);
-    static_assert(sizeof(VfxGpuParticleOperationRecord) == 16);
+    static_assert(sizeof(VfxGpuParticleOperationRecord) == 32);
     static_assert(alignof(VfxGpuParticleOperationRecord) == 16);
+    static_assert(sizeof(VfxGpuModulePropertyRecord) == 48);
+    static_assert(alignof(VfxGpuModulePropertyRecord) == 16);
+
+    struct alignas(16) VfxGpuShapeResourceRecord final
+    {
+        std::array<std::uint32_t, 4> Metadata{};
+    };
+
+    struct alignas(16) VfxGpuShapeSampleRecord final
+    {
+        Vector4 A;
+        Vector4 B;
+        Vector4 C;
+    };
+
+    static_assert(sizeof(VfxGpuShapeResourceRecord) == 16);
+    static_assert(sizeof(VfxGpuShapeSampleRecord) == 48);
 
     /// Returns an exact diagnostic for malformed or shader-unsupported renderer execution payloads.
     [[nodiscard]] std::optional<std::string> ValidateGpuVfxExecutionPayload(const VfxGpuExecutionPayload& payload);
@@ -747,12 +792,70 @@ namespace Keire::RenderBackend
     {
         SDL_GPUBuffer* Instructions = nullptr;
         SDL_GPUBuffer* Sources = nullptr;
-        SDL_GPUBuffer* Constants = nullptr;
-        SDL_GPUBuffer* Parameters = nullptr;
+        SDL_GPUBuffer* Values = nullptr;
         SDL_GPUBuffer* CustomInstructions = nullptr;
         SDL_GPUBuffer* ParticleOperations = nullptr;
+        SDL_GPUBuffer* ModuleProperties = nullptr;
+        SDL_GPUBuffer* LifetimeSamples = nullptr;
         std::uint64_t ByteSize = 0;
     };
+
+    struct GpuVfxRenderBuffers final
+    {
+        SDL_GPUBuffer* Indices = nullptr;
+        SDL_GPUBuffer* IndirectArguments = nullptr;
+        SDL_GPUBuffer* Instances = nullptr;
+        std::uint32_t Capacity = 0;
+        std::uint64_t ByteSize = 0;
+    };
+
+    struct GpuVfxShapeBuffers final
+    {
+        SDL_GPUBuffer* Table = nullptr;
+        std::uint32_t ResourceCount = 0;
+        std::uint32_t FirstSample = 0;
+        std::uint64_t RevisionHash = 0;
+        std::uint64_t ByteSize = 0;
+    };
+
+    struct GpuVfxVolumeEntry final
+    {
+        AssetHandle<VfxVolumeAsset> Handle;
+        Ref<const VfxVolumeAsset> LastGood;
+        std::uint64_t LoadedRevision = 0;
+    };
+
+    inline constexpr std::uint32_t MinimumGpuVfxPoolCapacity = 16'384;
+
+    [[nodiscard]] inline std::uint32_t
+    GpuVfxActiveParticleBudget(const std::uint32_t logicalLimit, const std::span<const VfxGpuEmitter> emitters) noexcept
+    {
+        std::uint64_t required = 0;
+        for (const auto& emitter : emitters)
+        {
+            required += std::max(emitter.Capacity, 1U);
+            if (required >= logicalLimit)
+                return logicalLimit;
+        }
+        return static_cast<std::uint32_t>(required);
+    }
+
+    /// Selects an amortized physical pool size from the capacities of all live systems. The VfxWorld logical budget
+    /// remains the hard limit, while small scenes avoid paying to allocate and scan the entire production ceiling.
+    [[nodiscard]] inline std::uint32_t SelectGpuVfxPoolCapacity(const std::uint32_t logicalLimit,
+                                                                const std::uint32_t currentCapacity,
+                                                                const std::span<const VfxGpuEmitter> emitters) noexcept
+    {
+        if (logicalLimit == 0 || emitters.empty())
+            return std::min(currentCapacity, logicalLimit);
+
+        std::uint64_t required = GpuVfxActiveParticleBudget(logicalLimit, emitters);
+        required = std::max(required, static_cast<std::uint64_t>(std::min(logicalLimit, MinimumGpuVfxPoolCapacity)));
+        const auto amortized = std::bit_ceil(required);
+        const auto selected =
+            std::min<std::uint64_t>(logicalLimit, std::max<std::uint64_t>(currentCapacity, amortized));
+        return static_cast<std::uint32_t>(selected);
+    }
 
     struct GpuVfxWorldResources final
     {
@@ -763,8 +866,16 @@ namespace Keire::RenderBackend
             Vector3 Position;
             Quaternion Rotation;
             VfxSimulationSpace Space = VfxSimulationSpace::World;
+            VfxRendererType Renderer = VfxRendererType::Sprite;
+            AssetId Sprite;
+            AssetId Mesh;
+            AssetId Material;
+            bool MaterialDiagnosticReported = false;
+            bool HasCompactedParticles = false;
+            std::shared_ptr<GpuVfxRenderBuffers> RenderBuffers;
             std::shared_ptr<const VfxGpuExecutionPayload> Execution;
             std::shared_ptr<GpuVfxExecutionBuffers> ExecutionBuffers;
+            std::shared_ptr<GpuVfxShapeBuffers> ShapeBuffers;
         };
 
         SDL_GPUBuffer* Particles = nullptr;
@@ -856,6 +967,14 @@ namespace Keire::RenderBackend
         RenderSurfaceState* Surface = nullptr;
     };
 
+    enum class GpuVfxPipelineWarmupState : std::uint8_t
+    {
+        NotStarted,
+        Compiling,
+        Ready,
+        Failed
+    };
+
     struct RenderSharedState final : public std::enable_shared_from_this<RenderSharedState>
     {
         RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
@@ -895,9 +1014,13 @@ namespace Keire::RenderBackend
                                                     MaterialSurfaceState surface, bool explicitSurface);
         [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
         [[nodiscard]] bool EnsureSkinningPipeline();
+        void StartGpuVfxPipelineWarmup();
+        void CompileGpuVfxPipelines();
+        void ReleaseGpuVfxPipelines() noexcept;
         void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet);
-        [[nodiscard]] bool EnsureGpuVfxPipelines();
-        void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot);
+        [[nodiscard]] bool EnsureGpuVfxPipelines(bool requireStripPipelines);
+        void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot,
+                           const RenderSurfaceState& surface);
         void ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept;
 
         [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
@@ -907,7 +1030,7 @@ namespace Keire::RenderBackend
                        const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase,
                        const PreparedSceneDrawList& prepared);
         void DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
-                     const SceneRenderPacket& packet);
+                     const SceneRenderPacket& packet, const ShadowFrameData& shadows);
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -938,7 +1061,9 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline*
         CreatePipeline(SDL_GPUSampleCount samples, SDL_GPUPrimitiveType primitive, bool depthWrite, bool blend = false);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateSkyPipeline(SDL_GPUSampleCount samples);
-        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxPipeline(SDL_GPUSampleCount samples);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateCpuVfxPipeline(SDL_GPUSampleCount samples);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxPipeline(SDL_GPUSampleCount samples, bool ribbon = false);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxMeshPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthPipeline(bool depthBias);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
         void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
@@ -1006,10 +1131,21 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* VfxKillPipeline = nullptr;
         SDL_GPUComputePipeline* VfxTransformPipeline = nullptr;
         SDL_GPUComputePipeline* VfxSimulatePipeline = nullptr;
+        SDL_GPUComputePipeline* VfxSimulateOutputPipeline = nullptr;
         SDL_GPUComputePipeline* VfxSpawnPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxSpawnInitializePipeline = nullptr;
+        SDL_GPUComputePipeline* VfxSpawnOutputPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxMapStripsPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxLinkStripsPipeline = nullptr;
         SDL_GPUComputePipeline* VfxFinalizePipeline = nullptr;
-        bool VfxPipelinesAttempted = false;
+        SDL_GPUComputePipeline* VfxResetRenderPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxFilterRenderPipeline = nullptr;
+        std::jthread VfxPipelineWarmupThread;
+        std::atomic<GpuVfxPipelineWarmupState> VfxPipelineWarmupState{GpuVfxPipelineWarmupState::NotStarted};
+        std::atomic<std::uint64_t> VfxPipelineWarmupMicroseconds{0};
+        std::string VfxPipelineWarmupFailure;
         std::unordered_map<std::uint64_t, GpuVfxWorldResources> GpuVfxWorlds;
+        std::unordered_map<AssetId, GpuVfxVolumeEntry> VfxVolumeCache;
         std::deque<InFlightFrame> InFlight;
         StaticSceneFrameGraph SceneFrameGraph;
         RenderStatistics Statistics;

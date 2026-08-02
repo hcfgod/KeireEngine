@@ -15,6 +15,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <ranges>
 #include <stdexcept>
@@ -59,6 +60,12 @@ namespace KeireEditor
         constexpr std::array RendererTypes{
             EnumEntry{Keire::VfxRendererType::Sprite, std::string_view("Sprite")},
             EnumEntry{Keire::VfxRendererType::Mesh, std::string_view("Mesh")},
+            EnumEntry{Keire::VfxRendererType::Ribbon, std::string_view("Ribbon")},
+            EnumEntry{Keire::VfxRendererType::Volumetric, std::string_view("Volumetric")},
+        };
+        constexpr std::array ParticleDataTypes{
+            EnumEntry{Keire::VfxParticleDataType::Particle, std::string_view("Particle")},
+            EnumEntry{Keire::VfxParticleDataType::ParticleStrip, std::string_view("Particle Strip")},
         };
         constexpr std::array PreviewBackends{
             EnumEntry{Keire::VfxBackend::Cpu, std::string_view("CPU (Authoring)")},
@@ -265,7 +272,9 @@ namespace KeireEditor
         {
             Keire::VfxGraphNode result;
             result.Id = Keire::AssetId::Generate();
-            result.Type = std::string(EnumName(context, ContextTypes)) + " Context";
+            result.Type = context == Keire::VfxContextType::Event
+                              ? "OnPlay"
+                              : std::string(EnumName(context, ContextTypes)) + " Context";
             result.Context = context;
             result.EditorPosition = position;
             if (context != Keire::VfxContextType::Spawn && context != Keire::VfxContextType::Event)
@@ -554,22 +563,31 @@ namespace KeireEditor
             try
             {
                 const auto backend = m_Controller.VfxEffectPreviewState().Backend;
-                const auto compiled = Keire::CompileVfxEffect(document.Definition(), backend);
-                const auto warningCount = static_cast<std::size_t>(
-                    std::ranges::count(compiled.Diagnostics, Keire::VfxCompileDiagnosticSeverity::Warning,
-                                       &Keire::VfxCompileDiagnostic::Severity));
-                if (!compiled.Valid)
+                const auto programs = Keire::CompileVfxEffectSystems(document.Definition(), backend);
+                const auto warningCount = static_cast<std::size_t>(std::accumulate(
+                    programs.begin(), programs.end(), std::size_t{0},
+                    [](const std::size_t count, const auto& program)
+                    {
+                        return count + static_cast<std::size_t>(std::ranges::count(
+                                           program.Diagnostics, Keire::VfxCompileDiagnosticSeverity::Warning,
+                                           &Keire::VfxCompileDiagnostic::Severity));
+                    }));
+                const auto failed = std::ranges::find(programs, false, &Keire::VfxCompiledProgram::Valid);
+                if (programs.empty() || failed != programs.end())
                 {
-                    m_Message = compiled.Diagnostics.empty()
+                    m_Message = programs.empty() || failed->Diagnostics.empty()
                                     ? "Graph compilation failed."
-                                    : "Graph compilation failed: " + compiled.Diagnostics.front().Message;
+                                    : "Graph compilation failed: " + failed->Diagnostics.front().Message;
                     m_Controller.ReportVfxEffectError(m_Message);
                 }
                 else
                 {
-                    m_Message = "Compiled " + std::string(EnumName(backend, PreviewBackends)) + " program (" +
-                                std::to_string(compiled.CanonicalIr.size()) + " bytes, " +
-                                std::to_string(warningCount) + " warnings).";
+                    const auto byteCount = std::accumulate(programs.begin(), programs.end(), std::size_t{0},
+                                                           [](const std::size_t count, const auto& program)
+                                                           { return count + program.CanonicalIr.size(); });
+                    m_Message = "Compiled " + std::to_string(programs.size()) + " " +
+                                std::string(EnumName(backend, PreviewBackends)) + " system program(s) (" +
+                                std::to_string(byteCount) + " bytes, " + std::to_string(warningCount) + " warnings).";
                 }
             }
             catch (const std::exception& error)
@@ -901,11 +919,7 @@ namespace KeireEditor
                     entry.OutputTypes.push_back(Keire::VfxValueType::ParticleStream);
                 if (context.Type == Keire::VfxContextType::Event)
                 {
-                    entry.CpuSupported = false;
-                    entry.GpuSupported = false;
-                    entry.Support = VfxNodeCatalogSupportLevel::Unsupported;
-                    entry.DisabledReason = represented ? "Already placed in this system."
-                                                       : "Event contexts are not supported by the particle compiler.";
+                    entry.DisabledReason = represented ? "Already placed in this system." : std::string{};
                 }
                 else if (represented)
                     entry.DisabledReason = "Already placed in this system.";
@@ -2298,6 +2312,33 @@ namespace KeireEditor
         }
         ui.Separator();
 
+        auto dataType = system->DataType;
+        auto particlesPerStrip = static_cast<std::int64_t>(system->ParticlesPerStrip);
+        const auto dataTypeChanged = DrawEnum(ui, "Data Type", dataType, ParticleDataTypes);
+        const auto stripCountChanged =
+            dataType == Keire::VfxParticleDataType::ParticleStrip &&
+            ui.DragInteger("Particles Per Strip", particlesPerStrip, 1.0, 1, definition.Capacity);
+        if (dataTypeChanged || stripCountChanged)
+        {
+            particlesPerStrip = std::clamp<std::int64_t>(particlesPerStrip, 1, definition.Capacity);
+            (void)ApplyAction("Configured VFX graph system",
+                              [&document, graph = system->Id, dataType, particlesPerStrip]
+                              {
+                                  return document.EditSystem(
+                                      graph,
+                                      [dataType, particlesPerStrip](Keire::VfxGraphSystem& candidate)
+                                      {
+                                          candidate.DataType = dataType;
+                                          candidate.ParticlesPerStrip = static_cast<std::uint32_t>(particlesPerStrip);
+                                      });
+                              });
+            return;
+        }
+        ui.TextColored(theme.MutedText, dataType == Keire::VfxParticleDataType::ParticleStrip
+                                            ? "Stable strip identity is available to Random and Ribbon output."
+                                            : "Independent particle simulation.");
+        ui.Separator();
+
         const auto selectedConnection =
             std::ranges::find(system->Connections, m_SelectedConnection, &Keire::VfxGraphConnection::Id);
         if (selectedConnection != system->Connections.end())
@@ -3247,7 +3288,7 @@ namespace KeireEditor
                     scalar("Cone Angle", value.ConeAngleDegrees, 0.1, 0.001, 89.999);
                     scalar("Cone Length", value.ConeLength, 0.01, 0.001, 1'000'000.0);
                     asset("Mesh", value.Mesh, Keire::MeshAsset::StaticType());
-                    asset("Volume Asset", value.Volume, std::nullopt);
+                    asset("Volume Asset", value.Volume, Keire::VfxVolumeAsset::StaticType());
                 },
                 [&](Keire::VfxInitializeModule& value)
                 {
@@ -3276,10 +3317,19 @@ namespace KeireEditor
                 [&](Keire::VfxRendererModule& value)
                 {
                     changed |= DrawEnum(ui, "Renderer", value.Type, RendererTypes);
-                    asset("Sprite", value.Sprite, Keire::Texture2DAsset::StaticType());
-                    asset("Mesh", value.Mesh, Keire::MeshAsset::StaticType());
-                    ui.TextColored(m_Controller.VfxEffectTheme().MutedText,
-                                   "Only the asset selected by the renderer type is used.");
+                    if (value.Type == Keire::VfxRendererType::Sprite || value.Type == Keire::VfxRendererType::Ribbon)
+                        asset("Texture", value.Sprite, Keire::Texture2DAsset::StaticType());
+                    if (value.Type == Keire::VfxRendererType::Mesh)
+                    {
+                        asset("Mesh", value.Mesh, Keire::MeshAsset::StaticType());
+                        asset("Material", value.Material, Keire::MaterialAsset::StaticType());
+                    }
+                    if (value.Type == Keire::VfxRendererType::Ribbon)
+                        ui.TextColored(m_Controller.VfxEffectTheme().MutedText,
+                                       "Requires Particle Strip data and renders camera-facing trail segments.");
+                    else if (value.Type == Keire::VfxRendererType::Volumetric)
+                        ui.TextColored(m_Controller.VfxEffectTheme().MutedText,
+                                       "Analytic density impostors provide CPU/GPU-matched volumetric particles.");
                 },
             },
             module.Payload);

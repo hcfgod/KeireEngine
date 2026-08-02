@@ -589,10 +589,30 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
         KeireEditor::EditorCommand::DeleteSelection,
         [this]
         {
-            RecordSceneUndo("Delete Entities");
+            const auto scene = ActiveScene();
             const auto selected = m_SceneDocument->Selections();
-            const std::vector entities(selected.begin(), selected.end());
-            for (const auto entity : entities)
+            const std::unordered_set<Keire::AssetId> selectedSet(selected.begin(), selected.end());
+            std::vector<Keire::AssetId> roots;
+            roots.reserve(selected.size());
+            for (const auto entity : selected)
+            {
+                auto parent = scene->FindEntity(Keire::EntityId(entity)).Parent();
+                bool ancestorSelected = false;
+                while (parent)
+                {
+                    if (selectedSet.contains(parent.Id().Value()))
+                    {
+                        ancestorSelected = true;
+                        break;
+                    }
+                    parent = parent.Parent();
+                }
+                if (!ancestorSelected)
+                    roots.push_back(entity);
+            }
+
+            RecordSceneUndo("Delete Entities");
+            for (const auto entity : roots)
             {
                 MarkPlayEditorEntity(entity);
                 m_SceneDocument->DeleteEntity(Keire::EntityId(entity));
@@ -777,6 +797,7 @@ void EditorWorkspaceLayer::OnAttach()
         gameSurface.Name = "Game View";
         gameSurface.ClearColor = {0.10F, 0.12F, 0.16F, 1.0F};
         m_GameRenderView = renderer->CreateView(gameSurface);
+        renderer->RequestGpuVfxPipelineWarmup();
     }
     m_SceneViewportPanel->Initialize(Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{});
     LoadTheme(workspace, workspace.ActiveTheme());
@@ -864,8 +885,9 @@ void EditorWorkspaceLayer::OnAttach()
             if (const auto input = Owner().Input())
             {
                 m_EditorInputUser = input->CreateUser("Editor");
-                (void)input->PairDevice(m_EditorInputUser, Keire::InputDeviceId(1));
-                (void)input->PairDevice(m_EditorInputUser, Keire::InputDeviceId(2));
+                if (!input->PairDevice(m_EditorInputUser, Keire::InputDeviceId(1)) ||
+                    !input->PairDevice(m_EditorInputUser, Keire::InputDeviceId(2)))
+                    throw std::runtime_error("The editor could not claim the keyboard and mouse input devices.");
             }
             Listen<Keire::InputDeviceConnectedEvent>(
                 [this](const auto& event)
@@ -972,6 +994,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_GameplayInputContext.Reset();
     m_ManagedCursorLocked = false;
     m_ManagedCursorVisible = true;
+    m_GameViewportCaptureSuspended = false;
     ApplyManagedCursorMode();
     StopInspectorAudioPreview();
     m_InspectorPanel->ClearSceneState();
@@ -1315,19 +1338,29 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
 
     const bool playActive =
         m_SceneDocument->PlaySession() && m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped;
-    if (!playActive)
+    const auto windows = Owner().Windows();
+    const auto mainWindow = Owner().MainWindow();
+    const bool nativeCursorCaptured =
+        windows && mainWindow && windows->GetCursorMode(mainWindow->Id()) != Keire::CursorMode::Normal;
+    if (playActive && nativeCursorCaptured && ui.KeyDown(Keire::UiKey::Escape))
     {
-        const auto windows = Owner().Windows();
-        const auto window = Owner().MainWindow();
-        if (windows && window && windows->GetCursorMode(window->Id()) != Keire::CursorMode::Normal &&
+        // This is deliberately independent of the project's input asset and managed scripts. If gameplay routing is
+        // broken, Escape must still return control to the editor so the user can stop Play Mode.
+        m_GameViewportCaptureSuspended = true;
+        m_GameViewportInputActive = false;
+        ApplyManagedCursorMode();
+    }
+    else if (!playActive)
+    {
+        if (windows && mainWindow && windows->GetCursorMode(mainWindow->Id()) != Keire::CursorMode::Normal &&
             (ui.Shortcut({.Key = Keire::UiKey::Escape, .Global = true}) ||
              ui.Shortcut({.Key = Keire::UiKey::Tab, .Global = true})))
         {
             const auto viewport = m_SceneViewportPanel->ViewportRect();
-            windows->SetCursorMode(window->Id(), Keire::CursorMode::Normal);
+            windows->SetCursorMode(mainWindow->Id(), Keire::CursorMode::Normal);
             if (viewport.Size().Width > 0.0F && viewport.Size().Height > 0.0F)
             {
-                windows->WarpCursor(window->Id(),
+                windows->WarpCursor(mainWindow->Id(),
                                     {static_cast<std::int32_t>((viewport.Minimum.X + viewport.Maximum.X) * 0.5F),
                                      static_cast<std::int32_t>((viewport.Minimum.Y + viewport.Maximum.Y) * 0.5F)});
             }

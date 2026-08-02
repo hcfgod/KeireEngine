@@ -161,32 +161,39 @@ TEST_CASE("GPU VFX capability validation preserves the exact supported baseline 
     CHECK(emitter.ConeLength == doctest::Approx(1.0F));
 }
 
-TEST_CASE("GPU VFX rejects resource-backed spawn shapes at their schema-4 Block")
+TEST_CASE("GPU VFX compiles resource-backed spawn shapes into stable execution resources")
 {
-    SUBCASE("Mesh")
+    constexpr std::array shapes{Keire::VfxShape::Mesh, Keire::VfxShape::Volume};
+    for (const auto shapeType : shapes)
     {
         auto definition = Keire::VfxEffectAsset::DefaultDefinition();
         auto& shape = Payload<Keire::VfxShapeModule>(definition);
-        shape.Shape = Keire::VfxShape::Mesh;
-        shape.Mesh = Keire::AssetId::Generate();
+        shape.Shape = shapeType;
+        const auto asset = Keire::AssetId::Generate();
+        if (shapeType == Keire::VfxShape::Mesh)
+            shape.Mesh = asset;
+        else
+            shape.Volume = asset;
         const auto shapeId = ModuleId<Keire::VfxShapeModule>(definition);
-        BlockPin(definition, shapeId, "mesh").DefaultValue = shape.Mesh;
-        const auto block = ExecutionNode(definition, shapeId);
+        BlockPin(definition, shapeId, shapeType == Keire::VfxShape::Mesh ? "mesh" : "volume").DefaultValue = asset;
 
-        CheckGpuError(definition, block, "Mesh or Volume shape sampling");
-    }
-
-    SUBCASE("Volume")
-    {
-        auto definition = Keire::VfxEffectAsset::DefaultDefinition();
-        auto& shape = Payload<Keire::VfxShapeModule>(definition);
-        shape.Shape = Keire::VfxShape::Volume;
-        shape.Volume = Keire::AssetId::Generate();
-        const auto shapeId = ModuleId<Keire::VfxShapeModule>(definition);
-        BlockPin(definition, shapeId, "volume").DefaultValue = shape.Volume;
-        const auto block = ExecutionNode(definition, shapeId);
-
-        CheckGpuError(definition, block, "Mesh or Volume shape sampling");
+        const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        REQUIRE(program.Valid);
+        auto world = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
+            .MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Gpu});
+        REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+        world->Update(0.1F);
+        const auto snapshot = world->CaptureRenderSnapshot();
+        REQUIRE(snapshot.GpuEmitters().size() == 1);
+        REQUIRE(snapshot.GpuEmitters().front().Execution);
+        const auto& execution = *snapshot.GpuEmitters().front().Execution;
+        REQUIRE(execution.ShapeResources.size() == 1);
+        CHECK(execution.ShapeResources.front() == Keire::VfxGpuShapeResource{shapeType, asset});
+        const auto operation =
+            std::ranges::find(execution.ParticleOperations, Keire::VfxGpuParticleOperationKind::Shape,
+                              &Keire::VfxGpuParticleOperation::Kind);
+        REQUIRE(operation != execution.ParticleOperations.end());
+        CHECK(operation->Index == 1);
     }
 }
 
@@ -203,40 +210,98 @@ TEST_CASE("GPU VFX rejects Sprite initialization rotations it cannot represent")
     CheckGpuError(definition, ExecutionNode(definition, initializeId), "Z-axis initialization rotation only");
 }
 
-TEST_CASE("GPU VFX rejects curves and gradients that its endpoint ABI cannot represent")
+TEST_CASE("GPU VFX accepts full XYZ initialization rotation for Mesh output")
 {
-    SUBCASE("Size curve")
-    {
-        auto definition = Keire::VfxEffectAsset::DefaultDefinition();
-        Payload<Keire::VfxSizeOverLifetimeModule>(definition).Size =
-            Keire::Curve1D({{0.0F, 1.0F}, {0.5F, 2.0F}, {1.0F, 1.0F}});
-        const auto block = ExecutionNode(definition, ModuleId<Keire::VfxSizeOverLifetimeModule>(definition));
+    auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    auto& initialize = Payload<Keire::VfxInitializeModule>(definition);
+    initialize.RotationMinimum = {10.0F, 20.0F, -30.0F};
+    initialize.RotationMaximum = {20.0F, 30.0F, 30.0F};
+    const auto initializeId = ModuleId<Keire::VfxInitializeModule>(definition);
+    BlockPin(definition, initializeId, "rotationMinimum").DefaultValue = initialize.RotationMinimum;
+    BlockPin(definition, initializeId, "rotationMaximum").DefaultValue = initialize.RotationMaximum;
 
-        CheckGpuError(definition, block, "size curves must be constant or an exactly linear");
-    }
+    auto& renderer = Payload<Keire::VfxRendererModule>(definition);
+    renderer.Type = Keire::VfxRendererType::Mesh;
+    renderer.Mesh = Keire::AssetId::Generate();
+    const auto rendererId = ModuleId<Keire::VfxRendererModule>(definition);
+    BlockPin(definition, rendererId, "mesh").DefaultValue = renderer.Mesh;
 
-    SUBCASE("Color gradient")
-    {
-        auto definition = Keire::VfxEffectAsset::DefaultDefinition();
-        Payload<Keire::VfxColorOverLifetimeModule>(definition).Color = Keire::ColorGradient(
-            {{0.0F, {1.0F, 1.0F, 1.0F, 1.0F}}, {0.5F, {0.0F, 1.0F, 0.0F, 1.0F}}, {1.0F, {0.0F, 0.0F, 1.0F, 1.0F}}});
-        const auto block = ExecutionNode(definition, ModuleId<Keire::VfxColorOverLifetimeModule>(definition));
+    const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(program.Valid);
+    CHECK_FALSE(std::ranges::any_of(
+        program.Diagnostics, [](const Keire::VfxCompileDiagnostic& diagnostic)
+        { return diagnostic.Message.find("Z-axis initialization rotation only") != std::string::npos; }));
 
-        CheckGpuError(definition, block, "color gradients must be constant or exactly linear");
-    }
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    world->Update(0.1F);
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    const auto& emitter = snapshot.GpuEmitters().front();
+    CHECK(emitter.Renderer == Keire::VfxRendererType::Mesh);
+    CHECK(emitter.Mesh == renderer.Mesh);
+    CHECK(emitter.Capacity == definition.Capacity);
+    CHECK(emitter.RotationMinimum == initialize.RotationMinimum);
+    CHECK(emitter.RotationMaximum == initialize.RotationMaximum);
 }
 
-TEST_CASE("GPU VFX rejects every unavailable collision mode at its schema-4 Block")
+TEST_CASE("GPU VFX publishes bounded lookup tables for nonlinear curves and gradients")
 {
-    constexpr std::array modes{Keire::VfxCollisionMode::Cpu, Keire::VfxCollisionMode::GpuDepth,
-                               Keire::VfxCollisionMode::ScenePhysics};
+    auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    auto& size = Payload<Keire::VfxSizeOverLifetimeModule>(definition);
+    size.Size = Keire::Curve1D({{0.0F, 1.0F}, {0.5F, 2.0F}, {1.0F, 1.0F}});
+    const auto sizeId = ModuleId<Keire::VfxSizeOverLifetimeModule>(definition);
+    BlockPin(definition, sizeId, "size").DefaultValue = size.Size.Evaluate(0.0F);
+    auto& color = Payload<Keire::VfxColorOverLifetimeModule>(definition);
+    color.Color = Keire::ColorGradient(
+        {{0.0F, {1.0F, 1.0F, 1.0F, 1.0F}}, {0.5F, {0.0F, 1.0F, 0.0F, 1.0F}}, {1.0F, {0.0F, 0.0F, 1.0F, 1.0F}}});
+    const auto colorId = ModuleId<Keire::VfxColorOverLifetimeModule>(definition);
+    BlockPin(definition, colorId, "color").DefaultValue = color.Color.Evaluate(0.0F);
+
+    const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(program.Valid);
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    world->Update(0.1F);
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    const auto& emitter = snapshot.GpuEmitters().front();
+    CHECK(emitter.SizeCurveSamples[0] == doctest::Approx(1.0F));
+    CHECK(emitter.SizeCurveSamples[32] > 1.95F);
+    CHECK(emitter.SizeCurveSamples.back() == doctest::Approx(1.0F));
+    CHECK(emitter.ColorGradientSamples[32].Green > 0.95F);
+    CHECK(emitter.ColorGradientSamples[32].Red < 0.05F);
+}
+
+TEST_CASE("GPU VFX accepts depth collision and rejects host-query collision modes")
+{
+    auto depthDefinition = Keire::VfxEffectAsset::DefaultDefinition();
+    AppendModule(depthDefinition, Keire::VfxContextType::Update,
+                 Keire::VfxCollisionModule{Keire::VfxCollisionMode::GpuDepth, 0.75F, false});
+    const auto depthProgram = Keire::CompileVfxEffect(depthDefinition, Keire::VfxBackend::Gpu);
+    REQUIRE(depthProgram.Valid);
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(depthDefinition)}));
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    REQUIRE(snapshot.GpuEmitters().front().Execution);
+    const auto collision =
+        std::ranges::find(snapshot.GpuEmitters().front().Execution->ParticleOperations,
+                          Keire::VfxGpuParticleOperationKind::Collision, &Keire::VfxGpuParticleOperation::Kind);
+    REQUIRE(collision != snapshot.GpuEmitters().front().Execution->ParticleOperations.end());
+    CHECK(collision->Setting == static_cast<std::uint32_t>(Keire::VfxCollisionMode::GpuDepth));
+
+    constexpr std::array modes{Keire::VfxCollisionMode::Cpu, Keire::VfxCollisionMode::ScenePhysics};
     for (const auto mode : modes)
     {
         auto definition = Keire::VfxEffectAsset::DefaultDefinition();
         const auto block =
             AppendModule(definition, Keire::VfxContextType::Update, Keire::VfxCollisionModule{mode, 0.5F, false});
 
-        CheckGpuError(definition, block, "collision mode must be None");
+        CheckGpuError(definition, block, "None or GPU Depth collision");
     }
 }
 
@@ -273,17 +338,32 @@ TEST_CASE("GPU VFX sums multiple scheduled emission-rate Blocks")
     CHECK(snapshot.GpuEmitters().front().SpawnSequence == 5);
 }
 
-TEST_CASE("GPU VFX rejects duplicate per-particle Blocks that share one fixed payload slot")
+TEST_CASE("GPU VFX executes duplicate per-particle Blocks through ordered operation payloads")
 {
     auto definition = Keire::VfxEffectAsset::DefaultDefinition();
     AppendModule(definition, Keire::VfxContextType::Update, Keire::VfxForceModule{{1.0F, 0.0F, 0.0F}, 0.0F});
-    const auto duplicate =
-        AppendModule(definition, Keire::VfxContextType::Update, Keire::VfxForceModule{{0.0F, 1.0F, 0.0F}, 0.0F});
+    AppendModule(definition, Keire::VfxContextType::Update, Keire::VfxForceModule{{0.0F, 1.0F, 0.0F}, 0.0F});
 
-    CheckGpuError(definition, duplicate, "one Force Block");
+    const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(program.Valid);
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    world->Update(0.1F);
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    REQUIRE(snapshot.GpuEmitters().front().Execution);
+    const auto& execution = *snapshot.GpuEmitters().front().Execution;
+    CHECK(std::ranges::count(execution.ParticleOperations, Keire::VfxGpuParticleOperationKind::Force,
+                             &Keire::VfxGpuParticleOperation::Kind) == 2);
+    for (const auto& operation : execution.ParticleOperations)
+    {
+        if (operation.Kind == Keire::VfxGpuParticleOperationKind::Force)
+            CHECK(operation.PropertyCount == 2);
+    }
 }
 
-TEST_CASE("GPU VFX rejects unavailable renderer configurations at the Output Block")
+TEST_CASE("GPU VFX publishes resource-backed Sprite and Mesh output metadata")
 {
     SUBCASE("Mesh output")
     {
@@ -291,11 +371,21 @@ TEST_CASE("GPU VFX rejects unavailable renderer configurations at the Output Blo
         auto& renderer = Payload<Keire::VfxRendererModule>(definition);
         renderer.Type = Keire::VfxRendererType::Mesh;
         renderer.Mesh = Keire::AssetId::Generate();
+        renderer.Material = Keire::AssetId::Generate();
         const auto rendererId = ModuleId<Keire::VfxRendererModule>(definition);
         BlockPin(definition, rendererId, "mesh").DefaultValue = renderer.Mesh;
-        const auto block = ExecutionNode(definition, rendererId);
-
-        CheckGpuError(definition, block, "supports Sprite output only");
+        BlockPin(definition, rendererId, "material").DefaultValue = renderer.Material;
+        const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        REQUIRE(program.Valid);
+        auto world = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
+            .MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+        REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+        world->Update(0.1F);
+        const auto snapshot = world->CaptureRenderSnapshot();
+        REQUIRE(snapshot.GpuEmitters().size() == 1);
+        CHECK(snapshot.GpuEmitters().front().Renderer == Keire::VfxRendererType::Mesh);
+        CHECK(snapshot.GpuEmitters().front().Mesh == renderer.Mesh);
+        CHECK(snapshot.GpuEmitters().front().Material == renderer.Material);
     }
 
     SUBCASE("Custom Sprite texture")
@@ -305,9 +395,16 @@ TEST_CASE("GPU VFX rejects unavailable renderer configurations at the Output Blo
         renderer.Sprite = Keire::AssetId::Generate();
         const auto rendererId = ModuleId<Keire::VfxRendererModule>(definition);
         BlockPin(definition, rendererId, "sprite").DefaultValue = renderer.Sprite;
-        const auto block = ExecutionNode(definition, rendererId);
-
-        CheckGpuError(definition, block, "does not support a custom texture");
+        const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        REQUIRE(program.Valid);
+        auto world = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
+            .MaximumEffects = 1, .MaximumParticles = 32, .Backend = Keire::VfxBackend::Gpu});
+        REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+        world->Update(0.1F);
+        const auto snapshot = world->CaptureRenderSnapshot();
+        REQUIRE(snapshot.GpuEmitters().size() == 1);
+        CHECK(snapshot.GpuEmitters().front().Renderer == Keire::VfxRendererType::Sprite);
+        CHECK(snapshot.GpuEmitters().front().Sprite == renderer.Sprite);
     }
 }
 
@@ -347,7 +444,7 @@ TEST_CASE("Portable Custom HLSL uses dynamic GPU records and reports its compile
     }
 }
 
-TEST_CASE("CPU VFX rejects renderer inputs its built-in output cannot consume")
+TEST_CASE("CPU VFX accepts resource-backed Sprite output")
 {
     SUBCASE("Schema-4 custom Sprite")
     {
@@ -357,7 +454,8 @@ TEST_CASE("CPU VFX rejects renderer inputs its built-in output cannot consume")
         const auto rendererId = ModuleId<Keire::VfxRendererModule>(definition);
         BlockPin(definition, rendererId, "sprite").DefaultValue = renderer.Sprite;
 
-        CheckCpuError(definition, ExecutionNode(definition, rendererId), "does not yet sample a custom texture");
+        const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+        CHECK(program.Valid);
     }
 
     SUBCASE("Legacy custom Sprite remains loadable with a warning")
@@ -368,13 +466,8 @@ TEST_CASE("CPU VFX rejects renderer inputs its built-in output cannot consume")
 
         const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
         CHECK(program.Valid);
-        CHECK(std::ranges::any_of(program.Diagnostics,
-                                  [](const Keire::VfxCompileDiagnostic& diagnostic)
-                                  {
-                                      return diagnostic.Severity == Keire::VfxCompileDiagnosticSeverity::Warning &&
-                                             diagnostic.Message.find("does not yet sample a custom texture") !=
-                                                 std::string::npos;
-                                  }));
+        CHECK_FALSE(std::ranges::any_of(program.Diagnostics, [](const Keire::VfxCompileDiagnostic& diagnostic)
+                                        { return diagnostic.Message.find("custom texture") != std::string::npos; }));
     }
 }
 
@@ -421,26 +514,38 @@ TEST_CASE("live VFX overrides transactionally revalidate backend capabilities")
     auto& output = Context(definition, Keire::VfxContextType::Output);
     const auto renderer = std::ranges::find(output.Blocks, rendererId, &Keire::VfxGraphBlock::Reference);
     REQUIRE(renderer != output.Blocks.end());
-    const auto sprite = std::ranges::find(renderer->Pins, std::string("sprite"), &Keire::VfxGraphPin::Semantic);
-    REQUIRE(sprite != renderer->Pins.end());
+    const auto spritePin = std::ranges::find(renderer->Pins, std::string("sprite"), &Keire::VfxGraphPin::Semantic);
+    REQUIRE(spritePin != renderer->Pins.end());
     Keire::VfxGraphConnection connection;
     connection.Id = Keire::AssetId::Generate();
     connection.OutputNode = parameterNodeId;
     connection.OutputPin = parameterPinId;
     connection.InputNode = output.Id;
     connection.InputBlock = renderer->Id;
-    connection.InputPin = sprite->Id;
+    connection.InputPin = spritePin->Id;
     definition.Systems.front().Connections.push_back(connection);
 
     const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(definition);
-    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
-    {
-        auto world = Keire::CreateRef<Keire::VfxWorld>(
-            Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = backend});
-        const auto handle = world->Activate({effect});
-        REQUIRE(handle);
-        CHECK_THROWS_WITH_AS(world->SetParameter(handle, parameterId, Keire::AssetId::Generate()),
-                             doctest::Contains("custom texture"), std::invalid_argument);
-        CHECK(world->IsAlive(handle));
-    }
+    auto cpuWorld = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Cpu});
+    const auto cpuHandle = cpuWorld->Activate({effect});
+    REQUIRE(cpuHandle);
+    const auto cpuSpriteAsset = Keire::AssetId::Generate();
+    CHECK_NOTHROW(cpuWorld->SetParameter(cpuHandle, parameterId, cpuSpriteAsset));
+    cpuWorld->Update(0.1F);
+    const auto cpuSnapshot = cpuWorld->CaptureRenderSnapshot();
+    REQUIRE_FALSE(cpuSnapshot.Particles().empty());
+    CHECK(cpuSnapshot.Particles().front().Sprite == cpuSpriteAsset);
+    CHECK(cpuWorld->IsAlive(cpuHandle));
+
+    auto gpuWorld = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Gpu});
+    const auto gpuHandle = gpuWorld->Activate({effect});
+    REQUIRE(gpuHandle);
+    const auto spriteAsset = Keire::AssetId::Generate();
+    CHECK_NOTHROW(gpuWorld->SetParameter(gpuHandle, parameterId, spriteAsset));
+    gpuWorld->Update(0.1F);
+    const auto snapshot = gpuWorld->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    CHECK(snapshot.GpuEmitters().front().Sprite == spriteAsset);
 }

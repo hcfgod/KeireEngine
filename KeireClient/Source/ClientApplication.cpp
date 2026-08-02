@@ -359,6 +359,9 @@ namespace Keire
             commandLine.SmokeWindow || commandLine.SmokeUi ? SceneMode::Disabled : SceneMode::Enabled;
         specification.Input.Mode =
             commandLine.SmokeWindow || commandLine.SmokeUi ? InputMode::Disabled : InputMode::Enabled;
+        // The editor creates and owns one explicit input user. Automatic joining can consume the fixed keyboard and
+        // mouse devices before that user is paired, leaving Play Mode with a valid action context that always reads 0.
+        specification.Input.AutoJoin = false;
         if (!commandLine.SmokeWindow && !commandLine.SmokeUi)
         {
             specification.Profiling.Mode = ProfilerMode::Enabled;

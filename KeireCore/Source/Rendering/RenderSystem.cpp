@@ -168,6 +168,12 @@ namespace Keire
     }
 
     void RenderSystem::Submit(SceneRenderRequest request) { m_Impl->State->Submit(std::move(request)); }
+    void RenderSystem::RequestGpuVfxPipelineWarmup()
+    {
+        m_Impl->State->RequireOwner("RequestGpuVfxPipelineWarmup");
+        if (m_Impl->State->Specification.Mode == RenderMode::Rendered)
+            m_Impl->State->StartGpuVfxPipelineWarmup();
+    }
     RenderMode RenderSystem::Mode() const noexcept { return m_Impl->State->Specification.Mode; }
     RenderCapabilities RenderSystem::Capabilities() const noexcept
     {
@@ -181,7 +187,16 @@ namespace Keire
                 .SampledResolvedDepth = rendered && m_Impl->State->ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_INVALID,
                 .GpuDepthCollision = false};
     }
-    RenderStatistics RenderSystem::Statistics() const noexcept { return m_Impl->State->Statistics; }
+    RenderStatistics RenderSystem::Statistics() const noexcept
+    {
+        auto result = m_Impl->State->Statistics;
+        const auto warmup = m_Impl->State->VfxPipelineWarmupState.load(std::memory_order_acquire);
+        result.VfxPipelineWarmupPending = warmup == RenderBackend::GpuVfxPipelineWarmupState::Compiling;
+        result.VfxPipelinesReady = warmup == RenderBackend::GpuVfxPipelineWarmupState::Ready;
+        result.VfxPipelineWarmupMilliseconds =
+            static_cast<float>(m_Impl->State->VfxPipelineWarmupMicroseconds.load(std::memory_order_relaxed)) / 1000.0F;
+        return result;
+    }
     bool RenderSystem::IsOpen() const noexcept { return m_Impl->State->Open; }
     void RenderSystem::Close() noexcept { m_Impl->State->Close(); }
 

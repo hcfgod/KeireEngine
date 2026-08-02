@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -106,9 +107,36 @@ TEST_CASE("GPU VFX sequencing distinguishes document snapshots from simulation s
     CHECK(resources.ShouldConsumeSimulationStep(2));
 }
 
+TEST_CASE("GPU VFX physical pools follow live system budgets without shrinking")
+{
+    using Keire::RenderBackend::GpuVfxActiveParticleBudget;
+    using Keire::RenderBackend::SelectGpuVfxPoolCapacity;
+
+    std::array<Keire::VfxGpuEmitter, 2> emitters;
+    emitters[0].Capacity = 4096;
+    emitters[1].Capacity = 3584;
+
+    CHECK(SelectGpuVfxPoolCapacity(1'000'000, 0, {}) == 0);
+    CHECK(GpuVfxActiveParticleBudget(1'000'000, emitters) == 7680);
+    CHECK(SelectGpuVfxPoolCapacity(1'000'000, 0, emitters) == 16'384);
+    CHECK(SelectGpuVfxPoolCapacity(32'768, 0, emitters) == 16'384);
+    CHECK(SelectGpuVfxPoolCapacity(8192, 0, emitters) == 8192);
+
+    emitters[0].Capacity = 60'000;
+    emitters[1].Capacity = 10'000;
+    CHECK(SelectGpuVfxPoolCapacity(1'000'000, 0, emitters) == 131'072);
+    CHECK(SelectGpuVfxPoolCapacity(1'000'000, 262'144, emitters) == 262'144);
+
+    emitters[0].Capacity = std::numeric_limits<std::uint32_t>::max();
+    emitters[1].Capacity = std::numeric_limits<std::uint32_t>::max();
+    CHECK(GpuVfxActiveParticleBudget(1'000'000, emitters) == 1'000'000);
+    CHECK(SelectGpuVfxPoolCapacity(1'000'000, 0, emitters) == 1'000'000);
+}
+
 TEST_CASE("GPU VFX execution wire records remain explicit 16-byte lanes")
 {
     using Keire::RenderBackend::VfxGpuCustomInstructionRecord;
+    using Keire::RenderBackend::VfxGpuModulePropertyRecord;
     using Keire::RenderBackend::VfxGpuParticleOperationRecord;
 
     CHECK(alignof(VfxGpuCustomInstructionRecord) == 16);
@@ -116,7 +144,13 @@ TEST_CASE("GPU VFX execution wire records remain explicit 16-byte lanes")
     CHECK(offsetof(VfxGpuCustomInstructionRecord, Metadata) == 0);
     CHECK(offsetof(VfxGpuCustomInstructionRecord, Operand) == 16);
     CHECK(alignof(VfxGpuParticleOperationRecord) == 16);
-    CHECK(sizeof(VfxGpuParticleOperationRecord) == 16);
+    CHECK(sizeof(VfxGpuParticleOperationRecord) == 32);
+    CHECK(offsetof(VfxGpuParticleOperationRecord, Metadata) == 0);
+    CHECK(offsetof(VfxGpuParticleOperationRecord, Payload) == 16);
+    CHECK(alignof(VfxGpuModulePropertyRecord) == 16);
+    CHECK(sizeof(VfxGpuModulePropertyRecord) == 48);
+    CHECK(offsetof(VfxGpuModulePropertyRecord, Metadata) == 0);
+    CHECK(offsetof(VfxGpuModulePropertyRecord, LiteralValue) == 16);
 }
 
 TEST_CASE("GPU VFX renderer validation accepts dynamic operation tables beyond the legacy cbuffer limits")
@@ -143,18 +177,59 @@ TEST_CASE("GPU VFX renderer validation accepts dynamic operation tables beyond t
 
 TEST_CASE("GPU VFX renderer validation accepts the production built-in context schedule")
 {
-    Keire::VfxGpuExecutionPayload payload;
-    payload.ParticleOperations = {
-        {Keire::VfxContextType::Initialize, Keire::VfxGpuParticleOperationKind::Shape, 0U},
-        {Keire::VfxContextType::Initialize, Keire::VfxGpuParticleOperationKind::Initialize, 0U},
-        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Force, 0U},
-        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Size, 0U},
-        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Color, 0U},
-        {Keire::VfxContextType::Update, Keire::VfxGpuParticleOperationKind::Collision, 0U},
-        {Keire::VfxContextType::Output, Keire::VfxGpuParticleOperationKind::Renderer, 0U},
-    };
+    const auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    auto world = Keire::CreateRef<Keire::VfxWorld>(
+        Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = Keire::VfxBackend::Gpu});
+    REQUIRE(world->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(definition)}));
+    world->Update(0.1F);
+    const auto snapshot = world->CaptureRenderSnapshot();
+    REQUIRE(snapshot.GpuEmitters().size() == 1);
+    REQUIRE(snapshot.GpuEmitters().front().Execution);
+    CHECK_FALSE(
+        Keire::RenderBackend::ValidateGpuVfxExecutionPayload(*snapshot.GpuEmitters().front().Execution).has_value());
+}
 
-    CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
+TEST_CASE("GPU VFX renderer validation accepts every packed Combine and Split vector signature")
+{
+    for (const auto type : {Keire::VfxValueType::Vector2, Keire::VfxValueType::Vector3, Keire::VfxValueType::Vector4,
+                            Keire::VfxValueType::Color})
+    {
+        const std::uint32_t componentCount = type == Keire::VfxValueType::Vector2   ? 2U
+                                             : type == Keire::VfxValueType::Vector3 ? 3U
+                                                                                    : 4U;
+        Keire::VfxGpuExecutionPayload payload;
+        payload.ValueProgram.RegisterCount = componentCount + 1U;
+        for (std::uint32_t component = 0; component < componentCount; ++component)
+        {
+            payload.ValueProgram.Constants.push_back(
+                {{{std::bit_cast<std::uint32_t>(static_cast<float>(component + 1U)), 0U, 0U, 0U}}, {}});
+            payload.ValueProgram.Sources.push_back({static_cast<std::uint32_t>(Keire::VfxGpuValueSourceKind::Literal),
+                                                    static_cast<std::uint32_t>(Keire::VfxValueType::Scalar), component,
+                                                    0U});
+        }
+
+        Keire::VfxGpuValueInstruction combine;
+        combine.Header = {static_cast<std::uint32_t>(Keire::VfxValueOpcode::Combine), static_cast<std::uint32_t>(type),
+                          static_cast<std::uint32_t>(Keire::VfxContextType::Update),
+                          static_cast<std::uint32_t>(Keire::VfxEvaluationDomain::PerParticleUpdate)};
+        combine.Output = {0U, 0U, 0U, componentCount};
+        payload.ValueProgram.Instructions.push_back(combine);
+
+        for (std::uint32_t component = 0; component < componentCount; ++component)
+        {
+            payload.ValueProgram.Sources.push_back({static_cast<std::uint32_t>(Keire::VfxGpuValueSourceKind::Register),
+                                                    static_cast<std::uint32_t>(type), 0U, 0U});
+            Keire::VfxGpuValueInstruction split;
+            split.Header = {static_cast<std::uint32_t>(Keire::VfxValueOpcode::Split),
+                            static_cast<std::uint32_t>(Keire::VfxValueType::Scalar),
+                            static_cast<std::uint32_t>(Keire::VfxContextType::Update),
+                            static_cast<std::uint32_t>(Keire::VfxEvaluationDomain::PerParticleUpdate)};
+            split.Output = {component + 1U, component, componentCount + component, 1U};
+            payload.ValueProgram.Instructions.push_back(split);
+        }
+
+        CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
+    }
 }
 
 TEST_CASE("GPU VFX renderer validation rejects malformed expression and Custom HLSL register references")

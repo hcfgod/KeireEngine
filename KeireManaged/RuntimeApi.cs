@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Keire;
 
 public enum LogLevel : byte
@@ -589,6 +591,12 @@ public readonly record struct VfxEmitterHandle(Entity Entity)
     public bool IsValid => Entity.IsValid && Entity.HasComponent<VfxEmitterComponent>();
     /// <summary>Whether the runtime entity currently owns a live native effect instance.</summary>
     public bool IsAlive => IsValid && NativeRuntime.IsVfxAlive(Entity);
+    /// <summary>Queues a named event for every matching system in this entity's live effect.</summary>
+    public bool SendEvent(string eventName, uint spawnCount = 1)
+    {
+        Vfx.ValidateEvent(eventName, spawnCount);
+        return IsValid && NativeRuntime.SendVfxEvent(Entity, eventName, spawnCount);
+    }
     /// <summary>Pauses this emitter by setting its runtime simulation speed to zero.</summary>
     public bool Pause() => IsValid && NativeRuntime.PauseVfx(Entity, true);
     /// <summary>Resumes this emitter at simulation speed 1.0.</summary>
@@ -634,6 +642,17 @@ public readonly record struct VfxEmitterHandle(Entity Entity)
 /// <summary>High-level Play Mode controls for entity-scoped VFX playback.</summary>
 public static class Vfx
 {
+    internal static bool ValidateEvent(string eventName, uint spawnCount)
+    {
+        if (string.IsNullOrWhiteSpace(eventName))
+            throw new ArgumentException("A VFX event name cannot be empty or whitespace.", nameof(eventName));
+        if (Encoding.UTF8.GetByteCount(eventName) > 256)
+            throw new ArgumentOutOfRangeException(nameof(eventName), "A VFX event name cannot exceed 256 UTF-8 bytes.");
+        if (spawnCount is 0 or > 1_000_000)
+            throw new ArgumentOutOfRangeException(nameof(spawnCount), "A VFX event spawn count must be in 1..1,000,000.");
+        return true;
+    }
+
     /// <summary>
     /// Assigns and requests playback of <paramref name="effect"/> on <paramref name="entity"/>.
     /// </summary>
@@ -665,6 +684,14 @@ public static class Vfx
     public static bool Resume(Entity entity) => entity.IsValid && NativeRuntime.PauseVfx(entity, false);
     /// <summary>Reports whether the entity currently owns a live native effect instance.</summary>
     public static bool IsAlive(Entity entity) => entity.IsValid && NativeRuntime.IsVfxAlive(entity);
+    /// <summary>Queues a named event for every matching system in an entity's live effect.</summary>
+    public static bool SendEvent(Entity entity, string eventName, uint spawnCount = 1)
+    {
+        if (!entity.IsValid)
+            throw new ArgumentException("VFX events require a valid entity.", nameof(entity));
+        ValidateEvent(eventName, spawnCount);
+        return NativeRuntime.SendVfxEvent(entity, eventName, spawnCount);
+    }
     /// <summary>Sets an exposed scalar-range Blackboard parameter on an entity's component and live effect.</summary>
     public static bool SetParameter(Entity entity, AssetId parameter,
                                     VfxRange<float> value) => new VfxEmitterHandle(entity).SetParameter(parameter,

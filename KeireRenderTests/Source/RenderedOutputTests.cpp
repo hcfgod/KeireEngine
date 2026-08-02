@@ -10,6 +10,7 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Vfx/VfxSystem.h"
+#include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/RenderInternal.h"
 
 #include <SDL3/SDL.h>
@@ -292,6 +293,109 @@ namespace
         return persisted;
     }
 
+    [[nodiscard]] Keire::Ref<Keire::VfxEffectAsset>
+    RenderedResourceOutputEffect(const Keire::VfxRendererType rendererType, const Keire::AssetId resource,
+                                 const Keire::AssetId material = {})
+    {
+        Keire::VfxRendererModule renderer;
+        renderer.Type = rendererType;
+        renderer.Material = material;
+        if (rendererType == Keire::VfxRendererType::Mesh)
+            renderer.Mesh = resource;
+        else
+            renderer.Sprite = resource;
+        Keire::VfxShapeModule shape;
+        if (rendererType == Keire::VfxRendererType::Ribbon)
+        {
+            shape.Shape = Keire::VfxShape::Box;
+            shape.BoxHalfExtent = {0.45F, 0.25F, 0.01F};
+        }
+
+        Keire::VfxEffectDefinition definition;
+        definition.EmitterId = RenderVfxId(rendererType == Keire::VfxRendererType::Mesh ? 300 : 400);
+        definition.Name = rendererType == Keire::VfxRendererType::Mesh         ? "GPU mesh output"
+                          : rendererType == Keire::VfxRendererType::Ribbon     ? "GPU ribbon output"
+                          : rendererType == Keire::VfxRendererType::Volumetric ? "GPU volumetric output"
+                                                                               : "Textured sprite output";
+        const auto animatedOutput =
+            rendererType == Keire::VfxRendererType::Ribbon || rendererType == Keire::VfxRendererType::Volumetric;
+        definition.Duration = animatedOutput ? 4.0F : 1.0F;
+        definition.Capacity = 4;
+        definition.Modules = {
+            {RenderVfxId(301), true,
+             Keire::VfxBurstModule{0.0F, rendererType == Keire::VfxRendererType::Ribbon ? 4U : 1U, 1, 0.1F}},
+            {RenderVfxId(302), true, std::move(shape)},
+            {RenderVfxId(303), true,
+             Keire::VfxInitializeModule{animatedOutput ? 4.0F : 1.0F, animatedOutput ? 4.0F : 1.0F, {}, {}, {}, {}}},
+            {RenderVfxId(304), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(1.4F)}},
+            {RenderVfxId(305), true,
+             Keire::VfxColorOverLifetimeModule{Keire::ColorGradient::Constant({1.0F, 1.0F, 1.0F, 1.0F})}},
+            {RenderVfxId(306), true, std::move(renderer)},
+        };
+        definition = Keire::ConvertVfxEffectToGraph(definition);
+        if (rendererType == Keire::VfxRendererType::Ribbon)
+        {
+            definition.Systems.front().DataType = Keire::VfxParticleDataType::ParticleStrip;
+            definition.Systems.front().ParticlesPerStrip = 4;
+        }
+        Keire::ValidateVfxEffect(definition);
+        return Keire::CreateRef<Keire::VfxEffectAsset>(std::move(definition));
+    }
+
+    [[nodiscard]] Keire::Ref<Keire::VfxEffectAsset> RenderedShapeSamplingEffect(const Keire::VfxShape shape,
+                                                                                const Keire::AssetId resource)
+    {
+        Keire::VfxShapeModule shapeModule;
+        shapeModule.Shape = shape;
+        if (shape == Keire::VfxShape::Mesh)
+            shapeModule.Mesh = resource;
+        else
+            shapeModule.Volume = resource;
+
+        Keire::VfxEffectDefinition definition;
+        definition.EmitterId = RenderVfxId(shape == Keire::VfxShape::Mesh ? 500 : 600);
+        definition.Name = shape == Keire::VfxShape::Mesh ? "GPU mesh spawn sampling" : "GPU volume spawn sampling";
+        definition.Duration = 1.0F;
+        definition.Capacity = 64;
+        definition.Modules = {
+            {RenderVfxId(501), true, Keire::VfxBurstModule{0.0F, 32, 1, 0.1F}},
+            {RenderVfxId(502), true, std::move(shapeModule)},
+            {RenderVfxId(503), true, Keire::VfxInitializeModule{1.0F, 1.0F, {}, {}, {}, {}}},
+            {RenderVfxId(504), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(0.12F)}},
+            {RenderVfxId(505), true,
+             Keire::VfxColorOverLifetimeModule{Keire::ColorGradient::Constant({1.0F, 0.3F, 0.05F, 1.0F})}},
+            {RenderVfxId(506), true, Keire::VfxRendererModule{}},
+        };
+        definition = Keire::ConvertVfxEffectToGraph(definition);
+        Keire::ValidateVfxEffect(definition);
+        return Keire::CreateRef<Keire::VfxEffectAsset>(std::move(definition));
+    }
+
+    [[nodiscard]] Keire::Ref<Keire::VfxEffectAsset> RenderedGpuDepthCollisionEffect(const bool enabled)
+    {
+        Keire::VfxEffectDefinition definition;
+        definition.EmitterId = RenderVfxId(700);
+        definition.Name = "GPU depth collision";
+        definition.Duration = 4.0F;
+        definition.Capacity = 4;
+        definition.Modules = {
+            {RenderVfxId(701), true, Keire::VfxBurstModule{0.0F, 1, 1, 0.1F}},
+            {RenderVfxId(702), true, Keire::VfxShapeModule{}},
+            {RenderVfxId(703), true,
+             Keire::VfxInitializeModule{4.0F, 4.0F, {0.0F, 0.0F, -1.5F}, {0.0F, 0.0F, -1.5F}, {}, {}}},
+            {RenderVfxId(704), true,
+             Keire::VfxCollisionModule{enabled ? Keire::VfxCollisionMode::GpuDepth : Keire::VfxCollisionMode::None,
+                                       0.0F, true}},
+            {RenderVfxId(705), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(0.2F)}},
+            {RenderVfxId(706), true,
+             Keire::VfxColorOverLifetimeModule{Keire::ColorGradient::Constant({1.0F, 0.0F, 0.0F, 1.0F})}},
+            {RenderVfxId(707), true, Keire::VfxRendererModule{}},
+        };
+        definition = Keire::ConvertVfxEffectToGraph(definition);
+        Keire::ValidateVfxEffect(definition);
+        return Keire::CreateRef<Keire::VfxEffectAsset>(std::move(definition));
+    }
+
     class RenderAssetFixture final
     {
       public:
@@ -327,6 +431,7 @@ namespace
             const auto meshImporter = Keire::CreateMeshAssetImporter();
             const auto shaderImporter = Keire::CreateShaderAssetImporter();
             const auto materialImporter = Keire::CreateMaterialAssetImporter();
+            const auto volumeImporter = Keire::CreateVfxVolumeAssetImporter();
             Keire::AssetImporterRegistration skinImporter;
             skinImporter.Name = "KeireTests.SkinnedMesh";
             skinImporter.Type = Keire::SkinnedMeshAsset::StaticType();
@@ -342,7 +447,7 @@ namespace
             Database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
                 .ProjectRoot = Root,
                 .Importers = std::vector<Keire::AssetImporterRegistration>{
-                    meshImporter, shaderImporter, materialImporter, skinImporter, textureImporter}});
+                    meshImporter, shaderImporter, materialImporter, volumeImporter, skinImporter, textureImporter}});
             const std::array vertices{Keire::MeshVertex{{-0.9F, -0.8F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}},
                                       Keire::MeshVertex{{0.9F, -0.8F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}},
                                       Keire::MeshVertex{{0.0F, 0.9F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}}};
@@ -363,6 +468,11 @@ namespace
             const auto builtInCube = Keire::MeshAsset::Cube();
             CubeMesh = Database->CreateAsset("Cube.keiremesh", meshImporter,
                                              Keire::MeshAsset::Encode(builtInCube->Vertices(), builtInCube->Indices()));
+            Keire::VfxVolumeDefinition volumeDefinition;
+            volumeDefinition.Cells = {{{-0.9F, -0.25F, -0.05F}, {-0.55F, 0.25F, 0.05F}, 1.0F},
+                                      {{0.45F, -0.15F, -0.05F}, {0.65F, 0.15F, 0.05F}, 0.2F}};
+            Volume = Database->CreateAsset("Spawn.keirevfxvolume", volumeImporter,
+                                           Keire::VfxVolumeAsset::Encode(volumeDefinition));
 
             TexturePath = Root / "Assets/Green.texture";
             Texture = Database->CreateAsset("Green.texture", textureImporter, SolidTexture(0, 255, 0));
@@ -505,6 +615,7 @@ namespace
         std::filesystem::path ShaderSourcePath;
         Keire::Ref<Keire::AssetDatabase> Database;
         Keire::AssetId Mesh;
+        Keire::AssetId Volume;
         Keire::AssetId Skeleton;
         Keire::AssetId Skin;
         Keire::AssetId CubeMesh;
@@ -675,6 +786,7 @@ namespace
       protected:
         void OnAttach() override
         {
+            Owner().Renderer()->RequestGpuVfxPipelineWarmup();
             m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000014"),
                                                      Keire::SceneAsset::EmptyDefinition("GPU VFX graph tests"),
                                                      Keire::ComponentRegistry::CreateDefault());
@@ -711,6 +823,8 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            if (!Owner().Renderer()->Statistics().VfxPipelinesReady)
+                return;
             if (!m_Submitted)
             {
                 Submit();
@@ -783,6 +897,10 @@ namespace
             m_Results->Statistics.VfxIndirectDraws =
                 std::max(m_Results->Statistics.VfxIndirectDraws, statistics.VfxIndirectDraws);
             m_Results->Statistics.VfxGpuWorlds = std::max(m_Results->Statistics.VfxGpuWorlds, statistics.VfxGpuWorlds);
+            m_Results->Statistics.VfxPipelinesReady =
+                m_Results->Statistics.VfxPipelinesReady || statistics.VfxPipelinesReady;
+            m_Results->Statistics.VfxPipelineWarmupMilliseconds =
+                std::max(m_Results->Statistics.VfxPipelineWarmupMilliseconds, statistics.VfxPipelineWarmupMilliseconds);
             m_Results->HasStatistics = true;
         }
 
@@ -793,6 +911,118 @@ namespace
         Keire::RenderEnvironmentSettings m_Environment;
         Phase m_Phase = Phase::AfterForceSpawn;
         bool m_Submitted = false;
+    };
+
+    class VfxResourceOutputCaptureLayer final : public Keire::Layer
+    {
+      public:
+        VfxResourceOutputCaptureLayer(const Keire::VfxBackend backend, Keire::Ref<Keire::VfxEffectAsset> effect,
+                                      std::shared_ptr<VfxGraphCaptureResults> results,
+                                      const bool advanceSimulation = false, const Keire::AssetId collisionMesh = {},
+                                      const Keire::AssetId collisionMaterial = {},
+                                      const Keire::Vector3 emitterPosition = {})
+            : Layer("VFX resource output capture"), m_Backend(backend), m_Effect(std::move(effect)),
+              m_Results(std::move(results)), m_CollisionMesh(collisionMesh), m_CollisionMaterial(collisionMaterial),
+              m_EmitterPosition(emitterPosition), m_AdvanceSimulation(advanceSimulation)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("VFX resource output"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "VFX resource output";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.Depth = true;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {}, {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+            m_Environment.SkyVisible = false;
+            m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+            m_Environment.AmbientIntensity = 1.0F;
+            if (m_CollisionMesh)
+            {
+                auto collider = m_Scene->CreateEntity("GPU VFX depth collider");
+                m_CollisionTransform = collider.GetComponent<Keire::TransformComponent>();
+                auto renderer = collider.AddComponent<Keire::MeshRendererComponent>();
+                renderer->SetMesh(m_CollisionMesh);
+                renderer->SetMaterial(m_CollisionMaterial);
+            }
+
+            const auto compiled = Keire::CompileVfxEffect(m_Effect->Definition(), m_Backend);
+            if (!compiled.Valid)
+                throw std::logic_error("Rendered VFX resource output did not compile for its requested backend.");
+            const auto maximumParticles = std::max<std::uint32_t>(4U, m_Effect->Definition().Capacity);
+            m_World = Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{
+                .MaximumEffects = 1, .MaximumParticles = maximumParticles, .Backend = m_Backend});
+            const auto handle = m_World->Activate({m_Effect});
+            if (!handle)
+                throw std::logic_error("Could not activate the rendered VFX resource output.");
+            m_World->SetTransform(handle, m_EmitterPosition, {});
+            m_World->Update(0.01F);
+        }
+
+        void OnDetach() noexcept override
+        {
+            m_World.Reset();
+            m_Effect.Reset();
+            m_CollisionTransform.Reset();
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (!m_Submitted)
+            {
+                Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+                m_Submitted = true;
+                return;
+            }
+            m_Results->Frames.push_back(
+                Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
+            const auto statistics = Owner().Renderer()->Statistics();
+            m_Results->Statistics.VfxIndirectDraws =
+                std::max(m_Results->Statistics.VfxIndirectDraws, statistics.VfxIndirectDraws);
+            m_Results->Statistics.VfxGpuWorlds = std::max(m_Results->Statistics.VfxGpuWorlds, statistics.VfxGpuWorlds);
+            m_Results->HasStatistics = true;
+            if (m_Results->Frames.size() >= 60)
+            {
+                Owner().RequestExit();
+                return;
+            }
+            if (m_AdvanceSimulation)
+                m_World->Update(1.0F / 60.0F);
+            if (m_CollisionTransform && m_Results->Frames.size() == 35)
+                m_CollisionTransform->SetLocalPosition({3.0F, 0.0F, 0.0F});
+            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment, m_World->CaptureRenderSnapshot()});
+        }
+
+      private:
+        Keire::VfxBackend m_Backend;
+        Keire::Ref<Keire::VfxEffectAsset> m_Effect;
+        std::shared_ptr<VfxGraphCaptureResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::VfxWorld> m_World;
+        Keire::Ref<Keire::TransformComponent> m_CollisionTransform;
+        Keire::RenderEnvironmentSettings m_Environment;
+        Keire::AssetId m_CollisionMesh;
+        Keire::AssetId m_CollisionMaterial;
+        Keire::Vector3 m_EmitterPosition;
+        bool m_Submitted = false;
+        bool m_AdvanceSimulation = false;
     };
 
     class CloseAfterSubmitLayer final : public Keire::Layer
@@ -1861,6 +2091,175 @@ TEST_CASE("schema-4 Block order Blackboard overrides and Portable HLSL drive ren
 
     REQUIRE(results->HasStatistics);
     CHECK(results->Statistics.VfxGpuWorlds > 0);
+    CHECK(results->Statistics.VfxPipelinesReady);
+    CHECK(results->Statistics.VfxPipelineWarmupMilliseconds > 0.0F);
+}
+
+TEST_CASE("CPU textured Sprite and GPU Mesh VFX outputs survive render readback")
+{
+    RenderAssetFixture assets;
+
+    SUBCASE("CPU textured Sprite")
+    {
+        const auto results = std::make_shared<VfxGraphCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
+                Keire::VfxBackend::Cpu, RenderedResourceOutputEffect(Keire::VfxRendererType::Sprite, assets.Texture),
+                results));
+            REQUIRE(application.Run() == 0);
+        }
+
+        REQUIRE(results->Frames.size() == 60);
+        float greenDominance = 0.0F;
+        for (const auto& frame : results->Frames)
+        {
+            const auto green = MeasureChannelSignal(frame, 1);
+            const auto red = MeasureChannelSignal(frame, 0);
+            greenDominance = std::max(greenDominance, green.Weight - red.Weight);
+        }
+        CHECK(greenDominance > 10.0F);
+    }
+
+    SUBCASE("GPU Mesh")
+    {
+        const auto results = std::make_shared<VfxGraphCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
+                Keire::VfxBackend::Gpu,
+                RenderedResourceOutputEffect(Keire::VfxRendererType::Mesh, assets.Mesh, assets.Material), results));
+            REQUIRE(application.Run() == 0);
+        }
+
+        REQUIRE(results->Frames.size() == 60);
+        float greenDominance = 0.0F;
+        for (const auto& frame : results->Frames)
+        {
+            const auto green = MeasureChannelSignal(frame, 1);
+            const auto red = MeasureChannelSignal(frame, 0);
+            greenDominance = std::max(greenDominance, green.Weight - red.Weight);
+        }
+        CHECK(greenDominance > 10.0F);
+    }
+}
+
+TEST_CASE("CPU and GPU Ribbon and Volumetric VFX outputs survive render readback")
+{
+    RenderAssetFixture assets;
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+    {
+        for (const auto renderer : {Keire::VfxRendererType::Ribbon, Keire::VfxRendererType::Volumetric})
+        {
+            CAPTURE(backend);
+            CAPTURE(renderer);
+            const auto results = std::make_shared<VfxGraphCaptureResults>();
+            auto specification = RenderTestSpecification();
+            specification.Assets.Mode = Keire::AssetMode::Development;
+            specification.Assets.DevelopmentCatalog = assets.Catalog;
+            {
+                Keire::Application application(std::move(specification));
+                (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
+                    backend, RenderedResourceOutputEffect(renderer, {}, assets.Material), results, true));
+                REQUIRE(application.Run() == 0);
+            }
+
+            REQUIRE(results->Frames.size() == 60);
+            float maximumLuminance = 0.0F;
+            float maximumGreenDominance = 0.0F;
+            for (const auto& frame : results->Frames)
+            {
+                maximumLuminance = std::max(maximumLuminance, MeasureCenter(frame).Luminance());
+                maximumGreenDominance = std::max(maximumGreenDominance, MeasureChannelSignal(frame, 1).Weight -
+                                                                            MeasureChannelSignal(frame, 0).Weight);
+            }
+            CHECK(maximumLuminance > MinimumShadowDepthDelta);
+            CHECK(maximumGreenDominance > 10.0F);
+            REQUIRE(results->HasStatistics);
+            if (backend == Keire::VfxBackend::Gpu)
+                CHECK(results->Statistics.VfxGpuWorlds > 0);
+        }
+    }
+}
+
+TEST_CASE("GPU Mesh and Volume spawn shapes survive weighted-sampling render readback")
+{
+    RenderAssetFixture assets;
+    for (const auto shape : {Keire::VfxShape::Mesh, Keire::VfxShape::Volume})
+    {
+        CAPTURE(shape);
+        const auto results = std::make_shared<VfxGraphCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        const auto resource = shape == Keire::VfxShape::Mesh ? assets.Mesh : assets.Volume;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
+                Keire::VfxBackend::Gpu, RenderedShapeSamplingEffect(shape, resource), results));
+            REQUIRE(application.Run() == 0);
+        }
+
+        REQUIRE(results->Frames.size() == 60);
+        VfxChannelSignal strongestRed;
+        for (const auto& frame : results->Frames)
+        {
+            const auto red = MeasureChannelSignal(frame, 0);
+            if (red.Weight > strongestRed.Weight)
+                strongestRed = red;
+        }
+        CHECK(strongestRed.Weight > 3.0F);
+        if (shape == Keire::VfxShape::Volume)
+            CHECK(strongestRed.CentroidX() < static_cast<float>(SurfaceSize) * 0.5F);
+        REQUIRE(results->HasStatistics);
+        CHECK(results->Statistics.VfxGpuWorlds > 0);
+    }
+}
+
+TEST_CASE("GPU depth collision kills particles against sampled scene geometry")
+{
+    RenderAssetFixture assets;
+    std::array<float, 2> lateRed{};
+    for (const bool collisionEnabled : {false, true})
+    {
+        CAPTURE(collisionEnabled);
+        const auto results = std::make_shared<VfxGraphCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<VfxResourceOutputCaptureLayer>(
+                Keire::VfxBackend::Gpu, RenderedGpuDepthCollisionEffect(collisionEnabled), results, true, assets.Mesh,
+                assets.Material, Keire::Vector3{0.0F, 0.0F, 0.75F}));
+            REQUIRE(application.Run() == 0);
+        }
+
+        REQUIRE(results->Frames.size() == 60);
+        float earlyRed = 0.0F;
+        for (std::size_t index = 0; index < results->Frames.size(); ++index)
+        {
+            const auto red = MeasureChannelSignal(results->Frames[index], 0);
+            const auto green = MeasureChannelSignal(results->Frames[index], 1);
+            const auto dominance = std::max(0.0F, red.Weight - green.Weight);
+            if (index < 20)
+                earlyRed = std::max(earlyRed, dominance);
+            if (index >= 45)
+            {
+                const auto resultIndex = collisionEnabled ? 1U : 0U;
+                lateRed[resultIndex] = std::max(lateRed[resultIndex], dominance);
+            }
+        }
+        CHECK(earlyRed > 3.0F);
+    }
+    CHECK(lateRed[0] > 3.0F);
+    CHECK(lateRed[1] < lateRed[0] * 0.2F);
 }
 
 TEST_CASE("submitted scene data remains valid when the scene closes before end frame")

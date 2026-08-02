@@ -536,7 +536,23 @@ void EditorWorkspaceLayer::BeginPlayMode()
     {
         const auto project = Owner().GetProject();
         if (project && project->Descriptor().DefaultInput)
-            m_GameplayInputContext = input->CreateActionContext(project->Descriptor().DefaultInput, m_EditorInputUser);
+        {
+            try
+            {
+                m_GameplayInputContext =
+                    input->CreateActionContext(project->Descriptor().DefaultInput, m_EditorInputUser);
+                if (!m_GameplayInputContext || !m_GameplayInputContext->EnableMap("Player"))
+                    throw std::runtime_error("The default input action asset does not contain a Player action map.");
+                m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture("Player"));
+            }
+            catch (const std::exception& error)
+            {
+                m_ManagedInputCaptureOverride.reset();
+                m_GameplayInputContext.Reset();
+                ReportError("Play Mode Input", error.what());
+                return;
+            }
+        }
     }
     m_PlayEditorTouchedEntities.clear();
     m_PlayChangeTracker = std::make_unique<KeireEditor::ScenePlayChangeTracker>();
@@ -549,6 +565,7 @@ void EditorWorkspaceLayer::BeginPlayMode()
     m_PlayFaultReported = false;
     m_ActiveUndoContext = m_SceneDocument->History();
     m_GameViewportInputActive = false;
+    m_GameViewportCaptureSuspended = false;
     m_Game.RequestFocus();
 }
 
@@ -595,6 +612,7 @@ void EditorWorkspaceLayer::FinishPlayMode(const bool apply)
         m_GameplayInputContext.Reset();
         m_ManagedCursorLocked = false;
         m_ManagedCursorVisible = true;
+        m_GameViewportCaptureSuspended = false;
         ApplyManagedCursorMode();
         if (applied)
         {
@@ -1036,8 +1054,12 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         Keire::Ref<Keire::ScenePresentationRuntime> presentation;
         const auto playSession = m_SceneDocument->PlaySession();
         const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
-        SetGameViewportInputActive(
-            KeireEditor::GameViewportOwnsRuntimeInput(playActive, ui.WindowFocused(), imageState.Hovered));
+        if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed)
+            m_GameViewportCaptureSuspended = false;
+        const auto mainWindow = Owner().MainWindow();
+        SetGameViewportInputActive(KeireEditor::GameViewportOwnsRuntimeInput(
+            playActive, mainWindow && mainWindow->Focused(), ui.WindowFocused(), imageState.Hovered,
+            m_GameViewportInputActive, m_ManagedCursorLocked, m_GameViewportCaptureSuspended));
         if (playActive)
         {
             playSession->SetPresentationViewport(size.Width, size.Height);

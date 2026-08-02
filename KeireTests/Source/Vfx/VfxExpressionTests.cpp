@@ -12,6 +12,7 @@
 #include <limits>
 #include <numeric>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -363,7 +364,7 @@ TEST_CASE("schema-4 VFX catalog exposes canonical executable Range and math Oper
         CHECK_FALSE(descriptor.Category.empty());
         if (descriptor.SupportTier == Keire::VfxNodeSupportTier::Disabled)
             CHECK_FALSE(descriptor.DisabledReason.empty());
-        else
+        else if (descriptor.Class == Keire::VfxNodeClass::Operator)
             CHECK(descriptor.Lowering.has_value());
     }
 
@@ -371,7 +372,7 @@ TEST_CASE("schema-4 VFX catalog exposes canonical executable Range and math Oper
     REQUIRE(randomRange != nullptr);
     CHECK(randomRange->Label == "Random Range");
     CHECK(randomRange->SupportTier == Keire::VfxNodeSupportTier::KeireEquivalent);
-    CHECK(randomRange->BackendTier == Keire::VfxNodeBackendTier::CpuOnly);
+    CHECK(randomRange->BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu);
 
     const auto node = Keire::CreateVfxGraphOperatorNode(randomRange->TypeId.View());
     CHECK(node.Kind == Keire::VfxGraphNodeKind::Operator);
@@ -380,44 +381,24 @@ TEST_CASE("schema-4 VFX catalog exposes canonical executable Range and math Oper
     CHECK(node.Properties.size() == randomRange->Settings.size());
     CHECK_THROWS_AS(static_cast<void>(Keire::CreateVfxGraphOperatorNode("keire.operator.not-real")),
                     std::invalid_argument);
+
+    const auto* eventContext = Keire::FindVfxNodeDescriptor("keire.context.event");
+    REQUIRE(eventContext != nullptr);
+    CHECK(eventContext->Class == Keire::VfxNodeClass::Context);
+    CHECK(eventContext->BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu);
+    CHECK_FALSE(eventContext->Lowering.has_value());
+
+    const auto* output = Keire::FindVfxNodeDescriptor("keire.output.renderer");
+    REQUIRE(output != nullptr);
+    CHECK(output->Class == Keire::VfxNodeClass::Output);
+    CHECK(output->Pins.size() == 3);
 }
 
-TEST_CASE("catalog promotes only differential-validated packed value Operators to CPU and GPU")
+TEST_CASE("every executable packed value Operator is available on CPU and GPU")
 {
     static_assert(static_cast<std::uint8_t>(Keire::VfxValueOpcode::Sign) == 56);
-    const std::set<std::string_view> expectedCpuOnly{
-        "keire.operator.delta-time",
-        "keire.operator.integer-to-float",
-        "keire.operator.lerp",
-        "keire.operator.lifetime",
-        "keire.operator.particle-id",
-        "keire.operator.power",
-        "keire.operator.random",
-        "keire.operator.random-boolean",
-        "keire.operator.random-color",
-        "keire.operator.random-color-range",
-        "keire.operator.random-integer",
-        "keire.operator.random-integer-range",
-        "keire.operator.random-range",
-        "keire.operator.random-unsigned-integer",
-        "keire.operator.random-unsigned-integer-range",
-        "keire.operator.random-vector2",
-        "keire.operator.random-vector2-range",
-        "keire.operator.random-vector3",
-        "keire.operator.random-vector3-range",
-        "keire.operator.random-vector4",
-        "keire.operator.random-vector4-range",
-        "keire.operator.sawtooth-wave",
-        "keire.operator.sine-wave",
-        "keire.operator.spawn-index",
-        "keire.operator.square-wave",
-        "keire.operator.triangle-wave",
-        "keire.operator.unsigned-integer-to-float",
-    };
-    std::set<std::string_view> actualCpuOnly;
     std::size_t executableCount = 0;
     std::size_t gpuInterpretedCount = 0;
-    REQUIRE(expectedCpuOnly.size() == 27);
     for (const auto& descriptor : Keire::VfxNodeCatalog())
     {
         const auto executable = descriptor.Class == Keire::VfxNodeClass::Operator && descriptor.Lowering &&
@@ -432,21 +413,14 @@ TEST_CASE("catalog promotes only differential-validated packed value Operators t
         const auto typesSupported = std::ranges::all_of(descriptor.Pins, [](const Keire::VfxNodePinDescriptor& pin)
                                                         { return Keire::IsVfxGpuExpressionValueType(pin.Type); });
         CAPTURE(descriptor.TypeId.Value);
-        if (opcodeSupported && typesSupported && !expectedCpuOnly.contains(descriptor.TypeId.View()))
-        {
-            ++gpuInterpretedCount;
-            CHECK(descriptor.BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu);
-        }
-        else
-        {
-            actualCpuOnly.insert(descriptor.TypeId.View());
-            CHECK(descriptor.BackendTier == Keire::VfxNodeBackendTier::CpuOnly);
-        }
+        REQUIRE(opcodeSupported);
+        REQUIRE(typesSupported);
+        ++gpuInterpretedCount;
+        CHECK(descriptor.BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu);
     }
 
     CHECK(executableCount > 0);
-    CHECK(gpuInterpretedCount + actualCpuOnly.size() == executableCount);
-    CHECK(actualCpuOnly == expectedCpuOnly);
+    CHECK(gpuInterpretedCount == executableCount);
 }
 
 TEST_CASE("schema-4 VFX resident bytes include nested graph and typed-value storage")
@@ -496,7 +470,7 @@ TEST_CASE("schema-4 VFX resident bytes include nested graph and typed-value stor
     }
 }
 
-TEST_CASE("Range and Random Range lower once for fan-out and execute per spawn on CPU")
+TEST_CASE("Range and Random Range lower once for fan-out and execute per spawn on CPU and GPU")
 {
     const auto definition = RandomRangeLifetimeEffect();
     const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
@@ -512,9 +486,9 @@ TEST_CASE("Range and Random Range lower once for fan-out and execute per spawn o
     CHECK(program.Bindings[0].ValueRegister == program.Bindings[1].ValueRegister);
 
     const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
-    CHECK_FALSE(gpu.Valid);
-    REQUIRE_FALSE(gpu.Diagnostics.empty());
-    CHECK(gpu.Diagnostics.front().Node == program.ValueInstructions.front().Node);
+    REQUIRE(gpu.Valid);
+    REQUIRE(gpu.ValueInstructions.size() == 1);
+    CHECK(gpu.ValueInstructions.front().Domain == Keire::VfxEvaluationDomain::PerSpawn);
 
     auto world =
         Keire::CreateRef<Keire::VfxWorld>(Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16});
@@ -529,7 +503,7 @@ TEST_CASE("Range and Random Range lower once for fan-out and execute per spawn o
     CHECK(snapshot.Effects[handle.Index()].ActiveParticles == 2);
 }
 
-TEST_CASE("GPU host-hoists per-frame value programs and rejects particle-domain programs")
+TEST_CASE("GPU operation payloads consume per-frame and particle-domain value programs")
 {
     auto definition = Keire::VfxEffectAsset::DefaultDefinition();
     definition.Loop = true;
@@ -558,8 +532,13 @@ TEST_CASE("GPU host-hoists per-frame value programs and rejects particle-domain 
     world->Update(0.25F);
     const auto snapshot = world->CaptureRenderSnapshot();
     REQUIRE(snapshot.GpuEmitters().size() == 1);
-    CHECK(snapshot.GpuEmitters().front().SizeStart == doctest::Approx(0.25F));
-    CHECK(snapshot.GpuEmitters().front().SizeEnd == doctest::Approx(0.25F));
+    REQUIRE(snapshot.GpuEmitters().front().Execution);
+    CHECK(std::ranges::any_of(snapshot.GpuEmitters().front().Execution->ModuleProperties,
+                              [](const Keire::VfxGpuModuleProperty& property)
+                              {
+                                  return property.Property == Keire::VfxModuleProperty::SizeConstant &&
+                                         property.Source == Keire::VfxGpuModulePropertySource::Register;
+                              }));
 
     auto particleDefinition = Keire::VfxEffectAsset::DefaultDefinition();
     auto age = Keire::CreateVfxGraphOperatorNode("keire.operator.age", {-360.0F, 120.0F});
@@ -574,10 +553,11 @@ TEST_CASE("GPU host-hoists per-frame value programs and rejects particle-domain 
     REQUIRE(particleSize != particleUpdate.Blocks.end());
     Connect(particleSystem, ageNode, "out", particleUpdate, *particleSize, "size");
 
-    const auto rejected = Keire::CompileVfxEffect(particleDefinition, Keire::VfxBackend::Gpu);
-    CHECK_FALSE(rejected.Valid);
-    REQUIRE_FALSE(rejected.Diagnostics.empty());
-    CHECK(rejected.Diagnostics.front().Node == ageNode.Id);
+    const auto particleProgram = Keire::CompileVfxEffect(particleDefinition, Keire::VfxBackend::Gpu);
+    REQUIRE(particleProgram.Valid);
+    REQUIRE(particleProgram.ValueInstructions.size() == 1);
+    CHECK(particleProgram.ValueInstructions.front().Node == ageNode.Id);
+    CHECK(particleProgram.ValueInstructions.front().Domain == Keire::VfxEvaluationDomain::PerParticleUpdate);
 }
 
 TEST_CASE("schema-4 Context Blocks, rather than free-flow Module nodes, drive particle execution")
@@ -824,7 +804,7 @@ TEST_CASE("schema-4 catalog exposes scalar equivalents for the complete Unity Wa
         CHECK(descriptor->Class == Keire::VfxNodeClass::Operator);
         CHECK(descriptor->TypeBehavior == Keire::VfxNodeTypeBehavior::Fixed);
         CHECK(descriptor->SupportTier == Keire::VfxNodeSupportTier::KeireEquivalent);
-        CHECK(descriptor->BackendTier == Keire::VfxNodeBackendTier::CpuOnly);
+        CHECK(descriptor->BackendTier == Keire::VfxNodeBackendTier::CpuAndGpu);
         REQUIRE(descriptor->Lowering.has_value());
         CHECK(*descriptor->Lowering == Keire::VfxValueOpcode::Lerp);
         REQUIRE(descriptor->Pins.size() == 5);
@@ -914,10 +894,7 @@ TEST_CASE("Wave recipes lower to reusable host-uniform primitive instructions")
         CHECK(cpu.ValueInstructions[index].Node == waveNode.Id);
     }
     const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
-    CHECK_FALSE(gpu.Valid);
-    CHECK(std::ranges::any_of(
-        gpu.Diagnostics, [node = waveNode.Id](const Keire::VfxCompileDiagnostic& diagnostic)
-        { return diagnostic.Node == node && diagnostic.Message.find("CPU-only") != std::string::npos; }));
+    CHECK(gpu.Valid);
     CHECK(gpu.ValueInstructions.size() == expectedOpcodes.size());
 
     auto world =
@@ -1037,6 +1014,77 @@ TEST_CASE("Vector Operators preserve multi-output identity and fold finite edge 
     CHECK(std::get<float>(*radius->LiteralValue) == doctest::Approx(2.0F));
     CHECK(std::get<float>(*coneLength->LiteralValue) == doctest::Approx(3.0F));
     CHECK((std::get<Keire::Vector3>(*velocityMinimum->LiteralValue) == Keire::Vector3{}));
+}
+
+TEST_CASE("Combine and Split Operators cover every packed vector and color type")
+{
+    const auto check = [](const std::string_view combineType, const std::string_view splitType,
+                          const std::span<const float> components, const std::string_view outputSemantic,
+                          const float expected)
+    {
+        auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+        auto combine = Keire::CreateVfxGraphOperatorNode(combineType, {-520.0F, 140.0F});
+        auto split = Keire::CreateVfxGraphOperatorNode(splitType, {-300.0F, 140.0F});
+        combine.Context = Keire::VfxContextType::Initialize;
+        split.Context = Keire::VfxContextType::Initialize;
+
+        std::size_t component = 0;
+        for (auto& pin : combine.Pins)
+        {
+            if (!pin.Input)
+                continue;
+            REQUIRE(component < components.size());
+            pin.DefaultValue = components[component++];
+        }
+        REQUIRE(component == components.size());
+
+        auto& system = definition.Systems.front();
+        system.Nodes.push_back(std::move(combine));
+        system.Nodes.push_back(std::move(split));
+        auto& combineNode = system.Nodes[system.Nodes.size() - 2];
+        auto& splitNode = system.Nodes.back();
+        Connect(system, combineNode, "out", splitNode, "input");
+
+        auto& initializeContext = ContextNode(definition, Keire::VfxContextType::Initialize);
+        const auto shape = std::ranges::find(initializeContext.Blocks, ModuleId(definition, Keire::VfxShapeModule{}),
+                                             &Keire::VfxGraphBlock::Reference);
+        REQUIRE(shape != initializeContext.Blocks.end());
+        Connect(system, splitNode, outputSemantic, initializeContext, *shape, "radius");
+
+        const auto cpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Cpu);
+        REQUIRE(cpu.Valid);
+        CHECK(cpu.ValueInstructions.empty());
+        const auto binding = std::ranges::find(cpu.Bindings, Keire::VfxModuleProperty::ShapeRadius,
+                                               &Keire::VfxCompiledBinding::Property);
+        REQUIRE(binding != cpu.Bindings.end());
+        REQUIRE(binding->LiteralValue.has_value());
+        CHECK(std::get<float>(*binding->LiteralValue) == doctest::Approx(expected));
+
+        const auto gpu = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+        REQUIRE(gpu.Valid);
+        CHECK(gpu.ValueInstructions.empty());
+    };
+
+    SUBCASE("Vector 2")
+    {
+        constexpr std::array values{2.0F, 7.0F};
+        check("keire.operator.combine-vector2", "keire.operator.split-vector2", values, "y", 7.0F);
+    }
+    SUBCASE("Vector 3")
+    {
+        constexpr std::array values{2.0F, 7.0F, 11.0F};
+        check("keire.operator.combine-vector3", "keire.operator.split-vector3", values, "z", 11.0F);
+    }
+    SUBCASE("Vector 4")
+    {
+        constexpr std::array values{2.0F, 7.0F, 11.0F, 13.0F};
+        check("keire.operator.combine-vector4", "keire.operator.split-vector4", values, "w", 13.0F);
+    }
+    SUBCASE("Color")
+    {
+        constexpr std::array values{0.1F, 0.2F, 0.3F, 0.4F};
+        check("keire.operator.combine-color", "keire.operator.split-color", values, "a", 0.4F);
+    }
 }
 
 TEST_CASE("Boolean casts and particle built-ins lower with explicit domains")
@@ -1470,15 +1518,18 @@ TEST_CASE("schema-4 validates disconnected Operators against their catalog descr
         CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(malformed),
                              "VFX Operator node does not match its catalog descriptor.", std::invalid_argument);
     }
-    SUBCASE("strip Random before strip systems exist")
+    SUBCASE("strip Random requires a Particle Strip system")
     {
         auto malformed = Keire::VfxEffectAsset::DefaultDefinition();
         auto random = Keire::CreateVfxGraphOperatorNode("keire.operator.random");
         Property(random, "Scope").Value = static_cast<std::uint64_t>(Keire::VfxRandomScope::PerParticleStrip);
         malformed.Systems.front().Nodes.push_back(std::move(random));
         CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(malformed),
-                             "VFX Random Per Particle Strip scope requires the particle-strip milestone.",
+                             "VFX Random Per Particle Strip scope requires a Particle Strip system.",
                              std::invalid_argument);
+        malformed.Systems.front().DataType = Keire::VfxParticleDataType::ParticleStrip;
+        malformed.Systems.front().ParticlesPerStrip = 8;
+        CHECK_NOTHROW(Keire::ValidateVfxEffect(malformed));
     }
 }
 

@@ -21,10 +21,22 @@ try {
         @{ Stage = "compute"; Entry = "CSKill"; Name = "Kill" },
         @{ Stage = "compute"; Entry = "CSTransform"; Name = "Transform" },
         @{ Stage = "compute"; Entry = "CSSimulate"; Name = "Simulate" },
+        @{ Stage = "compute"; Entry = "CSSimulateOutput"; Name = "SimulateOutput" },
         @{ Stage = "compute"; Entry = "CSSpawn"; Name = "Spawn" },
+        @{ Stage = "compute"; Entry = "CSSpawnInitialize"; Name = "SpawnInitialize" },
+        @{ Stage = "compute"; Entry = "CSSpawnOutput"; Name = "SpawnOutput" },
+        @{ Stage = "compute"; Entry = "CSMapStrips"; Name = "MapStrips" },
+        @{ Stage = "compute"; Entry = "CSLinkStrips"; Name = "LinkStrips" },
         @{ Stage = "compute"; Entry = "CSFinalize"; Name = "Finalize" },
+        @{ Stage = "compute"; Entry = "CSResetRender"; Name = "ResetRender" },
+        @{ Stage = "compute"; Entry = "CSFilterRender"; Name = "FilterRender" },
         @{ Stage = "vertex"; Entry = "VSMain"; Name = "Vertex" },
-        @{ Stage = "fragment"; Entry = "PSMain"; Name = "Fragment" }
+        @{ Stage = "vertex"; Entry = "VSRibbon"; Name = "RibbonVertex" },
+        @{ Stage = "fragment"; Entry = "PSMain"; Name = "Fragment" },
+        @{ Stage = "vertex"; Entry = "VSMesh"; Name = "MeshVertex" },
+        @{ Stage = "fragment"; Entry = "PSMesh"; Name = "MeshFragment" },
+        @{ Stage = "vertex"; Entry = "VSCpu"; Name = "CpuVertex" },
+        @{ Stage = "fragment"; Entry = "PSCpu"; Name = "CpuFragment" }
     )
     $variants = @(
         @{ Destination = "DXIL"; Name = "Dxil"; Extension = "dxil" },

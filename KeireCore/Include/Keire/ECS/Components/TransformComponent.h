@@ -8,12 +8,16 @@ namespace Keire
     class KEIRE_API TransformComponent final : public Component
     {
       public:
+        static constexpr float MinimumScaleMagnitude = 0.000001F;
+
         TransformComponent();
 
         [[nodiscard]] static constexpr ComponentTypeId StaticType() noexcept
         {
             return ComponentTypeId(AssetId(0x4b45495245545241ULL, 0x4e53464f524d0001ULL));
         }
+
+        [[nodiscard]] static bool IsValidLocalScale(Vector3 value) noexcept;
 
         [[nodiscard]] Vector3 LocalPosition() const noexcept { return m_LocalPosition; }
         [[nodiscard]] Quaternion LocalRotation() const noexcept { return m_LocalRotation; }

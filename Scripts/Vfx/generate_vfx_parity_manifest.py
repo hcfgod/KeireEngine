@@ -92,9 +92,36 @@ KEIRE_IMPLEMENTATIONS = {
     "Round": "keire.operator.round",
     "Total Time": "keire.operator.time",
     "Triangle Wave": "keire.operator.triangle-wave",
+    "Context|Event": "keire.context.event",
+    "Context|Initialize": "keire.context.initialize",
+    "Context|Spawn": "keire.context.spawn",
+    "Context|Update": "keire.context.update",
+    "Collide with Depth Buffer": "keire.block.collision",
+    "Set Position (Mesh)": "keire.block.shape",
+    "Output Particle Line": "keire.output.renderer",
+    "Output Particle Mesh": "keire.output.renderer",
+    "Output Particle Primitive": "keire.output.renderer",
+    "Output ShaderGraph Mesh": "keire.output.renderer",
+}
+
+KEIRE_ENABLED_EQUIVALENTS = {
+    "keire.block.collision",
+    "keire.block.shape",
+    "keire.context.event",
+    "keire.context.initialize",
+    "keire.context.spawn",
+    "keire.context.update",
+    "keire.output.renderer",
 }
 
 KEIRE_TESTS = {
+    "keire.block.collision": ["KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp"],
+    "keire.block.shape": ["KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp"],
+    "keire.context.event": ["KeireTests/Source/Vfx/VfxTests.cpp"],
+    "keire.context.initialize": ["KeireTests/Source/Vfx/VfxTests.cpp"],
+    "keire.context.spawn": ["KeireTests/Source/Vfx/VfxTests.cpp"],
+    "keire.context.update": ["KeireTests/Source/Vfx/VfxTests.cpp"],
+    "keire.output.renderer": ["KeireTests/Source/Vfx/VfxTests.cpp"],
     "keire.operator.absolute": ["KeireTests/Source/Vfx/VfxExpressionTests.cpp"],
     "keire.operator.acos": ["KeireTests/Source/Vfx/VfxExpressionTests.cpp"],
     "keire.operator.asin": ["KeireTests/Source/Vfx/VfxExpressionTests.cpp"],
@@ -483,7 +510,8 @@ def make_entries(package_root: Path, documents: list[Path]) -> list[dict[str, An
             label = label_from_path(menu_path, heading, len(paths))
             category = category_from_path(menu_path, kind)
             implementation = keire_implementation(category, label, heading)
-            backend = backend_tier(kind, label, category)
+            backend = "CPU and GPU" if implementation in KEIRE_ENABLED_EQUIVALENTS else backend_tier(kind, label, category)
+            support = "KÃ©ire Equivalent" if implementation in KEIRE_ENABLED_EQUIVALENTS else "Disabled"
             entries.append(
                 {
                     "id": entry_id(kind, document, label, len(paths)),
@@ -498,12 +526,12 @@ def make_entries(package_root: Path, documents: list[Path]) -> list[dict[str, An
                         "implementations": [f"{PACKAGE_PATH.as_posix()}/{source}" for source in sources],
                     },
                     "keire": {
-                        "support": "Disabled",
+                        "support": support,
                         "implementation": implementation,
                         "backendTier": backend,
                         "tests": KEIRE_TESTS.get(implementation, []) if implementation else [],
                         "documentation": ["docs/Vfx.md"] if implementation else [],
-                        "disabledReason": disabled_reason(kind, implementation, backend),
+                        "disabledReason": None if support != "Disabled" else disabled_reason(kind, implementation, backend),
                     },
                 }
             )

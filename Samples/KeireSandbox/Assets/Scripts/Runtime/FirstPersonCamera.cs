@@ -73,9 +73,6 @@ public sealed class FirstPersonCamera : Behaviour
     private float _jumpBufferRemaining;
 
     [HotReloadState]
-    private bool _escapeWasDown;
-
-    [HotReloadState]
     private bool _captureEnabled = true;
 
     private IDisposable? _cursorCapture;
@@ -120,10 +117,8 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void Update()
     {
-        bool escapeDown = Input.Button("Escape");
-        if (!_uiVisible && !Cursor.VisibilityRequested && escapeDown && !_escapeWasDown)
+        if (!_uiVisible && !Cursor.VisibilityRequested && Input.Pressed("Escape"))
             SetCaptureEnabled(!_captureEnabled);
-        _escapeWasDown = escapeDown;
 
         float deltaTime = Time.DeltaTime;
         if (deltaTime <= 0.0f || !_motorEntity.IsValid)

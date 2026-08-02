@@ -47,23 +47,7 @@ namespace Keire
 
         [[nodiscard]] constexpr bool HasValidatedGpuSemantics(const VfxValueOpcode opcode) noexcept
         {
-            switch (opcode)
-            {
-            case VfxValueOpcode::Random:
-            case VfxValueOpcode::RandomRange:
-            case VfxValueOpcode::DeltaTime:
-            case VfxValueOpcode::Lifetime:
-            case VfxValueOpcode::ParticleId:
-            case VfxValueOpcode::SpawnIndex:
-            case VfxValueOpcode::ToFloat:
-            case VfxValueOpcode::Power:
-            case VfxValueOpcode::Lerp:
-                // These opcodes are structurally available in the shader interpreter, but exact CPU/GPU identity,
-                // edge-case, or conversion parity still requires differential acceptance coverage.
-                return false;
-            default:
-                return true;
-            }
+            return opcode <= VfxValueOpcode::Sign;
         }
 
         [[nodiscard]] bool IsGpuInterpretedOperator(const VfxNodeDescriptor& descriptor) noexcept
@@ -88,6 +72,33 @@ namespace Keire
         [[nodiscard]] VfxNodePinDescriptor Output(std::string name, std::string semantic, const VfxValueType type)
         {
             return {std::move(name), std::move(semantic), type, false, std::nullopt, {type}};
+        }
+
+        [[nodiscard]] VfxNodePinDescriptor ParticleStream(const bool input)
+        {
+            return {input ? "In" : "Out",          "particleStream", VfxValueType::ParticleStream, input, std::nullopt,
+                    {VfxValueType::ParticleStream}};
+        }
+
+        [[nodiscard]] VfxNodeDescriptor Structural(std::string id, std::string label, std::string category,
+                                                   const VfxNodeClass nodeClass, std::vector<VfxContextType> contexts,
+                                                   std::vector<VfxNodePinDescriptor> pins,
+                                                   std::vector<VfxNodeSettingDescriptor> settings = {},
+                                                   const VfxNodeSupportTier support = VfxNodeSupportTier::Supported)
+        {
+            VfxNodeDescriptor descriptor{{std::move(id)},
+                                         std::move(label),
+                                         std::move(category),
+                                         {},
+                                         nodeClass,
+                                         VfxNodeTypeBehavior::Fixed,
+                                         support,
+                                         {},
+                                         std::move(contexts),
+                                         std::move(pins),
+                                         std::move(settings)};
+            descriptor.BackendTier = VfxNodeBackendTier::CpuAndGpu;
+            return descriptor;
         }
 
         [[nodiscard]] VfxNodeDescriptor ScalarBinary(std::string id, std::string label, const VfxValueOpcode opcode,
@@ -255,7 +266,68 @@ namespace Keire
         [[nodiscard]] std::vector<VfxNodeDescriptor> BuildCatalog()
         {
             std::vector<VfxNodeDescriptor> result;
-            result.reserve(96);
+            result.reserve(112);
+            result.push_back(Structural("keire.block.burst", "Burst", "Block/Spawn", VfxNodeClass::Block,
+                                        {VfxContextType::Spawn},
+                                        {Input("Time", "time", VfxValueType::Scalar, 0.0F),
+                                         Input("Count", "count", VfxValueType::Integer, std::int64_t{32}),
+                                         Input("Cycles", "cycles", VfxValueType::Integer, std::int64_t{1}),
+                                         Input("Interval", "interval", VfxValueType::Scalar, 0.1F)}));
+            result.push_back(Structural("keire.block.collision", "Collision", "Block/Update", VfxNodeClass::Block,
+                                        {VfxContextType::Update},
+                                        {Input("Restitution", "restitution", VfxValueType::Scalar, 0.5F),
+                                         Input("Kill On Collision", "killOnCollision", VfxValueType::Boolean, false)},
+                                        {{"Mode", std::uint64_t{0}}}, VfxNodeSupportTier::KeireEquivalent));
+            result.push_back(Structural("keire.block.color-over-lifetime", "Color over Lifetime", "Block/Update",
+                                        VfxNodeClass::Block, {VfxContextType::Update},
+                                        {Input("Color", "color", VfxValueType::Color, Color{})}));
+            result.push_back(
+                Structural("keire.block.emission-rate", "Emission Rate", "Block/Spawn", VfxNodeClass::Block,
+                           {VfxContextType::Spawn},
+                           {Input("Particles Per Second", "particlesPerSecond", VfxValueType::Scalar, 10.0F)}));
+            result.push_back(
+                Structural("keire.block.force", "Force", "Block/Update", VfxNodeClass::Block, {VfxContextType::Update},
+                           {Input("Force", "force", VfxValueType::Vector3, Vector3{}),
+                            Input("Gravity Multiplier", "gravityMultiplier", VfxValueType::Scalar, 0.0F)}));
+            result.push_back(
+                Structural("keire.block.initialize", "Initialize", "Block/Initialize", VfxNodeClass::Block,
+                           {VfxContextType::Initialize},
+                           {Input("Lifetime Minimum", "lifetimeMinimum", VfxValueType::Scalar, 1.0F),
+                            Input("Lifetime Maximum", "lifetimeMaximum", VfxValueType::Scalar, 1.0F),
+                            Input("Velocity Minimum", "velocityMinimum", VfxValueType::Vector3, Vector3{}),
+                            Input("Velocity Maximum", "velocityMaximum", VfxValueType::Vector3, Vector3{}),
+                            Input("Rotation Minimum", "rotationMinimum", VfxValueType::Vector3, Vector3{}),
+                            Input("Rotation Maximum", "rotationMaximum", VfxValueType::Vector3, Vector3{})}));
+            result.push_back(Structural("keire.block.portable-hlsl", "Portable Custom HLSL", "Block/Custom",
+                                        VfxNodeClass::Block, {VfxContextType::Initialize, VfxContextType::Update}, {},
+                                        {{"Source", std::string{}}}, VfxNodeSupportTier::KeireEquivalent));
+            result.push_back(Structural(
+                "keire.block.shape", "Shape", "Block/Initialize", VfxNodeClass::Block, {VfxContextType::Initialize},
+                {Input("Box Half Extent", "boxHalfExtent", VfxValueType::Vector3, Vector3{0.5F, 0.5F, 0.5F}),
+                 Input("Radius", "radius", VfxValueType::Scalar, 0.5F),
+                 Input("Cone Angle", "coneAngleDegrees", VfxValueType::Scalar, 25.0F),
+                 Input("Cone Length", "coneLength", VfxValueType::Scalar, 1.0F),
+                 Input("Mesh", "mesh", VfxValueType::Mesh, AssetId{}),
+                 Input("Volume", "volume", VfxValueType::Asset, AssetId{})},
+                {{"Shape", std::uint64_t{0}}}, VfxNodeSupportTier::KeireEquivalent));
+            result.push_back(Structural("keire.block.size-over-lifetime", "Size over Lifetime", "Block/Update",
+                                        VfxNodeClass::Block, {VfxContextType::Update},
+                                        {Input("Size", "size", VfxValueType::Scalar, 1.0F)}));
+            result.push_back(Structural("keire.context.event", "Event", "Context", VfxNodeClass::Context,
+                                        {VfxContextType::Event}, {ParticleStream(false)},
+                                        {{"Event Name", std::string("OnPlay")}}, VfxNodeSupportTier::KeireEquivalent));
+            result.push_back(Structural("keire.context.initialize", "Initialize", "Context", VfxNodeClass::Context,
+                                        {VfxContextType::Initialize}, {ParticleStream(true), ParticleStream(false)},
+                                        {{"Data Type", std::uint64_t{0}}, {"Particles Per Strip", std::uint64_t{32}}},
+                                        VfxNodeSupportTier::KeireEquivalent));
+            result.push_back(Structural("keire.context.output", "Output", "Context", VfxNodeClass::Context,
+                                        {VfxContextType::Output}, {ParticleStream(true)}));
+            result.push_back(Structural("keire.context.spawn", "Spawn", "Context", VfxNodeClass::Context,
+                                        {VfxContextType::Spawn}, {ParticleStream(false)}, {},
+                                        VfxNodeSupportTier::KeireEquivalent));
+            result.push_back(Structural("keire.context.update", "Update", "Context", VfxNodeClass::Context,
+                                        {VfxContextType::Update}, {ParticleStream(true), ParticleStream(false)}, {},
+                                        VfxNodeSupportTier::KeireEquivalent));
             result.push_back({{"keire.operator.range"},
                               "Range",
                               "Operator/Random",
@@ -605,16 +677,50 @@ namespace Keire
                 {Input("Input", "input", VfxValueType::Boolean, false), Output("Out", "out", VfxValueType::Boolean)},
                 VfxValueOpcode::BooleanNot, {"boolean not", "!"}));
 
+            result.push_back(
+                FixedOperator("keire.operator.combine-vector2", "Combine Vector 2", "Operator/Math/Vector",
+                              {Input("X", "x", VfxValueType::Scalar, 0.0F), Input("Y", "y", VfxValueType::Scalar, 0.0F),
+                               Output("Out", "out", VfxValueType::Vector2)},
+                              VfxValueOpcode::Combine, {"construct vector2", "make float2", "compose vector 2"}));
             result.push_back(FixedOperator(
                 "keire.operator.combine-vector3", "Combine", "Operator/Math/Vector",
                 {Input("X", "x", VfxValueType::Scalar, 0.0F), Input("Y", "y", VfxValueType::Scalar, 0.0F),
                  Input("Z", "z", VfxValueType::Scalar, 0.0F), Output("Out", "out", VfxValueType::Vector3)},
-                VfxValueOpcode::Combine, {"construct vector", "make vector3"}));
+                VfxValueOpcode::Combine, {"construct vector", "make vector3", "make float3", "combine vector 3"}));
+            result.push_back(
+                FixedOperator("keire.operator.combine-vector4", "Combine Vector 4", "Operator/Math/Vector",
+                              {Input("X", "x", VfxValueType::Scalar, 0.0F), Input("Y", "y", VfxValueType::Scalar, 0.0F),
+                               Input("Z", "z", VfxValueType::Scalar, 0.0F), Input("W", "w", VfxValueType::Scalar, 0.0F),
+                               Output("Out", "out", VfxValueType::Vector4)},
+                              VfxValueOpcode::Combine, {"construct vector4", "make float4", "compose vector 4"}));
+            result.push_back(
+                FixedOperator("keire.operator.combine-color", "Combine Color", "Operator/Math/Vector",
+                              {Input("R", "r", VfxValueType::Scalar, 0.0F), Input("G", "g", VfxValueType::Scalar, 0.0F),
+                               Input("B", "b", VfxValueType::Scalar, 0.0F), Input("A", "a", VfxValueType::Scalar, 1.0F),
+                               Output("Color", "out", VfxValueType::Color)},
+                              VfxValueOpcode::Combine, {"construct color", "rgba", "make color"}));
+            result.push_back(
+                FixedOperator("keire.operator.split-vector2", "Split Vector 2", "Operator/Math/Vector",
+                              {Input("Input", "input", VfxValueType::Vector2, Vector2{}),
+                               Output("X", "x", VfxValueType::Scalar), Output("Y", "y", VfxValueType::Scalar)},
+                              VfxValueOpcode::Split, {"break vector2", "float2 components", "decompose vector 2"}));
             result.push_back(FixedOperator(
                 "keire.operator.split-vector3", "Split", "Operator/Math/Vector",
                 {Input("Input", "input", VfxValueType::Vector3, Vector3{}), Output("X", "x", VfxValueType::Scalar),
                  Output("Y", "y", VfxValueType::Scalar), Output("Z", "z", VfxValueType::Scalar)},
-                VfxValueOpcode::Split, {"break vector", "components"}));
+                VfxValueOpcode::Split, {"break vector", "components", "split vector3", "float3 components"}));
+            result.push_back(
+                FixedOperator("keire.operator.split-vector4", "Split Vector 4", "Operator/Math/Vector",
+                              {Input("Input", "input", VfxValueType::Vector4, Vector4{}),
+                               Output("X", "x", VfxValueType::Scalar), Output("Y", "y", VfxValueType::Scalar),
+                               Output("Z", "z", VfxValueType::Scalar), Output("W", "w", VfxValueType::Scalar)},
+                              VfxValueOpcode::Split, {"break vector4", "float4 components", "decompose vector 4"}));
+            result.push_back(
+                FixedOperator("keire.operator.split-color", "Split Color", "Operator/Math/Vector",
+                              {Input("Color", "input", VfxValueType::Color, Color{}),
+                               Output("R", "r", VfxValueType::Scalar), Output("G", "g", VfxValueType::Scalar),
+                               Output("B", "b", VfxValueType::Scalar), Output("A", "a", VfxValueType::Scalar)},
+                              VfxValueOpcode::Split, {"rgba components", "break color", "decompose color"}));
             result.push_back(FixedOperator("keire.operator.dot-product", "Dot Product", "Operator/Math/Vector",
                                            {Input("A", "a", VfxValueType::Vector3, Vector3{}),
                                             Input("B", "b", VfxValueType::Vector3, Vector3{}),
@@ -670,15 +776,23 @@ namespace Keire
             result.push_back(BuiltIn("keire.operator.spawn-index", "Spawn Index", VfxValueType::UnsignedInteger,
                                      VfxValueOpcode::SpawnIndex, ValueContexts(), {"spawn id", "spawn count"}));
 
+            result.push_back(Structural("keire.output.renderer", "Particle Output", "Output", VfxNodeClass::Output,
+                                        {VfxContextType::Output},
+                                        {Input("Texture", "sprite", VfxValueType::Texture, AssetId{}),
+                                         Input("Mesh", "mesh", VfxValueType::Mesh, AssetId{}),
+                                         Input("Material", "material", VfxValueType::Asset, AssetId{})},
+                                        {{"Renderer", std::uint64_t{0}}}, VfxNodeSupportTier::KeireEquivalent));
+
             std::set<std::string> typeIds;
             for (auto& descriptor : result)
             {
                 if (IsGpuInterpretedOperator(descriptor))
                     descriptor.BackendTier = VfxNodeBackendTier::CpuAndGpu;
                 if (!ValidTypeId(descriptor.TypeId.View()) || !typeIds.insert(descriptor.TypeId.Value).second ||
-                    descriptor.Label.empty() || descriptor.Category.empty() || descriptor.Pins.empty() ||
+                    descriptor.Label.empty() || descriptor.Category.empty() ||
                     (descriptor.SupportTier == VfxNodeSupportTier::Disabled && descriptor.DisabledReason.empty()) ||
-                    (descriptor.SupportTier != VfxNodeSupportTier::Disabled && !descriptor.Lowering))
+                    (descriptor.Class == VfxNodeClass::Operator &&
+                     descriptor.SupportTier != VfxNodeSupportTier::Disabled && !descriptor.Lowering))
                 {
                     throw std::logic_error("The built-in VFX node catalog is invalid.");
                 }

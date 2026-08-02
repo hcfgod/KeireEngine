@@ -56,6 +56,21 @@
 #include <vector>
 namespace
 {
+    void RequireCompiledVfxSystems(const Keire::VfxEffectDefinition& definition, const Keire::VfxBackend backend)
+    {
+        const auto programs = Keire::CompileVfxEffectSystems(definition, backend);
+        if (programs.empty())
+            throw std::runtime_error("VFX preview compilation produced no systems.");
+        for (const auto& program : programs)
+        {
+            if (!program.Valid)
+            {
+                throw std::runtime_error(program.Diagnostics.empty() ? "VFX preview compilation failed."
+                                                                     : program.Diagnostics.front().Message);
+            }
+        }
+    }
+
     [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
     {
         std::ifstream input(path, std::ios::binary);
@@ -2300,12 +2315,7 @@ void EditorWorkspaceLayer::RestartVfxEffectPreview()
 {
     if (!m_VfxEffectDocument || !m_VfxEffectDocument->IsOpen() || !m_VfxEffectDocument->Publishable())
         return;
-    const auto compiled = Keire::CompileVfxEffect(m_VfxEffectDocument->Definition(), m_VfxEffectPreviewBackend);
-    if (!compiled.Valid)
-    {
-        throw std::runtime_error(compiled.Diagnostics.empty() ? "VFX preview compilation failed."
-                                                              : compiled.Diagnostics.front().Message);
-    }
+    RequireCompiledVfxSystems(m_VfxEffectDocument->Definition(), m_VfxEffectPreviewBackend);
     const auto paused = m_VfxEffectPreviewPaused;
     const auto autoRestart = m_VfxEffectPreviewAutoRestart;
     const auto speed = m_VfxEffectPreviewSpeed;
@@ -2362,12 +2372,7 @@ void EditorWorkspaceLayer::SetVfxEffectPreviewBackend(const Keire::VfxBackend ba
     {
         if (!m_VfxEffectDocument->Publishable())
             throw std::logic_error("Repair the VFX graph before changing the preview backend.");
-        const auto compiled = Keire::CompileVfxEffect(m_VfxEffectDocument->Definition(), backend);
-        if (!compiled.Valid)
-        {
-            throw std::runtime_error(compiled.Diagnostics.empty() ? "VFX preview compilation failed."
-                                                                  : compiled.Diagnostics.front().Message);
-        }
+        RequireCompiledVfxSystems(m_VfxEffectDocument->Definition(), backend);
     }
     m_VfxEffectPreviewBackend = backend;
     ResetEditorVfxPreviewWorld();
@@ -2421,10 +2426,7 @@ void EditorWorkspaceLayer::PreviewVfxEffect(const Keire::AssetId asset, const Ke
 {
     try
     {
-        const auto compiled = Keire::CompileVfxEffect(definition, m_VfxEffectPreviewBackend);
-        if (!compiled.Valid)
-            throw std::runtime_error(compiled.Diagnostics.empty() ? "VFX preview compilation failed."
-                                                                  : compiled.Diagnostics.front().Message);
+        RequireCompiledVfxSystems(definition, m_VfxEffectPreviewBackend);
         const auto effect = Keire::CreateRef<Keire::VfxEffectAsset>(definition);
         const auto capacity = static_cast<std::uint32_t>(std::clamp<std::size_t>(definition.Capacity, 1U, 1'000'000U));
         const bool sameAsset = m_VfxEffectPreviewAsset == asset;

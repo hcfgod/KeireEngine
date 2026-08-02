@@ -59,6 +59,7 @@
 #include "Keire/UiWorkspace.h"
 #include "Keire/Undo.h"
 #include "Keire/Vfx/VfxSystem.h"
+#include "Keire/Vfx/VfxVolumeAsset.h"
 #include "Keire/Window.h"
 #include "Keire/WindowConfig.h"
 

@@ -154,6 +154,8 @@ namespace Keire
         [[nodiscard]] bool PauseVfx(EntityId entity, bool paused);
         /// Reports whether the runtime entity currently owns a live native VfxHandle.
         [[nodiscard]] bool IsVfxAlive(EntityId entity) const noexcept;
+        /// Queues a bounded named event for every matching system owned by this entity's live effect instance.
+        [[nodiscard]] bool SendVfxEvent(EntityId entity, std::string_view eventName, std::uint32_t spawnCount = 1);
         /// Atomically updates an exposed Blackboard override on the runtime component and its live native VFX handle.
         /// Returns false without changing either side when the entity, handle, parameter, exposure, type, or range is
         /// incompatible.
