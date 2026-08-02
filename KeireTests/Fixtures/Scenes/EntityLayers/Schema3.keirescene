@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "name": "Entity Layer Schema 3",
+  "entities": [
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "parent": null,
+      "name": "Legacy Physics Layer",
+      "active": true,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+          }
+        },
+        {
+          "type": "4b454952-4543-4f4c-4c49-444552000001",
+          "version": 2,
+          "enabled": true,
+          "data": {
+            "layer": 512
+          }
+        }
+      ]
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": []
+}

@@ -37,6 +37,13 @@ Debug.Log($"{target.Name}: hierarchy active = {target.ActiveInHierarchy}");
 
 `Active` is the object's local setting. `ActiveInHierarchy` is read-only and also reflects inactive parents.
 
+`Layer` is a readable/writable unsigned index from 0 through 31. It is the same value shown in the Inspector entity
+header and drives the owning entity's physics collision layer. Invalid values throw before native scene state changes:
+
+```csharp
+Entity.Layer = 8;
+```
+
 ## Parent And Children
 
 ```csharp
@@ -136,8 +143,10 @@ Entity.RemoveComponent<AudioSourceComponent>();
 return whether removal succeeded. Do not remove a component while another part of the current callback assumes it
 exists.
 
-`RequireComponent` can describe a permanent type-level dependency, but the current native attachment path does not
-enforce that metadata. Validate the component in the script or ensure it through scene/prefab authoring.
+`RequireComponent` declares a permanent type-level dependency. Adding the dependent component adds missing
+dependencies first; removing a dependency is rejected while any attached component requires it. Duplicate,
+self-referential, unresolved, and cyclic dependency graphs fail managed registration without replacing the last-good
+registry.
 
 ## Accessing Managed Behaviours
 

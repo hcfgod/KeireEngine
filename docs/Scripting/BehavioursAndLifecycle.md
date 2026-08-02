@@ -18,7 +18,7 @@ tracks update callback availability, and isolates a failing instance rather than
 | `OnCollisionEnter/Stay/Exit()` | For ordered non-trigger physics contacts | Collision gameplay |
 | `OnTriggerEnter/Stay/Exit()` | For ordered trigger contacts | Volumes and detection |
 | `OnAnimationEvent()` | When an animation event crosses the playback cursor | Footsteps, effects, and gameplay markers |
-| `OnAnimatorIk()` | Reserved in the managed base class; not dispatched by the current runtime | Do not depend on it yet |
+| `OnAnimatorIk()` | After pose sampling and before IK goals are solved | Submit frame-specific named IK goals |
 | `OnBeforeReload()` | Before the active managed context is migrated | Release old-context subscriptions and requests |
 | `OnAfterReload()` | After a candidate instance is hydrated and activated | Rebind runtime-only relationships |
 
@@ -38,8 +38,8 @@ public CancellationToken LifetimeToken { get; }
 `Entity` is assigned before lifecycle callbacks begin. `Entity.Active` controls the scene object's local active state;
 `Entity.ActiveInHierarchy` also accounts for its parents.
 
-The current `Behaviour.Enabled` auto-property is not synchronized with the native component enabled state. Use a
-component handle when code must enable or disable a script:
+`Behaviour.Enabled` is synchronized with native component state. A component handle is an equivalent useful option
+when code does not already hold the behaviour instance:
 
 ```csharp
 ComponentHandle<PauseMenu> menu = Entity.GetComponentHandle<PauseMenu>();
@@ -102,17 +102,9 @@ public sealed class AmbientEmitter : Behaviour
 }
 ```
 
-Multiple attributes are allowed, and the component type must have a `StableComponentId`. The current native
-attachment path does not consume this metadata to add or reject missing components, so treat it as descriptive for now
-and still validate the dependency:
-
-```csharp
-protected override void Awake()
-{
-    if (!Entity.HasComponent<AudioSourceComponent>())
-        throw new InvalidOperationException("AmbientEmitter requires an Audio Source.");
-}
-```
+Multiple attributes are allowed, and the component type must have a stable component ID. Managed registration rejects
+duplicate, unresolved, self-referential, or cyclic requirements transactionally. Attachment adds missing dependencies
+before the requested component; removal is rejected until every dependent component has been removed.
 
 Built-in marker types are listed in the [Managed API Index](ApiIndex.md).
 
@@ -213,9 +205,8 @@ validate referenced entities after an `await`.
 
 See [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) for linked cancellation and failure patterns.
 
-`OnAnimatorIk` is present on `Behaviour` for the planned callback surface, but the current runtime does not dispatch
-it. Submit named IK goals from `Update`, `LateUpdate`, animation events, or another callback that is currently
-dispatched.
+`OnAnimatorIk` receives the current layer weight after the animator samples its pose and before named IK goals are
+solved. Use it for targets that must be refreshed against the sampled animation every frame.
 
 ## Exception Isolation
 

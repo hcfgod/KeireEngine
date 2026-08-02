@@ -287,6 +287,8 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetEntityActiveInHierarchyIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte, void> SetEntityActiveIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, uint> GetEntityLayerIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, uint, byte> SetEntityLayerIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, byte*, int, int> GetEntityNameIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> SetEntityNameIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong*, ulong*, byte> GetEntityParentIcall;
@@ -383,6 +385,16 @@ internal static unsafe class NativeRuntime
         GetEntityActiveInHierarchyIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
     internal static void SetEntityActive(Entity entity, bool active) =>
         SetEntityActiveIcall(entity.World, entity.Id.High, entity.Id.Low, active ? (byte)1 : (byte)0);
+
+    internal static uint GetEntityLayer(Entity entity) =>
+        GetEntityLayerIcall(entity.World, entity.Id.High, entity.Id.Low);
+
+    internal static void SetEntityLayer(Entity entity, uint layer)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(layer, 32U);
+        if (SetEntityLayerIcall(entity.World, entity.Id.High, entity.Id.Low, layer) == 0)
+            throw new InvalidOperationException("The entity layer could not be changed.");
+    }
 
     internal static string GetEntityName(Entity entity)
     {

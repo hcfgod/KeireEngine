@@ -84,6 +84,11 @@ def validate_top_level(manifest: dict[str, Any], errors: list[str]) -> None:
         errors,
     )
     require(
+        tooling.get("offlineReconciler") == "Scripts/Vfx/reconcile_vfx_manifest.py",
+        "tooling.offlineReconciler is invalid",
+        errors,
+    )
+    require(
         tooling.get("optionalUnityCatalogExporter") == "Scripts/Vfx/UnityVfxCatalogExporter.cs",
         "tooling.optionalUnityCatalogExporter is invalid",
         errors,
@@ -192,9 +197,12 @@ def validate_entry(
         require(reason is None, f"{location} enabled row must not have disabledReason", errors)
         require(runtime is not None, f"{location} enabled row needs a runtime implementation", errors)
         if runtime is not None:
-            require(RUNTIME_SUPPORT[runtime.support] == support,
-                    f"{location}.keire.support does not match runtime support {RUNTIME_SUPPORT[runtime.support]!r}",
-                    errors)
+            runtime_support = RUNTIME_SUPPORT[runtime.support]
+            require(
+                runtime_support == support or (support == "Kéire Equivalent" and runtime_support == "Supported"),
+                f"{location}.keire.support is incompatible with runtime support {runtime_support!r}",
+                errors,
+            )
             require(RUNTIME_BACKEND[runtime.backend] == keire.get("backendTier"),
                     f"{location}.keire.backendTier does not match runtime backend "
                     f"{RUNTIME_BACKEND[runtime.backend]!r}", errors)
@@ -214,6 +222,50 @@ def validate_counts(manifest: dict[str, Any], entries: list[dict[str, Any]], err
     actual["Disabled"] = sum(entry.get("keire", {}).get("support") == "Disabled" for entry in entries)
     actual["WithKeireImplementation"] = sum(bool(entry.get("keire", {}).get("implementation")) for entry in entries)
     require(manifest.get("counts") == actual, f"counts are stale; expected {actual}", errors)
+
+
+def validate_production_slices(manifest: dict[str, Any], entries: list[dict[str, Any]], errors: list[str]) -> None:
+    slices = manifest.get("productionSlices")
+    require(slices == generator.PRODUCTION_SLICES, "productionSlices drifted from the generator policy", errors)
+    if not isinstance(slices, list):
+        return
+
+    covered: set[str] = set()
+    for index, production_slice in enumerate(slices):
+        location = f"productionSlices[{index}]"
+        if not isinstance(production_slice, dict):
+            require(False, f"{location} must be an object", errors)
+            continue
+        implementations = production_slice.get("implementations")
+        require(
+            isinstance(implementations, list) and bool(implementations),
+            f"{location}.implementations must be a non-empty array",
+            errors,
+        )
+        if isinstance(implementations, list):
+            require(
+                implementations == sorted(set(implementations)),
+                f"{location}.implementations must be unique and sorted",
+                errors,
+            )
+            covered.update(value for value in implementations if isinstance(value, str))
+        for field in ("tests", "samples", "documentation"):
+            paths = production_slice.get(field)
+            require(isinstance(paths, list) and bool(paths), f"{location}.{field} must be non-empty", errors)
+            if isinstance(paths, list):
+                for path in paths:
+                    require(
+                        isinstance(path, str) and (REPOSITORY_ROOT / path).is_file(),
+                        f"{location}.{field} path does not exist: {path}",
+                        errors,
+                    )
+
+    enabled = {
+        entry.get("keire", {}).get("implementation")
+        for entry in entries
+        if entry.get("keire", {}).get("support") != "Disabled"
+    }
+    require(enabled == covered, "productionSlices do not cover every enabled manifest implementation", errors)
 
 
 def validate_source(manifest: dict[str, Any], entries: list[dict[str, Any]], root: Path, errors: list[str]) -> None:
@@ -274,6 +326,7 @@ def main() -> int:
     expected_order = sorted(entries, key=lambda entry: (entry["kind"], entry["unityCategory"], entry["unityLabel"], entry["id"]))
     require(entries == expected_order, "entries are not in canonical order", errors)
     validate_counts(manifest, entries, errors)
+    validate_production_slices(manifest, entries, errors)
     if options.unity_source:
         validate_source(manifest, entries, options.unity_source.resolve(), errors)
 

@@ -1074,6 +1074,7 @@ namespace Keire
             const Coral::Type* Type = nullptr;
             std::vector<ComponentProperty> Properties;
             std::vector<ComponentMethod> Methods;
+            std::vector<ComponentTypeId> RequiredComponents;
         };
 
         struct CallbackProfile final
@@ -1085,7 +1086,7 @@ namespace Keire
         };
 
         static constexpr std::size_t CallbackProfileCount =
-            static_cast<std::size_t>(ManagedBehaviourCallback::AfterReload) + 1;
+            static_cast<std::size_t>(ManagedBehaviourCallback::AnimatorIk) + 1;
 
         struct BehaviourInstance final
         {
@@ -1117,6 +1118,7 @@ namespace Keire
         static constexpr std::uint32_t FixedUpdateCallback = 1U << 0;
         static constexpr std::uint32_t UpdateCallback = 1U << 1;
         static constexpr std::uint32_t LateUpdateCallback = 1U << 2;
+        static constexpr std::uint32_t AnimatorIkCallback = 1U << 3;
 
         class RuntimeScope final
         {
@@ -2142,6 +2144,38 @@ namespace Keire
             }
         }
 
+        [[nodiscard]] static std::uint32_t RuntimeGetEntityLayer(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low) noexcept
+        {
+            try
+            {
+                const auto entity = ResolveRuntimeEntity(world, high, low);
+                return entity ? entity.Layer() : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] static std::uint8_t RuntimeSetEntityLayer(const std::uint64_t world, const std::uint64_t high,
+                                                                const std::uint64_t low,
+                                                                const std::uint32_t layer) noexcept
+        {
+            try
+            {
+                auto entity = ResolveRuntimeEntity(world, high, low);
+                if (!entity)
+                    return 0;
+                entity.SetLayer(layer);
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
         [[nodiscard]] static std::uint8_t RuntimeGetEntityActiveInHierarchy(const std::uint64_t world,
                                                                             const std::uint64_t high,
                                                                             const std::uint64_t low) noexcept
@@ -3023,7 +3057,9 @@ namespace Keire
             auto& callbackProfile = instance.CallbackProfiles[static_cast<std::size_t>(callback)];
             if ((callback == ManagedBehaviourCallback::FixedUpdate &&
                  (instance.CallbackMask & FixedUpdateCallback) == 0) ||
-                (callback == ManagedBehaviourCallback::LateUpdate && (instance.CallbackMask & LateUpdateCallback) == 0))
+                (callback == ManagedBehaviourCallback::LateUpdate &&
+                 (instance.CallbackMask & LateUpdateCallback) == 0) ||
+                (callback == ManagedBehaviourCallback::AnimatorIk && (instance.CallbackMask & AnimatorIkCallback) == 0))
             {
                 ++SkippedCallbacks;
                 ++callbackProfile.SkippedInvocations;
@@ -3071,6 +3107,9 @@ namespace Keire
                     break;
                 case ManagedBehaviourCallback::AfterReload:
                     Invoke(instance.Object, "RuntimeAfterReload");
+                    break;
+                case ManagedBehaviourCallback::AnimatorIk:
+                    Invoke(instance.Object, "RuntimeAnimatorIk", deltaSeconds);
                     break;
                 }
             }
@@ -3493,6 +3532,10 @@ namespace Keire
                         implementation.InvokeAnimationEvent(m_Instance.Value(), event);
                 });
         }
+        void OnAnimatorIk(const AnimationIkMessage& context) override
+        {
+            Invoke(ManagedBehaviourCallback::AnimatorIk, context.LayerWeight);
+        }
         void OnCollisionEnter(const PhysicsContactMessage& contact) override
         {
             InvokeContact(PhysicsContactPhase::Enter, contact);
@@ -3830,6 +3873,7 @@ namespace Keire
             Coral::Type* behaviourType = nullptr;
             Coral::Type* stableComponentIdType = nullptr;
             Coral::Type* executionOrderType = nullptr;
+            Coral::Type* requireComponentType = nullptr;
             Coral::Type* serializeFieldType = nullptr;
             Coral::Type* hideInInspectorType = nullptr;
             Coral::Type* serializableType = nullptr;
@@ -3942,6 +3986,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetEntityActiveInHierarchy));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityActiveIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetEntityActive));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityLayerIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetEntityLayer));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityLayerIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetEntityLayer));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetEntityNameIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetEntityName));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetEntityNameIcall",
@@ -4058,6 +4106,7 @@ namespace Keire
                 }
                 stableComponentIdType = &managedApi.GetLocalType("Keire.StableComponentIdAttribute");
                 executionOrderType = &managedApi.GetLocalType("Keire.ExecutionOrderAttribute");
+                requireComponentType = &managedApi.GetLocalType("Keire.RequireComponentAttribute");
                 serializeFieldType = &managedApi.GetLocalType("Keire.SerializeFieldAttribute");
                 hideInInspectorType = &managedApi.GetLocalType("Keire.HideInInspectorAttribute");
                 serializableType = &managedApi.GetLocalType("Keire.SerializableTypeAttribute");
@@ -4066,7 +4115,7 @@ namespace Keire
                 groupType = &managedApi.GetLocalType("Keire.InspectorGroupAttribute");
                 managedAssetMetadataType = &managedApi.GetLocalType("Keire.ManagedAssetMetadata");
                 nativeRuntimeType = &managedApi.GetLocalType("Keire.NativeRuntime");
-                if (!*stableComponentIdType || !*executionOrderType || !*serializeFieldType)
+                if (!*stableComponentIdType || !*executionOrderType || !*requireComponentType || !*serializeFieldType)
                     throw std::runtime_error("Keire.Managed does not expose managed component metadata.");
                 if (!*managedAssetMetadataType)
                     throw std::runtime_error("Keire.Managed does not expose managed asset metadata.");
@@ -4106,6 +4155,7 @@ namespace Keire
 
                         ComponentTypeId componentType;
                         std::int32_t executionOrder = 0;
+                        std::vector<ComponentTypeId> requiredComponents;
                         for (auto attribute : type.GetAttributes())
                         {
                             if (attribute.GetType() == *stableComponentIdType)
@@ -4117,17 +4167,32 @@ namespace Keire
                             {
                                 executionOrder = attribute.GetFieldValue<std::int32_t>("Order");
                             }
+                            else if (attribute.GetType() == *requireComponentType)
+                            {
+                                requiredComponents.emplace_back(AssetId(attribute.GetFieldValue<std::uint64_t>("High"),
+                                                                        attribute.GetFieldValue<std::uint64_t>("Low")));
+                            }
                         }
                         if (componentType)
                         {
-                            candidateTypes.push_back(
-                                {typeName, componentType, executionOrder, std::addressof(type),
-                                 ReflectManagedProperties(
-                                     type, *behaviourType, *serializeFieldType,
-                                     *hideInInspectorType ? hideInInspectorType : nullptr,
-                                     *serializableType ? serializableType : nullptr, *rangeType ? rangeType : nullptr,
-                                     *tooltipType ? tooltipType : nullptr, *groupType ? groupType : nullptr),
-                                 ReflectManagedMethods(type)});
+                            std::ranges::sort(requiredComponents);
+                            if (std::ranges::adjacent_find(requiredComponents) != requiredComponents.end())
+                                throw std::runtime_error("Managed Behaviour declares a duplicate required component.");
+                            if (std::ranges::find(requiredComponents, componentType) != requiredComponents.end())
+                                throw std::runtime_error("Managed Behaviour cannot require itself.");
+                            Impl::BehaviourType behaviour;
+                            behaviour.Name = typeName;
+                            behaviour.ComponentType = componentType;
+                            behaviour.ExecutionOrder = executionOrder;
+                            behaviour.Type = std::addressof(type);
+                            behaviour.Properties = ReflectManagedProperties(
+                                type, *behaviourType, *serializeFieldType,
+                                *hideInInspectorType ? hideInInspectorType : nullptr,
+                                *serializableType ? serializableType : nullptr, *rangeType ? rangeType : nullptr,
+                                *tooltipType ? tooltipType : nullptr, *groupType ? groupType : nullptr);
+                            behaviour.Methods = ReflectManagedMethods(type);
+                            behaviour.RequiredComponents = std::move(requiredComponents);
+                            candidateTypes.push_back(std::move(behaviour));
                         }
                     }
                 }
@@ -4374,7 +4439,7 @@ namespace Keire
         {
             const auto separator = type.Name.find_last_of('.');
             result.push_back({type.Name, separator == std::string::npos ? type.Name : type.Name.substr(separator + 1),
-                              type.ComponentType, type.ExecutionOrder});
+                              type.ComponentType, type.ExecutionOrder, type.RequiredComponents});
         }
         return result;
     }
@@ -4705,6 +4770,7 @@ namespace Keire
             registration.Name = separator == std::string::npos ? type.Name : type.Name.substr(separator + 1);
             registration.Category = "Scripts";
             registration.ExecutionOrder = type.ExecutionOrder;
+            registration.RequiredComponents = type.RequiredComponents;
             registration.Properties = type.Properties;
             registration.Methods = std::make_shared<const std::vector<ComponentMethod>>(type.Methods);
             const auto componentType = type.ComponentType;

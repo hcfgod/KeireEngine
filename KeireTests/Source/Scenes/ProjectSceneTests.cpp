@@ -14,6 +14,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -185,6 +186,15 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(std::filesystem::exists(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Project.keireproject"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Rendering.keiresettings"));
+    const auto starterSceneSource = KeireTests::ReadFile(created->Root() / "Assets/Scenes/SampleScene.keirescene");
+    const std::vector<std::byte> starterSceneBytes(
+        reinterpret_cast<const std::byte*>(starterSceneSource.data()),
+        reinterpret_cast<const std::byte*>(starterSceneSource.data() + starterSceneSource.size()));
+    const auto starterScene = Keire::SceneAsset::Decode(starterSceneBytes);
+    REQUIRE(starterScene);
+    CHECK(starterScene->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
+    CHECK(std::ranges::all_of(starterScene->Definition().Objects, [](const Keire::SceneObjectDefinition& object)
+                              { return object.Layer < Keire::EntityLayerCount; }));
     auto rendering = Keire::LoadRenderEnvironmentSettings(created->Root());
     CHECK(rendering.AmbientIntensity == doctest::Approx(0.75F));
     rendering.AmbientColor = {0.1F, 0.2F, 0.3F, 1.0F};
@@ -546,7 +556,7 @@ TEST_CASE("Newer scene importers upgrade older metadata revisions but reject fut
     auto database = Keire::CreateRef<Keire::AssetDatabase>(specification);
     CHECK_NOTHROW((void)database->ImportAll());
 
-    writeMetadata(4);
+    writeMetadata(Keire::CurrentSceneSchemaVersion + 1);
     database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     CHECK_THROWS_WITH_AS((void)database->ImportAll(),
                          "No compatible importer is registered for asset: Legacy.keirescene", std::runtime_error);

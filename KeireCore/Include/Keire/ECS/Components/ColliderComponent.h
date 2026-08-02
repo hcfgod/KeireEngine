@@ -38,7 +38,9 @@ namespace Keire
         void SetPhysicsMaterial(AssetId value);
 
       private:
+        friend class Detail::SceneState;
         friend ComponentRegistration CreateColliderComponentRegistration();
+        void ApplyEntityLayer(std::uint32_t value) noexcept { m_Layer = value; }
         ColliderShape m_Shape = ColliderShape::Box;
         Vector3 m_Center;
         Vector3 m_HalfExtent{0.5F, 0.5F, 0.5F};

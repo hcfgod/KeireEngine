@@ -333,7 +333,9 @@ position/rotation without entering Play Mode or dirtying the scene.
 The [VFX Authoring And Runtime guide](docs/Vfx.md) covers Context Blocks, value Operators, visual workflows, scene
 setup, native and managed range control, backend differences, recipes, migration, and troubleshooting. The
 [Unity 6.3 LTS parity manifest](docs/VfxParityManifest.json) is the machine-readable catalog and support ledger; its
-checked-in generator and validator live under [`Scripts/Vfx`](Scripts/Vfx).
+checked-in generator and validator live under [`Scripts/Vfx`](Scripts/Vfx). The generated
+[VFX capability reference](docs/generated/VfxCapabilities.md) is release-checked against both the frozen manifest and
+the runtime descriptor catalog, and production slices require every enabled implementation to have executable coverage.
 
 ## Windowing And Configuration
 
@@ -721,6 +723,11 @@ For GPU VFX captures, compare physical particle capacity and compute thread grou
 Use `GPU fence wait (ms)` to identify frames blocked at the configured frames-in-flight boundary; it is distinct from
 swapchain acquisition and CPU command-recording time.
 
+`GPU completion latency (ms)` and `VFX GPU completion latency (ms)` measure submit-to-observed-fence-completion delay;
+they are useful back-pressure signals, not GPU execution timestamps. Reference-hardware profiles in
+`Config/PerformanceGates.json` require real backend timestamps, capture metadata, a minimum history length, and explicit
+renderer/VFX budgets. See [Performance Gates](docs/PerformanceGates.md) for capture and validation commands.
+
 Development asset discovery runs on a database-owned monitor. `PollChangedAssets()` only consumes an immutable
 published snapshot and never walks the project tree on the application frame. `ChangeMonitorInterval` controls
 background reconciliation while `ChangeDebounce` controls publication.
@@ -735,6 +742,7 @@ Run the repeatable Debug, Release, sanitizer, and regression matrix with:
 bash Scripts/Unix/validate-production.sh
 ```
 
-Add `-IncludePackage` on Windows or `--include-package` on Unix to package the SDK and validate both consumers.
+Add `-IncludeGraphicsSmokes` on Windows or `--include-graphics-smokes` on Unix on a graphics-capable worker to run the
+project-aware Release smoke. Add `-IncludePackage` or `--include-package` to package the SDK and validate both consumers.
 
 See [Architecture](docs/Architecture.md), [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and [Changelog](CHANGELOG.md).

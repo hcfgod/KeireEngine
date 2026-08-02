@@ -217,6 +217,8 @@ namespace Keire
         float UiRecordingMilliseconds = 0.0F;
         float GpuSubmissionMilliseconds = 0.0F;
         float GpuFrameMilliseconds = 0.0F;
+        float GpuCompletionLatencyMilliseconds = 0.0F;
+        float VfxGpuCompletionLatencyMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
         float VfxPipelineWarmupMilliseconds = 0.0F;
     };

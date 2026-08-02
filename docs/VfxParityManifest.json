@@ -35,7 +35,8 @@
     "runtimeCatalogContract": "KeireCore/Source/Vfx/VfxNodeCatalogContract.inc",
     "runtimeCatalogExporter": "Scripts/Vfx/export_vfx_runtime_catalog.py",
     "optionalUnityCatalogExporter": "Scripts/Vfx/UnityVfxCatalogExporter.cs",
-    "canonicalEncoding": "UTF-8 JSON, two-space indentation, LF newline"
+    "canonicalEncoding": "UTF-8 JSON, two-space indentation, LF newline",
+    "offlineReconciler": "Scripts/Vfx/reconcile_vfx_manifest.py"
   },
   "counts": {
     "Operator": 214,
@@ -43,7 +44,7 @@
     "Context": 5,
     "Output": 13,
     "Total": 278,
-    "Disabled": 268,
+    "Disabled": 216,
     "WithKeireImplementation": 63
   },
   "entries": [
@@ -2099,7 +2100,7 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.age",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -2108,7 +2109,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -2313,7 +2314,7 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.lifetime",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -2322,7 +2323,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -2401,7 +2402,7 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.particle-id",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -2410,7 +2411,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -2552,7 +2553,7 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.spawn-index",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -2561,7 +2562,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -2884,7 +2885,7 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.delta-time",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -2893,7 +2894,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -2995,7 +2996,7 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.time",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -3004,7 +3005,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -3970,7 +3971,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.and",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -3979,7 +3980,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4004,7 +4005,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.branch",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4013,7 +4014,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4038,7 +4039,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.compare",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4047,7 +4048,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4111,7 +4112,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.not",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4120,7 +4121,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4138,7 +4139,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.or",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4147,7 +4148,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4296,7 +4297,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.cross-product",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4305,7 +4306,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4323,7 +4324,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.distance",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4332,7 +4333,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4350,7 +4351,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.dot-product",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4359,7 +4360,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4384,7 +4385,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.exponential",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4393,7 +4394,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4411,7 +4412,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.length",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4420,7 +4421,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4445,7 +4446,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.logarithm",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4454,7 +4455,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4495,7 +4496,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.normalize",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4504,7 +4505,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4766,7 +4767,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.absolute",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4775,7 +4776,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4793,7 +4794,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.add",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4802,7 +4803,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4820,7 +4821,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.divide",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4829,7 +4830,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4847,7 +4848,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.fractional",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4856,7 +4857,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4897,7 +4898,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.lerp",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4906,7 +4907,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4947,7 +4948,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.multiply",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4956,7 +4957,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -4974,7 +4975,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.negate",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -4983,7 +4984,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5024,7 +5025,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.power",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5033,7 +5034,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5074,7 +5075,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.sign",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5083,7 +5084,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5101,7 +5102,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.smoothstep",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5110,7 +5111,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5128,7 +5129,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.square-root",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5137,7 +5138,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5155,7 +5156,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.step",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5164,7 +5165,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5182,7 +5183,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.subtract",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5191,7 +5192,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5209,7 +5210,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.ceiling",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5218,7 +5219,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5236,7 +5237,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.clamp",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5245,7 +5246,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5286,7 +5287,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.floor",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5295,7 +5296,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5313,7 +5314,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.maximum",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5322,7 +5323,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5340,7 +5341,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.minimum",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5349,7 +5350,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5367,7 +5368,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.round",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5376,7 +5377,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5394,7 +5395,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.saturate",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5403,7 +5404,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5920,7 +5921,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.remap",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5929,7 +5930,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -5960,7 +5961,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.remap",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -5969,7 +5970,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6000,7 +6001,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.remap",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6009,7 +6010,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6027,7 +6028,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.acos",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6036,7 +6037,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6054,7 +6055,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.asin",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6063,7 +6064,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6081,7 +6082,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.atan",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6090,7 +6091,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6108,7 +6109,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.atan2",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6117,7 +6118,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6135,7 +6136,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.cosine",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6144,7 +6145,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6162,7 +6163,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.sine",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6171,7 +6172,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6189,7 +6190,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.tangent",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6198,7 +6199,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6241,7 +6242,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.sawtooth-wave",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6250,7 +6251,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6293,7 +6294,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.sine-wave",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6302,7 +6303,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6345,7 +6346,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.square-wave",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6354,7 +6355,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -6397,7 +6398,7 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
+        "support": "Kéire Equivalent",
         "implementation": "keire.operator.triangle-wave",
         "backendTier": "CPU and GPU",
         "tests": [
@@ -6406,7 +6407,7 @@
         "documentation": [
           "docs/Vfx.md"
         ],
-        "disabledReason": "A native Kéire baseline exists, but the complete Unity 6.3 signatures, settings, dynamic variants, CPU/GPU lowering, and differential acceptance coverage are not closed."
+        "disabledReason": null
       }
     },
     {
@@ -7944,6 +7945,100 @@
         "documentation": [],
         "disabledReason": "No production Kéire implementation is registered; this feature requires the schema-4 resource/output ABI and cooked GPU backend before it can be enabled."
       }
+    }
+  ],
+  "productionSlices": [
+    {
+      "id": "core-value-modulation",
+      "name": "Core value modulation",
+      "backendTier": "CPU and GPU",
+      "implementations": [
+        "keire.operator.absolute",
+        "keire.operator.acos",
+        "keire.operator.add",
+        "keire.operator.age",
+        "keire.operator.and",
+        "keire.operator.asin",
+        "keire.operator.atan",
+        "keire.operator.atan2",
+        "keire.operator.branch",
+        "keire.operator.ceiling",
+        "keire.operator.clamp",
+        "keire.operator.compare",
+        "keire.operator.cosine",
+        "keire.operator.cross-product",
+        "keire.operator.delta-time",
+        "keire.operator.distance",
+        "keire.operator.divide",
+        "keire.operator.dot-product",
+        "keire.operator.exponential",
+        "keire.operator.floor",
+        "keire.operator.fractional",
+        "keire.operator.length",
+        "keire.operator.lerp",
+        "keire.operator.lifetime",
+        "keire.operator.logarithm",
+        "keire.operator.maximum",
+        "keire.operator.minimum",
+        "keire.operator.multiply",
+        "keire.operator.negate",
+        "keire.operator.normalize",
+        "keire.operator.not",
+        "keire.operator.or",
+        "keire.operator.particle-id",
+        "keire.operator.power",
+        "keire.operator.remap",
+        "keire.operator.round",
+        "keire.operator.saturate",
+        "keire.operator.sawtooth-wave",
+        "keire.operator.sign",
+        "keire.operator.sine",
+        "keire.operator.sine-wave",
+        "keire.operator.smoothstep",
+        "keire.operator.spawn-index",
+        "keire.operator.square-root",
+        "keire.operator.square-wave",
+        "keire.operator.step",
+        "keire.operator.subtract",
+        "keire.operator.tangent",
+        "keire.operator.time",
+        "keire.operator.triangle-wave"
+      ],
+      "tests": [
+        "KeireTests/Source/Vfx/VfxExpressionTests.cpp"
+      ],
+      "samples": [
+        "Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"
+      ],
+      "documentation": [
+        "docs/Vfx.md"
+      ]
+    },
+    {
+      "id": "context-output-pipeline",
+      "name": "Context and particle-output pipeline",
+      "backendTier": "CPU and GPU",
+      "implementations": [
+        "keire.block.collision",
+        "keire.block.shape",
+        "keire.context.event",
+        "keire.context.initialize",
+        "keire.context.spawn",
+        "keire.context.update",
+        "keire.output.renderer"
+      ],
+      "tests": [
+        "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
+        "KeireTests/Source/Vfx/VfxTests.cpp"
+      ],
+      "samples": [
+        "Samples/KeireSandbox/Assets/Vfx/ArcaneSigilOrbit.keirevfx",
+        "Samples/KeireSandbox/Assets/Vfx/EmberShardCyclone.keirevfx",
+        "Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"
+      ],
+      "documentation": [
+        "docs/Vfx.md"
+      ]
     }
   ]
 }

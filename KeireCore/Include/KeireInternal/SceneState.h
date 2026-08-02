@@ -46,6 +46,8 @@ namespace Keire::Detail
         [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
         [[nodiscard]] std::string EntityName(EntityId id) const;
         void SetEntityName(EntityId id, std::string name);
+        [[nodiscard]] std::uint32_t EntityLayer(EntityId id) const;
+        void SetEntityLayer(EntityId id, std::uint32_t layer);
         [[nodiscard]] bool ActiveSelf(EntityId id) const;
         [[nodiscard]] bool ActiveInHierarchy(EntityId id) const;
         void SetActive(EntityId id, bool active);
@@ -67,6 +69,7 @@ namespace Keire::Detail
         void Update(float deltaSeconds);
         void LateUpdate();
         void DispatchAnimationEvent(EntityId entity, const AnimationEventMessage& event);
+        void DispatchAnimatorIk(EntityId entity, const AnimationIkMessage& context);
         void DispatchPhysicsContact(EntityId entity, PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void EndPlay() noexcept;
         void FlushDeferred();
@@ -74,6 +77,7 @@ namespace Keire::Detail
         [[nodiscard]] Ref<ComponentRegistry> Components() const noexcept;
 
       private:
+        void SynchronizeEntityLayer(EntityId id);
         class Impl;
         std::unique_ptr<Impl> m_Impl;
     };

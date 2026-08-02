@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 4,
+  "name": "Entity Layer Schema 4",
+  "entities": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "parent": null,
+      "name": "First Class Layer",
+      "active": true,
+      "layer": 12,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+          }
+        }
+      ]
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": []
+}

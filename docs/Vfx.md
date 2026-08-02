@@ -116,9 +116,9 @@ Unity Editor 6000.3, `com.unity.visualeffectgraph` 17.3.0, and Unity Graphics co
 provenance, Kéire implementation ID, backend tier, tests, documentation, support state, and disabled reason for every
 catalogued Operator, Block, Context, and Output.
 
-The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Ten rows now carry the
-explicit **Kéire Equivalent** tier for the implemented depth-collision, mesh-position sampling, core Context, Event,
-and renderer workflows; 268 remain `Disabled`. A `keire` implementation mapping alone means related native
+The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Sixty-two rows carry the
+explicit **Kéire Equivalent** tier for tested core-value, context, event, collision, sampling, and renderer workflows;
+216 remain `Disabled`. A `keire` implementation mapping alone means related native
 functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor, backend tier,
 focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries remain visible
 to tooling but creation or compilation must reject them with their recorded reason.
@@ -133,10 +133,16 @@ preserved verbatim rather than interpreted as HTML.
 From the repository root, validate the checked-in manifest without a Unity checkout:
 
 ```powershell
+python Scripts/Vfx/reconcile_vfx_manifest.py --check
 python Scripts/Vfx/validate_vfx_parity_manifest.py
+python Scripts/Vfx/generate_vfx_capabilities.py --check
 python Scripts/Vfx/test_vfx_parity_tooling.py
 python Scripts/Vfx/export_vfx_runtime_catalog.py
 ```
+
+The generated [VFX capability reference](generated/VfxCapabilities.md) combines the frozen Unity ledger with the live
+runtime descriptor catalog. Production slices group enabled rows by a complete tested effect workflow; generation and
+release validation fail when an enabled implementation is absent from every slice or the checked-in table is stale.
 
 Maintainers with the pinned Unity Graphics checkout can also verify source coverage and regenerate canonically:
 
@@ -2128,7 +2134,7 @@ explicit tier instead of changing behavior.
 | Named Event contexts | Yes | Yes |
 | Multiple executable graph systems | Yes; one root handle owns all slots | Yes; one root handle publishes per-system emitters |
 | Particle Strip identity / strip-scoped RNG | Yes | Yes |
-| Neighbor-connected strip topology | No | No; explicit later topology tier |
+| Sequence-qualified neighboring strip topology | Yes | Yes; MapStrips/LinkStrips connect consecutive live particles in the same system, strip, and generation |
 | Arbitrary shader HLSL/resources | No | No |
 
 Author and diagnose on CPU, then deliberately verify the effect on GPU. If a required feature is absent from the GPU

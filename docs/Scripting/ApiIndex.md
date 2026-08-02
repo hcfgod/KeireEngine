@@ -18,8 +18,7 @@ This index is a discovery map, not a replacement for the workflow guides or sour
 | `Vector2`, `Vector3`, `Vector4` | Engine math values | [Gameplay Services](GameplayServices.md) |
 | `Quaternion`, `Color` | Rotation and color values | [Gameplay Services](GameplayServices.md) |
 
-`Behaviour.Enabled` is not currently synchronized with native component state. Use
-`Entity.GetComponentHandle<T>().Enabled` to enable or disable a script component.
+`Behaviour.Enabled` and `Entity.GetComponentHandle<T>().Enabled` read and write the same native component state.
 
 ## Behaviour Callbacks
 
@@ -35,12 +34,12 @@ OnDestroy
 OnCollisionEnter / OnCollisionStay / OnCollisionExit
 OnTriggerEnter / OnTriggerStay / OnTriggerExit
 OnAnimationEvent
+OnAnimatorIk
 OnBeforeReload
 OnAfterReload
 ```
 
-`Behaviour` declares `OnAnimatorIk`, but the current runtime does not dispatch it. It is reserved for the planned
-callback surface.
+`OnAnimatorIk` runs after pose sampling and before named IK goals are solved for the frame.
 
 Callback payloads:
 
@@ -73,7 +72,9 @@ Callback payloads:
 
 See [Serialization And The Inspector](SerializationAndInspector.md) for persistence rules.
 
-`RequireComponent` is currently descriptive metadata; the native attachment path does not enforce it.
+`RequireComponent` is enforced transactionally during managed registration and attachment. Dependencies are added
+before the requested component, dependency cycles fail reload, and a dependency cannot be removed while a dependent
+component remains attached.
 
 ## Entity API
 
@@ -84,6 +85,7 @@ IsValid
 Name
 Active
 ActiveInHierarchy
+Layer
 Parent
 Children
 Transform

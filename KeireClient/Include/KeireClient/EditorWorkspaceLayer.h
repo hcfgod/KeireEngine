@@ -226,6 +226,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] KeireEditor::MaterialDocument& InspectorMaterialDocument() noexcept override;
     [[nodiscard]] KeireEditor::PropertyDrawerRegistry& InspectorPropertyDrawers() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& InspectorTheme() const noexcept override;
+    [[nodiscard]] std::span<const std::string> InspectorLayerNames() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> InspectorAssetDatabase() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> InspectorAssetSystem() const noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept override;

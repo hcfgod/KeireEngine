@@ -514,4 +514,18 @@ TEST_CASE("Component registry replacement is atomic and revisioned")
     CHECK(registry->Revision() == revisionBeforeFailure);
     REQUIRE(registry->Find(ReloadableComponent::StaticType()));
     CHECK(registry->Find(ReloadableComponent::StaticType())->Name == "Version Two");
+
+    const Keire::ComponentTypeId firstCycle(Keire::AssetId(0x6379636c652d6f6eULL, 0x652d747970650001ULL));
+    const Keire::ComponentTypeId secondCycle(Keire::AssetId(0x6379636c652d7477ULL, 0x6f2d747970650001ULL));
+    auto firstCyclic = Registration("Cycle One");
+    firstCyclic.Type = firstCycle;
+    firstCyclic.RequiredComponents = {secondCycle};
+    auto secondCyclic = Registration("Cycle Two");
+    secondCyclic.Type = secondCycle;
+    secondCyclic.RequiredComponents = {firstCycle};
+    CHECK_THROWS_AS(registry->ReplaceBatch({}, {std::move(firstCyclic), std::move(secondCyclic)}),
+                    std::invalid_argument);
+    CHECK(registry->Revision() == revisionBeforeFailure);
+    CHECK_FALSE(registry->Contains(firstCycle));
+    CHECK_FALSE(registry->Contains(secondCycle));
 }

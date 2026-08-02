@@ -7,6 +7,9 @@
 
 namespace
 {
+    static_assert(Keire::EntityLayerCount == 32);
+    static_assert(Keire::EntityLayerBit(7) == (1U << 7U));
+
     constexpr std::array ManagedOptions{
         Keire::ApplicationCommandLineOption{"--managed-smoke", "Run the managed SDK entrypoint smoke test."},
     };

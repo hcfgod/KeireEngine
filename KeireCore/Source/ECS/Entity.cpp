@@ -45,6 +45,22 @@ namespace Keire
         state->SetEntityName(m_Id, std::move(name));
     }
 
+    std::uint32_t Entity::Layer() const
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::Layer cannot inspect a stale entity.");
+        return state->EntityLayer(m_Id);
+    }
+
+    void Entity::SetLayer(const std::uint32_t layer)
+    {
+        const auto state = m_State.Lock();
+        if (!state)
+            throw std::logic_error("Entity::SetLayer cannot mutate a stale entity.");
+        state->SetEntityLayer(m_Id, layer);
+    }
+
     bool Entity::ActiveSelf() const
     {
         const auto state = m_State.Lock();

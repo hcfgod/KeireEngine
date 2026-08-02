@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <ranges>
 #include <stdexcept>
 #include <thread>
@@ -150,6 +151,12 @@ namespace Keire
             OnAnimationEvent(event);
     }
 
+    void Component::InvokeAnimatorIk(const AnimationIkMessage& context)
+    {
+        if (m_Impl->LifecycleActive && !m_Impl->Destroyed)
+            OnAnimatorIk(context);
+    }
+
     void Component::InvokePhysicsContact(const PhysicsContactPhase phase, const PhysicsContactMessage& contact)
     {
         if (!m_Impl->LifecycleActive || m_Impl->Destroyed)
@@ -239,6 +246,38 @@ namespace Keire
             if (std::ranges::adjacent_find(dependencies) != dependencies.end())
                 throw std::invalid_argument("Component registration contains duplicate dependencies.");
         }
+
+        void ValidateComponentDependencyGraph(
+            const std::unordered_map<ComponentTypeId, ComponentRegistration>& registrations)
+        {
+            enum class VisitState : std::uint8_t
+            {
+                Visiting,
+                Complete
+            };
+
+            std::unordered_map<ComponentTypeId, VisitState> visits;
+            std::function<void(ComponentTypeId)> visit = [&](const ComponentTypeId type)
+            {
+                if (const auto existing = visits.find(type); existing != visits.end())
+                {
+                    if (existing->second == VisitState::Visiting)
+                        throw std::invalid_argument("Component registration dependencies contain a cycle.");
+                    return;
+                }
+
+                const auto registration = registrations.find(type);
+                if (registration == registrations.end())
+                    throw std::invalid_argument("Component registration batch leaves an unresolved dependency.");
+                visits.emplace(type, VisitState::Visiting);
+                for (const auto required : registration->second.RequiredComponents)
+                    visit(required);
+                visits[type] = VisitState::Complete;
+            };
+
+            for (const auto& [type, _] : registrations)
+                visit(type);
+        }
     } // namespace
 
     ComponentRegistry::ComponentRegistry() : m_Impl(std::make_unique<Impl>()) {}
@@ -278,14 +317,7 @@ namespace Keire
         for (auto& registration : registrations)
             replacement.insert_or_assign(registration.Type, std::move(registration));
 
-        for (const auto& [_, registration] : replacement)
-        {
-            for (const auto required : registration.RequiredComponents)
-            {
-                if (!replacement.contains(required))
-                    throw std::invalid_argument("Component registration batch leaves an unresolved dependency.");
-            }
-        }
+        ValidateComponentDependencyGraph(replacement);
 
         m_Impl->Registrations.swap(replacement);
         m_Impl->Revision.fetch_add(1, std::memory_order_release);

@@ -73,6 +73,7 @@ namespace Keire
         [[nodiscard]] bool DestroyObject(AssetId id);
         [[nodiscard]] bool RenameObject(AssetId id, std::string name);
         [[nodiscard]] bool SetObjectActive(AssetId id, bool active);
+        [[nodiscard]] bool SetObjectLayer(AssetId id, std::uint32_t layer);
         [[nodiscard]] bool SetObjectTransform(AssetId id, SceneTransform transform);
         [[nodiscard]] bool ReparentObject(AssetId id, AssetId parent);
 
@@ -96,6 +97,7 @@ namespace Keire
         void Update(float deltaSeconds);
         void LateUpdate();
         void DispatchAnimationEvent(EntityId entity, const AnimationEventMessage& event);
+        void DispatchAnimatorIk(EntityId entity, const AnimationIkMessage& context);
         void DispatchPhysicsContact(EntityId entity, PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void EndPlay() noexcept;
         void Close() noexcept;

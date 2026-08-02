@@ -14,14 +14,16 @@ inert as soon as its application service closes.
 The profiler accepts typed native or managed spans and counters from worker threads. Frame begin/end and service/world
 mutation remain owner-thread operations.
 
-## Prefabs and scene schema v3
+## Prefabs and scene schema v4
 
 `.keireprefab` stores stable local object IDs, component data, nested prefab instances, an optional base prefab, and
 typed override records. Composition resolves bases recursively, applies variants deterministically, validates the
 canonical scene, and reports missing targets or cycles without mutating either source document.
 
-Scene schema v3 persists prefab object mappings and overrides. Readers migrate v1/v2 documents to v3; writers always
-emit v3. Editor authoring helpers implement create-from-selection, variant creation, transactional instantiation, and
+Scene schema v4 persists prefab object mappings, typed overrides, and a validated entity layer index. Readers migrate
+v1-v3 documents to v4; v2/v3 physics-component layers become the entity layer instead of being discarded. Writers
+always emit v4. Layer changes use a first-class prefab override and therefore survive variant composition and
+apply/revert. Editor authoring helpers implement create-from-selection, variant creation, transactional instantiation, and
 one-level or complete unpacking over `SceneDefinition` values, which makes undo/redo boundaries explicit.
 The Project panel exposes create-from-selection, prefab source opening, and drag-to-Scene instantiation. Instance
 override inspection, apply-to-source, revert, one-level unpack, and complete unpack remain explicit operations. Prefab

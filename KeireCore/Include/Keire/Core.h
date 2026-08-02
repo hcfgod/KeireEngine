@@ -33,6 +33,7 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/ECS/Entity.h"
+#include "Keire/ECS/EntityLayer.h"
 #include "Keire/EntryPoint.h"
 #include "Keire/Event.h"
 #include "Keire/Input/Input.h"

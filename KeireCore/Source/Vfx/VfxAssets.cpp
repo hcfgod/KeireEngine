@@ -1,7 +1,7 @@
 #include "Keire/Vfx/VfxSystem.h"
 
-#include "VfxExecutionInternal.h"
-#include "VfxExpressionInternal.h"
+#include "KeireInternal/Vfx/VfxExecutionInternal.h"
+#include "KeireInternal/Vfx/VfxExpressionInternal.h"
 
 #include <nlohmann/json.hpp>
 

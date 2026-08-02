@@ -4,6 +4,7 @@
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/ECS/Component.h"
+#include "Keire/ECS/EntityLayer.h"
 #include "Keire/Math/Math.h"
 
 #include <compare>
@@ -17,6 +18,8 @@
 
 namespace Keire
 {
+    inline constexpr std::uint32_t CurrentSceneSchemaVersion = 4;
+
     using SceneVector3 = Vector3;
     using SceneQuaternion = Quaternion;
 
@@ -44,6 +47,7 @@ namespace Keire
         bool Active = true;
         SceneTransform Transform;
         std::vector<SceneComponentDefinition> Components;
+        std::uint32_t Layer = 0;
     };
 
     enum class PrefabOverrideKind : std::uint8_t
@@ -55,7 +59,8 @@ namespace Keire
         AddComponent,
         RemoveComponent,
         AddObject,
-        RemoveObject
+        RemoveObject,
+        SetObjectLayer
     };
 
     struct PrefabOverrideDefinition
@@ -67,6 +72,7 @@ namespace Keire
         ComponentPropertyValue Value = false;
         std::string Name;
         bool Active = true;
+        std::uint32_t Layer = 0;
         SceneTransform Transform;
         std::optional<SceneComponentDefinition> AddedComponent;
         std::optional<SceneObjectDefinition> AddedObject;
@@ -88,7 +94,7 @@ namespace Keire
 
     struct SceneDefinition
     {
-        std::uint32_t SchemaVersion = 3;
+        std::uint32_t SchemaVersion = CurrentSceneSchemaVersion;
         std::string Name;
         std::vector<SceneObjectDefinition> Objects;
         std::vector<PrefabInstanceDefinition> PrefabInstances;

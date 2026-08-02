@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/ECS/Component.h"
+#include "Keire/ECS/EntityLayer.h"
 
 #include <concepts>
 #include <string>
@@ -26,6 +27,8 @@ namespace Keire
         [[nodiscard]] Entity Resolve(EntityId id) const noexcept;
         [[nodiscard]] std::string Name() const;
         void SetName(std::string name);
+        [[nodiscard]] std::uint32_t Layer() const;
+        void SetLayer(std::uint32_t layer);
         [[nodiscard]] bool ActiveSelf() const;
         [[nodiscard]] bool ActiveInHierarchy() const;
         void SetActive(bool active);

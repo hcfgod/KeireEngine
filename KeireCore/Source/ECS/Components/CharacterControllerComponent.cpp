@@ -1,5 +1,7 @@
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
 
+#include "Keire/ECS/Entity.h"
+
 #include <bit>
 #include <cmath>
 #include <limits>
@@ -95,6 +97,11 @@ namespace Keire
     {
         if (!std::has_single_bit(value))
             throw std::invalid_argument("Character Controller layer must select exactly one collision layer.");
+        if (IsAttached())
+        {
+            Owner().SetLayer(std::countr_zero(value));
+            return;
+        }
         m_Layer = value;
         NotifyChanged();
     }
@@ -179,7 +186,6 @@ namespace Keire
             {"maximumSlope", "Maximum Slope", "Movement", ComponentPropertyKind::Scalar, false, 0.0, 89.9, 1.0},
             {"stepHeight", "Step Height", "Movement", ComponentPropertyKind::Scalar, false, 0.0, 100'000.0, 0.05},
             {"skinWidth", "Skin Width", "Movement", ComponentPropertyKind::Scalar, false, 0.0001, 100'000.0, 0.005},
-            {"layer", "Layer", "Filtering", ComponentPropertyKind::Integer},
             {"mask", "Mask", "Filtering", ComponentPropertyKind::Integer}};
         result.Factory = [] { return Ref<Component>(CreateRef<CharacterControllerComponent>()); };
         result.Serialize = [](const Component& component)

@@ -318,7 +318,8 @@ namespace Keire
         Disable,
         Destroy,
         BeforeReload,
-        AfterReload
+        AfterReload,
+        AnimatorIk
     };
 
     struct ManagedCallbackMetric
@@ -357,6 +358,7 @@ namespace Keire
         std::string DisplayName;
         ComponentTypeId ComponentType;
         std::int32_t ExecutionOrder = 0;
+        std::vector<ComponentTypeId> RequiredComponents;
     };
 
     struct ManagedAssetTypeDiagnostic

@@ -568,6 +568,7 @@ namespace Keire
                 if (animator->Speed() < 0.0F)
                     animator->SetRuntimeDiagnostic("Negative Animator speed is not supported and is treated as zero.");
                 auto sample = state->Instance->Update(animator->Paused() ? 0.0F : deltaSeconds * speed);
+                Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
                 if (const auto ikDiagnostic =
                         ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices);
                     !ikDiagnostic.empty())
@@ -975,7 +976,7 @@ namespace Keire
                              : collider->Radius() * std::max({absoluteScale.X, absoluteScale.Y, absoluteScale.Z});
             definition.Height = (useCharacter ? character->Height() : collider->Height()) * absoluteScale.Y;
             definition.Mass = rigidBody ? rigidBody->Mass() : 1.0F;
-            definition.Layer = useCharacter ? character->Layer() : collider->Layer();
+            definition.Layer = EntityLayerBit(entity.Layer());
             definition.Mask = useCharacter ? character->Mask() : collider->Mask();
             definition.Trigger = !useCharacter && collider->Trigger();
             definition.Continuous = !useCharacter && rigidBody && rigidBody->Continuous();

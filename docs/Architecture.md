@@ -527,13 +527,21 @@ The application-frame profiler stores one bounded full frame plus a ring of ligh
 thread identifiers and monotonic microsecond timestamps, allowing the editor to present hotspot and chronological
 thread-lane views without instrumenting editor code through private APIs. `LatestChromeTrace()` emits a
 Perfetto/Chrome-trace-compatible snapshot. Renderer timings remain explicitly CPU-side until SDL_GPU exposes portable
-timestamp queries; `GpuTimingSupported` prevents recording or displaying synthetic GPU measurements. Managed callback
+timestamp queries; `GpuTimingSupported` prevents recording or displaying synthetic GPU measurements. The renderer also
+records submit-to-observed-fence-completion latency for all frames and for frames containing GPU VFX. That value is a
+queue-completion observation, not elapsed GPU execution time, and is deliberately named and gated separately. Managed callback
 timing uses fixed per-instance accumulators on the owner thread. The editor performs bounded type/lifecycle aggregation
 only at its throttled presentation refresh and limits default-open row submission to reduce profiler observer overhead.
 The renderer separately reports oldest-frame GPU fence wait, swapchain acquisition wait, VFX physical particle
 capacity, compute dispatches, and compute thread groups. Fence wait is measured at the frames-in-flight boundary, so a
 large `Render begin` span can be attributed to GPU/present back-pressure without misclassifying it as scene-recording
 CPU time.
+
+Reference-hardware gates live in `Config/PerformanceGates.json`. The validation tool independently recomputes frame
+percentiles from exported history, validates capture metadata and driver identity, and applies renderer/VFX counter
+budgets. Profiles that require GPU timestamps reject a backend without real timestamp support; fence latency is never
+substituted. Production validation always tests the gate machinery and can consume an explicit snapshot, history, and
+metadata triplet on a named graphics worker.
 
 Development `AssetDatabase` instances own a stoppable monitor thread. The monitor performs metadata/signature
 reconciliation away from the application thread and publishes a complete immutable candidate tagged with the source

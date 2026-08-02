@@ -73,7 +73,8 @@ namespace KeireEditor
 
         [[nodiscard]] std::string ObjectFingerprint(const Keire::SceneObjectDefinition& object)
         {
-            std::string result = object.Name + '\n' + (object.Active ? "1" : "0") + '\n' + object.Parent.ToString();
+            std::string result = object.Name + '\n' + (object.Active ? "1" : "0") + '\n' +
+                                 std::to_string(object.Layer) + '\n' + object.Parent.ToString();
             auto components = object.Components;
             std::ranges::sort(components, {}, &Keire::SceneComponentDefinition::Type);
             for (const auto& component : components)
@@ -124,6 +125,9 @@ namespace KeireEditor
             if (previous.Active != object.Active)
                 m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityActive, object.Id),
                                                   object.Active ? "true" : "false");
+            if (previous.Layer != object.Layer)
+                m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityLayer, object.Id),
+                                                  std::to_string(object.Layer));
             if (previous.Parent != object.Parent)
                 m_AuthoredValues.insert_or_assign(Path(ScenePlayChangeKind::EntityParent, object.Id),
                                                   object.Parent ? object.Parent.ToString() : "Root");
@@ -299,6 +303,9 @@ namespace KeireEditor
             if (before.Active != after.Active)
                 addEntityChange(ScenePlayChangeKind::EntityActive, "Active", before.Active ? "true" : "false",
                                 after.Active ? "true" : "false");
+            if (before.Layer != after.Layer)
+                addEntityChange(ScenePlayChangeKind::EntityLayer, "Layer", std::to_string(before.Layer),
+                                std::to_string(after.Layer));
             if (before.Parent != after.Parent)
                 addEntityChange(ScenePlayChangeKind::EntityParent, "Parent",
                                 before.Parent ? before.Parent.ToString() : "Root",
@@ -627,6 +634,9 @@ namespace KeireEditor
                 break;
             case ScenePlayChangeKind::EntityActive:
                 entity.SetActive(runtimeEntity.ActiveSelf());
+                break;
+            case ScenePlayChangeKind::EntityLayer:
+                entity.SetLayer(runtimeEntity.Layer());
                 break;
             case ScenePlayChangeKind::EntityParent:
                 postponedParents.push_back(&detail);

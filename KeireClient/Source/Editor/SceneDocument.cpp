@@ -146,6 +146,33 @@ namespace KeireEditor
         target.SetActive(active);
     }
 
+    void SceneDocument::SetEntityLayer(const Keire::EntityId entity, const std::uint32_t layer)
+    {
+        const auto scene = ActiveScene();
+        auto target = scene ? scene->FindEntity(entity) : Keire::Entity{};
+        if (!target)
+            throw std::invalid_argument("Cannot change the layer of an entity outside the active scene.");
+        target.SetLayer(layer);
+    }
+
+    void SceneDocument::SetEntitiesLayer(const std::span<const Keire::AssetId> entities, const std::uint32_t layer)
+    {
+        if (!Keire::IsValidEntityLayer(layer))
+            throw std::invalid_argument("Entity layer must be between 0 and 31.");
+        const auto scene = ActiveScene();
+        std::vector<Keire::Entity> targets;
+        targets.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+            if (!target)
+                throw std::invalid_argument("Cannot change the layer of an entity outside the active scene.");
+            targets.push_back(std::move(target));
+        }
+        for (auto& target : targets)
+            target.SetLayer(layer);
+    }
+
     void SceneDocument::ReparentEntity(const Keire::EntityId entity, const Keire::EntityId parent,
                                        const bool keepWorldTransform)
     {

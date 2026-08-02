@@ -18,6 +18,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstddef>
@@ -247,6 +248,8 @@ namespace Keire::RenderBackend
         std::vector<ForwardPlusGpuResources> RetiredForwardPlus;
         std::vector<SDL_GPUBuffer*> TransientBuffers;
         std::vector<SDL_GPUTransferBuffer*> TransientTransferBuffers;
+        std::chrono::steady_clock::time_point SubmittedAt;
+        bool IncludesGpuVfx = false;
     };
 
     struct GpuTextureEntry final

@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/ECS/EntityLayer.h"
 
 #include <array>
 #include <cstddef>
@@ -12,7 +13,7 @@
 namespace Keire
 {
     inline constexpr std::uint32_t ProjectAuthoringSettingsSchemaVersion = 1;
-    inline constexpr std::size_t PhysicsCollisionLayerCount = 32;
+    inline constexpr std::size_t PhysicsCollisionLayerCount = EntityLayerCount;
 
     struct ProjectAuthoringSettings
     {

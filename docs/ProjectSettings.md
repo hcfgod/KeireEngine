@@ -18,6 +18,14 @@ source in the Project panel. The same picker implementation backs typed componen
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
 
+## Entity And Physics Layers
+
+`Authoring.keiresettings` owns 32 stable layer slots and the symmetric physics collision matrix. Layer 0 is **Default**;
+the remaining display names are project-authored and may be renamed without changing serialized entity indices. The
+Inspector's entity-header **Layer** dropdown uses these names. Physics converts the selected index to its corresponding
+single-bit layer and applies the project collision matrix plus the Collider or Character Controller mask. Empty names
+remain valid in settings and appear as `Layer N` in the Inspector so every slot stays selectable.
+
 ## Rendering Environment
 
 `Rendering.keiresettings` is a bounded, versioned document containing:

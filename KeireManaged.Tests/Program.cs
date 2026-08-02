@@ -13,7 +13,34 @@ var tests = new (string Name, Action Run)[]
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
+    ("Entity exposes the production layer contract", EntityLayerContract),
+    ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
 };
+
+static void BehaviourLifecycleContract()
+{
+    var behaviour = new DetachedManagedContractProbe();
+    Assert(behaviour.Enabled, "Detached behaviours must begin enabled.");
+    behaviour.Enabled = false;
+    Assert(!behaviour.Enabled, "Detached Behaviour.Enabled state must remain coherent before native attachment.");
+
+    System.Reflection.MethodInfo? animatorIk = typeof(Keire.Behaviour).GetMethod(
+        "RuntimeAnimatorIk", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+    Assert(animatorIk is not null && animatorIk.GetParameters() is [{ ParameterType: var parameterType }] &&
+           parameterType == typeof(float), "The native runtime must retain the Animator IK callback entry point.");
+
+    var dependency = new Keire.RequireComponentAttribute(typeof(Keire.CharacterControllerComponent));
+    Keire.ComponentTypeId expected = Keire.ComponentType.Of<Keire.CharacterControllerComponent>();
+    Assert(dependency.High == expected.High && dependency.Low == expected.Low,
+        "RequireComponent metadata must expose the dependency's stable native component ID.");
+}
+
+static void EntityLayerContract()
+{
+    System.Reflection.PropertyInfo? layer = typeof(Keire.Entity).GetProperty(nameof(Keire.Entity.Layer));
+    Assert(layer is not null && layer.PropertyType == typeof(uint) && layer.CanRead && layer.CanWrite,
+        "Entity.Layer must remain a readable and writable unsigned layer index.");
+}
 
 static void CharacterControllerStableContract()
 {
@@ -340,6 +367,8 @@ file sealed class EmptyCollisionWorld : IBallisticCollisionWorld
         return false;
     }
 }
+
+file sealed class DetachedManagedContractProbe : Keire.Behaviour;
 
 file sealed class RecordingImpactSink : IBallisticImpactSink
 {

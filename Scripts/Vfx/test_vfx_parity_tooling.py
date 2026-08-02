@@ -17,6 +17,8 @@ from runtime_vfx_catalog import load_runtime_catalog
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = REPOSITORY_ROOT / "docs/VfxParityManifest.json"
 VALIDATOR = REPOSITORY_ROOT / "Scripts/Vfx/validate_vfx_parity_manifest.py"
+RECONCILER = REPOSITORY_ROOT / "Scripts/Vfx/reconcile_vfx_manifest.py"
+CAPABILITY_GENERATOR = REPOSITORY_ROOT / "Scripts/Vfx/generate_vfx_capabilities.py"
 
 
 class MarkdownCatalogTests(unittest.TestCase):
@@ -96,6 +98,39 @@ class RuntimeCatalogIntegrityTests(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 1)
         self.assertIn("encoding is not canonical", result.stderr)
+
+    def test_checked_manifest_and_capability_reference_are_reconciled(self) -> None:
+        for command in (
+            [sys.executable, str(RECONCILER), "--check"],
+            [sys.executable, str(CAPABILITY_GENERATOR), "--check"],
+        ):
+            with self.subTest(command=command[1]):
+                result = subprocess.run(
+                    command,
+                    cwd=REPOSITORY_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_every_enabled_implementation_belongs_to_a_production_slice(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        enabled = {
+            entry["keire"]["implementation"]
+            for entry in manifest["entries"]
+            if entry["keire"]["support"] != "Disabled"
+        }
+        covered = {
+            implementation
+            for production_slice in manifest["productionSlices"]
+            for implementation in production_slice["implementations"]
+        }
+        self.assertEqual(enabled, covered)
+        for production_slice in manifest["productionSlices"]:
+            self.assertTrue(production_slice["samples"])
+            for sample in production_slice["samples"]:
+                self.assertTrue((REPOSITORY_ROOT / sample).is_file(), sample)
 
 
 if __name__ == "__main__":

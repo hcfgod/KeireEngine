@@ -80,7 +80,12 @@ Never format or patch vendored code during ordinary engine work.
 | Hub tray behavior | Injected lifecycle tests plus conditional native smoke |
 | Script changes | Matching Windows and Unix regression harnesses |
 | Packaging | Release package with direct and CMake low-level/managed consumers |
+| Renderer/VFX performance | Named reference hardware, Release/Dist capture metadata, full frame-history export, and a passing configured performance profile |
 | Rendered pixels | Hidden-window `KeireRenderTests` on D3D12/Vulkan/Metal where supported |
+
+The production validation launchers accept `-IncludeGraphicsSmokes` on Windows or `--include-graphics-smokes` on Unix
+to run the sample-project Release smoke on a graphics-capable worker. `-IncludePackage` or `--include-package` adds the
+Release SDK build plus direct and CMake validation for both packaged consumers.
 
 UBSan and TSan should also run when a supported GCC/Clang platform is available and the change affects undefined
 behavior or concurrency. A missing host capability must be reported; it is not equivalent to a passing check.

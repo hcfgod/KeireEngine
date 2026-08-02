@@ -5,6 +5,21 @@ version tags.
 
 ## Unreleased
 
+- Closed the documented managed Behaviour contract gaps: `Enabled` now synchronizes native component state,
+  `RequireComponent` dependencies are reflected and enforced transactionally with cycle validation, and Animator IK
+  dispatch reaches managed `OnAnimatorIk` before pose IK application. Added native/managed lifecycle and rollback tests.
+- Completed the entity-layer schema-4 release surface with checked-in schema 1-4 migration fixtures, canonical
+  round-trip coverage, starter-scene schema 4 output, and layer-aware low-level and managed packaged consumers.
+- Added manifest-driven VFX production slices, an offline manifest reconciler, and generated capability documentation.
+  Release validation now rejects stale capability output, enabled implementations without a tested slice, and catalog
+  mappings that drift from runtime descriptors.
+- Added renderer and GPU-VFX fence-completion latency diagnostics plus reference-hardware performance profiles and a
+  capture validator that recomputes percentiles and enforces metadata, history, timestamp, renderer, and VFX budgets.
+  Fence completion remains explicitly distinct from true GPU timestamps and cannot satisfy timestamp-required gates.
+- Added first-class Unity-style entity layers. The Inspector entity header now exposes the project's 32 named layers,
+  supports mixed multi-selection, and records one undoable edit. Scene schema v4 persists layer indices and migrates
+  legacy Collider/Character Controller bit layers; duplication, prefab variants/overrides, Play Mode Changes, physics,
+  the native `Entity` API, and managed `Entity.Layer` all share the same validated contract.
 - Removed the first-Play GPU VFX pipeline hitch. The editor now requests all schema-4 compute pipelines through a
   low-priority background warmup while the workspace remains responsive; first-use compilation remains a compatible
   fallback for runtime clients that do not prewarm. Renderer statistics and profiler captures expose warmup pending,

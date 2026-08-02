@@ -3748,7 +3748,8 @@ namespace Keire::RenderBackend
             InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
                                 std::move(PendingRetiredSkins), std::move(PendingRetiredTextures),
                                 std::move(PendingRetiredPipelines), std::move(PendingRetiredForwardPlus),
-                                std::move(FrameTransientBuffers), std::move(FrameUploadTransfers)});
+                                std::move(FrameTransientBuffers), std::move(FrameUploadTransfers), submissionStarted,
+                                Statistics.VfxGpuWorlds != 0});
             PendingRetired.clear();
             PendingRetiredMeshes.clear();
             PendingRetiredSkins.clear();

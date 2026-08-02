@@ -41,6 +41,11 @@ Every entity receives one mandatory, non-removable Transform. Use typed `AddComp
 entities in deterministic hierarchy order. Structural changes requested from a component lifecycle callback are queued
 until traversal reaches the next safe boundary.
 
+Every entity also owns one layer index in the inclusive `0..31` range. `Entity::Layer()` and `Entity::SetLayer()` are
+the canonical native API; `EntityLayerCount`, `IsValidEntityLayer`, and `EntityLayerBit` support validated layer-mask
+work. Collider and Character Controller filtering consumes the owning entity's layer, so those components cannot drift
+onto a different layer. Their legacy single-bit layer setters remain source-compatible and forward to the entity.
+
 ## Lifecycle
 
 Play mode invokes `Awake`, `OnEnable`, `Start`, `FixedUpdate`, `Update`, `OnDisable`, and `OnDestroy` in deterministic
@@ -66,7 +71,9 @@ for one ambient-plus-Lambert light. Shadow mode, strength, and bias remain seria
 
 ## Scene Serialization
 
-Schema v2 stores entities with stable IDs and component records containing stable type ID, schema version, enabled
-state, and bounded JSON data. Schema v1 remains readable and its inline transform is migrated automatically. Saves are
-always canonical v2. Unregistered records remain attached as Missing Components and round-trip their type, version,
-enabled state, and complete data; cooking can reject unresolved types without destroying editor content.
+Scene schema v4 stores entities with stable IDs, a validated layer index, and component records containing stable type
+ID, schema version, enabled state, and bounded JSON data. Schemas v1-v3 remain readable. Legacy inline transforms are
+migrated automatically, and a v2/v3 entity without an entity layer inherits the first valid Collider or Character
+Controller collision layer before falling back to Default. Saves are always canonical v4. Unregistered records remain
+attached as Missing Components and round-trip their type, version, enabled state, and complete data; cooking can reject
+unresolved types without destroying editor content.

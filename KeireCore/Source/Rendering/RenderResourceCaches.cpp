@@ -24,6 +24,11 @@ namespace Keire::RenderBackend
         {
             auto frame = std::move(InFlight.front());
             InFlight.pop_front();
+            const auto completionLatency =
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - frame.SubmittedAt).count();
+            Statistics.GpuCompletionLatencyMilliseconds = completionLatency;
+            if (frame.IncludesGpuVfx)
+                Statistics.VfxGpuCompletionLatencyMilliseconds = completionLatency;
             for (auto& retired : frame.Retired)
                 ReleaseResources(retired);
             for (auto& retired : frame.RetiredMeshes)

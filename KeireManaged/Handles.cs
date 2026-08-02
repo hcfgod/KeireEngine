@@ -35,6 +35,12 @@ public readonly record struct Entity(ulong World, EntityId Id)
 
     public bool ActiveInHierarchy => NativeRuntime.GetEntityActiveInHierarchy(this);
 
+    public uint Layer
+    {
+        get => NativeRuntime.GetEntityLayer(this);
+        set => NativeRuntime.SetEntityLayer(this, value);
+    }
+
     public Entity Parent
     {
         get => NativeRuntime.GetEntityParent(this);

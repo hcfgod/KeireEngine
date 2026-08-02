@@ -1,5 +1,7 @@
 #include "Keire/Scenes/Scene.h"
 
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/SceneState.h"
 
@@ -242,6 +244,7 @@ namespace Keire
                 EntityId Parent;
                 std::string Name;
                 bool Active = true;
+                std::uint32_t Layer = 0;
                 std::vector<Ref<Component>> Components;
                 std::vector<SceneComponentDefinition> MissingComponents;
                 mutable Matrix4 CachedWorld;
@@ -260,7 +263,8 @@ namespace Keire
                 for (const auto& object : definition.Objects)
                 {
                     const auto native = Registry.create();
-                    EntityRecord record{EntityId(object.Id), EntityId(object.Parent), object.Name, object.Active};
+                    EntityRecord record{EntityId(object.Id), EntityId(object.Parent), object.Name, object.Active,
+                                        object.Layer};
                     bool hasTransform = false;
                     for (const auto& serialized : object.Components)
                     {
@@ -468,6 +472,8 @@ namespace Keire
                         component->Attach(m_Impl->Self, id);
                         m_Impl->IndexComponent(id, component);
                     }
+            for (const auto id : m_Impl->Order)
+                SynchronizeEntityLayer(id);
         }
 
         void SceneState::RequireOwner(const char* operation) const
@@ -527,7 +533,7 @@ namespace Keire
         SceneDefinition SceneState::Snapshot() const
         {
             RequireOwner("Snapshot");
-            SceneDefinition result{.SchemaVersion = 3,
+            SceneDefinition result{.SchemaVersion = CurrentSceneSchemaVersion,
                                    .Name = m_Impl->Name,
                                    .PrefabInstances = m_Impl->PrefabInstances,
                                    .PrefabOverrides = m_Impl->PrefabOverrides};
@@ -536,6 +542,7 @@ namespace Keire
             {
                 const auto* record = m_Impl->Find(id);
                 SceneObjectDefinition object{id.Value(), record->Parent.Value(), record->Name, record->Active};
+                object.Layer = record->Layer;
                 object.Components.reserve(record->Components.size() + record->MissingComponents.size());
                 for (const auto& component : record->Components)
                 {
@@ -564,7 +571,9 @@ namespace Keire
             for (const auto id : m_Impl->HierarchyOrder())
             {
                 const auto* record = m_Impl->Find(id);
-                result.Objects.emplace_back(id.Value(), record->Parent.Value(), record->Name, record->Active);
+                auto& object =
+                    result.Objects.emplace_back(id.Value(), record->Parent.Value(), record->Name, record->Active);
+                object.Layer = record->Layer;
             }
             return result;
         }
@@ -640,6 +649,7 @@ namespace Keire
                     rootCopy = copy.Id();
                 remapped.emplace(original, copy.Id());
                 SetActive(copy.Id(), object.Active);
+                SetEntityLayer(copy.Id(), object.Layer);
                 auto transform = copy.GetComponent<TransformComponent>();
                 transform->SetLocalPosition(object.Transform.Position);
                 transform->SetLocalRotation(object.Transform.Rotation);
@@ -659,6 +669,8 @@ namespace Keire
                                               serialized.SchemaVersion);
                     SetComponentEnabled(*component, serialized.Enabled);
                 }
+                // The entity field is canonical. Legacy component payloads may still carry an older layer bit.
+                SetEntityLayer(copy.Id(), object.Layer);
             }
             return Find(rootCopy);
         }
@@ -757,6 +769,45 @@ namespace Keire
             if (!record)
                 throw std::logic_error("Entity is stale.");
             record->Name = std::move(name);
+            m_Impl->Dirty = true;
+        }
+
+        std::uint32_t SceneState::EntityLayer(const EntityId id) const
+        {
+            RequireOwner("EntityLayer");
+            const auto* record = m_Impl->Find(id);
+            if (!record)
+                throw std::logic_error("Entity is stale.");
+            return record->Layer;
+        }
+
+        void SceneState::SynchronizeEntityLayer(const EntityId id)
+        {
+            auto* record = m_Impl->Find(id);
+            if (!record)
+                return;
+            const auto collisionLayer = EntityLayerBit(record->Layer);
+            for (const auto& component : record->Components)
+            {
+                if (component->Type() == ColliderComponent::StaticType())
+                    DynamicRefCast<ColliderComponent>(component)->ApplyEntityLayer(collisionLayer);
+                else if (component->Type() == CharacterControllerComponent::StaticType())
+                    DynamicRefCast<CharacterControllerComponent>(component)->ApplyEntityLayer(collisionLayer);
+            }
+        }
+
+        void SceneState::SetEntityLayer(const EntityId id, const std::uint32_t layer)
+        {
+            RequireOwner("SetEntityLayer");
+            if (!IsValidEntityLayer(layer))
+                throw std::invalid_argument("Entity layer must be between 0 and 31.");
+            auto* record = m_Impl->Find(id);
+            if (!record)
+                throw std::logic_error("Entity is stale.");
+            if (record->Layer == layer)
+                return;
+            record->Layer = layer;
+            SynchronizeEntityLayer(id);
             m_Impl->Dirty = true;
         }
 
@@ -910,6 +961,7 @@ namespace Keire
                 component->Attach(m_Impl->Self, id);
                 target->Components.push_back(component);
                 m_Impl->IndexComponent(id, component);
+                SynchronizeEntityLayer(id);
                 m_Impl->Dirty = true;
                 if (m_Impl->Playing)
                 {
@@ -1119,6 +1171,26 @@ namespace Keire
             FlushDeferred();
         }
 
+        void SceneState::DispatchAnimatorIk(const EntityId entity, const AnimationIkMessage& context)
+        {
+            RequireOwner("DispatchAnimatorIk");
+            if (!m_Impl->Playing || !entity || !std::isfinite(context.LayerWeight) || context.LayerWeight < 0.0F ||
+                context.LayerWeight > 1.0F)
+            {
+                throw std::invalid_argument("Animator IK dispatch arguments are invalid.");
+            }
+            auto* record = m_Impl->Find(entity);
+            if (!record || !ActiveInHierarchy(entity))
+                return;
+            m_Impl->Traverse(
+                [&]
+                {
+                    for (const auto& component : record->Components)
+                        component->InvokeAnimatorIk(context);
+                });
+            FlushDeferred();
+        }
+
         void SceneState::DispatchPhysicsContact(const EntityId entity, const PhysicsContactPhase phase,
                                                 const PhysicsContactMessage& contact)
         {
@@ -1278,6 +1350,13 @@ namespace Keire
         m_Impl->State->SetActive(EntityId(id), active);
         return true;
     }
+    bool Scene::SetObjectLayer(const AssetId id, const std::uint32_t layer)
+    {
+        if (!m_Impl->State->Contains(EntityId(id)))
+            return false;
+        m_Impl->State->SetEntityLayer(EntityId(id), layer);
+        return true;
+    }
     bool Scene::SetObjectTransform(const AssetId id, const SceneTransform transform)
     {
         auto entity = m_Impl->State->Find(EntityId(id));
@@ -1320,6 +1399,10 @@ namespace Keire
     void Scene::DispatchAnimationEvent(const EntityId entity, const AnimationEventMessage& event)
     {
         m_Impl->State->DispatchAnimationEvent(entity, event);
+    }
+    void Scene::DispatchAnimatorIk(const EntityId entity, const AnimationIkMessage& context)
+    {
+        m_Impl->State->DispatchAnimatorIk(entity, context);
     }
     void Scene::DispatchPhysicsContact(const EntityId entity, const PhysicsContactPhase phase,
                                        const PhysicsContactMessage& contact)

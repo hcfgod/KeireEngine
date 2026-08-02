@@ -27,6 +27,8 @@ namespace
             return "Set active";
         case Keire::PrefabOverrideKind::SetObjectTransform:
             return "Set transform";
+        case Keire::PrefabOverrideKind::SetObjectLayer:
+            return "Set layer";
         case Keire::PrefabOverrideKind::SetComponentProperty:
             return "Set component property";
         case Keire::PrefabOverrideKind::AddComponent:
@@ -700,6 +702,10 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         return "Update";
                     case Keire::ManagedBehaviourCallback::LateUpdate:
                         return "LateUpdate";
+                    case Keire::ManagedBehaviourCallback::AnimationEvent:
+                        return "OnAnimationEvent";
+                    case Keire::ManagedBehaviourCallback::PhysicsContact:
+                        return "Physics Contact";
                     case Keire::ManagedBehaviourCallback::Disable:
                         return "OnDisable";
                     case Keire::ManagedBehaviourCallback::Destroy:
@@ -708,6 +714,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         return "OnBeforeReload";
                     case Keire::ManagedBehaviourCallback::AfterReload:
                         return "OnAfterReload";
+                    case Keire::ManagedBehaviourCallback::AnimatorIk:
+                        return "OnAnimatorIk";
                     }
                     return "Unknown";
                 };
@@ -818,7 +826,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.CommandRecordingUnattributedMilliseconds) + " ms other");
                 ui.Text("Scheduling " + std::to_string(statistics.AllowedFramesInFlight) + " frames in flight / " +
                         std::to_string(statistics.GpuFenceWaitMilliseconds) + " ms fence wait / " +
-                        std::to_string(statistics.SwapchainWaitMilliseconds) + " ms swapchain wait");
+                        std::to_string(statistics.SwapchainWaitMilliseconds) + " ms swapchain wait / " +
+                        std::to_string(statistics.GpuCompletionLatencyMilliseconds) + " ms completion latency");
                 ui.Text("Frame uploads " + std::to_string(statistics.FrameUploadMilliseconds) + " ms / " +
                         std::to_string(statistics.FrameUploadSubmissions) + " submissions / " +
                         std::to_string(statistics.ForwardPlusUploadBytes) + " Forward+ bytes / " +
@@ -829,7 +838,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.VfxComputeThreadGroups) + " thread groups / " +
                         std::to_string(statistics.VfxIndirectDraws) + " indirect draws / " +
                         std::to_string(statistics.VfxGpuParticleCapacity) + " particle slots / " +
-                        std::to_string(statistics.VfxGpuBufferBytes) + " bytes");
+                        std::to_string(statistics.VfxGpuBufferBytes) + " bytes / " +
+                        std::to_string(statistics.VfxGpuCompletionLatencyMilliseconds) + " ms completion latency");
                 if (statistics.VfxPipelineWarmupPending)
                     ui.TextColored(m_Theme.Warning, "GPU VFX pipelines are compiling asynchronously");
                 else if (statistics.VfxPipelinesReady)

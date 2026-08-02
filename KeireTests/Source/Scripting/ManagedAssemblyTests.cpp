@@ -322,7 +322,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     {
         std::ofstream stream(root / "Scripts/Player.cs", std::ios::binary | std::ios::trunc);
         stream << "using Keire; namespace Game; "
+                  "[StableComponentId(\"73616e64-626f-4078-8000-000000000097\")] "
+                  "public sealed class PlayerDependency : Behaviour { } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
+                  "[RequireComponent(typeof(PlayerDependency))] "
                   "[ExecutionOrder(-50)] public sealed class Player : Behaviour { "
                   "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\")] "
                   "public float Speed = 7.5f; "
@@ -335,8 +338,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField] public bool RunAudioScalarValidation = false; "
                   "[SerializeField] public bool VolumeValidationObserved = false; "
                   "[SerializeField] public bool PitchValidationObserved = false; "
+                  "[SerializeField] public bool DisableThroughProperty = false; "
+                  "[SerializeField] public bool DisableObserved = false; "
+                  "[SerializeField] public bool AnimatorIkObserved = false; "
+                  "[SerializeField] public float AnimatorIkWeight = -1.0f; "
                   "protected override void Awake() { Speed += 1.0f; } "
                   "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
+                  "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
                   "try { var source = Entity.AudioSource; source.Time = 0.5f; } "
                   "catch (System.InvalidOperationException) { SeekFailureObserved = true; } "
                   "if (RunAudioScalarValidation) ValidateAudioScalars(); "
@@ -364,6 +372,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "try { source.Pitch = value; } "
                   "catch (System.ArgumentOutOfRangeException) { pitchFailures++; } } "
                   "PitchValidationObserved = pitchFailures == 3 && source.Pitch == 8.0f; } "
+                  "protected override void OnDisable() { DisableObserved = !Enabled; } "
+                  "protected override void OnAnimatorIk(AnimationIkContext context) { "
+                  "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
                   "protected override void OnBeforeReload() { Speed += 1.0f; } "
                   "protected override void OnAfterReload() { Speed += 1.0f; } } "
                   "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
@@ -406,7 +417,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     INFO(scripts->ReloadStatus().Diagnostic);
     REQUIRE(prepared);
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
-    CHECK(scripts->ReloadStatus().AvailableTypes == std::vector<std::string>{"Game.Player"});
+    CHECK(scripts->ReloadStatus().AvailableTypes == std::vector<std::string>{"Game.Player", "Game.PlayerDependency"});
     CHECK(scripts->ReloadStatus().RetainedState == request.State);
     scripts->CommitReload();
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
@@ -430,6 +441,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
                               { return diagnostic.TypeName == "Game.InvalidTuning"; }));
     const auto componentType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000099");
+    const auto dependencyType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000097");
     auto registry = Keire::ComponentRegistry::CreateDefault();
     const auto registryRevision = registry->Revision();
     scripts->InstallManagedComponents(registry);
@@ -437,6 +449,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(registry->Revision() == registryRevision + 1);
     const auto registration = registry->Find(componentType);
     REQUIRE(registration);
+    CHECK(registration->RequiredComponents == std::vector<Keire::ComponentTypeId>{dependencyType});
 
     const std::string duplicateState =
         R"({"Version":1,"Fields":[{"StableId":"","Name":"Speed","Type":"System.Single","Aliases":[],"Value":3.0},)"
@@ -457,6 +470,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     auto scriptedEntity = editingScene->CreateEntity("Player");
     const auto editingComponent = scriptedEntity.AddComponent(componentType);
     REQUIRE(editingComponent);
+    CHECK(scriptedEntity.HasComponent(dependencyType));
     registration->Deserialize(*editingComponent, {{"managedState", legacyState}}, registration->SchemaVersion);
     const auto editingValuesBeforePlay = registration->Serialize(*editingComponent);
     REQUIRE(editingValuesBeforePlay.contains("managedState"));
@@ -472,6 +486,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     REQUIRE(runtimeEntity);
     const auto runtimeComponent = runtimeEntity.GetComponent(componentType);
     REQUIRE(runtimeComponent);
+    CHECK_THROWS_AS(static_cast<void>(runtimeEntity.RemoveComponent(dependencyType)), std::logic_error);
 
     auto runtimeValues = registration->Serialize(*runtimeComponent);
     REQUIRE(runtimeValues.contains("managedState"));
@@ -504,6 +519,23 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::get<bool>(consumedValues.at("Utf8BusLimitObserved")));
     CHECK(std::get<bool>(consumedValues.at("Utf8BusBoundaryAccepted")));
     CHECK_FALSE(runtimeEntity.HasComponent<Keire::AudioSourceComponent>());
+
+    auto disableValues = consumedValues;
+    disableValues.insert_or_assign("DisableThroughProperty", true);
+    registration->Deserialize(*runtimeComponent, disableValues, registration->SchemaVersion);
+    CHECK_NOTHROW(play->FixedUpdate(1.0F / 60.0F));
+    CHECK_FALSE(runtimeComponent->Enabled());
+    const auto disabledResults = registration->Serialize(*runtimeComponent);
+    REQUIRE(disabledResults.contains("DisableObserved"));
+    CHECK(std::get<bool>(disabledResults.at("DisableObserved")));
+    runtimeComponent->SetEnabled(true);
+
+    CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.625F}));
+    const auto ikResults = registration->Serialize(*runtimeComponent);
+    REQUIRE(ikResults.contains("AnimatorIkObserved"));
+    REQUIRE(ikResults.contains("AnimatorIkWeight"));
+    CHECK(std::get<bool>(ikResults.at("AnimatorIkObserved")));
+    CHECK(std::get<double>(ikResults.at("AnimatorIkWeight")) == doctest::Approx(0.625));
 
     REQUIRE(runtimeEntity.AddComponent<Keire::AudioSourceComponent>());
     auto scalarValidationValues = consumedValues;

@@ -55,6 +55,10 @@ position, Euler rotation (stored as a normalized quaternion),
 scale, and parent hierarchy are component data. Camera exposes projection, primary selection, priority, clipping, and
 Skybox/Solid Color background, and linear clear color. Mesh Renderer exposes mesh/material IDs, tint, and visibility. Directional Light color, intensity,
 temperature, and orientation feed the built-in Lambert pass; shadow settings remain authoring data for a later pass.
+The entity header exposes a Unity-style **Layer** dropdown beside the common name/active controls. It reads the 32 names
+from Project Settings, applies one validated undoable edit, and edits every selected entity when the Inspector is not
+locked. A mixed selection displays **Mixed** until a layer is chosen. Layer edits persist through scene saves,
+duplication, prefabs, and selective Play Mode Changes.
 Scene uses its own bounded `UndoContext`, `Ctrl+S`, and explicit atomic Save. The global Edit menu and
 `Ctrl/Cmd+Z`, `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, or `Ctrl+Y` route to the focused document history. Continuous Transform and tint
 drags are one undo entry. `Ctrl+Shift+S` uses an asynchronous native dialog,
@@ -94,4 +98,6 @@ motion while vertical motion retains Unity's pitch convention. Game view renders
 from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content.
 Closing the editor cancels queued catalog refreshes instead of forcing pending background import work to finish;
 already-saved scene and material sources remain durable and refresh on the next launch. See
-[Rendering](Rendering.md). Prefabs, scripting, and native module hot reload remain later subsystem milestones.
+[Rendering](Rendering.md). Prefab composition and managed scripting are supported authoring workflows; see
+[Scene System](SceneSystem.md) and [C# Scripting](Scripting/README.md). Native C++ module hot reload is not part of the
+supported editor contract.

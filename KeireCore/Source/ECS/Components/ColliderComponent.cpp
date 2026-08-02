@@ -2,6 +2,7 @@
 
 #include "Keire/Assets/PhysicsMaterialAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/ECS/Entity.h"
 
 #include <bit>
 #include <cmath>
@@ -77,6 +78,11 @@ namespace Keire
     {
         if (!std::has_single_bit(value))
             throw std::invalid_argument("Collider layer must select exactly one of the 32 collision layers.");
+        if (IsAttached())
+        {
+            Owner().SetLayer(std::countr_zero(value));
+            return;
+        }
         m_Layer = value;
         NotifyChanged();
     }
@@ -136,7 +142,6 @@ namespace Keire
              {},
              0.1,
              PhysicsMaterialAsset::StaticType()},
-            {"layer", "Layer", "Filtering", ComponentPropertyKind::Integer},
             {"mask", "Mask", "Filtering", ComponentPropertyKind::Integer},
             {"trigger", "Is Trigger", "Filtering", ComponentPropertyKind::Boolean}};
         result.Factory = [] { return Ref<Component>(CreateRef<ColliderComponent>()); };

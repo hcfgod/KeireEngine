@@ -426,6 +426,8 @@ namespace Keire
                                                             static_cast<double>(statistics.ForwardPlusUploadBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU worlds",
                                                             static_cast<double>(statistics.VfxGpuWorlds));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Dropped VFX particles",
+                                                            static_cast<double>(statistics.DroppedVfxParticles));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU buffer bytes",
                                                             static_cast<double>(statistics.VfxGpuBufferBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU particle capacity",
@@ -452,6 +454,11 @@ namespace Keire
                                                             statistics.UiRecordingMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU submission CPU (ms)",
                                                             statistics.GpuSubmissionMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU completion latency (ms)",
+                                                            statistics.GpuCompletionLatencyMilliseconds);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering,
+                                                            "VFX GPU completion latency (ms)",
+                                                            statistics.VfxGpuCompletionLatencyMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU timing supported",
                                                             statistics.GpuTimingSupported ? 1.0 : 0.0);
                         if (statistics.GpuTimingSupported)

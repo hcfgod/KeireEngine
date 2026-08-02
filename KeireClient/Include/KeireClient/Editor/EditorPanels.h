@@ -82,6 +82,7 @@ namespace KeireEditor
         [[nodiscard]] virtual MaterialDocument& InspectorMaterialDocument() noexcept = 0;
         [[nodiscard]] virtual PropertyDrawerRegistry& InspectorPropertyDrawers() noexcept = 0;
         [[nodiscard]] virtual const Keire::UiThemeDefinition& InspectorTheme() const noexcept = 0;
+        [[nodiscard]] virtual std::span<const std::string> InspectorLayerNames() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetDatabase> InspectorAssetDatabase() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> InspectorAssetSystem() const noexcept = 0;
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept = 0;

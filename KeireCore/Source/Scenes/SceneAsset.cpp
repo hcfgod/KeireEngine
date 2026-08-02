@@ -4,6 +4,7 @@
 #include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/CameraComponent.h"
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
@@ -12,6 +13,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -294,7 +296,7 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] SceneObjectDefinition DecodeEntity(const Json& value)
+        [[nodiscard]] SceneObjectDefinition DecodeEntity(const Json& value, const bool requireLayer = false)
         {
             SceneObjectDefinition object;
             object.Id = AssetId::Parse(value.at("id").get<std::string>());
@@ -302,6 +304,9 @@ namespace Keire
                 object.Parent = AssetId::Parse(value["parent"].get<std::string>());
             object.Name = value.at("name").get<std::string>();
             object.Active = value.value("active", true);
+            if (requireLayer && !value.contains("layer"))
+                throw std::runtime_error("Scene schema v4 entity is missing its layer.");
+            std::optional<std::uint32_t> legacyLayer;
             const auto& components = value.at("components");
             if (!components.is_array() || components.size() > MaximumComponentsPerEntity)
                 throw std::runtime_error("Scene entity components must be a bounded array.");
@@ -317,8 +322,17 @@ namespace Keire
                 component.Data = serialized.at("data").dump();
                 if (component.Type == TransformComponent::StaticType())
                     object.Transform = ParseTransformData(serialized.at("data"));
+                if (!value.contains("layer") && !legacyLayer &&
+                    (component.Type == ColliderComponent::StaticType() ||
+                     component.Type == CharacterControllerComponent::StaticType()))
+                {
+                    const auto collisionLayer = serialized.at("data").value("layer", 1U);
+                    if (std::has_single_bit(collisionLayer))
+                        legacyLayer = std::countr_zero(collisionLayer);
+                }
                 object.Components.push_back(std::move(component));
             }
+            object.Layer = value.value("layer", legacyLayer.value_or(0U));
             return object;
         }
 
@@ -524,6 +538,7 @@ namespace Keire
             Json result{{"id", object.Id.ToString()},
                         {"name", object.Name},
                         {"active", object.Active},
+                        {"layer", object.Layer},
                         {"components", std::move(components)}};
             result["parent"] = object.Parent ? Json(object.Parent.ToString()) : Json(nullptr);
             return result;
@@ -543,6 +558,9 @@ namespace Keire
                 break;
             case PrefabOverrideKind::SetObjectTransform:
                 result["transform"] = TransformData(value.Transform);
+                break;
+            case PrefabOverrideKind::SetObjectLayer:
+                result["layer"] = value.Layer;
                 break;
             case PrefabOverrideKind::SetComponentProperty:
                 result["component"] = value.Component.ToString();
@@ -567,7 +585,7 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] PrefabOverrideDefinition DecodeOverride(const Json& value)
+        [[nodiscard]] PrefabOverrideDefinition DecodeOverride(const Json& value, const bool requireLayer = false)
         {
             PrefabOverrideDefinition result;
             result.Kind = static_cast<PrefabOverrideKind>(value.at("kind").get<std::uint8_t>());
@@ -583,6 +601,9 @@ namespace Keire
                 break;
             case PrefabOverrideKind::SetObjectTransform:
                 result.Transform = ParseTransformData(value.at("transform"));
+                break;
+            case PrefabOverrideKind::SetObjectLayer:
+                result.Layer = value.at("layer").get<std::uint32_t>();
                 break;
             case PrefabOverrideKind::SetComponentProperty:
                 result.Component = ComponentTypeId::Parse(value.at("component").get<std::string>());
@@ -603,7 +624,7 @@ namespace Keire
                 result.Component = ComponentTypeId::Parse(value.at("component").get<std::string>());
                 break;
             case PrefabOverrideKind::AddObject:
-                result.AddedObject = DecodeEntity(value.at("objectValue"));
+                result.AddedObject = DecodeEntity(value.at("objectValue"), requireLayer);
                 break;
             case PrefabOverrideKind::RemoveObject:
                 break;
@@ -627,7 +648,7 @@ namespace Keire
                     {"overrides", std::move(overrides)}};
         }
 
-        [[nodiscard]] PrefabInstanceDefinition DecodeInstance(const Json& value)
+        [[nodiscard]] PrefabInstanceDefinition DecodeInstance(const Json& value, const bool requireLayer = false)
         {
             PrefabInstanceDefinition result;
             result.Prefab = AssetId::Parse(value.at("prefab").get<std::string>());
@@ -636,13 +657,14 @@ namespace Keire
                 result.Objects.push_back({AssetId::Parse(mapping.at("source").get<std::string>()),
                                           AssetId::Parse(mapping.at("instance").get<std::string>())});
             for (const auto& overrideValue : value.value("overrides", Json::array()))
-                result.Overrides.push_back(DecodeOverride(overrideValue));
+                result.Overrides.push_back(DecodeOverride(overrideValue, requireLayer));
             return result;
         }
 
         [[nodiscard]] SceneDefinition DecodeVersionOne(const Json& document)
         {
-            SceneDefinition definition{.SchemaVersion = 3, .Name = document.at("name").get<std::string>()};
+            SceneDefinition definition{.SchemaVersion = CurrentSceneSchemaVersion,
+                                       .Name = document.at("name").get<std::string>()};
             const auto& objects = document.at("objects");
             if (!objects.is_array())
                 throw std::runtime_error("Scene objects must be an array.");
@@ -695,22 +717,24 @@ namespace Keire
         {
             definition = DecodeVersionOne(document);
         }
-        else if (version == 2 || version == 3)
+        else if (version == 2 || version == 3 || version == CurrentSceneSchemaVersion)
         {
-            definition.SchemaVersion = 3;
+            definition.SchemaVersion = CurrentSceneSchemaVersion;
             definition.Name = document.at("name").get<std::string>();
             const auto& entities = document.at("entities");
             if (!entities.is_array())
                 throw std::runtime_error("Scene entities must be an array.");
             definition.Objects.reserve(entities.size());
             for (const auto& value : entities)
-                definition.Objects.push_back(DecodeEntity(value));
-            if (version == 3)
+                definition.Objects.push_back(DecodeEntity(value, version == CurrentSceneSchemaVersion));
+            if (version >= 3)
             {
                 for (const auto& instance : document.value("prefabInstances", Json::array()))
-                    definition.PrefabInstances.push_back(DecodeInstance(instance));
+                    definition.PrefabInstances.push_back(
+                        DecodeInstance(instance, version == CurrentSceneSchemaVersion));
                 for (const auto& overrideValue : document.value("prefabOverrides", Json::array()))
-                    definition.PrefabOverrides.push_back(DecodeOverride(overrideValue));
+                    definition.PrefabOverrides.push_back(
+                        DecodeOverride(overrideValue, version == CurrentSceneSchemaVersion));
             }
         }
         else
@@ -733,7 +757,7 @@ namespace Keire
         Json overrides = Json::array();
         for (const auto& overrideValue : definition.PrefabOverrides)
             overrides.push_back(EncodeOverride(overrideValue));
-        const Json document{{"schemaVersion", 3},
+        const Json document{{"schemaVersion", CurrentSceneSchemaVersion},
                             {"name", definition.Name},
                             {"entities", std::move(entities)},
                             {"prefabInstances", std::move(instances)},
@@ -746,7 +770,7 @@ namespace Keire
 
     SceneDefinition SceneAsset::EmptyDefinition(std::string name)
     {
-        return {.SchemaVersion = 3, .Name = std::move(name)};
+        return {.SchemaVersion = CurrentSceneSchemaVersion, .Name = std::move(name)};
     }
 
     SceneDefinition SceneAsset::SampleDefinition()
@@ -813,8 +837,8 @@ namespace Keire
 
     void SceneAsset::Validate(const SceneDefinition& definition)
     {
-        if (definition.SchemaVersion != 3)
-            throw std::invalid_argument("Scene definition must use canonical schema version 3.");
+        if (definition.SchemaVersion != CurrentSceneSchemaVersion)
+            throw std::invalid_argument("Scene definition must use the canonical schema version.");
         if (definition.Name.empty() || definition.Name.size() > MaximumNameBytes)
             throw std::invalid_argument("Scene name is empty or exceeds 256 UTF-8 bytes.");
         if (definition.Objects.size() > MaximumObjects)
@@ -827,6 +851,8 @@ namespace Keire
             if (!object.Id || object.Name.empty() || object.Name.size() > MaximumNameBytes ||
                 depths.contains(object.Id))
                 throw std::invalid_argument("Scene entity has an invalid ID or name, or duplicates another entity.");
+            if (!IsValidEntityLayer(object.Layer))
+                throw std::invalid_argument("Scene entity layer must be between 0 and 31.");
             std::size_t depth = 1;
             if (object.Parent)
             {
@@ -906,6 +932,10 @@ namespace Keire
                         std::abs(Math::Length(value.Transform.Rotation) - 1.0F) > 0.001F)
                         throw std::invalid_argument("Prefab transform override is invalid.");
                     break;
+                case PrefabOverrideKind::SetObjectLayer:
+                    if (!value.Object || !IsValidEntityLayer(value.Layer))
+                        throw std::invalid_argument("Prefab layer override is invalid.");
+                    break;
                 case PrefabOverrideKind::SetComponentProperty:
                     if (!value.Object || !value.Component || value.Property.empty() || value.Property.size() > 256)
                         throw std::invalid_argument("Prefab component property override is invalid.");
@@ -921,7 +951,8 @@ namespace Keire
                         throw std::invalid_argument("Prefab remove-component override is invalid.");
                     break;
                 case PrefabOverrideKind::AddObject:
-                    if (!value.AddedObject || !value.AddedObject->Id || value.AddedObject->Name.empty())
+                    if (!value.AddedObject || !value.AddedObject->Id || value.AddedObject->Name.empty() ||
+                        !IsValidEntityLayer(value.AddedObject->Layer))
                         throw std::invalid_argument("Prefab add-object override is invalid.");
                     break;
                 case PrefabOverrideKind::RemoveObject:
@@ -948,7 +979,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Scene";
-        result.Version = 3;
+        result.Version = CurrentSceneSchemaVersion;
         result.Type = SceneAsset::StaticType();
         result.Extensions = {".keirescene"};
         result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)

@@ -61,9 +61,19 @@ public sealed class StableFieldIdAttribute(string id) : Attribute
 }
 
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = true)]
-public sealed class RequireComponentAttribute(Type componentType) : Attribute
+public sealed class RequireComponentAttribute : Attribute
 {
-    public Type ComponentType { get; } = componentType ?? throw new ArgumentNullException(nameof(componentType));
+    public RequireComponentAttribute(Type componentType)
+    {
+        ComponentType = componentType ?? throw new ArgumentNullException(nameof(componentType));
+        var id = global::Keire.ComponentType.Of(componentType);
+        High = id.High;
+        Low = id.Low;
+    }
+
+    public Type ComponentType { get; }
+    public readonly ulong High;
+    public readonly ulong Low;
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = true)]

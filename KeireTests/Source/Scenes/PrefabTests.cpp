@@ -22,19 +22,39 @@ namespace
     }
 } // namespace
 
-TEST_CASE("Scene schema v2 migrates to canonical v3 without prefab metadata")
+TEST_CASE("Scene schema v2 migrates to canonical v4 without prefab metadata")
 {
     const auto id = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000001");
     const auto source = std::string("{\"schemaVersion\":2,\"name\":\"Legacy\",\"entities\":[{") + "\"id\":\"" +
                         id.ToString() + "\",\"parent\":null,\"name\":\"Root\",\"active\":true,\"components\":[]}] }";
     const auto asset = Keire::SceneAsset::Decode(Bytes(source));
-    CHECK(asset->Definition().SchemaVersion == 3);
+    CHECK(asset->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
     CHECK(asset->Definition().PrefabInstances.empty());
     CHECK(asset->Definition().PrefabOverrides.empty());
 
     const auto encoded = Keire::SceneAsset::Encode(asset->Definition());
     const std::string text(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-    CHECK(text.find("\"schemaVersion\": 3") != std::string::npos);
+    CHECK(text.find("\"schemaVersion\": 4") != std::string::npos);
+}
+
+TEST_CASE("Prefab entity layer overrides round trip and compose")
+{
+    const auto prefabId = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000011");
+    const auto root = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000012");
+    Keire::PrefabDefinition definition;
+    definition.Template = Keire::SceneAsset::EmptyDefinition("Layered Prefab");
+    definition.Template.Objects.push_back(Object(root, "Root"));
+    definition.Template.PrefabOverrides.push_back(
+        {.Kind = Keire::PrefabOverrideKind::SetObjectLayer, .Object = root, .Layer = 12});
+
+    const auto decoded = Keire::PrefabAsset::Decode(Keire::PrefabAsset::Encode(definition));
+    REQUIRE(decoded->Definition().Template.PrefabOverrides.size() == 1);
+    CHECK(decoded->Definition().Template.PrefabOverrides.front().Layer == 12);
+    const auto composed =
+        Keire::ComposePrefab(prefabId, [&](const Keire::AssetId id)
+                             { return id == prefabId ? decoded : Keire::Ref<const Keire::PrefabAsset>{}; });
+    REQUIRE(composed.Objects.size() == 1);
+    CHECK(composed.Objects.front().Layer == 12);
 }
 
 TEST_CASE("Prefab source round trips variant and instance override metadata")

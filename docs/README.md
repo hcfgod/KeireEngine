@@ -8,6 +8,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Getting Started](GettingStarted.md) | Clone, bootstrap, generate, build, run, clean, and diagnose a workstation | New contributors and integrators |
 | [C# Scripting](Scripting/README.md) | Managed assemblies, Behaviours, Inspector data, entities, assets, gameplay services, audio, animation, UI, reload, and API lookup | Gameplay programmers and technical designers |
 | [Architecture](Architecture.md) | System boundaries, ownership, implementation strategy, and release shape | Engine maintainers |
+| [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, release blockers, and closure gates | Leads, maintainers, and release engineers |
 | [Runtime Lifecycle](RuntimeLifecycle.md) | Startup, frame order, threading, layer mutation, events, time, UI, and shutdown | Runtime and layer authors |
 | [Gameplay Foundations](GameplayFoundations.md) | Prefabs, managed builds, physics, audio graphs, navigation, profiling, and current adapter scope | Gameplay and subsystem authors |
 | [Undo And Redo](UndoRedo.md) | Contexts, commands, transactions, limits, merging, threading, and editor routing | Runtime, editor, and tooling authors |
@@ -15,6 +16,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Asset Runtime](AssetRuntime.md) | Handles, fallbacks, async loading, mounts, integrity, reloads, and threading | Runtime and subsystem authors |
 | [Asset Pipeline](AssetPipeline.md) | Metadata, import cache, file operations, cooking, validation, and CLI | Editor, content, and release authors |
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, navigation, and current scope | Rendering and editor authors |
+| [Performance Gates](PerformanceGates.md) | Reference hardware, capture metadata, GPU timestamp requirements, and automated budgets | Rendering, VFX, QA, and release engineers |
 | [Project Settings](ProjectSettings.md) | Tracked rendering environment settings, validation, defaults, and editor workflow | Technical artists and editor authors |
 | [Shaders And Materials](ShadersAndMaterials.md) | Shader manifests, compiler boundary, reflection, materials, and target cooking | Technical artists and rendering authors |
 | [VFX Authoring And Runtime](Vfx.md) | Visual graph workflow, executable modules, scene emitters, C++/C# control, diagnostics, and backend capabilities | Technical artists, gameplay programmers, and VFX/runtime authors |
@@ -23,7 +25,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Project Hub](ProjectHub.md) | Create/open/reveal workflows, launcher behavior, and smoke modes | Artists, designers, and editor authors |
 | [Scene System](SceneSystem.md) | Scene assets, mutable instances, async loading, activation, and events | Runtime and subsystem authors |
 | [Scene Authoring](SceneAuthoring.md) | Hierarchy/Inspector workflow, dirty prompts, undo, save, and recovery | Designers and editor authors |
-| [ECS And Components](ECSAndComponents.md) | Entities, registration, component lifetime, lifecycle, transforms, and schema v2 | Runtime and component authors |
+| [ECS And Components](ECSAndComponents.md) | Entities, layers, registration, component lifetime, lifecycle, transforms, and scene schema v4 | Runtime and component authors |
 | [Editor Panels And Commands](EditorPanels.md) | Panel boundaries, global commands, play toolbar, Inspector, and UI images | Editor and tooling authors |
 | [Input System](InputSystem.md) | Devices, users, actions, snapshots, rebinding, overrides, and cursor modes | Runtime and gameplay authors |
 | [Input Actions Editor](InputActionsEditor.md) | Templates, authoring, validation, undo, live monitor, and Listen | Designers and editor authors |

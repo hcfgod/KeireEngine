@@ -574,6 +574,7 @@ TEST_CASE("play changes apply selected property and structural edits transaction
     session->Play();
     auto runtimeEntity = session->RuntimeScene()->FindEntity(original.Id());
     runtimeEntity.SetName("Edited in Play");
+    runtimeEntity.SetLayer(7);
     Keire::DynamicRefCast<CustomComponent>(runtimeEntity.GetComponent(CustomComponent::StaticType()))->Value = 4.0;
     const auto created = session->RuntimeScene()->CreateEntity("Created in Play");
 
@@ -584,6 +585,7 @@ TEST_CASE("play changes apply selected property and structural edits transaction
     const auto applied = changes.BuildAppliedDefinition();
     auto restored = Keire::CreateRef<Keire::Scene>(asset, applied, registry);
     CHECK(restored->FindEntity(original.Id()).Name() == "Edited in Play");
+    CHECK(restored->FindEntity(original.Id()).Layer() == 7);
     const auto restoredCustom = Keire::DynamicRefCast<CustomComponent>(
         restored->FindEntity(original.Id()).GetComponent(CustomComponent::StaticType()));
     REQUIRE(restoredCustom);

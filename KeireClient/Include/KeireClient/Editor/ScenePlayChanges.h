@@ -20,6 +20,7 @@ namespace KeireEditor
         DeleteEntity,
         EntityName,
         EntityActive,
+        EntityLayer,
         EntityParent,
         AddComponent,
         RemoveComponent,

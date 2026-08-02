@@ -33,12 +33,17 @@ The workspace includes:
 - Application, scripting, physics, rendering, audio, asset-streaming, and custom counters.
 - Renderer visibility, frame-graph, light-tile, CPU preparation, and latency statistics.
 - Separate renderer command-recording, swapchain-wait, editor-UI recording, GPU-submission, and total-latency timings.
+- Explicit frame/VFX fence-completion latency, kept distinct from true GPU timestamp duration.
 - Audio voice, virtualization, rendered-frame, and underrun health.
 - Asset queue, loading, residency, failure, and eviction health.
 - Click-to-copy rows, complete clipboard snapshots, and rolling frame CSV export.
 
 Profiler buffers are bounded. A truncated capture reports dropped span and counter counts instead of growing memory
 without limit.
+
+Reference captures are validated with the workflow in [Performance Gates](PerformanceGates.md). A backend that cannot
+report true GPU timestamps may still expose fence-completion latency for diagnosis, but it cannot pass a profile that
+requires measured GPU execution time.
 
 The Kéire editor requests mailbox presentation to avoid falling from 60 FPS toward 30 FPS whenever a frame narrowly
 misses a VSync deadline. Platforms without mailbox support automatically retain the renderer's VSync fallback.

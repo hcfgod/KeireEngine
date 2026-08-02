@@ -132,6 +132,9 @@ namespace Keire
                                 .dump();
                     }
                     break;
+                case PrefabOverrideKind::SetObjectLayer:
+                    object->Layer = overrideValue.Layer;
+                    break;
                 case PrefabOverrideKind::SetComponentProperty:
                 {
                     const auto component =
@@ -263,7 +266,7 @@ namespace Keire
             }
 
             stack.pop_back();
-            result.SchemaVersion = 3;
+            result.SchemaVersion = CurrentSceneSchemaVersion;
             SceneAsset::Validate(result);
             return result;
         }

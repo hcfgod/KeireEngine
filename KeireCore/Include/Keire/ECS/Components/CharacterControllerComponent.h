@@ -59,6 +59,8 @@ namespace Keire
         void ResetRuntimeState() noexcept;
 
       private:
+        friend class Detail::SceneState;
+        void ApplyEntityLayer(std::uint32_t value) noexcept { m_Layer = value; }
         AssetId m_RuntimeId = AssetId::Generate();
         float m_Radius = 0.5F;
         float m_Height = 2.0F;

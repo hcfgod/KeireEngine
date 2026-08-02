@@ -1,12 +1,16 @@
 #include "Keire/Core.h"
+#include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -34,6 +38,10 @@ namespace
         void OnAnimationEvent(const Keire::AnimationEventMessage& event) override
         {
             m_Calls->push_back("Animation:" + event.Name);
+        }
+        void OnAnimatorIk(const Keire::AnimationIkMessage& context) override
+        {
+            m_Calls->push_back("AnimatorIK:" + std::to_string(context.LayerWeight));
         }
         void OnCollisionEnter(const Keire::PhysicsContactMessage&) override { m_Calls->push_back("CollisionEnter"); }
         void OnDisable() override { m_Calls->push_back("OnDisable"); }
@@ -239,13 +247,15 @@ TEST_CASE("Component lifecycle callbacks are deterministic and component handles
     scene->FixedUpdate(1.0F / 60.0F);
     scene->Update(1.0F / 60.0F);
     scene->DispatchAnimationEvent(entity.Id(), {"Footstep", 0.5F});
+    scene->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 0.25F});
+    CHECK_THROWS_AS(scene->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.25F}), std::invalid_argument);
     scene->LateUpdate();
     component->SetEnabled(false);
     REQUIRE(entity.RemoveComponent<LifecycleProbeComponent>());
     CHECK_FALSE(component->IsAttached());
-    const std::vector<std::string> expected{"Awake",       "OnEnable",  "Start",
-                                            "FixedUpdate", "Update",    "Animation:Footstep",
-                                            "LateUpdate",  "OnDisable", "OnDestroy"};
+    const std::vector<std::string> expected{
+        "Awake",      "OnEnable",  "Start",    "FixedUpdate", "Update", "Animation:Footstep", "AnimatorIK:0.250000",
+        "LateUpdate", "OnDisable", "OnDestroy"};
     CHECK(*calls == expected);
 }
 
@@ -453,7 +463,7 @@ TEST_CASE("Scene schema v1 migrates to canonical component schema v2")
 })";
     const auto migrated = Keire::SceneAsset::Decode(Bytes(versionOne));
     REQUIRE(migrated);
-    CHECK(migrated->Definition().SchemaVersion == 3);
+    CHECK(migrated->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
     REQUIRE(migrated->Definition().Objects.size() == 1);
     REQUIRE(migrated->Definition().Objects.front().Components.size() == 1);
     CHECK(migrated->Definition().Objects.front().Components.front().Type == Keire::TransformComponent::StaticType());
@@ -461,6 +471,104 @@ TEST_CASE("Scene schema v1 migrates to canonical component schema v2")
     const std::string text(reinterpret_cast<const char*>(encoded.data()), encoded.size());
     CHECK(text.find("\"entities\"") != std::string::npos);
     CHECK(text.find("\"objects\"") == std::string::npos);
+}
+
+TEST_CASE("Entity layers persist, duplicate, validate, and synchronize physics filtering")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Entity layers"));
+    auto entity = scene->CreateEntity("Layered");
+    const auto collider = entity.AddComponent<Keire::ColliderComponent>();
+    const auto controller = entity.AddComponent<Keire::CharacterControllerComponent>();
+    REQUIRE(collider);
+    REQUIRE(controller);
+    CHECK(entity.Layer() == 0);
+    CHECK(collider->Layer() == 1U);
+    CHECK(controller->Layer() == 1U);
+
+    entity.SetLayer(8);
+    CHECK(entity.Layer() == 8);
+    CHECK(collider->Layer() == (1U << 8U));
+    CHECK(controller->Layer() == (1U << 8U));
+
+    collider->SetLayer(1U << 5U);
+    CHECK(entity.Layer() == 5);
+    CHECK(collider->Layer() == (1U << 5U));
+    CHECK(controller->Layer() == (1U << 5U));
+    CHECK_THROWS_AS(entity.SetLayer(Keire::EntityLayerCount), std::invalid_argument);
+    CHECK(entity.Layer() == 5);
+
+    const auto duplicate = scene->DuplicateEntity(entity.Id());
+    REQUIRE(duplicate);
+    CHECK(duplicate.Layer() == 5);
+    CHECK(duplicate.GetComponent<Keire::ColliderComponent>()->Layer() == (1U << 5U));
+
+    const auto decoded = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(scene->Snapshot()));
+    REQUIRE(decoded->Definition().Objects.size() == 2);
+    CHECK(decoded->Definition().Objects.front().Layer == 5);
+    CHECK(decoded->Definition().Objects.back().Layer == 5);
+}
+
+TEST_CASE("Scene schema v3 migrates component collision layers to entity layers")
+{
+    const auto entityId = Keire::AssetId::Parse("11111111-1111-4111-8111-111111111112");
+    const auto source = std::string("{\"schemaVersion\":3,\"name\":\"Legacy Layer\",\"entities\":[{") + "\"id\":\"" +
+                        entityId.ToString() +
+                        "\",\"parent\":null,\"name\":\"Physics Object\",\"active\":true,\"components\":[{" +
+                        "\"type\":\"" + Keire::ColliderComponent::StaticType().ToString() +
+                        "\",\"version\":2,\"enabled\":true,\"data\":{\"layer\":512}}]}]}";
+    const auto migrated = Keire::SceneAsset::Decode(Bytes(source));
+    REQUIRE(migrated);
+    CHECK(migrated->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
+    REQUIRE(migrated->Definition().Objects.size() == 1);
+    CHECK(migrated->Definition().Objects.front().Layer == 9);
+
+    auto invalid = migrated->Definition();
+    invalid.Objects.front().Layer = static_cast<std::uint32_t>(Keire::EntityLayerCount);
+    CHECK_THROWS_AS(Keire::SceneAsset::Validate(invalid), std::invalid_argument);
+
+    auto malformedCanonical = source;
+    malformedCanonical.replace(malformedCanonical.find("\"schemaVersion\":3"),
+                               std::string_view("\"schemaVersion\":3").size(), "\"schemaVersion\":4");
+    CHECK_THROWS_AS((void)Keire::SceneAsset::Decode(Bytes(malformedCanonical)), std::runtime_error);
+}
+
+TEST_CASE("Entity layer schema fixtures migrate and round-trip canonically")
+{
+    struct Fixture
+    {
+        std::string_view Name;
+        std::uint32_t Layer;
+    };
+    constexpr std::array fixtures{
+        Fixture{"Schema1.keirescene", 0},
+        Fixture{"Schema2.keirescene", 0},
+        Fixture{"Schema3.keirescene", 9},
+        Fixture{"Schema4.keirescene", 12},
+    };
+
+    for (const auto& fixture : fixtures)
+    {
+        CAPTURE(fixture.Name);
+        const auto source =
+            KeireTests::ReadFile(std::filesystem::path("KeireTests/Fixtures/Scenes/EntityLayers") / fixture.Name);
+        REQUIRE_FALSE(source.empty());
+        const auto migrated = Keire::SceneAsset::Decode(Bytes(source));
+        REQUIRE(migrated);
+        CHECK(migrated->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
+        REQUIRE(migrated->Definition().Objects.size() == 1);
+        CHECK(migrated->Definition().Objects.front().Layer == fixture.Layer);
+
+        const auto canonical = Keire::SceneAsset::Encode(migrated->Definition());
+        const auto roundTrip = Keire::SceneAsset::Decode(canonical);
+        REQUIRE(roundTrip);
+        CHECK(roundTrip->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
+        REQUIRE(roundTrip->Definition().Objects.size() == 1);
+        CHECK(roundTrip->Definition().Objects.front().Layer == fixture.Layer);
+        const std::string canonicalText(reinterpret_cast<const char*>(canonical.data()), canonical.size());
+        CHECK(canonicalText.find("\"schemaVersion\": 4") != std::string::npos);
+        CHECK(canonicalText.find("\"layer\": " + std::to_string(fixture.Layer)) != std::string::npos);
+    }
 }
 
 TEST_CASE("Unregistered scene components survive load edit and save without losing payload")

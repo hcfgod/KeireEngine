@@ -204,11 +204,11 @@ Animator.ClearIK(Entity, "LeftHand");
 `AnimatorIkSpace.Model` interprets positions in model space. `World` converts world-space targets at the animation
 boundary. Bone names must exist in the active skeleton, and solver limits must be valid.
 
-`Behaviour` currently declares `OnAnimatorIk(AnimationIkContext context)` for the planned callback surface, but the
-runtime does not dispatch it yet. Submit goals from `Update`, `LateUpdate`, or another dispatched callback:
+`OnAnimatorIk(AnimationIkContext context)` runs after pose sampling and immediately before named IK goals are solved.
+Submit frame-specific goals there:
 
 ```csharp
-protected override void LateUpdate()
+protected override void OnAnimatorIk(AnimationIkContext context)
 {
     Animator.SetTwoBoneIK(
         Entity,
@@ -218,7 +218,7 @@ protected override void LateUpdate()
         "Hand.R",
         _handTarget,
         _elbowPole,
-        1.0f);
+        context.LayerWeight);
 }
 ```
 

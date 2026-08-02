@@ -2,7 +2,12 @@
 param(
     [switch]$SkipSanitizers,
     [switch]$IncludePackage,
-    [string]$Architecture = "x86_64"
+    [switch]$IncludeGraphicsSmokes,
+    [string]$Architecture = "x86_64",
+    [string]$PerformanceSnapshot = "",
+    [string]$PerformanceHistory = "",
+    [string]$PerformanceMetadata = "",
+    [string]$PerformanceProfile = "sandbox-vfx-reference"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +26,34 @@ function Invoke-Checked
     }
 }
 
+Invoke-Checked "VFX manifest and generated capability validation" {
+    & python (Join-Path $root "Scripts/Vfx/validate_vfx_parity_manifest.py")
+    if ($LASTEXITCODE -eq 0) {
+        & python (Join-Path $root "Scripts/Vfx/reconcile_vfx_manifest.py") --check
+    }
+    if ($LASTEXITCODE -eq 0) {
+        & python (Join-Path $root "Scripts/Vfx/generate_vfx_capabilities.py") --check
+    }
+    if ($LASTEXITCODE -eq 0) {
+        & python (Join-Path $root "Scripts/Vfx/test_vfx_parity_tooling.py")
+    }
+}
+Invoke-Checked "Performance gate tooling tests" {
+    & python (Join-Path $root "Scripts/Performance/test_validate_capture.py")
+}
+if ($PerformanceSnapshot -or $PerformanceHistory -or $PerformanceMetadata)
+{
+    if (-not ($PerformanceSnapshot -and $PerformanceHistory -and $PerformanceMetadata))
+    {
+        throw "PerformanceSnapshot, PerformanceHistory, and PerformanceMetadata must be supplied together."
+    }
+    Invoke-Checked "Reference-hardware performance gate" {
+        & python (Join-Path $root "Scripts/Performance/validate_capture.py") `
+            --snapshot $PerformanceSnapshot --history $PerformanceHistory --metadata $PerformanceMetadata `
+            --profile $PerformanceProfile
+    }
+}
+
 Invoke-Checked "Debug test matrix" {
     & $project test -Generator ninja -Configuration Debug -Toolset msc -Architecture $Architecture
 }
@@ -35,6 +68,12 @@ if (-not $SkipSanitizers)
 }
 Invoke-Checked "Windows regression harness" {
     & (Join-Path $root "Scripts/Tests/test-windows.ps1")
+}
+if ($IncludeGraphicsSmokes)
+{
+    Invoke-Checked "Release project-aware graphics smoke" {
+        & $project run -Generator ninja -Configuration Release -Toolset msc -Architecture $Architecture -SmokeProject
+    }
 }
 if ($IncludePackage)
 {

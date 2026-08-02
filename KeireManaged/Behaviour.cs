@@ -58,9 +58,29 @@ internal static class BehaviourRegistry
 public abstract class Behaviour
 {
     private BehaviourSynchronizationContext _synchronizationContext = new();
+    private bool _enabled = true;
 
     public Entity Entity { get; private set; }
-    public bool Enabled { get; set; } = true;
+    public bool Enabled
+    {
+        get
+        {
+            if (!Entity.Id.IsValid)
+                return _enabled;
+            var type = ComponentType.Of(GetType());
+            return NativeRuntime.ComponentExists(Entity, type) ? NativeRuntime.GetComponentEnabled(Entity, type) : _enabled;
+        }
+        set
+        {
+            if (Entity.Id.IsValid)
+            {
+                var type = ComponentType.Of(GetType());
+                if (NativeRuntime.ComponentExists(Entity, type))
+                    NativeRuntime.SetComponentEnabled(Entity, type, value);
+            }
+            _enabled = value;
+        }
+    }
     public CancellationToken LifetimeToken => _synchronizationContext.LifetimeToken;
 
     [NonSerialized, HideInInspector]
@@ -75,6 +95,7 @@ public abstract class Behaviour
     private const uint FixedUpdateCallback = 1U << 0;
     private const uint UpdateCallback = 1U << 1;
     private const uint LateUpdateCallback = 1U << 2;
+    private const uint AnimatorIkCallback = 1U << 3;
 
     protected virtual void Awake() { }
     protected virtual void OnEnable() { }
@@ -111,9 +132,13 @@ public abstract class Behaviour
             foreach (var method in type.GetMethods(BindingFlags.Instance | BindingFlags.NonPublic |
                                                    BindingFlags.DeclaredOnly))
             {
-                if (method.GetParameters().Length != 0)
+                var parameters = method.GetParameters();
+                if (method.Name == nameof(OnAnimatorIk) && parameters.Length == 1 &&
+                    parameters[0].ParameterType == typeof(AnimationIkContext))
+                    result |= AnimatorIkCallback;
+                else if (parameters.Length != 0)
                     continue;
-                if (method.Name == nameof(FixedUpdate))
+                else if (method.Name == nameof(FixedUpdate))
                     result |= FixedUpdateCallback;
                 else if (method.Name == nameof(Update))
                     result |= UpdateCallback;
@@ -147,6 +172,7 @@ public abstract class Behaviour
     public void RuntimeAwake() => InvokeWithContext(Awake);
     public void RuntimeEnable()
     {
+        _enabled = true;
         if (_synchronizationContext.IsCancelled)
             _synchronizationContext = new BehaviourSynchronizationContext();
         InvokeWithContext(OnEnable);
@@ -163,6 +189,8 @@ public abstract class Behaviour
     public void RuntimeAnimationEvent(string name, float normalizedTime, int integer, float scalar, string text) =>
         InvokeWithContext(() => OnAnimationEvent(new AnimationEvent(name, normalizedTime, integer, scalar, text)),
             true);
+    public void RuntimeAnimatorIk(float layerWeight) =>
+        InvokeWithContext(() => OnAnimatorIk(new AnimationIkContext(layerWeight)), true);
     public void RuntimePhysicsContact(byte phase, byte trigger, ulong otherHigh, ulong otherLow, Vector3 point,
                                       Vector3 normal, float impulse)
     {
@@ -189,6 +217,7 @@ public abstract class Behaviour
     }
     public void RuntimeDisable()
     {
+        _enabled = false;
         _synchronizationContext.Cancel();
         InvokeWithContext(OnDisable);
     }

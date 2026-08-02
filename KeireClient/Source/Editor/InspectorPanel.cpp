@@ -564,6 +564,43 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 m_Controller.RecordInspectorUndo();
                 sceneDocument.SetEntityActive(entity.Id(), active);
             }
+            const auto layerNames = m_Controller.InspectorLayerNames();
+            auto layer = entity.Layer();
+            bool mixedLayers = false;
+            if (!m_Registration.Locked() && sceneDocument.Selections().size() > 1)
+            {
+                for (const auto selected : sceneDocument.Selections())
+                {
+                    const auto selectedEntity = scene->FindEntity(Keire::EntityId(selected));
+                    if (selectedEntity && selectedEntity.Layer() != layer)
+                    {
+                        mixedLayers = true;
+                        break;
+                    }
+                }
+            }
+            const auto layerPreview =
+                mixedLayers ? std::string("Mixed")
+                            : (layer < layerNames.size() ? layerNames[layer] : "Layer " + std::to_string(layer));
+            if (auto layerCombo = ui.BeginCombo("Layer", layerPreview); layerCombo)
+            {
+                for (std::uint32_t candidate = 0; candidate < Keire::EntityLayerCount; ++candidate)
+                {
+                    const auto label = candidate < layerNames.size() && !layerNames[candidate].empty()
+                                           ? layerNames[candidate]
+                                           : "Layer " + std::to_string(candidate);
+                    if (ui.Selectable(label, !mixedLayers && candidate == layer))
+                    {
+                        m_Controller.RecordInspectorUndo("Change Layer");
+                        if (!m_Registration.Locked() && sceneDocument.Selections().size() > 1)
+                            sceneDocument.SetEntitiesLayer(sceneDocument.Selections(), candidate);
+                        else
+                            sceneDocument.SetEntityLayer(entity.Id(), candidate);
+                        layer = candidate;
+                        mixedLayers = false;
+                    }
+                }
+            }
             ui.Separator();
             const auto expansion = [&](const std::string_view type) -> bool&
             {

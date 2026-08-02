@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "name": "Entity Layer Schema 2",
+  "entities": [
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "parent": null,
+      "name": "Component Object",
+      "active": true,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+          }
+        }
+      ]
+    }
+  ]
+}

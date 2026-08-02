@@ -92,7 +92,7 @@ Name-based restoration produces a migration warning. Add a stable ID so future r
 | `[StableComponentId("uuid")]` | Identify an attachable managed component |
 | `[StableAssetTypeId("uuid")]` | Identify a concrete managed data or built-in asset marker type |
 | `[CreateAssetMenu("path", "name")]` | Add a managed data type to **Create > Managed Data** |
-| `[RequireComponent(typeof(T))]` | Describe a component dependency; current native attachment does not enforce it |
+| `[RequireComponent(typeof(T))]` | Enforce an automatically attached, non-removable-while-required dependency |
 | `[ExecutionOrder(value)]` | Define relative managed callback order |
 
 `Range` validates its bounds when the attribute is created. It does not replace runtime validation for values loaded

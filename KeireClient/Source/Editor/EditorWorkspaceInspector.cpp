@@ -72,6 +72,11 @@ KeireEditor::PropertyDrawerRegistry& EditorWorkspaceLayer::InspectorPropertyDraw
 
 const Keire::UiThemeDefinition& EditorWorkspaceLayer::InspectorTheme() const noexcept { return m_Theme; }
 
+std::span<const std::string> EditorWorkspaceLayer::InspectorLayerNames() const noexcept
+{
+    return m_ProjectSettingsDocument->AuthoringSettings().PhysicsLayerNames;
+}
+
 Keire::Ref<Keire::AssetDatabase> EditorWorkspaceLayer::InspectorAssetDatabase() const noexcept
 {
     return m_AssetDatabase;

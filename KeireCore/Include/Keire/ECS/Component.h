@@ -136,6 +136,11 @@ namespace Keire
         std::string Text;
     };
 
+    struct AnimationIkMessage
+    {
+        float LayerWeight = 1.0F;
+    };
+
     enum class PhysicsContactPhase : std::uint8_t
     {
         Enter,
@@ -173,6 +178,7 @@ namespace Keire
         virtual void Update(float) {}
         virtual void LateUpdate() {}
         virtual void OnAnimationEvent(const AnimationEventMessage&) {}
+        virtual void OnAnimatorIk(const AnimationIkMessage&) {}
         virtual void OnCollisionEnter(const PhysicsContactMessage&) {}
         virtual void OnCollisionStay(const PhysicsContactMessage&) {}
         virtual void OnCollisionExit(const PhysicsContactMessage&) {}
@@ -196,6 +202,7 @@ namespace Keire
         void InvokeUpdate(float deltaSeconds);
         void InvokeLateUpdate();
         void InvokeAnimationEvent(const AnimationEventMessage& event);
+        void InvokeAnimatorIk(const AnimationIkMessage& context);
         void InvokePhysicsContact(PhysicsContactPhase phase, const PhysicsContactMessage& contact);
         void InvokeDisable();
         void InvokeDestroy();

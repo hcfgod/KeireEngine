@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "sandbox-renderer-reference": {
+      "hardwareId": "keire-win-rtx3060-i7-12700f",
+      "gpuBackendPattern": "^direct3d12$",
+      "gpuNamePattern": "^NVIDIA GeForce RTX 3060$",
+      "gpuDriverPattern": "^32\\.0\\.15\\.9597$",
+      "cpuNamePattern": "i7-12700F",
+      "resolution": "3440x1377",
+      "workload": "sandbox-renderer-reference",
+      "allowedBuildConfigurations": ["Release", "Dist"],
+      "minimumHistoryFrames": 300,
+      "maximumSummaryMilliseconds": {
+        "Average": 8.33,
+        "P95": 10.0,
+        "P99": 16.67
+      },
+      "maximumStutters": 0,
+      "minimumCounters": {
+        "GPU timing supported": 1.0
+      },
+      "maximumCounters": {
+        "GPU frame (ms)": 8.33,
+        "GPU fence wait (ms)": 1.0,
+        "Renderer latency (ms)": 8.33
+      }
+    },
+    "sandbox-vfx-reference": {
+      "hardwareId": "keire-win-rtx3060-i7-12700f",
+      "gpuBackendPattern": "^direct3d12$",
+      "gpuNamePattern": "^NVIDIA GeForce RTX 3060$",
+      "gpuDriverPattern": "^32\\.0\\.15\\.9597$",
+      "cpuNamePattern": "i7-12700F",
+      "resolution": "3440x1377",
+      "workload": "sandbox-vfx-reference",
+      "allowedBuildConfigurations": ["Release", "Dist"],
+      "minimumHistoryFrames": 300,
+      "maximumSummaryMilliseconds": {
+        "Average": 8.33,
+        "P95": 10.0,
+        "P99": 16.67
+      },
+      "maximumStutters": 0,
+      "minimumCounters": {
+        "GPU timing supported": 1.0,
+        "VFX GPU worlds": 1.0
+      },
+      "maximumCounters": {
+        "GPU frame (ms)": 8.33,
+        "GPU fence wait (ms)": 1.0,
+        "Renderer latency (ms)": 8.33,
+        "VFX preparation (ms)": 0.5,
+        "VFX pipeline warmup pending": 0.0,
+        "VFX pipeline warmup (ms)": 250.0,
+        "VFX GPU completion latency (ms)": 50.0,
+        "Dropped VFX particles": 0.0
+      }
+    }
+  }
+}
