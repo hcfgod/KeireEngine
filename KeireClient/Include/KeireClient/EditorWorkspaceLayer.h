@@ -428,7 +428,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SelectSceneEntity(Keire::AssetId entity, bool additive = false);
     void SetSceneSelection(std::span<const Keire::EntityId> entities, bool additive);
     [[nodiscard]] Keire::Ref<Keire::Scene> ActiveScene() const noexcept;
+    [[nodiscard]] bool ProjectRequiresManagedRuntime() const noexcept;
     void BeginPlayMode();
+    void ContinuePendingPlayMode();
     void RequestStopPlayMode();
     void FinishPlayMode(bool apply);
     void ApplyManagedCursorMode() noexcept;
@@ -633,6 +635,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     ProfilerPresentationCache m_ProfilerPresentation;
     Keire::ScenePlayState m_PlayResumeState = Keire::ScenePlayState::Stopped;
     std::unordered_set<Keire::AssetId> m_PlayEditorTouchedEntities;
+    bool m_PlayStartPending = false;
     bool m_CloseThemeAfterDecision = false;
     bool m_OpenDialog = false;
     bool m_Smoke = false;

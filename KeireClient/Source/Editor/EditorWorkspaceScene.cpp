@@ -9,6 +9,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PlayModeReadiness.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -193,6 +194,7 @@ void EditorWorkspaceLayer::CreateScene()
 
 void EditorWorkspaceLayer::RequestCreateScene()
 {
+    m_PlayStartPending = false;
     if (m_PendingSceneAction != PendingSceneAction::None || (m_SceneTransitions && m_SceneTransitions->Pending()))
     {
         m_Notice = "Finish the pending scene transition before starting another one.";
@@ -253,6 +255,7 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
 
 void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
 {
+    m_PlayStartPending = false;
     if (m_PrefabEditingStage)
         throw std::runtime_error("Save or discard the active prefab stage before opening a scene.");
     if (asset == m_SceneDocument->Asset())
@@ -369,6 +372,7 @@ void EditorWorkspaceLayer::CompleteSaveSceneAs()
 
 void EditorWorkspaceLayer::RequestCloseScene()
 {
+    m_PlayStartPending = false;
     if (m_PendingSceneAction != PendingSceneAction::None || (m_SceneTransitions && m_SceneTransitions->Pending()))
     {
         m_Notice = "A scene transition is already pending; the additional request was ignored.";
@@ -528,8 +532,32 @@ void EditorWorkspaceLayer::SetSceneSelection(const std::span<const Keire::Entity
 
 void EditorWorkspaceLayer::BeginPlayMode()
 {
-    if (!m_SceneDocument->EditingScene() || m_SceneDocument->PlaySession())
+    if (!m_SceneDocument->EditingScene() || m_SceneDocument->PlaySession() || m_PlayStartPending)
         return;
+    const bool requiresManagedRuntime = ProjectRequiresManagedRuntime();
+    const auto scripts = Owner().Scripts();
+    const auto readiness = KeireEditor::EvaluatePlayModeReadiness(
+        requiresManagedRuntime, scripts && scripts->RuntimeHostAvailable(),
+        scripts ? scripts->BuildStatus().State : Keire::ManagedBuildState::Idle,
+        scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle);
+    if (readiness == KeireEditor::PlayModeReadiness::WaitingForManagedRuntime)
+    {
+        m_PlayStartPending = true;
+        m_SceneDocument->SetStatus("Play queued while the gameplay script generation becomes ready.");
+        AddConsoleMessage("Play Mode", "Waiting for the gameplay script build and reload before entering Play.",
+                          m_Theme.Accent);
+        return;
+    }
+    if (readiness == KeireEditor::PlayModeReadiness::ManagedRuntimeUnavailable)
+    {
+        const auto reload = scripts ? scripts->ReloadStatus() : Keire::ManagedReloadStatus{};
+        const std::string reason = reload.Diagnostic.empty()
+                                       ? "The gameplay script runtime is unavailable. Resolve the Managed Build "
+                                         "diagnostics before entering Play."
+                                       : reload.Diagnostic;
+        ReportError("Play Mode", reason);
+        return;
+    }
     m_ManagedInputCaptureOverride.reset();
     m_GameplayInputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
@@ -569,8 +597,67 @@ void EditorWorkspaceLayer::BeginPlayMode()
     m_Game.RequestFocus();
 }
 
+bool EditorWorkspaceLayer::ProjectRequiresManagedRuntime() const noexcept
+{
+    if (!m_AssetDatabase)
+        return false;
+    const auto project = Owner().GetProject();
+    if (!project)
+        return false;
+    for (const auto& record : m_AssetDatabase->Records())
+    {
+        if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
+            continue;
+        try
+        {
+            const auto assembly =
+                Keire::ManagedAssemblyAsset::Decode(ReadBytes(project->Root() / "Assets" / record.RelativePath));
+            if (assembly->Definition().Classification != Keire::ManagedAssemblyClassification::Tests)
+                return true;
+        }
+        catch (...)
+        {
+            // A transiently unreadable assembly still requires the managed build to produce a valid generation.
+            return true;
+        }
+    }
+    return false;
+}
+
+void EditorWorkspaceLayer::ContinuePendingPlayMode()
+{
+    if (!m_PlayStartPending || m_SceneDocument->PlaySession() || !m_SceneDocument->EditingScene())
+        return;
+    const auto scripts = Owner().Scripts();
+    const auto readiness = KeireEditor::EvaluatePlayModeReadiness(
+        true, scripts && scripts->RuntimeHostAvailable(),
+        scripts ? scripts->BuildStatus().State : Keire::ManagedBuildState::Idle,
+        scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle);
+    if (readiness == KeireEditor::PlayModeReadiness::WaitingForManagedRuntime)
+        return;
+    m_PlayStartPending = false;
+    if (readiness == KeireEditor::PlayModeReadiness::ManagedRuntimeUnavailable)
+    {
+        const auto reload = scripts ? scripts->ReloadStatus() : Keire::ManagedReloadStatus{};
+        const std::string reason = reload.Diagnostic.empty()
+                                       ? "The gameplay script build did not produce a runnable generation. Play was "
+                                         "not started."
+                                       : reload.Diagnostic;
+        ReportError("Play Mode", reason);
+        return;
+    }
+    m_SceneDocument->SetStatus("Gameplay scripts are ready. Entering Play.");
+    BeginPlayMode();
+}
+
 void EditorWorkspaceLayer::RequestStopPlayMode()
 {
+    if (m_PlayStartPending)
+    {
+        m_PlayStartPending = false;
+        m_SceneDocument->SetStatus("Queued Play request cancelled.");
+        return;
+    }
     if (!m_SceneDocument->PlaySession() || m_SceneDocument->PlaySession()->State() == Keire::ScenePlayState::Stopped ||
         m_PlayChanges || m_PendingPlayTransition != PendingPlayTransition::None)
         return;

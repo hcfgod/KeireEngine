@@ -314,14 +314,15 @@ void EditorWorkspaceLayer::DrawMainToolbar(Keire::UiFrame& ui)
         ui.AlignNextItemGroup(0.5F, 98.0F);
         const auto playState =
             m_SceneDocument->PlaySession() ? m_SceneDocument->PlaySession()->State() : Keire::ScenePlayState::Stopped;
-        if (ui.IconButton("ToolbarPlay",
-                          playState == Keire::ScenePlayState::Stopped ? Keire::UiIcon::Play : Keire::UiIcon::Stop,
-                          playState != Keire::ScenePlayState::Stopped, {28.0F, 24.0F}))
+        const bool playActive = playState != Keire::ScenePlayState::Stopped || m_PlayStartPending;
+        if (ui.IconButton("ToolbarPlay", playActive ? Keire::UiIcon::Stop : Keire::UiIcon::Play, playActive,
+                          {28.0F, 24.0F}))
         {
-            (void)m_CommandRouter->Execute(playState == Keire::ScenePlayState::Stopped
-                                               ? KeireEditor::EditorCommand::Play
-                                               : KeireEditor::EditorCommand::Stop);
+            (void)m_CommandRouter->Execute(playActive ? KeireEditor::EditorCommand::Stop
+                                                      : KeireEditor::EditorCommand::Play);
         }
+        if (m_PlayStartPending && ui.LastItemState().Hovered)
+            ui.SetTooltip("Waiting for gameplay scripts (click to cancel)", {.Delayed = true});
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(playState == Keire::ScenePlayState::Stopped ||
                                              playState == Keire::ScenePlayState::Faulted);

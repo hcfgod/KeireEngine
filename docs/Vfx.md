@@ -44,8 +44,9 @@ flowchart TD
 
 The graph and compatibility payload list are related, but they are not interchangeable:
 
-- A Graph asset currently has one executable particle **system**. Multiple systems, Events, strips, and subgraphs are
-  represented by schema-4 types and parity data but remain disabled until their production milestones land.
+- A Graph asset can contain multiple executable particle **systems** behind one root handle. Connected Event contexts
+  route named spawns, and Particle Strip systems preserve strip-scoped identity and sequence-qualified Ribbon topology.
+  Operator, Block, and System Subgraph assets remain a separate disabled authoring milestone.
 - **Context nodes** delimit Spawn, Initialize, Update, and Output. Their `Blocks` vectors are executable order; Blocks do
   not need decorative flow cables between one another.
 - A **Block** references validated payload data by stable ID, owns canonical typed input pins, and runs only because it
@@ -122,6 +123,10 @@ explicit **Kéire Equivalent** tier for tested core-value, context, event, colli
 functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor, backend tier,
 focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries remain visible
 to tooling but creation or compilation must reject them with their recorded reason.
+
+The [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) tracks Kéire-specific runtime, networking, debugging,
+scalability, streaming, collaboration, and production-operations features. Those items are deliberately excluded from
+the 278-row catalog score.
 
 The checked-in runtime catalog contract is consumed by `VfxNodeCatalog()` and the offline validator. Engine startup
 rejects any descriptor whose stable ID, label, class, support tier, or backend tier drifts from that contract, while

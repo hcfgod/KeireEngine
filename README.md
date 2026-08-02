@@ -336,6 +336,8 @@ setup, native and managed range control, backend differences, recipes, migration
 checked-in generator and validator live under [`Scripts/Vfx`](Scripts/Vfx). The generated
 [VFX capability reference](docs/generated/VfxCapabilities.md) is release-checked against both the frozen manifest and
 the runtime descriptor catalog, and production slices require every enabled implementation to have executable coverage.
+Kéire-specific shipping work that is deliberately outside the Unity node catalog is tracked separately in the
+[VFX Beyond-Parity Roadmap](docs/VfxBeyondParityRoadmap.md), so engine-production features never inflate parity counts.
 
 ## Windowing And Configuration
 
@@ -370,9 +372,8 @@ and serialized stable-ID parameter overrides. The scene Inspector resolves the a
 controls for exposed parameters, default reset, and stale-override cleanup. Native `VfxActivation`, `VfxWorld::SetParameter`,
 `SetParameterOverrides`, and `ResetParameter` provide typed per-handle control. Managed scripts can control playback
 through `Vfx.Play`, `Vfx.Pause`, `Vfx.Resume`, `Vfx.Stop`, and `Vfx.SendEvent`, and can transactionally update exposed
-scalar, integer, vector, and color ranges through `VfxRange<T>`. Subgraphs, decals, topology-connected multi-particle
-strip rendering, unrestricted Unity-style Custom HLSL, and arbitrary custom GPU resources remain explicit later
-compiler/runtime milestones.
+scalar, integer, vector, and color ranges through `VfxRange<T>`. Subgraph assets, decal outputs, unrestricted
+Unity-style Custom HLSL, and arbitrary custom GPU resources remain explicit later compiler/runtime milestones.
 
 Animation-only FBX/glTF imports now publish `AnimationSourceAsset` as their effective primary type and retain stable
 skeleton, rig, and clip subasset IDs. They never pass through mesh vertex validation. Reimport changes metadata,

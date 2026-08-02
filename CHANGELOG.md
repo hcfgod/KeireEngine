@@ -5,6 +5,11 @@ version tags.
 
 ## Unreleased
 
+- Fixed the intermittent first-Play FPS freeze by making Play entry wait for the first valid managed assembly
+  generation before cloning the scene or capturing input. The queued state is visible and cancelable from the toolbar,
+  native-only projects remain immediate, failed builds reject Play with their diagnostic, and an active last-good
+  generation remains playable during later rebuilds. Added readiness-policy tests and a separate Kéire VFX
+  beyond-parity production roadmap.
 - Closed the documented managed Behaviour contract gaps: `Enabled` now synchronizes native component state,
   `RequireComponent` dependencies are reflected and enforced transactionally with cycle validation, and Animator IK
   dispatch reaches managed `OnAnimatorIk` before pose IK application. Added native/managed lifecycle and rollback tests.

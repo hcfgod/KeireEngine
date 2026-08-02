@@ -672,7 +672,11 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
         [this] { return !m_SceneDocument->Selections().empty(); });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::Play, [this] { BeginPlayMode(); },
-        [this] { return m_SceneDocument->EditingScene() && !m_SceneDocument->PlaySession() && !m_PlayChanges; });
+        [this]
+        {
+            return m_SceneDocument->EditingScene() && !m_SceneDocument->PlaySession() && !m_PlayChanges &&
+                   !m_PlayStartPending;
+        });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::Pause, [this] { m_SceneDocument->PlaySession()->TogglePause(); },
         [this]
@@ -683,7 +687,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
         });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::Stop, [this] { RequestStopPlayMode(); },
-        [this] { return static_cast<bool>(m_SceneDocument->PlaySession()) && !m_PlayChanges; });
+        [this] { return (m_PlayStartPending || m_SceneDocument->PlaySession()) && !m_PlayChanges; });
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::SaveInputActions, [this] { SaveInputActions(); },
         [this] { return m_InputActionsDocument->Dirty() && static_cast<bool>(m_InputActionsDocument->Asset()); });
@@ -1116,6 +1120,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
     {
         Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");
         UpdateManagedBuild(time);
+        ContinuePendingPlayMode();
     }
     if (!m_AssetDatabase)
         return;
