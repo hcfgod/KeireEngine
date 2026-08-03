@@ -143,15 +143,15 @@ float SampleLocalShadow(const uint lightIndex, const float3 worldPosition)
     if (LocalShadowParameters[lightIndex].x < 0.0F)
         return 1.0F;
     const bool spot = LocalLights[lightIndex].Parameters.y > 0.5F;
-    uint layer = (uint)LocalShadowParameters[lightIndex].x;
+    uint matrixIndex = (uint)LocalShadowParameters[lightIndex].x;
     if (!spot)
-        layer += PointShadowFace(worldPosition - LocalLights[lightIndex].PositionRange.xyz);
-    const float4 clip = mul(LocalShadowMatrices[layer], float4(worldPosition, 1.0F));
+        matrixIndex += PointShadowFace(worldPosition - LocalLights[lightIndex].PositionRange.xyz);
+    const float4 clip = mul(LocalShadowMatrices[matrixIndex], float4(worldPosition, 1.0F));
     const float3 projected = clip.xyz / clip.w;
     const float2 uv = float2(projected.x * 0.5F + 0.5F, -projected.y * 0.5F + 0.5F);
     const float visibility = SampleShadowPcf(
-        LocalShadowTexture, LocalShadowSampler, uv, layer,
-        projected.z - LocalShadowParameters[lightIndex].w, 1.0F / 1024.0F,
+        LocalShadowTexture, LocalShadowSampler, uv, 0.0F,
+        projected.z - LocalShadowParameters[lightIndex].w, 1.0F / 4096.0F,
         LocalShadowParameters[lightIndex].z > 0.5F);
     return lerp(1.0F, visibility, saturate(LocalShadowParameters[lightIndex].y));
 }

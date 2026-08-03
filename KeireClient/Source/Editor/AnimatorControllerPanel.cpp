@@ -17,6 +17,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -182,6 +183,28 @@ namespace KeireEditor
             for (auto& source : layer.States)
                 std::erase_if(source.Transitions,
                               [&](const auto& transition) { return transition.DestinationId == state; });
+        }
+
+        void RepairEntryStates(Keire::AnimationLayerDefinition& layer)
+        {
+            const auto validRoot =
+                std::ranges::find(layer.States, layer.EntryStateId, &Keire::AnimationStateDefinition::Id);
+            if (validRoot == layer.States.end() || !validRoot->SubgraphId.empty())
+            {
+                const auto firstRoot =
+                    std::ranges::find(layer.States, std::string{}, &Keire::AnimationStateDefinition::SubgraphId);
+                layer.EntryStateId = firstRoot == layer.States.end() ? std::string{} : firstRoot->Id;
+            }
+            for (auto& subgraph : layer.Subgraphs)
+            {
+                const auto entry =
+                    std::ranges::find(layer.States, subgraph.EntryStateId, &Keire::AnimationStateDefinition::Id);
+                if (entry != layer.States.end() && entry->SubgraphId == subgraph.Id)
+                    continue;
+                const auto first =
+                    std::ranges::find(layer.States, subgraph.Id, &Keire::AnimationStateDefinition::SubgraphId);
+                subgraph.EntryStateId = first == layer.States.end() ? std::string{} : first->Id;
+            }
         }
 
         [[nodiscard]] float TimelineFraction(const float normalizedTime) noexcept
@@ -614,6 +637,7 @@ namespace KeireEditor
         m_GraphContext.reset();
         m_SelectedTransition.clear();
         m_GraphLayer.clear();
+        m_GraphSubgraph.clear();
         m_Message.clear();
         m_FocusGraph = true;
     }
@@ -748,7 +772,10 @@ namespace KeireEditor
         else if (!playMode)
             playbackDiagnostic = m_Preview->Diagnostic;
 
-        ui.TextColored(theme.Accent, playMode ? "LIVE PLAYBACK" : "EDIT MODE PREVIEW");
+        ui.TextColored(theme.Accent, playMode ? "LIVE PLAYBACK" : "ANIMATION PREVIEW SCENE");
+        if (playbackEntity)
+            ui.TextColored(theme.MutedText,
+                           std::string(playMode ? "Live target: " : "Preview target: ") + playbackEntity.Name());
         if (!playMode)
         {
             const bool canPreview = controllerMatches && playbackAnimator->SkinnedMesh() && assets;
@@ -781,6 +808,30 @@ namespace KeireEditor
         const auto progressLabel =
             stateName + "  " + std::to_string(static_cast<int>(std::clamp(progress, 0.0F, 1.0F) * 100.0F)) + "%";
         ui.ProgressBar(progress, {0.0F, 18.0F}, progressLabel);
+        if (primaryPlayback && primaryPlayback->InTransition)
+        {
+            const auto& definition = document.Definition();
+            std::string sourceName = primaryPlayback->SourceStateId;
+            std::string destinationName = primaryPlayback->DestinationStateId;
+            const auto layer =
+                std::ranges::find(definition.Layers, primaryPlayback->Id, &Keire::AnimationLayerDefinition::Id);
+            if (layer != definition.Layers.end())
+            {
+                const auto source = std::ranges::find(layer->States, primaryPlayback->SourceStateId,
+                                                      &Keire::AnimationStateDefinition::Id);
+                if (source != layer->States.end())
+                    sourceName = source->Name;
+                const auto destination = std::ranges::find(layer->States, primaryPlayback->DestinationStateId,
+                                                           &Keire::AnimationStateDefinition::Id);
+                if (destination != layer->States.end())
+                    destinationName = destination->Name;
+            }
+            ui.TextColored(theme.Accent,
+                           "Transition: " + sourceName + " -> " + destinationName + "  " +
+                               std::to_string(static_cast<int>(
+                                   std::clamp(primaryPlayback->TransitionProgress, 0.0F, 1.0F) * 100.0F)) +
+                               "%");
+        }
         if (!playMode && m_Preview->Active)
         {
             float timeline = progress;
@@ -789,6 +840,58 @@ namespace KeireEditor
         }
         if (!playbackDiagnostic.empty())
             ui.TextColored(theme.MutedText, playbackDiagnostic);
+        if (playbackSnapshot)
+        {
+            if (auto profiler = ui.BeginTreeNode("State-machine profiler", false); profiler)
+            {
+                const auto& profile = playbackSnapshot->Profile;
+                ui.Text(std::to_string(static_cast<std::uint64_t>(profile.LastEvaluationMicroseconds)) +
+                        " us last  |  " +
+                        std::to_string(static_cast<std::uint64_t>(profile.AverageEvaluationMicroseconds)) +
+                        " us average  |  " +
+                        std::to_string(static_cast<std::uint64_t>(profile.PeakEvaluationMicroseconds)) + " us peak");
+                ui.Text(std::to_string(profile.LayersEvaluated) + " layers  |  " +
+                        std::to_string(profile.TransitionsTested) + " transitions tested  |  " +
+                        std::to_string(profile.MotionsEvaluated) + " motions  |  " +
+                        std::to_string(profile.ClipsSampled) + " clips");
+                ui.TextColored(theme.MutedText, std::to_string(profile.UpdateCount) + " sampled state-machine updates");
+            }
+            if (auto pose = ui.BeginTreeNode(
+                    "Pose debugger (" + std::to_string(playbackSnapshot->Pose.size()) + " bones)", false);
+                pose)
+            {
+                for (const auto& bone : playbackSnapshot->Pose)
+                {
+                    ui.Text(bone.Name + "  [" + std::to_string(bone.WorldPosition.X) + ", " +
+                            std::to_string(bone.WorldPosition.Y) + ", " + std::to_string(bone.WorldPosition.Z) + "]");
+                }
+            }
+            if (auto trajectory = ui.BeginTreeNode(
+                    "Motion trajectory (" + std::to_string(playbackSnapshot->MotionTrajectory.size()) + " samples)",
+                    false);
+                trajectory)
+            {
+                float pathLength = 0.0F;
+                for (std::size_t index = 1; index < playbackSnapshot->MotionTrajectory.size(); ++index)
+                {
+                    const auto& previous = playbackSnapshot->MotionTrajectory[index - 1].Position;
+                    const auto& current = playbackSnapshot->MotionTrajectory[index].Position;
+                    const auto x = current.X - previous.X;
+                    const auto y = current.Y - previous.Y;
+                    const auto z = current.Z - previous.Z;
+                    pathLength += std::sqrt(x * x + y * y + z * z);
+                }
+                ui.Text("Travelled " + std::to_string(pathLength) + " model units");
+                const auto first =
+                    playbackSnapshot->MotionTrajectory.size() > 16 ? playbackSnapshot->MotionTrajectory.size() - 16 : 0;
+                for (std::size_t index = first; index < playbackSnapshot->MotionTrajectory.size(); ++index)
+                {
+                    const auto& point = playbackSnapshot->MotionTrajectory[index];
+                    ui.Text(std::to_string(point.Time) + "s  [" + std::to_string(point.Position.X) + ", " +
+                            std::to_string(point.Position.Y) + ", " + std::to_string(point.Position.Z) + "]");
+                }
+            }
+        }
         ui.Separator();
 
         auto graph = document.Definition();
@@ -796,6 +899,9 @@ namespace KeireEditor
         std::string selectedParameter(document.SelectedParameter());
         std::string selectedLayer(document.SelectedLayer());
         std::string selectedState(document.SelectedState());
+        if (auto* layer = FindLayer(graph, selectedLayer); layer && !selectedState.empty())
+            if (auto* state = FindState(*layer, selectedState); state)
+                m_GraphSubgraph = state->SubgraphId;
         std::string editName;
         bool changed = false;
         const auto markChanged = [&](const std::string_view name)
@@ -862,20 +968,80 @@ namespace KeireEditor
                     selectedParameter.clear();
                     selectedLayer = layer.Id;
                     selectedState.clear();
+                    m_GraphSubgraph.clear();
                     m_SelectedTransition.clear();
                 }
                 if (selectedLayer == layer.Id)
                 {
+                    auto rootId = ui.PushId("root-state-machine");
+                    if (ui.Selectable("   Root State Machine", m_GraphSubgraph.empty() && selectedState.empty()))
+                    {
+                        selectedParameter.clear();
+                        selectedState.clear();
+                        m_GraphSubgraph.clear();
+                        m_SelectedTransition.clear();
+                        m_FocusGraph = true;
+                    }
+                    for (const auto& subgraph : layer.Subgraphs)
+                    {
+                        auto subgraphId = ui.PushId(subgraph.Id);
+                        if (ui.Selectable("   " + subgraph.Name,
+                                          m_GraphSubgraph == subgraph.Id && selectedState.empty()))
+                        {
+                            selectedParameter.clear();
+                            selectedState.clear();
+                            m_GraphSubgraph = subgraph.Id;
+                            m_SelectedTransition.clear();
+                            m_FocusGraph = true;
+                        }
+                    }
                     for (const auto& state : layer.States)
                     {
+                        if (state.SubgraphId != m_GraphSubgraph)
+                            continue;
                         auto stateId = ui.PushId(state.Id);
-                        if (ui.Selectable("   " + state.Name, selectedState == state.Id))
+                        if (ui.Selectable("      " + state.Name, selectedState == state.Id))
                         {
                             selectedParameter.clear();
                             selectedLayer = layer.Id;
                             selectedState = state.Id;
+                            m_GraphSubgraph = state.SubgraphId;
                             m_SelectedTransition.clear();
                         }
+                    }
+                }
+            }
+            auto* selectedLayerDefinition = FindLayer(graph, selectedLayer);
+            if (auto disabled = ui.BeginDisabled(!selectedLayerDefinition); disabled)
+            {
+                if (ui.Button("+ Subgraph"))
+                {
+                    Keire::AnimationStateMachineSubgraphDefinition subgraph;
+                    subgraph.Id = Keire::AssetId::Generate().ToString();
+                    subgraph.Name = UniqueName(selectedLayerDefinition->Subgraphs, "New Subgraph",
+                                               &Keire::AnimationStateMachineSubgraphDefinition::Name);
+                    m_GraphSubgraph = subgraph.Id;
+                    selectedState.clear();
+                    selectedParameter.clear();
+                    selectedLayerDefinition->Subgraphs.push_back(std::move(subgraph));
+                    m_FocusGraph = true;
+                    markChanged("Add Animator State-Machine Subgraph");
+                }
+                ui.SameLine();
+                if (auto removeDisabled = ui.BeginDisabled(m_GraphSubgraph.empty()); removeDisabled)
+                {
+                    if (ui.Button("Delete##Subgraph"))
+                    {
+                        for (auto& state : selectedLayerDefinition->States)
+                            if (state.SubgraphId == m_GraphSubgraph)
+                                state.SubgraphId.clear();
+                        std::erase_if(selectedLayerDefinition->Subgraphs,
+                                      [&](const auto& subgraph) { return subgraph.Id == m_GraphSubgraph; });
+                        m_GraphSubgraph.clear();
+                        selectedState.clear();
+                        RepairEntryStates(*selectedLayerDefinition);
+                        m_FocusGraph = true;
+                        markChanged("Delete Animator State-Machine Subgraph");
                     }
                 }
             }
@@ -887,6 +1053,7 @@ namespace KeireEditor
                 selectedParameter.clear();
                 selectedLayer = layer.Id;
                 selectedState.clear();
+                m_GraphSubgraph.clear();
                 graph.Layers.push_back(std::move(layer));
                 markChanged("Add Animator Layer");
             }
@@ -901,6 +1068,7 @@ namespace KeireEditor
                 std::erase_if(graph.Layers, [&](const auto& layer) { return layer.Id == removeLayer; });
                 selectedLayer.clear();
                 selectedState.clear();
+                m_GraphSubgraph.clear();
                 m_SelectedTransition.clear();
                 markChanged("Delete Animator Layer");
             }
@@ -917,16 +1085,36 @@ namespace KeireEditor
                 layer = &graph.Layers.front();
                 selectedLayer = layer->Id;
             }
+            Keire::AnimationStateMachineSubgraphDefinition* subgraph = nullptr;
+            if (layer && !m_GraphSubgraph.empty())
+            {
+                const auto found = std::ranges::find(layer->Subgraphs, m_GraphSubgraph,
+                                                     &Keire::AnimationStateMachineSubgraphDefinition::Id);
+                if (found != layer->Subgraphs.end())
+                    subgraph = std::addressof(*found);
+                else
+                    m_GraphSubgraph.clear();
+            }
+            std::vector<Keire::AnimationStateDefinition*> visibleStates;
             if (layer)
             {
-                ui.TextColored(theme.MutedText, layer->Name);
+                for (auto& state : layer->States)
+                    if (state.SubgraphId == m_GraphSubgraph)
+                        visibleStates.push_back(std::addressof(state));
+            }
+            std::string* entryStateId =
+                layer ? (subgraph ? std::addressof(subgraph->EntryStateId) : std::addressof(layer->EntryStateId))
+                      : nullptr;
+            if (layer)
+            {
+                ui.TextColored(theme.MutedText, layer->Name + " / " + (subgraph ? subgraph->Name : "Root"));
                 ui.SameLine();
                 if (ui.Button("Auto Layout"))
                 {
-                    for (std::size_t index = 0; index < layer->States.size(); ++index)
+                    for (std::size_t index = 0; index < visibleStates.size(); ++index)
                     {
-                        layer->States[index].EditorPosition = {static_cast<float>(index % 3) * 190.0F,
-                                                               static_cast<float>(index / 3) * 104.0F};
+                        visibleStates[index]->EditorPosition = {static_cast<float>(index % 3) * 190.0F,
+                                                                static_cast<float>(index / 3) * 104.0F};
                     }
                     m_FocusGraph = true;
                     markChanged("Auto Layout Animator States");
@@ -947,11 +1135,11 @@ namespace KeireEditor
                         layerPlayback = &*found;
                 }
 
-                graphNodes.reserve(layer->States.size());
-                for (std::size_t index = 0; index < layer->States.size(); ++index)
+                graphNodes.reserve(visibleStates.size());
+                for (std::size_t index = 0; index < visibleStates.size(); ++index)
                 {
-                    const auto& state = layer->States[index];
-                    const bool entry = state.Id == layer->EntryStateId;
+                    const auto& state = *visibleStates[index];
+                    const bool entry = entryStateId && state.Id == *entryStateId;
                     const bool active = layerPlayback && state.Id == layerPlayback->StateId;
                     std::string subtitle;
                     if (active)
@@ -996,13 +1184,13 @@ namespace KeireEditor
                                          .Color = {0.24F, 0.78F, 1.0F, 1.0F}});
                     graphNodes.push_back(std::move(node));
                 }
-                for (const auto& source : layer->States)
+                for (const auto* source : visibleStates)
                 {
-                    for (const auto& transition : source.Transitions)
+                    for (const auto& transition : source->Transitions)
                     {
-                        const auto destination = std::ranges::find(layer->States, transition.DestinationId,
-                                                                   &Keire::AnimationStateDefinition::Id);
-                        if (destination == layer->States.end())
+                        const auto destination = std::ranges::find(visibleStates, transition.DestinationId,
+                                                                   [](const auto* state) { return state->Id; });
+                        if (destination == visibleStates.end())
                             continue;
                         std::string label = std::to_string(transition.Conditions.size());
                         label += transition.Conditions.size() == 1 ? " condition" : " conditions";
@@ -1010,11 +1198,11 @@ namespace KeireEditor
                             label += "  |  exit";
                         graphConnections.push_back(
                             {.Id = AnimatorCanvasId(transition.Id, 0x414e494d4c494e4bULL),
-                             .Source = AnimatorCanvasId(source.Id, 0x414e494d4e4f4445ULL),
-                             .Target = AnimatorCanvasId(destination->Id, 0x414e494d4e4f4445ULL),
+                             .Source = AnimatorCanvasId(source->Id, 0x414e494d4e4f4445ULL),
+                             .Target = AnimatorCanvasId((*destination)->Id, 0x414e494d4e4f4445ULL),
                              .Label = std::move(label),
-                             .SourcePin = AnimatorCanvasId(source.Id, 0x414e494d4f555450ULL),
-                             .TargetPin = AnimatorCanvasId(destination->Id, 0x414e494d494e5054ULL)});
+                             .SourcePin = AnimatorCanvasId(source->Id, 0x414e494d4f555450ULL),
+                             .TargetPin = AnimatorCanvasId((*destination)->Id, 0x414e494d494e5054ULL)});
                     }
                 }
             }
@@ -1024,22 +1212,22 @@ namespace KeireEditor
                 if (!layer)
                     return nullptr;
                 const auto found =
-                    std::ranges::find_if(layer->States, [&](const auto& state)
-                                         { return AnimatorCanvasId(state.Id, 0x414e494d4e4f4445ULL) == id; });
-                return found == layer->States.end() ? nullptr : std::addressof(*found);
+                    std::ranges::find_if(visibleStates, [&](const auto* state)
+                                         { return AnimatorCanvasId(state->Id, 0x414e494d4e4f4445ULL) == id; });
+                return found == visibleStates.end() ? nullptr : *found;
             };
             const auto findTransitionByCanvasId = [&](const StableNodeId id)
                 -> std::optional<std::pair<Keire::AnimationStateDefinition*, Keire::AnimationTransition*>>
             {
                 if (!layer)
                     return std::nullopt;
-                for (auto& state : layer->States)
+                for (auto* state : visibleStates)
                 {
                     const auto transition =
-                        std::ranges::find_if(state.Transitions, [&](const auto& candidate)
+                        std::ranges::find_if(state->Transitions, [&](const auto& candidate)
                                              { return AnimatorCanvasId(candidate.Id, 0x414e494d4c494e4bULL) == id; });
-                    if (transition != state.Transitions.end())
-                        return std::pair{std::addressof(state), std::addressof(*transition)};
+                    if (transition != state->Transitions.end())
+                        return std::pair{state, std::addressof(*transition)};
                 }
                 return std::nullopt;
             };
@@ -1049,8 +1237,7 @@ namespace KeireEditor
                     return;
                 RemoveStateReferences(*layer, stateId);
                 std::erase_if(layer->States, [&](const auto& candidate) { return candidate.Id == stateId; });
-                if (layer->EntryStateId == stateId)
-                    layer->EntryStateId = layer->States.empty() ? std::string{} : layer->States.front().Id;
+                RepairEntryStates(*layer);
                 selectedState.clear();
                 m_SelectedTransition.clear();
                 m_GraphCanvas.Select(std::nullopt);
@@ -1204,9 +1391,9 @@ namespace KeireEditor
                         ui.TextColored(theme.Accent, state->Name);
                         ui.TextColored(theme.MutedText, MotionTypeNames[static_cast<std::size_t>(state->Motion.Type)]);
                         ui.Separator();
-                        if (ui.MenuItem("Set As Entry", false, state->Id != layer->EntryStateId))
+                        if (ui.MenuItem("Set As Entry", false, entryStateId && state->Id != *entryStateId))
                         {
-                            layer->EntryStateId = state->Id;
+                            *entryStateId = state->Id;
                             markChanged("Set Animator Entry State");
                         }
                         if (ui.MenuItem("Remove All Transitions", false, !state->Transitions.empty()))
@@ -1338,6 +1525,8 @@ namespace KeireEditor
                             selectedLayer = base.Id;
                             graph.Layers.push_back(std::move(base));
                             layer = &graph.Layers.back();
+                            m_GraphSubgraph.clear();
+                            entryStateId = std::addressof(layer->EntryStateId);
                         }
                         std::size_t added = 0;
                         for (const auto& clip : clips)
@@ -1347,12 +1536,13 @@ namespace KeireEditor
                             state.Name = UniqueName(layer->States, clip.Name, &Keire::AnimationStateDefinition::Name);
                             state.Clip = clip.Id;
                             state.Motion.Clip = clip.Id;
+                            state.SubgraphId = m_GraphSubgraph;
                             state.EditorPosition = {
                                 graphResult.PointerGraphPosition.X + static_cast<float>(added) * 36.0F,
                                 graphResult.PointerGraphPosition.Y + static_cast<float>(added) * 28.0F};
                             selectedState = state.Id;
-                            if (layer->EntryStateId.empty())
-                                layer->EntryStateId = state.Id;
+                            if (entryStateId && entryStateId->empty())
+                                *entryStateId = state.Id;
                             layer->States.push_back(std::move(state));
                             ++added;
                         }
@@ -1418,7 +1608,20 @@ namespace KeireEditor
             else if (auto* layer = FindLayer(graph, selectedLayer))
             {
                 auto* state = FindState(*layer, selectedState);
-                if (!state)
+                auto selectedSubgraph = std::ranges::find(layer->Subgraphs, m_GraphSubgraph,
+                                                          &Keire::AnimationStateMachineSubgraphDefinition::Id);
+                if (!state && selectedSubgraph != layer->Subgraphs.end())
+                {
+                    ui.TextColored(theme.MutedText, "STATE-MACHINE SUBGRAPH");
+                    if (ui.InputText("Name", selectedSubgraph->Name))
+                        markChanged("Rename Animator State-Machine Subgraph");
+                    const auto stateCount = std::ranges::count(layer->States, selectedSubgraph->Id,
+                                                               &Keire::AnimationStateDefinition::SubgraphId);
+                    ui.TextColored(theme.MutedText, std::to_string(stateCount) + " states");
+                    ui.Text("Transitions may enter this subgraph through its entry state and leave through any "
+                            "cross-graph destination.");
+                }
+                else if (!state)
                 {
                     if (ui.InputText("Name", layer->Name))
                         markChanged("Rename Animator Layer");
@@ -1454,9 +1657,17 @@ namespace KeireEditor
                         markChanged("Edit Animator State Looping");
                     if (ui.DragVector2("Graph Position", state->EditorPosition, 1.0F))
                         markChanged("Move Animator State");
-                    if (state->Id != layer->EntryStateId && ui.Button("Set As Entry"))
+                    auto* stateEntry = std::addressof(layer->EntryStateId);
+                    if (!state->SubgraphId.empty())
                     {
-                        layer->EntryStateId = state->Id;
+                        const auto owner = std::ranges::find(layer->Subgraphs, state->SubgraphId,
+                                                             &Keire::AnimationStateMachineSubgraphDefinition::Id);
+                        if (owner != layer->Subgraphs.end())
+                            stateEntry = std::addressof(owner->EntryStateId);
+                    }
+                    if (state->Id != *stateEntry && ui.Button("Set As Entry"))
+                    {
+                        *stateEntry = state->Id;
                         markChanged("Set Animator Entry State");
                     }
                     auto motion = static_cast<std::uint8_t>(state->Motion.Type);
@@ -1728,8 +1939,7 @@ namespace KeireEditor
                         const auto stateId = state->Id;
                         RemoveStateReferences(*layer, stateId);
                         std::erase_if(layer->States, [&](const auto& candidate) { return candidate.Id == stateId; });
-                        if (layer->EntryStateId == stateId)
-                            layer->EntryStateId = layer->States.empty() ? std::string{} : layer->States.front().Id;
+                        RepairEntryStates(*layer);
                         selectedState.clear();
                         m_SelectedTransition.clear();
                         markChanged("Delete Animator State");

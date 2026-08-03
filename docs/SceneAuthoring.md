@@ -7,6 +7,8 @@ supports named indexed material slots plus cast/receive-shadow flags; the slot-z
 compatible with existing scenes. Point Light and Spot Light components can be created from the Hierarchy or generic
 component registry and edited by the component-driven Inspector. Scene icons are pickable for both types; selecting a
 point light shows its three-axis range sphere, while selecting a spot light shows its direction and outer cone.
+Reflection Probe and Light Probe Volume entities are available from the same menus; their oriented bounds are visible
+and pickable in Scene view.
 
 ## Editing during Play mode
 
@@ -53,8 +55,11 @@ duplicated twice.
 Inspector edits foldable Unity-style component cards that retain their bordered presentation when collapsed. Transform
 position, Euler rotation (stored as a normalized quaternion),
 scale, and parent hierarchy are component data. Camera exposes projection, primary selection, priority, clipping, and
-Skybox/Solid Color background, and linear clear color. Mesh Renderer exposes mesh/material IDs, tint, and visibility. Directional Light color, intensity,
-temperature, and orientation feed the built-in Lambert pass; shadow settings remain authoring data for a later pass.
+Skybox/Solid Color background, and linear clear color. Mesh Renderer exposes mesh/material IDs, tint, visibility,
+cast/receive-shadow flags, and static lightmap/GI participation. Directional, point, and spot lights expose realtime,
+baked, or mixed operation, shadow quality and resolution, contact shadows, cookies, and indirect contribution. Use
+**Window > Lighting** to configure bake quality, lightmap density, padding, samples, bounces, AO, and denoising, then
+queue a cached bake or force a rebuild. The resulting lighting-set reference is saved with scene schema v5.
 The entity header exposes a Unity-style **Layer** dropdown beside the common name/active controls. It reads the 32 names
 from Project Settings, applies one validated undoable edit, and edits every selected entity when the Inspector is not
 locked. A mixed selection displays **Mixed** until a layer is chosen. Layer edits persist through scene saves,

@@ -63,6 +63,25 @@ namespace Keire
         float Tolerance = 0.001F;
     };
 
+    struct AnimatorFootGroundingSettings
+    {
+        bool Enabled = false;
+        std::string Pelvis = "Hips";
+        std::string LeftUpperLeg = "LeftUpLeg";
+        std::string LeftLowerLeg = "LeftLeg";
+        std::string LeftFoot = "LeftFoot";
+        std::string RightUpperLeg = "RightUpLeg";
+        std::string RightLowerLeg = "RightLeg";
+        std::string RightFoot = "RightFoot";
+        float Weight = 1.0F;
+        float RotationWeight = 1.0F;
+        float RaycastHeight = 0.35F;
+        float RaycastDistance = 0.75F;
+        float FootOffset = 0.02F;
+        float MaximumPelvisAdjustment = 0.5F;
+        std::uint32_t CollisionMask = ~0U;
+    };
+
     class KEIRE_API AnimatorComponent final : public Component
     {
       public:
@@ -112,6 +131,8 @@ namespace Keire
         [[nodiscard]] bool ClearIk(std::string_view name) noexcept;
         void ClearIk() noexcept;
         [[nodiscard]] std::span<const AnimatorIkGoal> IkGoals() const noexcept { return m_IkGoals; }
+        [[nodiscard]] const AnimatorFootGroundingSettings& FootGrounding() const noexcept { return m_FootGrounding; }
+        void SetFootGrounding(AnimatorFootGroundingSettings settings);
         [[nodiscard]] std::vector<AnimatorCommand> ConsumeRuntimeCommands();
         void SetRuntimePose(std::string state, float normalizedTime, bool playing,
                             std::span<const Matrix4> skinPalette);
@@ -135,6 +156,7 @@ namespace Keire
         std::vector<Matrix4> m_SkinPalette;
         std::vector<AnimatorCommand> m_RuntimeCommands;
         std::vector<AnimatorIkGoal> m_IkGoals;
+        AnimatorFootGroundingSettings m_FootGrounding;
         std::uint64_t m_NextRuntimeCommand = 1;
         std::shared_ptr<const AnimatorDebugSnapshot> m_DebugSnapshot;
         std::string m_RuntimeDiagnostic;

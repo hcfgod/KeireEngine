@@ -150,6 +150,38 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
                 m_SceneDocument->Select(created.Value());
                 MarkPlayEditorEntity(m_SceneDocument->Selection());
             }
+            if (ui.MenuItem("Point Light"))
+            {
+                RecordSceneUndo();
+                const auto created =
+                    m_SceneDocument->CreateEntity("Point Light", {}, Keire::PointLightComponent::StaticType());
+                m_SceneDocument->Select(created.Value());
+                MarkPlayEditorEntity(m_SceneDocument->Selection());
+            }
+            if (ui.MenuItem("Spot Light"))
+            {
+                RecordSceneUndo();
+                const auto created =
+                    m_SceneDocument->CreateEntity("Spot Light", {}, Keire::SpotLightComponent::StaticType());
+                m_SceneDocument->Select(created.Value());
+                MarkPlayEditorEntity(m_SceneDocument->Selection());
+            }
+            if (ui.MenuItem("Reflection Probe"))
+            {
+                RecordSceneUndo();
+                const auto created = m_SceneDocument->CreateEntity("Reflection Probe", {},
+                                                                   Keire::ReflectionProbeComponent::StaticType());
+                m_SceneDocument->Select(created.Value());
+                MarkPlayEditorEntity(m_SceneDocument->Selection());
+            }
+            if (ui.MenuItem("Light Probe Volume"))
+            {
+                RecordSceneUndo();
+                const auto created = m_SceneDocument->CreateEntity("Light Probe Volume", {},
+                                                                   Keire::LightProbeVolumeComponent::StaticType());
+                m_SceneDocument->Select(created.Value());
+                MarkPlayEditorEntity(m_SceneDocument->Selection());
+            }
             if (ui.MenuItem("Main Camera"))
             {
                 RecordSceneUndo();
@@ -281,8 +313,10 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_RiggingStudioPanel->Registration());
             DrawPanelMenuItem(ui, m_AudioMixerPanel->Registration());
             DrawPanelMenuItem(ui, m_VfxEffectPanel->Registration());
+            DrawPanelMenuItem(ui, m_MaterialGraphPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
+            DrawPanelMenuItem(ui, m_LightingPanel->Registration());
             DrawPanelMenuItem(ui, m_PrefabOverrides);
             DrawPanelMenuItem(ui, m_BuildSettings);
             DrawPanelMenuItem(ui, m_Profiler);

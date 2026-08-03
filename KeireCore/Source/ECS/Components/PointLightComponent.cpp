@@ -1,5 +1,7 @@
 #include "Keire/ECS/Components/PointLightComponent.h"
 
+#include "Keire/Assets/RenderingAssets.h"
+
 #include <cmath>
 #include <stdexcept>
 
@@ -73,6 +75,38 @@ namespace Keire
         NotifyChanged();
     }
 
+    void PointLightComponent::SetBakeMode(const LightBakeMode value)
+    {
+        m_BakeMode = value;
+        NotifyChanged();
+    }
+
+    void PointLightComponent::SetShadowResolution(const ShadowResolutionHint value)
+    {
+        m_ShadowResolution = value;
+        NotifyChanged();
+    }
+
+    void PointLightComponent::SetCookie(const AssetId value)
+    {
+        m_Cookie = value;
+        NotifyChanged();
+    }
+
+    void PointLightComponent::SetContactShadows(const bool value)
+    {
+        m_ContactShadows = value;
+        NotifyChanged();
+    }
+
+    void PointLightComponent::SetIndirectMultiplier(const float value)
+    {
+        if (!std::isfinite(value) || value < 0.0F || value > 100.0F)
+            throw std::invalid_argument("Point Light indirect multiplier must be in the range 0..100.");
+        m_IndirectMultiplier = value;
+        NotifyChanged();
+    }
+
     void PointLightComponent::Reset()
     {
         m_Color = {};
@@ -81,6 +115,11 @@ namespace Keire
         m_Shadows = ShadowQuality::Soft;
         m_ShadowStrength = 1.0F;
         m_ShadowBias = 0.0025F;
+        m_BakeMode = LightBakeMode::Realtime;
+        m_ShadowResolution = ShadowResolutionHint::Medium;
+        m_Cookie = {};
+        m_ContactShadows = false;
+        m_IndirectMultiplier = 1.0F;
         NotifyChanged();
     }
 
@@ -90,13 +129,20 @@ namespace Keire
         result.Type = PointLightComponent::StaticType();
         result.Name = "Point Light";
         result.Category = "Lighting";
+        result.SchemaVersion = 2;
         result.Properties = {
             {"color", "Color", "Light", ComponentPropertyKind::Color},
             {"intensity", "Intensity", "Light", ComponentPropertyKind::Scalar, false, 0.0, 100'000.0, 0.05},
             {"range", "Range", "Light", ComponentPropertyKind::Scalar, false, 0.01, 100'000.0, 0.1},
             {"shadows", "Shadows", "Shadows", ComponentPropertyKind::Integer},
             {"shadowStrength", "Strength", "Shadows", ComponentPropertyKind::Scalar, false, 0.0, 1.0, 0.01},
-            {"shadowBias", "Bias", "Shadows", ComponentPropertyKind::Scalar, false, 0.0, 1.0, 0.001}};
+            {"shadowBias", "Bias", "Shadows", ComponentPropertyKind::Scalar, false, 0.0, 1.0, 0.001},
+            {"bakeMode", "Mode", "Baking", ComponentPropertyKind::Integer},
+            {"shadowResolution", "Resolution", "Shadows", ComponentPropertyKind::Integer},
+            {"cookie", "Cookie", "Cookie", ComponentPropertyKind::Asset},
+            {"contactShadows", "Contact Shadows", "Shadows", ComponentPropertyKind::Boolean},
+            {"indirectMultiplier", "Indirect Multiplier", "Baking", ComponentPropertyKind::Scalar, false, 0.0, 100.0,
+             0.05}};
         result.Factory = [] { return Ref<Component>(CreateRef<PointLightComponent>()); };
         result.Serialize = [](const Component& component)
         {
@@ -106,11 +152,16 @@ namespace Keire
                                         {"range", static_cast<double>(light.m_Range)},
                                         {"shadows", static_cast<std::int64_t>(light.m_Shadows)},
                                         {"shadowStrength", static_cast<double>(light.m_ShadowStrength)},
-                                        {"shadowBias", static_cast<double>(light.m_ShadowBias)}};
+                                        {"shadowBias", static_cast<double>(light.m_ShadowBias)},
+                                        {"bakeMode", static_cast<std::int64_t>(light.m_BakeMode)},
+                                        {"shadowResolution", static_cast<std::int64_t>(light.m_ShadowResolution)},
+                                        {"cookie", light.m_Cookie},
+                                        {"contactShadows", light.m_ContactShadows},
+                                        {"indirectMultiplier", static_cast<double>(light.m_IndirectMultiplier)}};
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1)
+            if (version != 2)
                 throw std::invalid_argument("Unsupported Point Light component schema version.");
             auto& light = dynamic_cast<PointLightComponent&>(component);
             light.SetLightColor(Read(values, "color", Color{}));
@@ -122,6 +173,27 @@ namespace Keire
             light.SetShadows(static_cast<ShadowQuality>(shadows));
             light.SetShadowStrength(static_cast<float>(Read(values, "shadowStrength", 1.0)));
             light.SetShadowBias(static_cast<float>(Read(values, "shadowBias", 0.0025)));
+            const auto bakeMode = Read(values, "bakeMode", std::int64_t{0});
+            const auto resolution = Read(values, "shadowResolution", std::int64_t{1});
+            if (bakeMode < 0 || bakeMode > 2 || resolution < 0 || resolution > 3)
+                throw std::invalid_argument("Point Light baking properties are invalid.");
+            light.SetBakeMode(static_cast<LightBakeMode>(bakeMode));
+            light.SetShadowResolution(static_cast<ShadowResolutionHint>(resolution));
+            light.SetCookie(Read(values, "cookie", AssetId{}));
+            light.SetContactShadows(Read(values, "contactShadows", false));
+            light.SetIndirectMultiplier(static_cast<float>(Read(values, "indirectMultiplier", 1.0)));
+        };
+        result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
+        {
+            if (version != 1)
+                throw std::invalid_argument("Unsupported Point Light component schema migration.");
+            auto migrated = values;
+            migrated.emplace("bakeMode", std::int64_t{0});
+            migrated.emplace("shadowResolution", std::int64_t{1});
+            migrated.emplace("cookie", AssetId{});
+            migrated.emplace("contactShadows", false);
+            migrated.emplace("indirectMultiplier", 1.0);
+            return migrated;
         };
         return result;
     }

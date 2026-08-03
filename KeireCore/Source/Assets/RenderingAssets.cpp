@@ -99,7 +99,10 @@ namespace Keire
                                 const bool allowMissingVariants = false)
         {
             if (definition.SchemaVersion != 1 ||
-                (definition.VertexLayoutVersion != 1 && definition.VertexLayoutVersion != 2) ||
+                (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
+                (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U) ||
+                (definition.SpatialLightingAbiVersion == 2U &&
+                 (!definition.UsesImageBasedLighting || definition.VertexLayoutVersion != 3U)) ||
                 definition.Source.empty() || definition.Source.is_absolute() ||
                 definition.Source.lexically_normal().generic_string().starts_with("..") ||
                 !ValidIdentifier(definition.VertexEntry) || !ValidIdentifier(definition.FragmentEntry))
@@ -142,6 +145,15 @@ namespace Keire
             if (numericProperties > MaximumShaderNumericProperties ||
                 textureProperties > MaximumShaderTextureProperties)
                 throw std::invalid_argument("Shader exceeds the 64 numeric slot or 16 texture slot ABI limit.");
+            constexpr std::size_t portableFragmentSamplerLimit = 16;
+            const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
+                                          (definition.UsesImageBasedLighting ? 2U : 0U) +
+                                          (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
+            if (textureProperties + reservedSamplers > portableFragmentSamplerLimit)
+            {
+                throw std::invalid_argument(
+                    "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");
+            }
             std::set<ShaderBinaryFormat> formats;
             for (const auto& variant : definition.Variants)
             {
@@ -152,11 +164,12 @@ namespace Keire
 
         void ValidateMaterialDefinition(const MaterialAssetDefinition& definition)
         {
-            if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) ||
+            if (definition.SchemaVersion < 1 || definition.SchemaVersion > 3 ||
                 definition.Properties.size() > MaximumShaderProperties ||
                 definition.Surface.AlphaMode > MaterialAlphaMode::Blend ||
                 !std::isfinite(definition.Surface.AlphaCutoff) || definition.Surface.AlphaCutoff < 0.0F ||
-                definition.Surface.AlphaCutoff > 1.0F)
+                definition.Surface.AlphaCutoff > 1.0F || !std::isfinite(definition.EmissiveGIIntensity) ||
+                definition.EmissiveGIIntensity < 0.0F || definition.EmissiveGIIntensity > 100'000.0F)
                 throw std::invalid_argument("Material definition is invalid or exceeds its property limit.");
             for (const auto& [name, value] : definition.Properties)
             {
@@ -193,7 +206,7 @@ namespace Keire
             if (!source.is_object())
                 throw std::invalid_argument("Material manifest has an unsupported schema.");
             definition.SchemaVersion = source.value("schemaVersion", 0U);
-            if (definition.SchemaVersion != 1 && definition.SchemaVersion != 2)
+            if (definition.SchemaVersion < 1 || definition.SchemaVersion > 3)
                 throw std::invalid_argument("Material manifest has an unsupported schema.");
             definition.Shader =
                 source.at("shader").is_null() ? AssetId{} : AssetId::Parse(source.at("shader").get<std::string>());
@@ -206,6 +219,14 @@ namespace Keire
                     static_cast<MaterialAlphaMode>(surface.value("alphaMode", static_cast<std::uint8_t>(0)));
                 definition.Surface.AlphaCutoff = surface.value("alphaCutoff", 0.5F);
                 definition.Surface.DoubleSided = surface.value("doubleSided", false);
+            }
+            if (definition.SchemaVersion >= 3)
+            {
+                const auto& lighting = source.value("bakedLighting", Json::object());
+                if (!lighting.is_object())
+                    throw std::invalid_argument("Material baked-lighting state must be an object.");
+                definition.ContributeEmissionToGI = lighting.value("contributeEmission", true);
+                definition.EmissiveGIIntensity = lighting.value("emissiveIntensity", 1.0F);
             }
             const auto properties = source.value("properties", Json::object());
             if (!properties.is_object())
@@ -274,6 +295,8 @@ namespace Keire
                     {"receivesShadows", definition.ReceivesShadows},
                     {"usesForwardPlus", definition.UsesForwardPlus},
                     {"usesInstancing", definition.UsesInstancing},
+                    {"usesImageBasedLighting", definition.UsesImageBasedLighting},
+                    {"spatialLightingAbiVersion", definition.SpatialLightingAbiVersion},
                     {"properties", std::move(properties)},
                     {"dependencies", std::move(dependencies)},
                     {"variants", std::move(variants)}};
@@ -297,6 +320,8 @@ namespace Keire
             result.ReceivesShadows = source.value("receivesShadows", false);
             result.UsesForwardPlus = source.value("usesForwardPlus", false);
             result.UsesInstancing = source.value("usesInstancing", false);
+            result.UsesImageBasedLighting = source.value("usesImageBasedLighting", false);
+            result.SpatialLightingAbiVersion = source.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
             for (const auto& property : source.at("properties"))
             {
                 ShaderPropertyDefinition decoded;
@@ -459,9 +484,13 @@ namespace Keire
             const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
                                                          &ShaderPropertyDefinition::Type);
             const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
-            const auto expectedFragmentUniformBuffers = 3U;
-            const auto minimumFragmentUniformBuffers = definition.ReceivesShadows ? 3U : 2U;
-            const auto expectedSamplers = textureCount + (definition.ReceivesShadows ? 2U : 0U);
+            const bool spatialLighting = definition.SpatialLightingAbiVersion == 2U;
+            const auto expectedFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U : 3U;
+            const auto minimumFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U
+                                                       : definition.ReceivesShadows      ? 3U
+                                                                                         : 2U;
+            const auto expectedSamplers = textureCount + (definition.ReceivesShadows ? 2U : 0U) +
+                                          (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U);
             const auto expectedFragmentStorageBuffers = definition.UsesForwardPlus ? 3U : 0U;
             if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
                 vertex.value("storage_buffers", 0U) != (definition.UsesInstancing ? 1U : 0U) ||
@@ -472,8 +501,11 @@ namespace Keire
                 fragment.value("samplers", 0U) != expectedSamplers)
                 throw std::invalid_argument("Shader violates Kéire's fixed graphics resource-binding ABI.");
 
-            constexpr std::array<std::string_view, 5> vertexTypes{"float3", "float3", "float2", "float4", "float4"};
-            const auto expectedInputs = definition.VertexLayoutVersion == 2 ? 5U : 4U;
+            constexpr std::array<std::string_view, 6> vertexTypes{"float3", "float3", "float2",
+                                                                  "float4", "float4", "float2"};
+            const auto expectedInputs = definition.VertexLayoutVersion == 3   ? 6U
+                                        : definition.VertexLayoutVersion == 2 ? 5U
+                                                                              : 4U;
             if (!vertex.at("inputs").is_array() || vertex.at("inputs").size() != expectedInputs)
                 throw std::invalid_argument("Shader vertex inputs do not match the fixed mesh ABI.");
             for (const auto& input : vertex.at("inputs"))
@@ -607,6 +639,16 @@ namespace Keire
             result.ReceivesShadows = manifest.value("receivesShadows", false);
             result.UsesForwardPlus = manifest.value("usesForwardPlus", false);
             result.UsesInstancing = manifest.value("usesInstancing", false);
+            result.UsesImageBasedLighting = manifest.value("usesImageBasedLighting", false);
+            result.SpatialLightingAbiVersion =
+                manifest.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
+            if (result.SpatialLightingAbiVersion != 0U && result.SpatialLightingAbiVersion != 2U)
+                throw std::invalid_argument("Shader spatial-lighting ABI version is unsupported.");
+            if (result.SpatialLightingAbiVersion == 2U &&
+                (!result.UsesImageBasedLighting || result.VertexLayoutVersion != 3U))
+            {
+                throw std::invalid_argument("Spatial-lighting ABI v2 requires image-based lighting and mesh UV1.");
+            }
 
             const auto& properties = manifest.value("properties", Json::array());
             if (!properties.is_array() || properties.size() > MaximumShaderProperties)
@@ -760,7 +802,7 @@ namespace Keire
             throw std::invalid_argument("Material asset has an unsupported schema.");
         MaterialAssetDefinition result;
         result.SchemaVersion = source.value("schemaVersion", 0U);
-        if (result.SchemaVersion != 1 && result.SchemaVersion != 2)
+        if (result.SchemaVersion < 1 || result.SchemaVersion > 3)
             throw std::invalid_argument("Material asset has an unsupported schema.");
         result.Shader =
             source.at("shader").is_null() ? AssetId{} : AssetId::Parse(source.at("shader").get<std::string>());
@@ -770,6 +812,12 @@ namespace Keire
             result.Surface.AlphaMode = static_cast<MaterialAlphaMode>(surface.at("alphaMode").get<std::uint8_t>());
             result.Surface.AlphaCutoff = surface.at("alphaCutoff").get<float>();
             result.Surface.DoubleSided = surface.at("doubleSided").get<bool>();
+        }
+        if (result.SchemaVersion >= 3)
+        {
+            const auto& lighting = source.at("bakedLighting");
+            result.ContributeEmissionToGI = lighting.at("contributeEmission").get<bool>();
+            result.EmissiveGIIntensity = lighting.at("emissiveIntensity").get<float>();
         }
         for (const auto& [name, property] : source.at("properties").items())
         {
@@ -859,6 +907,9 @@ namespace Keire
             source["surface"] = {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
                                  {"alphaCutoff", definition.Surface.AlphaCutoff},
                                  {"doubleSided", definition.Surface.DoubleSided}};
+        if (definition.SchemaVersion >= 3)
+            source["bakedLighting"] = {{"contributeEmission", definition.ContributeEmissionToGI},
+                                       {"emissiveIntensity", definition.EmissiveGIIntensity}};
         return ToBytes(Json::to_cbor(source));
     }
 
@@ -899,6 +950,9 @@ namespace Keire
             source["surface"] = {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
                                  {"alphaCutoff", definition.Surface.AlphaCutoff},
                                  {"doubleSided", definition.Surface.DoubleSided}};
+        if (definition.SchemaVersion >= 3)
+            source["bakedLighting"] = {{"contributeEmission", definition.ContributeEmissionToGI},
+                                       {"emissiveIntensity", definition.EmissiveGIIntensity}};
         const auto text = source.dump(2) + '\n';
         return ToBytes(text);
     }
@@ -984,7 +1038,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer limits are invalid.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 1;
+        result.Version = 2;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =

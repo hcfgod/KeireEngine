@@ -139,7 +139,9 @@ The Scene view uses the selected runtime Camera's clear color while retaining it
 `Q/W/E/R` View/Move/Rotate/Scale tools support Local/Global handles, configurable position/rotation/scale snapping, and
 camera/light gizmos. Project ambient color, intensity, and exposure are edited through **Edit > Project Settings...**
 and light both Scene and Game views together. A built-in studio sky renders by default; the same panel provides a
-searchable asset picker for custom HDR, equirectangular, cross-atlas, and strip-atlas environments.
+searchable asset picker for custom HDR, equirectangular, cross-atlas, and strip-atlas environments. The sandbox PBR
+material uses those environments for cached spherical-harmonic diffuse irradiance and split-sum specular response;
+sky rotation and the independent diffuse/specular intensity controls affect both the background and material lighting.
 Scene and Game surfaces render through the private frame graph into RGBA16F, resolve with fitted ACES, upload bounded
 Forward+ tile lists, and instance compatible opaque objects on a dedicated renderer submission thread. Renderer
 statistics expose graph transitions, transient allocation slots, instance batches, queue high-water mark, and CPU
@@ -148,6 +150,18 @@ command buffer; the upload-submission counter identifies fallback resource-publi
 statistics separate skinning, VFX, draw preparation, shadow, Forward+, scene, sampled-depth, tone-map, and residual
 costs. The configured frames-in-flight value is applied to SDL's bounded GPU presentation queue and reported alongside
 swapchain wait time; higher applied values favor throughput at the cost of additional presentation latency.
+
+Spatial lighting is authored from **Window > Lighting**. Add Reflection Probe and Light Probe Volume entities from the
+Entity or Hierarchy menus, mark contributing Mesh Renderers static, choose Realtime/Baked/Mixed on lights, and enable
+emissive GI on contributing materials. **Bake Lighting** runs in the isolated asset worker and publishes lightmaps,
+eight-channel mixed shadow masks, reflection cubemaps, and SH9 probe volumes as one cached lighting set. The equivalent
+headless workflow is:
+
+```powershell
+.\Build\Bin\Debug-windows-x86_64\KeireAssetTool\KeireAssetTool.exe bake-lighting --project <project-path> --input Assets/Scenes/Main.keirescene
+```
+
+Omit `--input` to bake the startup scene, or add `--force` to bypass the digest-verified cache.
 
 ## Gameplay-Production Foundations
 
@@ -280,7 +294,9 @@ Published meshes, async cancellation/stale rejection, dynamic obstacle invalidat
 hashes remain middleware-free public contracts.
 
 FBX/glTF/GLB import can be marked **Animation Source** in the Import Assets dialog and emits stable skeleton,
-semantic-rig, skinned-mesh, and animation-clip subassets with normalized four/eight-influence weights. Embedded Mixamo,
+semantic-rig, skinned-mesh, and animation-clip subassets with normalized four/eight-influence weights. Per-import
+None/Light/Balanced/Aggressive animation compression presets reduce redundant keys within measured transform-error
+tolerances. Embedded Mixamo,
 Blender, Unreal, humanoid, biped, and quadruped naming is mapped
 deterministically; models without a rig can generate one from a non-destructive import preset. Open **Window > Rigging
 Studio** to change the rig source/profile/skinning method, inspect semantic mappings and generated subassets, and bake
@@ -289,14 +305,17 @@ retargeted `.keireanim` clips. See [Animation and Rigging](docs/AnimationRigging
 Animation graph assets, animator sampling, transitions, root motion, events, skin palettes, two-bone IK, and FABRIK are
 exposed through first-party types. Create an **Animator Controller** from the Project panel, double-click it to open the
 dockable state-machine editor, then drag imported clips, Animation Sources, or animated models onto the graph. Source
-and model drops expand their generated clip subassets into states. Parameters, layers, entry states,
-transitions, conditions, blend trees, avatar masks, node layout, validation, and undo/redo are authored without editing
-JSON. State nodes use the production graph canvas: drag their Transition pin to another state's Enter pin, select or
+and model drops expand their generated clip subassets into states. Parameters, override/additive layers, entry states,
+transitions, conditions, blend trees, state-machine subgraphs, avatar masks, node layout, validation, and undo/redo are
+authored without editing JSON. State nodes use the production graph canvas: drag their Transition pin to another state's Enter pin, select or
 Delete a Bezier cable, right-click nodes/pins/cables to set entry state or unlink, middle-drag to pan, and use the wheel
 to zoom. Managed scripts can set or query typed parameters and layer weights and submit named IK goals through `Animator`.
-Select a scene object using the controller to inspect live state and normalized progress. Outside Play Mode, the
-controller toolbar can preview, pause, restart, stop, and scrub the animation directly on that object. Preview poses are
-transient; the assigned skinned mesh determines the compatible target skeleton for playback and retargeting.
+Select a scene object using the controller to inspect live state, transition progress, the final pose, root-motion
+trajectory, and state-machine profiling counters. Outside Play Mode, the selection-backed animation preview scene can
+preview, pause, restart, stop, and scrub the animation directly on that object. Preview poses are transient; the
+assigned skinned mesh determines the compatible target skeleton for playback and retargeting. Rigging Studio exposes
+the retarget mapping and scale/root-motion diagnostics before bake. Animator ground-adaptation settings apply
+physics-query-driven foot IK, while the public ragdoll transition utility blends compatible animation and physics poses.
 The sample project includes a
 `.keireasm` gameplay assembly, reload-aware third-person and navigation scripts, and base/variant prefab assets;
 `AssetTool cook` compiles and publishes those DLLs before writing the runtime manifest.
@@ -305,8 +324,9 @@ The sample project includes a
 Output Contexts, order executable Blocks inside those Contexts, and cable descriptor-backed Operators and stable-ID
 Blackboard Parameters into typed Block inputs. Schemas 1-3 migrate in memory and are written as schema 4 only on
 explicit Save; historical module-stack effects retain `LegacyModules` execution until an explicit conversion. Range,
-Random/Random Range, Remap, core arithmetic/logic/vector Operators, and bounded CPU/GPU value interpreters form the
-current value release. Unsupported or GPU-required work reports an explicit diagnostic instead of acting as a no-op;
+Random/Random Range, Remap, core arithmetic/logic/vector Operators, bitwise math, HSV/RGB conversion, normalized age,
+frame/system identity, and bounded CPU/GPU value interpreters form the current value release. Unsupported or
+GPU-required work reports an explicit diagnostic instead of acting as a no-op;
 compiled backend-limit diagnostics retain the responsible stable node ID. CPU + GPU catalog badges require validated
 packed representation and backend semantics; every currently executable packed core Operator now satisfies that
 contract on both interpreters.
@@ -336,6 +356,8 @@ setup, native and managed range control, backend differences, recipes, migration
 checked-in generator and validator live under [`Scripts/Vfx`](Scripts/Vfx). The generated
 [VFX capability reference](docs/generated/VfxCapabilities.md) is release-checked against both the frozen manifest and
 the runtime descriptor catalog, and production slices require every enabled implementation to have executable coverage.
+The current 125-row executable parity surface includes typed Inline values, particle/strip Attribute reads, constants,
+coordinate conversion and rotation, and deterministic fixed-3D Value/Perlin/Cellular noise and curl on CPU and GPU.
 Kéire-specific shipping work that is deliberately outside the Unity node catalog is tracked separately in the
 [VFX Beyond-Parity Roadmap](docs/VfxBeyondParityRoadmap.md), so engine-production features never inflate parity counts.
 
@@ -542,11 +564,12 @@ Asset APIs are organized beneath `Keire/Assets` (for example, `#include "Keire/A
 
 Static meshes can be imported from OBJ, FBX, glTF, or GLB and converted explicitly with `KeireAssetTool convert-mesh
 --input <model>`. PNG, JPEG, TGA, BMP, and Radiance HDR textures import as validated assets with deterministic mip
-generation and sampler settings stored in source metadata. Environment textures support equirectangular panoramas and
-model-folder drops preserve supported models and textures while ignoring unrelated exporter/readme files. Live imports
-publish immutable content-addressed packs, so active Scene/Game loads do not block catalog replacement on Windows.
-horizontal/vertical cubemap cross or strip atlases. Assimp and stb remain private implementation dependencies; their
-headers are not required by engine or SDK consumers.
+generation and sampler settings stored in source metadata. HDR environment mip generation preserves decoded radiance
+for roughness-filtered specular sampling. Environment textures support equirectangular panoramas and horizontal/vertical
+cubemap cross or strip atlases. Model-folder drops preserve supported models and textures while ignoring unrelated
+exporter/readme files. Live imports publish immutable content-addressed packs, so active Scene/Game loads do not block
+catalog replacement on Windows. Assimp and stb remain private implementation dependencies; their headers are not
+required by engine or SDK consumers.
 
 Audio clips import from WAV, Ogg Vorbis, FLAC, and MP3 natively. AAC, Opus, WMA, AIFF, WebM, MP4, MKV, MOV, M4A, and
 other registered codec/container sources are transcoded losslessly through the engine's private FFmpeg libraries.
@@ -564,6 +587,18 @@ Selecting a `.keirematerial` in Inspector exposes every shader-declared numeric,
 production surface uses base-color, +Y normal, packed metallic-roughness, separate metallic/roughness, occlusion, and
 emissive semantics with neutral fallbacks. Edits are range-checked, previewed through live immutable revisions, saved
 atomically at the edit boundary, persisted to the catalog in the background, and recorded in project-asset undo.
+
+Create a **Material Graph** from the Project panel to author Surface PBR, Transparent, Decal, or Unlit shaders on the
+same production node canvas used by VFX. Its searchable, categorized library includes texture/UV and parallax paths,
+normal/detail layering, procedural noise, Fresnel, world/vertex inputs, remap and shaping math, emission, clear coat,
+sheen, keyword/static-switch variants, and confined custom functions. Stable cables, typed input defaults, texture
+asset/semantic picking, node duplication, undo/redo, and cost-aware generated diagnostics update as the graph changes.
+The adaptive shaded sphere/plane/cube/custom-mesh preview exposes lighting, exposure, and rotation controls while
+retaining the last-good shader. Save publishes deterministic HLSL and `.keireshader` variants under the graph's
+generated asset directory and the production compiler validates DXIL, SPIR-V, and MSL. Five progressive examples live
+under `Samples/KeireSandbox/Assets/Materials/MaterialGraphs`. Typed `.keirematerialinstance` assets support
+bounded parent chains, property overrides, and keyword overrides. See
+[Shaders And Materials](docs/ShadersAndMaterials.md) for the contracts and safe-include rules.
 
 The Sandbox startup scene uses an imported humanoid model from `Assets/Meshes/T-Pose.fbx`, an Idle animation source,
 and a UV-mapped pyramid through the same renderer-owned resource caches used by the editor. Dist cooking follows

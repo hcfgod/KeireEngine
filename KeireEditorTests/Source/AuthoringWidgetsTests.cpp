@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -241,4 +242,30 @@ TEST_CASE("Stable node graph focus deterministically frames authored nodes")
     const auto firstPan = canvas.Pan();
     canvas.Focus(nodes, {800.0F, 600.0F});
     CHECK(canvas.Pan() == firstPan);
+}
+
+TEST_CASE("Stable node graph zoom detail prevents labels from overlapping scaled rows")
+{
+    const auto overview = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.5F);
+    CHECK_FALSE(overview.NodeSubtitle);
+    CHECK_FALSE(overview.BlockLabels);
+    CHECK_FALSE(overview.PinLabels);
+    CHECK_FALSE(overview.ConnectionLabels);
+
+    const auto compact = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.7F);
+    CHECK_FALSE(compact.NodeSubtitle);
+    CHECK(compact.BlockLabels);
+    CHECK_FALSE(compact.PinLabels);
+    CHECK(compact.ConnectionLabels);
+
+    const auto readablePins = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.8F);
+    CHECK_FALSE(readablePins.NodeSubtitle);
+    CHECK(readablePins.PinLabels);
+
+    const auto full = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.9F);
+    CHECK(full.NodeSubtitle);
+    CHECK(full.BlockLabels);
+    CHECK(full.PinLabels);
+    CHECK(full.ConnectionLabels);
+    CHECK(KeireEditor::StableNodeGraphCanvas::DetailForZoom(std::numeric_limits<float>::quiet_NaN()) == full);
 }

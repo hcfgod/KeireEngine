@@ -135,6 +135,8 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     request.BuildProfile.Roots = {id};
     request.BuildProfile.ManagedTypeDiscoveryComplete = true;
     request.BuildProfile.ManagedTypeCatalog = R"({"schemaVersion":1,"types":[]})";
+    request.BakeScene = id;
+    request.BakeForce = true;
     const auto requestPath = operation / "request.json";
     Keire::Detail::WriteAssetWorkerRequest(requestPath, request);
     const auto restored = Keire::Detail::ReadAssetWorkerRequest(requestPath);
@@ -163,6 +165,19 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restored.BuildProfile.Roots == request.BuildProfile.Roots);
     CHECK(restored.BuildProfile.ManagedTypeDiscoveryComplete);
     CHECK(restored.BuildProfile.ManagedTypeCatalog == request.BuildProfile.ManagedTypeCatalog);
+    CHECK(restored.BakeScene == request.BakeScene);
+    CHECK(restored.BakeForce);
+
+    Keire::Detail::AssetWorkerResult result;
+    result.Success = true;
+    result.CreatedAsset = id;
+    result.LightingCacheHit = true;
+    const auto resultPath = operation / "result.json";
+    Keire::Detail::WriteAssetWorkerResult(resultPath, result);
+    const auto restoredResult = Keire::Detail::ReadAssetWorkerResult(resultPath);
+    CHECK(restoredResult.Success);
+    CHECK(restoredResult.CreatedAsset == id);
+    CHECK(restoredResult.LightingCacheHit);
 }
 
 TEST_CASE("Single asset creation and rename avoid unrelated project rescans")

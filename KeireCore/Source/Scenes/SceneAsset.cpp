@@ -240,7 +240,40 @@ namespace Keire
             CollectOverrideDependencies(definition.PrefabOverrides, unique);
             for (const auto& object : definition.Objects)
                 CollectObjectDependencies(object, unique);
+            InsertDependency(unique, definition.BakedLighting);
             return {unique.begin(), unique.end()};
+        }
+
+        [[nodiscard]] LightingBakeSettings ParseLightingSettings(const Json& value)
+        {
+            if (!value.is_object())
+                throw std::runtime_error("Scene lighting settings must be an object.");
+            LightingBakeSettings result;
+            result.Backend = static_cast<LightingBakeBackend>(value.value("backend", 0U));
+            result.Quality = static_cast<LightingBakeQuality>(value.value("quality", 1U));
+            result.LightmapResolution = value.value("lightmapResolution", 1024U);
+            result.MaximumLightmapResolution = value.value("maximumLightmapResolution", 4096U);
+            result.TexelsPerUnit = value.value("texelsPerUnit", 32U);
+            result.PaddingTexels = value.value("paddingTexels", 4U);
+            result.IndirectBounceCount = value.value("indirectBounceCount", 2U);
+            result.SamplesPerTexel = value.value("samplesPerTexel", 64U);
+            result.BakeAmbientOcclusion = value.value("bakeAmbientOcclusion", true);
+            result.Denoise = value.value("denoise", true);
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeLightingSettings(const LightingBakeSettings& value)
+        {
+            return {{"backend", static_cast<std::uint8_t>(value.Backend)},
+                    {"quality", static_cast<std::uint8_t>(value.Quality)},
+                    {"lightmapResolution", value.LightmapResolution},
+                    {"maximumLightmapResolution", value.MaximumLightmapResolution},
+                    {"texelsPerUnit", value.TexelsPerUnit},
+                    {"paddingTexels", value.PaddingTexels},
+                    {"indirectBounceCount", value.IndirectBounceCount},
+                    {"samplesPerTexel", value.SamplesPerTexel},
+                    {"bakeAmbientOcclusion", value.BakeAmbientOcclusion},
+                    {"denoise", value.Denoise}};
         }
 
         [[nodiscard]] SceneVector3 ParseVector3(const Json& value)
@@ -717,7 +750,7 @@ namespace Keire
         {
             definition = DecodeVersionOne(document);
         }
-        else if (version == 2 || version == 3 || version == CurrentSceneSchemaVersion)
+        else if (version == 2 || version == 3 || version == 4 || version == CurrentSceneSchemaVersion)
         {
             definition.SchemaVersion = CurrentSceneSchemaVersion;
             definition.Name = document.at("name").get<std::string>();
@@ -726,15 +759,19 @@ namespace Keire
                 throw std::runtime_error("Scene entities must be an array.");
             definition.Objects.reserve(entities.size());
             for (const auto& value : entities)
-                definition.Objects.push_back(DecodeEntity(value, version == CurrentSceneSchemaVersion));
+                definition.Objects.push_back(DecodeEntity(value, version >= 4));
             if (version >= 3)
             {
                 for (const auto& instance : document.value("prefabInstances", Json::array()))
-                    definition.PrefabInstances.push_back(
-                        DecodeInstance(instance, version == CurrentSceneSchemaVersion));
+                    definition.PrefabInstances.push_back(DecodeInstance(instance, version >= 4));
                 for (const auto& overrideValue : document.value("prefabOverrides", Json::array()))
-                    definition.PrefabOverrides.push_back(
-                        DecodeOverride(overrideValue, version == CurrentSceneSchemaVersion));
+                    definition.PrefabOverrides.push_back(DecodeOverride(overrideValue, version >= 4));
+            }
+            if (version >= 5)
+            {
+                definition.Lighting = ParseLightingSettings(document.value("lighting", Json::object()));
+                if (document.contains("bakedLighting") && !document.at("bakedLighting").is_null())
+                    definition.BakedLighting = AssetId::Parse(document.at("bakedLighting").get<std::string>());
             }
         }
         else
@@ -757,11 +794,14 @@ namespace Keire
         Json overrides = Json::array();
         for (const auto& overrideValue : definition.PrefabOverrides)
             overrides.push_back(EncodeOverride(overrideValue));
-        const Json document{{"schemaVersion", CurrentSceneSchemaVersion},
-                            {"name", definition.Name},
-                            {"entities", std::move(entities)},
-                            {"prefabInstances", std::move(instances)},
-                            {"prefabOverrides", std::move(overrides)}};
+        const Json document{
+            {"schemaVersion", CurrentSceneSchemaVersion},
+            {"name", definition.Name},
+            {"entities", std::move(entities)},
+            {"prefabInstances", std::move(instances)},
+            {"prefabOverrides", std::move(overrides)},
+            {"lighting", EncodeLightingSettings(definition.Lighting)},
+            {"bakedLighting", definition.BakedLighting ? Json(definition.BakedLighting.ToString()) : Json(nullptr)}};
         const auto text = document.dump(2) + '\n';
         std::vector<std::byte> result(text.size());
         std::memcpy(result.data(), text.data(), text.size());
@@ -839,6 +879,17 @@ namespace Keire
     {
         if (definition.SchemaVersion != CurrentSceneSchemaVersion)
             throw std::invalid_argument("Scene definition must use the canonical schema version.");
+        if (static_cast<std::uint8_t>(definition.Lighting.Backend) >
+                static_cast<std::uint8_t>(LightingBakeBackend::CPU) ||
+            static_cast<std::uint8_t>(definition.Lighting.Quality) >
+                static_cast<std::uint8_t>(LightingBakeQuality::Production) ||
+            definition.Lighting.LightmapResolution < 64U || definition.Lighting.LightmapResolution > 16'384U ||
+            definition.Lighting.MaximumLightmapResolution < definition.Lighting.LightmapResolution ||
+            definition.Lighting.MaximumLightmapResolution > 16'384U || definition.Lighting.TexelsPerUnit == 0U ||
+            definition.Lighting.TexelsPerUnit > 4096U || definition.Lighting.PaddingTexels > 128U ||
+            definition.Lighting.IndirectBounceCount > 16U || definition.Lighting.SamplesPerTexel == 0U ||
+            definition.Lighting.SamplesPerTexel > 65'536U)
+            throw std::invalid_argument("Scene lighting bake settings are invalid.");
         if (definition.Name.empty() || definition.Name.size() > MaximumNameBytes)
             throw std::invalid_argument("Scene name is empty or exceeds 256 UTF-8 bytes.");
         if (definition.Objects.size() > MaximumObjects)

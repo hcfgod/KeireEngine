@@ -249,6 +249,9 @@ namespace Keire::RenderBackend
         packet.Environment = request.Environment;
         packet.Lighting = ResolveLighting(request.Scene);
         packet.LocalLights = ResolveLocalLights(request.Scene);
+        packet.BakedLighting = request.Scene->BakedLighting();
+        packet.ReflectionProbes = ResolveReflectionProbes(request.Scene);
+        packet.LightProbeVolumes = ResolveLightProbeVolumes(request.Scene);
         packet.DrawGrid = request.DrawGrid;
         packet.Vfx = std::move(request.Vfx);
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
@@ -370,6 +373,135 @@ namespace Keire::RenderBackend
             }
         }
         return entry.Resources.Empty() ? CheckerboardTexture : entry.Resources;
+    }
+
+    const GpuTextureResources& RenderSharedState::ResolveCookieAtlas(const std::span<const AssetId> cookies)
+    {
+        constexpr std::uint32_t slotResolution = 128;
+        constexpr std::uint32_t columns = 4;
+        constexpr std::uint32_t rows = 2;
+        bool anyCookie = false;
+        bool changed = CookieAtlas.Empty();
+        for (std::size_t slot = 0; slot < CookieAtlasAssets.size(); ++slot)
+        {
+            const auto id = slot < cookies.size() ? cookies[slot] : AssetId{};
+            anyCookie |= static_cast<bool>(id);
+            if (CookieAtlasAssets[slot] != id)
+            {
+                CookieAtlasAssets[slot] = id;
+                CookieAtlasHandles[slot] = id && Assets ? Assets->Load<Texture2DAsset>(id, AssetPriority::High)
+                                                        : AssetHandle<Texture2DAsset>{};
+                CookieAtlasRevisions[slot] = 0;
+                changed = true;
+            }
+            const auto revision = CookieAtlasHandles[slot] ? CookieAtlasHandles[slot].Revision() : 0U;
+            if (CookieAtlasRevisions[slot] != revision)
+            {
+                CookieAtlasRevisions[slot] = revision;
+                changed = true;
+            }
+        }
+        if (!anyCookie)
+            return WhiteTexture;
+        if (!changed)
+            return CookieAtlas.Empty() ? WhiteTexture : CookieAtlas;
+
+        TextureMipLevel atlas;
+        atlas.Width = slotResolution * columns;
+        atlas.Height = slotResolution * rows;
+        atlas.Pixels.assign(static_cast<std::size_t>(atlas.Width) * atlas.Height * 4U, std::byte{255});
+        for (std::size_t slot = 0; slot < CookieAtlasHandles.size(); ++slot)
+        {
+            const auto source = CookieAtlasHandles[slot].TryGetLoaded();
+            if (!source || source->Mips().empty())
+                continue;
+            const auto& sourceMip = source->Mips().front();
+            if (sourceMip.Width == 0U || sourceMip.Height == 0U ||
+                sourceMip.Pixels.size() != static_cast<std::size_t>(sourceMip.Width) * sourceMip.Height * 4U)
+                continue;
+            const auto originX = static_cast<std::uint32_t>(slot % columns) * slotResolution;
+            const auto originY = static_cast<std::uint32_t>(slot / columns) * slotResolution;
+            for (std::uint32_t y = 0; y < slotResolution; ++y)
+            {
+                const auto sourceY = std::min(y * sourceMip.Height / slotResolution, sourceMip.Height - 1U);
+                for (std::uint32_t x = 0; x < slotResolution; ++x)
+                {
+                    const auto sourceX = std::min(x * sourceMip.Width / slotResolution, sourceMip.Width - 1U);
+                    const auto sourceOffset = (static_cast<std::size_t>(sourceY) * sourceMip.Width + sourceX) * 4U;
+                    const auto destinationOffset =
+                        (static_cast<std::size_t>(originY + y) * atlas.Width + originX + x) * 4U;
+                    std::memcpy(atlas.Pixels.data() + destinationOffset, sourceMip.Pixels.data() + sourceOffset, 4U);
+                }
+            }
+        }
+        TextureImportSettings settings;
+        settings.Semantic = TextureSemantic::Color;
+        settings.ColorSpace = TextureColorSpace::Srgb;
+        settings.Mips = TextureMipPolicy::None;
+        settings.Sampler.AddressU = TextureAddressMode::Clamp;
+        settings.Sampler.AddressV = TextureAddressMode::Clamp;
+        auto replacement = CreateTextureResources(
+            *CreateRef<Texture2DAsset>(settings, std::vector<TextureMipLevel>{std::move(atlas)}));
+        Retire(std::exchange(CookieAtlas, replacement));
+        return CookieAtlas;
+    }
+
+    const GpuTextureResources& RenderSharedState::ResolveLightingTexture(const AssetId id, const bool cubeArray,
+                                                                         const bool whiteFallback)
+    {
+        const auto& fallback = cubeArray       ? DefaultReflectionCubeArray
+                               : whiteFallback ? DefaultLightingMaskArray
+                                               : DefaultLightingArray;
+        if (!id || !Assets)
+            return fallback;
+        auto [iterator, inserted] = LightingTextureCache.try_emplace(id);
+        auto& entry = iterator->second;
+        if (inserted)
+            entry.Handle = Assets->Load<LightingTextureArrayAsset>(id, AssetPriority::High);
+        const auto revision = entry.Handle.Revision();
+        if (revision != 0 && revision > entry.LastAttemptedRevision)
+        {
+            entry.LastAttemptedRevision = revision;
+            if (const auto texture = entry.Handle.TryGetLoaded())
+            {
+                try
+                {
+                    const auto expected =
+                        cubeArray ? LightingTextureTarget::CubeArray : LightingTextureTarget::Texture2DArray;
+                    if (texture->Definition().Target != expected)
+                        throw std::invalid_argument("Baked-lighting texture target does not match its binding.");
+                    auto replacement = CreateLightingTextureResources(*texture);
+                    Retire(std::exchange(entry.Resources, replacement));
+                    entry.LoadedRevision = revision;
+                }
+                catch (const std::exception& error)
+                {
+                    KEIRE_CORE_ERROR("Baked-lighting GPU rebuild failed for id={} revision={}: {}", id.ToString(),
+                                     revision, error.what());
+                }
+            }
+        }
+        return entry.Resources.Empty() ? fallback : entry.Resources;
+    }
+
+    Ref<const LightingSetAsset> RenderSharedState::ResolveLightingSet(const AssetId id)
+    {
+        if (!id || !Assets)
+            return {};
+        auto [iterator, inserted] = LightingSetCache.try_emplace(id);
+        if (inserted)
+            iterator->second = Assets->Load<LightingSetAsset>(id, AssetPriority::High);
+        return iterator->second.TryGetLoaded();
+    }
+
+    Ref<const LightProbeVolumeAsset> RenderSharedState::ResolveLightProbeVolume(const AssetId id)
+    {
+        if (!id || !Assets)
+            return {};
+        auto [iterator, inserted] = LightProbeVolumeCache.try_emplace(id);
+        if (inserted)
+            iterator->second = Assets->Load<LightProbeVolumeAsset>(id, AssetPriority::High);
+        return iterator->second.TryGetLoaded();
     }
 
     const GpuTextureResources& RenderSharedState::DefaultTexture(const ShaderTextureSemantic semantic) const noexcept
@@ -588,6 +720,8 @@ namespace Keire::RenderBackend
             result.ReceivesShadows = shader->LastGood->Definition().ReceivesShadows;
             result.UsesForwardPlus = shader->LastGood->Definition().UsesForwardPlus;
             result.UsesInstancing = shader->LastGood->Definition().UsesInstancing;
+            result.UsesImageBasedLighting = shader->LastGood->Definition().UsesImageBasedLighting;
+            result.UsesSpatialLighting = shader->LastGood->Definition().SpatialLightingAbiVersion == 2U;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

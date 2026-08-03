@@ -99,6 +99,8 @@ namespace Keire
         std::vector<ShaderPropertyDefinition> Properties;
         std::vector<AssetSourceDependency> Dependencies;
         std::vector<ShaderVariant> Variants;
+        bool UsesImageBasedLighting = false;
+        std::uint8_t SpatialLightingAbiVersion = 0;
     };
 
     class KEIRE_API ShaderAsset final : public Asset
@@ -144,9 +146,11 @@ namespace Keire
 
     struct MaterialAssetDefinition
     {
-        std::uint32_t SchemaVersion = 2;
+        std::uint32_t SchemaVersion = 3;
         AssetId Shader;
         MaterialSurfaceState Surface;
+        bool ContributeEmissionToGI = true;
+        float EmissiveGIIntensity = 1.0F;
         std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
 
         void SetTexture(std::string name, AssetId texture);
@@ -190,6 +194,7 @@ namespace Keire
         Vector2 UV0;
         Color VertexColor;
         Vector4 Tangent{1.0F, 0.0F, 0.0F, 1.0F};
+        Vector2 UV1;
     };
 
     struct MeshBounds

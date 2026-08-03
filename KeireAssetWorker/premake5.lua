@@ -29,16 +29,11 @@ project(AssetWorkerTarget)
     local function CopyUnixRuntime(source)
         return "mkdir -p " .. workerRuntimeDirectory .. " && cp -R " .. source .. "/. " .. workerRuntimeDirectory .. "/"
     end
-    if os.isdir(ffmpegDebug .. "/include") and os.isdir(ffmpegRelease .. "/include") then
-        defines { "KEIRE_HAS_FFMPEG=1" }
-        externalincludedirs { ffmpegDebug .. "/include" }
-
+    if os.isdir(ffmpegDebug .. "/include") then
         filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
+            defines { "KEIRE_HAS_FFMPEG=1" }
+            externalincludedirs { ffmpegDebug .. "/include" }
             libdirs { ffmpegDebug .. "/lib" }
-            links { "avformat", "avcodec", "swresample", "avutil" }
-
-        filter { "configurations:Release or Dist" }
-            libdirs { ffmpegRelease .. "/lib" }
             links { "avformat", "avcodec", "swresample", "avutil" }
 
         filter { "system:windows", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
@@ -48,13 +43,6 @@ project(AssetWorkerTarget)
                 CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/bin")
             }
 
-        filter { "system:windows", "configurations:Release or Dist" }
-            libdirs { ffmpegRelease .. "/bin" }
-            prelinkcommands
-            {
-                CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/bin")
-            }
-
         filter { "system:linux", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             linkoptions { "-Wl,-rpath,$ORIGIN" }
             prelinkcommands
@@ -62,18 +50,35 @@ project(AssetWorkerTarget)
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/lib")
             }
 
-        filter { "system:linux", "configurations:Release or Dist" }
-            linkoptions { "-Wl,-rpath,$ORIGIN" }
-            prelinkcommands
-            {
-                CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/lib")
-            }
-
         filter { "system:macosx", "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
             linkoptions { "-Wl,-rpath,@loader_path" }
             prelinkcommands
             {
                 CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Debug/install/lib")
+            }
+
+        filter {}
+    end
+
+    if os.isdir(ffmpegRelease .. "/include") then
+        filter { "configurations:Release or Dist" }
+            defines { "KEIRE_HAS_FFMPEG=1" }
+            externalincludedirs { ffmpegRelease .. "/include" }
+            libdirs { ffmpegRelease .. "/lib" }
+            links { "avformat", "avcodec", "swresample", "avutil" }
+
+        filter { "system:windows", "configurations:Release or Dist" }
+            libdirs { ffmpegRelease .. "/bin" }
+            prelinkcommands
+            {
+                CopyWindowsRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/bin")
+            }
+
+        filter { "system:linux", "configurations:Release or Dist" }
+            linkoptions { "-Wl,-rpath,$ORIGIN" }
+            prelinkcommands
+            {
+                CopyUnixRuntime(commandRepositoryRoot .. "/Build/Dependencies/ffmpeg/Release/install/lib")
             }
 
         filter { "system:macosx", "configurations:Release or Dist" }

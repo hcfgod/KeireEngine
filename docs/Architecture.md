@@ -39,6 +39,14 @@ The public `RenderSystem.cpp` PImpl facade delegates to separately compiled priv
 lifecycle, resource caches, surface/pipeline management, and scene recording. `RenderBackendInternal.h` is an internal
 coordination boundary only; SDL handles and backend state remain absent from supported headers.
 
+Offline spatial lighting follows the same ownership boundary. `LightingBaker` consumes an immutable scene definition,
+validated public asset values, transitive content digests, and explicit bake settings; it does not own an editor, scene,
+or GPU device. The asset worker owns process isolation and cancellation, atomically replaces the scene's lighting-set
+reference only after every artifact is published, and returns progress through the existing worker protocol. The editor
+Lighting panel queues that operation but never writes cache or scene files directly. Runtime rendering loads only typed
+lighting assets, publishes replacements transactionally, and fence-retires superseded GPU arrays. Cache manifests are
+content-addressed, digest-verified, and disposable; source scenes retain only stable asset identities.
+
 `Application` also owns one `UndoService` before layer attachment. Editors create bounded contexts per document rather
 than retaining process-global history. Commands own forward/inverse behavior and availability checks; nested
 transactions preserve all-or-nothing semantics. Contexts close during layer teardown, and the service closes before
@@ -388,6 +396,20 @@ Continuous numeric/color edits update a development-only in-memory asset revisio
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
 refresh runs in the background. Startup mounts a current development catalog directly; stale non-startup sources are
 refreshed after the editor becomes usable.
+
+`MaterialGraphDocument` is a separate authoring document layered on the shared stable node-graph canvas rather than a
+second graph interaction implementation. It owns graph validation, undo/redo, compile options, generated diagnostics,
+and the last-good preview definition and compilation. `MaterialGraphPanel` owns only transient selection, inspector
+buffers, searchable node-palette state, graph gestures, output/preview controls, bounded adaptive software-preview
+pixels, and presentation. The graph compiler computes reverse reachability from the single Master node before lowering;
+the resulting immutable statistics and advisory diagnostics expose unused work, texture samples, estimated ALU, and
+variant pressure without weakening compile success. Built-in nodes are validated against canonical pin contracts even
+when disconnected, while legacy Master nodes accept neutral defaults for newer clear-coat and sheen inputs. The workspace
+supplies confined include reads, nonblocking custom-mesh resolution through the asset system, and persistence.
+Publication writes deterministic shader variants beneath the graph asset's ID-owned generated directory before writing
+the graph source, then queues the ordinary asset import boundary. Runtime `MaterialGraphAsset` and
+`MaterialGraphInstanceAsset` remain immutable data; instance resolution and baking are explicit, bounded operations and
+do not introduce mutable renderer-global material state.
 Catalog-producing editor work is isolated in the private `KeireAssetWorker` executable. `AssetOperationService` owns
 one child at a time, prioritizes external imports and explicit actions ahead of cook and coalesced material refreshes,
 and exchanges versioned request/progress/result documents under `Library/AssetOperations/<operation-id>`. A worker
@@ -556,16 +578,21 @@ adjacency once per snapshot, preserving scene order while avoiding recursive ful
 
 ## Animator Controller Authoring
 
-Animation graph execution remains owned by `KeireCore`: stable local IDs identify parameters, layers, states,
-transitions, conditions, and blend-tree children, while `AnimatorInstance` owns typed runtime values and immutable debug
-snapshots. The editor owns only an `AnimatorControllerDocument` draft and panel selection state. Drafts may be
+Animation graph execution remains owned by `KeireCore`: stable local IDs identify parameters, layers, state-machine
+subgraphs, states, transitions, conditions, and blend-tree children, while `AnimatorInstance` owns typed runtime values
+and immutable debug snapshots. Subgraphs are authoring/navigation groups with validated per-group entry states; the
+runtime graph stays flat by stable state ID so transitions can deterministically cross subgraph boundaries. The editor
+owns only an `AnimatorControllerDocument` draft and panel selection state. Drafts may be
 temporarily incomplete, but Save canonicalizes and validates the complete graph before atomically replacing the source;
 failed validation therefore cannot replace the last-good imported asset.
 
 Animator state presentation reuses `StableNodeGraphCanvas`; the panel maps serialized string IDs to deterministic local
 canvas IDs, then translates completed node drags, typed pin connections, cable deletion, and context actions back into
 one document transaction. Canvas selection and popup state never enter the asset. Runtime state order and transition
-evaluation are therefore independent of layout, zoom, pan, or editor interaction state.
+evaluation are therefore independent of layout, zoom, pan, or editor interaction state. Edit-mode preview evaluates a
+private `AnimatorInstance` against the selected scene object's target skeleton and writes only its transient runtime
+pose; teardown clears that pose. Transition visualization, pose/trajectory inspection, and profiling consume the same
+immutable debug snapshot as live playback.
 
 ## Skeletal Deformation And Rig Authoring
 
@@ -576,16 +603,19 @@ Embedded skeletons pass through deterministic semantic inference so authored Mix
 and quadruped names participate in the same retargeting and IK contracts. Unknown bones remain ordered, retained, and
 unclassified rather than being discarded.
 
-The scene runtime samples animation into local bone transforms, applies named IK goals, computes the palette, and then
-submits deformation. Linear-blend skinning uses the SDL_GPU compute cache when available. Dual-quaternion skinning and
+The scene runtime samples animation into local bone transforms, applies named IK goals, optionally performs scene-owned
+ground raycasts and transactional foot grounding, computes the palette, and then submits deformation. The standalone
+ragdoll transition blends animation and physics-provided local poses but does not own physics bodies or constraints.
+Linear-blend skinning uses the SDL_GPU compute cache when available. Dual-quaternion skinning and
 unsupported compute paths use the deterministic CPU implementation; both paths produce an engine-owned transient
 deformed stream reused by scene, depth, and shadow recording. No native pointer or graphics allocation crosses the
 managed boundary.
 
 `RiggingStudioPanel` owns only draft import settings and retarget selection. `AssetDatabase::SetImportSettings` commits
 validated metadata atomically, `RequestReimport` advances the source generation, and the isolated asset worker publishes
-the complete model/subasset transaction. Retargeting matches stable semantic roles rather than source bone names and
-writes a standalone `.keireanim` source. Strict cooking decodes every rig, clip, and skinned mesh and validates declared
+the complete model/subasset transaction. Import-time animation compression reduces keys against explicit translation,
+rotation, and scale tolerances and reports measured errors. Retargeting produces a bone-by-bone exact/semantic/conflict
+diagnostic before it writes a standalone `.keireanim` source. Strict cooking decodes every rig, clip, and skinned mesh and validates declared
 dependency types, mesh/influence cardinality, and influence bone bounds before publication.
 
 Runtime IK goals are persistent named `AnimatorComponent` state. They are resolved after graph sampling and before

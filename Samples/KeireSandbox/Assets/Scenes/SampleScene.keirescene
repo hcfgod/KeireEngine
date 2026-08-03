@@ -1,4 +1,5 @@
 {
+  "bakedLighting": null,
   "entities": [
     {
       "active": true,
@@ -33,7 +34,7 @@
             "mask": 4294967295,
             "maximumSlope": 50.0,
             "radius": 0.3499999940395355,
-            "runtimeId": "ee0019cc-2d23-4d64-8b0a-3b5057f1b18d",
+            "runtimeId": "e72f044e-cfa5-47c3-befd-e82f829e3753",
             "skinWidth": 0.03999999910593033,
             "stepHeight": 0.3499999940395355
           },
@@ -158,9 +159,9 @@
         {
           "data": {
             "position": [
-              0.28,
-              -0.18,
-              0.65
+              0.2800000011920929,
+              -0.18000000715255737,
+              0.6499999761581421
             ],
             "rotation": [
               0.0,
@@ -247,9 +248,13 @@
         {
           "data": {
             "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
             "material": "3132442d-9879-4138-bcb5-15d693c3938e",
-            "mesh": null,
+            "mesh": "c0ffee00-0000-4000-8000-000000000001",
+            "preserveLightmapUvs": true,
             "receiveShadows": true,
+            "staticLighting": false,
             "tint": [
               0.8855721354484558,
               0.8855721354484558,
@@ -260,7 +265,7 @@
           },
           "enabled": true,
           "type": "4b454952-454d-4553-4852-454e44455201",
-          "version": 2
+          "version": 3
         },
         {
           "data": {
@@ -349,14 +354,28 @@
         },
         {
           "data": {
+            "bakeMode": 0,
             "color": [
               1.0,
               1.0,
               1.0,
               1.0
             ],
+            "contactShadows": false,
+            "cookie": null,
+            "cookieOffset": [
+              0.0,
+              0.0
+            ],
+            "cookieRotation": 0.0,
+            "cookieScale": [
+              1.0,
+              1.0
+            ],
+            "indirectMultiplier": 1.0,
             "intensity": 1.2549999952316284,
             "shadowBias": 0.054999999701976776,
+            "shadowResolution": 2,
             "shadowStrength": 1.0,
             "shadows": 2,
             "temperature": 6394.43994140625,
@@ -364,7 +383,7 @@
           },
           "enabled": true,
           "type": "4b454952-4544-4952-4c49-474854000001",
-          "version": 1
+          "version": 2
         }
       ],
       "id": "a1b2c3d4-1000-4000-8000-000000000002",
@@ -400,23 +419,37 @@
         },
         {
           "data": {
+            "bakeMode": 0,
             "color": [
               0.5938958525657654,
               0.0,
               0.641791045665741,
               1.0
             ],
+            "contactShadows": false,
+            "cookie": null,
+            "cookieOffset": [
+              0.0,
+              0.0
+            ],
+            "cookieRotation": 0.0,
+            "cookieScale": [
+              1.0,
+              1.0
+            ],
+            "indirectMultiplier": 1.0,
             "innerAngle": 5.0,
             "intensity": 47.150001525878906,
             "outerAngle": 15.5,
             "range": 11.699999809265137,
             "shadowBias": 0.0024999999441206455,
+            "shadowResolution": 1,
             "shadowStrength": 1.0,
             "shadows": 2
           },
           "enabled": true,
           "type": "4b454952-4553-504f-544c-494748540001",
-          "version": 1
+          "version": 2
         }
       ],
       "id": "c00a8f81-2a41-49d5-8387-5a15343a9c31",
@@ -453,9 +486,13 @@
         {
           "data": {
             "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
             "material": "3132442d-9879-4138-bcb5-15d693c3938e",
             "mesh": null,
+            "preserveLightmapUvs": true,
             "receiveShadows": true,
+            "staticLighting": false,
             "tint": [
               0.8855721354484558,
               0.8855721354484558,
@@ -466,7 +503,7 @@
           },
           "enabled": true,
           "type": "4b454952-454d-4553-4852-454e44455201",
-          "version": 2
+          "version": 3
         },
         {
           "data": {
@@ -1086,9 +1123,13 @@
         {
           "data": {
             "castShadows": true,
+            "giReceive": 0,
+            "lightmapScale": 1.0,
             "material": "e843c376-73b4-47e5-905a-3776564d5e4f",
             "mesh": "51cd8956-a6c4-4d63-b990-7d86829f92ff",
+            "preserveLightmapUvs": true,
             "receiveShadows": true,
+            "staticLighting": false,
             "tint": [
               0.25,
               0.550000011920929,
@@ -1099,19 +1140,34 @@
           },
           "enabled": true,
           "type": "4b454952-454d-4553-4852-454e44455201",
-          "version": 2
+          "version": 3
         },
         {
           "data": {
             "applyRootMotion": true,
+            "footCollisionMask": 4294967295,
+            "footGrounding": false,
+            "footIkWeight": 1.0,
+            "footOffset": 0.019999999552965164,
+            "footPelvis": "Hips",
+            "footRaycastDistance": 0.75,
+            "footRaycastHeight": 0.3499999940395355,
+            "footRotationWeight": 1.0,
             "graph": "9ec01b6f-4862-443e-8cfd-efa2f23ef04a",
+            "leftFoot": "LeftFoot",
+            "leftLowerLeg": "LeftLeg",
+            "leftUpperLeg": "LeftUpLeg",
+            "maximumPelvisAdjustment": 0.5,
+            "rightFoot": "RightFoot",
+            "rightLowerLeg": "RightLeg",
+            "rightUpperLeg": "RightUpLeg",
             "skeleton": "c8bf2eaf-9146-5b53-85c8-c3e6dc9b8f08",
             "skinnedMesh": "78c8dbe3-2951-54b9-b34e-9221c49c506b",
             "speed": 1.0
           },
           "enabled": true,
           "type": "4b454952-4541-4e49-4d41-544f52000001",
-          "version": 1
+          "version": 2
         }
       ],
       "id": "b814c702-6a84-47a1-90fb-777fadf4cb98",
@@ -1442,8 +1498,20 @@
       "parent": "f8e5df3c-47c2-46a3-b524-87d61d7da1e8"
     }
   ],
+  "lighting": {
+    "backend": 0,
+    "bakeAmbientOcclusion": true,
+    "denoise": true,
+    "indirectBounceCount": 2,
+    "lightmapResolution": 1024,
+    "maximumLightmapResolution": 4096,
+    "paddingTexels": 4,
+    "quality": 1,
+    "samplesPerTexel": 64,
+    "texelsPerUnit": 32
+  },
   "name": "SampleScene",
   "prefabInstances": [],
   "prefabOverrides": [],
-  "schemaVersion": 4
+  "schemaVersion": 5
 }

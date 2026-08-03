@@ -22,7 +22,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE("Scene schema v2 migrates to canonical v4 without prefab metadata")
+TEST_CASE("Scene schema v2 migrates to canonical v5 without prefab metadata")
 {
     const auto id = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000001");
     const auto source = std::string("{\"schemaVersion\":2,\"name\":\"Legacy\",\"entities\":[{") + "\"id\":\"" +
@@ -34,7 +34,7 @@ TEST_CASE("Scene schema v2 migrates to canonical v4 without prefab metadata")
 
     const auto encoded = Keire::SceneAsset::Encode(asset->Definition());
     const std::string text(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-    CHECK(text.find("\"schemaVersion\": 4") != std::string::npos);
+    CHECK(text.find("\"schemaVersion\": 5") != std::string::npos);
 }
 
 TEST_CASE("Prefab entity layer overrides round trip and compose")

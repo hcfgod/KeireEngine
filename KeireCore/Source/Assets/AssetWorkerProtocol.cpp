@@ -62,6 +62,8 @@ namespace Keire::Detail
                 return "undo-external-import";
             case AssetWorkerOperationKind::RedoExternalImport:
                 return "redo-external-import";
+            case AssetWorkerOperationKind::BakeLighting:
+                return "bake-lighting";
             }
             throw std::invalid_argument("Unknown asset-worker operation kind.");
         }
@@ -84,6 +86,8 @@ namespace Keire::Detail
                 return AssetWorkerOperationKind::UndoExternalImport;
             if (value == "redo-external-import")
                 return AssetWorkerOperationKind::RedoExternalImport;
+            if (value == "bake-lighting")
+                return AssetWorkerOperationKind::BakeLighting;
             throw std::invalid_argument("Unknown asset-worker operation kind: " + std::string(value));
         }
 
@@ -263,6 +267,8 @@ namespace Keire::Detail
                            {"destination", PathToUtf8(request.Mutation.Destination)}}},
                          {"cookOutput", PathToUtf8(request.CookOutput)},
                          {"receipt", request.Receipt ? request.Receipt.ToString() : std::string{}},
+                         {"bakeScene", request.BakeScene ? request.BakeScene.ToString() : std::string{}},
+                         {"bakeForce", request.BakeForce},
                          {"profile",
                           {{"name", request.BuildProfile.Name},
                            {"target", static_cast<std::uint8_t>(request.BuildProfile.Target)},
@@ -308,6 +314,9 @@ namespace Keire::Detail
         }
         if (const auto receipt = value.value("receipt", std::string{}); !receipt.empty())
             request.Receipt = ExternalAssetImportReceiptId::Parse(receipt);
+        if (const auto scene = value.value("bakeScene", std::string{}); !scene.empty())
+            request.BakeScene = AssetId::Parse(scene);
+        request.BakeForce = value.value("bakeForce", false);
         for (const auto& encoded : value.value("externalItems", Json::array()))
         {
             ExternalAssetImportItem item;
@@ -373,6 +382,7 @@ namespace Keire::Detail
                    {"import", EncodeImportResult(result.Import)},
                    {"externalEntries", std::move(entries)},
                    {"receipt", result.Receipt ? result.Receipt.ToString() : std::string{}}};
+        value["lightingCacheHit"] = result.LightingCacheHit;
         if (result.Cook)
             value["cook"] = {{"assetCount", result.Cook->AssetCount},
                              {"packCount", result.Cook->PackCount},
@@ -391,6 +401,7 @@ namespace Keire::Detail
         result.Success = value.value("success", false);
         result.Cancelled = value.value("cancelled", false);
         result.Diagnostic = value.value("diagnostic", std::string{});
+        result.LightingCacheHit = value.value("lightingCacheHit", false);
         if (const auto created = value.value("createdAsset", std::string{}); !created.empty())
             result.CreatedAsset = AssetId::Parse(created);
         for (const auto& asset : value.value("mutatedAssets", Json::array()))

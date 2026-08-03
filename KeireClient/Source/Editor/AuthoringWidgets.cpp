@@ -363,6 +363,15 @@ namespace KeireEditor
         return validator(connection);
     }
 
+    NodeGraphCanvasDetail StableNodeGraphCanvas::DetailForZoom(const float zoom) noexcept
+    {
+        const float boundedZoom = std::isfinite(zoom) ? std::clamp(zoom, 0.35F, 2.5F) : 1.0F;
+        return {.NodeSubtitle = boundedZoom >= 0.85F,
+                .BlockLabels = boundedZoom >= 0.68F,
+                .PinLabels = boundedZoom >= 0.78F,
+                .ConnectionLabels = boundedZoom >= 0.68F};
+    }
+
     NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
                                                       const std::span<NodeGraphNode> nodes,
                                                       const std::span<const NodeGraphConnection> connections,
@@ -407,6 +416,7 @@ namespace KeireEditor
                 result.PointerGraphPosition = ToGraph(pointer.Position, canvas);
             }
         }
+        const auto detail = DetailForZoom(m_Zoom);
 
         const float minorGridStep = 24.0F * m_Zoom;
         if (minorGridStep >= 8.0F)
@@ -845,7 +855,7 @@ namespace KeireEditor
                        : hovered ? 3.0F
                                  : 2.0F);
 
-            if (!connection.Connection->Label.empty() && m_Zoom >= 0.55F)
+            if (!connection.Connection->Label.empty() && detail.ConnectionLabels)
             {
                 constexpr float labelFontSize = 11.0F;
                 const auto labelPosition = BezierPoint(connection.Start, connection.FirstControl,
@@ -919,10 +929,11 @@ namespace KeireEditor
                                                : Keire::UiColor{0.22F, 0.25F, 0.32F, 1.0F};
             ui.DrawRectangle(rectangle, borderColor, selected ? 2.5F : hovered ? 1.5F : 1.0F, 8.0F);
 
-            const float labelX = rectangle.Minimum.X + 13.0F;
-            ui.DrawOverlayText({labelX, rectangle.Minimum.Y + 8.0F}, {0.97F, 0.98F, 1.0F, 1.0F}, node.Label, 0.0F,
-                               rectangle);
-            if (!node.Subtitle.empty())
+            const float labelX = rectangle.Minimum.X + std::clamp(13.0F * m_Zoom, 6.0F, 13.0F);
+            const float titleY = rectangle.Minimum.Y + std::clamp(8.0F * m_Zoom, 3.0F, 8.0F);
+            const float titleFontSize = detail.NodeSubtitle ? 0.0F : 11.0F;
+            ui.DrawOverlayText({labelX, titleY}, {0.97F, 0.98F, 1.0F, 1.0F}, node.Label, titleFontSize, rectangle);
+            if (!node.Subtitle.empty() && detail.NodeSubtitle)
                 ui.DrawOverlayText({labelX, rectangle.Minimum.Y + 27.0F}, {0.68F, 0.73F, 0.82F, 1.0F}, node.Subtitle,
                                    11.0F, rectangle);
 
@@ -946,7 +957,7 @@ namespace KeireEditor
                 ui.DrawFilledRectangle(blockAccent, ScaleColor(node.Color, block.Block->Enabled ? 1.45F : 0.65F, 1.0F),
                                        3.0F);
 
-                if (m_Zoom >= 0.45F)
+                if (detail.BlockLabels)
                 {
                     constexpr float blockFontSize = 11.0F;
                     const auto order = std::to_string(block.Index + 1);
@@ -1021,7 +1032,7 @@ namespace KeireEditor
             ui.DrawFilledCircle(pin.Position, radius, ScaleColor(pin.Pin->Color, hovered ? 1.2F : 0.88F, 1.0F));
             ui.DrawCircle(pin.Position, radius, ring, hovered || linkOrigin ? 2.0F : 1.0F);
 
-            if (m_Zoom >= 0.55F)
+            if (detail.PinLabels)
             {
                 auto labelRectangle = std::ranges::find(drawnNodes, pin.Address.Node, &DrawnNode::Id)->Rectangle;
                 if (pin.Address.Block)

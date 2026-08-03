@@ -6,6 +6,7 @@
 #include "Keire/Math/Math.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -110,12 +111,44 @@ namespace Keire
     {
         float Time = 0.0F;
         BoneTransform Value;
+        [[nodiscard]] bool operator==(const AnimationKeyframe&) const noexcept = default;
     };
 
     struct AnimationTrack
     {
         std::uint32_t Bone = 0;
         std::vector<AnimationKeyframe> Keys;
+    };
+
+    enum class AnimationCompressionPreset : std::uint8_t
+    {
+        Disabled,
+        Light,
+        Balanced,
+        Aggressive
+    };
+
+    struct AnimationCompressionSettings
+    {
+        bool Enabled = true;
+        float MaximumTranslationError = 0.001F;
+        float MaximumRotationErrorDegrees = 0.25F;
+        float MaximumScaleError = 0.001F;
+    };
+
+    struct AnimationCompressionStatistics
+    {
+        std::size_t SourceKeyCount = 0;
+        std::size_t CompressedKeyCount = 0;
+        float MaximumTranslationError = 0.0F;
+        float MaximumRotationErrorDegrees = 0.0F;
+        float MaximumScaleError = 0.0F;
+    };
+
+    struct AnimationCompressionResult
+    {
+        std::vector<AnimationTrack> Tracks;
+        AnimationCompressionStatistics Statistics;
     };
 
     struct AnimationEvent
@@ -269,12 +302,20 @@ namespace Keire
         std::string Id;
         AnimationMotionDefinition Motion;
         Vector2 EditorPosition;
+        std::string SubgraphId;
     };
 
     enum class AnimationLayerMode : std::uint8_t
     {
         Override,
         Additive
+    };
+
+    struct AnimationStateMachineSubgraphDefinition
+    {
+        std::string Id;
+        std::string Name;
+        std::string EntryStateId;
     };
 
     struct AnimationLayerDefinition
@@ -286,11 +327,12 @@ namespace Keire
         AssetId AvatarMask;
         std::string EntryStateId;
         std::vector<AnimationStateDefinition> States;
+        std::vector<AnimationStateMachineSubgraphDefinition> Subgraphs;
     };
 
     struct AnimationGraphDefinition
     {
-        std::uint32_t SchemaVersion = 2;
+        std::uint32_t SchemaVersion = 3;
         std::string EntryState;
         std::vector<std::string> Parameters;
         std::vector<AnimationStateDefinition> States;
@@ -386,6 +428,32 @@ namespace Keire
         std::vector<AnimatorBlendWeight> BlendWeights;
     };
 
+    struct AnimatorPoseBoneDebugState
+    {
+        std::string Name;
+        std::int32_t Parent = -1;
+        BoneTransform LocalTransform;
+        Vector3 WorldPosition;
+    };
+
+    struct AnimatorMotionTrajectoryPoint
+    {
+        float Time = 0.0F;
+        Vector3 Position;
+    };
+
+    struct AnimatorStateMachineProfile
+    {
+        std::uint64_t UpdateCount = 0;
+        double LastEvaluationMicroseconds = 0.0;
+        double AverageEvaluationMicroseconds = 0.0;
+        double PeakEvaluationMicroseconds = 0.0;
+        std::uint32_t LayersEvaluated = 0;
+        std::uint32_t TransitionsTested = 0;
+        std::uint32_t MotionsEvaluated = 0;
+        std::uint32_t ClipsSampled = 0;
+    };
+
     struct AnimatorDebugSnapshot
     {
         std::uint64_t Revision = 0;
@@ -394,6 +462,9 @@ namespace Keire
         Vector3 RootMotion;
         Quaternion RootRotation;
         std::vector<AnimationEvent> RecentEvents;
+        std::vector<AnimatorPoseBoneDebugState> Pose;
+        std::vector<AnimatorMotionTrajectoryPoint> MotionTrajectory;
+        AnimatorStateMachineProfile Profile;
     };
 
     class KEIRE_API AnimatorInstance final
@@ -475,10 +546,19 @@ namespace Keire
         bool m_HasPreviousRootRotation = false;
         std::uint64_t m_DebugRevision = 0;
         std::vector<AnimationEvent> m_RecentEvents;
+        std::vector<AnimatorPoseBoneDebugState> m_DebugPose;
+        std::vector<AnimatorMotionTrajectoryPoint> m_DebugMotionTrajectory;
+        Vector3 m_DebugTrajectoryPosition;
+        float m_DebugTrajectoryTime = 0.0F;
+        AnimatorStateMachineProfile m_Profile;
         std::shared_ptr<const AnimatorDebugSnapshot> m_DebugSnapshot;
     };
 
     KEIRE_API void ValidateSkeleton(std::span<const SkeletonBone> bones);
+    [[nodiscard]] KEIRE_API AnimationCompressionSettings
+    AnimationCompressionSettingsForPreset(AnimationCompressionPreset preset) noexcept;
+    [[nodiscard]] KEIRE_API AnimationCompressionResult
+    CompressAnimationTracks(std::span<const AnimationTrack> tracks, const AnimationCompressionSettings& settings);
     KEIRE_API void ValidateAnimationGraph(const AnimationGraphDefinition& definition);
     KEIRE_API void ValidateAvatarMask(AssetId skeleton, std::span<const AvatarMaskBoneWeight> bones);
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateSkeletonAssetDecoder();

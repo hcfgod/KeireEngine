@@ -2,18 +2,65 @@
 
 ## Real-time shadows
 
-Opaque scene geometry with `Cast Shadows` enabled is submitted to stabilized directional cascade maps and to bounded
-spot/point shadow arrays. Materials whose shader manifest opts into `receivesShadows` sample those maps only when the
+Opaque scene geometry with `Cast Shadows` enabled is submitted to stabilized directional cascade maps and a bounded
+spot/point shadow atlas. Materials whose shader manifest opts into `receivesShadows` sample those maps only when the
 renderer component also has `Receive Shadows` enabled. Directional lights support up to four cascades from the project
-rendering settings. To keep local-light cost deterministic, the renderer selects at most eight shadowed spot lights and
-two shadowed point lights in stable entity order; additional lights remain fully lit and are reported by renderer
-diagnostics. Point and spot components expose Disabled, Hard, and Soft authoring modes plus strength and bias.
+rendering settings. Local-light tile requests are allocated deterministically in a 4,096-pixel atlas from each light's
+resolution hint, stable entity identity, and point-light face. To keep local-light cost bounded, the renderer selects at
+most eight shadowed spot lights and two shadowed point lights; requests that do not fit remain fully lit. Point and spot
+components expose Disabled, Hard, and Soft authoring modes plus strength, bias, and resolution.
 The engine-owned default material uses the same receiver contract, so primitives without an assigned material receive
 directional, point, and spot shadows instead of falling through an unshadowed compatibility path.
 Shadow layer, quality, strength, and receiver bias occupy a dedicated shadow uniform block; enabling shadows never
 changes the light's color or intensity. A receiving surface does not darken merely because it is also submitted to the
 shadow pass. Visible shadowing requires another surface of the caster, or separate `Cast Shadows` geometry, to be
 closer to the light along that shadow-map sample.
+
+Directional, point, and spot lights can opt into short-range contact refinement and texture cookies. The renderer packs
+up to eight active cookies into one deterministic 4x2 atlas, keeping the spatial PBR shader within SDL's portable
+16-sampler limit. Directional and spot lights also expose cookie scale, offset, and rotation. `Realtime` lights remain
+entirely dynamic, `Baked` lights are excluded from runtime direct-light lists, and `Mixed` lights combine realtime direct
+lighting with one of eight packed baked shadow-mask channels.
+
+## Image-based lighting
+
+The sandbox PBR shader opts into the renderer's image-based-lighting ABI. Environment publication bakes nine
+second-order spherical-harmonic coefficients from the source panorama or cubemap atlas and caches them with the GPU
+texture revision. The fragment path evaluates those coefficients as diffuse irradiance, samples the environment's
+radiance-preserving mip chain by material roughness, and combines the result with an engine-owned deterministic
+split-sum BRDF integration LUT. Ambient occlusion attenuates the combined indirect response; emissive and direct
+directional/Forward+ light contributions remain independent.
+
+Radiance HDR imports generate RGBE-aware mip chains instead of averaging encoded bytes. LDR and HDR equirectangular,
+horizontal/vertical cross, and horizontal/vertical strip layouts use the same direction convention for sky rendering,
+irradiance baking, and specular lookup. Project rotation rotates all three responses together. `Environment Diffuse`
+and `Sky / Specular Intensity` scale indirect diffuse and specular/visible-sky radiance independently, while exposure
+is applied once after indirect, direct, and emissive lighting are combined.
+
+The global environment bake is deterministic and revision-cached in the renderer; a failed or still-loading custom
+environment falls back to the built-in studio environment as one complete lighting resource.
+
+## Spatial lighting
+
+Scene schema v5 can reference one baked `LightingSet` containing RGBE lightmap and directionality arrays, packed mixed
+shadow masks, a prefiltered reflection cubemap array, renderer UV transforms, reflection-probe bindings, and SH9
+light-probe volumes. Mesh schema v4 carries a separate UV1 channel, and material schema v3 marks emissive radiance that
+contributes to offline GI. Static renderers use UV1 (with deterministic UV0 fallback); dynamic renderers interpolate
+nearby probe-volume coefficients.
+
+Reflection Probe components author oriented boxes, blend distance, importance, intensity, resolution, and box
+projection. The renderer deterministically selects the two strongest containing probes for each draw, blends their
+prefiltered specular response, and intersects the reflection ray with each oriented local box when box projection is
+enabled. Light Probe Volume components author oriented bounds, spacing, priority, and normal/view bias; the runtime
+trilinearly samples their baked SH9 lattice.
+
+`LightingBaker` is an offline, backend-neutral boundary used by the editor worker and `KeireAssetTool bake-lighting`.
+It fingerprints the scene, transitive asset digests, settings, platform-independent baker version, and output schema.
+Successful artifacts and a digest-checked manifest are published atomically under `Library/LightingCache`; an exact hit
+reuses them without recomputation, while missing or corrupt artifacts rebuild the complete entry. The deterministic CPU
+path is always available and is the explicit fallback when the requested GPU bake backend is unavailable. Baked and
+mixed direct light, approximate indirect bounces, emissive-to-GI sources, reflection probes, and light-probe volumes are
+published together so a scene never observes a partially updated lighting set.
 
 ## Static-scene submission contracts
 
@@ -172,7 +219,7 @@ custom path accepts LDR or RGBE Radiance HDR equirectangular maps plus horizonta
 strip atlases. Layout and HDR encoding are versioned texture import data, so reimport and cooking preserve the same
 sampling behavior across supported GPU backends.
 
-This foundation renders asset-backed textured PBR meshes, deterministic directional and local-light shadow maps,
-GPU-consumed Forward+ light lists, instanced compatible geometry, sky backgrounds, an RGBA16F/ACES pipeline, and the
-editor grid through a dedicated submission thread. Image-based lighting and custom raw GPU passes remain later
-milestones.
+This foundation renders asset-backed textured PBR meshes, global diffuse/specular image-based lighting, deterministic
+directional and local-light shadow maps, GPU-consumed Forward+ light lists, instanced compatible geometry, sky
+backgrounds, an RGBA16F/ACES pipeline, and the editor grid through a dedicated submission thread. Spatial reflection
+probes and custom raw GPU passes remain later milestones.

@@ -24,6 +24,8 @@ namespace KeireEditor
         constexpr Keire::UiColor AxisZ{0.25F, 0.52F, 1.0F, 1.0F};
         constexpr Keire::UiColor CameraColor{0.35F, 0.78F, 1.0F, 1.0F};
         constexpr Keire::UiColor LightColor{1.0F, 0.76F, 0.20F, 1.0F};
+        constexpr Keire::UiColor ReflectionProbeColor{0.30F, 0.86F, 1.0F, 1.0F};
+        constexpr Keire::UiColor LightProbeVolumeColor{0.72F, 0.48F, 1.0F, 1.0F};
         constexpr Keire::UiColor ColliderColor{0.25F, 0.92F, 0.56F, 1.0F};
         constexpr Keire::UiColor TriggerColor{1.0F, 0.43F, 0.18F, 1.0F};
         constexpr Keire::UiColor ControllerColor{0.18F, 0.78F, 1.0F, 1.0F};
@@ -142,6 +144,18 @@ namespace KeireEditor
                                             center.Y + std::sin(angle) * (radius + 6.0F)};
                 ui.DrawLine(start, end, LightColor, 1.2F);
             }
+        }
+
+        void DrawProbeIcon(Keire::UiFrame& ui, const Keire::UiPosition center, const Keire::UiColor color,
+                           const bool selected)
+        {
+            const float radius = selected ? 7.0F : 6.0F;
+            const std::array points{
+                Keire::UiPosition{center.X, center.Y - radius}, Keire::UiPosition{center.X + radius, center.Y},
+                Keire::UiPosition{center.X, center.Y + radius}, Keire::UiPosition{center.X - radius, center.Y}};
+            ui.DrawFilledCircle(center, radius * 0.55F, {color.Red, color.Green, color.Blue, 0.20F});
+            for (std::size_t index = 0; index < points.size(); ++index)
+                ui.DrawLine(points[index], points[(index + 1U) % points.size()], color, selected ? 2.0F : 1.3F);
         }
 
         void DrawCameraFrustum(Keire::UiFrame& ui, const Keire::TransformComponent& transform,
@@ -762,6 +776,27 @@ namespace KeireEditor
             drawIcons(scene->Query<Keire::DirectionalLightComponent>(), false, true);
             drawIcons(scene->Query<Keire::PointLightComponent>(), false, false);
             drawIcons(scene->Query<Keire::SpotLightComponent>(), false, true);
+            const auto drawProbeIcons = [&](const auto& entities, const Keire::UiColor color)
+            {
+                for (const auto& entity : entities)
+                {
+                    const auto transform = entity.template GetComponent<Keire::TransformComponent>();
+                    if (!transform || !entity.ActiveInHierarchy())
+                        continue;
+                    const auto projected = Project(transform->WorldPosition(), viewProjection, viewport);
+                    if (!projected)
+                        continue;
+                    DrawProbeIcon(ui, *projected, color, selected == entity.Id());
+                    if (hovered && pointer.LeftPressed && Distance(pointer.Position, *projected) <= 14.0F)
+                    {
+                        selected = entity.Id();
+                        selectionActivated = true;
+                        pointerConsumed = true;
+                    }
+                }
+            };
+            drawProbeIcons(scene->Query<Keire::ReflectionProbeComponent>(), ReflectionProbeColor);
+            drawProbeIcons(scene->Query<Keire::LightProbeVolumeComponent>(), LightProbeVolumeColor);
         }
 
         for (const auto& colliderEntity : scene->Query<Keire::ColliderComponent>())
@@ -812,6 +847,39 @@ namespace KeireEditor
                     DrawPointLightRange(ui, *selectedTransform, *point, viewProjection, viewport);
                 if (const auto spot = selectedLight.GetComponent<Keire::SpotLightComponent>())
                     DrawSpotLightCone(ui, *selectedTransform, *spot, viewProjection, viewport);
+            }
+        }
+
+        if (selected)
+        {
+            const auto selectedProbe = scene->FindEntity(selected);
+            const auto selectedTransform = selectedProbe.GetComponent<Keire::TransformComponent>();
+            if (selectedTransform)
+            {
+                if (const auto reflection = selectedProbe.GetComponent<Keire::ReflectionProbeComponent>())
+                {
+                    const auto extents = reflection->BoxExtents();
+                    DrawWorldBox(
+                        ui, selectedTransform->WorldMatrix(), {-extents.X, -extents.Y, -extents.Z}, extents,
+                        viewProjection, viewport,
+                        {ReflectionProbeColor.Red, ReflectionProbeColor.Green, ReflectionProbeColor.Blue, 0.92F}, 2.0F);
+                    const auto blend = reflection->BlendDistance();
+                    const Keire::Vector3 inner{std::max(0.001F, extents.X - blend), std::max(0.001F, extents.Y - blend),
+                                               std::max(0.001F, extents.Z - blend)};
+                    DrawWorldBox(
+                        ui, selectedTransform->WorldMatrix(), {-inner.X, -inner.Y, -inner.Z}, inner, viewProjection,
+                        viewport,
+                        {ReflectionProbeColor.Red, ReflectionProbeColor.Green, ReflectionProbeColor.Blue, 0.38F}, 1.0F);
+                }
+                if (const auto volume = selectedProbe.GetComponent<Keire::LightProbeVolumeComponent>())
+                {
+                    const auto extents = volume->BoxExtents();
+                    DrawWorldBox(
+                        ui, selectedTransform->WorldMatrix(), {-extents.X, -extents.Y, -extents.Z}, extents,
+                        viewProjection, viewport,
+                        {LightProbeVolumeColor.Red, LightProbeVolumeColor.Green, LightProbeVolumeColor.Blue, 0.92F},
+                        2.0F);
+                }
             }
         }
 

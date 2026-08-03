@@ -1,10 +1,12 @@
 {
   "schemaVersion": 1,
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
-  "vertexLayoutVersion": 2,
+  "vertexLayoutVersion": 3,
   "receivesShadows": true,
   "usesForwardPlus": true,
   "usesInstancing": true,
+  "usesImageBasedLighting": true,
+  "spatialLightingAbiVersion": 2,
   "stages": {
     "vertex": "VSMain",
     "fragment": "PSMain"

@@ -44,8 +44,8 @@
     "Context": 5,
     "Output": 13,
     "Total": 278,
-    "Disabled": 216,
-    "WithKeireImplementation": 63
+    "Disabled": 153,
+    "WithKeireImplementation": 126
   },
   "entries": [
     {
@@ -2056,12 +2056,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.spherical-to-rectangular",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2079,12 +2084,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.age-over-lifetime",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2125,12 +2135,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-alive",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2146,12 +2161,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-alpha",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2167,12 +2187,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-angle",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2209,12 +2234,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-axis-x",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2230,12 +2260,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-axis-y",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2251,12 +2286,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-axis-z",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2272,12 +2312,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-color",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2360,12 +2405,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-old-position",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2381,12 +2431,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-particle-count-in-strip",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2427,12 +2482,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-particle-index-in-strip",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2469,12 +2529,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-position",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2511,12 +2576,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-seed",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2532,12 +2602,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-size",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2578,12 +2653,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-spawn-time",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2599,12 +2679,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-strip-index",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2662,12 +2747,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.attribute-velocity",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2727,12 +2817,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.ratio-over-strip",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2750,12 +2845,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.bitwise-and",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2773,12 +2873,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.bitwise-complement",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2796,12 +2901,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.bitwise-left-shift",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2820,12 +2930,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.bitwise-or",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2841,12 +2956,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.bitwise-right-shift",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2864,12 +2984,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.bitwise-xor",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2910,12 +3035,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.frame-index",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -2975,12 +3105,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.system-seed",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3104,12 +3239,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.color-luma",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3127,12 +3267,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.hsv-to-rgb",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3150,12 +3295,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.rgb-to-hsv",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3360,12 +3510,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-color",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3465,12 +3620,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-direction",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3633,12 +3793,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-position",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3801,12 +3966,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-vector",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3822,12 +3992,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-vector2",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3843,12 +4018,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-vector3",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3864,12 +4044,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-vector4",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3885,12 +4070,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-bool",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3906,12 +4096,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-float",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3927,12 +4122,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-int",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -3948,12 +4148,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inline-uint",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4066,12 +4271,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.nand",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4089,12 +4299,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.nor",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4523,12 +4738,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.polar-to-rectangular",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4546,12 +4766,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.rectangular-to-polar",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4569,12 +4794,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.rectangular-to-spherical",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4592,12 +4822,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.rotate-2d",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4615,12 +4850,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.rotate-3d",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4661,12 +4901,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.squared-distance",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4684,12 +4929,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.squared-length",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4875,12 +5125,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.inverse-lerp",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -4925,12 +5180,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.modulo",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -5002,12 +5262,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.one-minus",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -5052,12 +5317,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.reciprocal",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -5264,12 +5534,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.discretize",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -5422,12 +5697,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.epsilon",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -5445,12 +5725,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.pi",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -6438,12 +6723,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.cellular-curl-noise",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -6474,12 +6764,17 @@
         ]
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.cellular-noise",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -6508,12 +6803,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.perlin-curl-noise",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -6542,12 +6842,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.perlin-noise",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -6576,12 +6881,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.value-curl-noise",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -6610,12 +6920,17 @@
         "implementations": []
       },
       "keire": {
-        "support": "Disabled",
-        "implementation": null,
+        "support": "Kéire Equivalent",
+        "implementation": "keire.operator.value-noise",
         "backendTier": "CPU and GPU",
-        "tests": [],
-        "documentation": [],
-        "disabledReason": "No production Kéire Operator implementation is registered; creation and compilation must reject this row."
+        "tests": [
+          "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+          "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
+        ],
+        "documentation": [
+          "docs/Vfx.md"
+        ],
+        "disabledReason": null
       }
     },
     {
@@ -7957,37 +8272,94 @@
         "keire.operator.acos",
         "keire.operator.add",
         "keire.operator.age",
+        "keire.operator.age-over-lifetime",
         "keire.operator.and",
         "keire.operator.asin",
         "keire.operator.atan",
         "keire.operator.atan2",
+        "keire.operator.attribute-alive",
+        "keire.operator.attribute-alpha",
+        "keire.operator.attribute-angle",
+        "keire.operator.attribute-axis-x",
+        "keire.operator.attribute-axis-y",
+        "keire.operator.attribute-axis-z",
+        "keire.operator.attribute-color",
+        "keire.operator.attribute-old-position",
+        "keire.operator.attribute-particle-count-in-strip",
+        "keire.operator.attribute-particle-index-in-strip",
+        "keire.operator.attribute-position",
+        "keire.operator.attribute-seed",
+        "keire.operator.attribute-size",
+        "keire.operator.attribute-spawn-time",
+        "keire.operator.attribute-strip-index",
+        "keire.operator.attribute-velocity",
+        "keire.operator.bitwise-and",
+        "keire.operator.bitwise-complement",
+        "keire.operator.bitwise-left-shift",
+        "keire.operator.bitwise-or",
+        "keire.operator.bitwise-right-shift",
+        "keire.operator.bitwise-xor",
         "keire.operator.branch",
         "keire.operator.ceiling",
+        "keire.operator.cellular-curl-noise",
+        "keire.operator.cellular-noise",
         "keire.operator.clamp",
+        "keire.operator.color-luma",
         "keire.operator.compare",
         "keire.operator.cosine",
         "keire.operator.cross-product",
         "keire.operator.delta-time",
+        "keire.operator.discretize",
         "keire.operator.distance",
         "keire.operator.divide",
         "keire.operator.dot-product",
+        "keire.operator.epsilon",
         "keire.operator.exponential",
         "keire.operator.floor",
         "keire.operator.fractional",
+        "keire.operator.frame-index",
+        "keire.operator.hsv-to-rgb",
+        "keire.operator.inline-bool",
+        "keire.operator.inline-color",
+        "keire.operator.inline-direction",
+        "keire.operator.inline-float",
+        "keire.operator.inline-int",
+        "keire.operator.inline-position",
+        "keire.operator.inline-uint",
+        "keire.operator.inline-vector",
+        "keire.operator.inline-vector2",
+        "keire.operator.inline-vector3",
+        "keire.operator.inline-vector4",
+        "keire.operator.inverse-lerp",
         "keire.operator.length",
         "keire.operator.lerp",
         "keire.operator.lifetime",
         "keire.operator.logarithm",
         "keire.operator.maximum",
         "keire.operator.minimum",
+        "keire.operator.modulo",
         "keire.operator.multiply",
+        "keire.operator.nand",
         "keire.operator.negate",
+        "keire.operator.nor",
         "keire.operator.normalize",
         "keire.operator.not",
+        "keire.operator.one-minus",
         "keire.operator.or",
         "keire.operator.particle-id",
+        "keire.operator.perlin-curl-noise",
+        "keire.operator.perlin-noise",
+        "keire.operator.pi",
+        "keire.operator.polar-to-rectangular",
         "keire.operator.power",
+        "keire.operator.ratio-over-strip",
+        "keire.operator.reciprocal",
+        "keire.operator.rectangular-to-polar",
+        "keire.operator.rectangular-to-spherical",
         "keire.operator.remap",
+        "keire.operator.rgb-to-hsv",
+        "keire.operator.rotate-2d",
+        "keire.operator.rotate-3d",
         "keire.operator.round",
         "keire.operator.saturate",
         "keire.operator.sawtooth-wave",
@@ -7996,16 +8368,23 @@
         "keire.operator.sine-wave",
         "keire.operator.smoothstep",
         "keire.operator.spawn-index",
+        "keire.operator.spherical-to-rectangular",
         "keire.operator.square-root",
         "keire.operator.square-wave",
+        "keire.operator.squared-distance",
+        "keire.operator.squared-length",
         "keire.operator.step",
         "keire.operator.subtract",
+        "keire.operator.system-seed",
         "keire.operator.tangent",
         "keire.operator.time",
-        "keire.operator.triangle-wave"
+        "keire.operator.triangle-wave",
+        "keire.operator.value-curl-noise",
+        "keire.operator.value-noise"
       ],
       "tests": [
-        "KeireTests/Source/Vfx/VfxExpressionTests.cpp"
+        "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
+        "KeireTests/Source/Rendering/GpuVertexLayoutTests.cpp"
       ],
       "samples": [
         "Samples/KeireSandbox/Assets/Vfx/VfxEffect.keirevfx"

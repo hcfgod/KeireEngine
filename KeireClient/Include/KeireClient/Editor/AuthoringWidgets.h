@@ -184,6 +184,18 @@ namespace KeireEditor
         std::optional<NodeGraphBlockAddress> DeleteBlockRequested;
     };
 
+    /// Screen-space graph detail selected from zoom. Geometry and interaction remain available at every level while
+    /// text that cannot fit its scaled row is removed before it can overlap adjacent pins or blocks.
+    struct NodeGraphCanvasDetail
+    {
+        bool NodeSubtitle = false;
+        bool BlockLabels = false;
+        bool PinLabels = false;
+        bool ConnectionLabels = false;
+
+        [[nodiscard]] bool operator==(const NodeGraphCanvasDetail&) const noexcept = default;
+    };
+
     class StableNodeGraphIdMap final
     {
       public:
@@ -202,6 +214,7 @@ namespace KeireEditor
         [[nodiscard]] static NodeGraphConnectionValidation
         EvaluateConnection(std::span<const NodeGraphNode> nodes, const NodeGraphConnectionRequest& connection,
                            const NodeGraphConnectionValidator& validator = {});
+        [[nodiscard]] static NodeGraphCanvasDetail DetailForZoom(float zoom) noexcept;
 
         [[nodiscard]] NodeGraphCanvasResult Draw(Keire::UiFrame& ui, std::string_view id,
                                                  std::span<NodeGraphNode> nodes,

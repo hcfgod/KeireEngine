@@ -27,6 +27,14 @@ namespace Keire::Internal
         float DeltaTime = 0.0F;
         float Age = 0.0F;
         float Lifetime = 1.0F;
+        Vector3 Position;
+        Vector3 PreviousPosition;
+        Vector3 Velocity;
+        Vector3 Rotation;
+        Color Tint;
+        float Size = 1.0F;
+        std::uint32_t ParticleIndexInStrip = 0;
+        std::uint32_t ParticlesPerStrip = 1;
     };
 
     [[nodiscard]] VfxExpressionCompilation CompileVfxExpressions(const VfxGraphSystem& system,

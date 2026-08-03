@@ -6,6 +6,7 @@
 #include "Keire/ECS/Component.h"
 #include "Keire/ECS/EntityLayer.h"
 #include "Keire/Math/Math.h"
+#include "Keire/Rendering/Lighting.h"
 
 #include <compare>
 #include <cstddef>
@@ -18,7 +19,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t CurrentSceneSchemaVersion = 4;
+    inline constexpr std::uint32_t CurrentSceneSchemaVersion = 5;
 
     using SceneVector3 = Vector3;
     using SceneQuaternion = Quaternion;
@@ -99,6 +100,8 @@ namespace Keire
         std::vector<SceneObjectDefinition> Objects;
         std::vector<PrefabInstanceDefinition> PrefabInstances;
         std::vector<PrefabOverrideDefinition> PrefabOverrides;
+        LightingBakeSettings Lighting;
+        AssetId BakedLighting;
     };
 
     class KEIRE_API SceneAsset final : public Asset

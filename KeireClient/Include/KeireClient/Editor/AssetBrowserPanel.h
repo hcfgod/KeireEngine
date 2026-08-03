@@ -40,6 +40,8 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserAudioMixer(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPhysicsMaterial(std::string_view name) = 0;
         virtual bool CreateAssetBrowserVfxEffect(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserMaterialGraph(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserMaterialGraphInstance(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefab(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) = 0;
         virtual void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) = 0;
@@ -54,6 +56,7 @@ namespace KeireEditor
         virtual void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserAudioMixer(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserVfxEffect(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserPrefab(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserScene(Keire::AssetId asset) = 0;
         virtual void PrepareAssetBrowserExternalOpen(Keire::AssetId asset) = 0;

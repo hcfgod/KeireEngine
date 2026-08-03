@@ -20,6 +20,11 @@ namespace Keire
         [[nodiscard]] ShadowQuality Shadows() const noexcept { return m_Shadows; }
         [[nodiscard]] float ShadowStrength() const noexcept { return m_ShadowStrength; }
         [[nodiscard]] float ShadowBias() const noexcept { return m_ShadowBias; }
+        [[nodiscard]] LightBakeMode BakeMode() const noexcept { return m_BakeMode; }
+        [[nodiscard]] ShadowResolutionHint ShadowResolution() const noexcept { return m_ShadowResolution; }
+        [[nodiscard]] AssetId Cookie() const noexcept { return m_Cookie; }
+        [[nodiscard]] bool ContactShadows() const noexcept { return m_ContactShadows; }
+        [[nodiscard]] float IndirectMultiplier() const noexcept { return m_IndirectMultiplier; }
 
         void SetLightColor(Color value);
         void SetIntensity(float value);
@@ -27,6 +32,11 @@ namespace Keire
         void SetShadows(ShadowQuality value);
         void SetShadowStrength(float value);
         void SetShadowBias(float value);
+        void SetBakeMode(LightBakeMode value);
+        void SetShadowResolution(ShadowResolutionHint value);
+        void SetCookie(AssetId value);
+        void SetContactShadows(bool value);
+        void SetIndirectMultiplier(float value);
         void Reset();
 
       private:
@@ -37,6 +47,11 @@ namespace Keire
         ShadowQuality m_Shadows = ShadowQuality::Soft;
         float m_ShadowStrength = 1.0F;
         float m_ShadowBias = 0.0025F;
+        LightBakeMode m_BakeMode = LightBakeMode::Realtime;
+        ShadowResolutionHint m_ShadowResolution = ShadowResolutionHint::Medium;
+        AssetId m_Cookie;
+        bool m_ContactShadows = false;
+        float m_IndirectMultiplier = 1.0F;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreatePointLightComponentRegistration();

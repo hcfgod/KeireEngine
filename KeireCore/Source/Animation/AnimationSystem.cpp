@@ -4,8 +4,11 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <numbers>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -105,10 +108,15 @@ namespace Keire
                 return Vector3{left.X + (right.X - left.X) * alpha, left.Y + (right.Y - left.Y) * alpha,
                                left.Z + (right.Z - left.Z) * alpha};
             };
-            auto rotation = Quaternion{first.Rotation.X + (second.Rotation.X - first.Rotation.X) * alpha,
-                                       first.Rotation.Y + (second.Rotation.Y - first.Rotation.Y) * alpha,
-                                       first.Rotation.Z + (second.Rotation.Z - first.Rotation.Z) * alpha,
-                                       first.Rotation.W + (second.Rotation.W - first.Rotation.W) * alpha};
+            auto secondRotation = second.Rotation;
+            const auto rotationDot = first.Rotation.X * secondRotation.X + first.Rotation.Y * secondRotation.Y +
+                                     first.Rotation.Z * secondRotation.Z + first.Rotation.W * secondRotation.W;
+            if (rotationDot < 0.0F)
+                secondRotation = {-secondRotation.X, -secondRotation.Y, -secondRotation.Z, -secondRotation.W};
+            auto rotation = Quaternion{first.Rotation.X + (secondRotation.X - first.Rotation.X) * alpha,
+                                       first.Rotation.Y + (secondRotation.Y - first.Rotation.Y) * alpha,
+                                       first.Rotation.Z + (secondRotation.Z - first.Rotation.Z) * alpha,
+                                       first.Rotation.W + (secondRotation.W - first.Rotation.W) * alpha};
             return {vector(first.Translation, second.Translation), Math::Normalize(rotation),
                     vector(first.Scale, second.Scale)};
         }
@@ -139,6 +147,107 @@ namespace Keire
             const auto& first = *(upper - 1);
             const auto alpha = (time - first.Time) / (second.Time - first.Time);
             return Blend(first.Value, second.Value, alpha);
+        }
+
+        [[nodiscard]] float VectorDistance(const Vector3 first, const Vector3 second) noexcept
+        {
+            const auto x = first.X - second.X;
+            const auto y = first.Y - second.Y;
+            const auto z = first.Z - second.Z;
+            return std::sqrt(x * x + y * y + z * z);
+        }
+
+        [[nodiscard]] float RotationDistanceDegrees(const Quaternion first, const Quaternion second)
+        {
+            const auto left = Math::Normalize(first);
+            const auto right = Math::Normalize(second);
+            const auto dot = std::abs(left.X * right.X + left.Y * right.Y + left.Z * right.Z + left.W * right.W);
+            return 2.0F * std::acos(std::clamp(dot, 0.0F, 1.0F)) * 180.0F / std::numbers::pi_v<float>;
+        }
+
+        [[nodiscard]] float CompressionErrorScore(const BoneTransform& actual, const BoneTransform& approximated,
+                                                  const AnimationCompressionSettings& settings)
+        {
+            const auto ratio = [](const float error, const float tolerance) noexcept
+            {
+                if (tolerance > 0.0F)
+                    return error / tolerance;
+                return error > 0.0F ? std::numeric_limits<float>::infinity() : 0.0F;
+            };
+            return std::max(
+                {ratio(VectorDistance(actual.Translation, approximated.Translation), settings.MaximumTranslationError),
+                 ratio(RotationDistanceDegrees(actual.Rotation, approximated.Rotation),
+                       settings.MaximumRotationErrorDegrees),
+                 ratio(VectorDistance(actual.Scale, approximated.Scale), settings.MaximumScaleError)});
+        }
+
+        [[nodiscard]] AnimationTrack CompressTrack(const AnimationTrack& source,
+                                                   const AnimationCompressionSettings& settings)
+        {
+            if (!settings.Enabled || source.Keys.size() <= 2)
+                return source;
+
+            std::vector<bool> retained(source.Keys.size());
+            retained.front() = true;
+            retained.back() = true;
+            std::vector<std::pair<std::size_t, std::size_t>> pending{{0, source.Keys.size() - 1}};
+            while (!pending.empty())
+            {
+                const auto [firstIndex, lastIndex] = pending.back();
+                pending.pop_back();
+                if (lastIndex <= firstIndex + 1)
+                    continue;
+
+                const auto& first = source.Keys[firstIndex];
+                const auto& last = source.Keys[lastIndex];
+                const auto span = last.Time - first.Time;
+                float largestError = 1.0F;
+                std::size_t largestIndex = lastIndex;
+                for (auto index = firstIndex + 1; index < lastIndex; ++index)
+                {
+                    const auto alpha = span > 0.0F ? (source.Keys[index].Time - first.Time) / span : 0.0F;
+                    const auto error = CompressionErrorScore(source.Keys[index].Value,
+                                                             Blend(first.Value, last.Value, alpha), settings);
+                    if (error > largestError)
+                    {
+                        largestError = error;
+                        largestIndex = index;
+                    }
+                }
+                if (largestIndex == lastIndex)
+                    continue;
+                retained[largestIndex] = true;
+                pending.emplace_back(largestIndex, lastIndex);
+                pending.emplace_back(firstIndex, largestIndex);
+            }
+
+            AnimationTrack result;
+            result.Bone = source.Bone;
+            result.Keys.reserve(source.Keys.size());
+            for (std::size_t index = 0; index < source.Keys.size(); ++index)
+                if (retained[index])
+                    result.Keys.push_back(source.Keys[index]);
+            return result;
+        }
+
+        [[nodiscard]] std::vector<AnimatorPoseBoneDebugState>
+        BuildPoseDebugState(const SkeletonAsset& skeleton, const std::span<const BoneTransform> localPose)
+        {
+            if (localPose.size() != skeleton.Bones().size())
+                throw std::invalid_argument("Animator debug pose does not match its skeleton.");
+            std::vector<Matrix4> world(localPose.size());
+            std::vector<AnimatorPoseBoneDebugState> result;
+            result.reserve(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& bone = skeleton.Bones()[index];
+                const auto& transform = localPose[index];
+                const auto local = Math::ComposeTransform(transform.Translation, transform.Rotation, transform.Scale);
+                world[index] =
+                    bone.Parent < 0 ? local : Math::Multiply(world[static_cast<std::size_t>(bone.Parent)], local);
+                result.push_back({bone.Name, bone.Parent, transform, Math::TransformPoint(world[index], {})});
+            }
+            return result;
         }
 
         [[nodiscard]] bool Compare(const float current, const AnimationTransitionCondition& condition) noexcept
@@ -477,6 +586,70 @@ namespace Keire
             ValidateClip(m_Skeleton, m_Duration, m_Tracks, m_Events);
     }
 
+    AnimationCompressionSettings AnimationCompressionSettingsForPreset(const AnimationCompressionPreset preset) noexcept
+    {
+        switch (preset)
+        {
+        case AnimationCompressionPreset::Disabled:
+            return {false, 0.0F, 0.0F, 0.0F};
+        case AnimationCompressionPreset::Light:
+            return {true, 0.0001F, 0.05F, 0.0001F};
+        case AnimationCompressionPreset::Balanced:
+            return {true, 0.001F, 0.25F, 0.001F};
+        case AnimationCompressionPreset::Aggressive:
+            return {true, 0.01F, 1.0F, 0.01F};
+        }
+        return {false, 0.0F, 0.0F, 0.0F};
+    }
+
+    AnimationCompressionResult CompressAnimationTracks(const std::span<const AnimationTrack> tracks,
+                                                       const AnimationCompressionSettings& settings)
+    {
+        if (!std::isfinite(settings.MaximumTranslationError) || settings.MaximumTranslationError < 0.0F ||
+            !std::isfinite(settings.MaximumRotationErrorDegrees) || settings.MaximumRotationErrorDegrees < 0.0F ||
+            settings.MaximumRotationErrorDegrees > 180.0F || !std::isfinite(settings.MaximumScaleError) ||
+            settings.MaximumScaleError < 0.0F)
+            throw std::invalid_argument("Animation compression settings are invalid.");
+        if (tracks.size() > 65536)
+            throw std::invalid_argument("Animation compression track count exceeds the supported limit.");
+
+        AnimationCompressionResult result;
+        result.Tracks.reserve(tracks.size());
+        std::set<std::uint32_t> bones;
+        for (const auto& source : tracks)
+        {
+            if (source.Keys.empty() || source.Keys.size() > 4U * 1024U * 1024U || !bones.insert(source.Bone).second)
+                throw std::invalid_argument("Animation compression received an empty, oversized, or duplicate track.");
+            float previousTime = -1.0F;
+            for (const auto& key : source.Keys)
+            {
+                if (!std::isfinite(key.Time) || key.Time < 0.0F || key.Time <= previousTime ||
+                    !Math::IsFinite(key.Value.Translation) || !Math::IsFinite(key.Value.Rotation) ||
+                    !Math::IsFinite(key.Value.Scale))
+                    throw std::invalid_argument("Animation compression received an invalid or unordered key.");
+                (void)Math::Normalize(key.Value.Rotation);
+                previousTime = key.Time;
+            }
+            result.Statistics.SourceKeyCount += source.Keys.size();
+            auto compressed = CompressTrack(source, settings);
+            result.Statistics.CompressedKeyCount += compressed.Keys.size();
+            for (const auto& key : source.Keys)
+            {
+                const auto sampled = SampleTrack(compressed, key.Time);
+                result.Statistics.MaximumTranslationError =
+                    std::max(result.Statistics.MaximumTranslationError,
+                             VectorDistance(key.Value.Translation, sampled.Translation));
+                result.Statistics.MaximumRotationErrorDegrees =
+                    std::max(result.Statistics.MaximumRotationErrorDegrees,
+                             RotationDistanceDegrees(key.Value.Rotation, sampled.Rotation));
+                result.Statistics.MaximumScaleError =
+                    std::max(result.Statistics.MaximumScaleError, VectorDistance(key.Value.Scale, sampled.Scale));
+            }
+            result.Tracks.push_back(std::move(compressed));
+        }
+        return result;
+    }
+
     std::size_t AnimationClipAsset::ResidentBytes() const noexcept
     {
         std::size_t result =
@@ -661,6 +834,9 @@ namespace Keire
                 auto& layer = definition.Layers[layerIndex];
                 if (layer.Id.empty())
                     layer.Id = LegacyLocalId("layer", layer.Name);
+                for (auto& subgraph : layer.Subgraphs)
+                    if (subgraph.Id.empty())
+                        subgraph.Id = LegacyLocalId("subgraph", layer.Id + ':' + subgraph.Name);
                 for (auto& state : layer.States)
                 {
                     if (state.Id.empty())
@@ -691,6 +867,20 @@ namespace Keire
                         std::ranges::find(layer.States, layer.EntryStateId, &AnimationStateDefinition::Name);
                     entry != layer.States.end())
                     layer.EntryStateId = entry->Id;
+                for (auto& subgraph : layer.Subgraphs)
+                {
+                    if (const auto entry =
+                            std::ranges::find(layer.States, subgraph.EntryStateId, &AnimationStateDefinition::Name);
+                        entry != layer.States.end() && entry->SubgraphId == subgraph.Id)
+                        subgraph.EntryStateId = entry->Id;
+                    if (subgraph.EntryStateId.empty())
+                    {
+                        const auto first =
+                            std::ranges::find(layer.States, subgraph.Id, &AnimationStateDefinition::SubgraphId);
+                        if (first != layer.States.end())
+                            subgraph.EntryStateId = first->Id;
+                    }
+                }
 
                 for (auto& state : layer.States)
                 {
@@ -805,6 +995,9 @@ namespace Keire
             if (!editorPosition.is_array() || editorPosition.size() != 2)
                 throw std::invalid_argument("Animation state editor position must contain two elements.");
             state.EditorPosition = {editorPosition[0].get<float>(), editorPosition[1].get<float>()};
+            state.SubgraphId = encoded.value("subgraphId", std::string{});
+            if (state.SubgraphId.size() > 512)
+                throw std::invalid_argument("Animation state subgraph ID is invalid.");
             state.Motion = DecodeMotion(encoded.at("motion"));
             if (state.Motion.Type == AnimationMotionType::Clip)
                 state.Clip = state.Motion.Clip;
@@ -856,6 +1049,7 @@ namespace Keire
                     {"speed", state.Speed},
                     {"loop", state.Loop},
                     {"editorPosition", Json::array({state.EditorPosition.X, state.EditorPosition.Y})},
+                    {"subgraphId", state.SubgraphId},
                     {"motion", EncodeMotion(state.Motion)},
                     {"transitions", std::move(transitions)}};
         }
@@ -1084,7 +1278,7 @@ namespace Keire
     void ValidateAnimationGraph(const AnimationGraphDefinition& source)
     {
         const auto definition = CanonicalizeAnimationGraph(source);
-        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) ||
+        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2 && definition.SchemaVersion != 3) ||
             definition.ParameterDefinitions.size() > 4096 || definition.Layers.size() > 64)
             throw std::invalid_argument("Animation graph header is invalid.");
 
@@ -1109,11 +1303,19 @@ namespace Keire
             if (layer.Id.empty() || layer.Id.size() > 512 || layer.Name.empty() || layer.Name.size() > 256 ||
                 !localIds.insert(layer.Id).second || !layerNames.insert(layer.Name).second ||
                 layer.Mode > AnimationLayerMode::Additive || !std::isfinite(layer.DefaultWeight) ||
-                layer.DefaultWeight < 0.0F || layer.DefaultWeight > 1.0F || layer.States.size() > 4096)
+                layer.DefaultWeight < 0.0F || layer.DefaultWeight > 1.0F || layer.States.size() > 4096 ||
+                layer.Subgraphs.size() > 256)
                 throw std::invalid_argument("Animation graph contains an invalid layer.");
+            std::set<std::string, std::less<>> subgraphIds;
+            std::set<std::string, std::less<>> subgraphNames;
+            for (const auto& subgraph : layer.Subgraphs)
+                if (subgraph.Id.empty() || subgraph.Id.size() > 512 || subgraph.Name.empty() ||
+                    subgraph.Name.size() > 256 || !localIds.insert(subgraph.Id).second ||
+                    !subgraphIds.insert(subgraph.Id).second || !subgraphNames.insert(subgraph.Name).second)
+                    throw std::invalid_argument("Animation graph contains an invalid state-machine subgraph.");
             if (layer.States.empty())
             {
-                if (!layer.EntryStateId.empty())
+                if (!layer.EntryStateId.empty() || !layer.Subgraphs.empty())
                     throw std::invalid_argument("An empty animation graph layer cannot declare an entry state.");
                 continue;
             }
@@ -1124,7 +1326,8 @@ namespace Keire
                 if (state.Id.empty() || state.Id.size() > 512 || state.Name.empty() || state.Name.size() > 256 ||
                     !localIds.insert(state.Id).second || !stateIds.insert(state.Id).second ||
                     !stateNames.insert(state.Name).second || !std::isfinite(state.Speed) || state.Speed == 0.0F ||
-                    state.Motion.Type > AnimationMotionType::BlendTree2D || !Math::IsFinite(state.EditorPosition))
+                    state.Motion.Type > AnimationMotionType::BlendTree2D || !Math::IsFinite(state.EditorPosition) ||
+                    (!state.SubgraphId.empty() && !subgraphIds.contains(state.SubgraphId)))
                     throw std::invalid_argument("Animation graph contains an invalid state.");
                 if (state.Motion.Type == AnimationMotionType::Clip)
                 {
@@ -1158,8 +1361,19 @@ namespace Keire
                     }
                 }
             }
-            if (!stateIds.contains(layer.EntryStateId))
+            const auto rootEntry = std::ranges::find(layer.States, layer.EntryStateId, &AnimationStateDefinition::Id);
+            if (rootEntry == layer.States.end() || !rootEntry->SubgraphId.empty())
                 throw std::invalid_argument("Animation graph layer entry state is unavailable.");
+            for (const auto& subgraph : layer.Subgraphs)
+            {
+                const auto entry =
+                    std::ranges::find(layer.States, subgraph.EntryStateId, &AnimationStateDefinition::Id);
+                const auto hasStates = std::ranges::any_of(layer.States, [&](const auto& state)
+                                                           { return state.SubgraphId == subgraph.Id; });
+                if ((!hasStates && !subgraph.EntryStateId.empty()) ||
+                    (hasStates && (entry == layer.States.end() || entry->SubgraphId != subgraph.Id)))
+                    throw std::invalid_argument("Animation state-machine subgraph entry state is unavailable.");
+            }
             for (const auto& state : layer.States)
             {
                 for (const auto& transition : state.Transitions)
@@ -1201,9 +1415,11 @@ namespace Keire
         for (const auto& layer : m_Definition.Layers)
         {
             result += sizeof(layer) + layer.Id.size() + layer.Name.size() + layer.EntryStateId.size();
+            for (const auto& subgraph : layer.Subgraphs)
+                result += sizeof(subgraph) + subgraph.Id.size() + subgraph.Name.size() + subgraph.EntryStateId.size();
             for (const auto& state : layer.States)
             {
-                result += sizeof(state) + state.Id.size() + state.Name.size();
+                result += sizeof(state) + state.Id.size() + state.Name.size() + state.SubgraphId.size();
                 for (const auto& child : state.Motion.Children)
                     result += sizeof(child) + child.Id.size();
                 for (const auto& transition : state.Transitions)
@@ -1220,7 +1436,7 @@ namespace Keire
     std::vector<std::byte> AnimationGraphAsset::Encode(const AnimationGraphDefinition& source)
     {
         auto definition = CanonicalizeAnimationGraph(source);
-        definition.SchemaVersion = 2;
+        definition.SchemaVersion = 3;
         ValidateAnimationGraph(definition);
         Json parameters = Json::array();
         for (const auto& parameter : definition.ParameterDefinitions)
@@ -1236,16 +1452,21 @@ namespace Keire
             Json states = Json::array();
             for (const auto& state : layer.States)
                 states.push_back(EncodeStateV2(state));
+            Json subgraphs = Json::array();
+            for (const auto& subgraph : layer.Subgraphs)
+                subgraphs.push_back(
+                    {{"id", subgraph.Id}, {"name", subgraph.Name}, {"entryStateId", subgraph.EntryStateId}});
             layers.push_back({{"id", layer.Id},
                               {"name", layer.Name},
                               {"mode", static_cast<std::uint8_t>(layer.Mode)},
                               {"defaultWeight", layer.DefaultWeight},
                               {"avatarMask", layer.AvatarMask ? layer.AvatarMask.ToString() : std::string{}},
                               {"entryStateId", layer.EntryStateId},
+                              {"subgraphs", std::move(subgraphs)},
                               {"states", std::move(states)}});
         }
         const auto text =
-            Json{{"schemaVersion", 2}, {"parameters", std::move(parameters)}, {"layers", std::move(layers)}}.dump(2) +
+            Json{{"schemaVersion", 3}, {"parameters", std::move(parameters)}, {"layers", std::move(layers)}}.dump(2) +
             '\n';
         return {reinterpret_cast<const std::byte*>(text.data()),
                 reinterpret_cast<const std::byte*>(text.data() + text.size())};
@@ -1256,7 +1477,7 @@ namespace Keire
         const Json document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                           reinterpret_cast<const char*>(bytes.data() + bytes.size()));
         const auto schemaVersion = document.value("schemaVersion", 0U);
-        if (schemaVersion != 1 && schemaVersion != 2)
+        if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3)
             throw std::invalid_argument("Animation graph asset schema is unsupported.");
         AnimationGraphDefinition definition;
         definition.SchemaVersion = schemaVersion;
@@ -1314,6 +1535,16 @@ namespace Keire
                 layer.EntryStateId = encodedLayer.value("entryStateId", std::string{});
                 if (layer.EntryStateId.size() > 512)
                     throw std::invalid_argument("Animation graph entry state ID is invalid.");
+                for (const auto& encodedSubgraph : encodedLayer.value("subgraphs", Json::array()))
+                {
+                    AnimationStateMachineSubgraphDefinition subgraph;
+                    subgraph.Id = DecodeLocalId(encodedSubgraph, "id");
+                    subgraph.Name = encodedSubgraph.at("name").get<std::string>();
+                    subgraph.EntryStateId = encodedSubgraph.value("entryStateId", std::string{});
+                    if (subgraph.EntryStateId.size() > 512)
+                        throw std::invalid_argument("Animation subgraph entry state ID is invalid.");
+                    layer.Subgraphs.push_back(std::move(subgraph));
+                }
                 for (const auto& encodedState : encodedLayer.at("states"))
                     layer.States.push_back(DecodeStateV2(encodedState));
                 definition.Layers.push_back(std::move(layer));
@@ -1591,6 +1822,27 @@ namespace Keire
     {
         if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0F || deltaSeconds > 10.0F)
             throw std::invalid_argument("Animator delta time is invalid.");
+        const auto evaluationStart = std::chrono::steady_clock::now();
+        std::uint32_t layersEvaluated = 0;
+        std::uint32_t transitionsTested = 0;
+        std::uint32_t motionsEvaluated = 0;
+        std::uint32_t clipsSampled = 0;
+        const auto finishProfile = [&]
+        {
+            const auto elapsed =
+                std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - evaluationStart).count();
+            const auto previousCount = m_Profile.UpdateCount;
+            m_Profile.LastEvaluationMicroseconds = elapsed;
+            m_Profile.AverageEvaluationMicroseconds =
+                (m_Profile.AverageEvaluationMicroseconds * static_cast<double>(previousCount) + elapsed) /
+                static_cast<double>(previousCount + 1U);
+            m_Profile.PeakEvaluationMicroseconds = std::max(m_Profile.PeakEvaluationMicroseconds, elapsed);
+            ++m_Profile.UpdateCount;
+            m_Profile.LayersEvaluated = layersEvaluated;
+            m_Profile.TransitionsTested = transitionsTested;
+            m_Profile.MotionsEvaluated = motionsEvaluated;
+            m_Profile.ClipsSampled = clipsSampled;
+        };
         const auto& definition = m_Graph->Definition();
         const auto floatParameter = [&](const std::string_view id)
         {
@@ -1627,6 +1879,8 @@ namespace Keire
             m_State.clear();
             m_Time = 0.0F;
             m_HasPreviousRootRotation = false;
+            finishProfile();
+            m_DebugPose = BuildPoseDebugState(*m_Skeleton, result.LocalPose);
             PublishDebugSnapshot();
             return result;
         }
@@ -1636,6 +1890,7 @@ namespace Keire
 
         for (std::size_t layerIndex = 0; layerIndex < m_Layers.size(); ++layerIndex)
         {
+            ++layersEvaluated;
             auto& runtime = m_Layers[layerIndex];
             const auto* layer = FindLayer(definition, runtime.Id);
             if (!layer)
@@ -1648,6 +1903,7 @@ namespace Keire
             {
                 for (const auto& transition : state->Transitions)
                 {
+                    ++transitionsTested;
                     if (transition.HasExitTime && runtime.NormalizedTime < transition.ExitTime)
                         continue;
                     if (!std::ranges::all_of(transition.Conditions, conditionMatches))
@@ -1675,6 +1931,8 @@ namespace Keire
                     throw std::logic_error("Animator transition state is unavailable.");
                 const auto sourceClips = ResolveMotion(*source, floatParameter, m_Resolver);
                 const auto destinationClips = ResolveMotion(*destination, floatParameter, m_Resolver);
+                motionsEvaluated += 2;
+                clipsSampled += static_cast<std::uint32_t>(sourceClips.size() + destinationClips.size());
                 bool sourceWrapped = false;
                 bool destinationWrapped = false;
                 const auto previousSourceTime = transition.SourceTime;
@@ -1709,6 +1967,8 @@ namespace Keire
             else
             {
                 const auto clips = ResolveMotion(*state, floatParameter, m_Resolver);
+                ++motionsEvaluated;
+                clipsSampled += static_cast<std::uint32_t>(clips.size());
                 const auto duration = MotionDuration(clips);
                 const auto previousTime = runtime.Time;
                 bool wrapped = false;
@@ -1787,6 +2047,18 @@ namespace Keire
         else
         {
             m_HasPreviousRootRotation = false;
+        }
+        finishProfile();
+        m_DebugPose = BuildPoseDebugState(*m_Skeleton, result.LocalPose);
+        m_DebugTrajectoryTime += deltaSeconds;
+        m_DebugTrajectoryPosition.X += result.RootMotion.X;
+        m_DebugTrajectoryPosition.Y += result.RootMotion.Y;
+        m_DebugTrajectoryPosition.Z += result.RootMotion.Z;
+        if (deltaSeconds > 0.0F || m_DebugMotionTrajectory.empty())
+        {
+            m_DebugMotionTrajectory.push_back({m_DebugTrajectoryTime, m_DebugTrajectoryPosition});
+            if (m_DebugMotionTrajectory.size() > 240)
+                m_DebugMotionTrajectory.erase(m_DebugMotionTrajectory.begin());
         }
         PublishDebugSnapshot(result.RootMotion, result.RootRotation, result.Events);
         return result;
@@ -1914,6 +2186,9 @@ namespace Keire
         if (m_RecentEvents.size() > 64)
             m_RecentEvents.erase(m_RecentEvents.begin(), m_RecentEvents.end() - 64);
         snapshot->RecentEvents = m_RecentEvents;
+        snapshot->Pose = m_DebugPose;
+        snapshot->MotionTrajectory = m_DebugMotionTrajectory;
+        snapshot->Profile = m_Profile;
         const auto& definition = m_Graph->Definition();
         snapshot->Parameters.reserve(definition.ParameterDefinitions.size());
         for (const auto& parameter : definition.ParameterDefinitions)
@@ -1975,6 +2250,15 @@ namespace Keire
         m_PreviousRoot = {};
         m_HasPreviousRootRotation = false;
         m_RecentEvents.clear();
+        std::vector<BoneTransform> bindPose;
+        bindPose.reserve(m_Skeleton->Bones().size());
+        for (const auto& bone : m_Skeleton->Bones())
+            bindPose.push_back(bone.BindPose);
+        m_DebugPose = BuildPoseDebugState(*m_Skeleton, bindPose);
+        m_DebugMotionTrajectory = {{0.0F, {}}};
+        m_DebugTrajectoryPosition = {};
+        m_DebugTrajectoryTime = 0.0F;
+        m_Profile = {};
         PublishDebugSnapshot();
     }
 

@@ -1,0 +1,50 @@
+{
+  "defines": {},
+  "includeRoots": [
+    "Assets"
+  ],
+  "properties": [
+    {
+      "category": "Material Graph",
+      "default": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "displayName": "BaseColor",
+      "name": "BaseColor",
+      "type": "Color"
+    },
+    {
+      "category": "Material Graph",
+      "default": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "displayName": "Scalar",
+      "name": "Scalar",
+      "type": "Float"
+    }
+  ],
+  "receivesShadows": false,
+  "renderState": {
+    "blend": false,
+    "culling": "Back",
+    "depthTest": true,
+    "depthWrite": true,
+    "topology": "TriangleList"
+  },
+  "schemaVersion": 1,
+  "source": "Assets/Generated/MaterialGraphs/469b3e63-772c-46d4-bf1f-9a1a418c522d/MaterialGraph-14650fb0739d0383.hlsl",
+  "stages": {
+    "fragment": "PSMain",
+    "vertex": "VSMain"
+  },
+  "usesForwardPlus": false,
+  "usesImageBasedLighting": false,
+  "usesInstancing": true,
+  "vertexLayoutVersion": 2
+}

@@ -207,22 +207,6 @@ namespace KeireEditor
             return {0.2F, 0.24F, 0.3F, 1.0F};
         }
 
-        [[nodiscard]] std::string_view NodeKindName(const Keire::VfxGraphNodeKind kind) noexcept
-        {
-            switch (kind)
-            {
-            case Keire::VfxGraphNodeKind::Context:
-                return "Context";
-            case Keire::VfxGraphNodeKind::Module:
-                return "Runtime Module";
-            case Keire::VfxGraphNodeKind::Parameter:
-                return "Blackboard Parameter";
-            case Keire::VfxGraphNodeKind::CustomHlsl:
-                return "Custom HLSL";
-            }
-            return "Unsupported";
-        }
-
         [[nodiscard]] Keire::UiColor NodeColor(const Keire::VfxGraphNode& node) noexcept
         {
             switch (node.Kind)
@@ -235,6 +219,12 @@ namespace KeireEditor
                 return {0.12F, 0.52F, 0.36F, 1.0F};
             case Keire::VfxGraphNodeKind::CustomHlsl:
                 return {0.56F, 0.24F, 0.62F, 1.0F};
+            case Keire::VfxGraphNodeKind::Operator:
+                return {0.2F, 0.36F, 0.54F, 1.0F};
+            case Keire::VfxGraphNodeKind::Attribute:
+                return {0.16F, 0.48F, 0.38F, 1.0F};
+            case Keire::VfxGraphNodeKind::Subgraph:
+                return {0.42F, 0.28F, 0.58F, 1.0F};
             }
             return {0.2F, 0.24F, 0.3F, 1.0F};
         }
@@ -1250,8 +1240,8 @@ namespace KeireEditor
                 .Position = node.EditorPosition,
                 .Size = {260.0F, std::max(98.0F, 70.0F + static_cast<float>(rows) * 24.0F)},
                 .Color = NodeColor(node),
-                .Subtitle =
-                    std::string(NodeKindName(node.Kind)) + "  |  " + std::string(EnumName(node.Context, ContextTypes)),
+                .Subtitle = std::string(VfxGraphNodeKindLabel(node.Kind)) + "  |  " +
+                            std::string(EnumName(node.Context, ContextTypes)),
             };
             canvasNode.Pins.reserve(node.Pins.size());
             for (const auto& pin : node.Pins)
@@ -1678,7 +1668,7 @@ namespace KeireEditor
             if (node != system->Nodes.end())
             {
                 ui.TextColored(NodeColor(*node), NodeLabel(definition, *node));
-                ui.TextColored(theme.MutedText, std::string(NodeKindName(node->Kind)));
+                ui.TextColored(theme.MutedText, std::string(VfxGraphNodeKindLabel(node->Kind)));
                 ui.Separator();
                 if (ui.MenuItem("Inspect Node"))
                 {
@@ -2670,7 +2660,7 @@ namespace KeireEditor
 
         auto node = *selected;
         bool changed = false;
-        ui.TextColored(NodeColor(node), std::string(NodeKindName(node.Kind)));
+        ui.TextColored(NodeColor(node), std::string(VfxGraphNodeKindLabel(node.Kind)));
         ui.TextColored(theme.MutedText, "Stable ID: " + node.Id.ToString());
         if (node.Reference)
             ui.TextColored(theme.MutedText, "Reference: " + node.Reference.ToString());

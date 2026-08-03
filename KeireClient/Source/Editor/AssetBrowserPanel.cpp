@@ -55,6 +55,10 @@ namespace KeireEditor
                 return "Shader";
             if (extension == ".keirematerial")
                 return "Material";
+            if (extension == ".keirematerialgraph")
+                return "Material Graph";
+            if (extension == ".keirematerialinstance")
+                return "Material Instance";
             if (extension == ".keireanimgraph")
                 return "Animator Controller";
             if (extension == ".keireanim")
@@ -139,6 +143,8 @@ namespace KeireEditor
             AudioMixer,
             PhysicsMaterial,
             VfxEffect,
+            MaterialGraph,
+            MaterialGraphInstance,
             Prefab,
             PrefabVariant
         };
@@ -366,6 +372,8 @@ namespace KeireEditor
                     editor.OpenAssetBrowserAudioMixer(record.Id);
                 else if (record.RelativePath.extension() == ".keirevfx")
                     editor.OpenAssetBrowserVfxEffect(record.Id);
+                else if (record.RelativePath.extension() == ".keirematerialgraph")
+                    editor.OpenAssetBrowserMaterialGraph(record.Id);
                 else if (record.RelativePath.extension() == ".keirescene")
                     editor.OpenAssetBrowserScene(record.Id);
                 else if (record.RelativePath.extension() == ".keireprefab")
@@ -426,6 +434,10 @@ namespace KeireEditor
                 RequestNamedCreate(NamedCreateKind::PhysicsMaterial, "PhysicsMaterial");
             if (ui.MenuItem("VFX Effect"))
                 RequestNamedCreate(NamedCreateKind::VfxEffect, "VfxEffect");
+            if (ui.MenuItem("Material Graph"))
+                RequestNamedCreate(NamedCreateKind::MaterialGraph, "PBRMaterial");
+            if (ui.MenuItem("Material Instance"))
+                RequestNamedCreate(NamedCreateKind::MaterialGraphInstance, "MaterialInstance");
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
             if (std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); }))
             {
@@ -777,16 +789,18 @@ namespace KeireEditor
             if (auto create = ui.BeginPopupModal("Create Asset"); create)
             {
                 const std::string_view type =
-                    PendingCreateKind == NamedCreateKind::Material          ? "material"
-                    : PendingCreateKind == NamedCreateKind::AnimationGraph  ? "Animator Controller"
-                    : PendingCreateKind == NamedCreateKind::Script          ? "C# script"
-                    : PendingCreateKind == NamedCreateKind::ManagedAssembly ? "managed assembly"
-                    : PendingCreateKind == NamedCreateKind::ManagedData     ? "managed data asset"
-                    : PendingCreateKind == NamedCreateKind::AudioMixer      ? "audio mixer"
-                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial ? "physics material"
-                    : PendingCreateKind == NamedCreateKind::VfxEffect       ? "VFX effect"
-                    : PendingCreateKind == NamedCreateKind::Prefab          ? "prefab"
-                                                                            : "prefab variant";
+                    PendingCreateKind == NamedCreateKind::Material                ? "material"
+                    : PendingCreateKind == NamedCreateKind::AnimationGraph        ? "Animator Controller"
+                    : PendingCreateKind == NamedCreateKind::Script                ? "C# script"
+                    : PendingCreateKind == NamedCreateKind::ManagedAssembly       ? "managed assembly"
+                    : PendingCreateKind == NamedCreateKind::ManagedData           ? "managed data asset"
+                    : PendingCreateKind == NamedCreateKind::AudioMixer            ? "audio mixer"
+                    : PendingCreateKind == NamedCreateKind::PhysicsMaterial       ? "physics material"
+                    : PendingCreateKind == NamedCreateKind::VfxEffect             ? "VFX effect"
+                    : PendingCreateKind == NamedCreateKind::MaterialGraph         ? "material graph"
+                    : PendingCreateKind == NamedCreateKind::MaterialGraphInstance ? "material instance"
+                    : PendingCreateKind == NamedCreateKind::Prefab                ? "prefab"
+                                                                                  : "prefab variant";
                 ui.Text("Choose a name for the new " + std::string(type));
                 (void)ui.InputText("Name", CreateNameBuffer);
                 if (ui.Button("Create"))
@@ -813,6 +827,10 @@ namespace KeireEditor
                                 ? editor.CreateAssetBrowserPhysicsMaterial(CreateNameBuffer)
                             : PendingCreateKind == NamedCreateKind::VfxEffect
                                 ? editor.CreateAssetBrowserVfxEffect(CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::MaterialGraph
+                                ? editor.CreateAssetBrowserMaterialGraph(CreateNameBuffer)
+                            : PendingCreateKind == NamedCreateKind::MaterialGraphInstance
+                                ? editor.CreateAssetBrowserMaterialGraphInstance(CreateNameBuffer)
                             : PendingCreateKind == NamedCreateKind::Prefab
                                 ? editor.CreateAssetBrowserPrefab(CreateNameBuffer)
                                 : editor.CreateAssetBrowserPrefabVariant(PendingVariantBase, CreateNameBuffer);

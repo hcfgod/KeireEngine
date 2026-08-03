@@ -3,9 +3,11 @@
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Assets/InputActionAsset.h"
+#include "Keire/Assets/LightingAssets.h"
 #include "Keire/Assets/PhysicsMaterialAsset.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
+#include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
@@ -30,8 +32,13 @@ namespace Keire
         result.emplace_back(CreateManagedAssemblyAssetImporter());
         result.emplace_back(CreateShaderAssetImporter());
         result.emplace_back(CreateMaterialAssetImporter());
+        result.emplace_back(CreateMaterialGraphAssetImporter());
+        result.emplace_back(CreateMaterialGraphInstanceAssetImporter());
         result.emplace_back(CreateMeshAssetImporter());
         result.emplace_back(CreateTexture2DAssetImporter());
+        result.emplace_back(CreateLightingTextureArrayAssetImporter());
+        result.emplace_back(CreateLightProbeVolumeAssetImporter());
+        result.emplace_back(CreateLightingSetAssetImporter());
         result.emplace_back(CreateAudioClipAssetImporter());
         result.emplace_back(CreateAnimationClipAssetImporter());
         result.emplace_back(CreateAnimationGraphAssetImporter());
@@ -65,8 +72,13 @@ namespace Keire
         result.emplace_back(CreateSceneAssetDecoder());
         result.emplace_back(CreateShaderAssetDecoder());
         result.emplace_back(CreateMaterialAssetDecoder());
+        result.emplace_back(CreateMaterialGraphAssetDecoder());
+        result.emplace_back(CreateMaterialGraphInstanceAssetDecoder());
         result.emplace_back(CreateMeshAssetDecoder());
         result.emplace_back(CreateTexture2DAssetDecoder());
+        result.emplace_back(CreateLightingTextureArrayAssetDecoder());
+        result.emplace_back(CreateLightProbeVolumeAssetDecoder());
+        result.emplace_back(CreateLightingSetAssetDecoder());
         result.emplace_back(CreateAudioClipAssetDecoder());
         result.emplace_back(CreateSkeletonAssetDecoder());
         result.emplace_back(CreateSkinnedMeshAssetDecoder());

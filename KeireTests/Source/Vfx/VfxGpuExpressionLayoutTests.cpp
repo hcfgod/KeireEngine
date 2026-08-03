@@ -241,6 +241,52 @@ TEST_CASE("GPU expression compilation preserves Vector 2 and Vector 4 component 
     CHECK(program.GpuValueProgram.Instructions[3].Output[1] == 3);
 }
 
+TEST_CASE("GPU expression compilation packs all six noise inputs without truncation")
+{
+    auto definition = Keire::VfxEffectAsset::DefaultDefinition();
+    auto& system = definition.Systems.front();
+    const Keire::VfxBlackboardParameter coordinate{Keire::AssetId::Generate(), "Noise Coordinate",
+                                                   Keire::VfxValueType::Vector3, Keire::Vector3{1.0F, 2.0F, 3.0F},
+                                                   true};
+    definition.Blackboard.push_back(coordinate);
+
+    Keire::VfxGraphNode parameter;
+    parameter.Id = Keire::AssetId::Generate();
+    parameter.Type = coordinate.Name;
+    parameter.Context = Keire::VfxContextType::Spawn;
+    parameter.Kind = Keire::VfxGraphNodeKind::Parameter;
+    parameter.Reference = coordinate.Id;
+    parameter.TypeId = {"keire.parameter"};
+    parameter.Pins.push_back(
+        {Keire::AssetId::Generate(), coordinate.Name, coordinate.Type, false, "value", std::nullopt});
+
+    auto noise = Keire::CreateVfxGraphOperatorNode("keire.operator.perlin-noise");
+    noise.Context = Keire::VfxContextType::Spawn;
+    system.Nodes.push_back(std::move(parameter));
+    system.Nodes.push_back(std::move(noise));
+    const auto& storedParameter = system.Nodes[system.Nodes.size() - 2];
+    const auto& storedNoise = system.Nodes.back();
+    Connect(system, storedParameter, "value", storedNoise, "coordinate");
+    auto& spawn = Context(definition, Keire::VfxContextType::Spawn);
+    auto& emission = Block<Keire::VfxEmissionRateModule>(definition, Keire::VfxContextType::Spawn);
+    Connect(system, storedNoise, "out", spawn, emission, "particlesPerSecond");
+
+    const auto program = Keire::CompileVfxEffect(definition, Keire::VfxBackend::Gpu);
+    REQUIRE(program.Valid);
+    REQUIRE(program.GpuValueProgram.Instructions.size() == 1);
+    REQUIRE(program.GpuValueProgram.Sources.size() == 6);
+    REQUIRE(program.GpuValueProgram.Constants.size() == 5);
+    const auto& instruction = program.GpuValueProgram.Instructions.front();
+    CHECK(instruction.Header[0] == static_cast<std::uint32_t>(Keire::VfxValueOpcode::PerlinNoise));
+    CHECK(instruction.Header[3] == static_cast<std::uint32_t>(Keire::VfxEvaluationDomain::PerEffect));
+    CHECK(instruction.Output[2] == 0);
+    CHECK(instruction.Output[3] == 6);
+    CHECK(program.GpuValueProgram.Sources.front().Kind ==
+          static_cast<std::uint32_t>(Keire::VfxGpuValueSourceKind::Parameter));
+    CHECK(program.GpuValueProgram.Sources.back().Kind ==
+          static_cast<std::uint32_t>(Keire::VfxGpuValueSourceKind::Literal));
+}
+
 TEST_CASE("GPU expression layout limits identify the exact overflowing node")
 {
     auto definition = Keire::VfxEffectAsset::DefaultDefinition();

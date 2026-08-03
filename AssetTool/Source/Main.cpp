@@ -5,6 +5,7 @@
 #include "Keire/Log.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Project/ProjectAuthoringSettings.h"
+#include "Keire/Rendering/LightingBaker.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
@@ -26,6 +27,9 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
+#include <map>
+#include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -43,6 +47,7 @@ namespace
         std::filesystem::path Input;
         Keire::AssetBuildProfile Profile;
         std::chrono::seconds WorkerTimeout = std::chrono::minutes(10);
+        bool Force = false;
     };
 
     [[nodiscard]] std::uint64_t ParseUnsigned(const std::string_view value, const char* option)
@@ -113,6 +118,8 @@ namespace
             }
             else if (option == "--target")
                 result.Profile.Target = ParseTarget(requireValue());
+            else if (option == "--force")
+                result.Force = true;
             else
                 throw std::invalid_argument("Unknown option: " + std::string(option));
         }
@@ -130,6 +137,7 @@ namespace
                      "                      [--worker-timeout-seconds <seconds>]\n"
                      "                      [--target <host|windows|linux|macos>]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
+        std::cout << "  KeireAssetTool bake-lighting [--project <path>] [--input <scene.keirescene>] [--force]\n";
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
     }
 
@@ -525,6 +533,71 @@ namespace
                 result.CatalogPath = output / "catalog.json";
                 std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
                           << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
+            }
+            else if (commandLine.Command == "bake-lighting")
+            {
+                (void)ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
+                (void)database->Refresh();
+                std::optional<Keire::AssetSourceRecord> sceneRecord;
+                if (commandLine.Input.empty())
+                {
+                    if (!project->Descriptor().StartupScene)
+                        throw std::invalid_argument(
+                            "bake-lighting requires --input when the project has no startup scene.");
+                    sceneRecord = database->Find(project->Descriptor().StartupScene);
+                }
+                else
+                {
+                    auto relative = commandLine.Input.lexically_normal();
+                    if (relative.is_absolute())
+                        relative = std::filesystem::relative(relative, project->Root() / "Assets");
+                    if (!relative.empty() && *relative.begin() == std::filesystem::path("Assets"))
+                        relative = std::filesystem::relative(relative, "Assets");
+                    sceneRecord = database->Find(relative);
+                }
+                if (!sceneRecord || sceneRecord->Type != Keire::SceneAsset::StaticType())
+                    throw std::invalid_argument("bake-lighting input does not resolve to an imported scene asset.");
+                const auto scenePath = project->Root() / "Assets" / sceneRecord->RelativePath;
+                const auto source = Keire::SceneAsset::Decode(ReadBytes(scenePath));
+                Keire::LightingBakeRequest request;
+                request.Scene = sceneRecord->Id;
+                request.Definition = source->Definition();
+                request.ProjectRoot = project->Root();
+                request.Force = commandLine.Force;
+                if (commandLine.Output != std::filesystem::path("Build/Assets"))
+                    request.OutputDirectory = commandLine.Output;
+                const auto records = database->Records();
+                std::map<Keire::AssetId, Keire::AssetSourceRecord> indexed;
+                for (const auto& record : records)
+                    indexed.emplace(record.Id, record);
+                std::vector<Keire::AssetId> pending(sceneRecord->Dependencies.begin(), sceneRecord->Dependencies.end());
+                std::set<Keire::AssetId> visited;
+                while (!pending.empty())
+                {
+                    const auto id = pending.back();
+                    pending.pop_back();
+                    if (!id || !visited.emplace(id).second)
+                        continue;
+                    const auto found = indexed.find(id);
+                    if (found == indexed.end())
+                        continue;
+                    request.Inputs.push_back({id, found->second.SourceDigest});
+                    pending.insert(pending.end(), found->second.Dependencies.begin(), found->second.Dependencies.end());
+                }
+                request.Progress = [](const Keire::LightingBakeProgress& progress)
+                {
+                    std::cout << "[lighting] " << progress.Message;
+                    if (progress.Total != 0U)
+                        std::cout << " (" << progress.Completed << '/' << progress.Total << ')';
+                    std::cout << '\n';
+                };
+                const auto baked = Keire::LightingBaker::Bake(request);
+                auto updated = source->Definition();
+                updated.BakedLighting = baked.LightingSet;
+                Keire::Detail::WriteFileAtomically(scenePath, Keire::SceneAsset::Encode(updated));
+                (void)ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
+                std::cout << "Baked " << baked.Assets.size() << " lighting assets for "
+                          << sceneRecord->RelativePath.string() << (baked.CacheHit ? " (cache hit).\n" : ".\n");
             }
             else
             {

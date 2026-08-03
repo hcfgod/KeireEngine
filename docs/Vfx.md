@@ -74,25 +74,30 @@ The current executable value catalog includes:
 | Family | Operators |
 | --- | --- |
 | Range and random | Range, Random Number, Random Range, Remap |
-| Scalar arithmetic | Add, Subtract, Multiply, Divide, Power, Square Root, Minimum, Maximum, Absolute, Fractional, Negate (-x), Sign, Clamp, Saturate |
+| Scalar arithmetic | Add, Subtract, Multiply, Divide, Modulo, Power, Square Root, Minimum, Maximum, Absolute, Fractional, Negate (-x), Sign, One Minus, Reciprocal, Clamp, Saturate, Discretize |
 | Trigonometry | Sine, Cosine, Tangent, Asin, Acos, Atan, Atan2 |
 | Exponential and logarithmic | Exp, Log, Log2, Log10 |
 | Rounding | Ceiling, Floor, Round |
-| Interpolation | Lerp, Smoothstep, Step |
-| Logic | Compare, Branch, And, Or, Not |
+| Interpolation | Lerp, Inverse Lerp, Smoothstep, Step |
+| Logic | Compare, Branch, And, Or, Not, Nand, Nor |
+| Bitwise unsigned integer | And, Or, Xor, Complement, Left Shift, Right Shift |
 | Vector2 | Combine Vector 2, Split Vector 2 |
-| Vector3 | Combine, Split, Dot Product, Cross Product, Normalize, Length, Distance |
+| Vector3 | Combine, Split, Dot Product, Cross Product, Normalize, Length, Squared Length, Distance, Squared Distance |
 | Vector4 | Combine Vector 4, Split Vector 4 |
-| Color | Combine Color, Split Color |
+| Color | Combine Color, Split Color, Color Luma, HSV to RGB, RGB to HSV |
 | Casts | To Float, To Integer, To Unsigned Integer |
-| Built-ins | Total Time, Delta Time, Age, Lifetime, Particle ID, Spawn Index |
+| Inline and constants | Color, Direction, Position, Vector, Vector2, Vector3, Vector4, bool, float, int, uint, Epsilon (Ɛ), Pi (π) |
+| Built-ins and attributes | Total Time, Delta Time, Age, Age Over Lifetime, Lifetime, Particle ID, Spawn Index, Frame Index, System Seed, 16 Get Attribute nodes, Ratio Over Strip |
+| Coordinates and rotation | Polar to Rectangular, Rectangular to Polar, Rectangular to Spherical, Spherical to Rectangular, Rotate 2D, Rotate 3D |
+| Procedural noise | Value, Perlin, and Cellular Noise plus their Curl Noise variants |
 
 Pure literal subgraphs are folded during compilation. Unreachable Operators are eliminated. One output fanning out to
 several inputs evaluates once and shares its register. The shared compiler bounds a graph to 4,096 live value
 registers; the current GPU interpreter has a tighter cooked-program limit of 64 live registers and 64 instructions,
-with at most 256 sources and 256 deduplicated constants. Limit diagnostics retain the responsible node. The GPU
+with at most 512 sources and 256 deduplicated constants. A single instruction accepts at most eight typed inputs. Limit
+diagnostics retain the responsible node. The GPU
 compiler packs supported Boolean, integer, scalar, vector, color, and range values into a cooked expression program.
-Its shader interpreter implements the current opcode interval from `Constant` through `Sign` (0–56); compile-time and
+Its shader interpreter implements the current opcode interval from `Constant` through `Rotate3D` (0–108); compile-time and
 uniform work may still be folded or hoisted before upload. The complete executable packed Operator catalog now carries
 CPU + GPU support, including deterministic Random/identity sequencing, Delta Time and Lifetime, contained Power,
 overflow-resistant Lerp/Waves, and saturating 64-bit integer conversions.
@@ -105,9 +110,85 @@ zero-width Smoothstep all resolve to zero. These rules apply identically during 
 runtime evaluation. Operators promoted to CPU + GPU apply the same containment contract within documented
 floating-point tolerances.
 
+The Unity utility tranche follows the pinned 6.3 formulas: **Inverse Lerp** is unclamped, **Modulo** uses shader
+`frac(x / y) * y` behavior, **Discretize** uses `floor(value / granularity) * granularity`, and zero-width divisions
+resolve to zero. **Color Luma** uses the `0.299 / 0.587 / 0.114` RGB weights; **HSV to RGB** returns Vector4 with alpha
+one, while **RGB to HSV** ignores input alpha. **Age Over Lifetime**, **Frame Index**, and **System Seed** are evaluated
+in their explicit particle, per-frame, and per-effect domains. Kéire's unsigned graph value is 64-bit, so the Bitwise
+Operators deliberately process all 64 bits rather than Unity's 32-bit `uint`; shifts of 64 or more resolve to zero on
+both CPU and GPU. The currently fixed Scalar and Vector3 signatures are recorded as **Kéire Equivalent** rather than
+claiming Unity's broader Unified/adaptive-pin surface.
+
+| Unity utility family | Executable Kéire nodes | Canonical graph contract |
+| --- | --- | --- |
+| Scalar utility | Inverse Lerp, Modulo, One Minus (1-x), Reciprocal (1/x), Discretize | Scalar inputs and Scalar output; division and granularity zero are contained to zero. |
+| Boolean utility | Nand, Nor | Two Boolean inputs and one Boolean output. |
+| Bitwise | And, Or, Xor, Complement, Left Shift, Right Shift | Unsigned Integer inputs/output; Complement is unary and shift counts use the second input. |
+| Color conversion | Color Luma, HSV to RGB, RGB to HSV | Color to Scalar, Vector3 HSV to Vector4 RGBA, and Color RGBA to Vector3 HSV. |
+| Vector metrics | Squared Distance, Squared Length | Vector3 inputs and Scalar output, without the square-root cost of Distance/Length. |
+| Runtime identity | Age Over Lifetime, Frame Index, System Seed | Read-only outputs with no input pins; valid evaluation domains are compiler-owned. |
+
+All 21 nodes participate in ordinary right-click search, typed cable filtering, inline literal editing, constant
+folding where pure, dead-node elimination, block-property binding, canonical schema-4 serialization, and CPU/GPU
+backend diagnostics. Their packed signatures are renderer-validated before dispatch, so a corrupt or hand-authored
+program is rejected with its instruction index rather than reaching the shader interpreter.
+
 Particle-varying Operator inputs are scheduled for Portable Custom HLSL and every numeric Runtime Block property through
 the same typed register ABI. Structural enum and resource settings remain compiler-reflected settings rather than
 numeric particle values.
+
+### Attributes, Inline values, constants, coordinates, and noise
+
+The next production slice adds 42 Unity-labelled rows without enabling data the simulation does not actually store.
+The editor creates each node through normal right-click and wire search, preserves stable IDs and output ordering, and
+rejects malformed signatures during asset validation and again before GPU dispatch.
+
+**Inline** nodes are typed identity Operators. Color, Vector2/3/4, Boolean, float, signed integer, and unsigned integer
+retain their exact graph type and fold away when driven by a literal. Direction, Position, and Vector are explicit
+Vector3 semantic aliases in Kéire, so their parity rows are recorded as **Kéire Equivalent**. **Epsilon (Ɛ)** returns
+`0.00001`. **Pi (π)** exposes stable `Pi`, `2 Pi`, `Pi / 2`, and `Pi / 3` outputs; fan-out shares the selected constant
+without allocating a runtime register.
+
+The enabled **Get Attribute** nodes read live simulation state on CPU and GPU:
+
+| Attribute | Graph type and contract |
+| --- | --- |
+| `alive` | Boolean. Evaluation only visits live particles, so the result is true. |
+| `alpha`, `size`, `spawnTime` | Scalar. Spawn time is contained `effectTime - age`. |
+| `angle` | Vector3 Euler degrees, matching particle rotation storage. |
+| `axisX`, `axisY`, `axisZ` | Vector3 basis directions derived from particle rotation. |
+| `color` | Vector3 RGB; alpha remains independently addressable. |
+| `oldPosition`, `position`, `velocity` | Vector3 authoritative current/previous simulation values. |
+| `particleCountInStrip` | Unsigned Integer configured `ParticlesPerStrip`, clamped to at least one. |
+| `particleIndexInStrip` | Unsigned Integer stable position inside the configured strip. |
+| `stripIndex` | Unsigned Integer stable strip identity. |
+| `seed` | Unsigned Integer deterministic 32-bit particle seed carried in Kéire's 64-bit unsigned graph value. |
+| Ratio Over Strip | Scalar normalized index; a one-particle strip returns zero. |
+
+Attributes that are not independently represented by current particle state—custom attributes, angular velocity,
+direction, mass, pivot, non-uniform scale, target position, and texture index—remain disabled with explicit reasons.
+They are not aliases for decorative defaults.
+
+Coordinate conversions follow the pinned Unity formulas. **Polar to Rectangular** takes Angle in degrees; spherical
+Theta/Phi and Rotate 2D/3D angles use radians. Zero-length rectangular coordinates return zero spherical angles, and a
+zero Rotate 3D axis returns the original position. Rotate 3D normalizes nonzero axes before applying the axis-angle
+rotation around Rotation Center.
+
+Value, Perlin, and Cellular noise are deterministic fixed-3D Kéire equivalents. Each scalar noise node accepts
+Coordinate, Frequency, Octaves, Roughness, Lacunarity, and Range, then exposes Scalar Noise and Vector3 Derivatives.
+Curl variants replace Range with Amplitude and return a Vector3 curl field. Execution clamps Octaves to `1..8`,
+Roughness to `0..1`, Frequency/Lacunarity to non-negative values, bounds lattice coordinates, and contains every
+non-finite result. Cellular noise searches a bounded eight-cell neighborhood selected around the sample point; this
+keeps CPU/GPU work deterministic and suitable for the interpreter. Value and Perlin derivatives are evaluated
+analytically from the interpolation weights, while Cellular derives the nearest-feature distance gradient. Curl uses
+three decorrelated analytic gradient channels, avoiding 18 repeated finite-difference field samples per octave. Use low
+octave counts for dense per-particle Update graphs; uniform or literal coordinates are folded or hoisted when their
+evaluation domain permits it.
+
+The expression source ABI was expanded from four to eight inputs end-to-end: compiler folding, canonical asset
+validation, cooked source limits, CPU execution, GPU packing, renderer validation, and HLSL execution all enforce the
+same bound. Six-input Noise nodes therefore cannot save successfully and then fail later at runtime because of a
+different backend limit.
 
 ### Unity 6.3 LTS parity manifest
 
@@ -117,9 +198,9 @@ Unity Editor 6000.3, `com.unity.visualeffectgraph` 17.3.0, and Unity Graphics co
 provenance, Kéire implementation ID, backend tier, tests, documentation, support state, and disabled reason for every
 catalogued Operator, Block, Context, and Output.
 
-The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. Sixty-two rows carry the
-explicit **Kéire Equivalent** tier for tested core-value, context, event, collision, sampling, and renderer workflows;
-216 remain `Disabled`. A `keire` implementation mapping alone means related native
+The frozen snapshot contains 278 rows: 214 Operators, 46 Blocks, 5 Contexts, and 13 Outputs. One hundred twenty-five
+rows carry the explicit **Kéire Equivalent** tier for tested value, attribute, procedural-noise, context, event,
+collision, sampling, and renderer workflows; 153 remain `Disabled`. A `keire` implementation mapping alone means related native
 functionality exists and does not claim Unity parity. A row is enabled only when its native descriptor, backend tier,
 focused tests, documentation, and deliberately documented semantic differences agree. Disabled entries remain visible
 to tooling but creation or compilation must reject them with their recorded reason.
@@ -492,6 +573,11 @@ Use the canvas controls as follows:
 - Use the mouse wheel to zoom.
 - Click the background to clear node selection.
 - Select **Frame All** to fit every card in the available canvas.
+
+The canvas uses zoom-aware detail levels. At overview zoom it retains card silhouettes, colored typed pins, cables,
+selection, and pin hit targets while hiding text that cannot fit a scaled row. Block and cable labels return at medium
+zoom, pin labels return when row spacing is readable, and node subtitles return at full-detail zoom. These are visual
+levels of detail only: hidden labels do not disable pins, connections, context menus, selection, or drag operations.
 
 The Inspector exposes **Graph Position** for precise node placement. When a cable is selected, it instead presents the
 cable's stable identity, source node and pin, destination node and pin, value type, and unlink action.

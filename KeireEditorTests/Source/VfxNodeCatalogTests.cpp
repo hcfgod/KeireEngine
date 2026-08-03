@@ -207,7 +207,10 @@ TEST_CASE("VFX node catalog exposes type-correct Split variants for filtered sea
     {
         const auto* descriptor = Keire::FindVfxNodeDescriptor(typeId);
         REQUIRE(descriptor != nullptr);
-        (void)catalog.Add(KeireEditor::BuildVfxNodeCatalogEntry(*descriptor));
+        const auto entry = KeireEditor::BuildVfxNodeCatalogEntry(*descriptor);
+        CHECK(entry.Enabled());
+        CHECK(KeireEditor::VfxNodeCatalogSupportBadge(entry) == "CPU + GPU");
+        (void)catalog.Add(entry);
     }
 
     const auto vector2Matches = catalog.Search({.Text = "split",
@@ -223,4 +226,16 @@ TEST_CASE("VFX node catalog exposes type-correct Split variants for filtered sea
                                               .PinDirection = KeireEditor::VfxNodeCatalogPinDirection::Input});
     REQUIRE(colorMatches.size() == 1);
     CHECK(catalog.Entries()[colorMatches.front().EntryIndex].Id == "keire.operator.split-color");
+}
+
+TEST_CASE("VFX graph node kind labels cover every schema-4 node class")
+{
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::Context) == "Context");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::Module) == "Runtime Module");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::Parameter) == "Blackboard Parameter");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::CustomHlsl) == "Custom HLSL");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::Operator) == "Operator");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::Attribute) == "Attribute");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind::Subgraph) == "Subgraph");
+    CHECK(KeireEditor::VfxGraphNodeKindLabel(static_cast<Keire::VfxGraphNodeKind>(255)) == "Unknown");
 }

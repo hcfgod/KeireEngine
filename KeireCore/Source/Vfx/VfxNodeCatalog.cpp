@@ -47,13 +47,13 @@ namespace Keire
 
         [[nodiscard]] constexpr bool HasValidatedGpuSemantics(const VfxValueOpcode opcode) noexcept
         {
-            return opcode <= VfxValueOpcode::Sign;
+            return opcode <= VfxValueOpcode::Rotate3D;
         }
 
         [[nodiscard]] bool IsGpuInterpretedOperator(const VfxNodeDescriptor& descriptor) noexcept
         {
-            constexpr auto MaximumGpuOpcode = VfxValueOpcode::Sign;
-            static_assert(static_cast<std::uint8_t>(MaximumGpuOpcode) == 56);
+            constexpr auto MaximumGpuOpcode = VfxValueOpcode::Rotate3D;
+            static_assert(static_cast<std::uint8_t>(MaximumGpuOpcode) == 108);
             const auto executable = descriptor.SupportTier == VfxNodeSupportTier::Supported ||
                                     descriptor.SupportTier == VfxNodeSupportTier::KeireEquivalent;
             return descriptor.Class == VfxNodeClass::Operator && executable && descriptor.Lowering &&
@@ -266,7 +266,7 @@ namespace Keire
         [[nodiscard]] std::vector<VfxNodeDescriptor> BuildCatalog()
         {
             std::vector<VfxNodeDescriptor> result;
-            result.reserve(112);
+            result.reserve(180);
             result.push_back(Structural("keire.block.burst", "Burst", "Block/Spawn", VfxNodeClass::Block,
                                         {VfxContextType::Spawn},
                                         {Input("Time", "time", VfxValueType::Scalar, 0.0F),
@@ -507,6 +507,29 @@ namespace Keire
                   Input("Max", "maximum", VfxValueType::Scalar, 1.0F), Output("Out", "out", VfxValueType::Scalar)},
                  {},
                  VfxValueOpcode::Clamp});
+            result.push_back(
+                FixedOperator("keire.operator.modulo", "Modulo", "Operator/Math/Arithmetic",
+                              {Input("A", "a", VfxValueType::Scalar, 1.0F), Input("B", "b", VfxValueType::Scalar, 1.0F),
+                               Output("Out", "out", VfxValueType::Scalar)},
+                              VfxValueOpcode::Modulo, {"%", "remainder"}));
+            result.push_back(
+                FixedOperator("keire.operator.one-minus", "One Minus (1-x)", "Operator/Math/Arithmetic",
+                              {Input("X", "x", VfxValueType::Scalar, 0.0F), Output("Out", "out", VfxValueType::Scalar)},
+                              VfxValueOpcode::OneMinus, {"invert", "one minus x"}));
+            result.push_back(
+                FixedOperator("keire.operator.reciprocal", "Reciprocal (1/x)", "Operator/Math/Arithmetic",
+                              {Input("X", "x", VfxValueType::Scalar, 1.0F), Output("Out", "out", VfxValueType::Scalar)},
+                              VfxValueOpcode::Reciprocal, {"inverse", "one over x"}));
+            result.push_back(
+                FixedOperator("keire.operator.inverse-lerp", "Inverse Lerp", "Operator/Math/Arithmetic",
+                              {Input("X", "x", VfxValueType::Scalar, 0.0F), Input("Y", "y", VfxValueType::Scalar, 1.0F),
+                               Input("S", "s", VfxValueType::Scalar, 0.5F), Output("Out", "out", VfxValueType::Scalar)},
+                              VfxValueOpcode::InverseLerp, {"linear", "interpolation", "unlerp"}));
+            result.push_back(FixedOperator("keire.operator.discretize", "Discretize", "Operator/Math/Clamp",
+                                           {Input("Value", "a", VfxValueType::Scalar, 0.0F),
+                                            Input("Granularity", "b", VfxValueType::Scalar, 1.0F),
+                                            Output("Out", "out", VfxValueType::Scalar)},
+                                           VfxValueOpcode::Discretize, {"quantize", "snap"}));
 
             result.push_back(FixedOperator(
                 "keire.operator.sine", "Sine", "Operator/Math/Trigonometry",
@@ -676,6 +699,40 @@ namespace Keire
                 "keire.operator.not", "Not", "Operator/Logic",
                 {Input("Input", "input", VfxValueType::Boolean, false), Output("Out", "out", VfxValueType::Boolean)},
                 VfxValueOpcode::BooleanNot, {"boolean not", "!"}));
+            result.push_back(FixedOperator("keire.operator.nand", "Nand", "Operator/Logic",
+                                           {Input("A", "a", VfxValueType::Boolean, false),
+                                            Input("B", "b", VfxValueType::Boolean, false),
+                                            Output("Out", "out", VfxValueType::Boolean)},
+                                           VfxValueOpcode::BooleanNand, {"boolean nand", "not and"}));
+            result.push_back(FixedOperator("keire.operator.nor", "Nor", "Operator/Logic",
+                                           {Input("A", "a", VfxValueType::Boolean, false),
+                                            Input("B", "b", VfxValueType::Boolean, false),
+                                            Output("Out", "out", VfxValueType::Boolean)},
+                                           VfxValueOpcode::BooleanNor, {"boolean nor", "not or"}));
+
+            const auto bitwiseBinary =
+                [](std::string id, std::string label, const VfxValueOpcode opcode, std::vector<std::string> synonyms)
+            {
+                return FixedOperator(std::move(id), std::move(label), "Operator/Bitwise",
+                                     {Input("A", "a", VfxValueType::UnsignedInteger, std::uint64_t{0}),
+                                      Input("B", "b", VfxValueType::UnsignedInteger, std::uint64_t{0}),
+                                      Output("Out", "out", VfxValueType::UnsignedInteger)},
+                                     opcode, std::move(synonyms));
+            };
+            result.push_back(
+                bitwiseBinary("keire.operator.bitwise-and", "And", VfxValueOpcode::BitwiseAnd, {"bitwise and", "&"}));
+            result.push_back(
+                bitwiseBinary("keire.operator.bitwise-or", "Or", VfxValueOpcode::BitwiseOr, {"bitwise or", "|"}));
+            result.push_back(bitwiseBinary("keire.operator.bitwise-xor", "Xor", VfxValueOpcode::BitwiseXor,
+                                           {"bitwise xor", "exclusive or", "^"}));
+            result.push_back(bitwiseBinary("keire.operator.bitwise-left-shift", "Left Shift",
+                                           VfxValueOpcode::BitwiseLeftShift, {"shift left", "<<"}));
+            result.push_back(bitwiseBinary("keire.operator.bitwise-right-shift", "Right Shift",
+                                           VfxValueOpcode::BitwiseRightShift, {"shift right", ">>"}));
+            result.push_back(FixedOperator("keire.operator.bitwise-complement", "Complement", "Operator/Bitwise",
+                                           {Input("X", "x", VfxValueType::UnsignedInteger, std::uint64_t{0}),
+                                            Output("Out", "out", VfxValueType::UnsignedInteger)},
+                                           VfxValueOpcode::BitwiseComplement, {"bitwise not", "~"}));
 
             result.push_back(
                 FixedOperator("keire.operator.combine-vector2", "Combine Vector 2", "Operator/Math/Vector",
@@ -744,6 +801,28 @@ namespace Keire
                                             Input("B", "b", VfxValueType::Vector3, Vector3{}),
                                             Output("Out", "out", VfxValueType::Scalar)},
                                            VfxValueOpcode::Distance));
+            result.push_back(FixedOperator(
+                "keire.operator.squared-distance", "Squared Distance", "Operator/Math/Vector",
+                {Input("A", "a", VfxValueType::Vector3, Vector3{}), Input("B", "b", VfxValueType::Vector3, Vector3{}),
+                 Output("D", "out", VfxValueType::Scalar)},
+                VfxValueOpcode::SquaredDistance, {"distance squared", "sqr distance"}));
+            result.push_back(FixedOperator(
+                "keire.operator.squared-length", "Squared Length", "Operator/Math/Vector",
+                {Input("X", "x", VfxValueType::Vector3, Vector3{}), Output("L", "out", VfxValueType::Scalar)},
+                VfxValueOpcode::SquaredLength, {"length squared", "sqr magnitude"}));
+
+            result.push_back(FixedOperator("keire.operator.color-luma", "Color Luma", "Operator/Color",
+                                           {Input("Color", "color", VfxValueType::Color, Color{1.0F, 1.0F, 1.0F, 1.0F}),
+                                            Output("Luma", "out", VfxValueType::Scalar)},
+                                           VfxValueOpcode::ColorLuma, {"luminance", "brightness"}));
+            result.push_back(FixedOperator("keire.operator.hsv-to-rgb", "HSV to RGB", "Operator/Color",
+                                           {Input("HSV", "hsv", VfxValueType::Vector3, Vector3{1.0F, 0.5F, 0.5F}),
+                                            Output("RGB", "out", VfxValueType::Vector4)},
+                                           VfxValueOpcode::HsvToRgb, {"hue", "saturation", "value", "convert"}));
+            result.push_back(FixedOperator("keire.operator.rgb-to-hsv", "RGB to HSV", "Operator/Color",
+                                           {Input("Color", "color", VfxValueType::Color, Color{1.0F, 1.0F, 1.0F, 1.0F}),
+                                            Output("HSV", "out", VfxValueType::Vector3)},
+                                           VfxValueOpcode::RgbToHsv, {"red", "green", "blue", "convert"}));
 
             result.push_back(FixedOperator("keire.operator.integer-to-float", "To Float", "Operator/Math/Cast",
                                            {Input("Input", "input", VfxValueType::Integer, std::int64_t{0}),
@@ -769,12 +848,173 @@ namespace Keire
                                      VfxValueOpcode::DeltaTime, ValueContexts(), {"dt", "frame time"}));
             result.push_back(BuiltIn("keire.operator.age", "Age", VfxValueType::Scalar, VfxValueOpcode::Age,
                                      ParticleContexts(), {"particle age"}));
+            auto ageOverLifetime =
+                BuiltIn("keire.operator.age-over-lifetime", "Age Over Lifetime", VfxValueType::Scalar,
+                        VfxValueOpcode::AgeOverLifetime, ParticleContexts(), {"normalized age", "lifetime ratio"});
+            ageOverLifetime.Category = "Operator/Attribute";
+            result.push_back(std::move(ageOverLifetime));
             result.push_back(BuiltIn("keire.operator.lifetime", "Lifetime", VfxValueType::Scalar,
                                      VfxValueOpcode::Lifetime, ParticleContexts(), {"particle lifetime"}));
             result.push_back(BuiltIn("keire.operator.particle-id", "Particle ID", VfxValueType::UnsignedInteger,
                                      VfxValueOpcode::ParticleId, ParticleContexts(), {"particle index", "id"}));
             result.push_back(BuiltIn("keire.operator.spawn-index", "Spawn Index", VfxValueType::UnsignedInteger,
                                      VfxValueOpcode::SpawnIndex, ValueContexts(), {"spawn id", "spawn count"}));
+            result.push_back(BuiltIn("keire.operator.frame-index", "Frame Index", VfxValueType::UnsignedInteger,
+                                     VfxValueOpcode::FrameIndex, ValueContexts(), {"simulation step", "frame count"}));
+            result.push_back(BuiltIn("keire.operator.system-seed", "System Seed", VfxValueType::UnsignedInteger,
+                                     VfxValueOpcode::SystemSeed, ValueContexts(), {"effect seed", "random seed"}));
+
+            const auto addAttribute = [&result](std::string id, std::string label, const VfxValueType type,
+                                                const VfxValueOpcode opcode, std::vector<std::string> synonyms = {})
+            {
+                auto descriptor =
+                    BuiltIn(std::move(id), std::move(label), type, opcode, ParticleContexts(), std::move(synonyms));
+                descriptor.Category = "Operator/Attribute";
+                result.push_back(std::move(descriptor));
+            };
+            addAttribute("keire.operator.attribute-alive", "Get Attribute: alive", VfxValueType::Boolean,
+                         VfxValueOpcode::AttributeAlive, {"alive", "particle alive"});
+            addAttribute("keire.operator.attribute-alpha", "Get Attribute: alpha", VfxValueType::Scalar,
+                         VfxValueOpcode::AttributeAlpha, {"alpha", "opacity"});
+            addAttribute("keire.operator.attribute-angle", "Get Attribute: angle", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeAngle, {"angle", "rotation"});
+            addAttribute("keire.operator.attribute-axis-x", "Get Attribute: axisX", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeAxisX, {"axis x", "right"});
+            addAttribute("keire.operator.attribute-axis-y", "Get Attribute: axisY", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeAxisY, {"axis y", "up"});
+            addAttribute("keire.operator.attribute-axis-z", "Get Attribute: axisZ", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeAxisZ, {"axis z", "forward"});
+            addAttribute("keire.operator.attribute-color", "Get Attribute: color", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeColor, {"color", "rgb"});
+            addAttribute("keire.operator.attribute-old-position", "Get Attribute: oldPosition", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeOldPosition, {"previous position", "old position"});
+            addAttribute("keire.operator.attribute-particle-count-in-strip", "Get Attribute: particleCountInStrip",
+                         VfxValueType::UnsignedInteger, VfxValueOpcode::AttributeParticleCountInStrip,
+                         {"strip count", "particles per strip"});
+            addAttribute("keire.operator.attribute-particle-index-in-strip", "Get Attribute: particleIndexInStrip",
+                         VfxValueType::UnsignedInteger, VfxValueOpcode::AttributeParticleIndexInStrip,
+                         {"strip index", "particle index in strip"});
+            addAttribute("keire.operator.attribute-position", "Get Attribute: position", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributePosition, {"position", "particle position"});
+            addAttribute("keire.operator.attribute-seed", "Get Attribute: seed", VfxValueType::UnsignedInteger,
+                         VfxValueOpcode::AttributeSeed, {"seed", "particle seed"});
+            addAttribute("keire.operator.attribute-size", "Get Attribute: size", VfxValueType::Scalar,
+                         VfxValueOpcode::AttributeSize, {"size", "particle size"});
+            addAttribute("keire.operator.attribute-spawn-time", "Get Attribute: spawnTime", VfxValueType::Scalar,
+                         VfxValueOpcode::AttributeSpawnTime, {"spawn time", "birth time"});
+            addAttribute("keire.operator.attribute-strip-index", "Get Attribute: stripIndex",
+                         VfxValueType::UnsignedInteger, VfxValueOpcode::AttributeStripIndex,
+                         {"strip index", "strip id"});
+            addAttribute("keire.operator.attribute-velocity", "Get Attribute: velocity", VfxValueType::Vector3,
+                         VfxValueOpcode::AttributeVelocity, {"velocity", "particle velocity"});
+            addAttribute("keire.operator.ratio-over-strip", "Ratio Over Strip", VfxValueType::Scalar,
+                         VfxValueOpcode::RatioOverStrip, {"strip ratio", "normalized strip index"});
+
+            const auto addInline = [&result](std::string id, std::string label, const VfxValueType type,
+                                             VfxParameterValue defaultValue,
+                                             const VfxNodeSupportTier support = VfxNodeSupportTier::Supported)
+            {
+                auto descriptor =
+                    FixedOperator(std::move(id), std::move(label), "Operator/Inline",
+                                  {Input("Input", "input", type, std::move(defaultValue)), Output("Out", "out", type)},
+                                  VfxValueOpcode::Constant, {"inline", "literal", "identity"});
+                descriptor.SupportTier = support;
+                result.push_back(std::move(descriptor));
+            };
+            addInline("keire.operator.inline-color", "Color", VfxValueType::Color, Color{});
+            addInline("keire.operator.inline-direction", "Direction", VfxValueType::Vector3, Vector3{},
+                      VfxNodeSupportTier::KeireEquivalent);
+            addInline("keire.operator.inline-position", "Position", VfxValueType::Vector3, Vector3{},
+                      VfxNodeSupportTier::KeireEquivalent);
+            addInline("keire.operator.inline-vector", "Vector", VfxValueType::Vector3, Vector3{},
+                      VfxNodeSupportTier::KeireEquivalent);
+            addInline("keire.operator.inline-vector2", "Vector2", VfxValueType::Vector2, Vector2{});
+            addInline("keire.operator.inline-vector3", "Vector3", VfxValueType::Vector3, Vector3{});
+            addInline("keire.operator.inline-vector4", "Vector4", VfxValueType::Vector4, Vector4{});
+            addInline("keire.operator.inline-bool", "bool", VfxValueType::Boolean, false);
+            addInline("keire.operator.inline-float", "float", VfxValueType::Scalar, 0.0F);
+            addInline("keire.operator.inline-int", "int", VfxValueType::Integer, std::int64_t{0});
+            addInline("keire.operator.inline-uint", "uint", VfxValueType::UnsignedInteger, std::uint64_t{0});
+
+            result.push_back(FixedOperator("keire.operator.epsilon", "Epsilon (Ɛ)", "Operator/Math/Constants",
+                                           {Output("Epsilon", "epsilon", VfxValueType::Scalar)},
+                                           VfxValueOpcode::Epsilon, {"epsilon", "small value"}));
+            result.push_back(FixedOperator(
+                "keire.operator.pi", "Pi (π)", "Operator/Math/Constants",
+                {Output("Pi", "pi", VfxValueType::Scalar), Output("2 Pi", "twoPi", VfxValueType::Scalar),
+                 Output("Pi / 2", "halfPi", VfxValueType::Scalar), Output("Pi / 3", "thirdPi", VfxValueType::Scalar)},
+                VfxValueOpcode::Pi, {"pi", "tau", "circle constant"}));
+
+            const auto addNoise =
+                [&result](std::string id, std::string label, const VfxValueOpcode opcode, const bool curl)
+            {
+                std::vector<VfxNodePinDescriptor> pins{
+                    Input("Coordinate", "coordinate", VfxValueType::Vector3, Vector3{}),
+                    Input("Frequency", "frequency", VfxValueType::Scalar, 1.0F),
+                    Input("Octaves", "octaves", VfxValueType::Integer, std::int64_t{3}),
+                    Input("Roughness", "roughness", VfxValueType::Scalar, 0.5F),
+                    Input("Lacunarity", "lacunarity", VfxValueType::Scalar, 2.0F)};
+                if (curl)
+                {
+                    pins.push_back(Input("Amplitude", "amplitude", VfxValueType::Scalar, 1.0F));
+                    pins.push_back(Output("Noise", "out", VfxValueType::Vector3));
+                }
+                else
+                {
+                    pins.push_back(Input("Range", "range", VfxValueType::Vector2, Vector2{-1.0F, 1.0F}));
+                    pins.push_back(Output("Noise", "out", VfxValueType::Scalar));
+                    pins.push_back(Output("Derivatives", "derivatives", VfxValueType::Vector3));
+                }
+                auto descriptor = FixedOperator(std::move(id), std::move(label), "Operator/Noise", std::move(pins),
+                                                opcode, {"procedural", "fractal", "fbm", "3d noise"});
+                descriptor.SupportTier = VfxNodeSupportTier::KeireEquivalent;
+                descriptor.Settings = {{"Dimensions", std::string{"3D"}}};
+                result.push_back(std::move(descriptor));
+            };
+            addNoise("keire.operator.value-noise", "Value Noise", VfxValueOpcode::ValueNoise, false);
+            addNoise("keire.operator.perlin-noise", "Perlin Noise", VfxValueOpcode::PerlinNoise, false);
+            addNoise("keire.operator.cellular-noise", "Cellular Noise", VfxValueOpcode::CellularNoise, false);
+            addNoise("keire.operator.value-curl-noise", "Value Curl Noise", VfxValueOpcode::ValueCurlNoise, true);
+            addNoise("keire.operator.perlin-curl-noise", "Perlin Curl Noise", VfxValueOpcode::PerlinCurlNoise, true);
+            addNoise("keire.operator.cellular-curl-noise", "Cellular Curl Noise", VfxValueOpcode::CellularCurlNoise,
+                     true);
+
+            result.push_back(FixedOperator("keire.operator.polar-to-rectangular", "Polar to Rectangular",
+                                           "Operator/Math/Coordinates",
+                                           {Input("Angle", "angle", VfxValueType::Scalar, 0.0F),
+                                            Input("Distance", "distance", VfxValueType::Scalar, 1.0F),
+                                            Output("Out", "out", VfxValueType::Vector2)},
+                                           VfxValueOpcode::PolarToRectangular, {"polar", "cartesian"}));
+            result.push_back(FixedOperator(
+                "keire.operator.rectangular-to-polar", "Rectangular to Polar", "Operator/Math/Coordinates",
+                {Input("Coordinate", "coordinate", VfxValueType::Vector2, Vector2{}),
+                 Output("Theta", "theta", VfxValueType::Scalar), Output("Distance", "distance", VfxValueType::Scalar)},
+                VfxValueOpcode::RectangularToPolar, {"cartesian", "polar"}));
+            result.push_back(FixedOperator(
+                "keire.operator.rectangular-to-spherical", "Rectangular to Spherical", "Operator/Math/Coordinates",
+                {Input("Coordinate", "coordinate", VfxValueType::Vector3, Vector3{}),
+                 Output("Distance", "distance", VfxValueType::Scalar), Output("Theta", "theta", VfxValueType::Scalar),
+                 Output("Phi", "phi", VfxValueType::Scalar)},
+                VfxValueOpcode::RectangularToSpherical, {"cartesian", "spherical"}));
+            result.push_back(FixedOperator(
+                "keire.operator.spherical-to-rectangular", "Spherical to Rectangular", "Operator/Math/Coordinates",
+                {Input("Distance", "distance", VfxValueType::Scalar, 1.0F),
+                 Input("Theta", "theta", VfxValueType::Scalar, 0.0F), Input("Phi", "phi", VfxValueType::Scalar, 0.0F),
+                 Output("Out", "out", VfxValueType::Vector3)},
+                VfxValueOpcode::SphericalToRectangular, {"spherical", "cartesian"}));
+            result.push_back(FixedOperator("keire.operator.rotate-2d", "Rotate 2D", "Operator/Math/Coordinates",
+                                           {Input("Position", "position", VfxValueType::Vector2, Vector2{}),
+                                            Input("Rotation Center", "center", VfxValueType::Vector2, Vector2{}),
+                                            Input("Angle", "angle", VfxValueType::Scalar, 0.0F),
+                                            Output("Out", "out", VfxValueType::Vector2)},
+                                           VfxValueOpcode::Rotate2D, {"rotate vector2", "rotation"}));
+            result.push_back(FixedOperator(
+                "keire.operator.rotate-3d", "Rotate 3D", "Operator/Math/Coordinates",
+                {Input("Position", "position", VfxValueType::Vector3, Vector3{}),
+                 Input("Rotation Center", "center", VfxValueType::Vector3, Vector3{}),
+                 Input("Rotation Axis", "axis", VfxValueType::Vector3, Vector3{0.0F, 1.0F, 0.0F}),
+                 Input("Angle", "angle", VfxValueType::Scalar, 0.0F), Output("Out", "out", VfxValueType::Vector3)},
+                VfxValueOpcode::Rotate3D, {"rotate vector3", "axis angle", "rotation"}));
 
             result.push_back(Structural("keire.output.renderer", "Particle Output", "Output", VfxNodeClass::Output,
                                         {VfxContextType::Output},

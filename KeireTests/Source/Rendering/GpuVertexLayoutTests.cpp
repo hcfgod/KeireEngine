@@ -6,8 +6,13 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <iterator>
 #include <limits>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
 {
@@ -15,18 +20,48 @@ TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
     using Keire::RenderBackend::GpuRenderVertex;
 
     CHECK(alignof(GpuMeshVertex) == 16);
-    CHECK(sizeof(GpuMeshVertex) == 80);
+    CHECK(sizeof(GpuMeshVertex) == 96);
     CHECK(offsetof(GpuMeshVertex, Position) == 0);
     CHECK(offsetof(GpuMeshVertex, Normal) == 16);
     CHECK(offsetof(GpuMeshVertex, UV0) == 32);
     CHECK(offsetof(GpuMeshVertex, VertexColor) == 48);
     CHECK(offsetof(GpuMeshVertex, Tangent) == 64);
+    CHECK(offsetof(GpuMeshVertex, UV1) == 80);
 
     CHECK(alignof(GpuRenderVertex) == 16);
     CHECK(sizeof(GpuRenderVertex) == 48);
     CHECK(offsetof(GpuRenderVertex, Position) == 0);
     CHECK(offsetof(GpuRenderVertex, Color) == 16);
     CHECK(offsetof(GpuRenderVertex, Normal) == 32);
+}
+
+TEST_CASE("GPU skinning shader storage matches the mesh vertex lane layout")
+{
+    std::ifstream stream("KeireCore/Shaders/BuiltinSkinning.hlsl", std::ios::binary);
+    REQUIRE(stream.good());
+    const std::string shader{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+    const auto structure = shader.find("struct AssetVertex");
+    REQUIRE(structure != std::string::npos);
+    const auto end = shader.find("};", structure);
+    REQUIRE(end != std::string::npos);
+
+    const std::array fields{"float4 Position;",    "float4 Normal;",  "float4 UV0;",
+                            "float4 VertexColor;", "float4 Tangent;", "float4 UV1;"};
+    auto cursor = structure;
+    for (const auto field : fields)
+    {
+        cursor = shader.find(field, cursor);
+        REQUIRE(cursor != std::string::npos);
+        REQUIRE(cursor < end);
+        cursor += std::string_view(field).size();
+    }
+
+    std::istringstream lines(shader.substr(structure, end - structure));
+    std::size_t shaderLaneCount = 0;
+    for (std::string line; std::getline(lines, line);)
+        if (line.find("float4 ") != std::string::npos)
+            ++shaderLaneCount;
+    CHECK(shaderLaneCount == sizeof(Keire::RenderBackend::GpuMeshVertex) / sizeof(Keire::Vector4));
 }
 
 TEST_CASE("CPU mesh VFX particles enter material-aware scene rendering")
@@ -228,6 +263,151 @@ TEST_CASE("GPU VFX renderer validation accepts every packed Combine and Split ve
             payload.ValueProgram.Instructions.push_back(split);
         }
 
+        CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
+    }
+}
+
+TEST_CASE("GPU VFX renderer validation accepts the Unity core utility opcode signatures")
+{
+    struct Signature
+    {
+        Keire::VfxValueOpcode Opcode;
+        Keire::VfxValueType Output;
+        std::vector<Keire::VfxValueType> Inputs;
+        std::uint32_t OutputIndex = 0;
+    };
+    const std::array signatures{
+        Signature{Keire::VfxValueOpcode::AgeOverLifetime, Keire::VfxValueType::Scalar, {}},
+        Signature{Keire::VfxValueOpcode::BitwiseAnd,
+                  Keire::VfxValueType::UnsignedInteger,
+                  {Keire::VfxValueType::UnsignedInteger, Keire::VfxValueType::UnsignedInteger}},
+        Signature{Keire::VfxValueOpcode::BitwiseComplement,
+                  Keire::VfxValueType::UnsignedInteger,
+                  {Keire::VfxValueType::UnsignedInteger}},
+        Signature{Keire::VfxValueOpcode::BitwiseLeftShift,
+                  Keire::VfxValueType::UnsignedInteger,
+                  {Keire::VfxValueType::UnsignedInteger, Keire::VfxValueType::UnsignedInteger}},
+        Signature{Keire::VfxValueOpcode::BitwiseOr,
+                  Keire::VfxValueType::UnsignedInteger,
+                  {Keire::VfxValueType::UnsignedInteger, Keire::VfxValueType::UnsignedInteger}},
+        Signature{Keire::VfxValueOpcode::BitwiseRightShift,
+                  Keire::VfxValueType::UnsignedInteger,
+                  {Keire::VfxValueType::UnsignedInteger, Keire::VfxValueType::UnsignedInteger}},
+        Signature{Keire::VfxValueOpcode::BitwiseXor,
+                  Keire::VfxValueType::UnsignedInteger,
+                  {Keire::VfxValueType::UnsignedInteger, Keire::VfxValueType::UnsignedInteger}},
+        Signature{Keire::VfxValueOpcode::ColorLuma, Keire::VfxValueType::Scalar, {Keire::VfxValueType::Color}},
+        Signature{Keire::VfxValueOpcode::HsvToRgb, Keire::VfxValueType::Vector4, {Keire::VfxValueType::Vector3}},
+        Signature{Keire::VfxValueOpcode::RgbToHsv, Keire::VfxValueType::Vector3, {Keire::VfxValueType::Color}},
+        Signature{Keire::VfxValueOpcode::Discretize,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::FrameIndex, Keire::VfxValueType::UnsignedInteger, {}},
+        Signature{Keire::VfxValueOpcode::InverseLerp,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::Modulo,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::BooleanNand,
+                  Keire::VfxValueType::Boolean,
+                  {Keire::VfxValueType::Boolean, Keire::VfxValueType::Boolean}},
+        Signature{Keire::VfxValueOpcode::BooleanNor,
+                  Keire::VfxValueType::Boolean,
+                  {Keire::VfxValueType::Boolean, Keire::VfxValueType::Boolean}},
+        Signature{Keire::VfxValueOpcode::OneMinus, Keire::VfxValueType::Scalar, {Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::Reciprocal, Keire::VfxValueType::Scalar, {Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::SquaredDistance,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Vector3}},
+        Signature{Keire::VfxValueOpcode::SquaredLength, Keire::VfxValueType::Scalar, {Keire::VfxValueType::Vector3}},
+        Signature{Keire::VfxValueOpcode::SystemSeed, Keire::VfxValueType::UnsignedInteger, {}},
+        Signature{Keire::VfxValueOpcode::AttributeAlive, Keire::VfxValueType::Boolean, {}},
+        Signature{Keire::VfxValueOpcode::AttributeAlpha, Keire::VfxValueType::Scalar, {}},
+        Signature{Keire::VfxValueOpcode::AttributeAngle, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeAxisX, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeAxisY, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeAxisZ, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeColor, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeOldPosition, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeParticleCountInStrip, Keire::VfxValueType::UnsignedInteger, {}},
+        Signature{Keire::VfxValueOpcode::AttributeParticleIndexInStrip, Keire::VfxValueType::UnsignedInteger, {}},
+        Signature{Keire::VfxValueOpcode::AttributePosition, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::AttributeSeed, Keire::VfxValueType::UnsignedInteger, {}},
+        Signature{Keire::VfxValueOpcode::AttributeSize, Keire::VfxValueType::Scalar, {}},
+        Signature{Keire::VfxValueOpcode::AttributeSpawnTime, Keire::VfxValueType::Scalar, {}},
+        Signature{Keire::VfxValueOpcode::AttributeStripIndex, Keire::VfxValueType::UnsignedInteger, {}},
+        Signature{Keire::VfxValueOpcode::AttributeVelocity, Keire::VfxValueType::Vector3, {}},
+        Signature{Keire::VfxValueOpcode::RatioOverStrip, Keire::VfxValueType::Scalar, {}},
+        Signature{Keire::VfxValueOpcode::Epsilon, Keire::VfxValueType::Scalar, {}},
+        Signature{Keire::VfxValueOpcode::Pi, Keire::VfxValueType::Scalar, {}, 3U},
+        Signature{Keire::VfxValueOpcode::ValueNoise,
+                  Keire::VfxValueType::Vector3,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Scalar, Keire::VfxValueType::Integer,
+                   Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Vector2},
+                  1U},
+        Signature{Keire::VfxValueOpcode::PerlinNoise,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Scalar, Keire::VfxValueType::Integer,
+                   Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Vector2}},
+        Signature{Keire::VfxValueOpcode::CellularNoise,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Scalar, Keire::VfxValueType::Integer,
+                   Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Vector2}},
+        Signature{Keire::VfxValueOpcode::ValueCurlNoise,
+                  Keire::VfxValueType::Vector3,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Scalar, Keire::VfxValueType::Integer,
+                   Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::PerlinCurlNoise,
+                  Keire::VfxValueType::Vector3,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Scalar, Keire::VfxValueType::Integer,
+                   Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::CellularCurlNoise,
+                  Keire::VfxValueType::Vector3,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Scalar, Keire::VfxValueType::Integer,
+                   Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::PolarToRectangular,
+                  Keire::VfxValueType::Vector2,
+                  {Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{
+            Keire::VfxValueOpcode::RectangularToPolar, Keire::VfxValueType::Scalar, {Keire::VfxValueType::Vector2}, 1U},
+        Signature{Keire::VfxValueOpcode::RectangularToSpherical,
+                  Keire::VfxValueType::Scalar,
+                  {Keire::VfxValueType::Vector3},
+                  2U},
+        Signature{Keire::VfxValueOpcode::SphericalToRectangular,
+                  Keire::VfxValueType::Vector3,
+                  {Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::Rotate2D,
+                  Keire::VfxValueType::Vector2,
+                  {Keire::VfxValueType::Vector2, Keire::VfxValueType::Vector2, Keire::VfxValueType::Scalar}},
+        Signature{Keire::VfxValueOpcode::Rotate3D,
+                  Keire::VfxValueType::Vector3,
+                  {Keire::VfxValueType::Vector3, Keire::VfxValueType::Vector3, Keire::VfxValueType::Vector3,
+                   Keire::VfxValueType::Scalar}},
+    };
+    static_assert(static_cast<std::uint8_t>(Keire::VfxValueOpcode::Rotate3D) == 108);
+
+    for (const auto& signature : signatures)
+    {
+        Keire::VfxGpuExecutionPayload payload;
+        payload.ValueProgram.RegisterCount = 1;
+        for (const auto type : signature.Inputs)
+        {
+            const auto constant = static_cast<std::uint32_t>(payload.ValueProgram.Constants.size());
+            payload.ValueProgram.Constants.emplace_back();
+            payload.ValueProgram.Sources.push_back({static_cast<std::uint32_t>(Keire::VfxGpuValueSourceKind::Literal),
+                                                    static_cast<std::uint32_t>(type), constant, 0U});
+        }
+        Keire::VfxGpuValueInstruction instruction;
+        instruction.Header = {static_cast<std::uint32_t>(signature.Opcode),
+                              static_cast<std::uint32_t>(signature.Output),
+                              static_cast<std::uint32_t>(Keire::VfxContextType::Update),
+                              static_cast<std::uint32_t>(Keire::VfxEvaluationDomain::PerParticleUpdate)};
+        instruction.Output = {0U, signature.OutputIndex, 0U, static_cast<std::uint32_t>(signature.Inputs.size())};
+        payload.ValueProgram.Instructions.push_back(instruction);
+
+        CAPTURE(static_cast<std::uint32_t>(signature.Opcode));
         CHECK_FALSE(Keire::RenderBackend::ValidateGpuVfxExecutionPayload(payload).has_value());
     }
 }

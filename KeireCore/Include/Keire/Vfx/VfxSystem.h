@@ -460,7 +460,59 @@ namespace Keire
         Smoothstep,
         Step,
         Negate,
-        Sign
+        Sign,
+        AgeOverLifetime,
+        BitwiseAnd,
+        BitwiseComplement,
+        BitwiseLeftShift,
+        BitwiseOr,
+        BitwiseRightShift,
+        BitwiseXor,
+        ColorLuma,
+        HsvToRgb,
+        RgbToHsv,
+        Discretize,
+        FrameIndex,
+        InverseLerp,
+        Modulo,
+        BooleanNand,
+        BooleanNor,
+        OneMinus,
+        Reciprocal,
+        SquaredDistance,
+        SquaredLength,
+        SystemSeed,
+        AttributeAlive,
+        AttributeAlpha,
+        AttributeAngle,
+        AttributeAxisX,
+        AttributeAxisY,
+        AttributeAxisZ,
+        AttributeColor,
+        AttributeOldPosition,
+        AttributeParticleCountInStrip,
+        AttributeParticleIndexInStrip,
+        AttributePosition,
+        AttributeSeed,
+        AttributeSize,
+        AttributeSpawnTime,
+        AttributeStripIndex,
+        AttributeVelocity,
+        RatioOverStrip,
+        Epsilon,
+        Pi,
+        ValueNoise,
+        PerlinNoise,
+        CellularNoise,
+        ValueCurlNoise,
+        PerlinCurlNoise,
+        CellularCurlNoise,
+        PolarToRectangular,
+        RectangularToPolar,
+        RectangularToSpherical,
+        SphericalToRectangular,
+        Rotate2D,
+        Rotate3D
     };
 
     enum class VfxComparisonCondition : std::uint8_t
@@ -796,7 +848,7 @@ namespace Keire
     {
         static constexpr std::size_t MaximumInstructions = 64;
         static constexpr std::size_t MaximumRegisters = 64;
-        static constexpr std::size_t MaximumSources = MaximumInstructions * 4;
+        static constexpr std::size_t MaximumSources = MaximumInstructions * 8;
         static constexpr std::size_t MaximumConstants = MaximumSources;
 
         std::array<std::uint32_t, 4> SystemIdentity{};

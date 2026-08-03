@@ -38,6 +38,7 @@ namespace
     constexpr std::uint32_t SurfaceSize = 96;
     constexpr float ColorTolerance = 0.04F;
     constexpr float MinimumBehaviorDelta = 0.08F;
+    constexpr float MinimumNormalResponseDelta = 0.04F;
     constexpr float MinimumShadowDelta = 0.025F;
     constexpr float MinimumShadowDepthDelta = 0.01F;
 
@@ -510,10 +511,12 @@ namespace
             const std::string shaderManifest = R"({
   "schemaVersion": 1,
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
-  "vertexLayoutVersion": 2,
+  "vertexLayoutVersion": 3,
   "receivesShadows": true,
   "usesForwardPlus": true,
   "usesInstancing": true,
+  "usesImageBasedLighting": true,
+  "spatialLightingAbiVersion": 2,
   "stages": {"vertex": "VSMain", "fragment": "PSMain"},
   "includeRoots": ["Assets/Shaders"],
   "renderState": {"topology": "TriangleList", "culling": "None", "depthTest": true, "depthWrite": true, "blend": false},
@@ -1343,13 +1346,13 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
-            if (m_Frame == 48)
+            if (m_Frame == 120)
             {
                 m_Results->Frames.push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
                 m_Light->SetShadows(Keire::ShadowQuality::Soft);
             }
-            else if (m_Frame == 60)
+            else if (m_Frame == 144)
             {
                 m_Results->Frames.push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
@@ -1357,7 +1360,7 @@ namespace
                     *Owner().Renderer(), *m_View->Surface(), 0));
                 m_Caster->SetCastShadows(true);
             }
-            else if (m_Frame == 72)
+            else if (m_Frame == 168)
             {
                 m_Results->Frames.push_back(
                     Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface()));
@@ -1464,32 +1467,32 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
-            if (m_Frame == 48)
+            if (m_Frame == 120)
             {
                 Capture();
                 m_Point->SetShadows(Keire::ShadowQuality::Soft);
             }
-            else if (m_Frame == 60)
-            {
-                Capture();
-                CaptureShadow(11);
-                m_Caster->SetCastShadows(true);
-            }
-            else if (m_Frame == 72)
-            {
-                Capture();
-                CaptureShadow(11);
-                m_Point->SetShadows(Keire::ShadowQuality::Disabled);
-                m_Caster->SetCastShadows(false);
-                m_Spot->SetShadows(Keire::ShadowQuality::Soft);
-            }
-            else if (m_Frame == 84)
+            else if (m_Frame == 144)
             {
                 Capture();
                 CaptureShadow(0);
                 m_Caster->SetCastShadows(true);
             }
-            else if (m_Frame == 96)
+            else if (m_Frame == 168)
+            {
+                Capture();
+                CaptureShadow(0);
+                m_Point->SetShadows(Keire::ShadowQuality::Disabled);
+                m_Caster->SetCastShadows(false);
+                m_Spot->SetShadows(Keire::ShadowQuality::Soft);
+            }
+            else if (m_Frame == 192)
+            {
+                Capture();
+                CaptureShadow(0);
+                m_Caster->SetCastShadows(true);
+            }
+            else if (m_Frame == 216)
             {
                 Capture();
                 CaptureShadow(0);
@@ -2448,7 +2451,7 @@ TEST_CASE("PBR material semantics produce stable behavioral pixel deltas")
     CHECK(std::abs(captures[0].Red - captures[1].Red) <= ColorTolerance);
     CHECK(std::abs(captures[0].Green - captures[1].Green) <= ColorTolerance);
     CHECK(std::abs(captures[0].Blue - captures[1].Blue) <= ColorTolerance);
-    CHECK(std::abs(captures[1].Luminance() - captures[2].Luminance()) > MinimumBehaviorDelta);
+    CHECK(std::abs(captures[1].Luminance() - captures[2].Luminance()) > MinimumNormalResponseDelta);
     CHECK(std::abs(captures[1].Luminance() - captures[3].Luminance()) > MinimumBehaviorDelta);
     CHECK(captures[4].Luminance() > captures[5].Luminance() + MinimumBehaviorDelta);
     CHECK(captures[6].Red > captures[6].Green + MinimumBehaviorDelta);

@@ -18,6 +18,8 @@
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
+#include "KeireClient/Editor/MaterialGraphDocument.h"
+#include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -440,6 +442,24 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
           { PersistVfxEffect(asset, bytes); },
       })),
+      m_MaterialGraphDocument(
+          std::make_unique<KeireEditor::MaterialGraphDocument>(KeireEditor::MaterialGraphDocumentSpecification{
+              .Preview =
+                  [this](const Keire::AssetId, const Keire::MaterialGraphCompilation& compilation,
+                         const KeireEditor::MaterialGraphPreviewSettings& settings)
+              {
+                  if (m_MaterialGraphPanel)
+                      m_MaterialGraphPanel->UpdatePreview(compilation, settings);
+              },
+              .StopPreview =
+                  [this](const Keire::AssetId)
+              {
+                  if (m_MaterialGraphPanel)
+                      m_MaterialGraphPanel->ClearPreview();
+              },
+              .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
+              { PersistMaterialGraph(asset, bytes); },
+          })),
       m_ProjectSettingsDocument(std::make_unique<KeireEditor::ProjectSettingsDocument>()),
       m_MaterialDocument(std::make_unique<KeireEditor::MaterialDocument>()),
       m_CommandRouter(std::make_unique<KeireEditor::EditorCommandRouter>()),
@@ -459,8 +479,12 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           std::make_unique<KeireEditor::AudioMixerPanel>(static_cast<KeireEditor::IAudioMixerPanelController&>(*this))),
       m_VfxEffectPanel(
           std::make_unique<KeireEditor::VfxEffectPanel>(static_cast<KeireEditor::IVfxEffectPanelController&>(*this))),
+      m_MaterialGraphPanel(std::make_unique<KeireEditor::MaterialGraphPanel>(
+          static_cast<KeireEditor::IMaterialGraphPanelController&>(*this))),
       m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
           *m_ProjectSettingsDocument, static_cast<KeireEditor::IProjectSettingsController&>(*this))),
+      m_LightingPanel(
+          std::make_unique<KeireEditor::LightingPanel>(static_cast<KeireEditor::ILightingPanelController&>(*this))),
       m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
       m_ViewportAssetDropRouter(std::make_unique<KeireEditor::ViewportAssetDropRouter>()),
       m_PlayChangesPanel(std::make_unique<KeireEditor::ScenePlayChangesPanel>()),
@@ -785,8 +809,10 @@ void EditorWorkspaceLayer::OnAttach()
     m_RiggingStudioPanel->Attach(workspace);
     m_AudioMixerPanel->Attach(workspace);
     m_VfxEffectPanel->Attach(workspace);
+    m_MaterialGraphPanel->Attach(workspace);
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
     m_ProjectSettingsPanel->Attach(workspace);
+    m_LightingPanel->Attach(workspace);
     m_PrefabOverrides = workspace.RegisterPanel({"editor.prefab-overrides", "Prefab Overrides", false});
     m_BuildSettings = workspace.RegisterPanel({"editor.build-settings", "Build Settings", false});
     m_Profiler = workspace.RegisterPanel({"editor.profiler", "Profiler", false});
@@ -1017,6 +1043,8 @@ void EditorWorkspaceLayer::OnDetach() noexcept
         m_AudioMixerDocument->UndoContext()->Close();
     if (m_VfxEffectDocument->UndoContext())
         m_VfxEffectDocument->UndoContext()->Close();
+    if (m_MaterialGraphDocument->UndoContext())
+        m_MaterialGraphDocument->UndoContext()->Close();
     if (m_SceneDocument->UndoContext())
         m_SceneDocument->UndoContext()->Close();
     if (m_ThemeUndoContext)
@@ -1039,6 +1067,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
     m_InputActionsDocument->Close();
     m_AudioMixerDocument->Close();
     m_VfxEffectDocument->Close();
+    m_MaterialGraphDocument->Close();
     m_SceneDocument->Close();
     if (m_PrefabReturnDocument)
         m_PrefabReturnDocument->Close();
@@ -1242,6 +1271,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             m_ActiveUndoContext = m_AudioMixerDocument->UndoContext();
         else if (m_VfxEffectDocument->UndoContext() && m_VfxEffectDocument->UndoContext()->IsOpen())
             m_ActiveUndoContext = m_VfxEffectDocument->UndoContext();
+        else if (m_MaterialGraphDocument->UndoContext() && m_MaterialGraphDocument->UndoContext()->IsOpen())
+            m_ActiveUndoContext = m_MaterialGraphDocument->UndoContext();
         else if (m_AssetBrowserPanel)
             m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     }
@@ -1264,8 +1295,20 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         SaveSceneAs();
     else if (ui.Shortcut({.Key = Keire::UiKey::S, .Primary = true, .Global = true}))
     {
-        if (m_VfxEffectDocument->Dirty() && m_VfxEffectPanel->Registration().Visible() &&
-            m_ActiveUndoContext == m_VfxEffectDocument->UndoContext())
+        if (m_MaterialGraphDocument->Dirty() && m_MaterialGraphPanel->Registration().Visible() &&
+            m_ActiveUndoContext == m_MaterialGraphDocument->UndoContext())
+        {
+            try
+            {
+                SaveMaterialGraph();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Material Graph", error.what());
+            }
+        }
+        else if (m_VfxEffectDocument->Dirty() && m_VfxEffectPanel->Registration().Visible() &&
+                 m_ActiveUndoContext == m_VfxEffectDocument->UndoContext())
         {
             try
             {
@@ -1408,8 +1451,10 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         m_RiggingStudioPanel->Draw(ui);
         m_AudioMixerPanel->Draw(ui);
         m_VfxEffectPanel->Draw(ui);
+        m_MaterialGraphPanel->Draw(ui);
         DrawInputDebugger(ui);
         m_ProjectSettingsPanel->Draw(ui, m_Theme);
+        m_LightingPanel->Draw(ui, m_Theme);
     }
     {
         Keire::ProfileScope production(profiler, Keire::ProfileCategory::User, "Editor UI / Production");

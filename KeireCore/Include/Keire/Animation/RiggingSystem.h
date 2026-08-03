@@ -148,6 +148,46 @@ namespace Keire
         std::vector<RigDiagnostic> Diagnostics;
     };
 
+    enum class AnimationRetargetMatch : std::uint8_t
+    {
+        Unmapped,
+        ExactName,
+        Semantic,
+        TargetConflict
+    };
+
+    struct AnimationRetargetBoneMapping
+    {
+        std::uint32_t SourceBone = 0;
+        std::optional<std::uint32_t> TargetBone;
+        std::string SourceName;
+        std::string TargetName;
+        RigBoneSemantic Semantic = RigBoneSemantic::None;
+        AnimationRetargetMatch Match = AnimationRetargetMatch::Unmapped;
+        float TranslationScale = 1.0F;
+        bool PreservesAuthoredLocalTrack = false;
+        std::size_t ScaleFallbackKeyCount = 0;
+    };
+
+    struct AnimationRetargetDiagnostics
+    {
+        std::size_t SourceTrackCount = 0;
+        std::size_t MappedTrackCount = 0;
+        std::size_t ExactNameMatchCount = 0;
+        std::size_t SemanticMatchCount = 0;
+        bool RootMotionMapped = true;
+        std::vector<AnimationRetargetBoneMapping> Mappings;
+        std::vector<RigDiagnostic> Messages;
+
+        [[nodiscard]] bool Compatible() const noexcept { return MappedTrackCount != 0; }
+    };
+
+    struct AnimationRetargetResult
+    {
+        Ref<AnimationClipAsset> Clip;
+        AnimationRetargetDiagnostics Diagnostics;
+    };
+
     struct TwoBoneIkRequest
     {
         std::uint32_t Root = 0;
@@ -167,6 +207,61 @@ namespace Keire
         float Weight = 1.0F;
     };
 
+    struct FootGroundContact
+    {
+        std::uint32_t UpperLeg = 0;
+        std::uint32_t LowerLeg = 0;
+        std::uint32_t Foot = 0;
+        Vector3 Position;
+        Vector3 Normal{0.0F, 1.0F, 0.0F};
+        Vector3 Pole{0.0F, 0.0F, 1.0F};
+        float Weight = 1.0F;
+        float RotationWeight = 1.0F;
+    };
+
+    struct FootGroundingRequest
+    {
+        std::optional<std::uint32_t> Pelvis;
+        std::vector<FootGroundContact> Contacts;
+        float FootHeight = 0.02F;
+        float PelvisWeight = 1.0F;
+        float MaximumPelvisAdjustment = 0.5F;
+    };
+
+    struct FootGroundingResult
+    {
+        std::size_t SolvedFeet = 0;
+        float PelvisAdjustment = 0.0F;
+    };
+
+    enum class RagdollPoseMode : std::uint8_t
+    {
+        Animated,
+        TransitionToRagdoll,
+        Ragdoll,
+        TransitionToAnimation
+    };
+
+    class KEIRE_API RagdollPoseTransition final
+    {
+      public:
+        void SetRagdoll(bool enabled, float duration);
+        [[nodiscard]] std::vector<BoneTransform> Update(float deltaSeconds,
+                                                        std::span<const BoneTransform> animationPose,
+                                                        std::span<const BoneTransform> ragdollPose);
+        void Reset() noexcept;
+        [[nodiscard]] RagdollPoseMode Mode() const noexcept { return m_Mode; }
+        [[nodiscard]] float Weight() const noexcept { return m_Weight; }
+
+      private:
+        RagdollPoseMode m_Mode = RagdollPoseMode::Animated;
+        float m_Weight = 0.0F;
+        float m_StartWeight = 0.0F;
+        float m_TargetWeight = 0.0F;
+        float m_Duration = 0.0F;
+        float m_Elapsed = 0.0F;
+    };
+
     KEIRE_API void ValidateRigDefinition(const RigDefinition& definition);
     [[nodiscard]] KEIRE_API std::string_view RigBoneSemanticName(RigBoneSemantic semantic) noexcept;
     [[nodiscard]] KEIRE_API RigDefinition InferRigDefinition(const SkeletonAsset& skeleton,
@@ -174,6 +269,12 @@ namespace Keire
                                                              SkinningMethod skinning = SkinningMethod::LinearBlend,
                                                              std::uint8_t maximumInfluences = 4);
     [[nodiscard]] KEIRE_API AutoRigResult GenerateRig(const MeshAsset& mesh, const AutoRigRequest& request);
+    [[nodiscard]] KEIRE_API AnimationRetargetDiagnostics DiagnoseAnimationRetargeting(
+        const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig, const AnimationClipAsset& sourceClip,
+        const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig);
+    [[nodiscard]] KEIRE_API AnimationRetargetResult RetargetAnimationClipWithDiagnostics(
+        const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig, const AnimationClipAsset& sourceClip,
+        AssetId targetSkeletonId, const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig);
     [[nodiscard]] KEIRE_API Ref<AnimationClipAsset>
     RetargetAnimationClip(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
                           const AnimationClipAsset& sourceClip, AssetId targetSkeletonId,
@@ -182,6 +283,9 @@ namespace Keire
                                                 const TwoBoneIkRequest& request);
     [[nodiscard]] KEIRE_API bool SolveFabrikIk(const SkeletonAsset& skeleton, std::span<BoneTransform> localPose,
                                                const FabrikIkRequest& request);
+    [[nodiscard]] KEIRE_API std::optional<FootGroundingResult> SolveFootGrounding(const SkeletonAsset& skeleton,
+                                                                                  std::span<BoneTransform> localPose,
+                                                                                  const FootGroundingRequest& request);
 
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateRigDefinitionAssetImporter();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateRigDefinitionAssetDecoder();

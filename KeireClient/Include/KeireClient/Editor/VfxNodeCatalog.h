@@ -121,4 +121,5 @@ namespace KeireEditor
     /// Adapts the compiler-owned descriptor without making editor search metadata authoritative for execution.
     [[nodiscard]] VfxNodeCatalogEntry BuildVfxNodeCatalogEntry(const Keire::VfxNodeDescriptor& descriptor);
     [[nodiscard]] std::string VfxNodeCatalogSupportBadge(const VfxNodeCatalogEntry& entry);
+    [[nodiscard]] std::string_view VfxGraphNodeKindLabel(Keire::VfxGraphNodeKind kind) noexcept;
 } // namespace KeireEditor

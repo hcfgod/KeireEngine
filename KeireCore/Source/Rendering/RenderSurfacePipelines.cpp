@@ -2,6 +2,7 @@
 
 #include "Keire/Log.h"
 #include "KeireInternal/Rendering/DirectionalShadowInternal.h"
+#include "KeireInternal/Rendering/ImageBasedLightingInternal.h"
 
 #include <algorithm>
 #include <array>
@@ -65,13 +66,39 @@ namespace
         Keire::TextureImportSettings settings;
         settings.Semantic = Keire::TextureSemantic::Environment;
         settings.ColorSpace = Keire::TextureColorSpace::Linear;
-        settings.Mips = Keire::TextureMipPolicy::None;
+        settings.Mips = Keire::TextureMipPolicy::Generate;
         settings.EnvironmentLayout = Keire::TextureEnvironmentLayout::Equirectangular;
         settings.Sampler.AddressU = Keire::TextureAddressMode::Repeat;
         settings.Sampler.AddressV = Keire::TextureAddressMode::Clamp;
         settings.Sampler.AddressW = Keire::TextureAddressMode::Clamp;
-        return Keire::CreateRef<Keire::Texture2DAsset>(
-            settings, std::vector<Keire::TextureMipLevel>{{width, height, std::move(pixels)}});
+        std::vector<Keire::TextureMipLevel> mips{{width, height, std::move(pixels)}};
+        while (mips.back().Width > 1U || mips.back().Height > 1U)
+        {
+            const auto& source = mips.back();
+            Keire::TextureMipLevel mip;
+            mip.Width = std::max(source.Width / 2U, 1U);
+            mip.Height = std::max(source.Height / 2U, 1U);
+            mip.Pixels.resize(static_cast<std::size_t>(mip.Width) * mip.Height * 4U);
+            for (std::uint32_t y = 0; y < mip.Height; ++y)
+                for (std::uint32_t x = 0; x < mip.Width; ++x)
+                    for (std::uint32_t channelIndex = 0; channelIndex < 4U; ++channelIndex)
+                    {
+                        std::uint32_t total = 0;
+                        for (std::uint32_t offsetY = 0; offsetY < 2U; ++offsetY)
+                            for (std::uint32_t offsetX = 0; offsetX < 2U; ++offsetX)
+                            {
+                                const auto sourceX = std::min(x * 2U + offsetX, source.Width - 1U);
+                                const auto sourceY = std::min(y * 2U + offsetY, source.Height - 1U);
+                                const auto sourceIndex =
+                                    (static_cast<std::size_t>(sourceY) * source.Width + sourceX) * 4U + channelIndex;
+                                total += std::to_integer<std::uint8_t>(source.Pixels[sourceIndex]);
+                            }
+                        const auto targetIndex = (static_cast<std::size_t>(y) * mip.Width + x) * 4U + channelIndex;
+                        mip.Pixels[targetIndex] = std::byte((total + 2U) / 4U);
+                    }
+            mips.push_back(std::move(mip));
+        }
+        return Keire::CreateRef<Keire::Texture2DAsset>(settings, std::move(mips));
     }
 } // namespace
 
@@ -118,6 +145,7 @@ namespace Keire::RenderBackend
         ErrorMesh = CreateMeshResources(*MeshAsset::Error());
         CheckerboardTexture = CreateTextureResources(*Texture2DAsset::Checkerboard());
         DefaultSkyTexture = CreateTextureResources(*CreateDefaultSky());
+        BrdfIntegrationLut = CreateTextureResources(*CreateBrdfIntegrationLut(128U, 256U));
         const auto solidTexture =
             [](const std::array<std::byte, 4> pixel, const TextureSemantic semantic, const TextureColorSpace colorSpace)
         {
@@ -145,6 +173,27 @@ namespace Keire::RenderBackend
         WhiteDataTexture =
             CreateTextureResources(*solidTexture({std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}},
                                                  TextureSemantic::Data, TextureColorSpace::Linear));
+        const auto lightingTexture = [](const LightingTextureTarget target, const std::array<std::byte, 4> pixel)
+        {
+            LightingTextureArrayDefinition definition;
+            definition.Target = target;
+            definition.Encoding = LightingTextureEncoding::Rgba8;
+            LightingTextureMip mip;
+            mip.Width = 1;
+            mip.Height = 1;
+            mip.Layers = target == LightingTextureTarget::CubeArray ? 6U : 1U;
+            mip.Pixels.reserve(static_cast<std::size_t>(mip.Layers) * pixel.size());
+            for (std::uint32_t layer = 0; layer < mip.Layers; ++layer)
+                mip.Pixels.insert(mip.Pixels.end(), pixel.begin(), pixel.end());
+            definition.Mips.push_back(std::move(mip));
+            return CreateRef<LightingTextureArrayAsset>(std::move(definition));
+        };
+        DefaultLightingArray = CreateLightingTextureResources(*lightingTexture(
+            LightingTextureTarget::Texture2DArray, {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}}));
+        DefaultLightingMaskArray = CreateLightingTextureResources(*lightingTexture(
+            LightingTextureTarget::Texture2DArray, {std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}}));
+        DefaultReflectionCubeArray = CreateLightingTextureResources(*lightingTexture(
+            LightingTextureTarget::CubeArray, {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}}));
         const auto grid = CreateGridVertices();
         GridVertexCount = static_cast<std::uint32_t>(grid.size());
         GridBuffer = UploadVertexBuffer(grid);
@@ -735,11 +784,14 @@ namespace Keire::RenderBackend
                                      : nullptr;
         information.format = format;
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        information.num_samplers = vertex ? 0 : textureCount + (definition.ReceivesShadows ? 2U : 0U);
+        information.num_samplers = vertex ? 0
+                                          : textureCount + (definition.ReceivesShadows ? 2U : 0U) +
+                                                (definition.UsesImageBasedLighting ? 2U : 0U) +
+                                                (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
         information.num_storage_buffers = !vertex && definition.UsesForwardPlus ? 3U : 0U;
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
-        information.num_uniform_buffers = vertex ? 1 : 3U;
+        information.num_uniform_buffers = vertex ? 1 : definition.UsesImageBasedLighting ? 4U : 3U;
         SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
         if (!shader)
             throw std::runtime_error("SDL_CreateGPUShader(asset) failed: " + LastSdlError());
@@ -774,15 +826,18 @@ namespace Keire::RenderBackend
                 SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuMeshVertex, Normal)},
                 SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(GpuMeshVertex, UV0)},
                 SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, VertexColor)},
-                SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, Tangent)}};
+                SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, Tangent)},
+                SDL_GPUVertexAttribute{5, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(GpuMeshVertex, UV1)}};
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
             information.fragment_shader = fragment;
             information.vertex_input_state.vertex_buffer_descriptions = &buffer;
             information.vertex_input_state.num_vertex_buffers = 1;
             information.vertex_input_state.vertex_attributes = attributes.data();
-            information.vertex_input_state.num_vertex_attributes =
-                definition.VertexLayoutVersion == 2 ? static_cast<std::uint32_t>(attributes.size()) : 4U;
+            information.vertex_input_state.num_vertex_attributes = definition.VertexLayoutVersion == 3
+                                                                       ? static_cast<std::uint32_t>(attributes.size())
+                                                                   : definition.VertexLayoutVersion == 2 ? 5U
+                                                                                                         : 4U;
             information.primitive_type = definition.Topology == ShaderPrimitiveTopology::LineList
                                              ? SDL_GPU_PRIMITIVETYPE_LINELIST
                                              : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;

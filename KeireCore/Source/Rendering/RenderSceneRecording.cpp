@@ -343,10 +343,13 @@ namespace Keire::RenderBackend
             case VfxValueOpcode::Atan2:
             case VfxValueOpcode::Power:
             case VfxValueOpcode::Step:
+            case VfxValueOpcode::Modulo:
+            case VfxValueOpcode::Discretize:
                 return output == VfxValueType::Scalar && inputs.size() == 2 && allScalar();
             case VfxValueOpcode::Clamp:
             case VfxValueOpcode::Lerp:
             case VfxValueOpcode::Smoothstep:
+            case VfxValueOpcode::InverseLerp:
                 return output == VfxValueType::Scalar && inputs.size() == 3 && allScalar();
             case VfxValueOpcode::Saturate:
             case VfxValueOpcode::Absolute:
@@ -367,11 +370,15 @@ namespace Keire::RenderBackend
             case VfxValueOpcode::Fractional:
             case VfxValueOpcode::Negate:
             case VfxValueOpcode::Sign:
+            case VfxValueOpcode::OneMinus:
+            case VfxValueOpcode::Reciprocal:
                 return output == VfxValueType::Scalar && inputs.size() == 1 && allScalar();
             case VfxValueOpcode::Compare:
                 return output == VfxValueType::Boolean && inputs.size() == 2 && allScalar();
             case VfxValueOpcode::BooleanAnd:
             case VfxValueOpcode::BooleanOr:
+            case VfxValueOpcode::BooleanNand:
+            case VfxValueOpcode::BooleanNor:
                 return output == VfxValueType::Boolean && inputs.size() == 2 && inputs[0] == VfxValueType::Boolean &&
                        inputs[1] == VfxValueType::Boolean;
             case VfxValueOpcode::BooleanNot:
@@ -398,15 +405,38 @@ namespace Keire::RenderBackend
             case VfxValueOpcode::Normalize:
                 return output == VfxValueType::Vector3 && inputs.size() == 1 && inputs[0] == VfxValueType::Vector3;
             case VfxValueOpcode::Length:
+            case VfxValueOpcode::SquaredLength:
                 return output == VfxValueType::Scalar && inputs.size() == 1 && inputs[0] == VfxValueType::Vector3;
+            case VfxValueOpcode::SquaredDistance:
+                return output == VfxValueType::Scalar && inputs.size() == 2 && inputs[0] == VfxValueType::Vector3 &&
+                       inputs[1] == VfxValueType::Vector3;
             case VfxValueOpcode::Time:
             case VfxValueOpcode::DeltaTime:
             case VfxValueOpcode::Age:
             case VfxValueOpcode::Lifetime:
+            case VfxValueOpcode::AgeOverLifetime:
                 return output == VfxValueType::Scalar && inputs.empty();
             case VfxValueOpcode::ParticleId:
             case VfxValueOpcode::SpawnIndex:
+            case VfxValueOpcode::FrameIndex:
+            case VfxValueOpcode::SystemSeed:
                 return output == VfxValueType::UnsignedInteger && inputs.empty();
+            case VfxValueOpcode::BitwiseAnd:
+            case VfxValueOpcode::BitwiseLeftShift:
+            case VfxValueOpcode::BitwiseOr:
+            case VfxValueOpcode::BitwiseRightShift:
+            case VfxValueOpcode::BitwiseXor:
+                return output == VfxValueType::UnsignedInteger && inputs.size() == 2 &&
+                       inputs[0] == VfxValueType::UnsignedInteger && inputs[1] == VfxValueType::UnsignedInteger;
+            case VfxValueOpcode::BitwiseComplement:
+                return output == VfxValueType::UnsignedInteger && inputs.size() == 1 &&
+                       inputs[0] == VfxValueType::UnsignedInteger;
+            case VfxValueOpcode::ColorLuma:
+                return output == VfxValueType::Scalar && inputs.size() == 1 && inputs[0] == VfxValueType::Color;
+            case VfxValueOpcode::HsvToRgb:
+                return output == VfxValueType::Vector4 && inputs.size() == 1 && inputs[0] == VfxValueType::Vector3;
+            case VfxValueOpcode::RgbToHsv:
+                return output == VfxValueType::Vector3 && inputs.size() == 1 && inputs[0] == VfxValueType::Color;
             case VfxValueOpcode::ToFloat:
                 return output == VfxValueType::Scalar && inputs.size() == 1 &&
                        (inputs[0] == VfxValueType::Integer || inputs[0] == VfxValueType::UnsignedInteger);
@@ -415,6 +445,63 @@ namespace Keire::RenderBackend
             case VfxValueOpcode::ToUnsignedInteger:
                 return output == VfxValueType::UnsignedInteger && inputs.size() == 1 &&
                        inputs[0] == VfxValueType::Scalar;
+            case VfxValueOpcode::AttributeAlive:
+                return output == VfxValueType::Boolean && inputs.empty();
+            case VfxValueOpcode::AttributeAlpha:
+            case VfxValueOpcode::AttributeSize:
+            case VfxValueOpcode::AttributeSpawnTime:
+            case VfxValueOpcode::RatioOverStrip:
+                return output == VfxValueType::Scalar && inputs.empty();
+            case VfxValueOpcode::AttributeAngle:
+            case VfxValueOpcode::AttributeAxisX:
+            case VfxValueOpcode::AttributeAxisY:
+            case VfxValueOpcode::AttributeAxisZ:
+            case VfxValueOpcode::AttributeColor:
+            case VfxValueOpcode::AttributeOldPosition:
+            case VfxValueOpcode::AttributePosition:
+            case VfxValueOpcode::AttributeVelocity:
+                return output == VfxValueType::Vector3 && inputs.empty();
+            case VfxValueOpcode::AttributeParticleCountInStrip:
+            case VfxValueOpcode::AttributeParticleIndexInStrip:
+            case VfxValueOpcode::AttributeSeed:
+            case VfxValueOpcode::AttributeStripIndex:
+                return output == VfxValueType::UnsignedInteger && inputs.empty();
+            case VfxValueOpcode::Epsilon:
+                return output == VfxValueType::Scalar && outputIndex == 0 && inputs.empty();
+            case VfxValueOpcode::Pi:
+                return output == VfxValueType::Scalar && outputIndex < 4 && inputs.empty();
+            case VfxValueOpcode::ValueNoise:
+            case VfxValueOpcode::PerlinNoise:
+            case VfxValueOpcode::CellularNoise:
+                return inputs.size() == 6 && inputs[0] == VfxValueType::Vector3 && inputs[1] == VfxValueType::Scalar &&
+                       inputs[2] == VfxValueType::Integer && inputs[3] == VfxValueType::Scalar &&
+                       inputs[4] == VfxValueType::Scalar && inputs[5] == VfxValueType::Vector2 &&
+                       ((outputIndex == 0 && output == VfxValueType::Scalar) ||
+                        (outputIndex == 1 && output == VfxValueType::Vector3));
+            case VfxValueOpcode::ValueCurlNoise:
+            case VfxValueOpcode::PerlinCurlNoise:
+            case VfxValueOpcode::CellularCurlNoise:
+                return output == VfxValueType::Vector3 && outputIndex == 0 && inputs.size() == 6 &&
+                       inputs[0] == VfxValueType::Vector3 && inputs[1] == VfxValueType::Scalar &&
+                       inputs[2] == VfxValueType::Integer && inputs[3] == VfxValueType::Scalar &&
+                       inputs[4] == VfxValueType::Scalar && inputs[5] == VfxValueType::Scalar;
+            case VfxValueOpcode::PolarToRectangular:
+                return output == VfxValueType::Vector2 && inputs.size() == 2 && allScalar();
+            case VfxValueOpcode::RectangularToPolar:
+                return output == VfxValueType::Scalar && outputIndex < 2 && inputs.size() == 1 &&
+                       inputs[0] == VfxValueType::Vector2;
+            case VfxValueOpcode::RectangularToSpherical:
+                return output == VfxValueType::Scalar && outputIndex < 3 && inputs.size() == 1 &&
+                       inputs[0] == VfxValueType::Vector3;
+            case VfxValueOpcode::SphericalToRectangular:
+                return output == VfxValueType::Vector3 && inputs.size() == 3 && allScalar();
+            case VfxValueOpcode::Rotate2D:
+                return output == VfxValueType::Vector2 && inputs.size() == 3 && inputs[0] == VfxValueType::Vector2 &&
+                       inputs[1] == VfxValueType::Vector2 && inputs[2] == VfxValueType::Scalar;
+            case VfxValueOpcode::Rotate3D:
+                return output == VfxValueType::Vector3 && inputs.size() == 4 && inputs[0] == VfxValueType::Vector3 &&
+                       inputs[1] == VfxValueType::Vector3 && inputs[2] == VfxValueType::Vector3 &&
+                       inputs[3] == VfxValueType::Scalar;
             }
             return false;
         }
@@ -453,7 +540,7 @@ namespace Keire::RenderBackend
         for (std::size_t instructionIndex = 0; instructionIndex < program.Instructions.size(); ++instructionIndex)
         {
             const auto& instruction = program.Instructions[instructionIndex];
-            if (instruction.Header[0] > static_cast<std::uint32_t>(VfxValueOpcode::Sign))
+            if (instruction.Header[0] > static_cast<std::uint32_t>(VfxValueOpcode::Rotate3D))
                 return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unsupported opcode.");
             if (instruction.Header[1] > static_cast<std::uint32_t>(VfxValueType::SignedDistanceField))
                 return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown value type.");
@@ -472,7 +559,7 @@ namespace Keire::RenderBackend
                 return IndexedGpuPayloadError("instruction", instructionIndex, "writes an SSA register twice.");
             const auto firstSource = static_cast<std::size_t>(instruction.Output[2]);
             const auto sourceCount = static_cast<std::size_t>(instruction.Output[3]);
-            if (sourceCount > 4 || firstSource > program.Sources.size() ||
+            if (sourceCount > 8 || firstSource > program.Sources.size() ||
                 sourceCount > program.Sources.size() - firstSource)
                 return IndexedGpuPayloadError("instruction", instructionIndex, "references an invalid source span.");
             if ((instruction.Settings[2] & ~0xfU) != 0U)
@@ -482,7 +569,7 @@ namespace Keire::RenderBackend
             if (instruction.Settings[3] > static_cast<std::uint32_t>(VfxComparisonCondition::Greater))
                 return IndexedGpuPayloadError("instruction", instructionIndex, "uses an unknown comparison mode.");
 
-            std::array<VfxValueType, 4> inputTypes{};
+            std::array<VfxValueType, 8> inputTypes{};
             for (std::size_t inputIndex = 0; inputIndex < sourceCount; ++inputIndex)
             {
                 const auto& source = program.Sources[firstSource + inputIndex];
@@ -2035,7 +2122,7 @@ namespace Keire::RenderBackend
         static_assert(sizeof(GpuSkinMatrix) == 64);
         static_assert(alignof(GpuSkinMatrix) == 16);
         static_assert(sizeof(SkinDispatch) == 16);
-        static_assert(sizeof(GpuMeshVertex) == 80);
+        static_assert(sizeof(GpuMeshVertex) == 96);
         static_assert(sizeof(GpuRenderVertex) == 48);
 
         const auto createOutput = [this](const std::uint32_t vertexCount)
@@ -2425,11 +2512,155 @@ namespace Keire::RenderBackend
             throw std::logic_error("Forward+ GPU resources were not prepared before scene recording.");
         std::array<SDL_GPUBuffer*, 3> forwardPlusBuffers{surface.ForwardPlus.Lights, surface.ForwardPlus.Tiles,
                                                          surface.ForwardPlus.LightIndices};
+        const auto& requestedEnvironment =
+            packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
+        const auto& environment = requestedEnvironment.HasDiffuseIrradiance ? requestedEnvironment : DefaultSkyTexture;
+        AssetEnvironmentUniforms environmentUniforms{};
+        environmentUniforms.DiffuseIrradiance = environment.DiffuseIrradiance;
+        environmentUniforms.Parameters = {
+            packet.Environment.EnvironmentRotationDegrees, packet.Environment.EnvironmentDiffuseIntensity,
+            packet.Environment.EnvironmentSpecularIntensity, static_cast<float>(environment.MipLevels - 1U)};
+        environmentUniforms.Encoding = {static_cast<float>(environment.EnvironmentLayout) +
+                                            (environment.HdrEncoded ? 16.0F : 0.0F),
+                                        0.0F, 0.0F, 0.0F};
+        const std::array environmentBindings{
+            SDL_GPUTextureSamplerBinding{environment.Texture, environment.Sampler},
+            SDL_GPUTextureSamplerBinding{BrdfIntegrationLut.Texture, BrdfIntegrationLut.Sampler}};
+        const auto bakedLighting = ResolveLightingSet(packet.BakedLighting);
+        const auto* lightingSet = bakedLighting ? &bakedLighting->Definition() : nullptr;
+        const auto& bakedLightmaps =
+            lightingSet ? ResolveLightingTexture(lightingSet->Lightmaps) : DefaultLightingArray;
+        const auto& bakedDirectionality =
+            lightingSet ? ResolveLightingTexture(lightingSet->Directionality) : DefaultLightingArray;
+        const auto& bakedShadowMasks =
+            lightingSet ? ResolveLightingTexture(lightingSet->ShadowMasks, false, true) : DefaultLightingMaskArray;
+        const auto& bakedReflections =
+            lightingSet ? ResolveLightingTexture(lightingSet->ReflectionCubemaps, true) : DefaultReflectionCubeArray;
+        std::array<SDL_GPUTextureSamplerBinding, 5> spatialBindings{};
+        spatialBindings[0] = {bakedLightmaps.Texture, bakedLightmaps.Sampler};
+        spatialBindings[1] = {bakedDirectionality.Texture, bakedDirectionality.Sampler};
+        spatialBindings[2] = {bakedShadowMasks.Texture, bakedShadowMasks.Sampler};
+        spatialBindings[3] = {bakedReflections.Texture, bakedReflections.Sampler};
+        spatialBindings[4] = {WhiteTexture.Texture, WhiteTexture.Sampler};
+        AssetSpatialLightingUniforms spatialBase{};
+        spatialBase.LightmapScaleOffset = {1.0F, 1.0F, 0.0F, 0.0F};
+        spatialBase.ShadowMaskParameters.X = lightingSet ? static_cast<float>(lightingSet->Renderers.size()) : 0.0F;
+        spatialBase.ViewProjection = Math::Multiply(camera.Projection, camera.View);
+        std::uint32_t cookieCount = 0;
+        std::array<AssetId, 8> cookieAssets{};
+        const auto addCookie = [&](const AssetId cookie, const Vector2 scale, const Vector2 offset,
+                                   const float rotationDegrees) -> float
+        {
+            if (!cookie || cookieCount >= 8U)
+                return 0.0F;
+            const auto slot = cookieCount++;
+            cookieAssets[slot] = cookie;
+            spatialBase.CookieTransforms[slot] = {scale.X, scale.Y, offset.X, offset.Y};
+            auto& rotations = spatialBase.CookieRotations[slot / 4U];
+            switch (slot % 4U)
+            {
+            case 0:
+                rotations.X = rotationDegrees;
+                break;
+            case 1:
+                rotations.Y = rotationDegrees;
+                break;
+            case 2:
+                rotations.Z = rotationDegrees;
+                break;
+            default:
+                rotations.W = rotationDegrees;
+                break;
+            }
+            return static_cast<float>(slot + 1U);
+        };
+        const auto directionalCookie =
+            addCookie(lighting.Cookie, lighting.CookieScale, lighting.CookieOffset, lighting.CookieRotationDegrees);
+        spatialBase.DirectionalCookieAndContact = {directionalCookie, lighting.ContactShadows ? 1.0F : 0.0F, 0.35F,
+                                                   0.0025F};
+        std::array<float, MaximumShaderLocalLights> localCookieBindings{};
+        for (std::size_t lightIndex = 0; lightIndex < std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
+             ++lightIndex)
+        {
+            const auto& light = packet.LocalLights[lightIndex];
+            localCookieBindings[lightIndex] =
+                addCookie(light.Cookie, light.CookieScale, light.CookieOffset, light.CookieRotationDegrees);
+        }
+        const auto& cookieAtlas = ResolveCookieAtlas(cookieAssets);
+        spatialBindings[4] = {cookieAtlas.Texture, cookieAtlas.Sampler};
+        const auto mixedLightChannel = [&](const AssetId light) -> float
+        {
+            if (!lightingSet || !light)
+                return 0.0F;
+            const auto found = std::ranges::find(lightingSet->MixedLights, light, &MixedLightBinding::Light);
+            return found == lightingSet->MixedLights.end() ? 0.0F : static_cast<float>(found->ShadowMaskChannel + 1U);
+        };
+        auto spatialProbes = packet.ReflectionProbes;
+        if (lightingSet)
+        {
+            for (auto& probe : spatialProbes)
+            {
+                const auto binding =
+                    std::ranges::find(lightingSet->ReflectionProbes, probe.Entity, &ReflectionProbeBinding::Probe);
+                if (binding != lightingSet->ReflectionProbes.end())
+                    probe.CubeIndex = binding->CubeIndex;
+            }
+        }
+        const auto spatialUniforms = [&](const SceneDrawItem& item)
+        {
+            auto result = spatialBase;
+            if (!lightingSet)
+                return result;
+            const auto renderer =
+                std::ranges::find(lightingSet->Renderers, item.Entity.Value(), &LightmapRendererBinding::Renderer);
+            if (renderer != lightingSet->Renderers.end())
+            {
+                result.LightmapScaleOffset = renderer->ScaleOffset;
+                result.LightmapParameters.X = static_cast<float>(renderer->LightmapLayer);
+                result.LightmapParameters.Y = static_cast<float>(renderer->ShadowMaskLayer);
+                result.LightmapParameters.Z = 1.0F;
+                result.LightmapParameters.W = mixedLightChannel(lighting.Entity.Value());
+            }
+            const auto worldPosition = Math::TransformPoint(item.World, {});
+            for (const auto& volume : packet.LightProbeVolumes)
+            {
+                const auto binding = std::ranges::find(lightingSet->LightProbeVolumes, volume.Entity.Value(),
+                                                       &LightProbeVolumeBinding::Volume);
+                if (binding == lightingSet->LightProbeVolumes.end())
+                    continue;
+                const auto data = ResolveLightProbeVolume(binding->Data);
+                if (!data)
+                    continue;
+                const auto coefficients = Detail::SampleLightProbeCoefficients(
+                    data->Definition(), Math::TransformPoint(volume.WorldToLocal, worldPosition));
+                if (!coefficients)
+                    continue;
+                for (std::size_t coefficient = 0; coefficient < coefficients->size(); ++coefficient)
+                {
+                    const auto& value = (*coefficients)[coefficient];
+                    result.ProbeIrradiance[coefficient] = {value.X, value.Y, value.Z, 0.0F};
+                }
+                result.LightmapParameters.Z += 2.0F;
+                break;
+            }
+            const auto selected = Detail::SelectReflectionProbes(worldPosition, spatialProbes, 2U);
+            for (std::size_t index = 0; index < selected.size(); ++index)
+            {
+                const auto& selectedProbe = selected[index];
+                auto& output = result.ReflectionProbes[index];
+                output.WorldToLocal = selectedProbe.Probe->WorldToLocal;
+                output.LocalToWorld = selectedProbe.Probe->LocalToWorld;
+                output.ExtentsWeight = {selectedProbe.Probe->BoxExtents.X, selectedProbe.Probe->BoxExtents.Y,
+                                        selectedProbe.Probe->BoxExtents.Z, selectedProbe.Weight};
+                output.Parameters = {static_cast<float>(selectedProbe.Probe->CubeIndex), selectedProbe.Probe->Intensity,
+                                     selectedProbe.Probe->BoxProjection ? 1.0F : 0.0F,
+                                     static_cast<float>(bakedReflections.MipLevels - 1U)};
+            }
+            return result;
+        };
 
         if (phase == SceneDrawPhase::Opaque && packet.Environment.SkyVisible && pipelines.Sky)
         {
-            const auto& environment =
-                packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
             if (!environment.Empty())
             {
                 const SkyUniforms sky{
@@ -2482,6 +2713,8 @@ namespace Keire::RenderBackend
                                       light.ColorAndIntensity.Blue, light.ColorAndIntensity.Alpha};
             uniform.Parameters = {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F, 0.0F,
                                   0.0F};
+            uniform.Parameters.Z = mixedLightChannel(light.Entity.Value());
+            uniform.Parameters.W = localCookieBindings[lightIndex] + (light.ContactShadows ? 16.0F : 0.0F);
         }
         enum class FragmentSlot2Binding : std::uint8_t
         {
@@ -2562,9 +2795,17 @@ namespace Keire::RenderBackend
                     SDL_PushGPUFragmentUniformData(commands, 2, &localLights, sizeof(localLights));
                     fragmentSlot2Binding = FragmentSlot2Binding::LocalLights;
                 }
-                if (!material->Textures.empty() || material->ReceivesShadows)
+                if (material->UsesSpatialLighting)
                 {
-                    std::array<SDL_GPUTextureSamplerBinding, 18> bindings{};
+                    const AssetEnvironmentSpatialUniforms combined{environmentUniforms, spatialUniforms(item)};
+                    SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
+                }
+                else if (material->UsesImageBasedLighting)
+                    SDL_PushGPUFragmentUniformData(commands, 3, &environmentUniforms, sizeof(environmentUniforms));
+                if (!material->Textures.empty() || material->ReceivesShadows || material->UsesImageBasedLighting ||
+                    material->UsesSpatialLighting)
+                {
+                    std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
                     std::ranges::copy(material->Textures, bindings.begin());
                     auto bindingCount = material->Textures.size();
                     if (material->ReceivesShadows)
@@ -2576,6 +2817,17 @@ namespace Keire::RenderBackend
                         bindings[bindingCount++] = {surface.Resources.LocalShadow ? surface.Resources.LocalShadow
                                                                                   : EmptyShadowTexture,
                                                     ShadowSampler};
+                    }
+                    if (material->UsesImageBasedLighting)
+                    {
+                        bindings[bindingCount++] = environmentBindings[0];
+                        bindings[bindingCount++] = environmentBindings[1];
+                    }
+                    if (material->UsesSpatialLighting)
+                    {
+                        std::ranges::copy(spatialBindings,
+                                          bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
+                        bindingCount += spatialBindings.size();
                     }
                     SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindingCount));
                 }
@@ -2622,6 +2874,43 @@ namespace Keire::RenderBackend
                                     const ShadowFrameData& shadows)
     {
         auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+        const auto& requestedEnvironment =
+            packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
+        const auto& environment = requestedEnvironment.HasDiffuseIrradiance ? requestedEnvironment : DefaultSkyTexture;
+        AssetEnvironmentUniforms environmentUniforms{};
+        environmentUniforms.DiffuseIrradiance = environment.DiffuseIrradiance;
+        environmentUniforms.Parameters = {
+            packet.Environment.EnvironmentRotationDegrees, packet.Environment.EnvironmentDiffuseIntensity,
+            packet.Environment.EnvironmentSpecularIntensity, static_cast<float>(environment.MipLevels - 1U)};
+        environmentUniforms.Encoding = {static_cast<float>(environment.EnvironmentLayout) +
+                                            (environment.HdrEncoded ? 16.0F : 0.0F),
+                                        0.0F, 0.0F, 0.0F};
+        const std::array environmentBindings{
+            SDL_GPUTextureSamplerBinding{environment.Texture, environment.Sampler},
+            SDL_GPUTextureSamplerBinding{BrdfIntegrationLut.Texture, BrdfIntegrationLut.Sampler}};
+        const auto vfxBakedLighting = ResolveLightingSet(packet.BakedLighting);
+        const auto* vfxLightingSet = vfxBakedLighting ? &vfxBakedLighting->Definition() : nullptr;
+        const auto& vfxLightmaps =
+            vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Lightmaps) : DefaultLightingArray;
+        const auto& vfxDirectionality =
+            vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Directionality) : DefaultLightingArray;
+        const auto& vfxShadowMasks = vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->ShadowMasks, false, true)
+                                                    : DefaultLightingMaskArray;
+        const auto& vfxReflections = vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->ReflectionCubemaps, true)
+                                                    : DefaultReflectionCubeArray;
+        std::array<SDL_GPUTextureSamplerBinding, 5> vfxSpatialBindings{};
+        vfxSpatialBindings[0] = {vfxLightmaps.Texture, vfxLightmaps.Sampler};
+        vfxSpatialBindings[1] = {vfxDirectionality.Texture, vfxDirectionality.Sampler};
+        vfxSpatialBindings[2] = {vfxShadowMasks.Texture, vfxShadowMasks.Sampler};
+        vfxSpatialBindings[3] = {vfxReflections.Texture, vfxReflections.Sampler};
+        vfxSpatialBindings[4] = {WhiteTexture.Texture, WhiteTexture.Sampler};
+        AssetSpatialLightingUniforms vfxSpatialUniforms{};
+        vfxSpatialUniforms.LightmapScaleOffset = {1.0F, 1.0F, 0.0F, 0.0F};
+        vfxSpatialUniforms.ShadowMaskParameters.X =
+            vfxLightingSet ? static_cast<float>(vfxLightingSet->Renderers.size()) : 0.0F;
+        vfxSpatialUniforms.ViewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
+        vfxSpatialUniforms.DirectionalCookieAndContact = {0.0F, packet.Lighting.ContactShadows ? 1.0F : 0.0F, 0.35F,
+                                                          0.0025F};
         if (packet.Vfx.WorldId() != 0 && pipelines.GpuVfx && pipelines.GpuVfxRibbon && pipelines.GpuVfxMesh)
         {
             const auto world = GpuVfxWorlds.find(packet.Vfx.WorldId());
@@ -2681,7 +2970,7 @@ namespace Keire::RenderBackend
                     uniform.ColorIntensity = {light.ColorAndIntensity.Red, light.ColorAndIntensity.Green,
                                               light.ColorAndIntensity.Blue, light.ColorAndIntensity.Alpha};
                     uniform.Parameters = {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F,
-                                          0.0F, 0.0F};
+                                          0.0F, light.ContactShadows ? 16.0F : 0.0F};
                 }
                 AssetShadowUniforms shadowUniforms{shadows.Directional, shadows.Local};
                 for (std::size_t lightIndex = 0; lightIndex < localLightCount; ++lightIndex)
@@ -2750,9 +3039,18 @@ namespace Keire::RenderBackend
                                 SDL_PushGPUFragmentUniformData(commands, 2, &shadowUniforms, sizeof(shadowUniforms));
                             else
                                 SDL_PushGPUFragmentUniformData(commands, 2, &localLights, sizeof(localLights));
-                            if (!composed->Textures.empty() || composed->ReceivesShadows)
+                            if (composed->UsesSpatialLighting)
                             {
-                                std::array<SDL_GPUTextureSamplerBinding, 18> bindings{};
+                                const AssetEnvironmentSpatialUniforms combined{environmentUniforms, vfxSpatialUniforms};
+                                SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
+                            }
+                            else if (composed->UsesImageBasedLighting)
+                                SDL_PushGPUFragmentUniformData(commands, 3, &environmentUniforms,
+                                                               sizeof(environmentUniforms));
+                            if (!composed->Textures.empty() || composed->ReceivesShadows ||
+                                composed->UsesImageBasedLighting || composed->UsesSpatialLighting)
+                            {
+                                std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
                                 std::ranges::copy(composed->Textures, bindings.begin());
                                 auto bindingCount = composed->Textures.size();
                                 if (composed->ReceivesShadows)
@@ -2765,6 +3063,17 @@ namespace Keire::RenderBackend
                                                                     ? surface.Resources.LocalShadow
                                                                     : EmptyShadowTexture,
                                                                 ShadowSampler};
+                                }
+                                if (composed->UsesImageBasedLighting)
+                                {
+                                    bindings[bindingCount++] = environmentBindings[0];
+                                    bindings[bindingCount++] = environmentBindings[1];
+                                }
+                                if (composed->UsesSpatialLighting)
+                                {
+                                    std::ranges::copy(vfxSpatialBindings,
+                                                      bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
+                                    bindingCount += vfxSpatialBindings.size();
                                 }
                                 SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(),
                                                             static_cast<std::uint32_t>(bindingCount));
@@ -3099,20 +3408,8 @@ namespace Keire::RenderBackend
             currentLayers = layers;
         };
 
-        const auto drawLayer = [&](SDL_GPUTexture* texture, const std::uint32_t layer, const Matrix4& lightMatrix)
+        const auto drawScene = [&](SDL_GPURenderPass* pass, const Matrix4& lightMatrix)
         {
-            SDL_GPUDepthStencilTargetInfo depth{};
-            depth.texture = texture;
-            depth.clear_depth = 1.0F;
-            depth.load_op = SDL_GPU_LOADOP_CLEAR;
-            depth.store_op = SDL_GPU_STOREOP_STORE;
-            depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-            depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
-            depth.layer = static_cast<std::uint8_t>(layer);
-            auto* pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depth);
-            if (!pass)
-                throw std::runtime_error("SDL_BeginGPURenderPass(shadow) failed: " + LastSdlError());
-            SDL_BindGPUGraphicsPipeline(pass, ShadowPipeline);
             for (const auto& item : packet.DrawItems)
             {
                 if (!item.CastShadows)
@@ -3130,6 +3427,22 @@ namespace Keire::RenderBackend
                 for (const auto& submesh : mesh.Submeshes)
                     SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
             }
+        };
+        const auto drawLayer = [&](SDL_GPUTexture* texture, const std::uint32_t layer, const Matrix4& lightMatrix)
+        {
+            SDL_GPUDepthStencilTargetInfo depth{};
+            depth.texture = texture;
+            depth.clear_depth = 1.0F;
+            depth.load_op = SDL_GPU_LOADOP_CLEAR;
+            depth.store_op = SDL_GPU_STOREOP_STORE;
+            depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+            depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+            depth.layer = static_cast<std::uint8_t>(layer);
+            auto* pass = SDL_BeginGPURenderPass(commands, nullptr, 0, &depth);
+            if (!pass)
+                throw std::runtime_error("SDL_BeginGPURenderPass(shadow) failed: " + LastSdlError());
+            SDL_BindGPUGraphicsPipeline(pass, ShadowPipeline);
+            drawScene(pass, lightMatrix);
             SDL_EndGPURenderPass(pass);
             ++Statistics.Passes;
         };
@@ -3220,7 +3533,88 @@ namespace Keire::RenderBackend
         if (hasLocalShadows)
         {
             ensureTexture(surface.Resources.LocalShadow, surface.Resources.LocalShadowResolution,
-                          surface.Resources.LocalShadowLayers, LocalShadowResolution, LocalShadowLayerCount);
+                          surface.Resources.LocalShadowLayers, LocalShadowResolution, 1U);
+            const auto resolution = [](const ShadowResolutionHint hint) -> std::uint16_t
+            {
+                switch (hint)
+                {
+                case ShadowResolutionHint::Low:
+                    return 256;
+                case ShadowResolutionHint::High:
+                    return 1024;
+                case ShadowResolutionHint::VeryHigh:
+                    return 2048;
+                case ShadowResolutionHint::Medium:
+                default:
+                    return 512;
+                }
+            };
+            std::vector<Detail::ShadowAtlasRequest> requests;
+            std::size_t requestedSpots = 0;
+            std::size_t requestedPoints = 0;
+            const auto lightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
+            for (std::size_t lightIndex = 0; lightIndex < lightCount; ++lightIndex)
+            {
+                const auto& light = packet.LocalLights[lightIndex];
+                if (light.Shadows == ShadowQuality::Disabled)
+                    continue;
+                const auto importance = static_cast<std::int32_t>(std::clamp(
+                    light.ColorAndIntensity.Alpha * 100.0F, 0.0F, static_cast<float>(std::numeric_limits<int>::max())));
+                if (light.Type == SceneLocalLightType::Spot && requestedSpots < MaximumShadowedSpotLights)
+                {
+                    requests.push_back({{light.Entity.Value(), 0}, resolution(light.ShadowResolution), importance});
+                    ++requestedSpots;
+                }
+                else if (light.Type == SceneLocalLightType::Point && requestedPoints < MaximumShadowedPointLights)
+                {
+                    for (std::uint8_t face = 0; face < 6U; ++face)
+                        requests.push_back(
+                            {{light.Entity.Value(), face}, resolution(light.ShadowResolution), importance});
+                    ++requestedPoints;
+                }
+            }
+            const auto allocations = surface.ShadowAtlas.Allocate(requests);
+            const auto findAllocation = [&](const EntityId light,
+                                            const std::uint8_t face) -> const Detail::ShadowAtlasAllocation*
+            {
+                const auto found = std::ranges::find_if(
+                    allocations, [&](const auto& allocation)
+                    { return allocation.Key.Light == light.Value() && allocation.Key.Subresource == face; });
+                return found == allocations.end() ? nullptr : &*found;
+            };
+            const auto atlasMatrix = [](const Matrix4& lightMatrix, const Detail::ShadowAtlasAllocation& allocation)
+            {
+                const auto scale = allocation.ScaleOffset.X;
+                const auto offsetX = allocation.ScaleOffset.Z;
+                const auto offsetY = allocation.ScaleOffset.W;
+                Matrix4 atlasTransform{{scale, 0.0F, 0.0F, 0.0F, 0.0F, scale, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+                                        2.0F * offsetX + scale - 1.0F, 1.0F - 2.0F * offsetY - scale, 0.0F, 1.0F}};
+                return Math::Multiply(atlasTransform, lightMatrix);
+            };
+            SDL_GPUDepthStencilTargetInfo localDepth{};
+            localDepth.texture = surface.Resources.LocalShadow;
+            localDepth.clear_depth = 1.0F;
+            localDepth.load_op = SDL_GPU_LOADOP_CLEAR;
+            localDepth.store_op = SDL_GPU_STOREOP_STORE;
+            localDepth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+            localDepth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+            auto* localPass = SDL_BeginGPURenderPass(commands, nullptr, 0, &localDepth);
+            if (!localPass)
+                throw std::runtime_error("SDL_BeginGPURenderPass(shadow atlas) failed: " + LastSdlError());
+            SDL_BindGPUGraphicsPipeline(localPass, ShadowPipeline);
+            const auto drawAtlasTile = [&](const Matrix4& matrix, const Detail::ShadowAtlasAllocation& allocation)
+            {
+                const SDL_GPUViewport viewport{static_cast<float>(allocation.X),
+                                               static_cast<float>(allocation.Y),
+                                               static_cast<float>(allocation.Size),
+                                               static_cast<float>(allocation.Size),
+                                               0.0F,
+                                               1.0F};
+                const SDL_Rect scissor{allocation.X, allocation.Y, allocation.Size, allocation.Size};
+                SDL_SetGPUViewport(localPass, &viewport);
+                SDL_SetGPUScissor(localPass, &scissor);
+                drawScene(localPass, matrix);
+            };
             std::size_t spotCount = 0;
             std::size_t pointCount = 0;
             constexpr float radiansToDegrees = 57.295779513082320876F;
@@ -3230,7 +3624,6 @@ namespace Keire::RenderBackend
             constexpr std::array<Vector3, 6> pointUps{Vector3{0.0F, 1.0F, 0.0F},  Vector3{0.0F, 1.0F, 0.0F},
                                                       Vector3{0.0F, 0.0F, -1.0F}, Vector3{0.0F, 0.0F, 1.0F},
                                                       Vector3{0.0F, 1.0F, 0.0F},  Vector3{0.0F, 1.0F, 0.0F}};
-            const auto lightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
             for (std::size_t lightIndex = 0; lightIndex < lightCount; ++lightIndex)
             {
                 const auto& light = packet.LocalLights[lightIndex];
@@ -3238,34 +3631,54 @@ namespace Keire::RenderBackend
                     continue;
                 if (light.Type == SceneLocalLightType::Spot && spotCount < MaximumShadowedSpotLights)
                 {
+                    const auto* allocation = findAllocation(light.Entity, 0);
+                    if (!allocation)
+                    {
+                        ++spotCount;
+                        continue;
+                    }
                     const float outerAngle = std::acos(std::clamp(light.OuterConeCosine, -1.0F, 1.0F));
                     const auto up =
                         std::abs(light.Direction.Y) > 0.95F ? Vector3{0.0F, 0.0F, 1.0F} : Vector3{0.0F, 1.0F, 0.0F};
                     const auto view = Math::LookAt(light.Position, Add(light.Position, light.Direction), up);
                     const auto projection = Math::Perspective(
                         std::clamp(outerAngle * 2.0F * radiansToDegrees, 1.01F, 178.0F), 1.0F, 0.05F, light.Range);
-                    result.Local.Matrices[spotCount] = Math::Multiply(projection, view);
+                    const auto lightMatrix = Math::Multiply(projection, view);
+                    result.Local.Matrices[spotCount] = atlasMatrix(lightMatrix, *allocation);
                     result.LocalLayers[lightIndex] = static_cast<float>(spotCount);
-                    drawLayer(surface.Resources.LocalShadow, static_cast<std::uint32_t>(spotCount),
-                              result.Local.Matrices[spotCount]);
+                    drawAtlasTile(lightMatrix, *allocation);
                     ++spotCount;
                 }
                 else if (light.Type == SceneLocalLightType::Point && pointCount < MaximumShadowedPointLights)
                 {
                     const auto baseLayer = static_cast<std::uint32_t>(MaximumShadowedSpotLights + pointCount * 6U);
+                    std::array<const Detail::ShadowAtlasAllocation*, 6> faceAllocations{};
+                    bool complete = true;
+                    for (std::uint8_t face = 0; face < 6U; ++face)
+                    {
+                        faceAllocations[face] = findAllocation(light.Entity, face);
+                        complete &= faceAllocations[face] != nullptr;
+                    }
+                    if (!complete)
+                    {
+                        ++pointCount;
+                        continue;
+                    }
                     result.LocalLayers[lightIndex] = static_cast<float>(baseLayer);
                     const auto projection = Math::Perspective(90.0F, 1.0F, 0.05F, light.Range);
                     for (std::uint32_t face = 0; face < 6; ++face)
                     {
                         const auto view =
                             Math::LookAt(light.Position, Add(light.Position, pointDirections[face]), pointUps[face]);
-                        result.Local.Matrices[baseLayer + face] = Math::Multiply(projection, view);
-                        drawLayer(surface.Resources.LocalShadow, baseLayer + face,
-                                  result.Local.Matrices[baseLayer + face]);
+                        const auto lightMatrix = Math::Multiply(projection, view);
+                        result.Local.Matrices[baseLayer + face] = atlasMatrix(lightMatrix, *faceAllocations[face]);
+                        drawAtlasTile(lightMatrix, *faceAllocations[face]);
                     }
                     ++pointCount;
                 }
             }
+            SDL_EndGPURenderPass(localPass);
+            ++Statistics.Passes;
         }
         return result;
     }
@@ -3325,6 +3738,10 @@ namespace Keire::RenderBackend
                     };
                     hashValue(surface.Width);
                     hashValue(surface.Height);
+                    hashValue(request->Packet.BakedLighting.High());
+                    hashValue(request->Packet.BakedLighting.Low());
+                    hashValue(request->Packet.Lighting.Cookie.High());
+                    hashValue(request->Packet.Lighting.Cookie.Low());
                     for (const auto value : request->Packet.Camera.View.Elements)
                         hashValue(value);
                     for (const auto value : request->Packet.Camera.Projection.Elements)
@@ -3345,6 +3762,9 @@ namespace Keire::RenderBackend
                         hashValue(light.ColorAndIntensity.Alpha);
                         hashValue(light.InnerConeCosine);
                         hashValue(light.Type);
+                        hashValue(light.Cookie.High());
+                        hashValue(light.Cookie.Low());
+                        hashValue(light.ContactShadows);
                     }
                     Statistics.VisibleLocalLights += static_cast<std::uint32_t>(request->Packet.LocalLights.size());
                     if (surface.ForwardPlusContentValid && surface.ForwardPlusContentHash == contentHash &&
@@ -3366,15 +3786,32 @@ namespace Keire::RenderBackend
                     Statistics.OverflowedLightTiles += tiles.OverflowedTiles;
                     std::vector<AssetLocalLightUniform> gpuLights(
                         std::max<std::size_t>(1, request->Packet.LocalLights.size()));
+                    const auto forwardLightingSet = ResolveLightingSet(request->Packet.BakedLighting);
+                    const auto forwardMixedChannel = [&](const AssetId light) -> float
+                    {
+                        if (!forwardLightingSet)
+                            return 0.0F;
+                        const auto found = std::ranges::find(forwardLightingSet->Definition().MixedLights, light,
+                                                             &MixedLightBinding::Light);
+                        return found == forwardLightingSet->Definition().MixedLights.end()
+                                   ? 0.0F
+                                   : static_cast<float>(found->ShadowMaskChannel + 1U);
+                    };
+                    std::uint32_t forwardCookieSlot = request->Packet.Lighting.Cookie ? 1U : 0U;
                     for (std::size_t lightIndex = 0; lightIndex < request->Packet.LocalLights.size(); ++lightIndex)
                     {
                         const auto& light = request->Packet.LocalLights[lightIndex];
+                        float cookie = 0.0F;
+                        if (light.Cookie && forwardCookieSlot < 8U)
+                            cookie = static_cast<float>(++forwardCookieSlot);
                         gpuLights[lightIndex] = {
                             {light.Position.X, light.Position.Y, light.Position.Z, light.Range},
                             {light.Direction.X, light.Direction.Y, light.Direction.Z, light.OuterConeCosine},
                             {light.ColorAndIntensity.Red, light.ColorAndIntensity.Green, light.ColorAndIntensity.Blue,
                              light.ColorAndIntensity.Alpha},
-                            {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F, 0.0F, 0.0F}};
+                            {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F,
+                             forwardMixedChannel(light.Entity.Value()),
+                             cookie + (light.ContactShadows ? 16.0F : 0.0F)}};
                     }
                     std::vector<ForwardPlusTileUniform> gpuTiles(tiles.Offsets.size());
                     for (std::size_t tileIndex = 0; tileIndex < gpuTiles.size(); ++tileIndex)
@@ -3915,6 +4352,14 @@ namespace Keire::RenderBackend
             ReleaseTextureResources(entry.Resources);
         }
         TextureCache.clear();
+        for (auto& [id, entry] : LightingTextureCache)
+        {
+            (void)id;
+            ReleaseTextureResources(entry.Resources);
+        }
+        LightingTextureCache.clear();
+        LightingSetCache.clear();
+        LightProbeVolumeCache.clear();
         MaterialCache.clear();
         VfxVolumeCache.clear();
         for (auto& [id, entry] : ShaderCache)
@@ -3926,12 +4371,17 @@ namespace Keire::RenderBackend
         ShaderCache.clear();
         ReleaseTextureResources(CheckerboardTexture);
         ReleaseTextureResources(DefaultSkyTexture);
+        ReleaseTextureResources(BrdfIntegrationLut);
         ReleaseTextureResources(WhiteTexture);
         ReleaseTextureResources(FlatNormalTexture);
         ReleaseTextureResources(NeutralOrmTexture);
         ReleaseTextureResources(BlackTexture);
         ReleaseTextureResources(BlackDataTexture);
         ReleaseTextureResources(WhiteDataTexture);
+        ReleaseTextureResources(DefaultLightingArray);
+        ReleaseTextureResources(DefaultLightingMaskArray);
+        ReleaseTextureResources(DefaultReflectionCubeArray);
+        ReleaseTextureResources(CookieAtlas);
         for (const auto& [description, sampler] : SamplerCache)
         {
             (void)description;

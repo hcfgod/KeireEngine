@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
-  "id": "b1b2c3d4-1000-4000-8000-000000000001",
-  "type": "4b454952-4553-4841-4445-520000000001",
-  "importer": "Keire.Shader",
-  "importerVersion": 1,
   "dependencies": [],
-  "subAssets": []
+  "id": "b1b2c3d4-1000-4000-8000-000000000001",
+  "importer": "Keire.Shader",
+  "importerVersion": 2,
+  "schemaVersion": 1,
+  "subAssets": [],
+  "type": "4b454952-4553-4841-4445-520000000001"
 }

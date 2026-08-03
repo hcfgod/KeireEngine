@@ -8,6 +8,7 @@
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -890,9 +891,11 @@ namespace Keire
         return result;
     }
 
-    Ref<AnimationClipAsset> RetargetAnimationClip(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
-                                                  const AnimationClipAsset& sourceClip, const AssetId targetSkeletonId,
-                                                  const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig)
+    AnimationRetargetDiagnostics DiagnoseAnimationRetargeting(const SkeletonAsset& sourceSkeleton,
+                                                              const RigDefinition& sourceRig,
+                                                              const AnimationClipAsset& sourceClip,
+                                                              const SkeletonAsset& targetSkeleton,
+                                                              const RigDefinition& targetRig)
     {
         ValidateRigDefinition(sourceRig);
         ValidateRigDefinition(targetRig);
@@ -938,12 +941,23 @@ namespace Keire
         const auto isAssimpFbxRotationHelper = [](const std::string_view name) noexcept
         { return name.ends_with("_$AssimpFbx$_Rotation"); };
 
-        std::vector<AnimationTrack> tracks;
-        tracks.reserve(sourceClip.Tracks().size());
+        AnimationRetargetDiagnostics result;
+        result.SourceTrackCount = sourceClip.Tracks().size();
+        result.Mappings.reserve(sourceClip.Tracks().size());
+        std::unordered_map<std::uint32_t, std::size_t> acceptedTargets;
         for (const auto& sourceTrack : sourceClip.Tracks())
         {
+            AnimationRetargetBoneMapping mapping;
+            mapping.SourceBone = sourceTrack.Bone;
             if (sourceTrack.Bone >= sourceRig.Bones.size())
+            {
+                result.Messages.push_back({RigDiagnosticSeverity::Error, "KEIRERETARGET0001",
+                                           "The clip references a source bone outside its rig."});
+                result.Mappings.push_back(std::move(mapping));
                 continue;
+            }
+            mapping.SourceName = sourceSkeleton.Bones()[sourceTrack.Bone].Name;
+            mapping.Semantic = sourceRig.Bones[sourceTrack.Bone].Semantic;
             std::optional<std::uint32_t> targetIndex;
             bool exactNameMatch = false;
             if (const auto exact = targetByName.find(sourceSkeleton.Bones()[sourceTrack.Bone].Name);
@@ -958,7 +972,13 @@ namespace Keire
                 targetIndex = semantic->second;
             }
             if (!targetIndex)
+            {
+                result.Messages.push_back({RigDiagnosticSeverity::Warning, "KEIRERETARGET0002",
+                                           "No target bone matches source track '" + mapping.SourceName + "'.",
+                                           mapping.Semantic});
+                result.Mappings.push_back(std::move(mapping));
                 continue;
+            }
             const auto& sourceBind = sourceSkeleton.Bones()[sourceTrack.Bone].BindPose;
             const auto& targetBind = targetSkeleton.Bones()[*targetIndex].BindPose;
             const auto sourceLength = Length(sourceBind.Translation);
@@ -970,17 +990,107 @@ namespace Keire
                  (matchingVector(sourceBind.Translation, targetBind.Translation) &&
                   matchingRotation(sourceBind.Rotation, targetBind.Rotation) &&
                   matchingVector(sourceBind.Scale, targetBind.Scale)));
+            mapping.TargetBone = *targetIndex;
+            mapping.TargetName = targetSkeleton.Bones()[*targetIndex].Name;
+            mapping.Match = exactNameMatch ? AnimationRetargetMatch::ExactName : AnimationRetargetMatch::Semantic;
+            mapping.TranslationScale = translationScale;
+            mapping.PreservesAuthoredLocalTrack = preserveAuthoredLocalTrack;
+            for (const auto& key : sourceTrack.Keys)
+            {
+                const auto fallback = [](const float animated, const float source)
+                {
+                    if (std::abs(source) <= Epsilon)
+                        return true;
+                    const auto relative = animated / source;
+                    return !std::isfinite(relative) || relative < 0.125F || relative > 8.0F;
+                };
+                mapping.ScaleFallbackKeyCount += fallback(key.Value.Scale.X, sourceBind.Scale.X) ? 1U : 0U;
+                mapping.ScaleFallbackKeyCount += fallback(key.Value.Scale.Y, sourceBind.Scale.Y) ? 1U : 0U;
+                mapping.ScaleFallbackKeyCount += fallback(key.Value.Scale.Z, sourceBind.Scale.Z) ? 1U : 0U;
+            }
+
+            if (const auto accepted = acceptedTargets.find(*targetIndex); accepted != acceptedTargets.end())
+            {
+                auto& previous = result.Mappings[accepted->second];
+                if (mapping.Match == AnimationRetargetMatch::ExactName &&
+                    previous.Match == AnimationRetargetMatch::Semantic)
+                {
+                    previous.TargetBone.reset();
+                    previous.Match = AnimationRetargetMatch::TargetConflict;
+                    accepted->second = result.Mappings.size();
+                }
+                else
+                {
+                    mapping.TargetBone.reset();
+                    mapping.Match = AnimationRetargetMatch::TargetConflict;
+                }
+                result.Messages.push_back({RigDiagnosticSeverity::Warning, "KEIRERETARGET0003",
+                                           "Multiple source tracks resolve to target bone '" +
+                                               targetSkeleton.Bones()[*targetIndex].Name +
+                                               "'; the exact-name mapping takes priority.",
+                                           mapping.Semantic});
+            }
+            else
+            {
+                acceptedTargets.emplace(*targetIndex, result.Mappings.size());
+            }
+            result.Mappings.push_back(std::move(mapping));
+        }
+
+        for (const auto& mapping : result.Mappings)
+        {
+            if (!mapping.TargetBone)
+                continue;
+            ++result.MappedTrackCount;
+            result.ExactNameMatchCount += mapping.Match == AnimationRetargetMatch::ExactName ? 1U : 0U;
+            result.SemanticMatchCount += mapping.Match == AnimationRetargetMatch::Semantic ? 1U : 0U;
+        }
+        if (sourceClip.RootMotion())
+        {
+            const auto rootMapping = std::ranges::find(result.Mappings, 0U, &AnimationRetargetBoneMapping::SourceBone);
+            result.RootMotionMapped = rootMapping != result.Mappings.end() && rootMapping->TargetBone == 0U;
+            if (!result.RootMotionMapped)
+                result.Messages.push_back(
+                    {RigDiagnosticSeverity::Warning, "KEIRERETARGET0004",
+                     "Root motion is enabled but the source root does not map to the target root."});
+        }
+        if (!result.Compatible())
+            result.Messages.push_back({RigDiagnosticSeverity::Error, "KEIRERETARGET0005",
+                                       "Retargeting found no compatible source animation tracks."});
+        return result;
+    }
+
+    AnimationRetargetResult
+    RetargetAnimationClipWithDiagnostics(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
+                                         const AnimationClipAsset& sourceClip, const AssetId targetSkeletonId,
+                                         const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig)
+    {
+        auto diagnostics =
+            DiagnoseAnimationRetargeting(sourceSkeleton, sourceRig, sourceClip, targetSkeleton, targetRig);
+        if (!diagnostics.Compatible())
+            throw std::invalid_argument("Retargeting found no compatible semantic bone tracks.");
+
+        std::vector<AnimationTrack> tracks;
+        tracks.reserve(diagnostics.MappedTrackCount);
+        for (const auto& sourceTrack : sourceClip.Tracks())
+        {
+            const auto found =
+                std::ranges::find(diagnostics.Mappings, sourceTrack.Bone, &AnimationRetargetBoneMapping::SourceBone);
+            if (found == diagnostics.Mappings.end() || !found->TargetBone)
+                continue;
+            const auto& sourceBind = sourceSkeleton.Bones()[sourceTrack.Bone].BindPose;
+            const auto& targetBind = targetSkeleton.Bones()[*found->TargetBone].BindPose;
             AnimationTrack track;
-            track.Bone = *targetIndex;
+            track.Bone = *found->TargetBone;
             track.Keys.reserve(sourceTrack.Keys.size());
             for (const auto& key : sourceTrack.Keys)
             {
                 auto value = key.Value;
-                if (!preserveAuthoredLocalTrack)
+                if (!found->PreservesAuthoredLocalTrack)
                 {
                     value.Translation =
                         Add(targetBind.Translation,
-                            Multiply(Subtract(value.Translation, sourceBind.Translation), translationScale));
+                            Multiply(Subtract(value.Translation, sourceBind.Translation), found->TranslationScale));
                     const auto sourceRotation = Normalize(sourceBind.Rotation);
                     const auto targetRotation = Normalize(targetBind.Rotation);
                     const auto rotationDelta = Multiply(Conjugate(sourceRotation), Normalize(value.Rotation));
@@ -1002,12 +1112,22 @@ namespace Keire
             }
             tracks.push_back(std::move(track));
         }
-        if (tracks.empty())
-            throw std::invalid_argument("Retargeting found no compatible semantic bone tracks.");
-        return CreateRef<AnimationClipAsset>(
+        AnimationRetargetResult result;
+        result.Clip = CreateRef<AnimationClipAsset>(
             targetSkeletonId, sourceClip.Duration(), std::move(tracks),
             std::vector<AnimationEvent>(sourceClip.Events().begin(), sourceClip.Events().end()),
-            sourceClip.RootMotion());
+            sourceClip.RootMotion() && diagnostics.RootMotionMapped);
+        result.Diagnostics = std::move(diagnostics);
+        return result;
+    }
+
+    Ref<AnimationClipAsset> RetargetAnimationClip(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
+                                                  const AnimationClipAsset& sourceClip, const AssetId targetSkeletonId,
+                                                  const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig)
+    {
+        return RetargetAnimationClipWithDiagnostics(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
+                                                    targetSkeleton, targetRig)
+            .Clip;
     }
 
     bool SolveTwoBoneIk(const SkeletonAsset& skeleton, const std::span<BoneTransform> localPose,
@@ -1134,6 +1254,143 @@ namespace Keire
                 Nlerp(localPose[bone].Rotation, Multiply(delta, localPose[bone].Rotation), weight);
         }
         return true;
+    }
+
+    std::optional<FootGroundingResult> SolveFootGrounding(const SkeletonAsset& skeleton,
+                                                          const std::span<BoneTransform> localPose,
+                                                          const FootGroundingRequest& request)
+    {
+        if (localPose.size() != skeleton.Bones().size() || request.Contacts.empty() || request.Contacts.size() > 16 ||
+            (request.Pelvis && *request.Pelvis >= localPose.size()) || !std::isfinite(request.FootHeight) ||
+            request.FootHeight < 0.0F || !std::isfinite(request.PelvisWeight) || request.PelvisWeight < 0.0F ||
+            request.PelvisWeight > 1.0F || !std::isfinite(request.MaximumPelvisAdjustment) ||
+            request.MaximumPelvisAdjustment < 0.0F)
+            return std::nullopt;
+
+        std::set<std::uint32_t> feet;
+        for (const auto& contact : request.Contacts)
+        {
+            if (contact.UpperLeg >= localPose.size() || contact.LowerLeg >= localPose.size() ||
+                contact.Foot >= localPose.size() ||
+                skeleton.Bones()[contact.LowerLeg].Parent != static_cast<std::int32_t>(contact.UpperLeg) ||
+                skeleton.Bones()[contact.Foot].Parent != static_cast<std::int32_t>(contact.LowerLeg) ||
+                !feet.insert(contact.Foot).second || !Math::IsFinite(contact.Position) ||
+                !Math::IsFinite(contact.Normal) || Length(contact.Normal) <= Epsilon || !Math::IsFinite(contact.Pole) ||
+                !std::isfinite(contact.Weight) || contact.Weight < 0.0F || contact.Weight > 1.0F ||
+                !std::isfinite(contact.RotationWeight) || contact.RotationWeight < 0.0F ||
+                contact.RotationWeight > 1.0F)
+                return std::nullopt;
+        }
+
+        std::vector<BoneTransform> working(localPose.begin(), localPose.end());
+        FootGroundingResult result;
+        if (request.Pelvis && request.PelvisWeight > 0.0F)
+        {
+            const auto world = WorldMatrices(skeleton, working);
+            float requestedAdjustment = request.MaximumPelvisAdjustment;
+            for (const auto& contact : request.Contacts)
+            {
+                const auto current = Math::TransformPoint(world[contact.Foot], {});
+                const auto target = Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight));
+                requestedAdjustment = std::min(requestedAdjustment, target.Y - current.Y);
+            }
+            result.PelvisAdjustment =
+                std::clamp(requestedAdjustment, -request.MaximumPelvisAdjustment, request.MaximumPelvisAdjustment) *
+                request.PelvisWeight;
+            working[*request.Pelvis].Translation.Y += result.PelvisAdjustment;
+        }
+
+        for (const auto& contact : request.Contacts)
+        {
+            const auto normal = Normalize(contact.Normal);
+            const auto target = Add(contact.Position, Multiply(normal, request.FootHeight));
+            if (!SolveTwoBoneIk(
+                    skeleton, working,
+                    {contact.UpperLeg, contact.LowerLeg, contact.Foot, target, contact.Pole, contact.Weight}))
+                return std::nullopt;
+            const auto aligned = Multiply(FromTo({0.0F, 1.0F, 0.0F}, normal), working[contact.Foot].Rotation);
+            working[contact.Foot].Rotation =
+                Nlerp(working[contact.Foot].Rotation, aligned, contact.Weight * contact.RotationWeight);
+            ++result.SolvedFeet;
+        }
+
+        std::ranges::copy(working, localPose.begin());
+        return result;
+    }
+
+    void RagdollPoseTransition::SetRagdoll(const bool enabled, const float duration)
+    {
+        if (!std::isfinite(duration) || duration < 0.0F || duration > 60.0F)
+            throw std::invalid_argument("Ragdoll transition duration must be finite and in the range 0..60.");
+        m_StartWeight = m_Weight;
+        m_TargetWeight = enabled ? 1.0F : 0.0F;
+        m_Duration = duration;
+        m_Elapsed = 0.0F;
+        if (duration == 0.0F || m_StartWeight == m_TargetWeight)
+        {
+            m_Weight = m_TargetWeight;
+            m_Mode = enabled ? RagdollPoseMode::Ragdoll : RagdollPoseMode::Animated;
+            return;
+        }
+        m_Mode = enabled ? RagdollPoseMode::TransitionToRagdoll : RagdollPoseMode::TransitionToAnimation;
+    }
+
+    std::vector<BoneTransform> RagdollPoseTransition::Update(const float deltaSeconds,
+                                                             const std::span<const BoneTransform> animationPose,
+                                                             const std::span<const BoneTransform> ragdollPose)
+    {
+        if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0F || deltaSeconds > 10.0F || animationPose.empty() ||
+            animationPose.size() != ragdollPose.size() || animationPose.size() > 4096)
+            throw std::invalid_argument("Ragdoll pose transition sample is invalid.");
+        for (std::size_t index = 0; index < animationPose.size(); ++index)
+        {
+            if (!Math::IsFinite(animationPose[index].Translation) || !Math::IsFinite(animationPose[index].Rotation) ||
+                !Math::IsFinite(animationPose[index].Scale) || !Math::IsFinite(ragdollPose[index].Translation) ||
+                !Math::IsFinite(ragdollPose[index].Rotation) || !Math::IsFinite(ragdollPose[index].Scale))
+                throw std::invalid_argument("Ragdoll pose transition contains a non-finite transform.");
+        }
+
+        auto nextElapsed = m_Elapsed;
+        auto nextWeight = m_Weight;
+        auto nextMode = m_Mode;
+        if (m_Mode == RagdollPoseMode::TransitionToRagdoll || m_Mode == RagdollPoseMode::TransitionToAnimation)
+        {
+            nextElapsed = std::min(m_Elapsed + deltaSeconds, m_Duration);
+            const auto alpha = m_Duration > 0.0F ? nextElapsed / m_Duration : 1.0F;
+            nextWeight = m_StartWeight + (m_TargetWeight - m_StartWeight) * alpha;
+            if (nextElapsed >= m_Duration)
+                nextMode = m_TargetWeight > 0.0F ? RagdollPoseMode::Ragdoll : RagdollPoseMode::Animated;
+        }
+
+        std::vector<BoneTransform> result;
+        result.reserve(animationPose.size());
+        for (std::size_t index = 0; index < animationPose.size(); ++index)
+        {
+            const auto& animation = animationPose[index];
+            const auto& ragdoll = ragdollPose[index];
+            const auto blendVector = [nextWeight](const Vector3 first, const Vector3 second)
+            {
+                return Vector3{first.X + (second.X - first.X) * nextWeight, first.Y + (second.Y - first.Y) * nextWeight,
+                               first.Z + (second.Z - first.Z) * nextWeight};
+            };
+            result.push_back({blendVector(animation.Translation, ragdoll.Translation),
+                              Nlerp(animation.Rotation, ragdoll.Rotation, nextWeight),
+                              blendVector(animation.Scale, ragdoll.Scale)});
+        }
+        m_Elapsed = nextElapsed;
+        m_Weight = nextWeight;
+        m_Mode = nextMode;
+        return result;
+    }
+
+    void RagdollPoseTransition::Reset() noexcept
+    {
+        m_Mode = RagdollPoseMode::Animated;
+        m_Weight = 0.0F;
+        m_StartWeight = 0.0F;
+        m_TargetWeight = 0.0F;
+        m_Duration = 0.0F;
+        m_Elapsed = 0.0F;
     }
 
     AssetImporterRegistration CreateRigDefinitionAssetImporter()

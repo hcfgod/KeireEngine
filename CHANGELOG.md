@@ -5,6 +5,51 @@ version tags.
 
 ## Unreleased
 
+- Added production spatial lighting: oriented reflection probes with box projection and two-probe blending, static
+  lightmaps, SH9 light-probe volumes, emissive-to-GI, eight-channel mixed shadow masks, realtime/baked/mixed lights,
+  deterministic point/spot shadow-atlas allocation, contact-shadow refinement, packed light cookies, and an atomic
+  digest-verified offline lighting cache shared by the editor worker and `bake-lighting` CLI.
+- Added production Material Graph authoring on the shared VFX node-canvas foundation: Surface/Transparent/Decal/Unlit
+  outputs, PBR lowering, texture and UV operations, normal/detail/parallax/emission inputs, typed parameters, bounded
+  keywords and deterministic variants, live shaded sphere/plane/cube/custom-mesh previews with last-good retention,
+  generated diagnostics, confined recursive custom includes, material-instance resolution/baking, source/cooked asset
+  registration, and editor create/open/save with
+  asset-ID-owned generated HLSL/manifests. Generated output is validated by the production DXIL/SPIR-V/MSL compiler and
+  fixed resource-binding reflection contract.
+- Expanded Material Graph into a layered production surface workflow with clear coat, sheen, dielectric specular,
+  Fresnel, world/vertex inputs, UV rotation, procedural noise, remap/shaping/vector math, searchable categorized creation,
+  typed pin defaults, texture asset/semantic editing, node duplication, adaptive exposure/environment/rotation previews,
+  reachability and cost diagnostics, strict disconnected-node validation, and five progressively advanced Sandbox graphs.
+  Corrected generated alpha clipping to consume the renderer's alpha-mode/cutoff ABI in the declared order.
+- Completed an animation production pass with import-time key compression presets and measured errors, retarget mapping
+  diagnostics, state-machine subgraphs, live transition visualization, transient preview playback, immutable pose and
+  trajectory debugging, state-machine profiling, serialized foot-grounding settings, transactional ground adaptation,
+  and interruptible animation/ragdoll pose blending. Existing blend trees, override/additive layers, and avatar masks
+  now participate in the same preview and diagnostic workflow.
+- Fixed GPU-skinned meshes exploding during Play Mode and animation preview after the mesh vertex format gained a
+  second UV channel. The compute shader now preserves the full six-lane vertex layout, with a regression check tying
+  its storage declaration to the renderer ABI.
+- Added global image-based lighting for opted-in PBR materials: deterministic second-order diffuse irradiance baking,
+  RGBE-aware HDR radiance mip chains, roughness-filtered specular environment sampling, an engine-owned split-sum BRDF
+  integration LUT, revision-cached environment resources, shared sky/lighting rotation, and independent diffuse and
+  specular intensity controls. The fixed custom-shader ABI exposes this through `usesImageBasedLighting` without
+  changing shaders that do not opt in.
+- Fixed VFX graph readability at reduced zoom with deterministic detail levels: connection and Block labels collapse
+  first, pin labels appear only when their scaled rows can contain them, and compact node titles remain clipped to the
+  card. Corrected schema-4 Operator, Attribute, and Subgraph cards that were incorrectly labelled `Unsupported` by a
+  stale editor-only node-kind switch; Split Vector 2 and its sibling Split nodes now show their actual CPU + GPU status.
+- Promoted 42 additional Unity 6.3 VFX rows to executable CPU/GPU nodes: 16 live particle/strip Attribute reads plus
+  Ratio Over Strip, 11 typed Inline values, Epsilon/Pi constants, four coordinate conversions, 2D/3D rotation, and
+  deterministic fixed-3D Value/Perlin/Cellular noise and curl. Expanded the expression ABI from four to eight inputs
+  and from 256 to 512 cooked sources across compiler folding, schema validation, CPU execution, GPU packing, renderer
+  validation, and HLSL. Analytic noise gradients replace repeated finite-difference samples for materially cheaper
+  curl evaluation and GPU pipeline creation. The parity ledger now records 125 enabled equivalents and 153 disabled
+  rows.
+- Promoted 21 Unity 6.3 utility Operators from disabled catalog entries to executable CPU/GPU graph nodes: normalized
+  age, frame/system identity, inverse interpolation, modulo, discretization, reciprocal/one-minus, NAND/NOR, 64-bit
+  bitwise operations, squared vector metrics, luma, and HSV/RGB conversion. The compiler, constant folder, runtime
+  evaluator, packed GPU ABI, shader interpreter, renderer validation, descriptor catalog, parity manifest, generated
+  capabilities, and focused edge-case tests now share the same opcode and signature contract.
 - Fixed the intermittent first-Play FPS freeze by making Play entry wait for the first valid managed assembly
   generation before cloning the scene or capturing input. The queued state is visible and cancelable from the toolbar,
   native-only projects remain immediate, failed builds reject Play with their diagnostic, and an active last-good

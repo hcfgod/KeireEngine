@@ -566,7 +566,7 @@ TEST_CASE("Entity layer schema fixtures migrate and round-trip canonically")
         REQUIRE(roundTrip->Definition().Objects.size() == 1);
         CHECK(roundTrip->Definition().Objects.front().Layer == fixture.Layer);
         const std::string canonicalText(reinterpret_cast<const char*>(canonical.data()), canonical.size());
-        CHECK(canonicalText.find("\"schemaVersion\": 4") != std::string::npos);
+        CHECK(canonicalText.find("\"schemaVersion\": 5") != std::string::npos);
         CHECK(canonicalText.find("\"layer\": " + std::to_string(fixture.Layer)) != std::string::npos);
     }
 }

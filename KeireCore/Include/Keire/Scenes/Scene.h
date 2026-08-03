@@ -67,6 +67,10 @@ namespace Keire
         [[nodiscard]] std::vector<SceneObjectDefinition> Objects() const;
         [[nodiscard]] SceneHierarchySnapshot HierarchySnapshot() const;
         [[nodiscard]] SceneDefinition Snapshot() const;
+        [[nodiscard]] LightingBakeSettings LightingBakeConfiguration() const;
+        void SetLightingBakeConfiguration(LightingBakeSettings settings);
+        [[nodiscard]] AssetId BakedLighting() const;
+        void SetBakedLighting(AssetId asset);
         [[nodiscard]] SceneObjectHandle Find(AssetId id) const noexcept;
         [[nodiscard]] SceneObjectHandle CreateObject(std::string name = "GameObject", AssetId parent = {});
         [[nodiscard]] SceneObjectHandle DuplicateObject(AssetId id);

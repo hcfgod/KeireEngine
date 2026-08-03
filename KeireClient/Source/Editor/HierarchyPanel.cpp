@@ -318,6 +318,24 @@ namespace KeireEditor
                                         .Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
+                if (ui.MenuItem("Reflection Probe Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(document
+                                        .CreateEntity("Reflection Probe", Keire::EntityId(object.Id),
+                                                      Keire::ReflectionProbeComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("Light Probe Volume Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(document
+                                        .CreateEntity("Light Probe Volume", Keire::EntityId(object.Id),
+                                                      Keire::LightProbeVolumeComponent::StaticType())
+                                        .Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
                 ui.Separator();
                 if (ui.MenuItem("Duplicate"))
                 {
@@ -504,6 +522,22 @@ namespace KeireEditor
                 m_Controller.RecordHierarchyUndo();
                 document.Select(
                     document.CreateEntity("Spot Light", {}, Keire::SpotLightComponent::StaticType()).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("Reflection Probe"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(
+                    document.CreateEntity("Reflection Probe", {}, Keire::ReflectionProbeComponent::StaticType())
+                        .Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("Light Probe Volume"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(
+                    document.CreateEntity("Light Probe Volume", {}, Keire::LightProbeVolumeComponent::StaticType())
+                        .Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
             }
         }

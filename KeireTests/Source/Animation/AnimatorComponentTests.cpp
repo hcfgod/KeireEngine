@@ -60,3 +60,48 @@ TEST_CASE("Animator component queues ordered managed playback controls and prese
     CHECK_THROWS_AS(animator.Play("Run", {}, -0.1F), std::invalid_argument);
     CHECK_THROWS_AS(animator.CrossFade("Run", -0.1F), std::invalid_argument);
 }
+
+TEST_CASE("Animator foot grounding settings validate and migrate as authored component state")
+{
+    Keire::AnimatorComponent animator;
+    Keire::AnimatorFootGroundingSettings settings;
+    settings.Enabled = true;
+    settings.Pelvis = "pelvis";
+    settings.LeftUpperLeg = "left-upper";
+    settings.LeftLowerLeg = "left-lower";
+    settings.LeftFoot = "left-foot";
+    settings.RightUpperLeg = "right-upper";
+    settings.RightLowerLeg = "right-lower";
+    settings.RightFoot = "right-foot";
+    settings.RaycastDistance = 1.25F;
+    settings.CollisionMask = 0x4U;
+    animator.SetFootGrounding(settings);
+    CHECK(animator.FootGrounding().Enabled);
+    CHECK(animator.FootGrounding().LeftFoot == "left-foot");
+
+    auto invalid = settings;
+    invalid.Weight = 2.0F;
+    CHECK_THROWS_AS(animator.SetFootGrounding(invalid), std::invalid_argument);
+    CHECK(animator.FootGrounding().Weight == doctest::Approx(1.0F));
+
+    const auto registration = Keire::CreateAnimatorComponentRegistration();
+    CHECK(registration.SchemaVersion == 2);
+    const auto values = registration.Serialize(animator);
+    auto restored = registration.Factory();
+    registration.Deserialize(*restored, values, registration.SchemaVersion);
+    const auto restoredAnimator = Keire::DynamicRefCast<Keire::AnimatorComponent>(restored);
+    REQUIRE(restoredAnimator);
+    CHECK(restoredAnimator->FootGrounding().Enabled);
+    CHECK(restoredAnimator->FootGrounding().RaycastDistance == doctest::Approx(1.25F));
+    CHECK(restoredAnimator->FootGrounding().CollisionMask == 0x4U);
+
+    auto invalidMask = values;
+    invalidMask["footCollisionMask"] = std::int64_t{-1};
+    CHECK_THROWS_AS(registration.Deserialize(*registration.Factory(), invalidMask, registration.SchemaVersion),
+                    std::invalid_argument);
+
+    REQUIRE(registration.Migrate);
+    const auto migrated = registration.Migrate({}, 1);
+    CHECK(std::get<bool>(migrated.at("footGrounding")) == false);
+    CHECK(std::get<std::string>(migrated.at("leftFoot")) == "LeftFoot");
+}

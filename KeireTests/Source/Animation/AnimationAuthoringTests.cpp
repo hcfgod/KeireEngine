@@ -102,9 +102,9 @@ TEST_CASE("Animation graph schema one migrates in memory and source import remai
           definition.Layers.front().States.back().Id);
 
     const auto saved = Keire::AnimationGraphAsset::Encode(definition);
-    CHECK(Text(saved).find(R"("schemaVersion": 2)") != std::string::npos);
+    CHECK(Text(saved).find(R"("schemaVersion": 3)") != std::string::npos);
     const auto reopened = Keire::AnimationGraphAsset::Decode(saved);
-    CHECK(reopened->Definition().SchemaVersion == 2);
+    CHECK(reopened->Definition().SchemaVersion == 3);
     CHECK(reopened->Definition().Layers.front().States.front().Id == definition.Layers.front().States.front().Id);
 
     const auto importer = Keire::CreateAnimationGraphAssetImporter();
@@ -203,6 +203,44 @@ TEST_CASE("Animation graph validates stable IDs typed conditions blend trees and
                     std::invalid_argument);
 }
 
+TEST_CASE("Animation state-machine subgraphs round trip and execute through stable cross-graph transitions")
+{
+    const auto skeletonId = Keire::AssetId::Parse("21000000-0000-4000-8000-000000000001");
+    const auto idleId = Keire::AssetId::Parse("21000000-0000-4000-8000-000000000002");
+    const auto attackId = Keire::AssetId::Parse("21000000-0000-4000-8000-000000000003");
+    const auto skeleton = TestSkeleton();
+    const auto idleClip = ConstantHandClip(skeletonId, 0.0F);
+    const auto attackClip = ConstantHandClip(skeletonId, 3.0F);
+    auto idle = ClipState("state-idle", "Idle", idleId);
+    auto attack = ClipState("state-attack", "Attack", attackId);
+    attack.SubgraphId = "subgraph-combat";
+    idle.Transitions.push_back({"Attack", 0.0F, false, 1.0F, {}, "transition-attack", attack.Id});
+    auto definition = GraphWithBaseLayer({}, {idle, attack});
+    definition.Layers.front().Subgraphs.push_back({"subgraph-combat", "Combat", attack.Id});
+
+    const auto graph = Keire::AnimationGraphAsset::Decode(Keire::AnimationGraphAsset::Encode(definition));
+    REQUIRE(graph->Definition().SchemaVersion == 3);
+    REQUIRE(graph->Definition().Layers.front().Subgraphs.size() == 1);
+    CHECK(graph->Definition().Layers.front().Subgraphs.front().EntryStateId == attack.Id);
+    CHECK(graph->Definition().Layers.front().States.back().SubgraphId == "subgraph-combat");
+    Keire::AnimatorInstance animator(skeleton, graph,
+                                     [&](const Keire::AssetId id)
+                                     {
+                                         if (id == idleId)
+                                             return idleClip;
+                                         if (id == attackId)
+                                             return attackClip;
+                                         return Keire::Ref<Keire::AnimationClipAsset>{};
+                                     });
+    const auto sample = animator.Update(0.0F);
+    CHECK(sample.State == "Attack");
+    CHECK(sample.LocalPose[1].Translation.X == doctest::Approx(3.0F));
+
+    auto invalid = definition;
+    invalid.Layers.front().Subgraphs.front().EntryStateId = idle.Id;
+    CHECK_THROWS_AS(Keire::ValidateAnimationGraph(invalid), std::invalid_argument);
+}
+
 TEST_CASE("Animator evaluates typed transitions with crossfade bookkeeping and consumes triggers")
 {
     const auto skeletonId = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000001");
@@ -251,6 +289,14 @@ TEST_CASE("Animator evaluates typed transitions with crossfade bookkeeping and c
     REQUIRE(transitionDebug->Layers.size() == 1);
     CHECK(transitionDebug->Layers.front().InTransition);
     CHECK(transitionDebug->Layers.front().TransitionProgress == doctest::Approx(0.25F));
+    CHECK(transitionDebug->Pose.size() == 2);
+    CHECK(transitionDebug->Pose[1].Name == "Hand");
+    CHECK(transitionDebug->Profile.UpdateCount == 1);
+    CHECK(transitionDebug->Profile.LayersEvaluated == 1);
+    CHECK(transitionDebug->Profile.TransitionsTested == 1);
+    CHECK(transitionDebug->Profile.MotionsEvaluated == 2);
+    CHECK(transitionDebug->Profile.ClipsSampled == 2);
+    CHECK(transitionDebug->Profile.LastEvaluationMicroseconds >= 0.0);
     animator.SetLayerWeight("Base", 0.5F);
 
     auto compatibleDefinition = definition;
@@ -399,6 +445,64 @@ TEST_CASE("Animator publishes rotational root motion without reset or wrap disco
     const auto wrapped = animator.Update(0.6F);
     CHECK(wrapped.RootRotation == Keire::Quaternion{});
     CHECK(animator.DebugSnapshot()->RootRotation == Keire::Quaternion{});
+    REQUIRE(animator.DebugSnapshot()->MotionTrajectory.size() == 3);
+    CHECK(animator.DebugSnapshot()->MotionTrajectory.back().Time == doctest::Approx(1.1F));
+}
+
+TEST_CASE("Animation compression deterministically removes redundant keys within authored tolerances")
+{
+    Keire::AnimationTrack linear;
+    linear.Bone = 4;
+    linear.Keys = {{0.0F, {}},
+                   {0.25F, {{0.25F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}},
+                   {0.5F, {{0.5F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}},
+                   {0.75F, {{0.75F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}},
+                   {1.0F, {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}}};
+    const auto settings = Keire::AnimationCompressionSettingsForPreset(Keire::AnimationCompressionPreset::Balanced);
+    const auto compressed = Keire::CompressAnimationTracks(std::span(&linear, 1), settings);
+    const auto repeated = Keire::CompressAnimationTracks(std::span(&linear, 1), settings);
+
+    REQUIRE(compressed.Tracks.size() == 1);
+    CHECK(compressed.Tracks.front().Bone == 4);
+    REQUIRE(compressed.Tracks.front().Keys.size() == 2);
+    CHECK(compressed.Tracks.front().Keys.front().Time == doctest::Approx(0.0F));
+    CHECK(compressed.Tracks.front().Keys.back().Time == doctest::Approx(1.0F));
+    CHECK(compressed.Statistics.SourceKeyCount == 5);
+    CHECK(compressed.Statistics.CompressedKeyCount == 2);
+    CHECK(compressed.Statistics.MaximumTranslationError <= settings.MaximumTranslationError);
+    CHECK(repeated.Tracks.front().Keys == compressed.Tracks.front().Keys);
+
+    Keire::AnimationTrack antipodal;
+    antipodal.Keys = {{0.0F, {}}, {0.5F, {}}, {1.0F, {{}, {0.0F, 0.0F, 0.0F, -1.0F}, {1.0F, 1.0F, 1.0F}}}};
+    const auto antipodalCompressed = Keire::CompressAnimationTracks(std::span(&antipodal, 1), settings);
+    CHECK(antipodalCompressed.Tracks.front().Keys.size() == 2);
+}
+
+TEST_CASE("Animation compression retains meaningful motion and rejects invalid settings transactionally")
+{
+    Keire::AnimationTrack curved;
+    curved.Keys = {{0.0F, {}},
+                   {0.5F, {{0.0F, 0.02F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}},
+                   {1.0F, {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}}};
+    const auto balanced = Keire::CompressAnimationTracks(
+        std::span(&curved, 1),
+        Keire::AnimationCompressionSettingsForPreset(Keire::AnimationCompressionPreset::Balanced));
+    REQUIRE(balanced.Tracks.front().Keys.size() == 3);
+
+    const auto disabled = Keire::CompressAnimationTracks(
+        std::span(&curved, 1),
+        Keire::AnimationCompressionSettingsForPreset(Keire::AnimationCompressionPreset::Disabled));
+    CHECK(disabled.Tracks.front().Keys == curved.Keys);
+
+    auto invalid = Keire::AnimationCompressionSettingsForPreset(Keire::AnimationCompressionPreset::Balanced);
+    invalid.MaximumRotationErrorDegrees = 181.0F;
+    CHECK_THROWS_AS((void)Keire::CompressAnimationTracks(std::span(&curved, 1), invalid), std::invalid_argument);
+    CHECK(curved.Keys.size() == 3);
+
+    auto malformed = curved;
+    malformed.Keys[1].Time = malformed.Keys.front().Time;
+    CHECK_THROWS_AS((void)Keire::CompressAnimationTracks(std::span(&malformed, 1), {}), std::invalid_argument);
+    CHECK(malformed.Keys[1].Time == doctest::Approx(0.0F));
 }
 
 TEST_CASE("Animator supports explicit play, cross-fade, stop, and restart control")

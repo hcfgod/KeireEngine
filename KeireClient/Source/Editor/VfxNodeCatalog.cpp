@@ -472,4 +472,26 @@ namespace KeireEditor
             result += " / Experimental";
         return result;
     }
+
+    std::string_view VfxGraphNodeKindLabel(const Keire::VfxGraphNodeKind kind) noexcept
+    {
+        switch (kind)
+        {
+        case Keire::VfxGraphNodeKind::Context:
+            return "Context";
+        case Keire::VfxGraphNodeKind::Module:
+            return "Runtime Module";
+        case Keire::VfxGraphNodeKind::Parameter:
+            return "Blackboard Parameter";
+        case Keire::VfxGraphNodeKind::CustomHlsl:
+            return "Custom HLSL";
+        case Keire::VfxGraphNodeKind::Operator:
+            return "Operator";
+        case Keire::VfxGraphNodeKind::Attribute:
+            return "Attribute";
+        case Keire::VfxGraphNodeKind::Subgraph:
+            return "Subgraph";
+        }
+        return "Unknown";
+    }
 } // namespace KeireEditor

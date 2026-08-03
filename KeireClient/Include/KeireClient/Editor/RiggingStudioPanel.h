@@ -2,6 +2,7 @@
 
 #include "Keire/Core.h"
 
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -41,6 +42,12 @@ namespace KeireEditor
         Keire::AssetId m_LockedAsset;
         Keire::AssetImportSettings m_Draft;
         Keire::AssetId m_SourceClip;
+        Keire::Ref<const Keire::AnimationClipAsset> m_DiagnosticSourceClip;
+        Keire::Ref<const Keire::SkeletonAsset> m_DiagnosticSourceSkeleton;
+        Keire::Ref<const Keire::RigDefinitionAsset> m_DiagnosticSourceRig;
+        Keire::Ref<const Keire::SkeletonAsset> m_DiagnosticTargetSkeleton;
+        Keire::Ref<const Keire::RigDefinitionAsset> m_DiagnosticTargetRig;
+        std::optional<Keire::AnimationRetargetDiagnostics> m_RetargetDiagnostics;
         std::string m_RetargetName = "RetargetedClip";
         bool m_Dirty = false;
         std::string m_Message;

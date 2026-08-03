@@ -17,6 +17,7 @@
 #include "Keire/Vfx/VfxVolumeAsset.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -359,6 +360,39 @@ namespace Keire
             return palette;
         }
 
+        [[nodiscard]] static std::vector<Matrix4> ModelBoneMatrices(const SkeletonAsset& skeleton,
+                                                                    std::span<const BoneTransform> localPose)
+        {
+            std::vector<Matrix4> world(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& transform = localPose[index];
+                const auto local = Math::ComposeTransform(transform.Translation, transform.Rotation, transform.Scale);
+                const auto parent = skeleton.Bones()[index].Parent;
+                world[index] = parent < 0 ? local : Math::Multiply(world[static_cast<std::size_t>(parent)], local);
+            }
+            return world;
+        }
+
+        [[nodiscard]] static std::shared_ptr<const AnimatorDebugSnapshot>
+        FinalPoseDebugSnapshot(const SkeletonAsset& skeleton, const std::span<const BoneTransform> localPose,
+                               const std::shared_ptr<const AnimatorDebugSnapshot>& source)
+        {
+            if (!source || localPose.size() != skeleton.Bones().size())
+                return source;
+            auto result = std::make_shared<AnimatorDebugSnapshot>(*source);
+            const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+            result->Pose.clear();
+            result->Pose.reserve(localPose.size());
+            for (std::size_t index = 0; index < localPose.size(); ++index)
+            {
+                const auto& bone = skeleton.Bones()[index];
+                result->Pose.push_back(
+                    {bone.Name, bone.Parent, localPose[index], Math::TransformPoint(modelBones[index], {})});
+            }
+            return result;
+        }
+
         [[nodiscard]] static std::string ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
                                                       const AnimatorComponent& animator,
                                                       std::span<BoneTransform> localPose,
@@ -418,6 +452,95 @@ namespace Keire
                 if (!solved)
                     return "IK goal '" + goal.Name + "' does not describe a valid contiguous skeleton chain.";
             }
+            return {};
+        }
+
+        [[nodiscard]] std::string ApplyFootGrounding(const Entity& entity, const SkeletonAsset& skeleton,
+                                                     const AnimatorComponent& animator,
+                                                     std::span<BoneTransform> localPose,
+                                                     const std::map<std::string, std::uint32_t, std::less<>>& indices)
+        {
+            const auto& settings = animator.FootGrounding();
+            if (!settings.Enabled)
+                return {};
+            if (!PhysicsWorldService)
+                return "Foot grounding requires an active physics world.";
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!transform)
+                return "Foot grounding requires an Animator world transform.";
+
+            const auto bone = [&](const std::string_view name) -> std::optional<std::uint32_t>
+            {
+                const auto found = indices.find(name);
+                return found == indices.end() ? std::nullopt : std::optional(found->second);
+            };
+            const auto pelvis = bone(settings.Pelvis);
+            const std::array chains{
+                std::array{bone(settings.LeftUpperLeg), bone(settings.LeftLowerLeg), bone(settings.LeftFoot)},
+                std::array{bone(settings.RightUpperLeg), bone(settings.RightLowerLeg), bone(settings.RightFoot)}};
+            if (!pelvis ||
+                std::ranges::any_of(
+                    chains, [](const auto& chain)
+                    { return std::ranges::any_of(chain, [](const auto value) { return !value.has_value(); }); }))
+                return "Foot grounding references one or more unavailable skeleton bones.";
+
+            Matrix4 worldToModel;
+            try
+            {
+                worldToModel = Math::Inverse(transform->WorldMatrix());
+            }
+            catch (const std::exception&)
+            {
+                return "Foot grounding could not invert the Animator world transform.";
+            }
+            const auto modelToWorld = transform->WorldMatrix();
+            const auto modelBones = ModelBoneMatrices(skeleton, localPose);
+            const auto ownPhysics = PhysicsBodies.find(entity.Id());
+            const auto ownBody = ownPhysics == PhysicsBodies.end() ? PhysicsBodyId{} : ownPhysics->second.Body;
+            const auto queryLayer = ownPhysics == PhysicsBodies.end() || !ownPhysics->second.HasDefinition
+                                        ? 1U
+                                        : ownPhysics->second.Definition.Layer;
+
+            FootGroundingRequest request;
+            request.Pelvis = *pelvis;
+            request.FootHeight = settings.FootOffset;
+            request.PelvisWeight = settings.Weight;
+            request.MaximumPelvisAdjustment = settings.MaximumPelvisAdjustment;
+            for (const auto& chain : chains)
+            {
+                const auto footPosition = Math::TransformPoint(modelBones[*chain[2]], {});
+                const auto footWorld = Math::TransformPoint(modelToWorld, footPosition);
+                const Vector3 origin{footWorld.X, footWorld.Y + settings.RaycastHeight, footWorld.Z};
+                const auto hits =
+                    PhysicsWorldService->RayCast({.Origin = origin,
+                                                  .Direction = {0.0F, -1.0F, 0.0F},
+                                                  .MaximumDistance = settings.RaycastHeight + settings.RaycastDistance,
+                                                  .Mask = settings.CollisionMask,
+                                                  .IncludeTriggers = false,
+                                                  .Layer = queryLayer});
+                const auto hit = std::ranges::find_if(hits, [&](const auto& candidate)
+                                                      { return !ownBody || candidate.Body != ownBody; });
+                if (hit == hits.end())
+                    continue;
+                const auto position = Math::TransformPoint(worldToModel, hit->Position);
+                const auto normalEnd = Math::TransformPoint(worldToModel, {hit->Position.X + hit->Normal.X,
+                                                                           hit->Position.Y + hit->Normal.Y,
+                                                                           hit->Position.Z + hit->Normal.Z});
+                const Vector3 normal{normalEnd.X - position.X, normalEnd.Y - position.Y, normalEnd.Z - position.Z};
+                const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
+                request.Contacts.push_back({*chain[0],
+                                            *chain[1],
+                                            *chain[2],
+                                            position,
+                                            normal,
+                                            {knee.X, knee.Y, knee.Z + 1.0F},
+                                            settings.Weight,
+                                            settings.RotationWeight});
+            }
+            if (request.Contacts.empty())
+                return {};
+            if (!SolveFootGrounding(skeleton, localPose, request))
+                return "Foot grounding could not solve the configured leg chains.";
             return {};
         }
 
@@ -575,9 +698,18 @@ namespace Keire
                 {
                     animator->SetRuntimeDiagnostic(ikDiagnostic);
                 }
+                else if (const auto footDiagnostic =
+                             ApplyFootGrounding(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices);
+                         !footDiagnostic.empty())
+                {
+                    animator->SetRuntimeDiagnostic(footDiagnostic);
+                }
                 const auto palette = SkinPalette(*skeleton, sample.LocalPose);
                 animator->SetRuntimePose(sample.State, sample.NormalizedTime, state->Instance->Playing(), palette);
-                animator->SetRuntimeDebugSnapshot(state->Instance->DebugSnapshot());
+                auto debugSnapshot = state->Instance->DebugSnapshot();
+                if (!animator->IkGoals().empty() || animator->FootGrounding().Enabled)
+                    debugSnapshot = FinalPoseDebugSnapshot(*skeleton, sample.LocalPose, debugSnapshot);
+                animator->SetRuntimeDebugSnapshot(std::move(debugSnapshot));
                 ApplyRootMotion(entity, sample, *animator);
                 for (const auto& event : sample.Events)
                     Runtime->DispatchAnimationEvent(entity.Id(),

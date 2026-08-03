@@ -5,6 +5,7 @@ struct AssetVertex
     float4 UV0;
     float4 VertexColor;
     float4 Tangent;
+    float4 UV1;
 };
 
 struct BuiltinVertex

@@ -241,6 +241,58 @@ static const uint VfxOpcodeSmoothstep = 53;
 static const uint VfxOpcodeStep = 54;
 static const uint VfxOpcodeNegate = 55;
 static const uint VfxOpcodeSign = 56;
+static const uint VfxOpcodeAgeOverLifetime = 57;
+static const uint VfxOpcodeBitwiseAnd = 58;
+static const uint VfxOpcodeBitwiseComplement = 59;
+static const uint VfxOpcodeBitwiseLeftShift = 60;
+static const uint VfxOpcodeBitwiseOr = 61;
+static const uint VfxOpcodeBitwiseRightShift = 62;
+static const uint VfxOpcodeBitwiseXor = 63;
+static const uint VfxOpcodeColorLuma = 64;
+static const uint VfxOpcodeHsvToRgb = 65;
+static const uint VfxOpcodeRgbToHsv = 66;
+static const uint VfxOpcodeDiscretize = 67;
+static const uint VfxOpcodeFrameIndex = 68;
+static const uint VfxOpcodeInverseLerp = 69;
+static const uint VfxOpcodeModulo = 70;
+static const uint VfxOpcodeBooleanNand = 71;
+static const uint VfxOpcodeBooleanNor = 72;
+static const uint VfxOpcodeOneMinus = 73;
+static const uint VfxOpcodeReciprocal = 74;
+static const uint VfxOpcodeSquaredDistance = 75;
+static const uint VfxOpcodeSquaredLength = 76;
+static const uint VfxOpcodeSystemSeed = 77;
+static const uint VfxOpcodeAttributeAlive = 78;
+static const uint VfxOpcodeAttributeAlpha = 79;
+static const uint VfxOpcodeAttributeAngle = 80;
+static const uint VfxOpcodeAttributeAxisX = 81;
+static const uint VfxOpcodeAttributeAxisY = 82;
+static const uint VfxOpcodeAttributeAxisZ = 83;
+static const uint VfxOpcodeAttributeColor = 84;
+static const uint VfxOpcodeAttributeOldPosition = 85;
+static const uint VfxOpcodeAttributeParticleCountInStrip = 86;
+static const uint VfxOpcodeAttributeParticleIndexInStrip = 87;
+static const uint VfxOpcodeAttributePosition = 88;
+static const uint VfxOpcodeAttributeSeed = 89;
+static const uint VfxOpcodeAttributeSize = 90;
+static const uint VfxOpcodeAttributeSpawnTime = 91;
+static const uint VfxOpcodeAttributeStripIndex = 92;
+static const uint VfxOpcodeAttributeVelocity = 93;
+static const uint VfxOpcodeRatioOverStrip = 94;
+static const uint VfxOpcodeEpsilon = 95;
+static const uint VfxOpcodePi = 96;
+static const uint VfxOpcodeValueNoise = 97;
+static const uint VfxOpcodePerlinNoise = 98;
+static const uint VfxOpcodeCellularNoise = 99;
+static const uint VfxOpcodeValueCurlNoise = 100;
+static const uint VfxOpcodePerlinCurlNoise = 101;
+static const uint VfxOpcodeCellularCurlNoise = 102;
+static const uint VfxOpcodePolarToRectangular = 103;
+static const uint VfxOpcodeRectangularToPolar = 104;
+static const uint VfxOpcodeRectangularToSpherical = 105;
+static const uint VfxOpcodeSphericalToRectangular = 106;
+static const uint VfxOpcodeRotate2D = 107;
+static const uint VfxOpcodeRotate3D = 108;
 
 uint Hash(uint value)
 {
@@ -313,6 +365,13 @@ float4 FiniteOrZero(float4 value)
     return float4(FiniteOrZero(value.x), FiniteOrZero(value.y), FiniteOrZero(value.z), FiniteOrZero(value.w));
 }
 
+float2 FiniteOrZero(float2 value) { return float2(FiniteOrZero(value.x), FiniteOrZero(value.y)); }
+
+float3 FiniteOrZero(float3 value)
+{
+    return float3(FiniteOrZero(value.x), FiniteOrZero(value.y), FiniteOrZero(value.z));
+}
+
 bool Less64(uint2 left, uint2 right) { return left.y < right.y || (left.y == right.y && left.x < right.x); }
 
 bool Equal64(uint2 left, uint2 right) { return all(left == right); }
@@ -332,6 +391,28 @@ uint2 Subtract64(uint2 left, uint2 right)
 uint2 Negate64(uint2 value) { return Add64(~value, uint2(1U, 0U)); }
 
 uint2 ShiftLeftOne64(uint2 value) { return uint2(value.x << 1U, (value.y << 1U) | (value.x >> 31U)); }
+
+uint2 ShiftLeft64(uint2 value, uint2 amount)
+{
+    if (amount.y != 0U || amount.x >= 64U)
+        return 0U.xx;
+    if (amount.x == 0U)
+        return value;
+    if (amount.x < 32U)
+        return uint2(value.x << amount.x, (value.y << amount.x) | (value.x >> (32U - amount.x)));
+    return uint2(0U, value.x << (amount.x - 32U));
+}
+
+uint2 ShiftRight64(uint2 value, uint2 amount)
+{
+    if (amount.y != 0U || amount.x >= 64U)
+        return 0U.xx;
+    if (amount.x == 0U)
+        return value;
+    if (amount.x < 32U)
+        return uint2((value.x >> amount.x) | (value.y << (32U - amount.x)), value.y >> amount.x);
+    return uint2(value.y >> (amount.x - 32U), 0U);
+}
 
 uint ReadBit64(uint2 value, uint bit) { return bit < 32U ? ((value.x >> bit) & 1U) : ((value.y >> (bit - 32U)) & 1U); }
 
@@ -496,8 +577,8 @@ uint RangeTypeForValue(uint type)
     return 0xffffffffU;
 }
 
-bool ExecuteRandomValue(VfxGpuValueInstruction instruction, GpuParticle particle, VfxGpuValue inputs[4],
-                        uint inputTypes[4], uint inputCount, out VfxGpuValue output)
+bool ExecuteRandomValue(VfxGpuValueInstruction instruction, GpuParticle particle, VfxGpuValue inputs[8],
+                        uint inputTypes[8], uint inputCount, out VfxGpuValue output)
 {
     output = (VfxGpuValue)0;
     const uint opcode = instruction.Header.x;
@@ -575,11 +656,11 @@ bool ExecuteRandomValue(VfxGpuValueInstruction instruction, GpuParticle particle
     return true;
 }
 
-bool RequireScalarInputs(uint inputTypes[4], uint inputCount, uint expectedCount)
+bool RequireScalarInputs(uint inputTypes[8], uint inputCount, uint expectedCount)
 {
     if (inputCount != expectedCount)
         return false;
-    [unroll] for (uint index = 0U; index < 4U; ++index)
+    [unroll] for (uint index = 0U; index < 8U; ++index)
     {
         if (index < expectedCount && inputTypes[index] != VfxValueTypeScalar)
             return false;
@@ -587,17 +668,252 @@ bool RequireScalarInputs(uint inputTypes[4], uint inputCount, uint expectedCount
     return true;
 }
 
+static const uint VfxNoiseValue = 0U;
+static const uint VfxNoisePerlin = 1U;
+static const uint VfxNoiseCellular = 2U;
+
+uint HashNoiseLattice(int3 cell, uint salt)
+{
+    uint state = Hash(salt ^ 0x9e3779b9U);
+    state = Hash(state ^ asuint(cell.x));
+    state = Hash(state ^ asuint(cell.y));
+    return Hash(state ^ asuint(cell.z));
+}
+
+float NoiseUnit(uint value) { return (float)(value >> 8U) * (1.0F / 16777215.0F); }
+
+float NoiseFade(float value) { return value * value * value * (value * (value * 6.0F - 15.0F) + 10.0F); }
+
+float NoiseFadeDerivative(float value)
+{
+    const float offset = value - 1.0F;
+    return 30.0F * value * value * offset * offset;
+}
+
+float3 NoiseGradient(uint value)
+{
+    const float component = 0.70710678118654752440F;
+    const uint index = value % 12U;
+    if (index == 0U)
+        return float3(component, component, 0.0F);
+    if (index == 1U)
+        return float3(-component, component, 0.0F);
+    if (index == 2U)
+        return float3(component, -component, 0.0F);
+    if (index == 3U)
+        return float3(-component, -component, 0.0F);
+    if (index == 4U)
+        return float3(component, 0.0F, component);
+    if (index == 5U)
+        return float3(-component, 0.0F, component);
+    if (index == 6U)
+        return float3(component, 0.0F, -component);
+    if (index == 7U)
+        return float3(-component, 0.0F, -component);
+    if (index == 8U)
+        return float3(0.0F, component, component);
+    if (index == 9U)
+        return float3(0.0F, -component, component);
+    if (index == 10U)
+        return float3(0.0F, component, -component);
+    return float3(0.0F, -component, -component);
+}
+
+float SampleNoise(uint kind, float3 inputPosition, uint salt)
+{
+    const float3 position = clamp(FiniteOrZero(inputPosition), -1000000.0F.xxx, 1000000.0F.xxx);
+    const int3 cell = (int3)floor(position);
+    const float3 local = position - (float3)cell;
+    const float3 factor = float3(NoiseFade(local.x), NoiseFade(local.y), NoiseFade(local.z));
+    const int3 cellularBase =
+        cell - int3(local.x < 0.5F ? 1 : 0, local.y < 0.5F ? 1 : 0, local.z < 0.5F ? 1 : 0);
+    float valueNoise = 0.0F;
+    float perlinNoise = 0.0F;
+    float nearestSquared = 3.402823466e+38F;
+    [loop] for (uint corner = 0U; corner < 8U; ++corner)
+    {
+        const int3 offset = int3((int)(corner & 1U), (int)((corner >> 1U) & 1U), (int)((corner >> 2U) & 1U));
+        const uint hash = HashNoiseLattice(cell + offset, salt);
+        const float3 weights = lerp(1.0F.xxx - factor, factor, (float3)offset);
+        const float weight = weights.x * weights.y * weights.z;
+        if (kind == VfxNoiseValue)
+            valueNoise += NoiseUnit(hash) * weight;
+        else if (kind == VfxNoisePerlin)
+            perlinNoise += dot(NoiseGradient(hash), local - (float3)offset) * weight;
+        else
+        {
+            const int3 sampleCell = cellularBase + offset;
+            const uint cellularHash = HashNoiseLattice(sampleCell, salt);
+            const float3 feature = (float3)sampleCell +
+                                   float3(NoiseUnit(cellularHash), NoiseUnit(Hash(cellularHash ^ 0x68bc21ebU)),
+                                          NoiseUnit(Hash(cellularHash ^ 0x02e5be93U)));
+            const float3 delta = position - feature;
+            nearestSquared = min(nearestSquared, dot(delta, delta));
+        }
+    }
+    if (kind == VfxNoiseValue)
+        return saturate(valueNoise);
+    if (kind == VfxNoisePerlin)
+        return saturate(0.5F + perlinNoise);
+    return saturate(FiniteOrZero(sqrt(nearestSquared) * 0.57735026918962576451F));
+}
+
+float SampleFractalNoise(uint kind, float3 coordinate, float frequency, int octaves, float roughness, float lacunarity,
+                         uint salt)
+{
+    float3 position = coordinate * max(frequency, 0.0F);
+    float amplitude = 1.0F;
+    float sum = 0.0F;
+    float normalization = 0.0F;
+    const int octaveCount = clamp(octaves, 1, 8);
+    const float persistence = saturate(roughness);
+    const float frequencyMultiplier = max(lacunarity, 0.0F);
+    [loop] for (int octave = 0; octave < octaveCount; ++octave)
+    {
+        sum += SampleNoise(kind, position, salt + (uint)octave * 0x9e3779b9U) * amplitude;
+        normalization += amplitude;
+        amplitude *= persistence;
+        position *= frequencyMultiplier;
+    }
+    return normalization <= 0.0F ? 0.0F : saturate(FiniteOrZero(sum / normalization));
+}
+
+float RemapNoise(float sample, float2 range) { return FiniteOrZero(range.x + saturate(sample) * (range.y - range.x)); }
+
+float4 SampleNoiseWithDerivative(uint kind, float3 inputPosition, uint salt)
+{
+    const float3 position = clamp(FiniteOrZero(inputPosition), -1000000.0F.xxx, 1000000.0F.xxx);
+    const int3 cell = (int3)floor(position);
+    const float3 local = position - (float3)cell;
+    const float3 factor = float3(NoiseFade(local.x), NoiseFade(local.y), NoiseFade(local.z));
+    const float3 factorDerivative =
+        float3(NoiseFadeDerivative(local.x), NoiseFadeDerivative(local.y), NoiseFadeDerivative(local.z));
+    const int3 cellularBase =
+        cell - int3(local.x < 0.5F ? 1 : 0, local.y < 0.5F ? 1 : 0, local.z < 0.5F ? 1 : 0);
+    float sample = 0.0F;
+    float3 derivative = 0.0F.xxx;
+    float nearestSquared = 3.402823466e+38F;
+    float3 nearestDelta = 0.0F.xxx;
+    [loop] for (uint corner = 0U; corner < 8U; ++corner)
+    {
+        const int3 offset = int3((int)(corner & 1U), (int)((corner >> 1U) & 1U), (int)((corner >> 2U) & 1U));
+        const uint hash = HashNoiseLattice(cell + offset, salt);
+        const float3 weights = lerp(1.0F.xxx - factor, factor, (float3)offset);
+        const float3 derivativeWeights = lerp(-factorDerivative, factorDerivative, (float3)offset);
+        const float weight = weights.x * weights.y * weights.z;
+        const float3 weightDerivative =
+            float3(derivativeWeights.x * weights.y * weights.z, weights.x * derivativeWeights.y * weights.z,
+                   weights.x * weights.y * derivativeWeights.z);
+        if (kind == VfxNoiseValue)
+        {
+            const float value = NoiseUnit(hash);
+            sample += value * weight;
+            derivative += value * weightDerivative;
+        }
+        else if (kind == VfxNoisePerlin)
+        {
+            const float3 gradient = NoiseGradient(hash);
+            const float contribution = dot(gradient, local - (float3)offset);
+            sample += contribution * weight;
+            derivative += gradient * weight + contribution * weightDerivative;
+        }
+        else
+        {
+            const int3 sampleCell = cellularBase + offset;
+            const uint cellularHash = HashNoiseLattice(sampleCell, salt);
+            const float3 feature = (float3)sampleCell +
+                                   float3(NoiseUnit(cellularHash), NoiseUnit(Hash(cellularHash ^ 0x68bc21ebU)),
+                                          NoiseUnit(Hash(cellularHash ^ 0x02e5be93U)));
+            const float3 delta = position - feature;
+            const float distanceSquared = dot(delta, delta);
+            if (distanceSquared < nearestSquared)
+            {
+                nearestSquared = distanceSquared;
+                nearestDelta = delta;
+            }
+        }
+    }
+    if (kind == VfxNoisePerlin)
+        sample += 0.5F;
+    else if (kind == VfxNoiseCellular)
+    {
+        const float distance = sqrt(nearestSquared);
+        sample = distance * 0.57735026918962576451F;
+        derivative = distance <= 0.0000001F ? 0.0F.xxx : nearestDelta * (0.57735026918962576451F / distance);
+    }
+    if (sample <= 0.0F || sample >= 1.0F)
+        derivative = 0.0F.xxx;
+    return FiniteOrZero(float4(saturate(sample), derivative));
+}
+
+float4 SampleFractalNoiseWithDerivative(uint kind, float3 coordinate, float frequency, int octaves, float roughness,
+                                        float lacunarity, uint salt)
+{
+    const float boundedFrequency = max(frequency, 0.0F);
+    float3 position = coordinate * boundedFrequency;
+    float derivativeScale = boundedFrequency;
+    float amplitude = 1.0F;
+    float sampleSum = 0.0F;
+    float3 derivativeSum = 0.0F.xxx;
+    float normalization = 0.0F;
+    const int octaveCount = clamp(octaves, 1, 8);
+    const float persistence = saturate(roughness);
+    const float frequencyMultiplier = max(lacunarity, 0.0F);
+    [loop] for (int octave = 0; octave < octaveCount; ++octave)
+    {
+        const float4 sampled =
+            SampleNoiseWithDerivative(kind, position, salt + (uint)octave * 0x9e3779b9U);
+        sampleSum += sampled.x * amplitude;
+        derivativeSum += sampled.yzw * (amplitude * derivativeScale);
+        normalization += amplitude;
+        amplitude *= persistence;
+        position *= frequencyMultiplier;
+        derivativeScale *= frequencyMultiplier;
+    }
+    if (normalization <= 0.0F)
+        return 0.0F.xxxx;
+    const float sample = FiniteOrZero(sampleSum / normalization);
+    const float3 derivative = sample <= 0.0F || sample >= 1.0F ? 0.0F.xxx : derivativeSum / normalization;
+    return FiniteOrZero(float4(saturate(sample), derivative));
+}
+
+float3 SampleNoiseDerivative(uint kind, float3 coordinate, float frequency, int octaves, float roughness,
+                             float lacunarity, float2 range, uint salt)
+{
+    const float4 sampled =
+        SampleFractalNoiseWithDerivative(kind, coordinate, frequency, octaves, roughness, lacunarity, salt);
+    return FiniteOrZero(sampled.yzw * (range.y - range.x));
+}
+
+float3 SampleCurlNoise(uint kind, float3 coordinate, float frequency, int octaves, float roughness, float lacunarity,
+                       float amplitude)
+{
+    const float3 x = SampleFractalNoiseWithDerivative(kind, coordinate, frequency, octaves, roughness, lacunarity,
+                                                       0x243f6a88U)
+                         .yzw;
+    const float3 y = SampleFractalNoiseWithDerivative(kind, coordinate, frequency, octaves, roughness, lacunarity,
+                                                       0x85a308d3U)
+                         .yzw;
+    const float3 z = SampleFractalNoiseWithDerivative(kind, coordinate, frequency, octaves, roughness, lacunarity,
+                                                       0x13198a2eU)
+                         .yzw;
+    return FiniteOrZero(float3(z.y - y.z, x.z - z.x, y.x - x.y) * amplitude);
+}
+
+float3 RotateByQuaternion(float3 value, float4 rotation);
+float4 QuaternionFromEulerDegrees(float3 degrees);
+
 bool ExecuteValueInstruction(VfxGpuValueInstruction instruction, GpuParticle particle,
                              VfxGpuValue registers[MaximumValueRegisters], float evaluationDeltaSeconds,
                              out VfxGpuValue output)
 {
     output = (VfxGpuValue)0;
-    if (instruction.Output.w > 4U || instruction.Output.z > ValueProgramMetadata.y ||
+    if (instruction.Output.w > 8U || instruction.Output.z > ValueProgramMetadata.y ||
         instruction.Output.w > ValueProgramMetadata.y - instruction.Output.z)
         return false;
-    VfxGpuValue inputs[4];
-    uint inputTypes[4];
-    [unroll] for (uint index = 0U; index < 4U; ++index)
+    VfxGpuValue inputs[8];
+    uint inputTypes[8];
+    [unroll] for (uint index = 0U; index < 8U; ++index)
     {
         inputs[index] = (VfxGpuValue)0;
         inputTypes[index] = 0U;
@@ -639,11 +955,281 @@ bool ExecuteValueInstruction(VfxGpuValueInstruction instruction, GpuParticle par
         output.Primary.x = asuint(particle.VelocityLifetime.w);
         return true;
     }
+    if (opcode == VfxOpcodeAgeOverLifetime)
+    {
+        if (type != VfxValueTypeScalar || inputCount != 0U)
+            return false;
+        const float lifetime = particle.VelocityLifetime.w;
+        output.Primary.x = asuint(lifetime == 0.0F ? 0.0F : FiniteOrZero(particle.PositionAge.w / lifetime));
+        return true;
+    }
+    if (opcode == VfxOpcodeFrameIndex || opcode == VfxOpcodeSystemSeed)
+    {
+        if (type != VfxValueTypeUnsignedInteger || inputCount != 0U)
+            return false;
+        output.Primary.xy = opcode == VfxOpcodeFrameIndex ? ValueSimulationMetadata.xy : uint2(RandomSeed, 0U);
+        return true;
+    }
     if (opcode == VfxOpcodeParticleId || opcode == VfxOpcodeSpawnIndex)
     {
         if (type != VfxValueTypeUnsignedInteger || inputCount != 0U)
             return false;
         output.Primary.xy = opcode == VfxOpcodeParticleId ? particle.SequenceIdentity.zw : particle.SequenceIdentity.xy;
+        return true;
+    }
+    if (opcode >= VfxOpcodeAttributeAlive && opcode <= VfxOpcodeRatioOverStrip)
+    {
+        if (inputCount != 0U)
+            return false;
+        if (opcode == VfxOpcodeAttributeAlive)
+        {
+            if (type != VfxValueTypeBoolean)
+                return false;
+            output.Primary.x = 1U;
+        }
+        else if (opcode == VfxOpcodeAttributeAlpha)
+        {
+            if (type != VfxValueTypeScalar)
+                return false;
+            output.Primary.x = asuint(particle.Tint.w);
+        }
+        else if (opcode == VfxOpcodeAttributeAngle)
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            output.Primary.xyz = asuint(particle.SizeRotation.yzw);
+        }
+        else if (opcode >= VfxOpcodeAttributeAxisX && opcode <= VfxOpcodeAttributeAxisZ)
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            const float4 rotation = QuaternionFromEulerDegrees(particle.SizeRotation.yzw);
+            const float3 basis = opcode == VfxOpcodeAttributeAxisX   ? float3(1.0F, 0.0F, 0.0F)
+                                 : opcode == VfxOpcodeAttributeAxisY ? float3(0.0F, 1.0F, 0.0F)
+                                                                     : float3(0.0F, 0.0F, 1.0F);
+            output.Primary.xyz = asuint(FiniteOrZero(RotateByQuaternion(basis, rotation)));
+        }
+        else if (opcode == VfxOpcodeAttributeColor)
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            output.Primary.xyz = asuint(particle.Tint.xyz);
+        }
+        else if (opcode == VfxOpcodeAttributeOldPosition)
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            output.Primary.xyz = asuint(particle.PreviousPositionStrip.xyz);
+        }
+        else if (opcode == VfxOpcodeAttributeParticleCountInStrip)
+        {
+            if (type != VfxValueTypeUnsignedInteger)
+                return false;
+            output.Primary.xy = uint2(max(RenderMetadata.w, 1U), 0U);
+        }
+        else if (opcode == VfxOpcodeAttributeParticleIndexInStrip)
+        {
+            if (type != VfxValueTypeUnsignedInteger)
+                return false;
+            output.Primary.xy = Modulo64(particle.SequenceIdentity.xy, uint2(max(RenderMetadata.w, 1U), 0U));
+        }
+        else if (opcode == VfxOpcodeAttributePosition)
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            output.Primary.xyz = asuint(particle.PositionAge.xyz);
+        }
+        else if (opcode == VfxOpcodeAttributeSeed)
+        {
+            if (type != VfxValueTypeUnsignedInteger)
+                return false;
+            output.Primary.xy = uint2(Hash(RandomSeed ^ particle.SequenceIdentity.z ^ particle.SequenceIdentity.w), 0U);
+        }
+        else if (opcode == VfxOpcodeAttributeSize)
+        {
+            if (type != VfxValueTypeScalar)
+                return false;
+            output.Primary.x = asuint(particle.SizeRotation.x);
+        }
+        else if (opcode == VfxOpcodeAttributeSpawnTime)
+        {
+            if (type != VfxValueTypeScalar)
+                return false;
+            output.Primary.x = asuint(max(0.0F, FiniteOrZero(ValueRuntimeTime.x - particle.PositionAge.w)));
+        }
+        else if (opcode == VfxOpcodeAttributeStripIndex)
+        {
+            if (type != VfxValueTypeUnsignedInteger)
+                return false;
+            output.Primary.xy = Divide64By32(particle.SequenceIdentity.xy, max(RenderMetadata.w, 1U));
+        }
+        else if (opcode == VfxOpcodeAttributeVelocity)
+        {
+            if (type != VfxValueTypeVector3)
+                return false;
+            output.Primary.xyz = asuint(particle.VelocityLifetime.xyz);
+        }
+        else
+        {
+            if (opcode != VfxOpcodeRatioOverStrip || type != VfxValueTypeScalar)
+                return false;
+            const uint count = max(RenderMetadata.w, 1U);
+            const uint index = Modulo64(particle.SequenceIdentity.xy, uint2(count, 0U)).x;
+            output.Primary.x = asuint(count <= 1U ? 0.0F : (float)min(index, count - 1U) / (float)(count - 1U));
+        }
+        return true;
+    }
+    if (opcode == VfxOpcodeEpsilon || opcode == VfxOpcodePi)
+    {
+        if (type != VfxValueTypeScalar || inputCount != 0U)
+            return false;
+        if (opcode == VfxOpcodeEpsilon)
+        {
+            if (instruction.Output.y != 0U)
+                return false;
+            output.Primary.x = asuint(0.00001F);
+        }
+        else
+        {
+            if (instruction.Output.y >= 4U)
+                return false;
+            const float values[4] = {3.14159265358979323846F, 6.28318530717958647692F, 1.57079632679489661923F,
+                                     1.04719755119659774615F};
+            output.Primary.x = asuint(values[instruction.Output.y]);
+        }
+        return true;
+    }
+    if (opcode >= VfxOpcodeValueNoise && opcode <= VfxOpcodeCellularCurlNoise)
+    {
+        const bool curl = opcode >= VfxOpcodeValueCurlNoise;
+        if (inputCount != 6U || inputTypes[0] != VfxValueTypeVector3 ||
+            inputTypes[1] != VfxValueTypeScalar || inputTypes[2] != VfxValueTypeInteger ||
+            inputTypes[3] != VfxValueTypeScalar || inputTypes[4] != VfxValueTypeScalar ||
+            inputTypes[5] != (curl ? VfxValueTypeScalar : VfxValueTypeVector2))
+        {
+            return false;
+        }
+        const uint kind = opcode == VfxOpcodeValueNoise || opcode == VfxOpcodeValueCurlNoise
+                              ? VfxNoiseValue
+                              : opcode == VfxOpcodePerlinNoise || opcode == VfxOpcodePerlinCurlNoise
+                                    ? VfxNoisePerlin
+                                    : VfxNoiseCellular;
+        const float3 coordinate = asfloat(inputs[0].Primary.xyz);
+        const float frequency = asfloat(inputs[1].Primary.x);
+        const int octaves = clamp((int)Signed64ToFloat(inputs[2].Primary.xy), 1, 8);
+        const float roughness = asfloat(inputs[3].Primary.x);
+        const float lacunarity = asfloat(inputs[4].Primary.x);
+        if (curl)
+        {
+            if (type != VfxValueTypeVector3 || instruction.Output.y != 0U)
+                return false;
+            output.Primary.xyz = asuint(SampleCurlNoise(kind, coordinate, frequency, octaves, roughness, lacunarity,
+                                                        asfloat(inputs[5].Primary.x)));
+        }
+        else
+        {
+            const float2 range = asfloat(inputs[5].Primary.xy);
+            if (instruction.Output.y == 0U && type == VfxValueTypeScalar)
+            {
+                output.Primary.x = asuint(RemapNoise(
+                    SampleFractalNoise(kind, coordinate, frequency, octaves, roughness, lacunarity, 0U), range));
+            }
+            else if (instruction.Output.y == 1U && type == VfxValueTypeVector3)
+            {
+                output.Primary.xyz = asuint(
+                    SampleNoiseDerivative(kind, coordinate, frequency, octaves, roughness, lacunarity, range, 0U));
+            }
+            else
+                return false;
+        }
+        return true;
+    }
+    if (opcode == VfxOpcodePolarToRectangular)
+    {
+        if (type != VfxValueTypeVector2 || !RequireScalarInputs(inputTypes, inputCount, 2U))
+            return false;
+        const float radians = asfloat(inputs[0].Primary.x) * 0.01745329251994329577F;
+        const float distance = asfloat(inputs[1].Primary.x);
+        output.Primary.xy = asuint(FiniteOrZero(float2(cos(radians), sin(radians)) * distance));
+        return true;
+    }
+    if (opcode == VfxOpcodeRectangularToPolar)
+    {
+        if (inputCount != 1U || inputTypes[0] != VfxValueTypeVector2 || type != VfxValueTypeScalar ||
+            instruction.Output.y >= 2U)
+            return false;
+        const float2 coordinate = asfloat(inputs[0].Primary.xy);
+        output.Primary.x = asuint(instruction.Output.y == 0U
+                                      ? (all(coordinate == 0.0F.xx) ? 0.0F : FiniteOrZero(atan2(coordinate.y, coordinate.x)))
+                                      : FiniteOrZero(length(coordinate)));
+        return true;
+    }
+    if (opcode == VfxOpcodeSphericalToRectangular)
+    {
+        if (type != VfxValueTypeVector3 || !RequireScalarInputs(inputTypes, inputCount, 3U))
+            return false;
+        const float distance = asfloat(inputs[0].Primary.x);
+        const float theta = asfloat(inputs[1].Primary.x);
+        const float phi = asfloat(inputs[2].Primary.x);
+        const float cosinePhi = cos(phi);
+        output.Primary.xyz =
+            asuint(FiniteOrZero(float3(cos(theta) * cosinePhi, sin(phi), sin(theta) * cosinePhi) * distance));
+        return true;
+    }
+    if (opcode == VfxOpcodeRectangularToSpherical)
+    {
+        if (inputCount != 1U || inputTypes[0] != VfxValueTypeVector3 || type != VfxValueTypeScalar ||
+            instruction.Output.y >= 3U)
+            return false;
+        const float3 coordinate = asfloat(inputs[0].Primary.xyz);
+        const float distance = FiniteOrZero(length(coordinate));
+        float result = 0.0F;
+        if (distance > 1.1920928955078125e-7F)
+        {
+            result = instruction.Output.y == 0U   ? distance
+                     : instruction.Output.y == 1U ? atan2(coordinate.z, coordinate.x)
+                                                  : asin(clamp(coordinate.y / distance, -1.0F, 1.0F));
+        }
+        output.Primary.x = asuint(FiniteOrZero(result));
+        return true;
+    }
+    if (opcode == VfxOpcodeRotate2D)
+    {
+        if (type != VfxValueTypeVector2 || inputCount != 3U || inputTypes[0] != VfxValueTypeVector2 ||
+            inputTypes[1] != VfxValueTypeVector2 || inputTypes[2] != VfxValueTypeScalar)
+            return false;
+        const float2 position = asfloat(inputs[0].Primary.xy);
+        const float2 center = asfloat(inputs[1].Primary.xy);
+        const float angle = asfloat(inputs[2].Primary.x);
+        const float2 relative = position - center;
+        const float sine = sin(angle);
+        const float cosine = cos(angle);
+        output.Primary.xy =
+            asuint(FiniteOrZero(center + float2(relative.x * cosine - relative.y * sine,
+                                                relative.x * sine + relative.y * cosine)));
+        return true;
+    }
+    if (opcode == VfxOpcodeRotate3D)
+    {
+        if (type != VfxValueTypeVector3 || inputCount != 4U || inputTypes[0] != VfxValueTypeVector3 ||
+            inputTypes[1] != VfxValueTypeVector3 || inputTypes[2] != VfxValueTypeVector3 ||
+            inputTypes[3] != VfxValueTypeScalar)
+            return false;
+        const float3 position = asfloat(inputs[0].Primary.xyz);
+        const float3 center = asfloat(inputs[1].Primary.xyz);
+        const float3 inputAxis = asfloat(inputs[2].Primary.xyz);
+        const float axisLength = FiniteOrZero(length(inputAxis));
+        if (axisLength <= 1.1920928955078125e-7F)
+        {
+            output.Primary.xyz = inputs[0].Primary.xyz;
+            return true;
+        }
+        const float3 axis = inputAxis / axisLength;
+        const float3 projection = center + axis * dot(axis, position - center);
+        const float3 tangent = position - projection;
+        const float angle = asfloat(inputs[3].Primary.x);
+        output.Primary.xyz = asuint(
+            FiniteOrZero(projection + tangent * cos(angle) + cross(tangent, axis) * sin(angle)));
         return true;
     }
     if (opcode == VfxOpcodeConstant)
@@ -682,6 +1268,40 @@ bool ExecuteValueInstruction(VfxGpuValueInstruction instruction, GpuParticle par
         output.Primary.x = opcode == VfxOpcodeBooleanNot   ? (!left ? 1U : 0U)
                            : opcode == VfxOpcodeBooleanAnd ? (left && right ? 1U : 0U)
                                                            : (left || right ? 1U : 0U);
+        return true;
+    }
+    if (opcode == VfxOpcodeBooleanNand || opcode == VfxOpcodeBooleanNor)
+    {
+        if (type != VfxValueTypeBoolean || inputCount != 2U || inputTypes[0] != VfxValueTypeBoolean ||
+            inputTypes[1] != VfxValueTypeBoolean)
+            return false;
+        const bool left = inputs[0].Primary.x != 0U;
+        const bool right = inputs[1].Primary.x != 0U;
+        output.Primary.x = opcode == VfxOpcodeBooleanNand ? (!(left && right) ? 1U : 0U)
+                                                          : (!(left || right) ? 1U : 0U);
+        return true;
+    }
+    if (opcode >= VfxOpcodeBitwiseAnd && opcode <= VfxOpcodeBitwiseXor)
+    {
+        const bool unary = opcode == VfxOpcodeBitwiseComplement;
+        if (type != VfxValueTypeUnsignedInteger || inputCount != (unary ? 1U : 2U) ||
+            inputTypes[0] != VfxValueTypeUnsignedInteger ||
+            (!unary && inputTypes[1] != VfxValueTypeUnsignedInteger))
+            return false;
+        const uint2 left = inputs[0].Primary.xy;
+        const uint2 right = unary ? 0U.xx : inputs[1].Primary.xy;
+        if (opcode == VfxOpcodeBitwiseAnd)
+            output.Primary.xy = left & right;
+        else if (opcode == VfxOpcodeBitwiseComplement)
+            output.Primary.xy = ~left;
+        else if (opcode == VfxOpcodeBitwiseLeftShift)
+            output.Primary.xy = ShiftLeft64(left, right);
+        else if (opcode == VfxOpcodeBitwiseOr)
+            output.Primary.xy = left | right;
+        else if (opcode == VfxOpcodeBitwiseRightShift)
+            output.Primary.xy = ShiftRight64(left, right);
+        else
+            output.Primary.xy = left ^ right;
         return true;
     }
 
@@ -769,6 +1389,58 @@ bool ExecuteValueInstruction(VfxGpuValueInstruction instruction, GpuParticle par
             const float3 normalized = magnitude <= 1.1920928955078125e-7F ? 0.0F.xxx : value / magnitude;
             output.Primary.xyz = asuint(FiniteOrZero(float4(normalized, 0.0F)).xyz);
         }
+        return true;
+    }
+    if (opcode == VfxOpcodeSquaredDistance || opcode == VfxOpcodeSquaredLength)
+    {
+        const uint expected = opcode == VfxOpcodeSquaredDistance ? 2U : 1U;
+        if (type != VfxValueTypeScalar || inputCount != expected || inputTypes[0] != VfxValueTypeVector3 ||
+            (expected == 2U && inputTypes[1] != VfxValueTypeVector3))
+            return false;
+        const float3 left = asfloat(inputs[0].Primary.xyz);
+        const float3 value = expected == 2U ? left - asfloat(inputs[1].Primary.xyz) : left;
+        output.Primary.x = asuint(FiniteOrZero(dot(value, value)));
+        return true;
+    }
+    if (opcode == VfxOpcodeColorLuma)
+    {
+        if (type != VfxValueTypeScalar || inputCount != 1U || inputTypes[0] != VfxValueTypeColor)
+            return false;
+        const float3 color = asfloat(inputs[0].Primary.xyz);
+        output.Primary.x = asuint(FiniteOrZero(dot(color, float3(0.299F, 0.587F, 0.114F))));
+        return true;
+    }
+    if (opcode == VfxOpcodeHsvToRgb)
+    {
+        if (type != VfxValueTypeVector4 || inputCount != 1U || inputTypes[0] != VfxValueTypeVector3)
+            return false;
+        const float3 hsv = asfloat(inputs[0].Primary.xyz);
+        const float3 p = abs(frac(hsv.xxx + float3(1.0F, 2.0F / 3.0F, 1.0F / 3.0F)) * 6.0F - 3.0F);
+        const float3 rgb = hsv.z * lerp(1.0F.xxx, saturate(p - 1.0F), hsv.y);
+        output.Primary = asuint(FiniteOrZero(float4(rgb, 1.0F)));
+        return true;
+    }
+    if (opcode == VfxOpcodeRgbToHsv)
+    {
+        if (type != VfxValueTypeVector3 || inputCount != 1U || inputTypes[0] != VfxValueTypeColor)
+            return false;
+        const float3 rgb = asfloat(inputs[0].Primary.xyz);
+        const float minimum = min(rgb.x, min(rgb.y, rgb.z));
+        const float maximum = max(rgb.x, max(rgb.y, rgb.z));
+        const float delta = maximum - minimum;
+        float hue = 0.0F;
+        if (delta != 0.0F)
+        {
+            if (maximum == rgb.x)
+                hue = (rgb.y - rgb.z) / delta;
+            else if (maximum == rgb.y)
+                hue = 2.0F + (rgb.z - rgb.x) / delta;
+            else
+                hue = 4.0F + (rgb.x - rgb.y) / delta;
+            hue = frac(hue / 6.0F);
+        }
+        const float saturation = maximum == 0.0F ? 0.0F : FiniteOrZero(delta / maximum);
+        output.Primary.xyz = asuint(FiniteOrZero(float4(hue, saturation, maximum, 0.0F)).xyz);
         return true;
     }
     if (opcode == VfxOpcodeCompare)
@@ -881,6 +1553,39 @@ bool ExecuteValueInstruction(VfxGpuValueInstruction instruction, GpuParticle par
             result = first == 0.0F && second == 0.0F ? 0.0F : atan2(first, second);
         else
             result = pow(first, second);
+        output.Primary.x = asuint(FiniteOrZero(result));
+        return true;
+    }
+    if (opcode == VfxOpcodeModulo || opcode == VfxOpcodeDiscretize)
+    {
+        if (type != VfxValueTypeScalar || !RequireScalarInputs(inputTypes, inputCount, 2U))
+            return false;
+        const float first = asfloat(inputs[0].Primary.x);
+        const float second = asfloat(inputs[1].Primary.x);
+        float result = 0.0F;
+        if (second != 0.0F)
+            result = opcode == VfxOpcodeModulo ? frac(FiniteOrZero(first / second)) * second
+                                                : floor(first / second) * second;
+        output.Primary.x = asuint(FiniteOrZero(result));
+        return true;
+    }
+    if (opcode == VfxOpcodeInverseLerp)
+    {
+        if (type != VfxValueTypeScalar || !RequireScalarInputs(inputTypes, inputCount, 3U))
+            return false;
+        const float start = asfloat(inputs[0].Primary.x);
+        const float end = asfloat(inputs[1].Primary.x);
+        const float input = asfloat(inputs[2].Primary.x);
+        const float width = end - start;
+        output.Primary.x = asuint(width == 0.0F ? 0.0F : FiniteOrZero((input - start) / width));
+        return true;
+    }
+    if (opcode == VfxOpcodeOneMinus || opcode == VfxOpcodeReciprocal)
+    {
+        if (type != VfxValueTypeScalar || !RequireScalarInputs(inputTypes, inputCount, 1U))
+            return false;
+        const float input = asfloat(inputs[0].Primary.x);
+        const float result = opcode == VfxOpcodeOneMinus ? 1.0F - input : input == 0.0F ? 0.0F : 1.0F / input;
         output.Primary.x = asuint(FiniteOrZero(result));
         return true;
     }
@@ -1918,8 +2623,6 @@ void RejectCurrentSpawn(uint particleIndex, inout GpuParticle particle)
     FilteredIndirectArguments.Store4(0, uint4(RenderMetadata.x, 0U, 0U, 0U));
     FilteredIndirectArguments.Store(16, 0U);
 }
-
-float4 QuaternionFromEulerDegrees(float3 degrees);
 
 VfxInstanceData BuildVfxInstance(GpuParticle particle)
 {

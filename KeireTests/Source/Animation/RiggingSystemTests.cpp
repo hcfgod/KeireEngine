@@ -133,12 +133,47 @@ TEST_CASE("Animation retargeting rejects pathological source scale ratios")
     const Keire::AnimationClipAsset sourceClip(sourceSkeletonId, 1.0F,
                                                {{1, {{0.0F, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}}}}});
 
-    const auto retargeted = Keire::RetargetAnimationClip(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
-                                                         targetSkeleton, targetRig);
+    const auto result = Keire::RetargetAnimationClipWithDiagnostics(sourceSkeleton, sourceRig, sourceClip,
+                                                                    targetSkeletonId, targetSkeleton, targetRig);
+    const auto& retargeted = result.Clip;
 
     REQUIRE(retargeted);
     REQUIRE(retargeted->Tracks().size() == 1);
     CHECK((retargeted->Tracks().front().Keys.front().Value.Scale == Keire::Vector3{1.0F, 1.0F, 1.0F}));
+    REQUIRE(result.Diagnostics.Mappings.size() == 1);
+    CHECK(result.Diagnostics.Mappings.front().ScaleFallbackKeyCount == 3);
+}
+
+TEST_CASE("Animation retarget diagnostics distinguish exact semantic and unmapped tracks")
+{
+    const std::vector<Keire::SkeletonBone> sourceBones{
+        {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"Hips", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+        {"Accessory", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const std::vector<Keire::SkeletonBone> targetBones{{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                       {"Pelvis", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset sourceSkeleton(sourceBones);
+    const Keire::SkeletonAsset targetSkeleton(targetBones);
+    const auto sourceRig = Keire::InferRigDefinition(sourceSkeleton);
+    const auto targetRig = Keire::InferRigDefinition(targetSkeleton);
+    const Keire::AnimationClipAsset sourceClip(Keire::AssetId::Generate(), 1.0F,
+                                               {{0, {{0.0F, {}}}}, {1, {{0.0F, {}}}}, {2, {{0.0F, {}}}}}, {}, true);
+
+    const auto diagnostics =
+        Keire::DiagnoseAnimationRetargeting(sourceSkeleton, sourceRig, sourceClip, targetSkeleton, targetRig);
+
+    CHECK(diagnostics.Compatible());
+    CHECK(diagnostics.SourceTrackCount == 3);
+    CHECK(diagnostics.MappedTrackCount == 2);
+    CHECK(diagnostics.ExactNameMatchCount == 1);
+    CHECK(diagnostics.SemanticMatchCount == 1);
+    CHECK(diagnostics.RootMotionMapped);
+    REQUIRE(diagnostics.Mappings.size() == 3);
+    CHECK(diagnostics.Mappings[0].Match == Keire::AnimationRetargetMatch::ExactName);
+    CHECK(diagnostics.Mappings[1].Match == Keire::AnimationRetargetMatch::Semantic);
+    CHECK(diagnostics.Mappings[2].Match == Keire::AnimationRetargetMatch::Unmapped);
+    CHECK(std::ranges::any_of(diagnostics.Messages,
+                              [](const auto& diagnostic) { return diagnostic.Code == "KEIRERETARGET0002"; }));
 }
 
 TEST_CASE("Animation retargeting prefers exact bone names without semantic mappings")
@@ -214,4 +249,61 @@ TEST_CASE("Two bone and FABRIK solvers reject malformed chains and move valid ch
     CHECK(Keire::SolveFabrikIk(*skeleton, pose, fabrik));
     fabrik.Chain = {0, 2};
     CHECK_FALSE(Keire::SolveFabrikIk(*skeleton, pose, fabrik));
+}
+
+TEST_CASE("Foot grounding adapts pelvis and legs transactionally to validated contacts")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"UpperLeg", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"LowerLeg", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"Foot", 2, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const Keire::SkeletonAsset skeleton(bones);
+    std::vector<Keire::BoneTransform> pose;
+    for (const auto& bone : bones)
+        pose.push_back(bone.BindPose);
+
+    Keire::FootGroundingRequest request;
+    request.Pelvis = 0;
+    request.FootHeight = 0.0F;
+    request.MaximumPelvisAdjustment = 0.5F;
+    request.Contacts.push_back({1, 2, 3, {0.5F, 2.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 1.0F, 1.0F}});
+    const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
+    REQUIRE(solved);
+    CHECK(solved->SolvedFeet == 1);
+    CHECK(solved->PelvisAdjustment == doctest::Approx(-0.5F));
+    CHECK(pose.front().Translation.Y == doctest::Approx(-0.5F));
+    CHECK(pose[1].Rotation != Keire::Quaternion{});
+
+    const auto lastGood = pose;
+    request.Contacts.push_back(request.Contacts.front());
+    CHECK_FALSE(Keire::SolveFootGrounding(skeleton, pose, request));
+    CHECK(pose == lastGood);
+}
+
+TEST_CASE("Ragdoll pose transitions blend deterministically and support interruption")
+{
+    const std::vector<Keire::BoneTransform> animation(2);
+    const std::vector<Keire::BoneTransform> ragdoll{
+        {{2.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}},
+        {{0.0F, 4.0F, 0.0F}, Keire::Math::EulerDegreesToQuaternion({0.0F, 90.0F, 0.0F}), {1.0F, 1.0F, 1.0F}}};
+    Keire::RagdollPoseTransition transition;
+    transition.SetRagdoll(true, 1.0F);
+    const auto halfway = transition.Update(0.5F, animation, ragdoll);
+    CHECK(transition.Mode() == Keire::RagdollPoseMode::TransitionToRagdoll);
+    CHECK(transition.Weight() == doctest::Approx(0.5F));
+    CHECK(halfway[0].Translation.X == doctest::Approx(1.0F));
+    CHECK(halfway[1].Translation.Y == doctest::Approx(2.0F));
+
+    transition.SetRagdoll(false, 0.5F);
+    const auto animated = transition.Update(0.5F, animation, ragdoll);
+    CHECK(transition.Mode() == Keire::RagdollPoseMode::Animated);
+    CHECK(transition.Weight() == doctest::Approx(0.0F));
+    CHECK(animated == animation);
+
+    transition.SetRagdoll(true, 0.0F);
+    CHECK(transition.Mode() == Keire::RagdollPoseMode::Ragdoll);
+    CHECK(transition.Update(0.0F, animation, ragdoll) == ragdoll);
+    const auto lastGoodWeight = transition.Weight();
+    CHECK_THROWS_AS((void)transition.Update(-1.0F, animation, ragdoll), std::invalid_argument);
+    CHECK(transition.Weight() == doctest::Approx(lastGoodWeight));
 }

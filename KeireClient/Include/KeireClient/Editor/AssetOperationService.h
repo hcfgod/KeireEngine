@@ -101,6 +101,7 @@ namespace KeireEditor
                                    AssetOperationContext context = {});
         void QueueMutation(Keire::Detail::AssetWorkerMutation mutation, AssetOperationContext context = {});
         void QueueCook(Keire::AssetBuildProfile profile, std::filesystem::path output);
+        void QueueLightingBake(Keire::AssetId scene, bool force, AssetOperationContext context = {});
         void QueueReceipt(Keire::ExternalAssetImportReceiptId receipt, bool redo);
         void Update();
         [[nodiscard]] bool PreemptBackgroundImports();

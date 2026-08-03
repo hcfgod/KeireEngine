@@ -260,6 +260,8 @@ namespace Keire
                 Name = std::move(definition.Name);
                 PrefabInstances = std::move(definition.PrefabInstances);
                 PrefabOverrides = std::move(definition.PrefabOverrides);
+                Lighting = definition.Lighting;
+                BakedLightingAsset = definition.BakedLighting;
                 for (const auto& object : definition.Objects)
                 {
                     const auto native = Registry.create();
@@ -438,6 +440,8 @@ namespace Keire
             std::string Name;
             std::vector<PrefabInstanceDefinition> PrefabInstances;
             std::vector<PrefabOverrideDefinition> PrefabOverrides;
+            LightingBakeSettings Lighting;
+            AssetId BakedLightingAsset;
             Ref<ComponentRegistry> ComponentsRegistry;
             std::thread::id OwnerThread;
             entt::registry Registry;
@@ -536,7 +540,9 @@ namespace Keire
             SceneDefinition result{.SchemaVersion = CurrentSceneSchemaVersion,
                                    .Name = m_Impl->Name,
                                    .PrefabInstances = m_Impl->PrefabInstances,
-                                   .PrefabOverrides = m_Impl->PrefabOverrides};
+                                   .PrefabOverrides = m_Impl->PrefabOverrides,
+                                   .Lighting = m_Impl->Lighting,
+                                   .BakedLighting = m_Impl->BakedLightingAsset};
             result.Objects.reserve(m_Impl->Entities.size());
             for (const auto id : m_Impl->HierarchyOrder())
             {
@@ -561,6 +567,35 @@ namespace Keire
                 result.Objects.push_back(std::move(object));
             }
             return result;
+        }
+
+        LightingBakeSettings SceneState::LightingBakeConfiguration() const
+        {
+            RequireOwner("LightingBakeConfiguration");
+            return m_Impl->Lighting;
+        }
+
+        void SceneState::SetLightingBakeConfiguration(const LightingBakeSettings settings)
+        {
+            RequireOwner("SetLightingBakeConfiguration");
+            auto definition = Snapshot();
+            definition.Lighting = settings;
+            SceneAsset::Validate(definition);
+            m_Impl->Lighting = settings;
+            m_Impl->Dirty = true;
+        }
+
+        AssetId SceneState::BakedLighting() const
+        {
+            RequireOwner("BakedLighting");
+            return m_Impl->BakedLightingAsset;
+        }
+
+        void SceneState::SetBakedLighting(const AssetId asset)
+        {
+            RequireOwner("SetBakedLighting");
+            m_Impl->BakedLightingAsset = asset;
+            m_Impl->Dirty = true;
         }
 
         SceneHierarchySnapshot SceneState::HierarchySnapshot() const
@@ -1317,6 +1352,13 @@ namespace Keire
     std::vector<SceneObjectDefinition> Scene::Objects() const { return m_Impl->State->Snapshot().Objects; }
     SceneHierarchySnapshot Scene::HierarchySnapshot() const { return m_Impl->State->HierarchySnapshot(); }
     SceneDefinition Scene::Snapshot() const { return m_Impl->State->Snapshot(); }
+    LightingBakeSettings Scene::LightingBakeConfiguration() const { return m_Impl->State->LightingBakeConfiguration(); }
+    void Scene::SetLightingBakeConfiguration(const LightingBakeSettings settings)
+    {
+        m_Impl->State->SetLightingBakeConfiguration(settings);
+    }
+    AssetId Scene::BakedLighting() const { return m_Impl->State->BakedLighting(); }
+    void Scene::SetBakedLighting(const AssetId asset) { m_Impl->State->SetBakedLighting(asset); }
 
     SceneObjectHandle Scene::Find(const AssetId id) const noexcept
     {

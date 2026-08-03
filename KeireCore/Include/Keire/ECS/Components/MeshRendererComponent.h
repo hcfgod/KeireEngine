@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/ECS/Component.h"
+#include "Keire/Rendering/Lighting.h"
 
 #include <span>
 #include <vector>
@@ -28,6 +29,10 @@ namespace Keire
         [[nodiscard]] bool Visible() const noexcept { return m_Visible; }
         [[nodiscard]] bool CastShadows() const noexcept { return m_CastShadows; }
         [[nodiscard]] bool ReceiveShadows() const noexcept { return m_ReceiveShadows; }
+        [[nodiscard]] bool StaticLighting() const noexcept { return m_StaticLighting; }
+        [[nodiscard]] GIReceiveMode GIReceive() const noexcept { return m_GIReceive; }
+        [[nodiscard]] float LightmapScale() const noexcept { return m_LightmapScale; }
+        [[nodiscard]] bool PreserveLightmapUVs() const noexcept { return m_PreserveLightmapUVs; }
 
         void SetMesh(AssetId mesh);
         void SetMaterial(AssetId material);
@@ -37,6 +42,10 @@ namespace Keire
         void SetVisible(bool visible);
         void SetCastShadows(bool enabled);
         void SetReceiveShadows(bool enabled);
+        void SetStaticLighting(bool enabled);
+        void SetGIReceive(GIReceiveMode value);
+        void SetLightmapScale(float value);
+        void SetPreserveLightmapUVs(bool enabled);
         void Reset();
 
       private:
@@ -47,6 +56,10 @@ namespace Keire
         bool m_Visible = true;
         bool m_CastShadows = true;
         bool m_ReceiveShadows = true;
+        bool m_StaticLighting = false;
+        GIReceiveMode m_GIReceive = GIReceiveMode::LightProbes;
+        float m_LightmapScale = 1.0F;
+        bool m_PreserveLightmapUVs = true;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateMeshRendererComponentRegistration();

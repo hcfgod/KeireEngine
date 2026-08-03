@@ -51,6 +51,7 @@ namespace KeireEditor
         std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_SelectedTransition;
         std::string m_GraphLayer;
+        std::string m_GraphSubgraph;
         std::string m_Message;
         bool m_FocusGraph = true;
     };

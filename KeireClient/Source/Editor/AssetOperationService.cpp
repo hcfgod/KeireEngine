@@ -114,6 +114,20 @@ namespace KeireEditor
         Queue(std::move(operation));
     }
 
+    void AssetOperationService::QueueLightingBake(const Keire::AssetId scene, const bool force,
+                                                  AssetOperationContext context)
+    {
+        if (!scene)
+            throw std::invalid_argument("Lighting bake requires a scene asset.");
+        PendingOperation operation;
+        operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::BakeLighting;
+        operation.Request.BakeScene = scene;
+        operation.Request.BakeForce = force;
+        operation.Priority = AssetOperationPriority::ExplicitAction;
+        operation.Context = std::move(context);
+        Queue(std::move(operation));
+    }
+
     void AssetOperationService::QueueExtractMaterials(const Keire::AssetId model,
                                                       std::filesystem::path relativeDirectory,
                                                       AssetOperationContext context)

@@ -273,6 +273,8 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     definition.Surface.AlphaMode = Keire::MaterialAlphaMode::Mask;
     definition.Surface.AlphaCutoff = 0.35F;
     definition.Surface.DoubleSided = true;
+    definition.ContributeEmissionToGI = false;
+    definition.EmissiveGIIntensity = 2.5F;
     CHECK(definition.Texture("MainTexture") == texture);
     CHECK_FALSE(definition.Texture("Missing"));
 
@@ -281,9 +283,13 @@ TEST_CASE("material and built-in mesh assets retain Kéire-owned identities")
     CHECK(decoded->Definition().Properties.size() == 3);
     CHECK(std::get<Keire::AssetId>(decoded->Definition().Properties.at("MainTexture")) == texture);
     CHECK(decoded->Definition().Surface == definition.Surface);
+    CHECK_FALSE(decoded->Definition().ContributeEmissionToGI);
+    CHECK(decoded->Definition().EmissiveGIIntensity == doctest::Approx(2.5F));
     const auto sourceDecoded = Keire::MaterialAsset::DecodeSource(Keire::MaterialAsset::EncodeSource(definition));
     CHECK(sourceDecoded.Shader == definition.Shader);
     CHECK(sourceDecoded.Texture("MainTexture") == texture);
+    CHECK_FALSE(sourceDecoded.ContributeEmissionToGI);
+    CHECK(sourceDecoded.EmissiveGIIntensity == doctest::Approx(2.5F));
     auto mutableDefinition = sourceDecoded;
     CHECK(mutableDefinition.RemoveTexture("MainTexture"));
     CHECK_FALSE(mutableDefinition.RemoveTexture("MainTexture"));
@@ -475,13 +481,19 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 12);
+    CHECK(importer.Version == 13);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
     CHECK(content->Kind == Keire::AssetImportOptionKind::Choice);
     CHECK(std::get<std::string>(content->DefaultValue) == "model");
     CHECK(content->Choices == std::vector<std::string>{"model", "animation"});
+    const auto compression = std::ranges::find(importer.ImportOptions, std::string("animationCompression"),
+                                               &Keire::AssetImportOptionDescriptor::Key);
+    REQUIRE(compression != importer.ImportOptions.end());
+    CHECK(compression->Group == "Animation");
+    CHECK(std::get<std::string>(compression->DefaultValue) == "balanced");
+    CHECK(compression->Choices == std::vector<std::string>{"none", "light", "balanced", "aggressive"});
 }
 
 TEST_CASE("glTF import publishes faithful material and embedded texture subassets")

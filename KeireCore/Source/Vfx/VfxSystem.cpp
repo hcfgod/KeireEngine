@@ -868,6 +868,14 @@ namespace Keire
             evaluation.DeltaTime = deltaSeconds;
             evaluation.Age = particle ? particle->Age : 0.0F;
             evaluation.Lifetime = particle ? particle->Lifetime : 1.0F;
+            evaluation.Position = particle ? particle->Position : Vector3{};
+            evaluation.PreviousPosition = particle ? particle->PreviousPosition : Vector3{};
+            evaluation.Velocity = particle ? particle->Velocity : Vector3{};
+            evaluation.Rotation = particle ? particle->Rotation : Vector3{};
+            evaluation.Tint = particle ? particle->Tint : Color{};
+            evaluation.Size = particle ? particle->Size : 1.0F;
+            evaluation.ParticleIndexInStrip = particle ? particle->ParticleIndexInStrip : 0U;
+            evaluation.ParticlesPerStrip = std::max<std::uint32_t>(slot.Program.ParticlesPerStrip, 1U);
             if (!Internal::EvaluateVfxExpressions(slot.Program, slot.Parameters, evaluation, slot.ExpressionRegisters))
             {
                 slot.Diagnostics |= VfxRuntimeDiagnostic::SimulationValueInvalid;

@@ -2,15 +2,19 @@
 
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/Assets/LightingAssets.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
+#include "Keire/ECS/Components/LightProbeVolumeComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/ReflectionProbeComponent.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
+#include "KeireInternal/Rendering/SpatialLightingInternal.h"
 
 #include <SDL3/SDL.h>
 
@@ -192,6 +196,7 @@ namespace Keire::RenderBackend
         Color FrameClearColor;
         SurfaceResources Resources;
         ForwardPlusGpuResources ForwardPlus;
+        Detail::ShadowAtlasAllocator ShadowAtlas{4096, 256};
         std::uint64_t ForwardPlusContentHash = 0;
         bool ForwardPlusContentValid = false;
         Matrix4 SampledDepthViewProjection;
@@ -231,6 +236,9 @@ namespace Keire::RenderBackend
         SDL_GPUSampler* Sampler = nullptr;
         bool HdrEncoded = false;
         TextureEnvironmentLayout EnvironmentLayout = TextureEnvironmentLayout::Auto;
+        std::array<Vector4, 9> DiffuseIrradiance{};
+        std::uint32_t MipLevels = 1;
+        bool HasDiffuseIrradiance = false;
 
         [[nodiscard]] bool Empty() const noexcept { return !Texture && !Sampler; }
     };
@@ -255,6 +263,14 @@ namespace Keire::RenderBackend
     struct GpuTextureEntry final
     {
         AssetHandle<Texture2DAsset> Handle;
+        GpuTextureResources Resources;
+        std::uint64_t LoadedRevision = 0;
+        std::uint64_t LastAttemptedRevision = 0;
+    };
+
+    struct GpuLightingTextureEntry final
+    {
+        AssetHandle<LightingTextureArrayAsset> Handle;
         GpuTextureResources Resources;
         std::uint64_t LoadedRevision = 0;
         std::uint64_t LastAttemptedRevision = 0;
@@ -287,6 +303,8 @@ namespace Keire::RenderBackend
         bool ReceivesShadows = false;
         bool UsesForwardPlus = false;
         bool UsesInstancing = false;
+        bool UsesImageBasedLighting = false;
+        bool UsesSpatialLighting = false;
     };
 
     struct GpuMaterialEntry final
@@ -401,11 +419,12 @@ namespace Keire::RenderBackend
         Vector4 UV0;
         Vector4 VertexColor;
         Vector4 Tangent;
+        Vector4 UV1;
     };
 
     static_assert(sizeof(GpuRenderVertex) == 48);
     static_assert(alignof(GpuRenderVertex) == 16);
-    static_assert(sizeof(GpuMeshVertex) == 80);
+    static_assert(sizeof(GpuMeshVertex) == 96);
     static_assert(alignof(GpuMeshVertex) == 16);
 
     [[nodiscard]] constexpr bool SupportsComputeSkinning(const std::string_view driver,
@@ -469,7 +488,7 @@ namespace Keire::RenderBackend
 
     inline constexpr std::size_t MaximumShadowedSpotLights = 8;
     inline constexpr std::size_t MaximumShadowedPointLights = 2;
-    inline constexpr std::uint32_t LocalShadowResolution = 1024;
+    inline constexpr std::uint32_t LocalShadowResolution = 4096;
     inline constexpr std::uint32_t LocalShadowLayerCount =
         static_cast<std::uint32_t>(MaximumShadowedSpotLights + MaximumShadowedPointLights * 6U);
 
@@ -515,6 +534,40 @@ namespace Keire::RenderBackend
         std::array<AssetLocalLightUniform, MaximumShaderLocalLights> Lights;
     };
 
+    struct AssetEnvironmentUniforms final
+    {
+        std::array<Vector4, 9> DiffuseIrradiance;
+        Vector4 Parameters;
+        Vector4 Encoding;
+    };
+
+    struct AssetReflectionProbeUniform final
+    {
+        Matrix4 WorldToLocal;
+        Matrix4 LocalToWorld;
+        Vector4 ExtentsWeight;
+        Vector4 Parameters;
+    };
+
+    struct AssetSpatialLightingUniforms final
+    {
+        Vector4 LightmapScaleOffset;
+        Vector4 LightmapParameters;
+        Vector4 ShadowMaskParameters;
+        std::array<Vector4, 9> ProbeIrradiance;
+        std::array<AssetReflectionProbeUniform, 2> ReflectionProbes;
+        std::array<Vector4, 8> CookieTransforms;
+        std::array<Vector4, 2> CookieRotations;
+        Vector4 DirectionalCookieAndContact;
+        Matrix4 ViewProjection;
+    };
+
+    struct AssetEnvironmentSpatialUniforms final
+    {
+        AssetEnvironmentUniforms Environment;
+        AssetSpatialLightingUniforms Spatial;
+    };
+
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
     static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * (20 + MaximumShaderLocalLights * 16));
     static_assert(sizeof(AssetLocalLightUniform) == sizeof(float) * 16);
@@ -522,6 +575,9 @@ namespace Keire::RenderBackend
     static_assert(sizeof(AssetSceneUniforms) <= 4096);
     static_assert(sizeof(AssetShadowUniforms) <= 4096);
     static_assert(sizeof(AssetLocalLightUniforms) <= 4096);
+    static_assert(sizeof(AssetEnvironmentUniforms) == sizeof(float) * 44);
+    static_assert(sizeof(AssetSpatialLightingUniforms) == sizeof(float) * 188);
+    static_assert(sizeof(AssetEnvironmentSpatialUniforms) == sizeof(float) * 232);
 
     struct SkyUniforms final
     {
@@ -532,11 +588,17 @@ namespace Keire::RenderBackend
 
     struct SceneLighting final
     {
+        EntityId Entity;
         Vector4 Direction{0.0F, -1.0F, 0.0F, 0.0F};
         Color ColorAndIntensity{1.0F, 1.0F, 1.0F, 0.0F};
         ShadowQuality Shadows = ShadowQuality::Disabled;
         float ShadowStrength = 1.0F;
         float ShadowBias = 0.005F;
+        AssetId Cookie;
+        Vector2 CookieScale{1.0F, 1.0F};
+        Vector2 CookieOffset;
+        float CookieRotationDegrees = 0.0F;
+        bool ContactShadows = false;
         bool Enabled = false;
     };
 
@@ -592,8 +654,14 @@ namespace Keire::RenderBackend
         Color ColorAndIntensity;
         float InnerConeCosine = 1.0F;
         ShadowQuality Shadows = ShadowQuality::Disabled;
+        ShadowResolutionHint ShadowResolution = ShadowResolutionHint::Medium;
         float ShadowStrength = 1.0F;
         float ShadowBias = 0.0025F;
+        AssetId Cookie;
+        Vector2 CookieScale{1.0F, 1.0F};
+        Vector2 CookieOffset;
+        float CookieRotationDegrees = 0.0F;
+        bool ContactShadows = false;
     };
 
     struct SceneRenderPacket final
@@ -604,6 +672,20 @@ namespace Keire::RenderBackend
         SceneLighting Lighting;
         std::vector<SceneDrawItem> DrawItems;
         std::vector<SceneLocalLight> LocalLights;
+        AssetId BakedLighting;
+        std::vector<Detail::SpatialReflectionProbe> ReflectionProbes;
+        struct LightProbeVolume final
+        {
+            EntityId Entity;
+            Matrix4 LocalToWorld;
+            Matrix4 WorldToLocal;
+            Vector3 BoxExtents;
+            Vector3 Spacing;
+            std::int32_t Priority = 0;
+            float NormalBias = 0.0F;
+            float ViewBias = 0.0F;
+        };
+        std::vector<LightProbeVolume> LightProbeVolumes;
         bool DrawGrid = false;
         VfxRenderSnapshot Vfx;
     };
@@ -616,11 +698,13 @@ namespace Keire::RenderBackend
         {
             const auto light = entity.GetComponent<DirectionalLightComponent>();
             const auto transform = entity.GetComponent<TransformComponent>();
-            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy())
+            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy() ||
+                light->BakeMode() == LightBakeMode::Baked)
                 continue;
             if (selected && selected.Id().Value() < entity.Id().Value())
                 continue;
             selected = entity;
+            result.Entity = entity.Id();
             const auto direction = Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F}));
             const auto temperature =
                 light->UseColorTemperature() ? TemperatureColor(light->ColorTemperatureKelvin()) : Color{};
@@ -631,6 +715,11 @@ namespace Keire::RenderBackend
             result.Shadows = light->Shadows();
             result.ShadowStrength = light->ShadowStrength();
             result.ShadowBias = light->ShadowBias();
+            result.Cookie = light->Cookie();
+            result.CookieScale = light->CookieScale();
+            result.CookieOffset = light->CookieOffset();
+            result.CookieRotationDegrees = light->CookieRotationDegrees();
+            result.ContactShadows = light->ContactShadows();
             result.Enabled = true;
         }
         return result;
@@ -646,7 +735,8 @@ namespace Keire::RenderBackend
         {
             const auto light = entity.GetComponent<PointLightComponent>();
             const auto transform = entity.GetComponent<TransformComponent>();
-            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy())
+            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy() ||
+                light->BakeMode() == LightBakeMode::Baked)
                 continue;
             result.push_back({entity.Id(),
                               SceneLocalLightType::Point,
@@ -657,27 +747,77 @@ namespace Keire::RenderBackend
                               addColor(light->LightColor(), light->Intensity()),
                               1.0F,
                               light->Shadows(),
+                              light->ShadowResolution(),
                               light->ShadowStrength(),
-                              light->ShadowBias()});
+                              light->ShadowBias(),
+                              light->Cookie(),
+                              {},
+                              {},
+                              0.0F,
+                              light->ContactShadows()});
         }
         constexpr float degreesToRadians = 0.01745329251994329577F;
         for (const auto& entity : scene->Query<SpotLightComponent>())
         {
             const auto light = entity.GetComponent<SpotLightComponent>();
             const auto transform = entity.GetComponent<TransformComponent>();
-            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy())
+            if (!light || !transform || !light->Enabled() || !entity.ActiveInHierarchy() ||
+                light->BakeMode() == LightBakeMode::Baked)
                 continue;
-            result.push_back({entity.Id(), SceneLocalLightType::Spot,
-                              Math::TransformPoint(transform->WorldMatrix(), {}), light->Range(),
-                              Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F})),
-                              std::cos(light->OuterAngleDegrees() * degreesToRadians),
-                              addColor(light->LightColor(), light->Intensity()),
-                              std::cos(light->InnerAngleDegrees() * degreesToRadians), light->Shadows(),
-                              light->ShadowStrength(), light->ShadowBias()});
+            result.push_back(
+                {entity.Id(), SceneLocalLightType::Spot, Math::TransformPoint(transform->WorldMatrix(), {}),
+                 light->Range(), Normalize(Math::TransformDirection(transform->WorldMatrix(), {0.0F, 0.0F, 1.0F})),
+                 std::cos(light->OuterAngleDegrees() * degreesToRadians),
+                 addColor(light->LightColor(), light->Intensity()),
+                 std::cos(light->InnerAngleDegrees() * degreesToRadians), light->Shadows(), light->ShadowResolution(),
+                 light->ShadowStrength(), light->ShadowBias(), light->Cookie(), light->CookieScale(),
+                 light->CookieOffset(), light->CookieRotationDegrees(), light->ContactShadows()});
         }
         std::ranges::sort(result, {}, &SceneLocalLight::Entity);
         if (result.size() > 4096U)
             result.resize(4096U);
+        return result;
+    }
+
+    [[nodiscard]] inline std::vector<Detail::SpatialReflectionProbe> ResolveReflectionProbes(const Ref<Scene>& scene)
+    {
+        std::vector<Detail::SpatialReflectionProbe> result;
+        for (const auto& entity : scene->Query<ReflectionProbeComponent>())
+        {
+            const auto probe = entity.GetComponent<ReflectionProbeComponent>();
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!probe || !transform || !probe->Enabled() || !entity.ActiveInHierarchy())
+                continue;
+            const auto world = transform->WorldMatrix();
+            result.push_back({entity.Id().Value(), world, Math::Inverse(world), probe->BoxExtents(),
+                              probe->BlendDistance(), probe->Importance(), 0, probe->Intensity(),
+                              probe->BoxProjection()});
+        }
+        std::ranges::sort(result, {}, &Detail::SpatialReflectionProbe::Entity);
+        return result;
+    }
+
+    [[nodiscard]] inline std::vector<SceneRenderPacket::LightProbeVolume>
+    ResolveLightProbeVolumes(const Ref<Scene>& scene)
+    {
+        std::vector<SceneRenderPacket::LightProbeVolume> result;
+        for (const auto& entity : scene->Query<LightProbeVolumeComponent>())
+        {
+            const auto volume = entity.GetComponent<LightProbeVolumeComponent>();
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!volume || !transform || !volume->Enabled() || !entity.ActiveInHierarchy())
+                continue;
+            const auto world = transform->WorldMatrix();
+            result.push_back({entity.Id(), world, Math::Inverse(world), volume->BoxExtents(), volume->Spacing(),
+                              volume->Priority(), volume->NormalBias(), volume->ViewBias()});
+        }
+        std::ranges::sort(result,
+                          [](const auto& left, const auto& right)
+                          {
+                              if (left.Priority != right.Priority)
+                                  return left.Priority > right.Priority;
+                              return left.Entity < right.Entity;
+                          });
         return result;
     }
 
@@ -1003,6 +1143,7 @@ namespace Keire::RenderBackend
                                                             std::span<const MeshVertex> vertices);
         [[nodiscard]] SDL_GPUSampler* ResolveSampler(const SamplerDescription& description);
         [[nodiscard]] GpuTextureResources CreateTextureResources(const Texture2DAsset& asset);
+        [[nodiscard]] GpuTextureResources CreateLightingTextureResources(const LightingTextureArrayAsset& asset);
         [[nodiscard]] GpuMeshResources CreateMeshResources(const MeshAsset& mesh);
 
         void CollectCompletedFrames();
@@ -1011,6 +1152,11 @@ namespace Keire::RenderBackend
         void Submit(SceneRenderRequest request);
         [[nodiscard]] const GpuMeshResources& ResolveMesh(AssetId id);
         [[nodiscard]] const GpuTextureResources& ResolveTexture(AssetId id);
+        [[nodiscard]] const GpuTextureResources& ResolveLightingTexture(AssetId id, bool cubeArray = false,
+                                                                        bool whiteFallback = false);
+        [[nodiscard]] const GpuTextureResources& ResolveCookieAtlas(std::span<const AssetId> cookies);
+        [[nodiscard]] Ref<const LightingSetAsset> ResolveLightingSet(AssetId id);
+        [[nodiscard]] Ref<const LightProbeVolumeAsset> ResolveLightProbeVolume(AssetId id);
         [[nodiscard]] const GpuTextureResources& DefaultTexture(ShaderTextureSemantic semantic) const noexcept;
         [[nodiscard]] Ref<const MaterialAsset> ResolveMaterial(AssetId id);
         [[nodiscard]] GpuShaderEntry* ResolveShader(AssetId id, SDL_GPUSampleCount samples,
@@ -1101,15 +1247,26 @@ namespace Keire::RenderBackend
         GpuMeshResources ErrorMesh;
         GpuTextureResources CheckerboardTexture;
         GpuTextureResources DefaultSkyTexture;
+        GpuTextureResources BrdfIntegrationLut;
         GpuTextureResources WhiteTexture;
         GpuTextureResources FlatNormalTexture;
         GpuTextureResources NeutralOrmTexture;
         GpuTextureResources BlackTexture;
         GpuTextureResources BlackDataTexture;
         GpuTextureResources WhiteDataTexture;
+        GpuTextureResources DefaultLightingArray;
+        GpuTextureResources DefaultLightingMaskArray;
+        GpuTextureResources DefaultReflectionCubeArray;
+        GpuTextureResources CookieAtlas;
+        std::array<AssetId, 8> CookieAtlasAssets{};
+        std::array<AssetHandle<Texture2DAsset>, 8> CookieAtlasHandles{};
+        std::array<std::uint64_t, 8> CookieAtlasRevisions{};
         std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
         std::unordered_map<AssetId, GpuSkinEntry> SkinCache;
         std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
+        std::unordered_map<AssetId, GpuLightingTextureEntry> LightingTextureCache;
+        std::unordered_map<AssetId, AssetHandle<LightingSetAsset>> LightingSetCache;
+        std::unordered_map<AssetId, AssetHandle<LightProbeVolumeAsset>> LightProbeVolumeCache;
         std::unordered_map<AssetId, GpuMaterialEntry> MaterialCache;
         std::uint64_t MaterialBindingBuilds = 0;
         std::unordered_map<AssetId, GpuShaderEntry> ShaderCache;

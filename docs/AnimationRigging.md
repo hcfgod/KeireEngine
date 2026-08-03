@@ -17,7 +17,9 @@ This keeps reimport, retargeting, prefab references, and cooked dependencies det
    - `Biped` uses the two-legged profile without requiring human-specific authoring.
    - `Quadruped` maps front/rear legs, paws or hooves, spine, head, and tail.
 5. Choose four or eight maximum influences and linear-blend or dual-quaternion skinning.
-6. Select **Apply & Regenerate**. The isolated asset worker publishes the model and all generated subassets as one
+6. Choose an **Animation Compression** preset. `Balanced` is the default; `None`, `Light`, and `Aggressive` trade
+   key count for increasingly large translation, rotation, and scale error tolerances.
+7. Select **Apply & Regenerate**. The isolated asset worker publishes the model and all generated subassets as one
    operation.
 
 Embedded skeleton inference recognizes common Mixamo, Blender, and Unreal-style names. It never reorders or removes
@@ -47,16 +49,23 @@ To retarget:
 3. Choose a source clip from another imported model.
 4. Enter a destination name and create the retargeted clip.
 
-Retargeting matches semantic roles rather than type or bone names. The baked `.keireanim` clip references the target
-skeleton and can be dragged into an Animator Controller. Missing optional roles are skipped; source and target assets
-remain unchanged if validation fails.
+Before baking, Rigging Studio reports exact-name, semantic, unmapped, and conflicting bone matches; root-motion
+compatibility; translation scale; and any bones that need a scale fallback. Incompatible root motion disables the bake
+instead of creating a clip with an invalid root track. The mapping table remains available as a retarget preview so a
+content author can correct the rig definitions before writing an asset.
+
+Retargeting matches exact bones first and semantic roles second. The baked `.keireanim` clip references the target
+skeleton and can be dragged into an Animator Controller. Missing optional roles are skipped; pathological scale ratios
+fall back to a safe value; source and target assets remain unchanged if validation or the final bake fails.
 
 ## Animator Controllers
 
 Create an **Animator Controller** in the Project panel and double-click it. Drag clips, Animation Sources, or animated
 models into the graph; container assets expand their generated clip subassets into states. Create parameters, layers,
-transitions, masks, and blend trees, then assign the controller to an Animator component. Runtime sampling,
-events, root motion, transitions, and skinning occur in scene-safe order.
+transitions, masks, blend trees, and state-machine subgraphs, then assign the controller to an Animator component.
+Override layers replace masked bones, additive layers apply deltas from the skeleton bind pose, and avatar-mask weights
+can attenuate either mode per bone. Runtime sampling, events, root motion, transitions, and skinning occur in scene-safe
+order.
 
 The state machine uses the same stable production canvas as VFX authoring:
 
@@ -67,16 +76,25 @@ The state machine uses the same stable production canvas as VFX authoring:
 - Right-click an input pin to unlink incoming transitions, or right-click a cable to delete that exact transition.
 - Middle-drag to pan, use the wheel to zoom, and choose **Frame All** after a large layout change.
 - Drop clips at the intended graph position. Multi-clip drops are offset so newly created states remain selectable.
+- Select the root state machine or a named subgraph in the navigation tree. Each group owns its own entry state while
+  stable-ID transitions may cross group boundaries.
 
 Self-transitions are rejected. A second transition between the same two states is allowed with a warning because its
 conditions or exit timing can be distinct. Deleting a state also removes every incident transition transactionally.
 
-Select the animated scene object while its controller is open to use the controller transport. In Edit Mode, Preview,
-Pause, Restart, Stop, and Timeline scrub evaluate the graph on the selected object without serializing the preview pose.
-In Play Mode, the same strip reports the live state and normalized progress, and the active graph state is highlighted.
-The skinned mesh is authoritative for the target skeleton; source clips from another compatible rig are retargeted to
-that skeleton. Embedded imports rebuild inverse binds from the normalized runtime hierarchy, and retargeting discards
-pathological unit-conversion scale ratios instead of allowing them to corrupt the skin palette.
+Select the animated scene object while its controller is open to use the selection-backed **Animation Preview Scene**.
+In Edit Mode, Preview, Pause, Restart, Stop, and Timeline scrub evaluate the graph on the selected object without
+serializing the preview pose. Closing the panel, entering Play Mode, changing target, or pressing Stop clears the
+transient pose. In Play Mode, the same strip reports the live state and normalized progress, displays the active
+transition and blend progress, and highlights the active graph state.
+
+The preview and live strips expose three bounded debug views: the final local pose and derived model-space bone
+positions, a 240-sample accumulated root-motion trajectory, and state-machine timings/counters for layers, transition
+tests, motions, and sampled clips. Debug data is published through immutable snapshots, so inspecting it cannot mutate
+or stall graph evaluation. The skinned mesh is authoritative for the target skeleton; source clips from another
+compatible rig are retargeted to that skeleton. Embedded imports rebuild inverse binds from the normalized runtime
+hierarchy, and retargeting discards pathological unit-conversion scale ratios instead of allowing them to corrupt the
+skin palette.
 
 Managed gameplay code controls typed parameters and named IK goals:
 
@@ -108,6 +126,21 @@ coherent.
 IK goals persist by name until replaced or cleared. World-space goals are converted to model space at the animation
 boundary. Invalid entities, missing Animator components, stale Play generations, missing bones, and invalid solver
 limits are rejected without exposing native pointers.
+
+## Ground Adaptation And Ragdolls
+
+Enable **Ground Adaptation** on an Animator component and assign pelvis, upper-leg, lower-leg, and foot bone names for
+both legs. After graph sampling and explicit IK goals, the scene runtime raycasts below each foot, ignores the
+character's own physics body, lowers or raises the pelvis within the configured limit, solves both two-bone chains, and
+aligns the feet to the hit normals. Collision mask, ray height/range, foot offset, positional weight, and rotation
+weight are serialized settings. If either chain or contact is invalid, the operation rejects transactionally and the
+sampled pose remains unchanged.
+
+`SolveFootGrounding` is also available to custom character runtimes that already own their contact queries.
+`RagdollPoseTransition` provides an interruptible animated-to-physics pose blend with finite duration validation,
+shortest-path quaternion interpolation, zero-duration switching, and a deterministic return transition. The animation
+system intentionally does not create or own a ragdoll's bodies and constraints: the physics/character layer supplies a
+skeleton-compatible local ragdoll pose, keeping native body ownership outside public animation types.
 
 ## Deformation And Performance
 

@@ -38,7 +38,7 @@ namespace Keire
         using Json = nlohmann::json;
         constexpr std::array<char, 8> MeshMagic{'K', 'E', 'I', 'R', 'E', 'M', 'S', 'H'};
         constexpr std::array<char, 8> TextureMagic{'K', 'E', 'I', 'R', 'E', 'T', 'E', 'X'};
-        constexpr std::uint32_t MeshVersion = 3;
+        constexpr std::uint32_t MeshVersion = 4;
         constexpr std::uint32_t TextureVersion = 3;
         constexpr std::size_t MaximumMeshVertices = 16U * 1024U * 1024U;
         constexpr std::size_t MaximumMeshIndices = 48U * 1024U * 1024U;
@@ -169,7 +169,8 @@ namespace Keire
             for (const auto& vertex : vertices)
             {
                 if (!Math::IsFinite(vertex.Position) || !Math::IsFinite(vertex.Normal) ||
-                    !std::isfinite(vertex.UV0.X) || !std::isfinite(vertex.UV0.Y) ||
+                    !std::isfinite(vertex.UV0.X) || !std::isfinite(vertex.UV0.Y) || !std::isfinite(vertex.UV1.X) ||
+                    !std::isfinite(vertex.UV1.Y) ||
                     !Math::IsFinite(Vector4{vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue,
                                             vertex.VertexColor.Alpha}) ||
                     !Math::IsFinite(vertex.Tangent))
@@ -738,7 +739,13 @@ namespace Keire
                 }
                 while (base.Width > settings.MaximumSize || base.Height > settings.MaximumSize)
                     base = DownsampleRgbe(base);
-                return {std::move(base)};
+                std::vector<TextureMipLevel> result{std::move(base)};
+                if (settings.Mips == TextureMipPolicy::Generate)
+                {
+                    while (result.back().Width > 1 || result.back().Height > 1)
+                        result.push_back(DownsampleRgbe(result.back()));
+                }
+                return result;
             }
             std::unique_ptr<unsigned char, decltype(&stbi_image_free)> pixels(
                 stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()),
@@ -875,7 +882,7 @@ namespace Keire
         ValidateMeshStructure(indices, submeshes, materialSlots, lods);
         const auto bounds = CalculateBounds(vertices);
         std::vector<std::byte> result;
-        result.reserve(48U + vertices.size() * 64U + indices.size() * sizeof(std::uint32_t));
+        result.reserve(48U + vertices.size() * 72U + indices.size() * sizeof(std::uint32_t));
         for (const char value : MeshMagic)
             result.push_back(std::byte(value));
         AppendUnsigned(result, MeshVersion);
@@ -917,7 +924,7 @@ namespace Keire
                  {vertex.Position.X, vertex.Position.Y, vertex.Position.Z, vertex.Normal.X, vertex.Normal.Y,
                   vertex.Normal.Z, vertex.UV0.X, vertex.UV0.Y, vertex.VertexColor.Red, vertex.VertexColor.Green,
                   vertex.VertexColor.Blue, vertex.VertexColor.Alpha, vertex.Tangent.X, vertex.Tangent.Y,
-                  vertex.Tangent.Z, vertex.Tangent.W})
+                  vertex.Tangent.Z, vertex.Tangent.W, vertex.UV1.X, vertex.UV1.Y})
                 AppendFloat(result, value);
         }
         for (const auto index : indices)
@@ -981,7 +988,7 @@ namespace Keire
                 lods.push_back(lod);
             }
         }
-        const auto vertexSize = version == 1 ? 48U : 64U;
+        const auto vertexSize = version == 1 ? 48U : version < 4 ? 64U : 72U;
         const auto expected = vertexCount * vertexSize + indexCount * sizeof(std::uint32_t);
         if (expected != reader.Remaining())
             throw std::invalid_argument("Mesh asset payload size is invalid.");
@@ -994,6 +1001,8 @@ namespace Keire
             vertex.VertexColor = {reader.Float(), reader.Float(), reader.Float(), reader.Float()};
             if (version >= 2)
                 vertex.Tangent = {reader.Float(), reader.Float(), reader.Float(), reader.Float()};
+            if (version >= 4)
+                vertex.UV1 = {reader.Float(), reader.Float()};
         }
         std::vector<std::uint32_t> indices(static_cast<std::size_t>(indexCount));
         for (auto& index : indices)
@@ -1131,7 +1140,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 12;
+        result.Version = 13;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1151,6 +1160,7 @@ namespace Keire
             const auto requestedRigProfile = stringSetting("rigProfile", "humanoid");
             const auto requestedSkinning = stringSetting("skinningMethod", "linearBlend");
             const auto requestedInfluences = stringSetting("maximumInfluences", "4") == "8" ? 8 : 4;
+            const auto requestedCompression = stringSetting("animationCompression", "balanced");
             if (context.SourcePath.extension() == ".keiremesh")
             {
                 const auto mesh = MeshAsset::Decode(bytes);
@@ -1698,6 +1708,26 @@ namespace Keire
                     auto name = std::string(animation->mName.C_Str());
                     if (name.empty())
                         name = "Animation " + std::to_string(animationIndex + 1U);
+                    const auto compressionPreset = requestedCompression == "none" ? AnimationCompressionPreset::Disabled
+                                                   : requestedCompression == "light" ? AnimationCompressionPreset::Light
+                                                   : requestedCompression == "aggressive"
+                                                       ? AnimationCompressionPreset::Aggressive
+                                                       : AnimationCompressionPreset::Balanced;
+                    auto compressed =
+                        CompressAnimationTracks(tracks, AnimationCompressionSettingsForPreset(compressionPreset));
+                    if (compressed.Statistics.CompressedKeyCount < compressed.Statistics.SourceKeyCount)
+                    {
+                        output.Diagnostics.push_back(
+                            {AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                             "Compressed animation '" + name + "' from " +
+                                 std::to_string(compressed.Statistics.SourceKeyCount) + " to " +
+                                 std::to_string(compressed.Statistics.CompressedKeyCount) +
+                                 " keys (maximum translation/rotation/scale error " +
+                                 std::to_string(compressed.Statistics.MaximumTranslationError) + " / " +
+                                 std::to_string(compressed.Statistics.MaximumRotationErrorDegrees) + " degrees / " +
+                                 std::to_string(compressed.Statistics.MaximumScaleError) + ")."});
+                    }
+                    tracks = std::move(compressed.Tracks);
                     const auto key = "animation/" + name + "/" + std::to_string(animationIndex);
                     const auto clipId = context.ResolveSubAssetId(key);
                     output.SubAssets.push_back({clipId,
@@ -1956,7 +1986,16 @@ namespace Keire
                                  {},
                                  {},
                                  1.0,
-                                 {"linearBlend", "dualQuaternion"}}};
+                                 {"linearBlend", "dualQuaternion"}},
+                                {"animationCompression",
+                                 "Animation Compression",
+                                 "Animation",
+                                 AssetImportOptionKind::Choice,
+                                 std::string("balanced"),
+                                 {},
+                                 {},
+                                 1.0,
+                                 {"none", "light", "balanced", "aggressive"}}};
         return result;
     }
 
@@ -1965,7 +2004,7 @@ namespace Keire
         settings = NormalizeTextureSettings(settings);
         AssetImporterRegistration result;
         result.Name = "Keire.Texture2D";
-        result.Version = 3;
+        result.Version = 4;
         result.Type = Texture2DAsset::StaticType();
         result.Extensions = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
         result.Import = [settings](const std::span<const std::byte> bytes)
@@ -1976,7 +2015,7 @@ namespace Keire
             {
                 effective.Semantic = TextureSemantic::Environment;
                 effective.ColorSpace = TextureColorSpace::Linear;
-                effective.Mips = TextureMipPolicy::None;
+                effective.Mips = TextureMipPolicy::Generate;
                 effective.EnvironmentLayout = TextureEnvironmentLayout::Equirectangular;
                 effective.HighDynamicRange = true;
                 effective.Sampler.AddressU = TextureAddressMode::Repeat;
@@ -1994,7 +2033,7 @@ namespace Keire
             {
                 effective.Semantic = TextureSemantic::Environment;
                 effective.ColorSpace = TextureColorSpace::Linear;
-                effective.Mips = TextureMipPolicy::None;
+                effective.Mips = TextureMipPolicy::Generate;
                 effective.HighDynamicRange = true;
                 effective.Sampler.AddressU = TextureAddressMode::Repeat;
                 effective.Sampler.AddressV = TextureAddressMode::Clamp;

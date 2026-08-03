@@ -93,6 +93,22 @@ namespace KeireEditor
                                      });
             return found == records.end() ? nullptr : &*found;
         }
+
+        [[nodiscard]] std::string_view RetargetMatchLabel(const Keire::AnimationRetargetMatch match) noexcept
+        {
+            switch (match)
+            {
+            case Keire::AnimationRetargetMatch::Unmapped:
+                return "unmapped";
+            case Keire::AnimationRetargetMatch::ExactName:
+                return "exact name";
+            case Keire::AnimationRetargetMatch::Semantic:
+                return "semantic";
+            case Keire::AnimationRetargetMatch::TargetConflict:
+                return "target conflict";
+            }
+            return "unknown";
+        }
     } // namespace
 
     void RiggingStudioPanel::Attach(Keire::UiWorkspace& workspace)
@@ -156,6 +172,12 @@ namespace KeireEditor
                 m_Draft = model->ImportSettings;
                 m_Dirty = false;
                 m_Message.clear();
+                m_RetargetDiagnostics.reset();
+                m_DiagnosticSourceClip = {};
+                m_DiagnosticSourceSkeleton = {};
+                m_DiagnosticSourceRig = {};
+                m_DiagnosticTargetSkeleton = {};
+                m_DiagnosticTargetRig = {};
             }
 
             ui.Text(model->RelativePath.generic_string());
@@ -232,6 +254,25 @@ namespace KeireEditor
             else
             {
                 ui.TextColored(theme.Warning, "Rigging is disabled; this model imports as static geometry.");
+            }
+
+            if (rigSource != "none")
+            {
+                auto compression = ReadChoice(m_Draft, "animationCompression", "balanced");
+                if (auto combo = ui.BeginCombo("Animation Compression", compression); combo)
+                {
+                    for (const auto value : {"none", "light", "balanced", "aggressive"})
+                    {
+                        if (ui.Selectable(value, compression == value))
+                        {
+                            compression = value;
+                            m_Draft["animationCompression"] = compression;
+                            m_Dirty = true;
+                        }
+                    }
+                }
+                ui.TextColored(theme.MutedText,
+                               "Balanced preserves millimeter-scale translation and quarter-degree rotation error.");
             }
 
             ui.Separator();
@@ -393,23 +434,86 @@ namespace KeireEditor
                 ui.TextColored(theme.MutedText,
                                std::to_string(sourceRig->Definition().Bones.size()) + " source bones  ->  " +
                                    std::to_string(targetRig->Definition().Bones.size()) + " target bones");
-                if (ui.Button("Bake Retargeted Clip"))
+                if (m_DiagnosticSourceClip != sourceClip || m_DiagnosticSourceSkeleton != sourceSkeleton ||
+                    m_DiagnosticSourceRig != sourceRig || m_DiagnosticTargetSkeleton != targetSkeleton ||
+                    m_DiagnosticTargetRig != targetRig)
                 {
+                    m_DiagnosticSourceClip = sourceClip;
+                    m_DiagnosticSourceSkeleton = sourceSkeleton;
+                    m_DiagnosticSourceRig = sourceRig;
+                    m_DiagnosticTargetSkeleton = targetSkeleton;
+                    m_DiagnosticTargetRig = targetRig;
                     try
                     {
-                        const auto baked = Keire::RetargetAnimationClip(*sourceSkeleton, sourceRig->Definition(),
-                                                                        *sourceClip, targetAnimation.Skeleton,
-                                                                        *targetSkeleton, targetRig->Definition());
-                        m_Controller.CreateRiggingStudioRetarget(
-                            m_RetargetName,
-                            Keire::AnimationClipAsset::Encode(baked->Skeleton(), baked->Duration(), baked->Tracks(),
-                                                              baked->Events(), baked->RootMotion()));
-                        m_Message = "Retargeted clip creation queued in the isolated asset worker.";
+                        m_RetargetDiagnostics =
+                            Keire::DiagnoseAnimationRetargeting(*sourceSkeleton, sourceRig->Definition(), *sourceClip,
+                                                                *targetSkeleton, targetRig->Definition());
                     }
                     catch (const std::exception& error)
                     {
+                        m_RetargetDiagnostics.reset();
                         m_Message = error.what();
-                        m_Controller.ReportRiggingStudioError(m_Message);
+                    }
+                }
+
+                const bool compatible = m_RetargetDiagnostics && m_RetargetDiagnostics->Compatible();
+                if (m_RetargetDiagnostics)
+                {
+                    const auto& diagnostics = *m_RetargetDiagnostics;
+                    ui.TextColored(compatible ? theme.Success : theme.Error,
+                                   std::to_string(diagnostics.MappedTrackCount) + " / " +
+                                       std::to_string(diagnostics.SourceTrackCount) + " tracks mapped  |  " +
+                                       std::to_string(diagnostics.ExactNameMatchCount) + " exact  |  " +
+                                       std::to_string(diagnostics.SemanticMatchCount) + " semantic");
+                    ui.TextColored(diagnostics.RootMotionMapped ? theme.Success : theme.Warning,
+                                   diagnostics.RootMotionMapped ? "Root motion mapping is compatible."
+                                                                : "Root motion will be disabled for this bake.");
+                    std::size_t scaleFallbacks = 0;
+                    for (const auto& mapping : diagnostics.Mappings)
+                        scaleFallbacks += mapping.ScaleFallbackKeyCount;
+                    if (scaleFallbacks != 0)
+                        ui.TextColored(theme.Warning, std::to_string(scaleFallbacks) +
+                                                          " animated scale components will use target bind scale.");
+                    if (auto details = ui.BeginTreeNode("Retarget diagnostics", !compatible); details)
+                    {
+                        for (const auto& mapping : diagnostics.Mappings)
+                        {
+                            const auto target = mapping.TargetBone ? mapping.TargetName : std::string("(none)");
+                            ui.Text(mapping.SourceName + "  ->  " + target + "  [" +
+                                    std::string(RetargetMatchLabel(mapping.Match)) + "]  scale " +
+                                    std::to_string(mapping.TranslationScale));
+                        }
+                        for (const auto& diagnostic : diagnostics.Messages)
+                        {
+                            const auto color = diagnostic.Severity == Keire::RigDiagnosticSeverity::Error ? theme.Error
+                                               : diagnostic.Severity == Keire::RigDiagnosticSeverity::Warning
+                                                   ? theme.Warning
+                                                   : theme.MutedText;
+                            ui.TextColored(color, diagnostic.Code + "  " + diagnostic.Message);
+                        }
+                    }
+                }
+                if (auto disabled = ui.BeginDisabled(!compatible); disabled)
+                {
+                    if (ui.Button("Bake Retargeted Clip"))
+                    {
+                        try
+                        {
+                            const auto baked = Keire::RetargetAnimationClipWithDiagnostics(
+                                *sourceSkeleton, sourceRig->Definition(), *sourceClip, targetAnimation.Skeleton,
+                                *targetSkeleton, targetRig->Definition());
+                            m_Controller.CreateRiggingStudioRetarget(
+                                m_RetargetName,
+                                Keire::AnimationClipAsset::Encode(baked.Clip->Skeleton(), baked.Clip->Duration(),
+                                                                  baked.Clip->Tracks(), baked.Clip->Events(),
+                                                                  baked.Clip->RootMotion()));
+                            m_Message = "Retargeted clip creation queued in the isolated asset worker.";
+                        }
+                        catch (const std::exception& error)
+                        {
+                            m_Message = error.what();
+                            m_Controller.ReportRiggingStudioError(m_Message);
+                        }
                     }
                 }
             }

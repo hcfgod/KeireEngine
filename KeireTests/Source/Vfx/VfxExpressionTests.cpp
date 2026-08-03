@@ -1,4 +1,5 @@
 #include "Keire/Vfx/VfxSystem.h"
+#include "KeireInternal/Vfx/VfxExpressionInternal.h"
 
 #include <doctest/doctest.h>
 
@@ -173,6 +174,66 @@ namespace
         REQUIRE(binding->LiteralValue.has_value());
         REQUIRE(std::holds_alternative<float>(*binding->LiteralValue));
         return std::get<float>(*binding->LiteralValue);
+    }
+
+    [[nodiscard]] Keire::VfxParameterValue FoldValueOperator(const std::string_view typeId,
+                                                             const std::vector<Keire::VfxParameterValue>& inputValues,
+                                                             const std::string_view outputSemantic = {})
+    {
+        Keire::VfxGraphSystem system;
+        system.Id = Keire::AssetId::Generate();
+        auto operation = Keire::CreateVfxGraphOperatorNode(typeId);
+        auto value = inputValues.begin();
+        for (auto& pin : operation.Pins)
+        {
+            if (!pin.Input)
+                continue;
+            REQUIRE(value != inputValues.end());
+            REQUIRE(Keire::VfxValueMatchesType(pin.Type, *value));
+            pin.DefaultValue = *value++;
+        }
+        REQUIRE(value == inputValues.end());
+        const auto output =
+            std::ranges::find_if(operation.Pins, [outputSemantic](const Keire::VfxGraphPin& pin)
+                                 { return !pin.Input && (outputSemantic.empty() || pin.Semantic == outputSemantic); });
+        REQUIRE(output != operation.Pins.end());
+        const auto outputId = output->Id;
+        system.Nodes.push_back(std::move(operation));
+
+        const std::array required{outputId};
+        const auto compilation = Keire::Internal::CompileVfxExpressions(system, {}, required);
+        const auto source = compilation.SourcesByOutputPin.find(outputId);
+        REQUIRE(source != compilation.SourcesByOutputPin.end());
+        REQUIRE(source->second.Kind == Keire::VfxCompiledValueSourceKind::Literal);
+        return source->second.Literal;
+    }
+
+    [[nodiscard]] Keire::VfxParameterValue
+    EvaluateBuiltInOperator(const std::string_view typeId,
+                            const Keire::Internal::VfxExpressionEvaluationContext& context)
+    {
+        Keire::VfxGraphSystem system;
+        system.Id = context.System;
+        auto operation = Keire::CreateVfxGraphOperatorNode(typeId);
+        operation.Context = context.Context;
+        const auto output =
+            std::ranges::find_if(operation.Pins, [](const Keire::VfxGraphPin& pin) { return !pin.Input; });
+        REQUIRE(output != operation.Pins.end());
+        const auto outputId = output->Id;
+        system.Nodes.push_back(std::move(operation));
+
+        const std::array required{outputId};
+        auto compilation = Keire::Internal::CompileVfxExpressions(system, {}, required);
+        const auto source = compilation.SourcesByOutputPin.find(outputId);
+        REQUIRE(source != compilation.SourcesByOutputPin.end());
+        REQUIRE(source->second.Kind == Keire::VfxCompiledValueSourceKind::Register);
+        Keire::VfxCompiledProgram program;
+        program.ValueInstructions = std::move(compilation.Instructions);
+        program.ValueRegisterCount = compilation.RegisterCount;
+        std::vector<Keire::VfxParameterValue> registers(program.ValueRegisterCount, 0.0F);
+        REQUIRE(Keire::Internal::EvaluateVfxExpressions(program, {}, context, registers));
+        REQUIRE(source->second.Index < registers.size());
+        return registers[source->second.Index];
     }
 
     [[nodiscard]] Keire::VfxEffectDefinition RandomRangeLifetimeEffect()
@@ -394,9 +455,294 @@ TEST_CASE("schema-4 VFX catalog exposes canonical executable Range and math Oper
     CHECK(output->Pins.size() == 3);
 }
 
+TEST_CASE("Unity core utility Operators fold deterministically with contained edge cases")
+{
+    const auto scalar = [](const std::string_view typeId, const std::initializer_list<float> values)
+    {
+        std::vector<Keire::VfxParameterValue> inputs;
+        inputs.reserve(values.size());
+        for (const auto value : values)
+            inputs.emplace_back(value);
+        const auto result = FoldValueOperator(typeId, inputs);
+        REQUIRE(std::holds_alternative<float>(result));
+        return std::get<float>(result);
+    };
+    const auto boolean = [](const std::string_view typeId, const bool left, const bool right)
+    {
+        const auto result = FoldValueOperator(typeId, {left, right});
+        REQUIRE(std::holds_alternative<bool>(result));
+        return std::get<bool>(result);
+    };
+    const auto unsignedInteger = [](const std::string_view typeId, const std::uint64_t left,
+                                    const std::optional<std::uint64_t> right = std::nullopt)
+    {
+        auto inputs = std::vector<Keire::VfxParameterValue>{left};
+        if (right)
+            inputs.emplace_back(*right);
+        const auto result = FoldValueOperator(typeId, inputs);
+        REQUIRE(std::holds_alternative<std::uint64_t>(result));
+        return std::get<std::uint64_t>(result);
+    };
+
+    CHECK(scalar("keire.operator.modulo", {-3.0F, 2.0F}) == doctest::Approx(1.0F));
+    CHECK(scalar("keire.operator.modulo", {3.0F, 0.0F}) == 0.0F);
+    CHECK(scalar("keire.operator.one-minus", {0.25F}) == doctest::Approx(0.75F));
+    CHECK(scalar("keire.operator.reciprocal", {4.0F}) == doctest::Approx(0.25F));
+    CHECK(scalar("keire.operator.reciprocal", {0.0F}) == 0.0F);
+    CHECK(scalar("keire.operator.inverse-lerp", {0.0F, 10.0F, 15.0F}) == doctest::Approx(1.5F));
+    CHECK(scalar("keire.operator.inverse-lerp", {2.0F, 2.0F, 5.0F}) == 0.0F);
+    CHECK(scalar("keire.operator.discretize", {2.9F, 0.5F}) == doctest::Approx(2.5F));
+    CHECK(scalar("keire.operator.discretize", {-0.1F, 0.5F}) == doctest::Approx(-0.5F));
+    CHECK(scalar("keire.operator.discretize", {2.0F, 0.0F}) == 0.0F);
+
+    CHECK(boolean("keire.operator.nand", true, true) == false);
+    CHECK(boolean("keire.operator.nand", true, false) == true);
+    CHECK(boolean("keire.operator.nor", false, false) == true);
+    CHECK(boolean("keire.operator.nor", false, true) == false);
+
+    CHECK(unsignedInteger("keire.operator.bitwise-and", 0b1010U, 0b1100U) == 0b1000U);
+    CHECK(unsignedInteger("keire.operator.bitwise-or", 0b1010U, 0b1100U) == 0b1110U);
+    CHECK(unsignedInteger("keire.operator.bitwise-xor", 0b1010U, 0b1100U) == 0b0110U);
+    CHECK(unsignedInteger("keire.operator.bitwise-complement", 0U) == std::numeric_limits<std::uint64_t>::max());
+    CHECK(unsignedInteger("keire.operator.bitwise-left-shift", 1U, 63U) == (std::uint64_t{1} << 63U));
+    CHECK(unsignedInteger("keire.operator.bitwise-left-shift", 1U, 64U) == 0U);
+    CHECK(unsignedInteger("keire.operator.bitwise-right-shift", std::uint64_t{1} << 63U, 63U) == 1U);
+    CHECK(unsignedInteger("keire.operator.bitwise-right-shift", std::uint64_t{1} << 63U, 64U) == 0U);
+
+    const auto squaredDistance = FoldValueOperator(
+        "keire.operator.squared-distance", {Keire::Vector3{1.0F, 2.0F, 3.0F}, Keire::Vector3{4.0F, 6.0F, 3.0F}});
+    REQUIRE(std::holds_alternative<float>(squaredDistance));
+    CHECK(std::get<float>(squaredDistance) == doctest::Approx(25.0F));
+    const auto squaredLength = FoldValueOperator("keire.operator.squared-length", {Keire::Vector3{3.0F, 4.0F, 12.0F}});
+    REQUIRE(std::holds_alternative<float>(squaredLength));
+    CHECK(std::get<float>(squaredLength) == doctest::Approx(169.0F));
+
+    const auto luma = FoldValueOperator("keire.operator.color-luma", {Keire::Color{1.0F, 0.0F, 0.0F, 0.25F}});
+    REQUIRE(std::holds_alternative<float>(luma));
+    CHECK(std::get<float>(luma) == doctest::Approx(0.299F));
+    const auto rgb = FoldValueOperator("keire.operator.hsv-to-rgb", {Keire::Vector3{0.0F, 1.0F, 1.0F}});
+    REQUIRE(std::holds_alternative<Keire::Vector4>(rgb));
+    CHECK(std::get<Keire::Vector4>(rgb).X == doctest::Approx(1.0F));
+    CHECK(std::get<Keire::Vector4>(rgb).Y == doctest::Approx(0.0F));
+    CHECK(std::get<Keire::Vector4>(rgb).Z == doctest::Approx(0.0F));
+    CHECK(std::get<Keire::Vector4>(rgb).W == doctest::Approx(1.0F));
+    const auto hsv = FoldValueOperator("keire.operator.rgb-to-hsv", {Keire::Color{0.0F, 1.0F, 0.0F, 0.25F}});
+    REQUIRE(std::holds_alternative<Keire::Vector3>(hsv));
+    CHECK(std::get<Keire::Vector3>(hsv).X == doctest::Approx(1.0F / 3.0F));
+    CHECK(std::get<Keire::Vector3>(hsv).Y == doctest::Approx(1.0F));
+    CHECK(std::get<Keire::Vector3>(hsv).Z == doctest::Approx(1.0F));
+}
+
+TEST_CASE("Unity particle and system utility Operators use stable runtime identity")
+{
+    Keire::Internal::VfxExpressionEvaluationContext context;
+    context.EffectSeed = 0x12345678U;
+    context.SeedOffset = 0x00ff00ffU;
+    context.System = Keire::AssetId(0x1122334455667788ULL, 0x99aabbccddeeff00ULL);
+    context.Context = Keire::VfxContextType::Update;
+    context.SimulationStep = 0x123456789abcdef0ULL;
+    context.Age = 2.0F;
+    context.Lifetime = 8.0F;
+
+    const auto normalizedAge = EvaluateBuiltInOperator("keire.operator.age-over-lifetime", context);
+    REQUIRE(std::holds_alternative<float>(normalizedAge));
+    CHECK(std::get<float>(normalizedAge) == doctest::Approx(0.25F));
+    context.Lifetime = 0.0F;
+    const auto zeroLifetime = EvaluateBuiltInOperator("keire.operator.age-over-lifetime", context);
+    REQUIRE(std::holds_alternative<float>(zeroLifetime));
+    CHECK(std::get<float>(zeroLifetime) == 0.0F);
+
+    const auto frameIndex = EvaluateBuiltInOperator("keire.operator.frame-index", context);
+    REQUIRE(std::holds_alternative<std::uint64_t>(frameIndex));
+    CHECK(std::get<std::uint64_t>(frameIndex) == context.SimulationStep);
+    const auto systemSeed = EvaluateBuiltInOperator("keire.operator.system-seed", context);
+    REQUIRE(std::holds_alternative<std::uint64_t>(systemSeed));
+    CHECK(std::get<std::uint64_t>(systemSeed) == static_cast<std::uint64_t>(context.EffectSeed ^ context.SeedOffset));
+}
+
+TEST_CASE("schema-4 Inline and constant Operators fold typed values without runtime work")
+{
+    const std::array<std::pair<std::string_view, Keire::VfxParameterValue>, 11> inlineValues{{
+        {"keire.operator.inline-color", Keire::Color{0.1F, 0.2F, 0.3F, 0.4F}},
+        {"keire.operator.inline-direction", Keire::Vector3{1.0F, 2.0F, 3.0F}},
+        {"keire.operator.inline-position", Keire::Vector3{4.0F, 5.0F, 6.0F}},
+        {"keire.operator.inline-vector", Keire::Vector3{7.0F, 8.0F, 9.0F}},
+        {"keire.operator.inline-vector2", Keire::Vector2{1.0F, 2.0F}},
+        {"keire.operator.inline-vector3", Keire::Vector3{1.0F, 2.0F, 3.0F}},
+        {"keire.operator.inline-vector4", Keire::Vector4{1.0F, 2.0F, 3.0F, 4.0F}},
+        {"keire.operator.inline-bool", true},
+        {"keire.operator.inline-float", 12.5F},
+        {"keire.operator.inline-int", std::int64_t{-42}},
+        {"keire.operator.inline-uint", std::uint64_t{42}},
+    }};
+    for (const auto& [typeId, value] : inlineValues)
+    {
+        CAPTURE(typeId);
+        CHECK((FoldValueOperator(typeId, {value}) == value));
+    }
+
+    const auto epsilon = FoldValueOperator("keire.operator.epsilon", {});
+    REQUIRE(std::holds_alternative<float>(epsilon));
+    CHECK(std::get<float>(epsilon) == doctest::Approx(0.00001F));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.pi", {}, "pi")) ==
+          doctest::Approx(3.14159265358979323846F));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.pi", {}, "twoPi")) ==
+          doctest::Approx(6.28318530717958647692F));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.pi", {}, "halfPi")) ==
+          doctest::Approx(1.57079632679489661923F));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.pi", {}, "thirdPi")) ==
+          doctest::Approx(1.04719755119659774615F));
+}
+
+TEST_CASE("coordinate conversion and rotation Operators match their documented conventions")
+{
+    constexpr float HalfPi = 1.57079632679489661923F;
+    const auto rectangular = FoldValueOperator("keire.operator.polar-to-rectangular", {90.0F, 2.0F});
+    REQUIRE(std::holds_alternative<Keire::Vector2>(rectangular));
+    CHECK(std::get<Keire::Vector2>(rectangular).X == doctest::Approx(0.0F).epsilon(0.00001));
+    CHECK(std::get<Keire::Vector2>(rectangular).Y == doctest::Approx(2.0F));
+
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.rectangular-to-polar", {Keire::Vector2{0.0F, 2.0F}},
+                                            "theta")) == doctest::Approx(HalfPi));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.rectangular-to-polar", {Keire::Vector2{0.0F, 2.0F}},
+                                            "distance")) == doctest::Approx(2.0F));
+
+    const auto cartesian = FoldValueOperator("keire.operator.spherical-to-rectangular", {2.0F, HalfPi, 0.0F});
+    REQUIRE(std::holds_alternative<Keire::Vector3>(cartesian));
+    CHECK(std::get<Keire::Vector3>(cartesian).X == doctest::Approx(0.0F).epsilon(0.00001));
+    CHECK(std::get<Keire::Vector3>(cartesian).Y == doctest::Approx(0.0F));
+    CHECK(std::get<Keire::Vector3>(cartesian).Z == doctest::Approx(2.0F));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.rectangular-to-spherical",
+                                            {Keire::Vector3{0.0F, 0.0F, 2.0F}}, "distance")) == doctest::Approx(2.0F));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.rectangular-to-spherical",
+                                            {Keire::Vector3{0.0F, 0.0F, 2.0F}}, "theta")) == doctest::Approx(HalfPi));
+    CHECK(std::get<float>(FoldValueOperator("keire.operator.rectangular-to-spherical", {Keire::Vector3{}}, "phi")) ==
+          0.0F);
+
+    const auto rotated2D =
+        FoldValueOperator("keire.operator.rotate-2d", {Keire::Vector2{1.0F, 0.0F}, Keire::Vector2{}, HalfPi});
+    REQUIRE(std::holds_alternative<Keire::Vector2>(rotated2D));
+    CHECK(std::get<Keire::Vector2>(rotated2D).X == doctest::Approx(0.0F).epsilon(0.00001));
+    CHECK(std::get<Keire::Vector2>(rotated2D).Y == doctest::Approx(1.0F));
+    const auto rotated3D =
+        FoldValueOperator("keire.operator.rotate-3d", {Keire::Vector3{1.0F, 0.0F, 0.0F}, Keire::Vector3{},
+                                                       Keire::Vector3{0.0F, 1.0F, 0.0F}, HalfPi});
+    REQUIRE(std::holds_alternative<Keire::Vector3>(rotated3D));
+    CHECK(std::get<Keire::Vector3>(rotated3D).X == doctest::Approx(0.0F).epsilon(0.00001));
+    CHECK(std::get<Keire::Vector3>(rotated3D).Z == doctest::Approx(1.0F));
+}
+
+TEST_CASE("procedural noise Operators are deterministic finite and expose derivative and curl outputs")
+{
+    const std::vector<Keire::VfxParameterValue> noiseInputs{
+        Keire::Vector3{0.25F, -1.5F, 2.75F}, 1.5F, std::int64_t{2}, 0.55F, 2.0F, Keire::Vector2{-2.0F, 3.0F}};
+    for (const auto typeId :
+         {"keire.operator.value-noise", "keire.operator.perlin-noise", "keire.operator.cellular-noise"})
+    {
+        CAPTURE(typeId);
+        const auto first = FoldValueOperator(typeId, noiseInputs, "out");
+        const auto second = FoldValueOperator(typeId, noiseInputs, "out");
+        REQUIRE(std::holds_alternative<float>(first));
+        CHECK(first == second);
+        CHECK(std::isfinite(std::get<float>(first)));
+        CHECK(std::get<float>(first) >= -2.0F);
+        CHECK(std::get<float>(first) <= 3.0F);
+        const auto derivatives = FoldValueOperator(typeId, noiseInputs, "derivatives");
+        REQUIRE(std::holds_alternative<Keire::Vector3>(derivatives));
+        const auto analytic = std::get<Keire::Vector3>(derivatives);
+        CHECK(Keire::Math::IsFinite(analytic));
+        constexpr float DerivativeStep = 0.001F;
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            auto negativeInputs = noiseInputs;
+            auto positiveInputs = noiseInputs;
+            auto negativeCoordinate = std::get<Keire::Vector3>(negativeInputs.front());
+            auto positiveCoordinate = negativeCoordinate;
+            auto* negativeComponent = axis == 0   ? &negativeCoordinate.X
+                                      : axis == 1 ? &negativeCoordinate.Y
+                                                  : &negativeCoordinate.Z;
+            auto* positiveComponent = axis == 0   ? &positiveCoordinate.X
+                                      : axis == 1 ? &positiveCoordinate.Y
+                                                  : &positiveCoordinate.Z;
+            *negativeComponent -= DerivativeStep;
+            *positiveComponent += DerivativeStep;
+            negativeInputs.front() = negativeCoordinate;
+            positiveInputs.front() = positiveCoordinate;
+            const auto negative = std::get<float>(FoldValueOperator(typeId, negativeInputs, "out"));
+            const auto positive = std::get<float>(FoldValueOperator(typeId, positiveInputs, "out"));
+            const auto numerical = (positive - negative) / (2.0F * DerivativeStep);
+            const auto analyticComponent = axis == 0 ? analytic.X : axis == 1 ? analytic.Y : analytic.Z;
+            CHECK(std::abs(analyticComponent - numerical) < 0.02F);
+        }
+    }
+
+    const std::vector<Keire::VfxParameterValue> curlInputs{
+        Keire::Vector3{0.25F, -1.5F, 2.75F}, 1.5F, std::int64_t{2}, 0.55F, 2.0F, 0.75F};
+    for (const auto typeId :
+         {"keire.operator.value-curl-noise", "keire.operator.perlin-curl-noise", "keire.operator.cellular-curl-noise"})
+    {
+        CAPTURE(typeId);
+        const auto curl = FoldValueOperator(typeId, curlInputs);
+        REQUIRE(std::holds_alternative<Keire::Vector3>(curl));
+        CHECK(Keire::Math::IsFinite(std::get<Keire::Vector3>(curl)));
+    }
+}
+
+TEST_CASE("particle Attribute Operators read authoritative CPU simulation state")
+{
+    Keire::Internal::VfxExpressionEvaluationContext context;
+    context.EffectSeed = 0x12345678U;
+    context.SeedOffset = 0x01020304U;
+    context.System = Keire::AssetId::Generate();
+    context.Context = Keire::VfxContextType::Update;
+    context.ParticleId = 0x1122334455667788ULL;
+    context.StripId = 7;
+    context.EffectTime = 12.0F;
+    context.Age = 2.5F;
+    context.Position = {1.0F, 2.0F, 3.0F};
+    context.PreviousPosition = {-1.0F, -2.0F, -3.0F};
+    context.Velocity = {4.0F, 5.0F, 6.0F};
+    context.Rotation = {};
+    context.Tint = {0.2F, 0.4F, 0.6F, 0.8F};
+    context.Size = 3.5F;
+    context.ParticleIndexInStrip = 2;
+    context.ParticlesPerStrip = 5;
+
+    CHECK(std::get<bool>(EvaluateBuiltInOperator("keire.operator.attribute-alive", context)));
+    CHECK(std::get<float>(EvaluateBuiltInOperator("keire.operator.attribute-alpha", context)) == doctest::Approx(0.8F));
+    CHECK(std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-angle", context)) ==
+          Keire::Vector3{});
+    CHECK((std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-axis-x", context)) ==
+           Keire::Vector3{1.0F, 0.0F, 0.0F}));
+    CHECK((std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-axis-y", context)) ==
+           Keire::Vector3{0.0F, 1.0F, 0.0F}));
+    CHECK((std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-axis-z", context)) ==
+           Keire::Vector3{0.0F, 0.0F, 1.0F}));
+    CHECK((std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-color", context)) ==
+           Keire::Vector3{0.2F, 0.4F, 0.6F}));
+    CHECK(std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-old-position", context)) ==
+          context.PreviousPosition);
+    CHECK(std::get<std::uint64_t>(
+              EvaluateBuiltInOperator("keire.operator.attribute-particle-count-in-strip", context)) == 5);
+    CHECK(std::get<std::uint64_t>(
+              EvaluateBuiltInOperator("keire.operator.attribute-particle-index-in-strip", context)) == 2);
+    CHECK(std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-position", context)) ==
+          context.Position);
+    const auto seed = EvaluateBuiltInOperator("keire.operator.attribute-seed", context);
+    CHECK(seed == EvaluateBuiltInOperator("keire.operator.attribute-seed", context));
+    CHECK(std::get<float>(EvaluateBuiltInOperator("keire.operator.attribute-size", context)) == doctest::Approx(3.5F));
+    CHECK(std::get<float>(EvaluateBuiltInOperator("keire.operator.attribute-spawn-time", context)) ==
+          doctest::Approx(9.5F));
+    CHECK(std::get<std::uint64_t>(EvaluateBuiltInOperator("keire.operator.attribute-strip-index", context)) == 7);
+    CHECK(std::get<Keire::Vector3>(EvaluateBuiltInOperator("keire.operator.attribute-velocity", context)) ==
+          context.Velocity);
+    CHECK(std::get<float>(EvaluateBuiltInOperator("keire.operator.ratio-over-strip", context)) ==
+          doctest::Approx(0.5F));
+}
+
 TEST_CASE("every executable packed value Operator is available on CPU and GPU")
 {
-    static_assert(static_cast<std::uint8_t>(Keire::VfxValueOpcode::Sign) == 56);
+    static_assert(static_cast<std::uint8_t>(Keire::VfxValueOpcode::Rotate3D) == 108);
     std::size_t executableCount = 0;
     std::size_t gpuInterpretedCount = 0;
     for (const auto& descriptor : Keire::VfxNodeCatalog())
@@ -408,8 +754,8 @@ TEST_CASE("every executable packed value Operator is available on CPU and GPU")
             continue;
         ++executableCount;
 
-        const auto opcodeSupported =
-            static_cast<std::uint8_t>(*descriptor.Lowering) <= static_cast<std::uint8_t>(Keire::VfxValueOpcode::Sign);
+        const auto opcodeSupported = static_cast<std::uint8_t>(*descriptor.Lowering) <=
+                                     static_cast<std::uint8_t>(Keire::VfxValueOpcode::Rotate3D);
         const auto typesSupported = std::ranges::all_of(descriptor.Pins, [](const Keire::VfxNodePinDescriptor& pin)
                                                         { return Keire::IsVfxGpuExpressionValueType(pin.Type); });
         CAPTURE(descriptor.TypeId.Value);

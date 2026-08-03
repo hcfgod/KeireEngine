@@ -38,6 +38,10 @@ namespace Keire::Detail
         [[nodiscard]] std::optional<SceneObjectDefinition> SnapshotObject(EntityId id) const;
         [[nodiscard]] SceneHierarchySnapshot HierarchySnapshot() const;
         [[nodiscard]] SceneDefinition Snapshot() const;
+        [[nodiscard]] LightingBakeSettings LightingBakeConfiguration() const;
+        void SetLightingBakeConfiguration(LightingBakeSettings settings);
+        [[nodiscard]] AssetId BakedLighting() const;
+        void SetBakedLighting(AssetId asset);
         [[nodiscard]] std::vector<Entity> Entities() const;
         [[nodiscard]] Entity Find(EntityId id) const noexcept;
         [[nodiscard]] Entity Create(std::string name, EntityId parent = {});

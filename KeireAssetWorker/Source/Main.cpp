@@ -2,6 +2,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Project/Project.h"
+#include "Keire/Rendering/LightingBaker.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
@@ -17,6 +18,8 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <set>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -144,6 +147,8 @@ namespace
                 (!request.ExtractModel || request.ExtractDirectory.empty() || request.ExtractDirectory.is_absolute() ||
                  !IsWithin(request.ProjectRoot / "Assets", request.ProjectRoot / "Assets" / request.ExtractDirectory)))
                 throw std::invalid_argument("Asset-worker material extraction escapes Assets.");
+            if (request.Kind == Keire::Detail::AssetWorkerOperationKind::BakeLighting && !request.BakeScene)
+                throw std::invalid_argument("Asset-worker lighting bake requires a scene asset.");
             for (const auto& auxiliary : request.CreateAuxiliarySources)
             {
                 if (!IsWithin(operationRoot, auxiliary.PayloadPath))
@@ -303,6 +308,70 @@ namespace
                 database->RedoExternalImport(request.Receipt);
                 result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
                 break;
+            case Keire::Detail::AssetWorkerOperationKind::BakeLighting:
+            {
+                (void)database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                const auto sceneRecord = database->Find(request.BakeScene);
+                if (!sceneRecord || sceneRecord->Type != Keire::SceneAsset::StaticType())
+                    throw std::invalid_argument(
+                        "Asset-worker lighting bake scene is unavailable or has the wrong type.");
+                const auto sourcePath = request.ProjectRoot / "Assets" / sceneRecord->RelativePath;
+                const auto originalSource = Keire::Detail::ReadTextFile(sourcePath, 64U * 1024U * 1024U);
+                const auto scene = Keire::SceneAsset::Decode(std::as_bytes(std::span(originalSource)));
+                Keire::LightingBakeRequest bake;
+                bake.Scene = request.BakeScene;
+                bake.Definition = scene->Definition();
+                bake.ProjectRoot = request.ProjectRoot;
+                bake.Force = request.BakeForce;
+                const auto records = database->Records();
+                std::map<Keire::AssetId, Keire::AssetSourceRecord> indexed;
+                for (const auto& record : records)
+                    indexed.emplace(record.Id, record);
+                std::vector<Keire::AssetId> pending(sceneRecord->Dependencies.begin(), sceneRecord->Dependencies.end());
+                std::set<Keire::AssetId> visited;
+                while (!pending.empty())
+                {
+                    const auto id = pending.back();
+                    pending.pop_back();
+                    if (!id || !visited.emplace(id).second)
+                        continue;
+                    const auto found = indexed.find(id);
+                    if (found == indexed.end())
+                        continue;
+                    bake.Inputs.push_back({id, found->second.SourceDigest});
+                    pending.insert(pending.end(), found->second.Dependencies.begin(), found->second.Dependencies.end());
+                }
+                bake.Progress = [&](const Keire::LightingBakeProgress& value)
+                {
+                    if (std::filesystem::exists(commandLine.Cancel))
+                        throw Keire::AssetOperationCancelled();
+                    const auto phase = value.Phase == Keire::LightingBakePhase::Publishing
+                                           ? Keire::AssetOperationPhase::Publishing
+                                           : Keire::AssetOperationPhase::Importing;
+                    Keire::Detail::WriteAssetWorkerProgress(
+                        commandLine.Progress,
+                        {phase, value.Completed, value.Total, std::filesystem::path(value.Message)});
+                };
+                const auto baked = Keire::LightingBaker::Bake(bake);
+                auto updated = scene->Definition();
+                updated.BakedLighting = baked.LightingSet;
+                try
+                {
+                    Keire::Detail::WriteFileAtomically(sourcePath, Keire::SceneAsset::Encode(updated));
+                    result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                }
+                catch (...)
+                {
+                    Keire::Detail::WriteTextFileAtomically(sourcePath, originalSource);
+                    throw;
+                }
+                result.CreatedAsset = baked.LightingSet;
+                result.LightingCacheHit = baked.CacheHit;
+                result.MutatedAssets.push_back(request.BakeScene);
+                for (const auto& output : baked.Assets)
+                    result.MutatedAssets.push_back(output.Id);
+                break;
+            }
             }
             Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, request.SourceIndexPath);
             result.Success = true;

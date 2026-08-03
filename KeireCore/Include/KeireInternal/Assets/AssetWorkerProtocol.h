@@ -18,7 +18,8 @@ namespace Keire::Detail
         Mutate,
         Cook,
         UndoExternalImport,
-        RedoExternalImport
+        RedoExternalImport,
+        BakeLighting
     };
 
     enum class AssetWorkerMutationKind : std::uint8_t
@@ -66,6 +67,8 @@ namespace Keire::Detail
         AssetBuildProfile BuildProfile;
         std::filesystem::path CookOutput;
         ExternalAssetImportReceiptId Receipt;
+        AssetId BakeScene;
+        bool BakeForce = false;
     };
 
     struct AssetWorkerResult
@@ -80,6 +83,7 @@ namespace Keire::Detail
         std::vector<AssetId> MutatedAssets;
         AssetTrashId Trash;
         std::optional<AssetCookResult> Cook;
+        bool LightingCacheHit = false;
     };
 
     void WriteAssetWorkerRequest(const std::filesystem::path& path, const AssetWorkerRequest& request);

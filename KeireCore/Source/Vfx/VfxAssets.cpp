@@ -3204,7 +3204,7 @@ namespace Keire
                     throw VfxNodeCompileError(instruction.Node,
                                               "This VFX value type has no packed GPU register representation.");
                 }
-                if (instruction.OutputRegister >= registerCount || instruction.Inputs.size() > 4)
+                if (instruction.OutputRegister >= registerCount || instruction.Inputs.size() > 8)
                     throw VfxNodeCompileError(instruction.Node, "VFX GPU expression instruction layout is invalid.");
 
                 VfxGpuValueInstruction packed;

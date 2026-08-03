@@ -7,8 +7,10 @@
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/JointComponents.h"
+#include "Keire/ECS/Components/LightProbeVolumeComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/ReflectionProbeComponent.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
@@ -360,6 +362,8 @@ namespace Keire
         result->Register(CreateDirectionalLightComponentRegistration());
         result->Register(CreatePointLightComponentRegistration());
         result->Register(CreateSpotLightComponentRegistration());
+        result->Register(CreateReflectionProbeComponentRegistration());
+        result->Register(CreateLightProbeVolumeComponentRegistration());
         result->Register(CreateMeshRendererComponentRegistration());
         result->Register(CreateAnimatorComponentRegistration());
         result->Register(CreateColliderComponentRegistration());

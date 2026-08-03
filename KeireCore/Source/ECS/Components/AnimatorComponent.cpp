@@ -4,7 +4,9 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <utility>
@@ -13,6 +15,8 @@ namespace Keire
 {
     namespace
     {
+        constexpr std::uint32_t AnimatorSchemaVersion = 2;
+
         template <typename T>
         [[nodiscard]] T ReadAnimatorProperty(const ComponentPropertyBag& values, const std::string_view key,
                                              const T fallback)
@@ -212,6 +216,23 @@ namespace Keire
 
     void AnimatorComponent::ClearIk() noexcept { m_IkGoals.clear(); }
 
+    void AnimatorComponent::SetFootGrounding(AnimatorFootGroundingSettings settings)
+    {
+        const std::array<std::string_view, 7> bones{settings.Pelvis,   settings.LeftUpperLeg,  settings.LeftLowerLeg,
+                                                    settings.LeftFoot, settings.RightUpperLeg, settings.RightLowerLeg,
+                                                    settings.RightFoot};
+        if (std::ranges::any_of(bones, [](const auto bone) { return bone.empty() || bone.size() > 256; }) ||
+            !std::isfinite(settings.Weight) || settings.Weight < 0.0F || settings.Weight > 1.0F ||
+            !std::isfinite(settings.RotationWeight) || settings.RotationWeight < 0.0F ||
+            settings.RotationWeight > 1.0F || !std::isfinite(settings.RaycastHeight) || settings.RaycastHeight < 0.0F ||
+            !std::isfinite(settings.RaycastDistance) || settings.RaycastDistance <= 0.0F ||
+            !std::isfinite(settings.FootOffset) || settings.FootOffset < 0.0F ||
+            !std::isfinite(settings.MaximumPelvisAdjustment) || settings.MaximumPelvisAdjustment < 0.0F)
+            throw std::invalid_argument("Animator foot-grounding settings are invalid.");
+        m_FootGrounding = std::move(settings);
+        NotifyChanged();
+    }
+
     std::vector<AnimatorCommand> AnimatorComponent::ConsumeRuntimeCommands()
     {
         return std::exchange(m_RuntimeCommands, {});
@@ -274,6 +295,7 @@ namespace Keire
         result.Type = AnimatorComponent::StaticType();
         result.Name = "Animator";
         result.Category = "Animation";
+        result.SchemaVersion = AnimatorSchemaVersion;
         result.RequiredComponents = {TransformComponent::StaticType()};
         result.Properties = {{"graph",
                               "Graph",
@@ -303,20 +325,59 @@ namespace Keire
                               0.1,
                               SkinnedMeshAsset::StaticType()},
                              {"applyRootMotion", "Apply Root Motion", "Animation", ComponentPropertyKind::Boolean},
-                             {"speed", "Speed", "Animation", ComponentPropertyKind::Scalar, false, -8.0, 8.0, 0.05}};
+                             {"speed", "Speed", "Animation", ComponentPropertyKind::Scalar, false, -8.0, 8.0, 0.05},
+                             {"footGrounding", "Foot Grounding", "Ground Adaptation", ComponentPropertyKind::Boolean},
+                             {"footPelvis", "Pelvis", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"leftUpperLeg", "Left Upper Leg", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"leftLowerLeg", "Left Lower Leg", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"leftFoot", "Left Foot", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"rightUpperLeg", "Right Upper Leg", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"rightLowerLeg", "Right Lower Leg", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"rightFoot", "Right Foot", "Ground Adaptation", ComponentPropertyKind::Text},
+                             {"footIkWeight", "Position Weight", "Ground Adaptation", ComponentPropertyKind::Scalar,
+                              false, 0.0, 1.0, 0.01},
+                             {"footRotationWeight", "Rotation Weight", "Ground Adaptation",
+                              ComponentPropertyKind::Scalar, false, 0.0, 1.0, 0.01},
+                             {"footRaycastHeight", "Raycast Height", "Ground Adaptation", ComponentPropertyKind::Scalar,
+                              false, 0.0, 1000.0, 0.01},
+                             {"footRaycastDistance", "Raycast Distance", "Ground Adaptation",
+                              ComponentPropertyKind::Scalar, false, 0.001, 1000.0, 0.01},
+                             {"footOffset", "Sole Offset", "Ground Adaptation", ComponentPropertyKind::Scalar, false,
+                              0.0, 1000.0, 0.005},
+                             {"maximumPelvisAdjustment", "Maximum Pelvis Adjustment", "Ground Adaptation",
+                              ComponentPropertyKind::Scalar, false, 0.0, 1000.0, 0.01},
+                             {"footCollisionMask", "Collision Mask", "Ground Adaptation",
+                              ComponentPropertyKind::Integer, false, 0.0,
+                              static_cast<double>(std::numeric_limits<std::uint32_t>::max()), 1.0}};
         result.Factory = [] { return Ref<Component>(CreateRef<AnimatorComponent>()); };
         result.Serialize = [](const Component& component)
         {
             const auto& animator = dynamic_cast<const AnimatorComponent&>(component);
+            const auto& foot = animator.m_FootGrounding;
             return ComponentPropertyBag{{"graph", animator.m_Graph},
                                         {"skeleton", animator.m_Skeleton},
                                         {"skinnedMesh", animator.m_SkinnedMesh},
                                         {"applyRootMotion", animator.m_ApplyRootMotion},
-                                        {"speed", static_cast<double>(animator.m_Speed)}};
+                                        {"speed", static_cast<double>(animator.m_Speed)},
+                                        {"footGrounding", foot.Enabled},
+                                        {"footPelvis", foot.Pelvis},
+                                        {"leftUpperLeg", foot.LeftUpperLeg},
+                                        {"leftLowerLeg", foot.LeftLowerLeg},
+                                        {"leftFoot", foot.LeftFoot},
+                                        {"rightUpperLeg", foot.RightUpperLeg},
+                                        {"rightLowerLeg", foot.RightLowerLeg},
+                                        {"rightFoot", foot.RightFoot},
+                                        {"footIkWeight", static_cast<double>(foot.Weight)},
+                                        {"footRotationWeight", static_cast<double>(foot.RotationWeight)},
+                                        {"footRaycastHeight", static_cast<double>(foot.RaycastHeight)},
+                                        {"footRaycastDistance", static_cast<double>(foot.RaycastDistance)},
+                                        {"footOffset", static_cast<double>(foot.FootOffset)},
+                                        {"maximumPelvisAdjustment", static_cast<double>(foot.MaximumPelvisAdjustment)},
+                                        {"footCollisionMask", static_cast<std::int64_t>(foot.CollisionMask)}};
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1)
+            if (version != AnimatorSchemaVersion)
                 throw std::invalid_argument("Unsupported Animator component schema version.");
             auto& animator = dynamic_cast<AnimatorComponent&>(component);
             animator.SetGraph(ReadAnimatorProperty(values, "graph", AssetId{}));
@@ -324,6 +385,51 @@ namespace Keire
             animator.SetSkinnedMesh(ReadAnimatorProperty(values, "skinnedMesh", AssetId{}));
             animator.SetApplyRootMotion(ReadAnimatorProperty(values, "applyRootMotion", true));
             animator.SetSpeed(static_cast<float>(ReadAnimatorProperty(values, "speed", 1.0)));
+            AnimatorFootGroundingSettings foot;
+            foot.Enabled = ReadAnimatorProperty(values, "footGrounding", false);
+            foot.Pelvis = ReadAnimatorProperty(values, "footPelvis", std::string("Hips"));
+            foot.LeftUpperLeg = ReadAnimatorProperty(values, "leftUpperLeg", std::string("LeftUpLeg"));
+            foot.LeftLowerLeg = ReadAnimatorProperty(values, "leftLowerLeg", std::string("LeftLeg"));
+            foot.LeftFoot = ReadAnimatorProperty(values, "leftFoot", std::string("LeftFoot"));
+            foot.RightUpperLeg = ReadAnimatorProperty(values, "rightUpperLeg", std::string("RightUpLeg"));
+            foot.RightLowerLeg = ReadAnimatorProperty(values, "rightLowerLeg", std::string("RightLeg"));
+            foot.RightFoot = ReadAnimatorProperty(values, "rightFoot", std::string("RightFoot"));
+            foot.Weight = static_cast<float>(ReadAnimatorProperty(values, "footIkWeight", 1.0));
+            foot.RotationWeight = static_cast<float>(ReadAnimatorProperty(values, "footRotationWeight", 1.0));
+            foot.RaycastHeight = static_cast<float>(ReadAnimatorProperty(values, "footRaycastHeight", 0.35));
+            foot.RaycastDistance = static_cast<float>(ReadAnimatorProperty(values, "footRaycastDistance", 0.75));
+            foot.FootOffset = static_cast<float>(ReadAnimatorProperty(values, "footOffset", 0.02));
+            foot.MaximumPelvisAdjustment =
+                static_cast<float>(ReadAnimatorProperty(values, "maximumPelvisAdjustment", 0.5));
+            const auto collisionMask =
+                ReadAnimatorProperty(values, "footCollisionMask", static_cast<std::int64_t>(~0U));
+            if (collisionMask < 0 ||
+                collisionMask > static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()))
+                throw std::invalid_argument("Animator foot-grounding collision mask is invalid.");
+            foot.CollisionMask = static_cast<std::uint32_t>(collisionMask);
+            animator.SetFootGrounding(std::move(foot));
+        };
+        result.Migrate = [](const ComponentPropertyBag& values, const std::uint32_t version)
+        {
+            if (version != 1)
+                throw std::invalid_argument("Unsupported Animator component schema migration.");
+            auto migrated = values;
+            migrated.emplace("footGrounding", false);
+            migrated.emplace("footPelvis", std::string("Hips"));
+            migrated.emplace("leftUpperLeg", std::string("LeftUpLeg"));
+            migrated.emplace("leftLowerLeg", std::string("LeftLeg"));
+            migrated.emplace("leftFoot", std::string("LeftFoot"));
+            migrated.emplace("rightUpperLeg", std::string("RightUpLeg"));
+            migrated.emplace("rightLowerLeg", std::string("RightLeg"));
+            migrated.emplace("rightFoot", std::string("RightFoot"));
+            migrated.emplace("footIkWeight", 1.0);
+            migrated.emplace("footRotationWeight", 1.0);
+            migrated.emplace("footRaycastHeight", 0.35);
+            migrated.emplace("footRaycastDistance", 0.75);
+            migrated.emplace("footOffset", 0.02);
+            migrated.emplace("maximumPelvisAdjustment", 0.5);
+            migrated.emplace("footCollisionMask", static_cast<std::int64_t>(~0U));
+            return migrated;
         };
         return result;
     }
