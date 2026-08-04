@@ -278,6 +278,8 @@ namespace Keire
         [[nodiscard]] bool SetFocus(RuntimeUiElementId element);
         [[nodiscard]] RuntimeUiElementId Focus() const noexcept;
         [[nodiscard]] bool PollEvent(RuntimeUiEvent& event);
+        [[nodiscard]] std::vector<RuntimeUiEvent> PendingEvents() const;
+        void ReplacePendingEvents(std::span<const RuntimeUiEvent> events);
 
         [[nodiscard]] RuntimeUiStatistics Statistics() const noexcept;
 

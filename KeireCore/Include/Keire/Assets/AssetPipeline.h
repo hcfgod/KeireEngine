@@ -3,6 +3,7 @@
 #include "Keire/Api.h"
 #include "Keire/Assets/Asset.h"
 #include "Keire/Assets/AssetMetadata.h"
+#include "Keire/Jobs/JobSystem.h"
 
 #include <chrono>
 #include <compare>
@@ -170,6 +171,7 @@ namespace Keire
         std::chrono::milliseconds ChangeMonitorInterval = std::chrono::milliseconds(100);
         std::size_t MaximumSourceBytes = std::size_t{1024} * 1024U * 1024U;
         std::vector<AssetImporterRegistration> Importers;
+        Ref<JobSystem> Jobs;
     };
 
     struct AssetChangeMonitorStatistics

@@ -73,6 +73,7 @@ namespace KeireEditor
         AssetBrowserPanel& operator=(const AssetBrowserPanel&) = delete;
 
         void SetProjectRoot(const std::filesystem::path& root);
+        void SetJobSystem(Keire::Ref<Keire::JobSystem> jobs);
         void SetUndoContext(Keire::Ref<Keire::UndoContext> context);
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const;
         [[nodiscard]] bool Focused() const noexcept;

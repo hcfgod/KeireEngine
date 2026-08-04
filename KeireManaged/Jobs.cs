@@ -1,0 +1,222 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Keire;
+
+public enum JobPriority : byte
+{
+    Critical,
+    High,
+    Normal,
+    Low,
+    Background
+}
+
+public enum JobClass : byte
+{
+    Compute,
+    Blocking
+}
+
+public enum JobStatus : byte
+{
+    Waiting,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled
+}
+
+public sealed class JobDescription
+{
+    public string Name { get; init; } = "Managed job";
+    public JobPriority Priority { get; init; } = JobPriority.Normal;
+    public JobClass Class { get; init; } = JobClass.Compute;
+    public IReadOnlyList<JobHandle> Dependencies { get; init; } = Array.Empty<JobHandle>();
+}
+
+public sealed class JobContext
+{
+    internal JobContext(CancellationToken cancellationToken) => CancellationToken = cancellationToken;
+
+    public CancellationToken CancellationToken { get; }
+    public bool IsCancellationRequested => CancellationToken.IsCancellationRequested;
+}
+
+public readonly struct JobHandle : IEquatable<JobHandle>
+{
+    private readonly ManagedJobState? _state;
+
+    internal JobHandle(ManagedJobState state) => _state = state;
+
+    public ulong Id => _state?.Id ?? 0;
+    public bool IsValid => _state is not null;
+    public JobStatus Status => _state?.Status ?? JobStatus.Cancelled;
+    public Task Completion => _state?.Completion ?? Task.FromCanceled(new CancellationToken(true));
+
+    public void Cancel() => _state?.Cancel();
+
+    public bool Equals(JobHandle other) => ReferenceEquals(_state, other._state);
+    public override bool Equals(object? value) => value is JobHandle other && Equals(other);
+    public override int GetHashCode() => _state?.GetHashCode() ?? 0;
+    public static bool operator ==(JobHandle left, JobHandle right) => left.Equals(right);
+    public static bool operator !=(JobHandle left, JobHandle right) => !left.Equals(right);
+}
+
+public static unsafe class Jobs
+{
+    public static JobHandle Submit(Action<JobContext> callback, JobDescription? description = null)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        description ??= new JobDescription();
+        ArgumentNullException.ThrowIfNull(description.Name);
+        ArgumentNullException.ThrowIfNull(description.Dependencies);
+        if (description.Dependencies.Count > 1024)
+            throw new ArgumentOutOfRangeException(nameof(description), "A managed job accepts at most 1024 dependencies.");
+
+        ulong[] dependencies = new ulong[description.Dependencies.Count];
+        for (int index = 0; index < dependencies.Length; ++index)
+        {
+            JobHandle dependency = description.Dependencies[index];
+            if (!dependency.IsValid)
+                throw new ArgumentException("Managed job dependencies must be valid handles.", nameof(description));
+            dependencies[index] = dependency.Id;
+        }
+
+        var state = new ManagedJobState(callback);
+        GCHandle managedHandle = GCHandle.Alloc(state, GCHandleType.Normal);
+        state.SetHandle(GCHandle.ToIntPtr(managedHandle));
+        ulong id = NativeRuntime.SubmitManagedJob(
+            dependencies, (byte)description.Priority, (byte)description.Class, description.Name,
+            GCHandle.ToIntPtr(managedHandle), (IntPtr)(delegate* unmanaged<IntPtr, byte, byte, byte>)&Invoke);
+        if (id == 0)
+        {
+            state.ReleaseHandle();
+            throw new InvalidOperationException("The native job scheduler rejected the managed job.");
+        }
+        state.SetId(id);
+        return new JobHandle(state);
+    }
+
+    public static JobHandle Run(Action callback, JobDescription? description = null)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        return Submit(_ => callback(), description);
+    }
+
+    [UnmanagedCallersOnly]
+    private static byte Invoke(IntPtr pointer, byte phase, byte stopRequested)
+    {
+        ManagedJobState? state = null;
+        try
+        {
+            state = GCHandle.FromIntPtr(pointer).Target as ManagedJobState;
+            if (state is null)
+                return 1;
+            return state.Invoke(phase, stopRequested);
+        }
+        catch (Exception exception)
+        {
+            state?.RecordInteropFailure(exception);
+            return 1;
+        }
+    }
+}
+
+internal sealed class ManagedJobState
+{
+    private readonly Action<JobContext> _callback;
+    private readonly CancellationTokenSource _cancellation = new();
+    private readonly TaskCompletionSource _completion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Exception? _failure;
+    private IntPtr _handle;
+    private long _id;
+    private int _status = (int)JobStatus.Waiting;
+    private int _released;
+
+    internal ManagedJobState(Action<JobContext> callback) => _callback = callback;
+
+    internal ulong Id => unchecked((ulong)Volatile.Read(ref _id));
+    internal JobStatus Status => (JobStatus)Volatile.Read(ref _status);
+    internal Task Completion => _completion.Task;
+
+    internal void SetHandle(IntPtr handle) => _handle = handle;
+    internal void SetId(ulong id) => Volatile.Write(ref _id, unchecked((long)id));
+
+    internal byte Invoke(byte phase, byte stopRequested)
+    {
+        if (phase == 0)
+        {
+            if (stopRequested != 0)
+                _cancellation.Cancel();
+            Volatile.Write(ref _status, (int)JobStatus.Running);
+            try
+            {
+                _callback(new JobContext(_cancellation.Token));
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                _failure = exception;
+                return 1;
+            }
+        }
+
+        try
+        {
+            if (phase == 1)
+            {
+                Volatile.Write(ref _status, (int)JobStatus.Succeeded);
+                _completion.TrySetResult();
+            }
+            else if (phase == 2)
+            {
+                Volatile.Write(ref _status, (int)JobStatus.Failed);
+                _completion.TrySetException(_failure ?? new InvalidOperationException("The native managed job failed."));
+            }
+            else
+            {
+                if (!_cancellation.IsCancellationRequested)
+                    _cancellation.Cancel();
+                Volatile.Write(ref _status, (int)JobStatus.Cancelled);
+                _completion.TrySetCanceled(_cancellation.Token);
+            }
+            return 0;
+        }
+        finally
+        {
+            ReleaseHandle();
+        }
+    }
+
+    internal void Cancel()
+    {
+        JobStatus status = Status;
+        if (status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Cancelled)
+            return;
+        if (!_cancellation.IsCancellationRequested)
+            _cancellation.Cancel();
+        NativeRuntime.CancelManagedJob(Id);
+    }
+
+    internal void RecordInteropFailure(Exception exception)
+    {
+        _failure = exception;
+        Volatile.Write(ref _status, (int)JobStatus.Failed);
+        _completion.TrySetException(exception);
+        ReleaseHandle();
+    }
+
+    internal void ReleaseHandle()
+    {
+        if (Interlocked.Exchange(ref _released, 1) != 0 || _handle == IntPtr.Zero)
+            return;
+        GCHandle.FromIntPtr(_handle).Free();
+        _handle = IntPtr.Zero;
+    }
+}

@@ -1116,6 +1116,23 @@ TEST_CASE("CPU VFX simulation is deterministic and snapshots are bounded value o
     CHECK(renderSnapshot.DroppedParticles() == 1);
     CHECK_THROWS_AS((void)first->CaptureRenderSnapshot(Keire::VfxRenderSnapshot::MaximumParticles + 1),
                     std::invalid_argument);
+
+    const auto checkpoint = first->CaptureCheckpoint();
+    const auto checkpointRender = first->CaptureRenderSnapshot();
+    first->Update(0.25F);
+    CHECK(first->CaptureDebugSnapshot().Revision != firstSnapshot.Revision);
+    first->RestoreCheckpoint(checkpoint);
+    const auto restoredRender = first->CaptureRenderSnapshot();
+    CHECK(restoredRender.Revision() == checkpointRender.Revision());
+    CHECK(std::ranges::equal(restoredRender.Particles(), checkpointRender.Particles()));
+    auto corruptCheckpoint = checkpoint;
+    corruptCheckpoint.pop_back();
+    CHECK_THROWS_AS(first->RestoreCheckpoint(corruptCheckpoint), std::runtime_error);
+    CHECK(std::ranges::equal(first->CaptureRenderSnapshot().Particles(), checkpointRender.Particles()));
+
+    first->Update(0.25F);
+    second->Update(0.25F);
+    CHECK(std::ranges::equal(first->CaptureRenderSnapshot().Particles(), second->CaptureRenderSnapshot().Particles()));
 }
 
 TEST_CASE("schema-4 compiles, serializes, and owns multiple particle systems transactionally")

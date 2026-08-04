@@ -352,6 +352,27 @@ namespace KeireEditor
             throw std::invalid_argument("Material Graph documents require a persistence callback.");
     }
 
+    MaterialGraphDocument::~MaterialGraphDocument() noexcept
+    {
+        CancelBackgroundCompilation();
+        if (m_JobScope)
+        {
+            m_JobScope->Cancel();
+            m_JobScope->Wait();
+        }
+        if (m_OwnJobSystem && m_JobSystem)
+            m_JobSystem->Close();
+    }
+
+    void MaterialGraphDocument::SetJobSystem(Keire::Ref<Keire::JobSystem> jobs)
+    {
+        if (m_BackgroundCompilation || m_JobScope)
+            throw std::logic_error("Material Graph jobs are already configured.");
+        if (!jobs)
+            throw std::invalid_argument("Material Graph job system is unavailable.");
+        m_JobSystem = std::move(jobs);
+    }
+
     void MaterialGraphDocument::Open(const Keire::AssetId asset, const std::span<const std::byte> bytes,
                                      const std::uint64_t revision, Keire::Ref<Keire::UndoContext> undo)
     {
@@ -390,7 +411,7 @@ namespace KeireEditor
     {
         ++m_RequestedGeneration;
         m_PendingDefinition.reset();
-        m_BackgroundCompilation = {};
+        CancelBackgroundCompilation();
         m_Host.Close();
         m_Compilation = {};
         m_LastGoodCompilation.reset();
@@ -597,7 +618,7 @@ namespace KeireEditor
 
     bool MaterialGraphDocument::CompilationPending() const noexcept
     {
-        return m_PendingDefinition.has_value() || m_BackgroundCompilation.valid();
+        return m_PendingDefinition.has_value() || static_cast<bool>(m_BackgroundCompilation);
     }
 
     void MaterialGraphDocument::AdvanceCompilation(const double deltaSeconds)
@@ -606,14 +627,14 @@ namespace KeireEditor
             throw std::invalid_argument("Material Graph compilation delta must be finite and in the range 0..60.");
         ConsumeBackgroundCompilation(false);
         m_CompileDebounceSeconds = std::max(0.0, m_CompileDebounceSeconds - deltaSeconds);
-        if (m_PendingDefinition && m_CompileDebounceSeconds <= 0.0 && !m_BackgroundCompilation.valid())
+        if (m_PendingDefinition && m_CompileDebounceSeconds <= 0.0 && !m_BackgroundCompilation)
             StartPendingCompilation();
         ConsumeBackgroundCompilation(false);
     }
 
     void MaterialGraphDocument::QueueCompilation(const Keire::MaterialGraphDefinition& definition)
     {
-        if (!m_PendingDefinition && !m_BackgroundCompilation.valid() && m_LastGoodDefinition && m_LastGoodCompilation)
+        if (!m_PendingDefinition && !m_BackgroundCompilation && m_LastGoodDefinition && m_LastGoodCompilation)
         {
             Keire::MaterialGraphCompilation compilation;
             if (BuildParameterOnlyCompilation(*m_LastGoodDefinition, *m_LastGoodCompilation, definition, compilation))
@@ -635,8 +656,9 @@ namespace KeireEditor
 
     void MaterialGraphDocument::StartPendingCompilation()
     {
-        if (!m_PendingDefinition || m_BackgroundCompilation.valid())
+        if (!m_PendingDefinition || m_BackgroundCompilation)
             return;
+        EnsureJobScope();
         auto definition = std::move(*m_PendingDefinition);
         m_PendingDefinition.reset();
         auto options = m_Specification.CompileOptions;
@@ -644,12 +666,19 @@ namespace KeireEditor
         auto previousDefinition = m_LastGoodDefinition;
         m_InFlightGeneration = m_RequestedGeneration;
         const auto generation = m_InFlightGeneration;
-        m_BackgroundCompilation = std::async(
-            std::launch::async,
+        m_BackgroundCompilationState = std::make_shared<BackgroundCompilationState>();
+        const auto state = m_BackgroundCompilationState;
+        m_BackgroundCompilation = m_JobScope->Submit(
+            {.Name = "Compile Material Graph",
+             .Priority = Keire::JobPriority::High,
+             .Class = Keire::JobClass::Compute,
+             .Domain = Keire::JobDomain::Tooling},
             [generation, definition = std::move(definition), options = std::move(options),
-             previousCompilation = std::move(previousCompilation),
-             previousDefinition = std::move(previousDefinition)]() mutable
+             previousCompilation = std::move(previousCompilation), previousDefinition = std::move(previousDefinition),
+             state](Keire::JobContext& context) mutable
             {
+                if (context.StopRequested())
+                    return;
                 auto compilation = Keire::CompileMaterialGraph(definition, options);
                 std::vector<Keire::Ref<Keire::ShaderAsset>> developmentShaders;
                 if (compilation.Succeeded() &&
@@ -667,22 +696,60 @@ namespace KeireEditor
                              std::string("Live shader compilation failed: ") + error.what()});
                     }
                 }
-                return BackgroundCompilation{generation, std::move(definition), std::move(compilation),
-                                             std::move(developmentShaders)};
+                if (context.StopRequested())
+                    return;
+                std::scoped_lock lock(state->Mutex);
+                state->Result.emplace(BackgroundCompilation{generation, std::move(definition), std::move(compilation),
+                                                            std::move(developmentShaders)});
             });
     }
 
     void MaterialGraphDocument::ConsumeBackgroundCompilation(const bool wait)
     {
-        if (!m_BackgroundCompilation.valid())
+        if (!m_BackgroundCompilation)
             return;
-        if (!wait && m_BackgroundCompilation.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        if (!wait && !m_BackgroundCompilation.IsComplete())
             return;
-        auto result = m_BackgroundCompilation.get();
+        (void)m_BackgroundCompilation.Wait();
+        m_BackgroundCompilation.RethrowIfFailed();
+        std::optional<BackgroundCompilation> result;
+        {
+            std::scoped_lock lock(m_BackgroundCompilationState->Mutex);
+            result = std::move(m_BackgroundCompilationState->Result);
+        }
+        m_BackgroundCompilation = {};
+        m_BackgroundCompilationState.reset();
         m_InFlightGeneration = 0;
-        if (result.Generation == m_RequestedGeneration && !m_PendingDefinition && IsOpen())
-            ApplyCompilation(std::move(result.Definition), std::move(result.Compilation),
-                             std::move(result.DevelopmentShaders));
+        if (result && result->Generation == m_RequestedGeneration && !m_PendingDefinition && IsOpen())
+            ApplyCompilation(std::move(result->Definition), std::move(result->Compilation),
+                             std::move(result->DevelopmentShaders));
+    }
+
+    void MaterialGraphDocument::EnsureJobScope()
+    {
+        if (m_JobScope)
+            return;
+        if (!m_JobSystem)
+        {
+            Keire::JobSystemSpecification specification;
+            specification.WorkerCount = 1;
+            specification.BlockingWorkerCount = 1;
+            m_JobSystem = Keire::CreateRef<Keire::JobSystem>(specification);
+            m_OwnJobSystem = true;
+        }
+        m_JobScope = m_JobSystem->CreateScope("Material Graph compilation");
+    }
+
+    void MaterialGraphDocument::CancelBackgroundCompilation() noexcept
+    {
+        if (m_BackgroundCompilation)
+        {
+            m_BackgroundCompilation.Cancel();
+            (void)m_BackgroundCompilation.Wait();
+            m_BackgroundCompilation = {};
+        }
+        m_BackgroundCompilationState.reset();
+        m_InFlightGeneration = 0;
     }
 
     void MaterialGraphDocument::ApplyCompilation(Keire::MaterialGraphDefinition definition,

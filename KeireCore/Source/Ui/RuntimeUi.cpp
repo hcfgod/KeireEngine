@@ -756,6 +756,27 @@ namespace Keire
         return true;
     }
 
+    std::vector<RuntimeUiEvent> RuntimeUiTree::PendingEvents() const
+    {
+        return {m_Impl->Events.begin(), m_Impl->Events.end()};
+    }
+
+    void RuntimeUiTree::ReplacePendingEvents(const std::span<const RuntimeUiEvent> events)
+    {
+        if (events.size() > m_Impl->MaximumEvents)
+            throw std::length_error("Runtime UI event checkpoint exceeds the configured event capacity.");
+        for (const auto& event : events)
+        {
+            if (!m_Impl->Index(event.Target) || event.Type > RuntimeUiEventType::Cancel ||
+                event.Button > RuntimeUiPointerButton::Middle || !std::isfinite(event.PointerX) ||
+                !std::isfinite(event.PointerY))
+            {
+                throw std::invalid_argument("Runtime UI event checkpoint is invalid or stale.");
+            }
+        }
+        m_Impl->Events.assign(events.begin(), events.end());
+    }
+
     RuntimeUiStatistics RuntimeUiTree::Statistics() const noexcept
     {
         RuntimeUiStatistics result;

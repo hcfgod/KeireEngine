@@ -1020,45 +1020,57 @@ namespace Keire::RenderBackend
 
         try
         {
-            VfxPipelineWarmupThread = std::jthread(
-                [this]
+            VfxPipelineWarmupJob = RenderJobs->Submit(
+                {.Name = "Warm GPU VFX pipelines",
+                 .Priority = JobPriority::Background,
+                 .Class = JobClass::Compute,
+                 .Domain = JobDomain::Rendering},
+                [state = shared_from_this()](JobContext& context)
                 {
-                    (void)SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
+                    if (context.StopRequested())
+                        return;
                     const auto started = std::chrono::steady_clock::now();
                     try
                     {
-                        CompileGpuVfxPipelines();
+                        state->CompileGpuVfxPipelines();
+                        if (context.StopRequested())
+                            return;
                         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - started);
-                        VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                            std::memory_order_relaxed);
-                        VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready, std::memory_order_release);
+                        state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                                   std::memory_order_relaxed);
+                        state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready,
+                                                            std::memory_order_release);
                         KEIRE_CORE_INFO("GPU VFX pipelines warmed asynchronously in {:.2f} ms.",
                                         static_cast<double>(elapsed.count()) / 1000.0);
                     }
                     catch (const std::exception& error)
                     {
-                        ReleaseGpuVfxPipelines();
-                        VfxPipelineWarmupFailure = error.what();
+                        state->ReleaseGpuVfxPipelines();
+                        state->VfxPipelineWarmupFailure = error.what();
                         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - started);
-                        VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                            std::memory_order_relaxed);
-                        VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
+                        state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                                   std::memory_order_relaxed);
+                        state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
+                                                            std::memory_order_release);
                         KEIRE_CORE_ERROR("GPU VFX pipeline warmup failed after {:.2f} ms: {}",
-                                         static_cast<double>(elapsed.count()) / 1000.0, VfxPipelineWarmupFailure);
+                                         static_cast<double>(elapsed.count()) / 1000.0,
+                                         state->VfxPipelineWarmupFailure);
                     }
                     catch (...)
                     {
-                        ReleaseGpuVfxPipelines();
-                        VfxPipelineWarmupFailure = "Unknown GPU backend failure.";
+                        state->ReleaseGpuVfxPipelines();
+                        state->VfxPipelineWarmupFailure = "Unknown GPU backend failure.";
                         const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now() - started);
-                        VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                            std::memory_order_relaxed);
-                        VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
+                        state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                                   std::memory_order_relaxed);
+                        state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
+                                                            std::memory_order_release);
                         KEIRE_CORE_ERROR("GPU VFX pipeline warmup failed after {:.2f} ms: {}",
-                                         static_cast<double>(elapsed.count()) / 1000.0, VfxPipelineWarmupFailure);
+                                         static_cast<double>(elapsed.count()) / 1000.0,
+                                         state->VfxPipelineWarmupFailure);
                     }
                 });
         }
@@ -4195,7 +4207,8 @@ namespace Keire::RenderBackend
                                 std::move(PendingRetiredSkins), std::move(PendingRetiredTextures),
                                 std::move(PendingRetiredPipelines), std::move(PendingRetiredForwardPlus),
                                 std::move(FrameTransientBuffers), std::move(FrameUploadTransfers), submissionStarted,
-                                Statistics.VfxGpuWorlds != 0});
+                                Statistics.VfxGpuWorlds != 0, PendingRetiredBytes});
+            PendingRetiredBytes = 0;
             PendingRetired.clear();
             PendingRetiredMeshes.clear();
             PendingRetiredSkins.clear();
@@ -4259,8 +4272,17 @@ namespace Keire::RenderBackend
             return;
         Open = false;
         FrameActive = false;
-        if (VfxPipelineWarmupThread.joinable())
-            VfxPipelineWarmupThread.join();
+        if (VfxPipelineWarmupJob)
+        {
+            VfxPipelineWarmupJob.Cancel();
+            (void)VfxPipelineWarmupJob.Wait();
+            VfxPipelineWarmupJob = {};
+        }
+        if (RenderJobs)
+        {
+            RenderJobs->Cancel();
+            RenderJobs->Wait();
+        }
         StopRenderThread();
         FrameExecutionActive = false;
         ActiveGpuSubmissionSerial = 0;
@@ -4278,21 +4300,36 @@ namespace Keire::RenderBackend
         for (auto& resources : PendingRetired)
             ReleaseResources(resources);
         PendingRetired.clear();
+        std::uint64_t pendingRetiredMeshBytes = 0;
         for (auto& resources : PendingRetiredMeshes)
+        {
+            pendingRetiredMeshBytes += resources.EstimatedBytes;
             ReleaseMeshResources(resources);
+        }
         PendingRetiredMeshes.clear();
         for (auto& resources : PendingRetiredSkins)
             ReleaseGpuSkinResources(resources);
         PendingRetiredSkins.clear();
+        std::uint64_t pendingRetiredTextureBytes = 0;
         for (auto& resources : PendingRetiredTextures)
+        {
+            pendingRetiredTextureBytes += resources.EstimatedBytes;
             ReleaseTextureResources(resources);
+        }
         PendingRetiredTextures.clear();
+        if (Streaming)
+        {
+            Streaming->ReleaseRetired(StreamingClass::Mesh, 0, pendingRetiredMeshBytes);
+            Streaming->ReleaseRetired(StreamingClass::Texture, 0, pendingRetiredTextureBytes);
+        }
         for (auto* pipeline : PendingRetiredPipelines)
             SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
         PendingRetiredPipelines.clear();
         for (auto& resources : PendingRetiredForwardPlus)
             ReleaseForwardPlusResources(resources);
         PendingRetiredForwardPlus.clear();
+        PendingRetiredBytes = 0;
+        Statistics.FenceRetiredBytes = 0;
         for (auto* buffer : FrameTransientBuffers)
             SDL_ReleaseGPUBuffer(Device, buffer);
         FrameTransientBuffers.clear();
@@ -4303,6 +4340,12 @@ namespace Keire::RenderBackend
         FrameUploadCommands = nullptr;
         for (auto& frame : InFlight)
         {
+            std::uint64_t retiredMeshBytes = 0;
+            for (const auto& resources : frame.RetiredMeshes)
+                retiredMeshBytes += resources.EstimatedBytes;
+            std::uint64_t retiredTextureBytes = 0;
+            for (const auto& resources : frame.RetiredTextures)
+                retiredTextureBytes += resources.EstimatedBytes;
             for (auto& resources : frame.Retired)
                 ReleaseResources(resources);
             for (auto& resources : frame.RetiredMeshes)
@@ -4319,6 +4362,11 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUBuffer(Device, buffer);
             for (auto* transfer : frame.TransientTransferBuffers)
                 SDL_ReleaseGPUTransferBuffer(Device, transfer);
+            if (Streaming)
+            {
+                Streaming->ReleaseRetired(StreamingClass::Mesh, 0, retiredMeshBytes);
+                Streaming->ReleaseRetired(StreamingClass::Texture, 0, retiredTextureBytes);
+            }
             if (Device && frame.Fence)
                 SDL_ReleaseGPUFence(Device, frame.Fence);
         }

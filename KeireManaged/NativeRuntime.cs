@@ -240,6 +240,9 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, byte> RequestManagedAssetLoadIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, void> CancelManagedAssetLoadIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, void> ReleaseManagedAssetIcall;
+    internal static delegate* unmanaged<ulong*, int, byte, byte, NativeString, IntPtr, IntPtr, ulong>
+        SubmitManagedJobIcall;
+    internal static delegate* unmanaged<ulong, void> CancelManagedJobIcall;
     internal static delegate* unmanaged<float> DeltaTimeIcall;
     internal static delegate* unmanaged<float> FixedDeltaTimeIcall;
     internal static delegate* unmanaged<float> UnscaledDeltaTimeIcall;
@@ -352,6 +355,21 @@ internal static unsafe class NativeRuntime
         RecordProfileSpanIcall(id, startMicroseconds, durationMicroseconds);
 
     internal static void SetProfileCounter(ulong id, double value) => SetProfileCounterIcall(id, value);
+
+    internal static ulong SubmitManagedJob(ReadOnlySpan<ulong> dependencies, byte priority, byte jobClass,
+                                           string name, IntPtr state, IntPtr callback)
+    {
+        using NativeString nativeName = name;
+        fixed (ulong* dependencyData = dependencies)
+            return SubmitManagedJobIcall(dependencyData, dependencies.Length, priority, jobClass, nativeName, state,
+                                         callback);
+    }
+
+    internal static void CancelManagedJob(ulong id)
+    {
+        if (CancelManagedJobIcall != null)
+            CancelManagedJobIcall(id);
+    }
 
     internal static float DeltaTime => DeltaTimeIcall();
     internal static float FixedDeltaTime => FixedDeltaTimeIcall();

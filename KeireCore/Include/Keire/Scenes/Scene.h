@@ -2,15 +2,18 @@
 
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 
+#include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Api.h"
 #include "Keire/ECS/Entity.h"
 #include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Ref.h"
 #include "Keire/Scenes/SceneAsset.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -133,6 +136,22 @@ namespace Keire
         PhysicsQueryHit Hit;
     };
 
+    struct ScenePhysicsCheckpointBody
+    {
+        EntityId Entity;
+        Vector3 Position;
+        Quaternion Rotation;
+        Vector3 LinearVelocity;
+        Vector3 AngularVelocity;
+        bool Sleeping = false;
+    };
+
+    struct SceneAnimatorCheckpoint
+    {
+        EntityId Entity;
+        AnimatorCheckpoint State;
+    };
+
     class KEIRE_API SceneRuntimeSession final : public RefCounted
     {
       public:
@@ -149,6 +168,13 @@ namespace Keire
         [[nodiscard]] SceneRuntimeDiagnostic Diagnostic() const;
         [[nodiscard]] Ref<ScenePresentationRuntime> Presentation() const noexcept;
         [[nodiscard]] Ref<PhysicsWorld> Physics() const noexcept;
+        [[nodiscard]] std::vector<ScenePhysicsCheckpointBody> CapturePhysicsCheckpoint() const;
+        void RestorePhysicsCheckpoint(std::span<const ScenePhysicsCheckpointBody> bodies);
+        [[nodiscard]] std::vector<SceneAnimatorCheckpoint> CaptureAnimatorCheckpoint() const;
+        void RestoreAnimatorCheckpoint(std::span<const SceneAnimatorCheckpoint> animators);
+        void SetDeterministicSimulation(bool enabled);
+        [[nodiscard]] std::vector<std::byte> CaptureVfxCheckpoint() const;
+        void RestoreVfxCheckpoint(std::span<const std::byte> checkpoint);
         /// Returns the Play Mode scene-owned VFX world, or null when the runtime session is not active.
         [[nodiscard]] Ref<VfxWorld> Vfx() const noexcept;
         /// Assigns effect to the runtime entity and requests playback. restart replaces only that entity's live

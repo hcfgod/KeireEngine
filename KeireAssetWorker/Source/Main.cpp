@@ -1,6 +1,7 @@
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Rendering/LightingBaker.h"
 #include "Keire/Scenes/PrefabAsset.h"
@@ -14,7 +15,9 @@
 #include "KeireInternal/Process.h"
 
 #include "FfmpegAudioImportBackend.h"
+#include "KeireProjectModules/SourceModulePack.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <iostream>
@@ -72,9 +75,21 @@ namespace
 
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> CreateDatabase(const std::filesystem::path& projectRoot)
     {
-        (void)Keire::Project::Open(projectRoot);
+        auto modules = Keire::CreateRef<Keire::ModuleRegistry>(
+            Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
+        const auto project = Keire::Project::Open(projectRoot);
+        modules->ValidateRequired(project->Descriptor().RequiredModules);
         Keire::AssetDatabaseSpecification specification{.ProjectRoot = projectRoot};
+        specification.Jobs = Keire::CreateRef<Keire::JobSystem>();
         specification.Importers = Keire::CreateBuiltinAssetImporters();
+        for (auto& importer : modules->Importers())
+        {
+            if (std::ranges::find(specification.Importers, importer.Name, &Keire::AssetImporterRegistration::Name) !=
+                specification.Importers.end())
+                throw std::invalid_argument("A source module importer duplicates an existing importer: " +
+                                            importer.Name);
+            specification.Importers.push_back(std::move(importer));
+        }
         for (auto& importer : specification.Importers)
         {
             if (importer.Name == "Keire.AudioClip")

@@ -21,7 +21,7 @@ imgui_library="${PROJECT_NAMESPACE}ImGui"
 zstd_library="${PROJECT_NAMESPACE}Zstd"
 archive="$ROOT/Artifacts/$name.tar.gz"; symbols="$ROOT/Artifacts/$name-symbols.tar.gz"; symbol_stage="$ROOT/Artifacts/$name-symbols"
 rm -rf "$stage" "$symbol_stage"; rm -f "$archive" "$archive.sha256" "$symbols" "$symbols.sha256"
-mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
+mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/docs/Diagnostics" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/examples/source-module" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
 client_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"
 hub_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$HUB_TARGET/$HUB_TARGET"
 core_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CORE_TARGET/lib$CORE_TARGET.a"
@@ -69,8 +69,11 @@ cp "$sdl_install/lib/libSDL3.a" "$stage/third-party/SDL3/lib/"
 cp -R "$sdl_install/cmake/"* "$stage/third-party/SDL3/cmake/"
 cp -R "$sdl_install/licenses/SDL3" "$stage/third-party/SDL3/licenses/"
 cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
+cp -R "$ROOT/docs/Diagnostics/"* "$stage/docs/Diagnostics/"
+cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 cp -R "$ROOT/Examples/Consumer/"* "$stage/examples/consumer/"
 cp -R "$ROOT/Examples/ManagedConsumer/"* "$stage/examples/managed-consumer/"
+cp -R "$ROOT/Examples/SourceModule/"* "$stage/examples/source-module/"
 sed -e "s/@CORE_TARGET@/$CORE_TARGET/g" -e "s/@PROJECT_NAMESPACE@/$PROJECT_NAMESPACE/g" -e "s/@PACKAGE_CONFIGURATION@/$CONFIGURATION/g" "$ROOT/Config/PackageConfig.cmake.in" > "$stage/lib/cmake/$PROJECT_IDENTIFIER/${PROJECT_IDENTIFIER}Config.cmake"
 commit="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null || printf unknown)"; spdlog="$(config_value "$ROOT/Config/Dependencies.lock" SPDLOG_COMMIT)"; doctest="$(config_value "$ROOT/Config/Dependencies.lock" DOCTEST_COMMIT)"; sdl="$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)"; json="$(config_value "$ROOT/Config/Dependencies.lock" JSON_COMMIT)"; imgui="$(config_value "$ROOT/Config/Dependencies.lock" IMGUI_COMMIT)"; zstd="$(config_value "$ROOT/Config/Dependencies.lock" ZSTD_COMMIT)"; entt="$(config_value "$ROOT/Config/Dependencies.lock" ENTT_COMMIT)"; glm="$(config_value "$ROOT/Config/Dependencies.lock" GLM_COMMIT)"; shadercross="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_COMMIT)"; dxc="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_DXC_COMMIT)"; spirv_cross="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)"; spirv_headers="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)"; spirv_tools="$(config_value "$ROOT/Config/Dependencies.lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)"; assimp="$(config_value "$ROOT/Config/Dependencies.lock" ASSIMP_COMMIT)"; stb="$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)"; jolt="$(config_value "$ROOT/Config/Dependencies.lock" JOLT_COMMIT)"; recast="$(config_value "$ROOT/Config/Dependencies.lock" RECAST_COMMIT)"; miniaudio="$(config_value "$ROOT/Config/Dependencies.lock" MINIAUDIO_COMMIT)"; coral="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_COMMIT)"
 dotnet_runtime="$(find "$ROOT/Build/Dependencies/dotnet-sdk/shared/Microsoft.NETCore.App" -mindepth 1 -maxdepth 1 -type d -print | sort | tail -n 1)"
@@ -171,5 +174,8 @@ cmake --build "$validation_root/cmake-build" --config Release
 cmake -S "$validation_root/sdk/examples/managed-consumer" -B "$validation_root/managed-cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$validation_root/managed-cmake-build" --config Release
 (cd "$validation_root" && "$validation_root/managed-cmake-build/ManagedSdkConsumer" --managed-smoke)
+cmake -S "$validation_root/sdk/examples/source-module" -B "$validation_root/module-cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$validation_root/module-cmake-build" --config Release
+(cd "$validation_root" && "$validation_root/module-cmake-build/SourceModuleConsumer" --module-smoke)
 rm -rf "$validation_root"
 printf '==> Package created: %s\n' "$archive"

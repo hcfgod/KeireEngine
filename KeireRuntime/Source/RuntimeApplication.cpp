@@ -1,5 +1,7 @@
 #include "Keire/Core.h"
+#include "KeireProjectModules/SourceModulePack.h"
 
+#include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <nlohmann/json.hpp>
@@ -21,12 +23,36 @@ namespace
 {
     constexpr std::array RuntimeOptions{
         Keire::ApplicationCommandLineOption{"--content <path>", "Mount cooked Kéire runtime content."},
-        Keire::ApplicationCommandLineOption{"--frames <count>", "Exit after a finite number of rendered frames."}};
+        Keire::ApplicationCommandLineOption{"--frames <count>", "Exit after a finite number of rendered frames."},
+        Keire::ApplicationCommandLineOption{"--headless", "Run with a hidden window and headless audio."},
+        Keire::ApplicationCommandLineOption{"--scene <asset-id>", "Override the cooked startup scene."},
+        Keire::ApplicationCommandLineOption{"--tick-limit <count>", "Exit after a finite number of fixed ticks."},
+        Keire::ApplicationCommandLineOption{"--record <path>", "Record a deterministic replay."},
+        Keire::ApplicationCommandLineOption{"--play <path>", "Play a replay."},
+        Keire::ApplicationCommandLineOption{"--verify <path>",
+                                            "Verify a replay and return a failure exit code on divergence."},
+        Keire::ApplicationCommandLineOption{"--profile <strict|performance>", "Select the replay recording profile."},
+        Keire::ApplicationCommandLineOption{"--output <path>", "Write an atomic replay result report."}};
+
+    enum class RuntimeReplayAction : std::uint8_t
+    {
+        None,
+        Record,
+        Play,
+        Verify
+    };
 
     struct RuntimeCommandLine final
     {
         std::filesystem::path Content;
         std::uint32_t Frames = 0;
+        std::uint64_t TickLimit = 0;
+        Keire::AssetId Scene;
+        RuntimeReplayAction ReplayAction = RuntimeReplayAction::None;
+        std::filesystem::path ReplayPath;
+        std::filesystem::path OutputPath;
+        Keire::ReplayProfile ReplayProfile = Keire::ReplayProfile::StrictVerified;
+        bool Headless = false;
     };
 
     struct RuntimeManifest final
@@ -38,11 +64,106 @@ namespace
         Keire::RenderEnvironmentSettings Rendering;
         std::array<std::uint32_t, Keire::PhysicsCollisionLayerCount> PhysicsCollisionMatrix;
         std::vector<std::filesystem::path> ManagedAssemblyRoots;
+        std::vector<Keire::RequiredSourceModule> RequiredModules;
         bool Scripting = false;
         bool Physics = false;
         bool Audio = false;
         bool Navigation = false;
     };
+
+    template <typename T> void ParsePositiveCount(const std::string_view value, T& output, const char* option)
+    {
+        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), output);
+        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || output == 0)
+            throw Keire::CommandLineError(std::string(option) + " requires a positive count.");
+    }
+
+    [[nodiscard]] nlohmann::json EncodeAnimatorCheckpoint(const Keire::SceneAnimatorCheckpoint& animator)
+    {
+        nlohmann::json parameters = nlohmann::json::array();
+        for (const auto& parameter : animator.State.Parameters)
+            parameters.push_back({{"id", parameter.Id},
+                                  {"type", static_cast<std::uint8_t>(parameter.Type)},
+                                  {"float", parameter.FloatValue},
+                                  {"integer", parameter.IntegerValue},
+                                  {"boolean", parameter.BooleanValue}});
+        nlohmann::json layers = nlohmann::json::array();
+        for (const auto& layer : animator.State.Layers)
+        {
+            nlohmann::json encoded{{"id", layer.Id},
+                                   {"state", layer.StateId},
+                                   {"time", layer.Time},
+                                   {"weight", layer.Weight},
+                                   {"normalizedTime", layer.NormalizedTime}};
+            if (layer.Transition)
+            {
+                const auto& transition = *layer.Transition;
+                encoded["transition"] = {{"id", transition.Id},
+                                         {"source", transition.SourceStateId},
+                                         {"destination", transition.DestinationStateId},
+                                         {"sourceTime", transition.SourceTime},
+                                         {"destinationTime", transition.DestinationTime},
+                                         {"elapsed", transition.Elapsed},
+                                         {"duration", transition.Duration}};
+            }
+            layers.push_back(std::move(encoded));
+        }
+        const auto& root = animator.State.PreviousRoot;
+        return {{"entity", animator.Entity.ToString()},
+                {"playing", animator.State.Playing},
+                {"hasPreviousRootRotation", animator.State.HasPreviousRootRotation},
+                {"previousRoot",
+                 {{"translation", {root.Translation.X, root.Translation.Y, root.Translation.Z}},
+                  {"rotation", {root.Rotation.X, root.Rotation.Y, root.Rotation.Z, root.Rotation.W}},
+                  {"scale", {root.Scale.X, root.Scale.Y, root.Scale.Z}}}},
+                {"parameters", std::move(parameters)},
+                {"layers", std::move(layers)}};
+    }
+
+    [[nodiscard]] Keire::SceneAnimatorCheckpoint DecodeAnimatorCheckpoint(const nlohmann::json& encoded)
+    {
+        const auto vector3 = [](const nlohmann::json& value)
+        {
+            if (!value.is_array() || value.size() != 3U)
+                throw std::runtime_error("Animator replay checkpoint vector is malformed.");
+            return Keire::Vector3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+        };
+        Keire::SceneAnimatorCheckpoint result;
+        result.Entity = Keire::EntityId::Parse(encoded.at("entity").get<std::string>());
+        result.State.Playing = encoded.at("playing").get<bool>();
+        result.State.HasPreviousRootRotation = encoded.at("hasPreviousRootRotation").get<bool>();
+        const auto& root = encoded.at("previousRoot");
+        result.State.PreviousRoot.Translation = vector3(root.at("translation"));
+        const auto& rotation = root.at("rotation");
+        if (!rotation.is_array() || rotation.size() != 4U)
+            throw std::runtime_error("Animator replay checkpoint rotation is malformed.");
+        result.State.PreviousRoot.Rotation = {rotation[0].get<float>(), rotation[1].get<float>(),
+                                              rotation[2].get<float>(), rotation[3].get<float>()};
+        result.State.PreviousRoot.Scale = vector3(root.at("scale"));
+        for (const auto& parameter : encoded.at("parameters"))
+            result.State.Parameters.push_back(
+                {parameter.at("id").get<std::string>(),
+                 static_cast<Keire::AnimationParameterType>(parameter.at("type").get<std::uint8_t>()),
+                 parameter.at("float").get<float>(), parameter.at("integer").get<std::int32_t>(),
+                 parameter.at("boolean").get<bool>()});
+        for (const auto& layer : encoded.at("layers"))
+        {
+            Keire::AnimatorCheckpointLayer decoded{
+                layer.at("id").get<std::string>(), layer.at("state").get<std::string>(), layer.at("time").get<float>(),
+                layer.at("weight").get<float>(), layer.at("normalizedTime").get<float>()};
+            if (layer.contains("transition"))
+            {
+                const auto& transition = layer.at("transition");
+                decoded.Transition = Keire::AnimatorCheckpointTransition{
+                    transition.at("id").get<std::string>(),          transition.at("source").get<std::string>(),
+                    transition.at("destination").get<std::string>(), transition.at("sourceTime").get<float>(),
+                    transition.at("destinationTime").get<float>(),   transition.at("elapsed").get<float>(),
+                    transition.at("duration").get<float>()};
+            }
+            result.State.Layers.push_back(std::move(decoded));
+        }
+        return result;
+    }
 
     [[nodiscard]] RuntimeCommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
     {
@@ -60,16 +181,66 @@ namespace
             {
                 if (++index >= arguments.Size())
                     throw Keire::CommandLineError("--frames requires a positive count.");
-                const auto value = arguments[index];
-                const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result.Frames);
-                if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || result.Frames == 0)
-                    throw Keire::CommandLineError("--frames requires a positive count.");
+                ParsePositiveCount(arguments[index], result.Frames, "--frames");
+            }
+            else if (option == "--tick-limit")
+            {
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError("--tick-limit requires a positive count.");
+                ParsePositiveCount(arguments[index], result.TickLimit, "--tick-limit");
+            }
+            else if (option == "--headless")
+                result.Headless = true;
+            else if (option == "--scene")
+            {
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError("--scene requires an asset ID.");
+                try
+                {
+                    result.Scene = Keire::AssetId::Parse(arguments[index]);
+                }
+                catch (const std::exception&)
+                {
+                    throw Keire::CommandLineError("--scene requires a valid asset ID.");
+                }
+            }
+            else if (option == "--record" || option == "--play" || option == "--verify")
+            {
+                if (result.ReplayAction != RuntimeReplayAction::None)
+                    throw Keire::CommandLineError("--record, --play, and --verify are mutually exclusive.");
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError(std::string(option) + " requires a replay path.");
+                result.ReplayAction = option == "--record" ? RuntimeReplayAction::Record
+                                      : option == "--play" ? RuntimeReplayAction::Play
+                                                           : RuntimeReplayAction::Verify;
+                result.ReplayPath =
+                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments[index])).lexically_normal();
+            }
+            else if (option == "--profile")
+            {
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError("--profile requires strict or performance.");
+                if (arguments[index] == "strict")
+                    result.ReplayProfile = Keire::ReplayProfile::StrictVerified;
+                else if (arguments[index] == "performance")
+                    result.ReplayProfile = Keire::ReplayProfile::PerformanceCapture;
+                else
+                    throw Keire::CommandLineError("--profile requires strict or performance.");
+            }
+            else if (option == "--output")
+            {
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError("--output requires a path.");
+                result.OutputPath =
+                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments[index])).lexically_normal();
             }
             else
                 throw Keire::CommandLineError("Unknown runtime option: " + std::string(option));
         }
         if (result.Content.empty())
             throw Keire::CommandLineError("KeireRuntime requires --content <path>.");
+        if (!result.OutputPath.empty() && result.ReplayAction == RuntimeReplayAction::None)
+            throw Keire::CommandLineError("--output requires --record, --play, or --verify.");
         result.Content = std::filesystem::absolute(result.Content).lexically_normal();
         return result;
     }
@@ -84,14 +255,20 @@ namespace
         if (!stream || !source.is_object())
             throw Keire::CommandLineError("Cooked content has no valid runtime-manifest.json.");
         const auto schema = source.value("schemaVersion", 0U);
-        if (schema < 3)
+        if (schema < 4)
             throw Keire::CommandLineError(
                 "Cooked runtime manifest schema is obsolete; recook the project with this Kéire version.");
-        if (schema > 3)
+        if (schema > 4)
             throw Keire::CommandLineError(
-                "Cooked runtime manifest requires a newer Kéire runtime (supported schema: 3).");
+                "Cooked runtime manifest requires a newer Kéire runtime (supported schema: 4).");
         RuntimeManifest result;
         result.ContentRoot = std::filesystem::absolute(content).lexically_normal();
+        const auto& modules = source.at("sourceModules");
+        if (!modules.is_array())
+            throw Keire::CommandLineError("Runtime manifest sourceModules must be an array.");
+        for (const auto& module : modules)
+            result.RequiredModules.push_back(
+                {module.at("id").get<std::string>(), module.at("version").get<std::string>()});
         result.StartupScene = Keire::AssetId::Parse(source.at("startupScene").get<std::string>());
         if (source.contains("defaultInput") && !source.at("defaultInput").is_null())
             result.DefaultInput = Keire::AssetId::Parse(source.at("defaultInput").get<std::string>());
@@ -180,13 +357,86 @@ namespace
         return selected;
     }
 
+    struct RuntimeReplayState final
+    {
+        Keire::Ref<Keire::SceneRuntimeSession> Session;
+        bool Started = false;
+        bool ReportWritten = false;
+    };
+
+    [[nodiscard]] Keire::ReplayFingerprints BuildReplayFingerprints(const RuntimeManifest& manifest,
+                                                                    const Keire::ModuleRegistry& modules)
+    {
+        const auto& build = Keire::GetBuildInfo();
+        const auto manifestText = Keire::Detail::ReadTextFile(manifest.ContentRoot / "runtime-manifest.json",
+                                                              std::size_t{64} * 1024U * 1024U);
+        const auto catalogText =
+            Keire::Detail::ReadTextFile(manifest.ContentRoot / "catalog.json", std::size_t{64} * 1024U * 1024U);
+        return {.EngineBuild = std::string(build.Version) + '-' + std::string(build.GitCommit) + '-' +
+                               std::string(build.Configuration) + '-' + std::string(build.Platform) + '-' +
+                               std::string(build.Architecture),
+                .Project = Keire::Detail::DigestToString(Keire::Detail::Sha256(std::as_bytes(std::span(manifestText)))),
+                .Modules = modules.Fingerprint(),
+                .Content = Keire::Detail::DigestToString(Keire::Detail::Sha256(std::as_bytes(std::span(catalogText)))),
+                .DeterministicConfiguration = "fixed-tick-v1;scene=" + manifest.StartupScene.ToString()};
+    }
+
+    [[nodiscard]] std::string_view ReplayStateName(const Keire::ReplaySessionState state) noexcept
+    {
+        switch (state)
+        {
+        case Keire::ReplaySessionState::Idle:
+            return "idle";
+        case Keire::ReplaySessionState::Recording:
+            return "recording";
+        case Keire::ReplaySessionState::Playing:
+            return "playing";
+        case Keire::ReplaySessionState::Verifying:
+            return "verifying";
+        case Keire::ReplaySessionState::Paused:
+            return "paused";
+        case Keire::ReplaySessionState::Completed:
+            return "completed";
+        case Keire::ReplaySessionState::Diverged:
+            return "diverged";
+        case Keire::ReplaySessionState::Failed:
+            return "failed";
+        }
+        return "unknown";
+    }
+
+    void WriteReplayReport(const RuntimeCommandLine& commandLine, RuntimeReplayState& state,
+                           const Keire::ReplaySessionStatus& status)
+    {
+        if (commandLine.OutputPath.empty() || state.ReportWritten)
+            return;
+        nlohmann::json report{
+            {"state", ReplayStateName(status.State)},
+            {"profile", status.Profile == Keire::ReplayProfile::StrictVerified ? "strict" : "performance"},
+            {"currentTick", status.CurrentTick},
+            {"tickCount", status.TickCount},
+            {"checkpointCount", status.CheckpointCount},
+            {"diagnostic", status.Diagnostic}};
+        if (status.Divergence)
+        {
+            report["divergence"] = {{"tick", status.Divergence->Tick},
+                                    {"expected", Keire::Detail::DigestToString(status.Divergence->Expected)},
+                                    {"actual", Keire::Detail::DigestToString(status.Divergence->Actual)},
+                                    {"message", status.Divergence->Message}};
+        }
+        Keire::Detail::WriteTextFileAtomically(commandLine.OutputPath, report.dump(2) + '\n');
+        state.ReportWritten = true;
+    }
+
     class RuntimeLayer final : public Keire::Layer, public Keire::IScriptRuntimeServices
     {
       public:
         RuntimeLayer(const Keire::AssetId startupScene, const Keire::AssetId defaultInput,
-                     const Keire::RenderEnvironmentSettings rendering, const std::uint32_t frames)
+                     const Keire::RenderEnvironmentSettings rendering, RuntimeCommandLine commandLine,
+                     Keire::ReplayFingerprints fingerprints, std::shared_ptr<RuntimeReplayState> replayState)
             : Layer("Runtime"), m_StartupScene(startupScene), m_DefaultInput(defaultInput), m_Rendering(rendering),
-              m_MaximumFrames(frames)
+              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
+              m_ReplayState(std::move(replayState))
         {
         }
 
@@ -219,6 +469,18 @@ namespace
 
         void OnDetach() noexcept override
         {
+            try
+            {
+                const auto replay = Owner().Replay();
+                if (replay && replay->IsOpen() && m_ReplayState->Started)
+                {
+                    WriteReplayReport(m_CommandLine, *m_ReplayState, replay->Status());
+                    replay->Stop();
+                }
+            }
+            catch (...)
+            {
+            }
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(nullptr);
             if (m_Presentation)
@@ -226,6 +488,7 @@ namespace
             if (m_Runtime)
                 m_Runtime->Stop();
             m_Runtime.Reset();
+            m_ReplayState->Session.Reset();
             m_Presentation.Reset();
             m_Scene.Reset();
         }
@@ -233,7 +496,11 @@ namespace
         void OnFixedUpdate(const Keire::Time& time) override
         {
             if (m_Runtime)
+            {
                 m_Runtime->FixedUpdate(static_cast<float>(time.FixedDeltaTime().Seconds()));
+                if (m_CommandLine.TickLimit != 0 && ++m_FixedTicks >= m_CommandLine.TickLimit)
+                    Owner().RequestExit();
+            }
         }
 
         void OnUpdate(const Keire::Time& time) override
@@ -252,6 +519,42 @@ namespace
                     throw std::runtime_error("Startup scene Play failed: " + m_Runtime->Diagnostic().Message);
                 m_Scene = m_Runtime->RuntimeScene();
                 m_Presentation = m_Runtime->Presentation();
+                m_ReplayState->Session = m_Runtime;
+                if (m_CommandLine.ReplayAction != RuntimeReplayAction::None)
+                {
+                    m_Runtime->SetDeterministicSimulation(m_CommandLine.ReplayProfile ==
+                                                          Keire::ReplayProfile::StrictVerified);
+                }
+                if (m_CommandLine.ReplayAction == RuntimeReplayAction::Record)
+                {
+                    Owner().Replay()->BeginRecording(
+                        {m_CommandLine.ReplayPath, m_CommandLine.ReplayProfile, m_ReplayFingerprints});
+                    m_ReplayState->Started = true;
+                }
+                else if (m_CommandLine.ReplayAction == RuntimeReplayAction::Play ||
+                         m_CommandLine.ReplayAction == RuntimeReplayAction::Verify)
+                {
+                    Owner().Replay()->BeginPlayback({m_CommandLine.ReplayPath, m_ReplayFingerprints,
+                                                     m_CommandLine.ReplayAction == RuntimeReplayAction::Verify});
+                    m_ReplayState->Started = true;
+                }
+            }
+            m_Scene = m_Runtime->RuntimeScene();
+            m_Presentation = m_Runtime->Presentation();
+            if (m_ReplayState->Started)
+            {
+                const auto status = Owner().Replay()->Status();
+                if (status.State == Keire::ReplaySessionState::Completed ||
+                    status.State == Keire::ReplaySessionState::Diverged ||
+                    status.State == Keire::ReplaySessionState::Failed)
+                {
+                    WriteReplayReport(m_CommandLine, *m_ReplayState, status);
+                    Owner().RequestExit(status.State == Keire::ReplaySessionState::Diverged ||
+                                                status.State == Keire::ReplaySessionState::Failed
+                                            ? 2
+                                            : 0);
+                    return;
+                }
             }
             const auto pixels = Owner().MainWindow()->PixelSize();
             const auto width = std::max(pixels.Width, 1U);
@@ -279,7 +582,7 @@ namespace
             if (const auto vfx = m_Runtime->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
             Owner().Renderer()->Submit(std::move(renderRequest));
-            if (m_MaximumFrames != 0 && ++m_RenderedFrames >= m_MaximumFrames)
+            if (m_CommandLine.Frames != 0 && ++m_RenderedFrames >= m_CommandLine.Frames)
                 Owner().RequestExit();
         }
 
@@ -532,8 +835,11 @@ namespace
         Keire::AssetId m_StartupScene;
         Keire::AssetId m_DefaultInput;
         Keire::RenderEnvironmentSettings m_Rendering;
-        std::uint32_t m_MaximumFrames = 0;
+        RuntimeCommandLine m_CommandLine;
+        Keire::ReplayFingerprints m_ReplayFingerprints;
+        std::shared_ptr<RuntimeReplayState> m_ReplayState;
         std::uint32_t m_RenderedFrames = 0;
+        std::uint64_t m_FixedTicks = 0;
         Keire::Ref<Keire::SceneLoadOperation> m_Load;
         Keire::Ref<Keire::SceneRuntimeSession> m_Runtime;
         Keire::Ref<Keire::Scene> m_Scene;
@@ -548,14 +854,219 @@ namespace
     {
       public:
         RuntimeApplication(Keire::ApplicationSpecification specification, RuntimeManifest manifest,
-                           const std::uint32_t frames)
-            : Application(std::move(specification)), m_Manifest(std::move(manifest)), m_Frames(frames)
+                           RuntimeCommandLine commandLine, Keire::ReplayFingerprints fingerprints)
+            : Application(std::move(specification)), m_Manifest(std::move(manifest)),
+              m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
+              m_ReplayState(std::make_shared<RuntimeReplayState>())
         {
         }
 
       protected:
         void OnInitialize() override
         {
+            Replay()->RegisterSerializer(
+                {.Id = "runtime.scene",
+                 .Version = 1,
+                 .Deterministic = true,
+                 .Capture =
+                     [state = m_ReplayState]
+                 {
+                     if (!state->Session || !state->Session->RuntimeScene())
+                         throw std::logic_error("Runtime scene replay state is unavailable.");
+                     return Keire::SceneAsset::Encode(state->Session->RuntimeScene()->Snapshot());
+                 },
+                 .Restore =
+                     [state = m_ReplayState](const std::span<const std::byte> bytes)
+                 {
+                     if (!state->Session)
+                         throw std::logic_error("Runtime scene replay state is unavailable.");
+                     state->Session->ReplaceRuntime(Keire::SceneAsset::Decode(bytes)->Definition());
+                 }});
+            Replay()->RegisterSerializer(
+                {.Id = "runtime.scene.animation",
+                 .Version = 1,
+                 .Deterministic = true,
+                 .Capture =
+                     [state = m_ReplayState]
+                 {
+                     if (!state->Session)
+                         throw std::logic_error("Runtime animation replay state is unavailable.");
+                     nlohmann::json animators = nlohmann::json::array();
+                     for (const auto& animator : state->Session->CaptureAnimatorCheckpoint())
+                         animators.push_back(EncodeAnimatorCheckpoint(animator));
+                     const auto encoded = nlohmann::json::to_cbor(
+                         nlohmann::json{{"schemaVersion", 1}, {"animators", std::move(animators)}});
+                     return std::vector<std::byte>(reinterpret_cast<const std::byte*>(encoded.data()),
+                                                   reinterpret_cast<const std::byte*>(encoded.data() + encoded.size()));
+                 },
+                 .Restore =
+                     [state = m_ReplayState](const std::span<const std::byte> bytes)
+                 {
+                     if (!state->Session)
+                         throw std::logic_error("Runtime animation replay state is unavailable.");
+                     const auto document =
+                         nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                                   reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
+                     if (document.value("schemaVersion", 0) != 1 || !document.at("animators").is_array())
+                         throw std::runtime_error("Runtime animation replay checkpoint is malformed.");
+                     std::vector<Keire::SceneAnimatorCheckpoint> animators;
+                     animators.reserve(document.at("animators").size());
+                     for (const auto& animator : document.at("animators"))
+                         animators.push_back(DecodeAnimatorCheckpoint(animator));
+                     state->Session->RestoreAnimatorCheckpoint(animators);
+                 }});
+            Replay()->RegisterSerializer(
+                {.Id = "runtime.scene.physics",
+                 .Version = 1,
+                 .Deterministic = true,
+                 .Capture =
+                     [state = m_ReplayState]
+                 {
+                     if (!state->Session)
+                         throw std::logic_error("Runtime physics replay state is unavailable.");
+                     nlohmann::json bodies = nlohmann::json::array();
+                     for (const auto& body : state->Session->CapturePhysicsCheckpoint())
+                     {
+                         bodies.push_back(
+                             {{"entity", body.Entity.ToString()},
+                              {"position", {body.Position.X, body.Position.Y, body.Position.Z}},
+                              {"rotation", {body.Rotation.X, body.Rotation.Y, body.Rotation.Z, body.Rotation.W}},
+                              {"linearVelocity", {body.LinearVelocity.X, body.LinearVelocity.Y, body.LinearVelocity.Z}},
+                              {"angularVelocity",
+                               {body.AngularVelocity.X, body.AngularVelocity.Y, body.AngularVelocity.Z}},
+                              {"sleeping", body.Sleeping}});
+                     }
+                     const auto encoded =
+                         nlohmann::json::to_cbor(nlohmann::json{{"schemaVersion", 1}, {"bodies", std::move(bodies)}});
+                     return std::vector<std::byte>(reinterpret_cast<const std::byte*>(encoded.data()),
+                                                   reinterpret_cast<const std::byte*>(encoded.data() + encoded.size()));
+                 },
+                 .Restore =
+                     [state = m_ReplayState](const std::span<const std::byte> bytes)
+                 {
+                     if (!state->Session)
+                         throw std::logic_error("Runtime physics replay state is unavailable.");
+                     const auto document =
+                         nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                                   reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
+                     if (document.value("schemaVersion", 0) != 1 || !document.at("bodies").is_array())
+                         throw std::runtime_error("Runtime physics replay checkpoint is malformed.");
+                     std::vector<Keire::ScenePhysicsCheckpointBody> bodies;
+                     bodies.reserve(document.at("bodies").size());
+                     for (const auto& encoded : document.at("bodies"))
+                     {
+                         const auto vector3 = [&encoded](const char* name)
+                         {
+                             const auto& value = encoded.at(name);
+                             if (!value.is_array() || value.size() != 3U)
+                                 throw std::runtime_error("Runtime physics checkpoint vector is malformed.");
+                             return Keire::Vector3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
+                         };
+                         const auto& rotation = encoded.at("rotation");
+                         if (!rotation.is_array() || rotation.size() != 4U)
+                             throw std::runtime_error("Runtime physics checkpoint rotation is malformed.");
+                         bodies.push_back({Keire::EntityId::Parse(encoded.at("entity").get<std::string>()),
+                                           vector3("position"),
+                                           {rotation[0].get<float>(), rotation[1].get<float>(),
+                                            rotation[2].get<float>(), rotation[3].get<float>()},
+                                           vector3("linearVelocity"),
+                                           vector3("angularVelocity"),
+                                           encoded.at("sleeping").get<bool>()});
+                     }
+                     state->Session->RestorePhysicsCheckpoint(bodies);
+                 }});
+            Replay()->RegisterSerializer(
+                {.Id = "runtime.scene.presentation",
+                 .Version = 1,
+                 .Deterministic = true,
+                 .Capture =
+                     [state = m_ReplayState]
+                 {
+                     if (!state->Session || !state->Session->Presentation())
+                         throw std::logic_error("Runtime presentation replay state is unavailable.");
+                     const auto checkpoint = state->Session->Presentation()->CaptureCheckpoint();
+                     nlohmann::json audio = nlohmann::json::array();
+                     for (const auto& source : checkpoint.AudioSources)
+                     {
+                         audio.push_back({{"entity", source.Entity.ToString()},
+                                          {"clip", source.Clip.ToString()},
+                                          {"state", static_cast<std::uint8_t>(source.State)},
+                                          {"frame", source.Frame},
+                                          {"manualPlayRequested", source.ManualPlayRequested},
+                                          {"playOnAwakeConsumed", source.PlayOnAwakeConsumed}});
+                     }
+                     nlohmann::json events = nlohmann::json::array();
+                     for (const auto& event : checkpoint.PendingUiEvents)
+                     {
+                         events.push_back({{"type", static_cast<std::uint8_t>(event.Type)},
+                                           {"target", event.Target.ToString()},
+                                           {"pointerX", event.PointerX},
+                                           {"pointerY", event.PointerY},
+                                           {"button", static_cast<std::uint8_t>(event.Button)}});
+                     }
+                     const auto encoded = nlohmann::json::to_cbor(
+                         nlohmann::json{{"schemaVersion", 1},
+                                        {"focus", checkpoint.FocusedEntity ? checkpoint.FocusedEntity.ToString() : ""},
+                                        {"audio", std::move(audio)},
+                                        {"events", std::move(events)}});
+                     return std::vector<std::byte>(reinterpret_cast<const std::byte*>(encoded.data()),
+                                                   reinterpret_cast<const std::byte*>(encoded.data() + encoded.size()));
+                 },
+                 .Restore =
+                     [state = m_ReplayState](const std::span<const std::byte> bytes)
+                 {
+                     if (!state->Session || !state->Session->Presentation())
+                         throw std::logic_error("Runtime presentation replay state is unavailable.");
+                     const auto document =
+                         nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                                                   reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
+                     if (document.value("schemaVersion", 0) != 1 || !document.at("audio").is_array() ||
+                         !document.at("events").is_array())
+                     {
+                         throw std::runtime_error("Runtime presentation replay checkpoint is malformed.");
+                     }
+                     Keire::ScenePresentationCheckpoint checkpoint;
+                     const auto focus = document.at("focus").get<std::string>();
+                     if (!focus.empty())
+                         checkpoint.FocusedEntity = Keire::EntityId::Parse(focus);
+                     checkpoint.AudioSources.reserve(document.at("audio").size());
+                     for (const auto& source : document.at("audio"))
+                     {
+                         checkpoint.AudioSources.push_back(
+                             {Keire::EntityId::Parse(source.at("entity").get<std::string>()),
+                              Keire::AssetId::Parse(source.at("clip").get<std::string>()),
+                              static_cast<Keire::AudioSourcePlaybackState>(source.at("state").get<std::uint8_t>()),
+                              source.at("frame").get<std::uint64_t>(), source.at("manualPlayRequested").get<bool>(),
+                              source.at("playOnAwakeConsumed").get<bool>()});
+                     }
+                     checkpoint.PendingUiEvents.reserve(document.at("events").size());
+                     for (const auto& event : document.at("events"))
+                     {
+                         checkpoint.PendingUiEvents.push_back(
+                             {static_cast<Keire::RuntimeUiEventType>(event.at("type").get<std::uint8_t>()),
+                              Keire::EntityId::Parse(event.at("target").get<std::string>()),
+                              event.at("pointerX").get<float>(), event.at("pointerY").get<float>(),
+                              static_cast<Keire::RuntimeUiPointerButton>(event.at("button").get<std::uint8_t>())});
+                     }
+                     state->Session->Presentation()->RestoreCheckpoint(checkpoint);
+                 }});
+            Replay()->RegisterSerializer({.Id = "runtime.scene.vfx",
+                                          .Version = 1,
+                                          .Deterministic = true,
+                                          .Capture =
+                                              [state = m_ReplayState]
+                                          {
+                                              if (!state->Session)
+                                                  throw std::logic_error("Runtime VFX replay state is unavailable.");
+                                              return state->Session->CaptureVfxCheckpoint();
+                                          },
+                                          .Restore =
+                                              [state = m_ReplayState](const std::span<const std::byte> bytes)
+                                          {
+                                              if (!state->Session)
+                                                  throw std::logic_error("Runtime VFX replay state is unavailable.");
+                                              state->Session->RestoreVfxCheckpoint(bytes);
+                                          }});
             if (m_Manifest.Scripting)
             {
                 Keire::ManagedReloadRequest reload;
@@ -577,14 +1088,63 @@ namespace
                                              Scripts()->ReloadStatus().Diagnostic);
                 Scripts()->CommitReload();
                 Scripts()->InstallManagedComponents(Scenes()->Components());
+                Replay()->RegisterSerializer(
+                    {.Id = "runtime.scene.scripting",
+                     .Version = 1,
+                     .Deterministic = true,
+                     .Capture =
+                         [scripts = Scripts()]
+                     {
+                         nlohmann::json behaviours = nlohmann::json::array();
+                         for (const auto& behaviour : scripts->CaptureReplayCheckpoint())
+                         {
+                             behaviours.push_back({{"type", behaviour.TypeName},
+                                                   {"component", behaviour.ComponentType.ToString()},
+                                                   {"world", behaviour.World},
+                                                   {"entity", behaviour.Entity.ToString()},
+                                                   {"state", behaviour.State},
+                                                   {"enabled", behaviour.Enabled},
+                                                   {"faulted", behaviour.Faulted}});
+                         }
+                         const auto encoded = nlohmann::json::to_cbor(
+                             nlohmann::json{{"schemaVersion", 1}, {"behaviours", std::move(behaviours)}});
+                         return std::vector<std::byte>(
+                             reinterpret_cast<const std::byte*>(encoded.data()),
+                             reinterpret_cast<const std::byte*>(encoded.data() + encoded.size()));
+                     },
+                     .Restore =
+                         [scripts = Scripts()](const std::span<const std::byte> bytes)
+                     {
+                         const auto document = nlohmann::json::from_cbor(
+                             reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                             reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
+                         if (document.value("schemaVersion", 0) != 1 || !document.at("behaviours").is_array())
+                             throw std::runtime_error("Managed replay checkpoint is malformed.");
+                         std::vector<Keire::ManagedBehaviourCheckpoint> behaviours;
+                         behaviours.reserve(document.at("behaviours").size());
+                         for (const auto& encoded : document.at("behaviours"))
+                         {
+                             behaviours.push_back(
+                                 {encoded.at("type").get<std::string>(),
+                                  Keire::ComponentTypeId::Parse(encoded.at("component").get<std::string>()),
+                                  encoded.at("world").get<std::uint64_t>(),
+                                  Keire::AssetId::Parse(encoded.at("entity").get<std::string>()),
+                                  encoded.at("state").get<std::string>(), encoded.at("enabled").get<bool>(),
+                                  encoded.at("faulted").get<bool>()});
+                         }
+                         scripts->RestoreReplayCheckpoint(behaviours);
+                     }});
             }
             (void)PushLayer(std::make_unique<RuntimeLayer>(m_Manifest.StartupScene, m_Manifest.DefaultInput,
-                                                           m_Manifest.Rendering, m_Frames));
+                                                           m_Manifest.Rendering, m_CommandLine, m_ReplayFingerprints,
+                                                           m_ReplayState));
         }
 
       private:
         RuntimeManifest m_Manifest;
-        std::uint32_t m_Frames = 0;
+        RuntimeCommandLine m_CommandLine;
+        Keire::ReplayFingerprints m_ReplayFingerprints;
+        std::shared_ptr<RuntimeReplayState> m_ReplayState;
     };
 } // namespace
 
@@ -592,7 +1152,7 @@ namespace Keire
 {
     ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
     {
-        return {"--content <path> [--frames <count>]", RuntimeOptions};
+        return {"--content <path> [runtime/replay options]", RuntimeOptions};
     }
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
@@ -600,9 +1160,15 @@ namespace Keire
         const auto commandLine = ParseCommandLine(arguments);
         auto manifest = LoadManifest(commandLine.Content);
         ApplicationSpecification specification;
+        specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
+        auto moduleValidation = CreateRef<ModuleRegistry>(specification.Modules);
+        moduleValidation->ValidateCatalog(manifest.RequiredModules);
+        if (commandLine.Scene)
+            manifest.StartupScene = commandLine.Scene;
+        const auto replayFingerprints = BuildReplayFingerprints(manifest, *moduleValidation);
         specification.MainWindow.Title = "Kéire Runtime";
-        specification.MainWindow.Visible = commandLine.Frames == 0;
-        specification.TargetFrameRate = commandLine.Frames == 0 ? 0 : 240;
+        specification.MainWindow.Visible = commandLine.Frames == 0 && !commandLine.Headless;
+        specification.TargetFrameRate = specification.MainWindow.Visible ? 0 : 240;
         specification.SuspendWhenMainWindowMinimized = false;
         specification.Assets.Mode = AssetMode::Cooked;
         specification.Assets.Mounts.push_back({commandLine.Content / "catalog.json", 0, false});
@@ -632,9 +1198,10 @@ namespace Keire
             specification.Physics.CollisionMatrix = manifest.PhysicsCollisionMatrix;
         }
         if (manifest.Audio)
-            specification.Audio.Mode = commandLine.Frames == 0 ? AudioMode::Enabled : AudioMode::Headless;
+            specification.Audio.Mode = specification.MainWindow.Visible ? AudioMode::Enabled : AudioMode::Headless;
         if (manifest.Navigation)
             specification.Navigation.Mode = NavigationMode::Enabled;
-        return std::make_unique<RuntimeApplication>(std::move(specification), std::move(manifest), commandLine.Frames);
+        return std::make_unique<RuntimeApplication>(std::move(specification), std::move(manifest), commandLine,
+                                                    replayFingerprints);
     }
 } // namespace Keire

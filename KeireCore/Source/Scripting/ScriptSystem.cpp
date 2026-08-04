@@ -8,6 +8,7 @@
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/ECS/Entity.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -43,6 +44,7 @@
 #include <set>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -1115,6 +1117,14 @@ namespace Keire
             std::uint64_t Generation = 0;
         };
 
+        using ManagedJobCallback = std::uint8_t (*)(void*, std::uint8_t, std::uint8_t);
+
+        struct ManagedJobRecord final
+        {
+            JobHandle Work;
+            std::uint64_t Generation = 0;
+        };
+
         static constexpr std::uint32_t FixedUpdateCallback = 1U << 0;
         static constexpr std::uint32_t UpdateCallback = 1U << 1;
         static constexpr std::uint32_t LateUpdateCallback = 1U << 2;
@@ -1133,16 +1143,34 @@ namespace Keire
             Impl* m_Previous;
         };
 
-        explicit Impl(ScriptSystemSpecification value)
-            : Specification(std::move(value)), Owner(std::this_thread::get_id()),
+        explicit Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
+            : Specification(std::move(value)), Owner(std::this_thread::get_id()), Scheduler(std::move(jobs)),
               Lifetime(std::make_shared<Impl*>(this))
         {
+            if (!Scheduler)
+            {
+                JobSystemSpecification jobsSpecification;
+                jobsSpecification.WorkerCount = 1;
+                jobsSpecification.BlockingWorkerCount = 1;
+                Scheduler = CreateRef<JobSystem>(jobsSpecification);
+                OwnScheduler = true;
+            }
+            WorkScope = Scheduler->CreateScope("Managed builds");
+            ManagedJobs = Scheduler->CreateScope("Managed assembly jobs");
         }
 
         ~Impl()
         {
-            *Lifetime = nullptr;
             StopWorker();
+            if (WorkScope)
+            {
+                WorkScope->Cancel();
+                WorkScope->Wait();
+            }
+            DrainManagedJobs(false);
+            if (OwnScheduler && Scheduler)
+                Scheduler->Close();
+            *Lifetime = nullptr;
             ShutdownRuntime();
         }
 
@@ -1267,10 +1295,11 @@ namespace Keire
 
         void StopWorker() noexcept
         {
-            if (Worker.joinable())
+            BuildCancellation.request_stop();
+            if (Worker)
             {
-                Worker.request_stop();
-                Worker.join();
+                (void)Worker.Wait();
+                Worker = {};
             }
         }
 
@@ -1319,6 +1348,7 @@ namespace Keire
 
         void ShutdownRuntime() noexcept
         {
+            DrainManagedJobs(false);
             ResetManagedAssetGeneration(CandidateNativeRuntimeType, Reload.Generation + 1);
             ResetManagedAssetGeneration(ActiveNativeRuntimeType, Reload.Generation);
             {
@@ -1349,6 +1379,36 @@ namespace Keire
                 {
                 }
                 RuntimeInitialized = false;
+            }
+        }
+
+        void DrainManagedJobs(const bool recreate) noexcept
+        {
+            Ref<JobScope> jobs;
+            {
+                std::scoped_lock lock(ManagedJobMutex);
+                jobs = std::move(ManagedJobs);
+            }
+            if (jobs)
+            {
+                jobs->Cancel();
+                jobs->Wait();
+            }
+            {
+                std::scoped_lock lock(ManagedJobMutex);
+                ManagedJobRecords.clear();
+            }
+            if (recreate && Scheduler && Scheduler->IsOpen())
+            {
+                try
+                {
+                    auto replacement = Scheduler->CreateScope("Managed assembly jobs");
+                    std::scoped_lock lock(ManagedJobMutex);
+                    ManagedJobs = std::move(replacement);
+                }
+                catch (...)
+                {
+                }
             }
         }
 
@@ -1459,6 +1519,108 @@ namespace Keire
             catch (...)
             {
             }
+        }
+
+        static std::uint64_t RuntimeSubmitManagedJob(const std::uint64_t* dependencyIds,
+                                                     const std::int32_t dependencyCount, const std::uint8_t priority,
+                                                     const std::uint8_t jobClass, const Coral::String name, void* state,
+                                                     const ManagedJobCallback callback) noexcept
+        {
+            auto* runtime = CurrentRuntime;
+            if (!runtime || !callback || !state || dependencyCount < 0 || dependencyCount > 1024 ||
+                priority > static_cast<std::uint8_t>(JobPriority::Background) ||
+                jobClass > static_cast<std::uint8_t>(JobClass::Blocking))
+                return 0;
+            JobHandle work;
+            bool completionInstalled = false;
+            try
+            {
+                std::uint64_t generation = 0;
+                {
+                    std::scoped_lock lock(runtime->Mutex);
+                    if (runtime->Reload.State != ManagedReloadState::Active)
+                        return 0;
+                    generation = runtime->Reload.Generation;
+                }
+                JobDescription description;
+                description.Name = static_cast<std::string>(name);
+                if (description.Name.empty())
+                    description.Name = "Managed callback";
+                description.Priority = static_cast<JobPriority>(priority);
+                description.Class = static_cast<JobClass>(jobClass);
+                std::uint64_t id = 0;
+                const auto lifetime = std::weak_ptr<Impl*>(runtime->Lifetime);
+                std::scoped_lock lock(runtime->ManagedJobMutex);
+                if (!runtime->ManagedJobs || runtime->ManagedJobRecords.size() >= 65536)
+                    return 0;
+                for (std::int32_t index = 0; index < dependencyCount; ++index)
+                {
+                    const auto found = runtime->ManagedJobRecords.find(dependencyIds[index]);
+                    if (found == runtime->ManagedJobRecords.end() || found->second.Generation != generation)
+                        return 0;
+                    description.Dependencies.push_back(found->second.Work);
+                }
+                if (runtime->NextManagedJob == 0)
+                    return 0;
+                id = runtime->NextManagedJob++;
+                work = runtime->ManagedJobs->Submit(std::move(description),
+                                                    [lifetime, callback, state](JobContext& context)
+                                                    {
+                                                        const auto locked = lifetime.lock();
+                                                        if (!locked || !*locked)
+                                                            throw std::runtime_error(
+                                                                "Managed job runtime is unavailable.");
+                                                        RuntimeScope scope(**locked);
+                                                        if (callback(state, 0, context.StopRequested() ? 1 : 0) != 0)
+                                                            throw std::runtime_error("Managed job callback failed.");
+                                                    });
+                work.OnComplete(
+                    [lifetime, callback, state](const JobResult& result)
+                    {
+                        const auto locked = lifetime.lock();
+                        if (!locked || !*locked)
+                            return;
+                        RuntimeScope scope(**locked);
+                        const auto phase = result.Status == JobStatus::Succeeded ? std::uint8_t{1}
+                                           : result.Status == JobStatus::Failed  ? std::uint8_t{2}
+                                                                                 : std::uint8_t{3};
+                        (void)callback(state, phase, 0);
+                    });
+                completionInstalled = true;
+                runtime->ManagedJobRecords.emplace(id, ManagedJobRecord{work, generation});
+                return id;
+            }
+            catch (...)
+            {
+                if (work)
+                {
+                    work.Cancel();
+                    (void)work.Wait();
+                    if (!completionInstalled)
+                    {
+                        const auto result = work.Result();
+                        const auto phase = result.Status == JobStatus::Succeeded ? std::uint8_t{1}
+                                           : result.Status == JobStatus::Failed  ? std::uint8_t{2}
+                                                                                 : std::uint8_t{3};
+                        (void)callback(state, phase, 0);
+                    }
+                }
+                return 0;
+            }
+        }
+
+        static void RuntimeCancelManagedJob(const std::uint64_t id) noexcept
+        {
+            if (!CurrentRuntime || id == 0)
+                return;
+            JobHandle job;
+            {
+                std::scoped_lock lock(CurrentRuntime->ManagedJobMutex);
+                const auto found = CurrentRuntime->ManagedJobRecords.find(id);
+                if (found != CurrentRuntime->ManagedJobRecords.end())
+                    job = found->second.Work;
+            }
+            job.Cancel();
         }
 
         static void RuntimeWriteLog(const std::uint8_t level, const Coral::String message) noexcept
@@ -3474,7 +3636,15 @@ namespace Keire
         std::string RuntimeException;
         bool RuntimeInitialized = false;
         std::uint64_t NextReload = 1;
-        std::jthread Worker;
+        Ref<JobSystem> Scheduler;
+        Ref<JobScope> WorkScope;
+        Ref<JobScope> ManagedJobs;
+        std::mutex ManagedJobMutex;
+        std::unordered_map<std::uint64_t, ManagedJobRecord> ManagedJobRecords;
+        std::uint64_t NextManagedJob = 1;
+        JobHandle Worker;
+        std::stop_source BuildCancellation;
+        bool OwnScheduler = false;
         std::uint64_t NextOperation = 1;
         static inline thread_local Impl* CurrentRuntime = nullptr;
     };
@@ -3662,7 +3832,8 @@ namespace Keire
         std::string m_State = "{\"Version\":1,\"Fields\":[]}";
     };
 
-    ScriptSystem::ScriptSystem(ScriptSystemSpecification specification) : m_Impl(std::make_unique<Impl>(specification))
+    ScriptSystem::ScriptSystem(ScriptSystemSpecification specification, Ref<JobSystem> jobs)
+        : m_Impl(std::make_unique<Impl>(specification, std::move(jobs)))
     {
         if (specification.Mode == ScriptMode::Disabled || specification.ProjectRoot.empty() ||
             specification.AssemblyDirectory.empty() || specification.AssemblyDirectory.is_absolute() ||
@@ -3756,11 +3927,7 @@ namespace Keire
         ValidateManagedAssemblyGraph(request.Assemblies);
         if (request.Assemblies.empty())
             throw std::invalid_argument("Managed build requires at least one assembly.");
-        if (m_Impl->Worker.joinable())
-        {
-            m_Impl->Worker.request_stop();
-            m_Impl->Worker.join();
-        }
+        m_Impl->StopWorker();
         if (m_Impl->Dotnet.empty())
             m_Impl->Dotnet =
                 Detail::ResolveDotnet(m_Impl->Specification.DotnetExecutable, m_Impl->Specification.SdkSelection,
@@ -3773,9 +3940,21 @@ namespace Keire
             for (const auto& assembly : request.Assemblies)
                 m_Impl->Status.ChangedAssemblies.push_back(assembly.Definition.Name);
         }
-        m_Impl->Worker = std::jthread([implementation = m_Impl.get(), request = std::move(request),
-                                       operation](const std::stop_token cancellation) mutable
-                                      { implementation->RunBuild(cancellation, std::move(request), operation); });
+        m_Impl->BuildCancellation = std::stop_source{};
+        const auto buildCancellation = m_Impl->BuildCancellation.get_token();
+        m_Impl->Worker = m_Impl->WorkScope->Submit(
+            {.Name = "Managed assembly build",
+             .Priority = JobPriority::High,
+             .Class = JobClass::Blocking,
+             .Domain = JobDomain::Tooling},
+            [implementation = m_Impl.get(), request = std::move(request), operation,
+             buildCancellation](JobContext& context) mutable
+            {
+                std::stop_source combined;
+                std::stop_callback schedulerStop(context.StopToken(), [&combined] { combined.request_stop(); });
+                std::stop_callback buildStop(buildCancellation, [&combined] { combined.request_stop(); });
+                implementation->RunBuild(combined.get_token(), std::move(request), operation);
+            });
         return operation;
     }
 
@@ -3784,8 +3963,7 @@ namespace Keire
         m_Impl->RequireOwner();
         if (!operation || BuildStatus().Operation != operation)
             throw std::invalid_argument("Managed build operation is unavailable.");
-        if (m_Impl->Worker.joinable())
-            m_Impl->Worker.request_stop();
+        m_Impl->BuildCancellation.request_stop();
     }
 
     bool ScriptSystem::WaitForBuild(const ManagedBuildOperationId operation,
@@ -3908,6 +4086,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeCancelManagedAssetLoad));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ReleaseManagedAssetIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeReleaseManagedAsset));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SubmitManagedJobIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSubmitManagedJob));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "CancelManagedJobIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeCancelManagedJob));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DeltaTimeIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeDeltaTime));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "FixedDeltaTimeIcall",
@@ -4375,6 +4557,8 @@ namespace Keire
             throw;
         }
 
+        // Reverse-P/Invoke callbacks must finish while the old assembly load context is still alive.
+        m_Impl->DrainManagedJobs(true);
         auto previous = std::move(m_Impl->ActiveContext);
         const auto* previousNativeRuntime = m_Impl->ActiveNativeRuntimeType;
         const auto previousGeneration = m_Impl->Reload.Generation;
@@ -4750,6 +4934,105 @@ namespace Keire
         return true;
     }
 
+    std::vector<ManagedBehaviourCheckpoint> ScriptSystem::CaptureReplayCheckpoint()
+    {
+        m_Impl->RequireOwner();
+        if (!IsOpen())
+            throw std::logic_error("ScriptSystem is closed.");
+        std::vector<ManagedBehaviourCheckpoint> result;
+        result.reserve(m_Impl->Instances.size());
+        for (auto& [id, instance] : m_Impl->Instances)
+        {
+            (void)id;
+            if (!instance.Object.IsValid())
+                continue;
+            instance.State = m_Impl->CaptureState(instance.Object, true);
+            result.push_back({instance.TypeName, instance.ComponentType, instance.World, instance.Entity,
+                              instance.State, instance.Enabled, instance.Faulted});
+        }
+        std::ranges::sort(result,
+                          [](const ManagedBehaviourCheckpoint& left, const ManagedBehaviourCheckpoint& right)
+                          {
+                              return std::tie(left.World, left.Entity, left.ComponentType, left.TypeName) <
+                                     std::tie(right.World, right.Entity, right.ComponentType, right.TypeName);
+                          });
+        return result;
+    }
+
+    void ScriptSystem::RestoreReplayCheckpoint(const std::span<const ManagedBehaviourCheckpoint> checkpoint)
+    {
+        m_Impl->RequireOwner();
+        if (!IsOpen())
+            throw std::logic_error("ScriptSystem is closed.");
+        using Key = std::tuple<std::uint64_t, AssetId, ComponentTypeId>;
+        std::map<Key, std::uint64_t> instances;
+        for (const auto& [id, instance] : m_Impl->Instances)
+        {
+            if (instance.Object.IsValid() &&
+                !instances.emplace(Key{instance.World, instance.Entity, instance.ComponentType}, id).second)
+            {
+                throw std::runtime_error("Managed replay state contains duplicate runtime behaviour identities.");
+            }
+        }
+        std::set<Key> checkpointKeys;
+        for (const auto& state : checkpoint)
+        {
+            const Key key{state.World, state.Entity, state.ComponentType};
+            const auto found = instances.find(key);
+            if (state.World == 0 || !state.Entity || !state.ComponentType || state.TypeName.empty() ||
+                !checkpointKeys.insert(key).second || found == instances.end() ||
+                m_Impl->Instances.at(found->second).TypeName != state.TypeName)
+            {
+                throw std::runtime_error("Managed replay checkpoint is incompatible with the runtime behaviours.");
+            }
+        }
+        if (checkpointKeys.size() != instances.size())
+            throw std::runtime_error("Managed replay checkpoint does not contain every runtime behaviour.");
+
+        struct RollbackState final
+        {
+            std::uint64_t Instance = 0;
+            std::string State;
+            bool Enabled = true;
+            bool Faulted = false;
+        };
+        std::vector<RollbackState> rollback;
+        rollback.reserve(checkpoint.size());
+        try
+        {
+            for (const auto& state : checkpoint)
+            {
+                const auto id = instances.at(Key{state.World, state.Entity, state.ComponentType});
+                auto& instance = m_Impl->Instances.at(id);
+                rollback.push_back(
+                    {id, m_Impl->CaptureState(instance.Object, true), instance.Enabled, instance.Faulted});
+                m_Impl->RestoreState(instance.Object, state.State, true);
+                instance.State = state.State;
+                instance.Enabled = state.Enabled;
+                instance.Faulted = state.Faulted;
+            }
+        }
+        catch (...)
+        {
+            const auto original = std::current_exception();
+            for (auto iterator = rollback.rbegin(); iterator != rollback.rend(); ++iterator)
+            {
+                try
+                {
+                    auto& instance = m_Impl->Instances.at(iterator->Instance);
+                    m_Impl->RestoreState(instance.Object, iterator->State, true);
+                    instance.State = iterator->State;
+                    instance.Enabled = iterator->Enabled;
+                    instance.Faulted = iterator->Faulted;
+                }
+                catch (...)
+                {
+                }
+            }
+            std::rethrow_exception(original);
+        }
+    }
+
     void ScriptSystem::InstallManagedComponents(Ref<ComponentRegistry> registry)
     {
         m_Impl->RequireOwner();
@@ -4820,6 +5103,13 @@ namespace Keire
         if (!m_Impl->Open.exchange(false, std::memory_order_acq_rel))
             return;
         m_Impl->StopWorker();
+        if (m_Impl->WorkScope)
+        {
+            m_Impl->WorkScope->Cancel();
+            m_Impl->WorkScope->Wait();
+        }
+        if (m_Impl->OwnScheduler && m_Impl->Scheduler)
+            m_Impl->Scheduler->Close();
         m_Impl->ShutdownRuntime();
     }
 } // namespace Keire

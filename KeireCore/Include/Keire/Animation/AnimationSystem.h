@@ -467,6 +467,45 @@ namespace Keire
         AnimatorStateMachineProfile Profile;
     };
 
+    struct AnimatorCheckpointParameter
+    {
+        std::string Id;
+        AnimationParameterType Type = AnimationParameterType::Float;
+        float FloatValue = 0.0F;
+        std::int32_t IntegerValue = 0;
+        bool BooleanValue = false;
+    };
+
+    struct AnimatorCheckpointTransition
+    {
+        std::string Id;
+        std::string SourceStateId;
+        std::string DestinationStateId;
+        float SourceTime = 0.0F;
+        float DestinationTime = 0.0F;
+        float Elapsed = 0.0F;
+        float Duration = 0.0F;
+    };
+
+    struct AnimatorCheckpointLayer
+    {
+        std::string Id;
+        std::string StateId;
+        float Time = 0.0F;
+        float Weight = 1.0F;
+        float NormalizedTime = 0.0F;
+        std::optional<AnimatorCheckpointTransition> Transition;
+    };
+
+    struct AnimatorCheckpoint
+    {
+        std::vector<AnimatorCheckpointParameter> Parameters;
+        std::vector<AnimatorCheckpointLayer> Layers;
+        BoneTransform PreviousRoot;
+        bool Playing = true;
+        bool HasPreviousRootRotation = false;
+    };
+
     class KEIRE_API AnimatorInstance final
     {
       public:
@@ -495,6 +534,8 @@ namespace Keire
             return m_DebugSnapshot;
         }
         [[nodiscard]] AnimatorSample Update(float deltaSeconds);
+        [[nodiscard]] AnimatorCheckpoint CaptureCheckpoint() const;
+        void RestoreCheckpoint(const AnimatorCheckpoint& checkpoint);
         [[nodiscard]] bool Reload(Ref<const AnimationGraphAsset> graph);
         void Reset();
 

@@ -320,6 +320,8 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_PrefabOverrides);
             DrawPanelMenuItem(ui, m_BuildSettings);
             DrawPanelMenuItem(ui, m_Profiler);
+            DrawPanelMenuItem(ui, m_RenderGraph);
+            DrawPanelMenuItem(ui, m_ArchitectureDashboard);
             if (ui.MenuItem("Viewport Performance Overlay", m_ShowPerformanceOverlay))
                 m_ShowPerformanceOverlay = !m_ShowPerformanceOverlay;
         }

@@ -354,6 +354,7 @@ namespace Keire
                                                                       const SaveFileDialogSpecification& specification);
         void SetClipboardText(std::string_view text);
         [[nodiscard]] std::string ClipboardText() const;
+        void OpenUrl(std::string_view url);
         [[nodiscard]] Ref<SystemTray> CreateSystemTray(SystemTraySpecification specification);
         void SetCursorMode(WindowId window, CursorMode mode);
         [[nodiscard]] CursorMode GetCursorMode(WindowId window) const;

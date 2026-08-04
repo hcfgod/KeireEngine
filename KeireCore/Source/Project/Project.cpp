@@ -122,7 +122,27 @@ namespace Keire
                 descriptor.StartupScene = AssetId::Parse(document["startupScene"].get<std::string>());
             if (document.contains("defaultInput") && !document["defaultInput"].is_null())
                 descriptor.DefaultInput = AssetId::Parse(document["defaultInput"].get<std::string>());
-            if (descriptor.SchemaVersion != 1 || !descriptor.Id)
+            if (descriptor.SchemaVersion >= 2)
+            {
+                const auto& modules = document.at("requiredModules");
+                if (!modules.is_array())
+                    throw std::runtime_error("Project requiredModules must be an array.");
+                for (const auto& module : modules)
+                {
+                    RequiredSourceModule requirement;
+                    requirement.Id = module.at("id").get<std::string>();
+                    requirement.VersionRange = module.at("version").get<std::string>();
+                    if (requirement.Id.empty() || requirement.VersionRange.empty())
+                        throw std::runtime_error("Project contains an invalid required source module.");
+                    descriptor.RequiredModules.push_back(std::move(requirement));
+                }
+                if (!std::ranges::is_sorted(descriptor.RequiredModules, {}, &RequiredSourceModule::Id) ||
+                    std::ranges::adjacent_find(descriptor.RequiredModules, {}, &RequiredSourceModule::Id) !=
+                        descriptor.RequiredModules.end())
+                    throw std::runtime_error("Project required source modules must be unique and sorted by ID.");
+            }
+            if (descriptor.SchemaVersion == 0 || descriptor.SchemaVersion > CurrentProjectSchemaVersion ||
+                !descriptor.Id)
                 throw std::runtime_error("Project descriptor uses an unsupported schema or has no identity.");
             ValidateName(descriptor.Name);
             (void)ParseVersion(descriptor.CreatedWithEngineVersion);
@@ -132,7 +152,7 @@ namespace Keire
 
         void WriteDescriptor(const std::filesystem::path& root, const ProjectDescriptor& descriptor)
         {
-            if (descriptor.SchemaVersion != 1 || !descriptor.Id)
+            if (descriptor.SchemaVersion != CurrentProjectSchemaVersion || !descriptor.Id)
                 throw std::invalid_argument("Project descriptor uses an unsupported schema or has no identity.");
             ValidateName(descriptor.Name);
             (void)ParseVersion(descriptor.CreatedWithEngineVersion);
@@ -146,6 +166,17 @@ namespace Keire
                 descriptor.StartupScene ? Json(descriptor.StartupScene.ToString()) : Json(nullptr);
             document["defaultInput"] =
                 descriptor.DefaultInput ? Json(descriptor.DefaultInput.ToString()) : Json(nullptr);
+            auto requiredModules = descriptor.RequiredModules;
+            std::ranges::sort(requiredModules, {}, &RequiredSourceModule::Id);
+            if (std::ranges::adjacent_find(requiredModules, {}, &RequiredSourceModule::Id) != requiredModules.end())
+                throw std::invalid_argument("Required source module IDs must be unique.");
+            document["requiredModules"] = Json::array();
+            for (const auto& module : requiredModules)
+            {
+                if (module.Id.empty() || module.VersionRange.empty())
+                    throw std::invalid_argument("Required source modules must include an ID and version range.");
+                document["requiredModules"].push_back({{"id", module.Id}, {"version", module.VersionRange}});
+            }
             Detail::WriteTextFileAtomically(MarkerPath(root), document.dump(2) + '\n');
         }
 
@@ -402,6 +433,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
     {
         const auto root = ResolveRoot(path);
         auto descriptor = ParseDescriptor(root);
+        if (descriptor.SchemaVersion < CurrentProjectSchemaVersion)
+            throw std::runtime_error("Project upgrade is required before opening this project.");
         if (RequiresNewerEngine(descriptor))
             throw std::runtime_error("Project requires a newer Kéire engine version.");
         return CreateRef<Project>(std::make_unique<Impl>(root, std::move(descriptor), mode));
@@ -413,7 +446,12 @@ float4 PSMain(VertexOutput input) : SV_Target0
         {
             if (!std::filesystem::exists(path))
                 return ProjectStatus::Missing;
-            const auto descriptor = ParseDescriptor(ResolveRoot(path));
+            const auto root = ResolveRoot(path);
+            if (std::filesystem::is_regular_file(root / "Library" / "ProjectUpgrades" / "Active" / "journal.json"))
+                return ProjectStatus::RecoveryRequired;
+            const auto descriptor = ParseDescriptor(root);
+            if (descriptor.SchemaVersion < CurrentProjectSchemaVersion)
+                return ProjectStatus::UpgradeAvailable;
             if (RequiresNewerEngine(descriptor))
                 return ProjectStatus::RequiresNewerEngine;
             return ProjectStatus::Ready;

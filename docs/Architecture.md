@@ -1,5 +1,93 @@
 # Architecture
 
+## Shared architecture foundations
+
+`Application` owns the scheduler, memory tracker, string interner, diagnostic catalog/sink, source-module registry,
+streaming manager, and replay service. They are constructed before services that consume them. Shutdown proceeds in
+the opposite direction: managed generations and subsystem scopes cancel and drain, renderer and streaming references
+retire, modules stop in reverse dependency order, and the scheduler closes last. Asynchronous work captures reference-
+counted or weak state; reusable slots use typed generational handles so an old completion cannot address a replacement.
+
+`JobSystem` has bounded priority-aware injection queues, local LIFO worker deques, FIFO stealing, configurable compute
+workers, and a separately bounded two-worker blocking lane. Dependencies are immutable and scheduler-qualified.
+Failure and cancellation propagate without hiding the originating exception; continuations can explicitly observe a
+terminal result. A worker wait cooperatively executes ready work. `JobScope` supplies the cancellation-and-drain
+boundary used by asset loading/cooking, navigation, managed builds and managed callbacks, thumbnails, material work,
+VFX warmup, and physics. Jolt worlds share the application scheduler through a barrier adapter. Renderer submission,
+filesystem monitoring, process reaping, audio callbacks, and the logger retain their required dedicated threads.
+Strict simulation domains use submission order and deterministic partitions instead of stealing. Editor and tool asset
+databases inject the same process-owned scheduler into catalog cooking; the small internal scheduler remains only as a
+source-compatible fallback for standalone database consumers that do not provide one.
+
+`MemorySystem` exposes hierarchical domains, tracked PMR resources, immutable current/peak/allocation/external-byte
+snapshots, an owner-thread frame arena, per-job scratch arenas, and fence-owned renderer upload storage. It does not
+replace global allocation. The editor Architecture dashboard reports scheduler queues, memory domains, streaming
+budgets, active and retired renderer bytes, module order, replay state, and structured diagnostic counts.
+Application domains cover assets, renderer residency and fence retirement, physics, audio, animation, scripting,
+navigation, editor, replay, streaming, jobs, and registered source modules. Asset CPU residency and renderer transient,
+VFX GPU, and fence-retired bytes are refreshed from their authoritative subsystem counters.
+
+`DiagnosticId` values use `KEIRE-<DOMAIN>-NNNN`. Definitions are registered transactionally before the catalog freezes;
+reports carry severity, optional source location, and stable context. The Diagnostics panel resolves a packaged Markdown
+page first and the configured repository documentation URL second. `StringInterner` IDs remain process-local and are
+never serialized. Persistent assets continue to store canonical UTF-8 paths or UUIDs, while `AssetDatabase` maintains
+transactional identity and canonical-path indexes and reports portable case-fold collisions.
+
+## Streaming and frame-safe resources
+
+Cooked catalog schema 3 retains schema-1/2 monolithic readability and adds semantic segment tables over independently
+compressed, SHA-256-verified pages. New texture cooks publish metadata plus tail-first mip ranges, meshes publish
+metadata plus per-LOD vertex/index ranges, audio publishes metadata plus time-windowed pages, and animation publishes
+independently addressable time windows. Old catalogs surface one whole-resident compatibility segment.
+Whole-asset `LoadAsync` remains compatible, while `ReadRangeAsync` and `StreamingSystem` expose explicit texture-mip,
+mesh-LOD, audio-page, animation-window, and general residency requests. Priority follows metadata, reads, decode, and
+publication; bounded aging in the shared scheduler prevents starvation. Each class has independent CPU/GPU soft budgets,
+100/90 percent eviction hysteresis, pins, stale-handle cancellation, latency/miss/eviction counters, and retired-byte
+accounting. Audio underruns are reported atomically; the callback emits silence without waiting, allocating, decoding,
+locking a completion, or performing file I/O.
+
+Renderer resource replacement uses the fence retirement queue. GPU bytes remain charged until their submission fence
+signals, and CPU pages remain owned by snapshots, jobs, or consumers until their last reference releases. The compiled
+frame graph publishes an immutable inspection snapshot containing deterministic pass order, resource lifetimes,
+transitions, estimated bytes, and physical alias slots. The Render Graph panel reads that snapshot rather than compiling
+a second graph and performs JSON or Graphviz export only after an explicit atomic-save action.
+
+## Fixed-tick replay and deterministic profiles
+
+Gameplay input is latched at fixed-tick boundaries. Digital edges remain pending until a tick consumes them, analog
+absolute values use the latest sample, and relative mouse/scroll values accumulate across render frames and are consumed
+once. Actions are sorted by stable context/map/action/user identity and replay encoding stores exact floating-point bit
+patterns plus the input-map fingerprint. Playback replaces only gameplay input; editor-control contexts remain live.
+
+`.keirereplay` is a versioned chunk stream with build/project/module/content/deterministic fingerprints, SHA-256 chunk
+and footer integrity, zstd checkpoints, an initial checkpoint, and a configurable 300-tick checkpoint interval. Seeking
+restores the closest checkpoint and deterministically simulates intervening ticks. `StrictVerified` enables ordered
+simulation scheduling and rejects any simulation-affecting module or serializer without a deterministic path.
+`PerformanceCapture` retains complete input/checkpoints and divergence reporting without promising identical
+intermediate GPU results. Runtime flags support record, play, verify, headless execution, startup-scene override, tick
+limits, profile selection, and atomic JSON result reports. Checkpoint restoration validates every serializer before
+mutation and rolls all restored serializers back if a later one fails. Runtime checkpoints include the scene graph,
+Jolt transforms/velocities/sleep state, animator layers and transitions, managed behaviour state, presentation focus and
+queued UI events, logical audio voice frames/pause state, and VFX emitter/random/spawn state. Strict replay selects the
+canonical CPU VFX path and stores CPU particles; performance captures retain GPU emitter progress without claiming
+cross-device bit identity. Networking and rollback transport remain outside this layer.
+
+## Project upgrades and source modules
+
+Project descriptors are schema 2 and include a sorted required source-module catalog. Schema-1 projects inspect as
+`UpgradeAvailable`; they are not treated as corrupt. `ProjectUpgradeService` produces a pure ordered plan, applies under
+the project lock through path-confined staging and before-images, durably journals publication, validates each step and
+the staged project, can recover or roll back an interrupted transaction, and retains the three newest successful
+backups under `Library/ProjectUpgrades`. Hub application requires plan confirmation. `upgrade-project` is dry-run unless
+`--apply` is explicit and also exposes recovery and rollback.
+
+`EngineModule` is a source-level interface. The registry deterministically resolves versions and dependencies, rejects
+duplicates/cycles/mismatches before service startup, collects components, importers, decoders, replay serializers,
+diagnostics, upgrade steps, and memory domains through one transactional registration context, freezes afterward, and
+stops modules in reverse order. The same static source-module pack links into editor/client, runtime, AssetTool, and the
+asset worker. Its ordered catalog is embedded in cooked manifests and replay fingerprints. There is deliberately no
+`LoadLibrary`, `dlopen`, runtime unloading, or public binary plugin ABI.
+
 ## Persistence boundary
 
 First-party settings, scene/project documents, thumbnails, input overrides, asset metadata/cache objects, catalogs,

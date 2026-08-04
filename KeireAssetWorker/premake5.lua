@@ -98,5 +98,6 @@ project(AssetWorkerTarget)
         filter {}
     end
 
+    LinkKeireSourceModules()
     LinkKeireCore()
     LinkSDL3()

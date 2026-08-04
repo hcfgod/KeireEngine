@@ -20,6 +20,7 @@
 #include <ranges>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -246,6 +247,7 @@ namespace Keire
         {
             InputActionPhase Phase = InputActionPhase::Waiting;
             InputValue Value;
+            InputValue PendingRelativeValue;
             std::uint64_t StartedFrame = 0;
             std::uint64_t PerformedFrame = 0;
             std::uint64_t CanceledFrame = 0;
@@ -255,6 +257,9 @@ namespace Keire
             InputDeviceId ActiveDevice;
             bool Active = false;
             bool HoldPerformed = false;
+            bool PendingStarted = false;
+            bool PendingPerformed = false;
+            bool PendingCanceled = false;
         };
 
         class InputContextState final : public RefCounted
@@ -264,6 +269,8 @@ namespace Keire
             AssetHandle<InputActionAsset> AssetHandle;
             AssetId AssetIdValue;
             InputUserId User;
+            InputContextRole Role = InputContextRole::Gameplay;
+            std::uint64_t ContextId = 0;
             InputActionAssetDefinition Definition;
             std::uint64_t AssetRevision = std::numeric_limits<std::uint64_t>::max();
             std::unordered_set<AssetId> EnabledMaps;
@@ -701,7 +708,17 @@ namespace Keire
                     AutoJoin(event);
                     auto found = Devices.find(event.Device);
                     if (found != Devices.end())
-                        found->second.Controls[event.Path] = event.Value;
+                    {
+                        auto& control = found->second.Controls[event.Path];
+                        if (event.Path == "<Mouse>/delta" || event.Path == "<Mouse>/scroll")
+                        {
+                            control.Type = event.Value.Type;
+                            control.X += event.Value.X;
+                            control.Y += event.Value.Y;
+                        }
+                        else
+                            control = event.Value;
+                    }
                     CaptureRebind(event);
                     LastTimestamp = std::max(LastTimestamp, event.Timestamp);
                 }
@@ -710,7 +727,8 @@ namespace Keire
                     if (const auto context = iterator->Lock())
                     {
                         context->Rebuild();
-                        Evaluate(*context);
+                        if (!GameplayPlayback || context->Role == InputContextRole::EditorControl)
+                            Evaluate(*context);
                         ++iterator;
                     }
                     else
@@ -809,6 +827,23 @@ namespace Keire
                 return {ApplyProcessors(result, action.Processors), device};
             }
 
+            [[nodiscard]] static bool IsRelativeAction(const InputContextState& context,
+                                                       const InputActionMapDefinition& map,
+                                                       const InputActionDefinition& action)
+            {
+                return std::ranges::any_of(map.Bindings,
+                                           [&](const InputBindingDefinition& binding)
+                                           {
+                                               if (binding.Action != action.Id)
+                                                   return false;
+                                               const auto override = context.Overrides.find(binding.Id);
+                                               const std::string_view path = override == context.Overrides.end()
+                                                                                 ? binding.Path
+                                                                                 : override->second;
+                                               return path == "<Mouse>/delta" || path == "<Mouse>/scroll";
+                                           });
+            }
+
             void Emit(InputContextState& context, ActionRuntime& runtime, const InputActionMapDefinition& map,
                       const InputActionDefinition& action, const InputDeviceId device, const InputActionPhase phase,
                       const InputValue value)
@@ -817,11 +852,20 @@ namespace Keire
                 runtime.Value = value;
                 runtime.ActiveDevice = phase == InputActionPhase::Canceled ? InputDeviceId{} : device;
                 if (phase == InputActionPhase::Started)
+                {
                     runtime.StartedFrame = Frame;
+                    runtime.PendingStarted = true;
+                }
                 else if (phase == InputActionPhase::Performed)
+                {
                     runtime.PerformedFrame = Frame;
+                    runtime.PendingPerformed = true;
+                }
                 else if (phase == InputActionPhase::Canceled)
+                {
                     runtime.CanceledFrame = Frame;
+                    runtime.PendingCanceled = true;
+                }
                 const auto duration =
                     runtime.PressTimestamp == 0 || LastTimestamp < runtime.PressTimestamp
                         ? 0.0
@@ -849,6 +893,12 @@ namespace Keire
                         }
                         const InputBindingDefinition* winning = nullptr;
                         auto [value, device] = EvaluateAction(context, map, action, &winning);
+                        if (IsRelativeAction(context, map, action))
+                        {
+                            runtime.PendingRelativeValue.Type = action.ValueType;
+                            runtime.PendingRelativeValue.X += value.X;
+                            runtime.PendingRelativeValue.Y += value.Y;
+                        }
                         const bool active = value.Magnitude() >= 0.5F;
                         const auto& interactions =
                             winning && !winning->Interactions.empty() ? winning->Interactions : action.Interactions;
@@ -1043,10 +1093,12 @@ namespace Keire
             std::uint64_t Frame = 0;
             std::uint64_t LastTimestamp = 0;
             std::uint64_t DroppedEvents = 0;
+            std::uint64_t NextContext = 1;
             double DeltaSeconds = 0.0;
             UiCaptureState CurrentCapture;
             bool Suspended = false;
             bool BackendFailure = false;
+            bool GameplayPlayback = false;
             bool GamepadSubsystemInitialized = false;
             bool Open = true;
         };
@@ -1576,7 +1628,8 @@ namespace Keire
         m_Impl->State->SelectScheme(found->second);
         return true;
     }
-    Ref<InputActionContext> InputSystem::CreateActionContext(const AssetId asset, const InputUserId user)
+    Ref<InputActionContext> InputSystem::CreateActionContext(const AssetId asset, const InputUserId user,
+                                                             const InputContextRole role)
     {
         m_Impl->State->RequireOwner("CreateActionContext");
         if (!m_Impl->State->Users.contains(user))
@@ -1586,12 +1639,14 @@ namespace Keire
         state->AssetHandle = m_Impl->State->Assets->Load<InputActionAsset>(asset, AssetPriority::Critical);
         state->AssetIdValue = asset;
         state->User = user;
+        state->Role = role;
+        state->ContextId = m_Impl->State->NextContext++;
         state->Rebuild();
         m_Impl->State->Contexts.push_back(state);
         return CreateRef<InputActionContext>(std::make_unique<InputActionContext::Impl>(std::move(state)));
     }
     Ref<InputActionContext> InputSystem::CreateActionContext(InputActionAssetDefinition definition,
-                                                             const InputUserId user)
+                                                             const InputUserId user, const InputContextRole role)
     {
         m_Impl->State->RequireOwner("CreateActionContext");
         if (!m_Impl->State->Users.contains(user))
@@ -1599,6 +1654,8 @@ namespace Keire
         auto state = CreateRef<Detail::InputContextState>();
         state->Runtime = m_Impl->State;
         state->User = user;
+        state->Role = role;
+        state->ContextId = m_Impl->State->NextContext++;
         state->Definition = std::move(definition);
         state->AssetRevision = state->AssetHandle.Revision();
         for (const auto& map : state->Definition.ActionMaps)
@@ -1642,6 +1699,144 @@ namespace Keire
         return CreateRef<InteractiveRebindOperation>(
             std::make_unique<InteractiveRebindOperation::Impl>(std::move(state)));
     }
+    FixedTickInputSnapshot InputSystem::CaptureFixedTick(const std::uint64_t tick)
+    {
+        m_Impl->State->RequireOwner("CaptureFixedTick");
+        FixedTickInputSnapshot snapshot;
+        snapshot.Tick = tick;
+        constexpr std::uint64_t offsetBasis = 14695981039346656037ULL;
+        constexpr std::uint64_t prime = 1099511628211ULL;
+        snapshot.InputMapFingerprint = offsetBasis;
+        const auto hashByte = [&](const std::uint8_t byte)
+        {
+            snapshot.InputMapFingerprint ^= byte;
+            snapshot.InputMapFingerprint *= prime;
+        };
+        const auto hash64 = [&](const std::uint64_t value)
+        {
+            for (std::size_t byte = 0; byte < sizeof(value); ++byte)
+                hashByte(static_cast<std::uint8_t>(value >> (byte * 8U)));
+        };
+
+        for (auto iterator = m_Impl->State->Contexts.begin(); iterator != m_Impl->State->Contexts.end();)
+        {
+            const auto context = iterator->Lock();
+            if (!context)
+            {
+                iterator = m_Impl->State->Contexts.erase(iterator);
+                continue;
+            }
+            ++iterator;
+            if (context->Role != InputContextRole::Gameplay)
+                continue;
+            context->Rebuild();
+            hash64(context->ContextId);
+            hash64(context->AssetIdValue.High());
+            hash64(context->AssetIdValue.Low());
+            for (const auto& map : context->Definition.ActionMaps)
+            {
+                hash64(map.Id.High());
+                hash64(map.Id.Low());
+                for (const auto& action : map.Actions)
+                {
+                    hash64(action.Id.High());
+                    hash64(action.Id.Low());
+                    hashByte(static_cast<std::uint8_t>(action.Type));
+                    hashByte(static_cast<std::uint8_t>(action.ValueType));
+                    auto& runtime = context->Actions[action.Id];
+                    const bool relative = Detail::InputRuntimeState::IsRelativeAction(*context, map, action);
+                    snapshot.Actions.push_back(
+                        {context->ContextId, context->AssetIdValue, map.Id, action.Id, context->User, runtime.Phase,
+                         relative ? runtime.PendingRelativeValue : runtime.Value, runtime.PendingStarted,
+                         runtime.PendingPerformed, runtime.PendingCanceled});
+                    if (relative)
+                        runtime.PendingRelativeValue = InputValue{action.ValueType};
+                    runtime.PendingStarted = false;
+                    runtime.PendingPerformed = false;
+                    runtime.PendingCanceled = false;
+                }
+            }
+        }
+        std::ranges::sort(
+            snapshot.Actions,
+            [](const FixedTickInputAction& left, const FixedTickInputAction& right)
+            {
+                return std::tuple{left.Context, left.ContextAsset, left.Map, left.Action, left.User.Value()} <
+                       std::tuple{right.Context, right.ContextAsset, right.Map, right.Action, right.User.Value()};
+            });
+        return snapshot;
+    }
+
+    void InputSystem::ApplyFixedTick(const FixedTickInputSnapshot& snapshot)
+    {
+        m_Impl->State->RequireOwner("ApplyFixedTick");
+        for (const auto& weak : m_Impl->State->Contexts)
+        {
+            const auto context = weak.Lock();
+            if (!context || context->Role != InputContextRole::Gameplay)
+                continue;
+            for (const auto& map : context->Definition.ActionMaps)
+            {
+                for (const auto& definition : map.Actions)
+                {
+                    auto& runtime = context->Actions[definition.Id];
+                    runtime.Phase =
+                        context->EnabledMaps.contains(map.Id) ? InputActionPhase::Waiting : InputActionPhase::Disabled;
+                    runtime.Value = InputValue{definition.ValueType};
+                    runtime.Active = false;
+                    runtime.PendingStarted = false;
+                    runtime.PendingPerformed = false;
+                    runtime.PendingCanceled = false;
+                }
+            }
+        }
+
+        for (const auto& recorded : snapshot.Actions)
+        {
+            const auto context = std::ranges::find_if(m_Impl->State->Contexts,
+                                                      [&](const WeakRef<Detail::InputContextState>& weak)
+                                                      {
+                                                          const auto candidate = weak.Lock();
+                                                          return candidate &&
+                                                                 candidate->Role == InputContextRole::Gameplay &&
+                                                                 candidate->ContextId == recorded.Context &&
+                                                                 candidate->User == recorded.User &&
+                                                                 candidate->AssetIdValue == recorded.ContextAsset;
+                                                      });
+            if (context == m_Impl->State->Contexts.end())
+                continue;
+            const auto state = context->Lock();
+            if (!state)
+                continue;
+            const auto map =
+                std::ranges::find(state->Definition.ActionMaps, recorded.Map, &InputActionMapDefinition::Id);
+            if (map == state->Definition.ActionMaps.end())
+                continue;
+            const auto definition = std::ranges::find(map->Actions, recorded.Action, &InputActionDefinition::Id);
+            if (definition == map->Actions.end())
+                continue;
+            auto& runtime = state->Actions[recorded.Action];
+            runtime.Phase = recorded.Phase;
+            runtime.Value = recorded.Value;
+            runtime.Active = recorded.Value.Magnitude() >= 0.5F;
+            if (recorded.Started)
+                m_Impl->State->Emit(*state, runtime, *map, *definition, {}, InputActionPhase::Started, recorded.Value);
+            if (recorded.Performed)
+                m_Impl->State->Emit(*state, runtime, *map, *definition, {}, InputActionPhase::Performed,
+                                    recorded.Value);
+            if (recorded.Canceled)
+                m_Impl->State->Emit(*state, runtime, *map, *definition, {}, InputActionPhase::Canceled, recorded.Value);
+            runtime.Phase = recorded.Phase;
+            runtime.Value = recorded.Value;
+        }
+    }
+
+    void InputSystem::SetGameplayPlayback(const bool enabled)
+    {
+        m_Impl->State->RequireOwner("SetGameplayPlayback");
+        m_Impl->State->GameplayPlayback = enabled;
+    }
+
     std::uint64_t InputSystem::Frame() const noexcept { return m_Impl->State->Frame; }
     bool InputSystem::IsOpen() const noexcept { return m_Impl && m_Impl->State->Open; }
     void InputSystem::AdvanceFrame(const TimeStep delta, const UiCaptureState capture, const bool suspended)

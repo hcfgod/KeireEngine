@@ -2987,7 +2987,7 @@ void EditorWorkspaceLayer::OpenInputActions(const Keire::AssetId asset)
     m_InputActionsPanel->ResetTransientState();
     m_InputContext.Reset();
     if (const auto input = Owner().Input(); input && m_EditorInputUser)
-        m_InputContext = input->CreateActionContext(asset, m_EditorInputUser);
+        m_InputContext = input->CreateActionContext(asset, m_EditorInputUser, Keire::InputContextRole::EditorControl);
     m_InputActionsPanel->Registration().SetVisible(true);
 }
 

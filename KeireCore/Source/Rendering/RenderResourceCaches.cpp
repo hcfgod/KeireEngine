@@ -29,6 +29,12 @@ namespace Keire::RenderBackend
             Statistics.GpuCompletionLatencyMilliseconds = completionLatency;
             if (frame.IncludesGpuVfx)
                 Statistics.VfxGpuCompletionLatencyMilliseconds = completionLatency;
+            std::uint64_t retiredMeshBytes = 0;
+            for (const auto& retired : frame.RetiredMeshes)
+                retiredMeshBytes += retired.EstimatedBytes;
+            std::uint64_t retiredTextureBytes = 0;
+            for (const auto& retired : frame.RetiredTextures)
+                retiredTextureBytes += retired.EstimatedBytes;
             for (auto& retired : frame.Retired)
                 ReleaseResources(retired);
             for (auto& retired : frame.RetiredMeshes)
@@ -45,6 +51,12 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUBuffer(Device, transient);
             for (auto* transient : frame.TransientTransferBuffers)
                 SDL_ReleaseGPUTransferBuffer(Device, transient);
+            if (Streaming)
+            {
+                Streaming->ReleaseRetired(StreamingClass::Mesh, 0, retiredMeshBytes);
+                Streaming->ReleaseRetired(StreamingClass::Texture, 0, retiredTextureBytes);
+            }
+            Statistics.FenceRetiredBytes -= std::min(Statistics.FenceRetiredBytes, frame.RetiredBytes);
             SDL_ReleaseGPUFence(Device, frame.Fence);
         };
 

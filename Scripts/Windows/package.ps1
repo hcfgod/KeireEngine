@@ -28,7 +28,7 @@ $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $sta
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\content", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
+New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\content", "$stage\docs\Diagnostics", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\examples\source-module", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$assetToolName\$assetToolName.exe" "$stage\bin\"
@@ -88,8 +88,11 @@ Copy-Item "$sdlInstall\lib\SDL3-static.lib" "$stage\third-party\SDL3\lib\"
 Copy-Item "$sdlInstall\cmake\*" "$stage\third-party\SDL3\cmake\" -Recurse
 Copy-Item "$sdlInstall\licenses\SDL3" "$stage\third-party\SDL3\licenses\" -Recurse
 Copy-Item "$Root\README.md", "$Root\LICENSE.txt", "$Root\THIRD_PARTY_NOTICES.md" $stage
+Copy-Item "$Root\docs\Diagnostics\*" "$stage\docs\Diagnostics\" -Recurse
+Copy-Item "$Root\Config\SourceModules.premake.lua" "$stage\Config\"
 Copy-Item "$Root\Examples\Consumer\*" "$stage\examples\consumer\" -Recurse
 Copy-Item "$Root\Examples\ManagedConsumer\*" "$stage\examples\managed-consumer\" -Recurse
+Copy-Item "$Root\Examples\SourceModule\*" "$stage\examples\source-module\" -Recurse
 $packageConfig = [IO.File]::ReadAllText((Join-Path $Root "Config\PackageConfig.cmake.in"))
 $packageConfig = $packageConfig.Replace("@CORE_TARGET@", $Project.CORE_TARGET).Replace("@PROJECT_NAMESPACE@", $Project.PROJECT_NAMESPACE).Replace("@PACKAGE_CONFIGURATION@", $Configuration)
 [IO.File]::WriteAllText((Join-Path $stage "lib\cmake\$($Project.PROJECT_IDENTIFIER)\$($Project.PROJECT_IDENTIFIER)Config.cmake"), $packageConfig, [Text.UTF8Encoding]::new($false))
@@ -293,6 +296,16 @@ try {
     if (-not $managedCmakeConsumer) { throw "Managed SDK CMake consumer executable was not produced." }
     & $managedCmakeConsumer.FullName --managed-smoke
     if ($LASTEXITCODE -ne 0) { throw "Managed SDK CMake consumer failed with exit code $LASTEXITCODE." }
+
+    $moduleCmakeBuild = Join-Path $validationRoot "module-cmake-build"
+    & $CMake -S (Join-Path $sdkRoot "examples\source-module") -B $moduleCmakeBuild "-DCMAKE_PREFIX_PATH=$sdkRoot"
+    if ($LASTEXITCODE -ne 0) { throw "Source-module SDK CMake configuration failed with exit code $LASTEXITCODE." }
+    & $CMake --build $moduleCmakeBuild --config Release
+    if ($LASTEXITCODE -ne 0) { throw "Source-module SDK CMake build failed with exit code $LASTEXITCODE." }
+    $moduleCmakeConsumer = Get-ChildItem $moduleCmakeBuild -Filter "SourceModuleConsumer.exe" -Recurse | Select-Object -First 1
+    if (-not $moduleCmakeConsumer) { throw "Source-module SDK CMake consumer executable was not produced." }
+    & $moduleCmakeConsumer.FullName --module-smoke
+    if ($LASTEXITCODE -ne 0) { throw "Source-module SDK CMake consumer failed with exit code $LASTEXITCODE." }
 }
 finally {
     $env:PATH = $previousValidationPath

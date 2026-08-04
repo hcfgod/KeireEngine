@@ -248,6 +248,8 @@ function Get-WindowsRequiredPackagePaths {
         "third-party\SDL3\licenses\SDL3\LICENSE.txt",
         "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
         "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md",
+        "examples\source-module\ClientApplication.cpp", "examples\source-module\GameplayModule.cpp", "examples\source-module\GameplayModule.h", "examples\source-module\CMakeLists.txt", "examples\source-module\README.md",
+        "Config\SourceModules.premake.lua", "docs\Diagnostics\KEIRE-AUDIO-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0001.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
     )
 }

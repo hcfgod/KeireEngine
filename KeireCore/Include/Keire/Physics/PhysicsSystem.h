@@ -15,6 +15,8 @@
 
 namespace Keire
 {
+    class JobSystem;
+
     enum class PhysicsMode : std::uint8_t
     {
         Disabled,
@@ -123,6 +125,7 @@ namespace Keire
         Vector3 Position;
         Quaternion Rotation;
         Vector3 LinearVelocity;
+        Vector3 AngularVelocity;
         bool Sleeping = false;
     };
 
@@ -243,6 +246,7 @@ namespace Keire
         [[nodiscard]] PhysicsBodyId CreateBody(const PhysicsBodyDefinition& definition);
         void DestroyBody(PhysicsBodyId body);
         void SetKinematicTarget(PhysicsBodyId body, Vector3 position, Quaternion rotation);
+        void SetBodyState(PhysicsBodyId body, const PhysicsBodyState& state);
         void SetGravityEnabled(PhysicsBodyId body, bool enabled);
         [[nodiscard]] std::optional<PhysicsBodyState> TryGetBody(PhysicsBodyId body) const;
         [[nodiscard]] std::vector<PhysicsQueryHit> RayCast(const PhysicsRayQuery& query) const;
@@ -265,7 +269,7 @@ namespace Keire
     class KEIRE_API PhysicsSystem final : public RefCounted
     {
       public:
-        explicit PhysicsSystem(PhysicsSystemSpecification specification = {});
+        explicit PhysicsSystem(PhysicsSystemSpecification specification = {}, Ref<JobSystem> jobs = {});
         ~PhysicsSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] Ref<PhysicsWorld> CreateWorld();

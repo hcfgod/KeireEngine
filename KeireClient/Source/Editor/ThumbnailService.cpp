@@ -658,12 +658,21 @@ namespace KeireEditor
             std::uint64_t Generation = 0;
         };
 
-        Impl(std::filesystem::path cacheDirectory, const std::size_t capacity)
+        Impl(std::filesystem::path cacheDirectory, const std::size_t capacity, Keire::Ref<Keire::JobSystem> jobs)
             : CacheDirectory(std::move(cacheDirectory)), Capacity(capacity), OwnerThread(std::this_thread::get_id()),
-              Worker([this](const std::stop_token token) { Run(token); })
+              Scheduler(std::move(jobs))
         {
             if (Capacity == 0 || Capacity > 4096)
                 throw std::invalid_argument("Thumbnail queue capacity must be in the range 1..4096.");
+            if (!Scheduler)
+            {
+                Keire::JobSystemSpecification specification;
+                specification.WorkerCount = 1;
+                specification.BlockingWorkerCount = 1;
+                Scheduler = Keire::CreateRef<Keire::JobSystem>(specification);
+                OwnScheduler = true;
+            }
+            WorkScope = Scheduler->CreateScope("Editor thumbnails");
             std::filesystem::create_directories(CacheDirectory);
         }
 
@@ -713,59 +722,47 @@ namespace KeireEditor
             }
         }
 
-        void Run(const std::stop_token token)
+        void Run(Job job, const ProviderRecord& provider, Keire::JobContext& context)
         {
-            while (!token.stop_requested())
+            if (context.StopRequested())
+                return;
+            auto pixels = job.Request.Missing ? std::vector<std::byte>{} : ReadCache(CachePath(job.Key));
+            if (pixels.empty() && !context.StopRequested())
             {
-                Job job;
-                ProviderRecord provider;
+                try
                 {
-                    std::unique_lock lock(Mutex);
-                    Condition.wait(lock, token, [&] { return !Jobs.empty(); });
-                    if (token.stop_requested())
-                        return;
-                    job = std::move(Jobs.front());
-                    Jobs.pop_front();
-                    const auto extension = Lower(job.Request.RelativePath.extension().string());
-                    provider = Providers.contains(extension) ? Providers.at(extension) : Providers.at("*");
+                    pixels = provider.Generate(job.Request, ThumbnailWidth, ThumbnailHeight);
                 }
-                auto pixels = job.Request.Missing ? std::vector<std::byte>{} : ReadCache(CachePath(job.Key));
-                if (pixels.empty())
+                catch (...)
                 {
-                    try
-                    {
-                        pixels = provider.Generate(job.Request, ThumbnailWidth, ThumbnailHeight);
-                    }
-                    catch (...)
-                    {
-                        pixels = MakeIcon(ThumbnailWidth, ThumbnailHeight, {40, 32, 44}, {226, 72, 108}, 'X', true);
-                    }
-                    if (!job.Request.Missing &&
-                        pixels.size() == static_cast<std::size_t>(ThumbnailWidth) * ThumbnailHeight * 4)
-                        WriteCache(CachePath(job.Key), pixels);
+                    pixels = MakeIcon(ThumbnailWidth, ThumbnailHeight, {40, 32, 44}, {226, 72, 108}, 'X', true);
                 }
-                std::scoped_lock lock(Mutex);
-                Pending.erase(job.Request.Asset);
-                if (job.Generation == Generation && !pixels.empty())
-                    Completed.push_back({job.Request.Asset, ThumbnailWidth, ThumbnailHeight, std::move(pixels)});
+                if (!job.Request.Missing &&
+                    pixels.size() == static_cast<std::size_t>(ThumbnailWidth) * ThumbnailHeight * 4)
+                    WriteCache(CachePath(job.Key), pixels);
             }
+            std::scoped_lock lock(Mutex);
+            Pending.erase(job.Request.Asset);
+            if (!context.StopRequested() && job.Generation == Generation && !pixels.empty())
+                Completed.push_back({job.Request.Asset, ThumbnailWidth, ThumbnailHeight, std::move(pixels)});
         }
 
         std::filesystem::path CacheDirectory;
         std::size_t Capacity = 0;
         std::thread::id OwnerThread;
         mutable std::mutex Mutex;
-        std::condition_variable_any Condition;
         std::unordered_map<std::string, ProviderRecord> Providers;
-        std::deque<Job> Jobs;
         std::deque<ThumbnailResult> Completed;
         std::unordered_set<Keire::AssetId> Pending;
         std::uint64_t Generation = 1;
-        std::jthread Worker;
+        Keire::Ref<Keire::JobSystem> Scheduler;
+        Keire::Ref<Keire::JobScope> WorkScope;
+        bool OwnScheduler = false;
     };
 
-    ThumbnailService::ThumbnailService(std::filesystem::path cacheDirectory, const std::size_t queueCapacity)
-        : m_Impl(std::make_unique<Impl>(std::move(cacheDirectory), queueCapacity))
+    ThumbnailService::ThumbnailService(std::filesystem::path cacheDirectory, const std::size_t queueCapacity,
+                                       Keire::Ref<Keire::JobSystem> jobs)
+        : m_Impl(std::make_unique<Impl>(std::move(cacheDirectory), queueCapacity, std::move(jobs)))
     {
         const auto icon =
             [](const std::array<std::uint8_t, 3> background, const std::array<std::uint8_t, 3> accent, const char glyph)
@@ -798,8 +795,10 @@ namespace KeireEditor
 
     ThumbnailService::~ThumbnailService()
     {
-        m_Impl->Worker.request_stop();
-        m_Impl->Condition.notify_all();
+        m_Impl->WorkScope->Cancel();
+        m_Impl->WorkScope->Wait();
+        if (m_Impl->OwnScheduler)
+            m_Impl->Scheduler->Close();
     }
 
     void ThumbnailService::RegisterProvider(std::string extension, const std::uint32_t version, Provider provider)
@@ -820,12 +819,27 @@ namespace KeireEditor
         const auto provider =
             m_Impl->Providers.contains(extension) ? m_Impl->Providers.at(extension) : m_Impl->Providers.at("*");
         std::scoped_lock lock(m_Impl->Mutex);
-        if (m_Impl->Pending.contains(request.Asset) || m_Impl->Jobs.size() >= m_Impl->Capacity)
+        if (m_Impl->Pending.contains(request.Asset) || m_Impl->Pending.size() >= m_Impl->Capacity)
             return false;
         m_Impl->Pending.insert(request.Asset);
-        m_Impl->Jobs.push_back({std::move(request), {}, m_Impl->Generation});
-        m_Impl->Jobs.back().Key = m_Impl->KeyFor(m_Impl->Jobs.back().Request, provider);
-        m_Impl->Condition.notify_one();
+        Impl::Job job{std::move(request), {}, m_Impl->Generation};
+        const auto asset = job.Request.Asset;
+        job.Key = m_Impl->KeyFor(job.Request, provider);
+        try
+        {
+            (void)m_Impl->WorkScope->Submit(
+                {.Name = "Generate thumbnail",
+                 .Priority = Keire::JobPriority::Low,
+                 .Class = Keire::JobClass::Blocking,
+                 .Domain = Keire::JobDomain::Tooling},
+                [implementation = m_Impl.get(), job = std::move(job), provider](Keire::JobContext& context) mutable
+                { implementation->Run(std::move(job), provider, context); });
+        }
+        catch (...)
+        {
+            m_Impl->Pending.erase(asset);
+            throw;
+        }
         return true;
     }
 
@@ -848,7 +862,6 @@ namespace KeireEditor
     {
         std::scoped_lock lock(m_Impl->Mutex);
         ++m_Impl->Generation;
-        m_Impl->Jobs.clear();
         m_Impl->Completed.clear();
         m_Impl->Pending.clear();
     }

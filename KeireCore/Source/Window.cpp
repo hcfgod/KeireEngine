@@ -1091,6 +1091,16 @@ namespace Keire
             return result;
         }
 
+        void OpenUrl(const std::string_view url)
+        {
+            RequireOwner("OpenUrl");
+            if (!url.starts_with("https://") && !url.starts_with("http://"))
+                throw std::invalid_argument("External URLs must use HTTP or HTTPS.");
+            const std::string value(url);
+            if (!SDL_OpenURL(value.c_str()))
+                throw std::runtime_error("SDL_OpenURL failed: " + LastSdlError());
+        }
+
       private:
         struct FileDropState
         {
@@ -1329,6 +1339,8 @@ namespace Keire
     void WindowSystem::SetClipboardText(const std::string_view text) { m_Impl->SetClipboardText(text); }
 
     std::string WindowSystem::ClipboardText() const { return m_Impl->ClipboardText(); }
+
+    void WindowSystem::OpenUrl(const std::string_view url) { m_Impl->OpenUrl(url); }
 
     Ref<SystemTray> WindowSystem::CreateSystemTray(SystemTraySpecification specification)
     {

@@ -15,6 +15,8 @@
 #include <chrono>
 #include <exception>
 #include <limits>
+#include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -53,9 +55,27 @@ namespace Keire
         std::atomic<int> ExitCode{NoExitRequested};
         Ref<EventBus> EventSystem;
         Ref<Profiler> ProfilerService;
+        Ref<DiagnosticCatalog> DiagnosticDefinitionService;
+        Ref<DiagnosticSink> DiagnosticReportService;
+        Ref<MemorySystem> MemoryService;
+        MemoryDomain AssetMemoryDomain;
+        MemoryDomain RendererMemoryDomain;
+        MemoryDomain RetiredGpuMemoryDomain;
+        MemoryDomain PhysicsMemoryDomain;
+        MemoryDomain AudioMemoryDomain;
+        MemoryDomain AnimationMemoryDomain;
+        MemoryDomain ScriptingMemoryDomain;
+        MemoryDomain NavigationMemoryDomain;
+        MemoryDomain EditorMemoryDomain;
+        std::unique_ptr<TrackedMemoryResource> JobMemoryResource;
+        Ref<StringInterner> StringService;
+        Ref<JobSystem> JobService;
+        Ref<ModuleRegistry> ModuleService;
         Ref<UndoService> UndoHistory;
         Ref<Project> ProjectService;
         Ref<AssetSystem> Assets;
+        Ref<StreamingSystem> StreamingService;
+        Ref<ReplaySystem> ReplayService;
         Ref<ScriptSystem> ScriptService;
         Ref<PhysicsSystem> PhysicsService;
         Ref<AudioSystem> AudioService;
@@ -69,6 +89,7 @@ namespace Keire
         EventSubscription LayerListener;
         std::unique_ptr<LayerStack> LayerSystem;
         std::unique_ptr<UiSystem> UserInterface;
+        std::uint64_t FixedTick = 0;
     };
 
     Application::Application(ApplicationSpecification specification)
@@ -126,6 +147,73 @@ namespace Keire
             m_Impl->EventSystem = CreateRef<EventBus>(m_Impl->Specification.Events);
             if (m_Impl->Specification.Profiling.Mode == ProfilerMode::Enabled)
                 m_Impl->ProfilerService = CreateRef<Profiler>(m_Impl->Specification.Profiling);
+            m_Impl->DiagnosticDefinitionService = CreateRef<DiagnosticCatalog>(m_Impl->Specification.Diagnostics);
+            m_Impl->DiagnosticReportService =
+                CreateRef<DiagnosticSink>(m_Impl->Specification.Diagnostics.MaximumRetainedDiagnostics);
+            m_Impl->DiagnosticDefinitionService->Register(
+                {DiagnosticId("KEIRE-AUDIO-0001"), "Audio streaming underrun",
+                 "The audio callback emitted silence because a decoded streaming page was unavailable.",
+                 "KEIRE-AUDIO-0001.md"});
+            m_Impl->DiagnosticDefinitionService->Register(
+                {DiagnosticId("KEIRE-REPLAY-0001"), "Replay divergence",
+                 "Canonical deterministic state differs from the recorded state for a fixed tick.",
+                 "KEIRE-REPLAY-0001.md"});
+            m_Impl->MemoryService = CreateRef<MemorySystem>(m_Impl->Specification.Memory);
+            m_Impl->StringService = CreateRef<StringInterner>();
+            const auto jobMemoryDomain = m_Impl->MemoryService->RegisterDomain("Jobs");
+            m_Impl->JobMemoryResource = m_Impl->MemoryService->CreateTrackedResource(jobMemoryDomain);
+            m_Impl->AssetMemoryDomain = m_Impl->MemoryService->RegisterDomain("Assets");
+            m_Impl->RendererMemoryDomain = m_Impl->MemoryService->RegisterDomain("Renderer");
+            m_Impl->RetiredGpuMemoryDomain =
+                m_Impl->MemoryService->RegisterDomain("Retired GPU Resources", m_Impl->RendererMemoryDomain);
+            m_Impl->PhysicsMemoryDomain = m_Impl->MemoryService->RegisterDomain("Physics");
+            m_Impl->AudioMemoryDomain = m_Impl->MemoryService->RegisterDomain("Audio");
+            m_Impl->AnimationMemoryDomain = m_Impl->MemoryService->RegisterDomain("Animation");
+            m_Impl->ScriptingMemoryDomain = m_Impl->MemoryService->RegisterDomain("Scripting");
+            m_Impl->NavigationMemoryDomain = m_Impl->MemoryService->RegisterDomain("Navigation");
+            m_Impl->EditorMemoryDomain = m_Impl->MemoryService->RegisterDomain("Editor");
+            m_Impl->JobService = CreateRef<JobSystem>(m_Impl->Specification.Jobs, m_Impl->JobMemoryResource.get());
+            m_Impl->ModuleService = CreateRef<ModuleRegistry>(m_Impl->Specification.Modules);
+            if (m_Impl->ProjectService)
+                m_Impl->ModuleService->ValidateRequired(m_Impl->ProjectService->Descriptor().RequiredModules);
+            for (const auto& definition : m_Impl->ModuleService->Diagnostics())
+                m_Impl->DiagnosticDefinitionService->Register(definition);
+            const auto moduleDomainRegistrations = m_Impl->ModuleService->MemoryDomains();
+            std::set<std::string, std::less<>> moduleDomainNames;
+            for (const auto& domain : moduleDomainRegistrations)
+            {
+                if (domain.Name.empty())
+                    throw std::invalid_argument("Module memory domain names cannot be empty.");
+                if (!moduleDomainNames.emplace(domain.Name).second)
+                    throw std::invalid_argument("Duplicate module memory domain: " + domain.Name);
+            }
+            for (const auto& domain : moduleDomainRegistrations)
+            {
+                if (!domain.Parent.empty() && !moduleDomainNames.contains(domain.Parent))
+                    throw std::invalid_argument("Unknown parent '" + domain.Parent + "' for module memory domain '" +
+                                                domain.Name + "'.");
+            }
+            std::map<std::string, MemoryDomain, std::less<>> moduleMemoryDomains;
+            auto pendingModuleDomains = moduleDomainRegistrations;
+            while (!pendingModuleDomains.empty())
+            {
+                const auto previousCount = pendingModuleDomains.size();
+                std::erase_if(pendingModuleDomains,
+                              [&](const ModuleMemoryDomainRegistration& domain)
+                              {
+                                  if (!domain.Parent.empty() && !moduleMemoryDomains.contains(domain.Parent))
+                                      return false;
+                                  const auto parent = domain.Parent.empty() ? m_Impl->MemoryService->RootDomain()
+                                                                            : moduleMemoryDomains.at(domain.Parent);
+                                  moduleMemoryDomains.emplace(
+                                      domain.Name, m_Impl->MemoryService->RegisterDomain(domain.Name, parent));
+                                  return true;
+                              });
+                if (pendingModuleDomains.size() == previousCount)
+                    throw std::invalid_argument("Module memory domains contain a parent cycle involving '" +
+                                                pendingModuleDomains.front().Name + "'.");
+            }
+            m_Impl->DiagnosticDefinitionService->Freeze();
             m_Impl->UndoHistory = CreateRef<UndoService>(m_Impl->Specification.Undo);
             if (m_Impl->Specification.Input.Mode == InputMode::Enabled &&
                 m_Impl->Specification.Assets.Mode == AssetMode::Disabled)
@@ -154,25 +242,40 @@ namespace Keire
                     m_Impl->Specification.Assets.Decoders.push_back(CreateSceneAssetDecoder());
             }
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
+            {
+                for (auto& decoder : m_Impl->ModuleService->Decoders())
+                {
+                    const auto duplicate = std::ranges::find(m_Impl->Specification.Assets.Decoders, decoder.Type,
+                                                             &AssetDecoderRegistration::Type);
+                    if (duplicate != m_Impl->Specification.Assets.Decoders.end())
+                        throw std::invalid_argument("A module asset decoder duplicates an existing decoder.");
+                    m_Impl->Specification.Assets.Decoders.push_back(std::move(decoder));
+                }
                 AppendMissingBuiltinAssetDecoders(m_Impl->Specification.Assets.Decoders);
+            }
             if (m_Impl->Specification.Assets.Mode != AssetMode::Disabled)
             {
-                m_Impl->Assets = CreateRef<AssetSystem>(m_Impl->Specification.Assets, m_Impl->EventSystem);
+                m_Impl->Assets =
+                    CreateRef<AssetSystem>(m_Impl->Specification.Assets, m_Impl->EventSystem, m_Impl->JobService);
+                m_Impl->StreamingService =
+                    CreateRef<StreamingSystem>(m_Impl->Specification.Streaming, m_Impl->Assets,
+                                               m_Impl->DiagnosticReportService, m_Impl->MemoryService);
             }
             if (m_Impl->Specification.Scripting.Mode == ScriptMode::Enabled)
             {
                 if (!m_Impl->Assets)
                     throw std::invalid_argument("Enabled scripting requires enabled assets.");
-                m_Impl->ScriptService = CreateRef<ScriptSystem>(m_Impl->Specification.Scripting);
+                m_Impl->ScriptService = CreateRef<ScriptSystem>(m_Impl->Specification.Scripting, m_Impl->JobService);
                 m_Impl->ScriptService->SetAssetSystem(m_Impl->Assets);
             }
             if (m_Impl->Specification.Physics.Mode == PhysicsMode::Enabled)
-                m_Impl->PhysicsService = CreateRef<PhysicsSystem>(m_Impl->Specification.Physics);
+                m_Impl->PhysicsService = CreateRef<PhysicsSystem>(m_Impl->Specification.Physics, m_Impl->JobService);
             if (m_Impl->Specification.Navigation.Mode == NavigationMode::Enabled)
             {
                 if (!m_Impl->Assets || !m_Impl->PhysicsService)
                     throw std::invalid_argument("Enabled navigation requires enabled assets and physics.");
-                m_Impl->NavigationService = CreateRef<NavigationSystem>(m_Impl->Specification.Navigation);
+                m_Impl->NavigationService =
+                    CreateRef<NavigationSystem>(m_Impl->Specification.Navigation, m_Impl->JobService);
             }
             if (m_Impl->Specification.Audio.Mode != AudioMode::Disabled)
             {
@@ -182,6 +285,9 @@ namespace Keire
             }
             if (m_Impl->Specification.Scenes.Mode == SceneMode::Enabled)
             {
+                if (!m_Impl->Specification.Scenes.Components)
+                    m_Impl->Specification.Scenes.Components = ComponentRegistry::CreateDefault();
+                m_Impl->Specification.Scenes.Components->ReplaceBatch({}, m_Impl->ModuleService->Components());
                 m_Impl->SceneService =
                     CreateRef<SceneSystem>(m_Impl->Specification.Scenes, m_Impl->Assets, m_Impl->EventSystem);
             }
@@ -217,13 +323,34 @@ namespace Keire
             m_Impl->Specification.Render = renderSpecification;
             if (renderSpecification.Mode != RenderMode::Disabled)
             {
-                m_Impl->Renderer = CreateRef<RenderSystem>(renderSpecification, m_Impl->Windowing,
-                                                           m_Impl->PrimaryWindow, m_Impl->Assets);
+                m_Impl->Renderer =
+                    CreateRef<RenderSystem>(renderSpecification, m_Impl->Windowing, m_Impl->PrimaryWindow,
+                                            m_Impl->Assets, m_Impl->JobService, m_Impl->StreamingService);
             }
             if (m_Impl->Specification.Input.Mode == InputMode::Enabled)
             {
                 m_Impl->InputService = CreateRef<InputSystem>(m_Impl->Specification.Input, m_Impl->Windowing,
                                                               m_Impl->Assets, m_Impl->EventSystem);
+            }
+            m_Impl->ReplayService = CreateRef<ReplaySystem>(m_Impl->Specification.Replay,
+                                                            m_Impl->DiagnosticReportService, m_Impl->MemoryService);
+            for (auto& serializer : m_Impl->ModuleService->ReplaySerializers())
+                m_Impl->ReplayService->RegisterSerializer(std::move(serializer));
+            for (const auto& module : m_Impl->ModuleService->OrderedCatalog())
+            {
+                if (!module.SimulationAffecting)
+                    continue;
+                m_Impl->ReplayService->RegisterSerializer({.Id = "module." + module.Id,
+                                                           .Version = 1,
+                                                           .Deterministic = module.DeterministicReplay,
+                                                           .Capture = [] { return std::vector<std::byte>{}; },
+                                                           .Restore =
+                                                               [](std::span<const std::byte> state)
+                                                           {
+                                                               if (!state.empty())
+                                                                   throw std::runtime_error(
+                                                                       "Source module replay marker state is invalid.");
+                                                           }});
             }
             if (m_Impl->Specification.Ui.Mode != UiMode::Disabled)
             {
@@ -235,6 +362,7 @@ namespace Keire
                                                                       EventPriorities::Normal);
 
             m_Impl->LayerSystem->Activate();
+            m_Impl->ModuleService->Start(*this);
             OnInitialize();
             m_Impl->LayerSystem->ApplyPending();
             initialized = true;
@@ -242,6 +370,7 @@ namespace Keire
             auto previousFrame = std::chrono::steady_clock::now();
             while (!ExitRequested() && m_Impl->PrimaryWindow->IsOpen())
             {
+                m_Impl->MemoryService->ResetFrameArena();
                 const auto frameStart = std::chrono::steady_clock::now();
                 const bool suspended =
                     m_Impl->Specification.SuspendWhenMainWindowMinimized && m_Impl->PrimaryWindow->Minimized();
@@ -271,6 +400,8 @@ namespace Keire
                         {
                             (void)m_Impl->Assets->PumpCompletions();
                         }
+                        if (m_Impl->StreamingService)
+                            (void)m_Impl->StreamingService->Pump();
                         if (m_Impl->ScriptService)
                             m_Impl->ScriptService->PumpManagedAssets();
                         if (m_Impl->SceneService)
@@ -284,6 +415,8 @@ namespace Keire
                 if (!ExitRequested() && m_Impl->InputService)
                 {
                     ProfileScope input(m_Impl->ProfilerService, ProfileCategory::Application, "Input");
+                    m_Impl->InputService->SetGameplayPlayback(m_Impl->ReplayService &&
+                                                              m_Impl->ReplayService->ReplacesGameplayInput());
                     m_Impl->InputService->AdvanceFrame(m_Impl->Clock->UnscaledDeltaTime(), UiCapture(), nowSuspended);
                 }
                 if (!ExitRequested() && m_Impl->AudioService)
@@ -307,12 +440,29 @@ namespace Keire
                     // but every fixed step produced by AdvanceFrame must still be consumed before the next frame.
                     if (!ExitRequested() && !suspended)
                     {
+                        if (m_Impl->JobService && m_Impl->ReplayService)
+                            m_Impl->JobService->SetDeterministicSimulation(
+                                m_Impl->ReplayService->UsesStrictScheduling());
                         {
                             ProfileScope fixedUpdate(m_Impl->ProfilerService, ProfileCategory::Application,
                                                      "Fixed update");
                             while (m_Impl->Clock->ConsumeFixedStep())
                             {
+                                if (m_Impl->ReplayService && !m_Impl->ReplayService->ShouldAdvanceFixedTick())
+                                    continue;
+                                ++m_Impl->FixedTick;
+                                FixedTickInputSnapshot fixedInput;
+                                fixedInput.Tick = m_Impl->FixedTick;
+                                if (m_Impl->InputService)
+                                    fixedInput = m_Impl->InputService->CaptureFixedTick(m_Impl->FixedTick);
+                                if (m_Impl->ReplayService)
+                                    fixedInput = m_Impl->ReplayService->BeginFixedTick(fixedInput);
+                                if (m_Impl->InputService && m_Impl->ReplayService &&
+                                    m_Impl->ReplayService->ReplacesGameplayInput())
+                                    m_Impl->InputService->ApplyFixedTick(fixedInput);
                                 m_Impl->LayerSystem->FixedUpdate(*m_Impl->Clock);
+                                if (m_Impl->ReplayService)
+                                    m_Impl->ReplayService->EndFixedTick(m_Impl->FixedTick);
                                 if (ExitRequested())
                                 {
                                     break;
@@ -359,6 +509,28 @@ namespace Keire
 
                 m_Impl->LayerSystem->ApplyPending();
 
+                if (m_Impl->MemoryService)
+                {
+                    if (m_Impl->Assets)
+                        m_Impl->MemoryService->ReportExternal(m_Impl->AssetMemoryDomain,
+                                                              m_Impl->Assets->Statistics().ResidentBytes);
+                    if (m_Impl->Renderer)
+                    {
+                        const auto statistics = m_Impl->Renderer->Statistics();
+                        const auto activeBytes =
+                            statistics.ActiveTransientBytes >
+                                    std::numeric_limits<std::size_t>::max() - statistics.VfxGpuBufferBytes
+                                ? std::numeric_limits<std::size_t>::max()
+                                : static_cast<std::size_t>(statistics.ActiveTransientBytes +
+                                                           statistics.VfxGpuBufferBytes);
+                        m_Impl->MemoryService->ReportExternal(m_Impl->RendererMemoryDomain, activeBytes);
+                        m_Impl->MemoryService->ReportExternal(
+                            m_Impl->RetiredGpuMemoryDomain,
+                            static_cast<std::size_t>(std::min<std::uint64_t>(statistics.FenceRetiredBytes,
+                                                                             std::numeric_limits<std::size_t>::max())));
+                    }
+                }
+
                 if (m_Impl->ProfilerService)
                 {
                     m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Frame",
@@ -373,6 +545,16 @@ namespace Keire
                                                         m_Impl->Clock->DeltaTime().Seconds() * 1000.0);
                     m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Fixed delta (ms)",
                                                         m_Impl->Clock->FixedDeltaTime().Seconds() * 1000.0);
+                    if (m_Impl->JobService)
+                    {
+                        const auto statistics = m_Impl->JobService->Statistics();
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Jobs queued",
+                                                            static_cast<double>(statistics.QueuedJobs));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Jobs running",
+                                                            static_cast<double>(statistics.RunningJobs));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Application, "Jobs stolen",
+                                                            static_cast<double>(statistics.StolenJobs));
+                    }
                     if (m_Impl->Renderer)
                     {
                         const auto statistics = m_Impl->Renderer->Statistics();
@@ -430,6 +612,12 @@ namespace Keire
                                                             static_cast<double>(statistics.DroppedVfxParticles));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU buffer bytes",
                                                             static_cast<double>(statistics.VfxGpuBufferBytes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Fence-retired bytes",
+                                                            static_cast<double>(statistics.FenceRetiredBytes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Active transient bytes",
+                                                            static_cast<double>(statistics.ActiveTransientBytes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Aliasing saved bytes",
+                                                            static_cast<double>(statistics.SavedAliasingBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU particle capacity",
                                                             static_cast<double>(statistics.VfxGpuParticleCapacity));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX compute dispatches",
@@ -587,7 +775,26 @@ namespace Keire
 
     Ref<Profiler> Application::GetProfiler() const noexcept { return m_Impl->ProfilerService; }
 
+    Ref<DiagnosticCatalog> Application::DiagnosticDefinitions() const noexcept
+    {
+        return m_Impl->DiagnosticDefinitionService;
+    }
+
+    Ref<DiagnosticSink> Application::DiagnosticReports() const noexcept { return m_Impl->DiagnosticReportService; }
+
+    Ref<MemorySystem> Application::Memory() const noexcept { return m_Impl->MemoryService; }
+
+    Ref<StringInterner> Application::Strings() const noexcept { return m_Impl->StringService; }
+
+    Ref<JobSystem> Application::Jobs() const noexcept { return m_Impl->JobService; }
+
+    Ref<ModuleRegistry> Application::Modules() const noexcept { return m_Impl->ModuleService; }
+
     Ref<AssetSystem> Application::Assets() const noexcept { return m_Impl->Assets; }
+
+    Ref<StreamingSystem> Application::Streaming() const noexcept { return m_Impl->StreamingService; }
+
+    Ref<ReplaySystem> Application::Replay() const noexcept { return m_Impl->ReplayService; }
 
     Ref<ScriptSystem> Application::Scripts() const noexcept { return m_Impl->ScriptService; }
 
@@ -713,6 +920,12 @@ namespace Keire
             m_Impl->UserInterface.reset();
         }
 
+        if (m_Impl->ReplayService)
+        {
+            m_Impl->ReplayService->Close();
+            m_Impl->ReplayService.Reset();
+        }
+
         if (m_Impl->Renderer)
         {
             m_Impl->Renderer->Close();
@@ -782,13 +995,37 @@ namespace Keire
         m_Impl->Windowing.Reset();
         m_Impl->Clock.reset();
 
+        if (m_Impl->StreamingService)
+        {
+            m_Impl->StreamingService->Close();
+            m_Impl->StreamingService.Reset();
+        }
+
         if (m_Impl->Assets)
         {
             m_Impl->Assets->Close();
             m_Impl->Assets.Reset();
         }
 
+        if (m_Impl->ModuleService)
+        {
+            m_Impl->ModuleService->Close();
+            m_Impl->ModuleService.Reset();
+        }
+
         m_Impl->ProjectService.Reset();
+
+        if (m_Impl->JobService)
+        {
+            m_Impl->JobService->Close();
+            m_Impl->JobService.Reset();
+        }
+
+        m_Impl->StringService.Reset();
+        m_Impl->JobMemoryResource.reset();
+        m_Impl->MemoryService.Reset();
+        m_Impl->DiagnosticReportService.Reset();
+        m_Impl->DiagnosticDefinitionService.Reset();
 
         if (m_Impl->ProfilerService)
         {

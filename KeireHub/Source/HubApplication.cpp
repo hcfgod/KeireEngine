@@ -2,6 +2,7 @@
 
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireProjectModules/SourceModulePack.h"
 
 #include <algorithm>
 #include <array>
@@ -46,6 +47,10 @@ namespace
         {
         case Keire::ProjectStatus::Ready:
             return "Ready";
+        case Keire::ProjectStatus::UpgradeAvailable:
+            return "Upgrade available";
+        case Keire::ProjectStatus::RecoveryRequired:
+            return "Recovery required";
         case Keire::ProjectStatus::Missing:
             return "Missing";
         case Keire::ProjectStatus::Invalid:
@@ -65,13 +70,22 @@ namespace
         case Keire::ProjectStatus::Ready:
             return {0.32F, 0.84F, 0.58F, 1.0F};
         case Keire::ProjectStatus::InUse:
+        case Keire::ProjectStatus::UpgradeAvailable:
             return {0.96F, 0.72F, 0.28F, 1.0F};
+        case Keire::ProjectStatus::RecoveryRequired:
+            return {0.96F, 0.50F, 0.25F, 1.0F};
         case Keire::ProjectStatus::Missing:
         case Keire::ProjectStatus::Invalid:
         case Keire::ProjectStatus::RequiresNewerEngine:
             return {0.96F, 0.38F, 0.42F, 1.0F};
         }
         return {0.62F, 0.66F, 0.74F, 1.0F};
+    }
+
+    [[nodiscard]] bool CanOpenOrUpgrade(const Keire::ProjectStatus status) noexcept
+    {
+        return status == Keire::ProjectStatus::Ready || status == Keire::ProjectStatus::UpgradeAvailable ||
+               status == Keire::ProjectStatus::RecoveryRequired;
     }
 
     [[nodiscard]] std::string FormatLastOpened(const std::int64_t seconds)
@@ -246,8 +260,11 @@ namespace
                     ui.OpenPopup("Create Project");
                 if (std::exchange(m_RequestOpenPopup, false))
                     ui.OpenPopup("Open Project");
+                if (std::exchange(m_RequestUpgradePopup, false))
+                    ui.OpenPopup("Project Upgrade");
                 DrawCreateDialog(ui);
                 DrawOpenDialog(ui);
+                DrawUpgradeDialog(ui);
             }
         }
 
@@ -471,6 +488,19 @@ namespace
             {
                 if (Keire::Project::IsLocked(path))
                     throw std::runtime_error("Project is already open in another editor.");
+                const auto status = Keire::Project::Inspect(path);
+                if (status == Keire::ProjectStatus::UpgradeAvailable ||
+                    status == Keire::ProjectStatus::RecoveryRequired)
+                {
+                    m_UpgradeService = std::make_unique<Keire::ProjectUpgradeService>(
+                        path, Owner().Modules() ? Owner().Modules()->ProjectUpgrades()
+                                                : std::vector<Keire::ProjectUpgradeStep>{});
+                    m_UpgradeInterrupted =
+                        m_UpgradeService->State() == Keire::ProjectUpgradeTransactionState::Interrupted;
+                    m_UpgradePlan = m_UpgradeInterrupted ? std::nullopt : std::optional(m_UpgradeService->Plan());
+                    m_RequestUpgradePopup = true;
+                    return;
+                }
                 Launch(Keire::Project::Open(path));
             }
             catch (const std::exception& error)
@@ -548,11 +578,12 @@ namespace
                         if (ui.Selectable((entry.Pinned ? "*  " : "") + entry.Name, selected))
                             m_SelectedProject = entry.Id;
                         const auto state = ui.LastItemState();
-                        if (state.DoubleClicked && entry.Status == Keire::ProjectStatus::Ready)
+                        if (state.DoubleClicked && CanOpenOrUpgrade(entry.Status))
                             Open(entry.Root);
                         if (auto context = ui.BeginItemContextMenu("ProjectActions"); context)
                         {
-                            if (ui.MenuItem("Open", false, entry.Status == Keire::ProjectStatus::Ready))
+                            if (ui.MenuItem(entry.Status == Keire::ProjectStatus::Ready ? "Open" : "Review upgrade",
+                                            false, CanOpenOrUpgrade(entry.Status)))
                                 Open(entry.Root);
                             if (ui.MenuItem("Reveal"))
                                 Reveal(entry.Root);
@@ -586,7 +617,7 @@ namespace
                 {
                     const auto selected = std::ranges::find_if(visible, [this](const auto* entry)
                                                                { return entry->Id == m_SelectedProject; });
-                    if (selected != visible.end() && (*selected)->Status == Keire::ProjectStatus::Ready)
+                    if (selected != visible.end() && CanOpenOrUpgrade((*selected)->Status))
                         Open((*selected)->Root);
                 }
                 return;
@@ -628,12 +659,13 @@ namespace
                         if (entry.Pinned)
                             ui.DrawOverlayText({header.Maximum.X - 54.0F, header.Minimum.Y + 9.0F},
                                                {0.98F, 0.75F, 0.30F, 1.0F}, "PINNED");
-                        if (openCard && entry.Status == Keire::ProjectStatus::Ready)
+                        if (openCard && CanOpenOrUpgrade(entry.Status))
                             Open(entry.Root);
                         ui.TextColored({0.52F, 0.57F, 0.66F, 1.0F}, Utf8Path(entry.Root));
                         ui.Spacing();
-                        if (auto disabled = ui.BeginDisabled(entry.Status != Keire::ProjectStatus::Ready); disabled)
-                            if (ui.Button("Open", {74.0F, 30.0F}))
+                        if (auto disabled = ui.BeginDisabled(!CanOpenOrUpgrade(entry.Status)); disabled)
+                            if (ui.Button(entry.Status == Keire::ProjectStatus::Ready ? "Open" : "Upgrade",
+                                          {74.0F, 30.0F}))
                                 Open(entry.Root);
                         ui.SameLine();
                         if (ui.Button("Reveal", {74.0F, 30.0F}))
@@ -747,11 +779,106 @@ namespace
             }
         }
 
+        void DrawUpgradeDialog(Keire::UiFrame& ui)
+        {
+            ui.SetNextWindowSize({680.0F, 440.0F}, false);
+            if (auto dialog = ui.BeginPopupModal("Project Upgrade"); dialog)
+            {
+                if (!m_UpgradeService)
+                {
+                    ui.Text("No project upgrade is pending.");
+                }
+                else if (m_UpgradeInterrupted)
+                {
+                    ui.TextColored({0.96F, 0.50F, 0.25F, 1.0F}, "An interrupted project upgrade was detected.");
+                    ui.Text("Recover continues publication from the durable journal. Rollback restores before-images.");
+                    if (ui.Button("Recover", {112.0F, 34.0F}))
+                    {
+                        try
+                        {
+                            const auto root = m_UpgradeService->Root();
+                            m_UpgradeService->Recover();
+                            m_UpgradeService.reset();
+                            m_UpgradeInterrupted = false;
+                            ui.CloseCurrentPopup();
+                            Refresh();
+                            Open(root);
+                        }
+                        catch (const std::exception& error)
+                        {
+                            SetError(error.what());
+                        }
+                    }
+                    ui.SameLine();
+                    if (ui.Button("Rollback", {112.0F, 34.0F}))
+                    {
+                        try
+                        {
+                            m_UpgradeService->Rollback();
+                            m_UpgradeService.reset();
+                            m_UpgradeInterrupted = false;
+                            ui.CloseCurrentPopup();
+                            Refresh();
+                        }
+                        catch (const std::exception& error)
+                        {
+                            SetError(error.what());
+                        }
+                    }
+                }
+                else if (m_UpgradePlan)
+                {
+                    const auto& plan = *m_UpgradePlan;
+                    ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "Project schema " + std::to_string(plan.CurrentSchema) +
+                                                                    " -> " + std::to_string(plan.TargetSchema));
+                    ui.Text("Backup estimate: " + std::to_string(plan.EstimatedBackupBytes) + " bytes");
+                    ui.Separator();
+                    for (const auto& step : plan.Steps)
+                    {
+                        ui.Text(step.Id);
+                        for (const auto& path : step.AffectedPaths)
+                            ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F}, "  " + Utf8Path(path));
+                        if (!step.Warning.empty())
+                            ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, step.Warning);
+                    }
+                    ui.Separator();
+                    ui.Text("The project is locked while staged files are validated and atomically published.");
+                    if (ui.Button("Apply Upgrade", {136.0F, 34.0F}))
+                    {
+                        try
+                        {
+                            const auto root = plan.ProjectRoot;
+                            m_UpgradeService->Apply(plan);
+                            m_UpgradeService.reset();
+                            m_UpgradePlan.reset();
+                            ui.CloseCurrentPopup();
+                            Refresh();
+                            Open(root);
+                        }
+                        catch (const std::exception& error)
+                        {
+                            SetError(error.what());
+                        }
+                    }
+                }
+                ui.SameLine();
+                if (ui.Button("Cancel"))
+                {
+                    m_UpgradeService.reset();
+                    m_UpgradePlan.reset();
+                    m_UpgradeInterrupted = false;
+                    ui.CloseCurrentPopup();
+                }
+            }
+        }
+
         std::filesystem::path m_Executable;
         std::filesystem::path m_PreferencesPath;
         Keire::Ref<Keire::ProjectRegistry> m_Registry;
         Keire::Ref<Keire::SystemTray> m_Tray;
         Keire::Ref<Keire::FolderDialogOperation> m_FolderDialog;
+        std::unique_ptr<Keire::ProjectUpgradeService> m_UpgradeService;
+        std::optional<Keire::ProjectUpgradePlan> m_UpgradePlan;
         FolderTarget m_FolderTarget = FolderTarget::None;
         std::string m_Search;
         std::string m_CreateName = "NewProject";
@@ -766,6 +893,8 @@ namespace
         bool m_NoticeError = false;
         bool m_RequestCreatePopup = false;
         bool m_RequestOpenPopup = false;
+        bool m_RequestUpgradePopup = false;
+        bool m_UpgradeInterrupted = false;
         bool m_Smoke = false;
     };
 
@@ -805,6 +934,7 @@ namespace Keire
                 throw CommandLineError("Unknown project hub option: " + std::string(arguments[index]));
         }
         ApplicationSpecification specification;
+        specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
         specification.MainWindow.Title = "Kéire Project Hub";
         specification.MainWindow.Width = 1120;
         specification.MainWindow.Height = 720;

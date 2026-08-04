@@ -26,6 +26,16 @@ namespace Keire::Detail
         Sha256Digest Digest{};
     };
 
+    struct CatalogSegment
+    {
+        std::uint8_t Kind = 0;
+        std::uint32_t Segment = 0;
+        std::uint64_t UncompressedOffset = 0;
+        std::uint64_t UncompressedBytes = 0;
+        float WindowStartSeconds = 0.0F;
+        float WindowEndSeconds = 0.0F;
+    };
+
     struct CatalogEntry
     {
         AssetId Id;
@@ -34,8 +44,10 @@ namespace Keire::Detail
         std::uint64_t Offset = 0;
         std::uint64_t CompressedBytes = 0;
         std::uint64_t UncompressedBytes = 0;
+        std::uint32_t StreamLayoutVersion = 0;
         Sha256Digest Digest{};
         std::vector<CatalogPage> Pages;
+        std::vector<CatalogSegment> Segments;
         std::vector<AssetId> Dependencies;
         AssetDerivedMetadata Metadata;
     };

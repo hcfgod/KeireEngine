@@ -27,6 +27,7 @@ project(ProjectConfig.HUB_TARGET)
 
     dependson { ProjectConfig.CLIENT_TARGET }
 
+    LinkKeireSourceModules()
     LinkKeireCore()
 
     LinkSDL3()

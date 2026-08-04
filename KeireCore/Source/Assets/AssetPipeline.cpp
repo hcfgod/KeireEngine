@@ -57,7 +57,7 @@ namespace Keire
 
         std::scoped_lock operation(*database.m_Impl->OperationMutex);
         std::scoped_lock lock(database.m_Impl->Mutex);
-        database.m_Impl->Records = std::move(records);
+        database.m_Impl->ReplaceRecords(std::move(records));
         database.m_Impl->Observed = std::move(signatures);
         database.m_Impl->PendingChanges.clear();
         database.m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
@@ -81,7 +81,7 @@ namespace Keire
     {
         auto scanned = m_Impl->Scan();
         std::scoped_lock lock(m_Impl->Mutex);
-        m_Impl->Records = std::move(scanned.Records);
+        m_Impl->ReplaceRecords(std::move(scanned.Records));
         m_Impl->Observed = std::move(scanned.Signatures);
         m_Impl->PendingChanges.clear();
         m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
@@ -107,16 +107,18 @@ namespace Keire
     std::optional<AssetSourceRecord> AssetDatabase::Find(const AssetId id) const
     {
         std::scoped_lock lock(m_Impl->Mutex);
-        const auto found = std::ranges::find(m_Impl->Records, id, &AssetSourceRecord::Id);
-        return found == m_Impl->Records.end() ? std::nullopt : std::optional<AssetSourceRecord>(*found);
+        const auto found = m_Impl->IdIndex.find(id);
+        return found == m_Impl->IdIndex.end() ? std::nullopt
+                                              : std::optional<AssetSourceRecord>(m_Impl->Records[found->second]);
     }
 
     std::optional<AssetSourceRecord> AssetDatabase::Find(const std::filesystem::path& relativePath) const
     {
-        const auto normalized = relativePath.lexically_normal();
+        const auto normalized = m_Impl->CanonicalPathKey(relativePath);
         std::scoped_lock lock(m_Impl->Mutex);
-        const auto found = std::ranges::find(m_Impl->Records, normalized, &AssetSourceRecord::RelativePath);
-        return found == m_Impl->Records.end() ? std::nullopt : std::optional<AssetSourceRecord>(*found);
+        const auto found = m_Impl->PathIndex.find(normalized);
+        return found == m_Impl->PathIndex.end() ? std::nullopt
+                                                : std::optional<AssetSourceRecord>(m_Impl->Records[found->second]);
     }
 
     std::vector<AssetId> AssetDatabase::PollChangedAssets()
@@ -149,7 +151,7 @@ namespace Keire
                     }
                 }
                 m_Impl->Observed = std::move(scanned.Signatures);
-                m_Impl->Records = std::move(scanned.Records);
+                m_Impl->ReplaceRecords(std::move(scanned.Records));
             }
             for (auto iterator = m_Impl->PendingChanges.begin(); iterator != m_Impl->PendingChanges.end();)
             {

@@ -20,6 +20,8 @@
 
 namespace Keire
 {
+    class JobSystem;
+
     enum class AssetMode : std::uint8_t
     {
         Disabled,
@@ -95,6 +97,33 @@ namespace Keire
         Cancelled
     };
 
+    enum class AssetStreamSegmentKind : std::uint8_t
+    {
+        Data,
+        Metadata,
+        TextureMip,
+        MeshLod,
+        AudioPage,
+        AnimationWindow
+    };
+
+    struct AssetStreamSegment
+    {
+        AssetStreamSegmentKind Kind = AssetStreamSegmentKind::Data;
+        std::uint32_t Segment = 0;
+        std::uint64_t Offset = 0;
+        std::size_t Bytes = 0;
+        float WindowStartSeconds = 0.0F;
+        float WindowEndSeconds = 0.0F;
+    };
+
+    struct AssetStreamLayout
+    {
+        std::uint32_t Version = 0;
+        bool MonolithicCompatibility = true;
+        std::vector<AssetStreamSegment> Segments;
+    };
+
     class KEIRE_API AssetStreamOperation final : public RefCounted
     {
       public:
@@ -116,7 +145,8 @@ namespace Keire
     class KEIRE_API AssetSystem final : public RefCounted
     {
       public:
-        explicit AssetSystem(AssetSystemSpecification specification, Ref<EventBus> events = {});
+        explicit AssetSystem(AssetSystemSpecification specification, Ref<EventBus> events = {},
+                             Ref<JobSystem> jobs = {});
         ~AssetSystem() override;
 
         AssetSystem(const AssetSystem&) = delete;
@@ -133,12 +163,14 @@ namespace Keire
         [[nodiscard]] bool Unmount(const std::filesystem::path& catalogPath);
         [[nodiscard]] bool PublishDevelopmentAsset(AssetId id, Ref<Asset> asset);
         [[nodiscard]] bool Reload(AssetId id, AssetPriority priority = AssetPriority::High);
-        [[nodiscard]] Ref<AssetStreamOperation> ReadRangeAsync(AssetId id, std::uint64_t offset, std::size_t bytes);
+        [[nodiscard]] Ref<AssetStreamOperation> ReadRangeAsync(AssetId id, std::uint64_t offset, std::size_t bytes,
+                                                               AssetPriority priority = AssetPriority::Normal);
         [[nodiscard]] std::size_t PumpCompletions();
         [[nodiscard]] std::size_t EvictUnused();
         [[nodiscard]] AssetSystemStatistics Statistics() const;
         [[nodiscard]] std::optional<AssetTypeId> TryGetType(AssetId id) const;
         [[nodiscard]] std::optional<AssetDerivedMetadata> TryGetMetadata(AssetId id) const;
+        [[nodiscard]] std::optional<AssetStreamLayout> TryGetStreamLayout(AssetId id) const;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;
 

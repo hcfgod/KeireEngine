@@ -1,11 +1,13 @@
 #pragma once
 
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Rendering/MaterialGraph.h"
 #include "KeireClient/Editor/AssetDocumentHost.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 
 #include <functional>
-#include <future>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -60,6 +62,7 @@ namespace KeireEditor
         using Host = AssetDocumentHost<Keire::MaterialGraphDefinition>;
 
         explicit MaterialGraphDocument(MaterialGraphDocumentSpecification specification);
+        ~MaterialGraphDocument() noexcept;
 
         MaterialGraphDocument(const MaterialGraphDocument&) = delete;
         MaterialGraphDocument& operator=(const MaterialGraphDocument&) = delete;
@@ -74,6 +77,7 @@ namespace KeireEditor
         void Save();
         void Discard();
         void Close() noexcept;
+        void SetJobSystem(Keire::Ref<Keire::JobSystem> jobs);
         [[nodiscard]] bool Undo();
         [[nodiscard]] bool Redo();
 
@@ -122,9 +126,17 @@ namespace KeireEditor
             std::vector<Keire::Ref<Keire::ShaderAsset>> DevelopmentShaders;
         };
 
+        struct BackgroundCompilationState
+        {
+            std::mutex Mutex;
+            std::optional<BackgroundCompilation> Result;
+        };
+
         void QueueCompilation(const Keire::MaterialGraphDefinition& definition);
         void StartPendingCompilation();
         void ConsumeBackgroundCompilation(bool wait);
+        void EnsureJobScope();
+        void CancelBackgroundCompilation() noexcept;
         void ApplyCompilation(Keire::MaterialGraphDefinition definition, Keire::MaterialGraphCompilation compilation,
                               std::vector<Keire::Ref<Keire::ShaderAsset>> developmentShaders = {});
         void CompileAndPreview(const Keire::MaterialGraphDefinition& definition, bool compileDevelopmentShaders);
@@ -136,11 +148,15 @@ namespace KeireEditor
         std::optional<Keire::MaterialGraphCompilation> m_LastGoodCompilation;
         std::optional<Keire::MaterialGraphDefinition> m_LastGoodDefinition;
         std::optional<Keire::MaterialGraphDefinition> m_PendingDefinition;
-        std::future<BackgroundCompilation> m_BackgroundCompilation;
+        Keire::Ref<Keire::JobSystem> m_JobSystem;
+        Keire::Ref<Keire::JobScope> m_JobScope;
+        Keire::JobHandle m_BackgroundCompilation;
+        std::shared_ptr<BackgroundCompilationState> m_BackgroundCompilationState;
         MaterialGraphPreviewSettings m_PreviewSettings;
         std::string m_Diagnostic;
         double m_CompileDebounceSeconds = 0.0;
         std::uint64_t m_RequestedGeneration = 0;
         std::uint64_t m_InFlightGeneration = 0;
+        bool m_OwnJobSystem = false;
     };
 } // namespace KeireEditor

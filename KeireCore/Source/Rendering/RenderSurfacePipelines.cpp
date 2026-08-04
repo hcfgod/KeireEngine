@@ -270,9 +270,21 @@ namespace Keire::RenderBackend
         if (!Open || !Device)
             ReleaseTextureResources(resources);
         else if (FrameActive)
+        {
+            PendingRetiredBytes += resources.EstimatedBytes;
+            Statistics.FenceRetiredBytes += resources.EstimatedBytes;
+            if (Streaming)
+                Streaming->ReportRetired(StreamingClass::Texture, 0, resources.EstimatedBytes);
             PendingRetiredTextures.push_back(resources);
+        }
         else if (!InFlight.empty())
+        {
+            InFlight.back().RetiredBytes += resources.EstimatedBytes;
+            Statistics.FenceRetiredBytes += resources.EstimatedBytes;
+            if (Streaming)
+                Streaming->ReportRetired(StreamingClass::Texture, 0, resources.EstimatedBytes);
             InFlight.back().RetiredTextures.push_back(resources);
+        }
         else
             ReleaseTextureResources(resources);
     }
@@ -301,9 +313,21 @@ namespace Keire::RenderBackend
             return;
         }
         if (FrameActive)
+        {
+            PendingRetiredBytes += resources.EstimatedBytes;
+            Statistics.FenceRetiredBytes += resources.EstimatedBytes;
+            if (Streaming)
+                Streaming->ReportRetired(StreamingClass::Mesh, 0, resources.EstimatedBytes);
             PendingRetiredMeshes.push_back(resources);
+        }
         else if (!InFlight.empty())
+        {
+            InFlight.back().RetiredBytes += resources.EstimatedBytes;
+            Statistics.FenceRetiredBytes += resources.EstimatedBytes;
+            if (Streaming)
+                Streaming->ReportRetired(StreamingClass::Mesh, 0, resources.EstimatedBytes);
             InFlight.back().RetiredMeshes.push_back(resources);
+        }
         else
             ReleaseMeshResources(resources);
     }

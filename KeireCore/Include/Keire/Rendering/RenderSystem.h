@@ -4,6 +4,7 @@
 #include "Keire/Assets/Asset.h"
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
+#include "Keire/Rendering/FrameGraphSnapshot.h"
 #include "Keire/Vfx/VfxSystem.h"
 
 #include <compare>
@@ -14,6 +15,8 @@
 
 namespace Keire
 {
+    class StreamingSystem;
+    class JobSystem;
     class AssetSystem;
     class Scene;
     class Window;
@@ -192,6 +195,10 @@ namespace Keire
         std::uint64_t ForwardPlusUploadBytes = 0;
         std::uint64_t DroppedVfxParticles = 0;
         std::uint64_t VfxGpuBufferBytes = 0;
+        std::uint64_t FenceRetiredBytes = 0;
+        std::uint64_t ActiveTransientBytes = 0;
+        std::uint64_t TheoreticalUnaliasedBytes = 0;
+        std::uint64_t SavedAliasingBytes = 0;
         std::uint64_t VfxComputeThreadGroups = 0;
         std::uint32_t VfxComputeDispatches = 0;
         std::uint32_t VfxIndirectDraws = 0;
@@ -242,6 +249,7 @@ namespace Keire
         [[nodiscard]] RenderMode Mode() const noexcept;
         [[nodiscard]] RenderCapabilities Capabilities() const noexcept;
         [[nodiscard]] RenderStatistics Statistics() const noexcept;
+        [[nodiscard]] FrameGraphSnapshot CaptureFrameGraph() const;
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;
 
@@ -250,7 +258,7 @@ namespace Keire
         friend class RenderSystemInternalAccess;
         template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
         RenderSystem(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
-                     Ref<AssetSystem> assets);
+                     Ref<AssetSystem> assets, Ref<JobSystem> jobs, Ref<StreamingSystem> streaming);
 
         class Impl;
         std::unique_ptr<Impl> m_Impl;

@@ -15,9 +15,11 @@
 namespace Keire::RenderBackend
 {
     RenderSharedState::RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows,
-                                         Ref<Keire::Window> window, Ref<AssetSystem> assets)
+                                         Ref<Keire::Window> window, Ref<AssetSystem> assets, Ref<JobSystem> jobs,
+                                         Ref<StreamingSystem> streaming)
         : Specification(std::move(specification)), Windows(std::move(windows)), Window(std::move(window)),
-          Assets(std::move(assets)), OwnerThread(std::this_thread::get_id())
+          Assets(std::move(assets)), Streaming(std::move(streaming)), OwnerThread(std::this_thread::get_id()),
+          Jobs(std::move(jobs))
     {
         if (!ValidColor(Specification.SwapchainClearColor))
             throw std::invalid_argument("Render swapchain clear color must contain finite values in 0..1.");
@@ -28,6 +30,9 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("RenderSystem requires a resolved render mode.");
         if (Specification.Mode != RenderMode::Rendered)
             return;
+        if (!Jobs)
+            throw std::invalid_argument("Rendered mode requires an application job system.");
+        RenderJobs = Jobs->CreateScope("Renderer background work");
         if (!Windows || !Window)
             throw std::invalid_argument("Rendered mode requires an open window system and primary window.");
 
@@ -576,6 +581,7 @@ namespace Keire::RenderBackend
         }
 
         GpuTextureResources result;
+        result.EstimatedBytes = totalBytes;
         SDL_GPUTransferBuffer* transfer = nullptr;
         try
         {
@@ -694,6 +700,7 @@ namespace Keire::RenderBackend
         }
 
         GpuTextureResources result;
+        result.EstimatedBytes = totalBytes;
         SDL_GPUTransferBuffer* transfer = nullptr;
         try
         {
@@ -808,6 +815,9 @@ namespace Keire::RenderBackend
                                 vertex.Normal});
         }
         GpuMeshResources result;
+        result.EstimatedBytes = static_cast<std::uint64_t>(vertices.size()) * sizeof(RenderVertex) +
+                                static_cast<std::uint64_t>(mesh.Vertices().size()) * sizeof(MeshVertex) +
+                                static_cast<std::uint64_t>(mesh.Indices().size()) * sizeof(std::uint32_t);
         try
         {
             result.Vertices = UploadVertexBuffer(vertices);

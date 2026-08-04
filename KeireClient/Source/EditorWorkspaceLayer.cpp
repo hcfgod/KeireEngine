@@ -769,6 +769,9 @@ EditorWorkspaceLayer::~EditorWorkspaceLayer() = default;
 void EditorWorkspaceLayer::OnAttach()
 {
     auto& workspace = Owner().GetUiWorkspace();
+    m_AssetBrowserPanel->SetJobSystem(Owner().Jobs());
+    m_MaterialGraphDocument->SetJobSystem(Owner().Jobs());
+    m_MaterialGraphPanel->SetJobSystem(Owner().Jobs());
     m_SceneViewportPanel->Attach(workspace);
     m_Game = workspace.RegisterPanel({"editor.game", "Game"});
     m_HierarchyPanel->Attach(workspace);
@@ -789,6 +792,8 @@ void EditorWorkspaceLayer::OnAttach()
     m_PrefabOverrides = workspace.RegisterPanel({"editor.prefab-overrides", "Prefab Overrides", false});
     m_BuildSettings = workspace.RegisterPanel({"editor.build-settings", "Build Settings", false});
     m_Profiler = workspace.RegisterPanel({"editor.profiler", "Profiler", false});
+    m_RenderGraph = workspace.RegisterPanel({"editor.render-graph", "Render Graph", false});
+    m_ArchitectureDashboard = workspace.RegisterPanel({"editor.architecture", "Architecture", false});
     if (const auto undo = Owner().Undo())
     {
         m_ThemeUndoContext = undo->CreateContext({.Name = "Theme Authoring"});
@@ -826,6 +831,7 @@ void EditorWorkspaceLayer::OnAttach()
             }
             databaseSpecification.ProjectRoot = project->Root();
             databaseSpecification.ChangeDebounce = std::chrono::milliseconds(75);
+            databaseSpecification.Jobs = Owner().Jobs();
             m_AssetBrowserPanel->SetProjectRoot(project->Root());
             Keire::RenderEnvironmentSettings renderEnvironment;
             try
@@ -1435,6 +1441,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         DrawPrefabOverrides(ui);
         DrawBuildSettings(ui);
         DrawProfiler(ui);
+        DrawRenderGraph(ui);
+        DrawArchitectureDashboard(ui);
         DrawPlayChanges(ui);
     }
 }
@@ -1485,5 +1493,6 @@ void EditorWorkspaceLayer::DrawDiagnostics(Keire::UiFrame& ui)
     const auto& time = Owner().GetTime();
     const auto size = Owner().MainWindow()->LogicalSize();
     m_DiagnosticsPanel->Draw(ui, m_Theme, time.FrameCount(), time.UnscaledDeltaTime().Milliseconds(),
-                             {static_cast<float>(size.Width), static_cast<float>(size.Height)}, Owner().UiCapture());
+                             {static_cast<float>(size.Width), static_cast<float>(size.Height)}, Owner().UiCapture(),
+                             Owner().DiagnosticDefinitions(), Owner().DiagnosticReports(), Owner().Windows());
 }

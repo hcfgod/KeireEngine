@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <numbers>
 #include <set>
@@ -25,6 +27,63 @@ namespace Keire
 
         constexpr Vector3 Gravity{0.0F, -9.81F, 0.0F};
         constexpr std::uint32_t MaximumRuntimeBurstCycles = 1024;
+        constexpr std::array<char, 8> VfxCheckpointMagic{'K', 'R', 'V', 'F', 'X', 'C', 'P', '\0'};
+        constexpr std::uint32_t VfxCheckpointVersion = 1;
+
+        class VfxCheckpointWriter final
+        {
+          public:
+            template <typename T> void Unsigned(const T value)
+            {
+                static_assert(std::is_unsigned_v<T>);
+                for (std::size_t index = 0; index < sizeof(T); ++index)
+                    Bytes.push_back(static_cast<std::byte>(value >> (index * 8U)));
+            }
+
+            void Boolean(const bool value) { Unsigned<std::uint8_t>(value ? 1U : 0U); }
+            void Float(const float value) { Unsigned(std::bit_cast<std::uint32_t>(value)); }
+            void Double(const double value) { Unsigned(std::bit_cast<std::uint64_t>(value)); }
+            void Id(const AssetId value)
+            {
+                Unsigned(value.High());
+                Unsigned(value.Low());
+            }
+
+            std::vector<std::byte> Bytes;
+        };
+
+        class VfxCheckpointReader final
+        {
+          public:
+            explicit VfxCheckpointReader(const std::span<const std::byte> bytes) : Bytes(bytes) {}
+
+            template <typename T> [[nodiscard]] T Unsigned()
+            {
+                static_assert(std::is_unsigned_v<T>);
+                if (Offset > Bytes.size() || sizeof(T) > Bytes.size() - Offset)
+                    throw std::runtime_error("VFX checkpoint is truncated.");
+                T result = 0;
+                for (std::size_t index = 0; index < sizeof(T); ++index)
+                    result |= static_cast<T>(std::to_integer<std::uint8_t>(Bytes[Offset++])) << (index * 8U);
+                return result;
+            }
+
+            [[nodiscard]] bool Boolean()
+            {
+                const auto value = Unsigned<std::uint8_t>();
+                if (value > 1U)
+                    throw std::runtime_error("VFX checkpoint contains an invalid Boolean.");
+                return value != 0U;
+            }
+            [[nodiscard]] float Float() { return std::bit_cast<float>(Unsigned<std::uint32_t>()); }
+            [[nodiscard]] double Double() { return std::bit_cast<double>(Unsigned<std::uint64_t>()); }
+            [[nodiscard]] AssetId Id() { return {Unsigned<std::uint64_t>(), Unsigned<std::uint64_t>()}; }
+            [[nodiscard]] bool Complete() const noexcept { return Offset == Bytes.size(); }
+
+          private:
+            std::span<const std::byte> Bytes;
+            std::size_t Offset = 0;
+        };
 
         [[nodiscard]] bool ValidRuntimeBurst(const VfxEffectDefinition& definition,
                                              const VfxBurstModule& burst) noexcept
@@ -2207,6 +2266,237 @@ namespace Keire
             };
         }
         return result;
+    }
+
+    VfxBackend VfxWorld::Backend() const noexcept { return m_Impl->Specification.Backend; }
+
+    std::vector<std::byte> VfxWorld::CaptureCheckpoint() const
+    {
+        VfxCheckpointWriter writer;
+        for (const auto value : VfxCheckpointMagic)
+            writer.Unsigned(static_cast<std::uint8_t>(value));
+        writer.Unsigned(VfxCheckpointVersion);
+        writer.Unsigned(static_cast<std::uint8_t>(m_Impl->Specification.Backend));
+        writer.Unsigned(static_cast<std::uint32_t>(m_Impl->Effects.size()));
+        writer.Unsigned(static_cast<std::uint32_t>(m_Impl->Particles.size()));
+        writer.Unsigned(m_Impl->SnapshotRevision);
+        writer.Unsigned(m_Impl->SimulationStepRevision);
+        writer.Unsigned(m_Impl->ResetRevision);
+        writer.Float(m_Impl->LastDeltaSeconds);
+        writer.Unsigned(m_Impl->WorldStatistics.ActiveEffects);
+        writer.Unsigned(m_Impl->WorldStatistics.ActiveParticles);
+        writer.Unsigned(m_Impl->WorldStatistics.DroppedEffects);
+        writer.Unsigned(m_Impl->WorldStatistics.DroppedParticles);
+
+        const auto activeEffects = std::ranges::count_if(m_Impl->Effects, &Impl::EffectSlot::Active);
+        writer.Unsigned(static_cast<std::uint32_t>(activeEffects));
+        for (std::uint32_t index = 0; index < m_Impl->Effects.size(); ++index)
+        {
+            const auto& slot = m_Impl->Effects[index];
+            if (!slot.Active)
+                continue;
+            writer.Unsigned(index);
+            writer.Unsigned(slot.Generation);
+            writer.Unsigned(slot.RootEffectIndex);
+            writer.Id(slot.Program.System);
+            writer.Unsigned(slot.Revision);
+            writer.Boolean(slot.Emitting);
+            writer.Boolean(slot.FirstUpdate);
+            writer.Boolean(slot.Finished);
+            writer.Float(slot.Position.X);
+            writer.Float(slot.Position.Y);
+            writer.Float(slot.Position.Z);
+            writer.Float(slot.Rotation.X);
+            writer.Float(slot.Rotation.Y);
+            writer.Float(slot.Rotation.Z);
+            writer.Float(slot.Rotation.W);
+            writer.Double(slot.Elapsed);
+            writer.Double(slot.RateAccumulator);
+            writer.Unsigned(slot.Random);
+            writer.Unsigned(slot.SeedOffset);
+            writer.Unsigned(slot.ActiveParticles);
+            writer.Unsigned(slot.DroppedParticles);
+            writer.Unsigned(slot.GpuSpawnSequence);
+            writer.Unsigned(slot.SpawnSequence);
+            writer.Unsigned(slot.PendingEventSpawns);
+            writer.Unsigned(slot.NextParticleId);
+            writer.Unsigned(slot.GpuSimulationRevision);
+            writer.Double(slot.GpuLastDeathTime);
+            writer.Float(slot.GpuSimulationDeltaSeconds);
+            writer.Float(slot.GpuEffectTime);
+            writer.Float(slot.SimulationSpeed);
+            writer.Unsigned(static_cast<std::uint32_t>(slot.Diagnostics));
+            writer.Unsigned(static_cast<std::uint32_t>(slot.ExpressionRegisters.size()));
+        }
+
+        const auto activeParticles = std::ranges::count_if(m_Impl->Particles, &Impl::Particle::Active);
+        writer.Unsigned(static_cast<std::uint32_t>(activeParticles));
+        for (std::uint32_t index = 0; index < m_Impl->Particles.size(); ++index)
+        {
+            const auto& particle = m_Impl->Particles[index];
+            if (!particle.Active)
+                continue;
+            writer.Unsigned(index);
+            writer.Unsigned(particle.EffectIndex);
+            writer.Unsigned(particle.Id);
+            writer.Unsigned(particle.SpawnIndex);
+            for (const auto value :
+                 {particle.Position.X, particle.Position.Y, particle.Position.Z, particle.PreviousPosition.X,
+                  particle.PreviousPosition.Y, particle.PreviousPosition.Z, particle.Velocity.X, particle.Velocity.Y,
+                  particle.Velocity.Z, particle.Rotation.X, particle.Rotation.Y, particle.Rotation.Z})
+                writer.Float(value);
+            writer.Float(particle.Age);
+            writer.Float(particle.Lifetime);
+            writer.Float(particle.Size);
+            writer.Float(particle.Tint.Red);
+            writer.Float(particle.Tint.Green);
+            writer.Float(particle.Tint.Blue);
+            writer.Float(particle.Tint.Alpha);
+            writer.Unsigned(static_cast<std::uint8_t>(particle.Renderer));
+            writer.Unsigned(particle.StripId);
+            writer.Unsigned(particle.ParticleIndexInStrip);
+        }
+        return std::move(writer.Bytes);
+    }
+
+    void VfxWorld::RestoreCheckpoint(const std::span<const std::byte> checkpoint)
+    {
+        VfxCheckpointReader reader(checkpoint);
+        for (const auto expected : VfxCheckpointMagic)
+            if (reader.Unsigned<std::uint8_t>() != static_cast<std::uint8_t>(expected))
+                throw std::runtime_error("VFX checkpoint signature is invalid.");
+        if (reader.Unsigned<std::uint32_t>() != VfxCheckpointVersion)
+            throw std::runtime_error("VFX checkpoint version is unsupported.");
+        const auto backend = static_cast<VfxBackend>(reader.Unsigned<std::uint8_t>());
+        if (backend != m_Impl->Specification.Backend || reader.Unsigned<std::uint32_t>() != m_Impl->Effects.size() ||
+            reader.Unsigned<std::uint32_t>() != m_Impl->Particles.size())
+        {
+            throw std::runtime_error("VFX checkpoint does not match the active world configuration.");
+        }
+
+        const auto snapshotRevision = reader.Unsigned<std::uint64_t>();
+        const auto simulationStepRevision = reader.Unsigned<std::uint64_t>();
+        const auto resetRevision = reader.Unsigned<std::uint64_t>();
+        const auto lastDeltaSeconds = reader.Float();
+        VfxWorldStatistics statistics;
+        statistics.ActiveEffects = reader.Unsigned<std::uint32_t>();
+        statistics.ActiveParticles = reader.Unsigned<std::uint32_t>();
+        statistics.DroppedEffects = reader.Unsigned<std::uint64_t>();
+        statistics.DroppedParticles = reader.Unsigned<std::uint64_t>();
+        if (!std::isfinite(lastDeltaSeconds) || lastDeltaSeconds < 0.0F)
+            throw std::runtime_error("VFX checkpoint frame state is invalid.");
+
+        auto effects = m_Impl->Effects;
+        const auto activeEffectCount = reader.Unsigned<std::uint32_t>();
+        if (activeEffectCount > effects.size())
+            throw std::runtime_error("VFX checkpoint effect count exceeds the world capacity.");
+        std::set<std::uint32_t> seenEffects;
+        for (std::uint32_t count = 0; count < activeEffectCount; ++count)
+        {
+            const auto index = reader.Unsigned<std::uint32_t>();
+            const auto generation = reader.Unsigned<std::uint32_t>();
+            const auto rootIndex = reader.Unsigned<std::uint32_t>();
+            const auto system = reader.Id();
+            const auto revision = reader.Unsigned<std::uint64_t>();
+            if (index >= effects.size() || rootIndex >= effects.size() || !seenEffects.insert(index).second ||
+                !effects[index].Active || effects[index].Generation != generation ||
+                effects[index].RootEffectIndex != rootIndex || effects[index].Program.System != system)
+            {
+                throw std::runtime_error("VFX checkpoint effect topology is stale.");
+            }
+            auto& slot = effects[index];
+            slot.Revision = revision;
+            slot.Emitting = reader.Boolean();
+            slot.FirstUpdate = reader.Boolean();
+            slot.Finished = reader.Boolean();
+            slot.Position = {reader.Float(), reader.Float(), reader.Float()};
+            slot.Rotation = {reader.Float(), reader.Float(), reader.Float(), reader.Float()};
+            slot.Elapsed = reader.Double();
+            slot.RateAccumulator = reader.Double();
+            slot.Random = reader.Unsigned<std::uint32_t>();
+            slot.SeedOffset = reader.Unsigned<std::uint32_t>();
+            slot.ActiveParticles = reader.Unsigned<std::uint32_t>();
+            slot.DroppedParticles = reader.Unsigned<std::uint64_t>();
+            slot.GpuSpawnSequence = reader.Unsigned<std::uint64_t>();
+            slot.SpawnSequence = reader.Unsigned<std::uint64_t>();
+            slot.PendingEventSpawns = reader.Unsigned<std::uint64_t>();
+            slot.NextParticleId = reader.Unsigned<std::uint64_t>();
+            slot.GpuSimulationRevision = reader.Unsigned<std::uint64_t>();
+            slot.GpuLastDeathTime = reader.Double();
+            slot.GpuSimulationDeltaSeconds = reader.Float();
+            slot.GpuEffectTime = reader.Float();
+            slot.SimulationSpeed = reader.Float();
+            slot.Diagnostics = static_cast<VfxRuntimeDiagnostic>(reader.Unsigned<std::uint32_t>());
+            const auto registerCount = reader.Unsigned<std::uint32_t>();
+            if (registerCount != slot.ExpressionRegisters.size())
+                throw std::runtime_error("VFX checkpoint expression layout is stale.");
+            for (auto& value : slot.ExpressionRegisters)
+                value = 0.0F;
+            if (!Math::IsFinite(slot.Position) || !Math::IsFinite(slot.Rotation) || !std::isfinite(slot.Elapsed) ||
+                slot.Elapsed < 0.0 || !std::isfinite(slot.RateAccumulator) || !std::isfinite(slot.GpuLastDeathTime) ||
+                !std::isfinite(slot.GpuSimulationDeltaSeconds) || !std::isfinite(slot.GpuEffectTime) ||
+                !std::isfinite(slot.SimulationSpeed) || slot.SimulationSpeed < 0.0F || slot.SimulationSpeed > 8.0F)
+            {
+                throw std::runtime_error("VFX checkpoint effect state is invalid.");
+            }
+        }
+        if (seenEffects.size() != static_cast<std::size_t>(std::ranges::count_if(effects, &Impl::EffectSlot::Active)))
+            throw std::runtime_error("VFX checkpoint omits active effect state.");
+
+        auto particles = m_Impl->Particles;
+        for (auto& particle : particles)
+            particle.Active = false;
+        const auto activeParticleCount = reader.Unsigned<std::uint32_t>();
+        if (activeParticleCount > particles.size())
+            throw std::runtime_error("VFX checkpoint particle count exceeds the world capacity.");
+        std::set<std::uint32_t> seenParticles;
+        for (std::uint32_t count = 0; count < activeParticleCount; ++count)
+        {
+            const auto index = reader.Unsigned<std::uint32_t>();
+            if (index >= particles.size() || !seenParticles.insert(index).second)
+                throw std::runtime_error("VFX checkpoint particle identity is invalid.");
+            auto& particle = particles[index];
+            particle.Active = true;
+            particle.EffectIndex = reader.Unsigned<std::uint32_t>();
+            particle.Id = reader.Unsigned<std::uint64_t>();
+            particle.SpawnIndex = reader.Unsigned<std::uint64_t>();
+            particle.Position = {reader.Float(), reader.Float(), reader.Float()};
+            particle.PreviousPosition = {reader.Float(), reader.Float(), reader.Float()};
+            particle.Velocity = {reader.Float(), reader.Float(), reader.Float()};
+            particle.Rotation = {reader.Float(), reader.Float(), reader.Float()};
+            particle.Age = reader.Float();
+            particle.Lifetime = reader.Float();
+            particle.Size = reader.Float();
+            particle.Tint = {reader.Float(), reader.Float(), reader.Float(), reader.Float()};
+            particle.Renderer = static_cast<VfxRendererType>(reader.Unsigned<std::uint8_t>());
+            particle.StripId = reader.Unsigned<std::uint64_t>();
+            particle.ParticleIndexInStrip = reader.Unsigned<std::uint32_t>();
+            if (particle.EffectIndex >= effects.size() || !effects[particle.EffectIndex].Active ||
+                particle.Renderer > VfxRendererType::Volumetric || !Math::IsFinite(particle.Position) ||
+                !Math::IsFinite(particle.PreviousPosition) || !Math::IsFinite(particle.Velocity) ||
+                !Math::IsFinite(particle.Rotation) || !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Age) ||
+                !std::isfinite(particle.Lifetime) || particle.Age < 0.0F || particle.Lifetime <= 0.0F ||
+                !std::isfinite(particle.Size))
+            {
+                throw std::runtime_error("VFX checkpoint particle state is invalid.");
+            }
+        }
+        if (!reader.Complete() || (backend == VfxBackend::Cpu && statistics.ActiveParticles != activeParticleCount))
+            throw std::runtime_error("VFX checkpoint particle accounting is invalid.");
+
+        std::vector<std::uint32_t> freeParticles;
+        freeParticles.reserve(particles.size() - activeParticleCount);
+        for (auto index = particles.size(); index > 0; --index)
+            if (!particles[index - 1U].Active)
+                freeParticles.push_back(static_cast<std::uint32_t>(index - 1U));
+        m_Impl->Effects = std::move(effects);
+        m_Impl->Particles = std::move(particles);
+        m_Impl->FreeParticles = std::move(freeParticles);
+        m_Impl->WorldStatistics = statistics;
+        m_Impl->SnapshotRevision = snapshotRevision;
+        m_Impl->SimulationStepRevision = simulationStepRevision;
+        m_Impl->ResetRevision = resetRevision;
+        m_Impl->LastDeltaSeconds = lastDeltaSeconds;
     }
 
     void VfxWorld::Clear() noexcept

@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
@@ -196,6 +197,94 @@ namespace
         Keire::AssetId m_Asset;
         std::shared_ptr<InputProbeResult> m_Result;
     };
+
+    struct RelativeInputResult final
+    {
+        Keire::InputValue First;
+        Keire::InputValue Second;
+    };
+
+    class RelativeInputLayer final : public Keire::Layer
+    {
+      public:
+        explicit RelativeInputLayer(std::shared_ptr<RelativeInputResult> result)
+            : Layer("RelativeInput"), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            auto definition = Keire::InputActionAsset::DefaultDefinition();
+            auto player = std::ranges::find(definition.ActionMaps, "Player", &Keire::InputActionMapDefinition::Name);
+            REQUIRE(player != definition.ActionMaps.end());
+            player->Actions.clear();
+            player->Bindings.clear();
+            m_Action = Keire::AssetId::Parse("bf8d1589-63c8-4db9-9a82-f4ca9cb167e7");
+            player->Actions.push_back(
+                {m_Action, "Look", Keire::InputActionType::PassThrough, Keire::InputValueType::Axis2D});
+            player->Bindings.push_back({.Id = Keire::AssetId::Parse("bda05628-fc40-451a-a425-615defa8dc89"),
+                                        .Action = m_Action,
+                                        .Name = "Mouse delta",
+                                        .Path = "<Mouse>/delta"});
+            const auto input = Owner().Input();
+            const auto user = input->CreateUser("Relative input");
+            REQUIRE(input->PairDevice(user, Keire::InputDeviceId(2)));
+            m_Context = input->CreateActionContext(std::move(definition), user);
+            REQUIRE(m_Context->EnableMap("Player"));
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Frame++ == 0)
+            {
+                PushMotion(2.0F, -3.0F);
+                PushMotion(4.0F, 1.0F);
+                return;
+            }
+            const auto first = Owner().Input()->CaptureFixedTick(10);
+            const auto second = Owner().Input()->CaptureFixedTick(11);
+            const auto firstAction = std::ranges::find(first.Actions, m_Action, &Keire::FixedTickInputAction::Action);
+            const auto secondAction = std::ranges::find(second.Actions, m_Action, &Keire::FixedTickInputAction::Action);
+            REQUIRE(firstAction != first.Actions.end());
+            REQUIRE(secondAction != second.Actions.end());
+            m_Result->First = firstAction->Value;
+            m_Result->Second = secondAction->Value;
+            Owner().RequestExit();
+        }
+
+      private:
+        static void PushMotion(const float x, const float y)
+        {
+            SDL_Event event{};
+            event.type = SDL_EVENT_MOUSE_MOTION;
+            event.motion.timestamp = SDL_GetTicksNS();
+            event.motion.xrel = x;
+            event.motion.yrel = y;
+            REQUIRE(SDL_PushEvent(&event));
+        }
+
+        std::shared_ptr<RelativeInputResult> m_Result;
+        Keire::Ref<Keire::InputActionContext> m_Context;
+        Keire::AssetId m_Action;
+        std::uint32_t m_Frame = 0;
+    };
+
+    class RelativeInputApplication final : public Keire::Application
+    {
+      public:
+        RelativeInputApplication(Keire::ApplicationSpecification specification,
+                                 std::shared_ptr<RelativeInputResult> result)
+            : Application(std::move(specification)), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<RelativeInputLayer>(m_Result)); }
+
+      private:
+        std::shared_ptr<RelativeInputResult> m_Result;
+    };
 } // namespace
 
 TEST_CASE("Input action assets validate and serialize canonically")
@@ -276,4 +365,27 @@ TEST_CASE("Application rejects enabled input without assets")
     specification.ManageLogging = false;
     Keire::Application application(specification);
     CHECK_THROWS_AS((void)application.Run(), std::invalid_argument);
+}
+
+TEST_CASE("Fixed tick input accumulates relative deltas and consumes them once")
+{
+    UseDummyVideoDriver();
+    InputProject project;
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = project.Catalog;
+    specification.Input.Mode = Keire::InputMode::Enabled;
+    specification.Input.AutoJoin = false;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.Timing.FixedDeltaTime = Keire::TimeStep::FromSeconds(10.0);
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+    auto result = std::make_shared<RelativeInputResult>();
+    RelativeInputApplication application(std::move(specification), result);
+    CHECK(application.Run() == 0);
+    CHECK(result->First.X == doctest::Approx(6.0F));
+    CHECK(result->First.Y == doctest::Approx(-2.0F));
+    CHECK(result->Second.X == doctest::Approx(0.0F));
+    CHECK(result->Second.Y == doctest::Approx(0.0F));
 }

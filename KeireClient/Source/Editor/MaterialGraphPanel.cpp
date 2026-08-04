@@ -154,8 +154,27 @@ namespace KeireEditor
     MaterialGraphPanel::~MaterialGraphPanel() noexcept
     {
         m_PreviewCancellation->fetch_add(1, std::memory_order_release);
-        if (m_PreviewRender.valid())
-            m_PreviewRender.wait();
+        if (m_PreviewRender)
+        {
+            m_PreviewRender.Cancel();
+            (void)m_PreviewRender.Wait();
+        }
+        if (m_JobScope)
+        {
+            m_JobScope->Cancel();
+            m_JobScope->Wait();
+        }
+        if (m_OwnJobSystem && m_JobSystem)
+            m_JobSystem->Close();
+    }
+
+    void MaterialGraphPanel::SetJobSystem(Keire::Ref<Keire::JobSystem> jobs)
+    {
+        if (m_PreviewRender || m_JobScope)
+            throw std::logic_error("Material Graph preview jobs are already configured.");
+        if (!jobs)
+            throw std::invalid_argument("Material Graph preview job system is unavailable.");
+        m_JobSystem = std::move(jobs);
     }
 
     void MaterialGraphPanel::Attach(Keire::UiWorkspace& workspace)
@@ -280,23 +299,38 @@ namespace KeireEditor
     void MaterialGraphPanel::DrawPreview(Keire::UiFrame& ui)
     {
         const auto& theme = m_Controller.MaterialGraphTheme();
-        if (m_PreviewRender.valid() && m_PreviewRender.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        if (m_PreviewRender && m_PreviewRender.IsComplete())
         {
-            auto result = m_PreviewRender.get();
-            if (result.Generation == m_PreviewGeneration)
+            (void)m_PreviewRender.Wait();
+            try
             {
-                if (result.Error.empty())
+                m_PreviewRender.RethrowIfFailed();
+                std::optional<PreviewRenderResult> result;
                 {
-                    m_PreviewImage = ui.CreateImage(result.Width, result.Height, result.Pixels);
-                    if (!result.FinalQuality)
-                    {
-                        m_PreviewRefinement = true;
-                        m_PreviewDirty = true;
-                    }
+                    std::scoped_lock lock(m_PreviewRenderState->Mutex);
+                    result = std::move(m_PreviewRenderState->Result);
                 }
-                else
-                    Report(std::move(result.Error));
+                if (result && result->Generation == m_PreviewGeneration)
+                {
+                    if (result->Error.empty())
+                    {
+                        m_PreviewImage = ui.CreateImage(result->Width, result->Height, result->Pixels);
+                        if (!result->FinalQuality)
+                        {
+                            m_PreviewRefinement = true;
+                            m_PreviewDirty = true;
+                        }
+                    }
+                    else
+                        Report(std::move(result->Error));
+                }
             }
+            catch (const std::exception& error)
+            {
+                Report(error.what());
+            }
+            m_PreviewRender = {};
+            m_PreviewRenderState.reset();
         }
         ui.TextColored(theme.Accent, "LIVE MATERIAL PREVIEW");
         auto preview = m_Controller.MaterialGraphState().PreviewSettings();
@@ -324,10 +358,11 @@ namespace KeireEditor
                 ++m_PreviewGeneration;
             m_PreviewCancellation->store(m_PreviewGeneration, std::memory_order_release);
         }
-        if (m_PreviewDirty && !m_PreviewRender.valid())
+        if (m_PreviewDirty && !m_PreviewRender)
         {
             try
             {
+                EnsureJobScope();
                 Keire::Ref<const Keire::MeshAsset> customMesh;
                 if (m_PreviewSettings.Mesh == Keire::MaterialGraphPreviewMesh::Custom)
                 {
@@ -349,14 +384,20 @@ namespace KeireEditor
                 auto properties = m_PreviewProperties;
                 auto settings = m_PreviewSettings;
                 auto cancellation = m_PreviewCancellation;
-                m_PreviewRender = std::async(
-                    std::launch::async,
+                m_PreviewRenderState = std::make_shared<PreviewRenderState>();
+                const auto state = m_PreviewRenderState;
+                m_PreviewRender = m_JobScope->Submit(
+                    {.Name = "Render Material Graph preview",
+                     .Priority = Keire::JobPriority::Low,
+                     .Class = Keire::JobClass::Compute,
+                     .Domain = Keire::JobDomain::Tooling},
                     [generation, width, height, definition = std::move(definition), properties = std::move(properties),
                      settings = std::move(settings), customMesh = std::move(customMesh),
-                     cancellation = std::move(cancellation), finalQuality]() mutable
+                     cancellation = std::move(cancellation), finalQuality, state](Keire::JobContext& context) mutable
                     {
                         PreviewRenderResult result{
                             .Generation = generation, .Width = width, .Height = height, .FinalQuality = finalQuality};
+                        const auto jobStop = context.StopToken();
                         try
                         {
                             result.Pixels = RenderMaterialGraphPreview({
@@ -370,15 +411,23 @@ namespace KeireEditor
                                 .Exposure = settings.Exposure,
                                 .EnvironmentIntensity = settings.EnvironmentIntensity,
                                 .RotationDegrees = settings.RotationDegrees,
-                                .CancellationRequested = [cancellation, generation]
-                                { return cancellation->load(std::memory_order_acquire) != generation; },
+                                .CancellationRequested =
+                                    [cancellation, generation, jobStop]
+                                {
+                                    return jobStop.stop_requested() ||
+                                           cancellation->load(std::memory_order_acquire) != generation;
+                                },
                             });
                         }
                         catch (const std::exception& error)
                         {
                             result.Error = error.what();
                         }
-                        return result;
+                        if (!context.StopRequested())
+                        {
+                            std::scoped_lock lock(state->Mutex);
+                            state->Result = std::move(result);
+                        }
                     });
                 m_PreviewRefinement = false;
                 m_PreviewDirty = false;
@@ -389,12 +438,27 @@ namespace KeireEditor
                 m_PreviewDirty = false;
             }
         }
-        if (m_PreviewDirty || m_PreviewRender.valid())
+        if (m_PreviewDirty || m_PreviewRender)
             ui.TextColored(theme.MutedText, "Updating preview...");
         if (m_PreviewImage)
             ui.Image(m_PreviewImage, {static_cast<float>(m_PreviewWidth), static_cast<float>(m_PreviewHeight)});
         else
             ui.TextColored(theme.Warning, "The live preview is unavailable.");
+    }
+
+    void MaterialGraphPanel::EnsureJobScope()
+    {
+        if (m_JobScope)
+            return;
+        if (!m_JobSystem)
+        {
+            Keire::JobSystemSpecification specification;
+            specification.WorkerCount = 1;
+            specification.BlockingWorkerCount = 1;
+            m_JobSystem = Keire::CreateRef<Keire::JobSystem>(specification);
+            m_OwnJobSystem = true;
+        }
+        m_JobScope = m_JobSystem->CreateScope("Material Graph previews");
     }
 
     void MaterialGraphPanel::UpdatePreview(const Keire::MaterialGraphCompilation& compilation,

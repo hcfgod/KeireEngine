@@ -123,18 +123,19 @@ namespace Keire
     class RenderSystem::Impl final
     {
       public:
-        Impl(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window, Ref<AssetSystem> assets)
+        Impl(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window, Ref<AssetSystem> assets,
+             Ref<JobSystem> jobs, Ref<StreamingSystem> streaming)
             : State(std::make_shared<RenderSharedState>(std::move(specification), std::move(windows), std::move(window),
-                                                        std::move(assets)))
+                                                        std::move(assets), std::move(jobs), std::move(streaming)))
         {
         }
         std::shared_ptr<RenderSharedState> State;
     };
 
     RenderSystem::RenderSystem(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
-                               Ref<AssetSystem> assets)
+                               Ref<AssetSystem> assets, Ref<JobSystem> jobs, Ref<StreamingSystem> streaming)
         : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(windows), std::move(window),
-                                        std::move(assets)))
+                                        std::move(assets), std::move(jobs), std::move(streaming)))
     {
     }
 
@@ -196,6 +197,77 @@ namespace Keire
         result.VfxPipelineWarmupMilliseconds =
             static_cast<float>(m_Impl->State->VfxPipelineWarmupMicroseconds.load(std::memory_order_relaxed)) / 1000.0F;
         return result;
+    }
+
+    FrameGraphSnapshot RenderSystem::CaptureFrameGraph() const
+    {
+        auto& state = *m_Impl->State;
+        state.RequireOwner("CaptureFrameGraph");
+        FrameGraphSnapshot snapshot;
+        snapshot.Frame = state.Statistics.Frame;
+        snapshot.FenceRetiredBytes = state.Statistics.FenceRetiredBytes;
+
+        std::uint64_t largestPixels = 0;
+        for (const auto& surface : state.LiveSurfaces())
+            largestPixels = std::max(largestPixels, static_cast<std::uint64_t>(surface->Width) * surface->Height);
+
+        const auto resources = state.SceneFrameGraph.Graph.Resources();
+        const auto passes = state.SceneFrameGraph.Graph.Passes();
+        const auto& compiled = state.SceneFrameGraph.Compiled;
+        snapshot.Resources.reserve(resources.size());
+        std::vector<std::uint64_t> aliasBytes(compiled.TransientAllocations.size());
+        for (std::uint32_t index = 0; index < resources.size(); ++index)
+        {
+            const auto& resource = resources[index];
+            const auto& lifetime = compiled.Lifetimes[index];
+            const auto physical = compiled.PhysicalResources[index];
+            auto estimatedBytes = resource.SizeBytes;
+            if (estimatedBytes == 0 && resource.Kind == RenderBackend::FrameGraphResourceKind::Texture)
+            {
+                const auto bytesPerPixel = resource.Name.find("HDR") != std::string::npos ? 8ULL : 4ULL;
+                estimatedBytes = largestPixels * bytesPerPixel;
+            }
+            snapshot.Resources.push_back({index, resource.Name,
+                                          static_cast<FrameGraphSnapshotResourceKind>(resource.Kind),
+                                          lifetime.FirstPass, lifetime.LastPass, physical, resource.CompatibilityKey,
+                                          estimatedBytes, resource.Imported, lifetime.Used});
+            if (!resource.Imported && lifetime.Used)
+            {
+                snapshot.TheoreticalUnaliasedBytes += estimatedBytes;
+                if (physical < aliasBytes.size())
+                    aliasBytes[physical] = std::max(aliasBytes[physical], estimatedBytes);
+            }
+        }
+        for (const auto bytes : aliasBytes)
+            snapshot.ActiveTransientBytes += bytes;
+        snapshot.SavedAliasingBytes = snapshot.TheoreticalUnaliasedBytes -
+                                      std::min(snapshot.TheoreticalUnaliasedBytes, snapshot.ActiveTransientBytes);
+
+        snapshot.Passes.reserve(compiled.Order.size());
+        for (std::uint32_t order = 0; order < compiled.Order.size(); ++order)
+        {
+            const auto passIndex = compiled.Order[order].Value;
+            const auto& pass = passes[passIndex];
+            FrameGraphSnapshotPass captured;
+            captured.Index = passIndex;
+            captured.Order = order;
+            captured.Name = pass.Name;
+            captured.Kind = static_cast<FrameGraphSnapshotPassKind>(pass.Kind);
+            for (const auto resource : pass.Reads)
+                captured.Reads.push_back(resource.Value);
+            for (const auto resource : pass.Writes)
+                captured.Writes.push_back(resource.Value);
+            for (const auto& transition : compiled.Execution[order].Transitions)
+                captured.Transitions.push_back({transition.Resource.Value,
+                                                static_cast<FrameGraphSnapshotResourceState>(transition.Before),
+                                                static_cast<FrameGraphSnapshotResourceState>(transition.After)});
+            snapshot.Passes.push_back(std::move(captured));
+        }
+
+        state.Statistics.ActiveTransientBytes = snapshot.ActiveTransientBytes;
+        state.Statistics.TheoreticalUnaliasedBytes = snapshot.TheoreticalUnaliasedBytes;
+        state.Statistics.SavedAliasingBytes = snapshot.SavedAliasingBytes;
+        return snapshot;
     }
     bool RenderSystem::IsOpen() const noexcept { return m_Impl->State->Open; }
     void RenderSystem::Close() noexcept { m_Impl->State->Close(); }

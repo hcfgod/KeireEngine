@@ -337,6 +337,14 @@ TEST_CASE("scene presentation clear discards UI events deferred during filtered 
     presentation->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true);
     presentation->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, false);
     CHECK_FALSE(presentation->ConsumeClick(second.Id()));
+    const auto checkpoint = presentation->CaptureCheckpoint();
+    CHECK(checkpoint.FocusedEntity == first.Id());
+    CHECK_FALSE(checkpoint.PendingUiEvents.empty());
+    CHECK(presentation->ConsumeClick(first.Id()));
+    CHECK(presentation->SetFocus(second.Id()));
+    presentation->RestoreCheckpoint(checkpoint);
+    CHECK(presentation->CaptureCheckpoint().FocusedEntity == first.Id());
+    CHECK(presentation->ConsumeClick(first.Id()));
 
     presentation->Clear();
     Keire::RuntimeUiEvent event;
@@ -480,8 +488,15 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     CHECK(audio->Voices().front().Frame == 0);
     REQUIRE(presentation->Seek(sourceEntity.Id(), 2.0F / 48'000.0F));
     CHECK(audio->Voices().front().Frame == 2);
+    const auto pausedCheckpoint = presentation->CaptureCheckpoint();
     REQUIRE(presentation->Resume(sourceEntity.Id()));
     CHECK(presentation->Playback(sourceEntity.Id()).State == Keire::AudioSourcePlaybackState::Playing);
+    (void)audio->RenderVoicesOffline(4);
+    presentation->RestoreCheckpoint(pausedCheckpoint);
+    CHECK(presentation->Playback(sourceEntity.Id()).State == Keire::AudioSourcePlaybackState::Paused);
+    REQUIRE(audio->Voice(audio->Voices().front().Id));
+    CHECK(audio->Voice(audio->Voices().front().Id)->Frame == 2);
+    REQUIRE(presentation->Resume(sourceEntity.Id()));
     REQUIRE(presentation->Stop(sourceEntity.Id()));
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
     CHECK(audio->Voices().empty());

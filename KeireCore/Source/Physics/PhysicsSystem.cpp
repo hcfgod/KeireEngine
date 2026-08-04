@@ -1,9 +1,11 @@
 #include "Keire/Physics/PhysicsSystem.h"
 
+#include "Keire/Jobs/JobSystem.h"
+
 #include <Jolt/Jolt.h>
 
 #include <Jolt/Core/Factory.h>
-#include <Jolt/Core/JobSystemThreadPool.h>
+#include <Jolt/Core/JobSystemWithBarrier.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -45,6 +47,89 @@ namespace Keire
         constexpr JPH::ObjectLayer MovingLayer = 1;
         constexpr JPH::uint BroadPhaseLayerCount = 2;
 
+        class JoltJobSystemAdapter final : public JPH::JobSystemWithBarrier
+        {
+          public:
+            explicit JoltJobSystemAdapter(Ref<Keire::JobSystem> jobs)
+                : JPH::JobSystemWithBarrier(JPH::cMaxPhysicsBarriers), Scheduler(std::move(jobs)),
+                  Scope(Scheduler->CreateScope("Jolt physics"))
+            {
+            }
+
+            ~JoltJobSystemAdapter() override { Close(); }
+
+            [[nodiscard]] int GetMaxConcurrency() const override
+            {
+                return static_cast<int>(std::max<std::size_t>(1, Scheduler->Statistics().WorkerCount));
+            }
+
+            JobHandle CreateJob(const char* name, const JPH::ColorArg color, const JobFunction& function,
+                                const JPH::uint32 dependencies = 0) override
+            {
+                return JobHandle(new Job(name, color, this, function, dependencies));
+            }
+
+            void WaitForJobs(Barrier* barrier) override
+            {
+                JPH::JobSystemWithBarrier::WaitForJobs(barrier);
+                DrainSubmitted();
+            }
+
+            void Close() noexcept
+            {
+                if (!Scope)
+                    return;
+                Scope->Cancel();
+                Scope->Wait();
+                Scope.Reset();
+                std::scoped_lock lock(SubmittedMutex);
+                Submitted.clear();
+            }
+
+          protected:
+            void QueueJob(Job* job) override
+            {
+                job->AddRef();
+                auto lifetime = std::shared_ptr<Job>(job, [](Job* value) { value->Release(); });
+                JobDescription description;
+                description.Name = "Jolt physics";
+                description.Domain = JobDomain::Simulation;
+                const auto submitted =
+                    Scope->Submit(std::move(description),
+                                  [lifetime = std::move(lifetime)](JobContext&) { (void)lifetime->Execute(); });
+                std::scoped_lock lock(SubmittedMutex);
+                Submitted.push_back(submitted);
+            }
+
+            void QueueJobs(Job** jobs, const JPH::uint count) override
+            {
+                for (JPH::uint index = 0; index < count; ++index)
+                    QueueJob(jobs[index]);
+            }
+
+            void FreeJob(Job* job) override { delete job; }
+
+          private:
+            void DrainSubmitted()
+            {
+                std::vector<Keire::JobHandle> submitted;
+                {
+                    std::scoped_lock lock(SubmittedMutex);
+                    submitted.swap(Submitted);
+                }
+                for (const auto& job : submitted)
+                {
+                    (void)job.Wait();
+                    job.RethrowIfFailed();
+                }
+            }
+
+            Ref<Keire::JobSystem> Scheduler;
+            Ref<JobScope> Scope;
+            std::mutex SubmittedMutex;
+            std::vector<Keire::JobHandle> Submitted;
+        };
+
         class JoltRuntimeLease final
         {
           public:
@@ -83,6 +168,9 @@ namespace Keire
             std::uint32_t MaximumWorlds = 0;
             std::array<std::uint32_t, 32> CollisionMatrix;
             std::shared_ptr<JoltRuntimeLease> Runtime = std::make_shared<JoltRuntimeLease>();
+            Ref<JobSystem> Scheduler;
+            std::shared_ptr<JoltJobSystemAdapter> Jobs;
+            bool OwnScheduler = false;
         };
 
         void ValidateCollisionMatrix(const std::array<std::uint32_t, 32>& matrix)
@@ -516,9 +604,7 @@ namespace Keire
         };
 
         explicit Impl(std::shared_ptr<PhysicsServiceState> service)
-            : Service(std::move(service)), Owner(std::this_thread::get_id()), ContactListener(*this),
-              Jobs(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
-                   static_cast<int>(std::max(1U, std::thread::hardware_concurrency()) - 1U))
+            : Service(std::move(service)), Owner(std::this_thread::get_id()), ContactListener(*this)
         {
             Native.Init(65'536, 0, 65'536, 10'240, BroadPhaseLayers, BroadPhaseFilter, LayerFilter);
             Native.SetContactListener(&ContactListener);
@@ -691,7 +777,6 @@ namespace Keire
         ObjectLayerFilter LayerFilter;
         JPH::PhysicsSystem Native;
         JPH::TempAllocatorImpl Temporary{16U * 1024U * 1024U};
-        JPH::JobSystemThreadPool Jobs;
     };
 
     PhysicsWorld::PhysicsWorld(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
@@ -821,6 +906,37 @@ namespace Keire
         }
     }
 
+    void PhysicsWorld::SetBodyState(const PhysicsBodyId body, const PhysicsBodyState& state)
+    {
+        m_Impl->RequireOwner("SetBodyState");
+        const auto found = m_Impl->Bodies.find(body.m_Value);
+        if (!body || found == m_Impl->Bodies.end() || (state.Body && state.Body != body) ||
+            !Math::IsFinite(state.Position) || !Math::IsFinite(state.Rotation) ||
+            !Math::IsFinite(state.LinearVelocity) || !Math::IsFinite(state.AngularVelocity))
+        {
+            throw std::invalid_argument("Physics body checkpoint state is invalid or unavailable.");
+        }
+
+        auto& bodyInterface = m_Impl->Native.GetBodyInterface();
+        const auto rotation = Math::Normalize(state.Rotation);
+        const auto activation = state.Sleeping ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
+        bodyInterface.SetPositionAndRotation(found->second.Native, ToJolt(state.Position), ToJolt(rotation),
+                                             activation);
+        if (found->second.Definition.Motion != PhysicsMotionType::Static)
+        {
+            bodyInterface.SetLinearAndAngularVelocity(
+                found->second.Native, JPH::Vec3(state.LinearVelocity.X, state.LinearVelocity.Y, state.LinearVelocity.Z),
+                JPH::Vec3(state.AngularVelocity.X, state.AngularVelocity.Y, state.AngularVelocity.Z));
+            if (state.Sleeping)
+                bodyInterface.DeactivateBody(found->second.Native);
+            else
+                bodyInterface.ActivateBody(found->second.Native);
+        }
+        found->second.Definition.Position = state.Position;
+        found->second.Definition.Rotation = rotation;
+        found->second.Definition.LinearVelocity = state.LinearVelocity;
+    }
+
     std::optional<PhysicsBodyState> PhysicsWorld::TryGetBody(const PhysicsBodyId body) const
     {
         m_Impl->RequireOwner("TryGetBody");
@@ -831,8 +947,11 @@ namespace Keire
         JPH::Quat rotation;
         const auto& bodyInterface = m_Impl->Native.GetBodyInterface();
         bodyInterface.GetPositionAndRotation(found->second.Native, position, rotation);
-        return PhysicsBodyState{body, FromJoltPosition(position), FromJoltRotation(rotation),
+        return PhysicsBodyState{body,
+                                FromJoltPosition(position),
+                                FromJoltRotation(rotation),
                                 FromJoltVector(bodyInterface.GetLinearVelocity(found->second.Native)),
+                                FromJoltVector(bodyInterface.GetAngularVelocity(found->second.Native)),
                                 !bodyInterface.IsActive(found->second.Native)};
     }
 
@@ -958,7 +1077,8 @@ namespace Keire
         }
         m_Impl->ContactListener.Clear();
         const auto collisionSteps = std::max(1, static_cast<int>(std::ceil(deltaSeconds * 60.0F)));
-        const auto error = m_Impl->Native.Update(deltaSeconds, collisionSteps, &m_Impl->Temporary, &m_Impl->Jobs);
+        const auto error =
+            m_Impl->Native.Update(deltaSeconds, collisionSteps, &m_Impl->Temporary, m_Impl->Service->Jobs.get());
         if (error != JPH::EPhysicsUpdateError::None)
             throw std::runtime_error("Jolt physics update capacity was exhausted.");
 
@@ -1108,19 +1228,30 @@ namespace Keire
     class PhysicsSystem::Impl final
     {
       public:
-        Impl(const std::uint32_t maximumWorlds, std::array<std::uint32_t, 32> collisionMatrix)
+        Impl(const std::uint32_t maximumWorlds, std::array<std::uint32_t, 32> collisionMatrix, Ref<JobSystem> jobs)
             : Owner(std::this_thread::get_id())
         {
             Service->MaximumWorlds = maximumWorlds;
             Service->CollisionMatrix = std::move(collisionMatrix);
+            if (!jobs)
+            {
+                JobSystemSpecification specification;
+                specification.WorkerCount =
+                    std::clamp<std::size_t>(std::max(1U, std::thread::hardware_concurrency()), 1, 32);
+                specification.BlockingWorkerCount = 1;
+                jobs = CreateRef<JobSystem>(specification);
+                Service->OwnScheduler = true;
+            }
+            Service->Scheduler = std::move(jobs);
+            Service->Jobs = std::make_shared<JoltJobSystemAdapter>(Service->Scheduler);
         }
 
         std::thread::id Owner;
         std::shared_ptr<PhysicsServiceState> Service = std::make_shared<PhysicsServiceState>();
     };
 
-    PhysicsSystem::PhysicsSystem(const PhysicsSystemSpecification specification)
-        : m_Impl(std::make_unique<Impl>(specification.MaximumWorlds, specification.CollisionMatrix))
+    PhysicsSystem::PhysicsSystem(const PhysicsSystemSpecification specification, Ref<JobSystem> jobs)
+        : m_Impl(std::make_unique<Impl>(specification.MaximumWorlds, specification.CollisionMatrix, std::move(jobs)))
     {
         ValidateCollisionMatrix(specification.CollisionMatrix);
         if (specification.Mode == PhysicsMode::Disabled || specification.MaximumWorlds == 0 ||
@@ -1178,5 +1309,13 @@ namespace Keire
         if (std::this_thread::get_id() != m_Impl->Owner)
             throw std::logic_error("PhysicsSystem::Close must run on the owner thread.");
         m_Impl->Service->Open.store(false, std::memory_order_release);
+        if (m_Impl->Service->Jobs)
+        {
+            m_Impl->Service->Jobs->Close();
+            m_Impl->Service->Jobs.reset();
+        }
+        if (m_Impl->Service->OwnScheduler && m_Impl->Service->Scheduler)
+            m_Impl->Service->Scheduler->Close();
+        m_Impl->Service->Scheduler.Reset();
     }
 } // namespace Keire

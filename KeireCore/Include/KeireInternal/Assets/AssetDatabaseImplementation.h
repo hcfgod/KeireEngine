@@ -698,6 +698,12 @@ namespace Keire
     class AssetDatabase::Impl final
     {
       public:
+        struct RecordIndices final
+        {
+            std::unordered_map<AssetId, std::size_t> ById;
+            std::unordered_map<std::string, std::size_t> ByPath;
+        };
+
         explicit Impl(AssetDatabaseSpecification value) : Specification(std::move(value))
         {
             if (Specification.MaximumSourceBytes == 0 || Specification.ChangeDebounce.count() < 0 ||
@@ -1193,16 +1199,14 @@ namespace Keire
         {
             std::scoped_lock lock(Mutex);
             const auto id = record.Id;
-            const auto samePath = std::ranges::find(Records, record.RelativePath, &AssetSourceRecord::RelativePath);
-            if (samePath != Records.end() && samePath->Id != record.Id)
-                throw std::runtime_error("Asset path is already registered: " +
-                                         Detail::PathToUtf8(record.RelativePath));
-            const auto existing = std::ranges::find(Records, record.Id, &AssetSourceRecord::Id);
-            if (existing == Records.end())
-                Records.push_back(std::move(record));
+            auto candidate = Records;
+            const auto existing = IdIndex.find(record.Id);
+            if (existing == IdIndex.end())
+                candidate.push_back(std::move(record));
             else
-                *existing = std::move(record);
-            std::ranges::sort(Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
+                candidate[existing->second] = std::move(record);
+            std::ranges::sort(candidate, [](const auto& left, const auto& right) { return left.Id < right.Id; });
+            ReplaceRecords(std::move(candidate));
             Observed.insert_or_assign(id, signature);
             PendingChanges.erase(id);
             SourceRevision.fetch_add(1, std::memory_order_release);
@@ -1214,7 +1218,9 @@ namespace Keire
             std::scoped_lock lock(Mutex);
             const auto contains = [&](const AssetId id)
             { return std::ranges::find(identities, id) != identities.end(); };
-            std::erase_if(Records, [&](const AssetSourceRecord& record) { return contains(record.Id); });
+            auto candidate = Records;
+            std::erase_if(candidate, [&](const AssetSourceRecord& record) { return contains(record.Id); });
+            ReplaceRecords(std::move(candidate));
             for (const auto id : identities)
             {
                 Observed.erase(id);
@@ -1227,10 +1233,57 @@ namespace Keire
             RequestChangeMonitorScan();
         }
 
+        [[nodiscard]] static std::string CanonicalPathKey(const std::filesystem::path& path)
+        {
+            return Detail::PathToUtf8(path.lexically_normal());
+        }
+
+        [[nodiscard]] static std::string PortablePathKey(const std::filesystem::path& path)
+        {
+            auto result = CanonicalPathKey(path);
+            std::ranges::transform(result, result.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            return result;
+        }
+
+        [[nodiscard]] static RecordIndices BuildIndices(const std::vector<AssetSourceRecord>& records)
+        {
+            RecordIndices result;
+            result.ById.reserve(records.size());
+            result.ByPath.reserve(records.size());
+            std::unordered_map<std::string, std::string> portablePaths;
+            portablePaths.reserve(records.size());
+            for (std::size_t index = 0; index < records.size(); ++index)
+            {
+                const auto& record = records[index];
+                const auto path = CanonicalPathKey(record.RelativePath);
+                if (!result.ById.emplace(record.Id, index).second)
+                    throw std::runtime_error("Asset identity is registered more than once: " + record.Id.ToString());
+                if (!result.ByPath.emplace(path, index).second)
+                    throw std::runtime_error("Asset path is registered more than once: " + path);
+                const auto portable = PortablePathKey(record.RelativePath);
+                const auto [found, inserted] = portablePaths.emplace(portable, path);
+                if (!inserted && found->second != path)
+                    throw std::runtime_error("Asset paths differ only by case and are not portable: " + found->second +
+                                             " and " + path);
+            }
+            return result;
+        }
+
+        void ReplaceRecords(std::vector<AssetSourceRecord> records)
+        {
+            auto indices = BuildIndices(records);
+            Records = std::move(records);
+            IdIndex = std::move(indices.ById);
+            PathIndex = std::move(indices.ByPath);
+        }
+
         AssetDatabaseSpecification Specification;
         std::filesystem::path SourceRoot;
         std::filesystem::path CacheRoot;
         std::vector<AssetSourceRecord> Records;
+        std::unordered_map<AssetId, std::size_t> IdIndex;
+        std::unordered_map<std::string, std::size_t> PathIndex;
         std::unordered_map<AssetId, FileSignature> Observed;
         std::unordered_map<AssetId, std::chrono::steady_clock::time_point> PendingChanges;
         std::unordered_map<std::string, AssetImporterRegistration> Importers;

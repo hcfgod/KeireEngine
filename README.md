@@ -91,6 +91,33 @@ bash Scripts/project.sh package --generator ninja --configuration Release --allo
 
 `default` resolves before Premake runs: MSVC for Visual Studio and Windows Ninja, GCC for Windows GNU Make and Linux, and Clang for macOS. Generation stamps record the concrete toolset.
 
+## Architecture workflows
+
+The engine now has application-owned jobs, tracked memory domains and arenas, typed generational handles, structured
+diagnostics, per-class streaming budgets, frame-safe GPU retirement, deterministic replay, transactional project
+upgrades, and source-level modules. The editor's **Window > Architecture** and **Window > Render Graph** panels inspect
+these systems without exposing renderer or platform implementation types.
+
+Project upgrade preview is the default; mutation requires an explicit operation:
+
+```powershell
+KeireAssetTool upgrade-project --project C:\Projects\Game
+KeireAssetTool upgrade-project --project C:\Projects\Game --apply
+KeireAssetTool upgrade-project --project C:\Projects\Game --recover
+```
+
+Runtime replay automation supports certified strict verification and non-certified performance capture:
+
+```powershell
+KeireRuntime --content Cooked --record Captures\run.keirereplay --profile strict --tick-limit 3600 --headless
+KeireRuntime --content Cooked --verify Captures\run.keirereplay --headless --output Captures\result.json
+```
+
+SDK source modules are compiled with the application. See `Examples/SourceModule`: CMake's
+`keire_define_source_module_pack` creates the shared static pack and `keire_link_source_module_pack` links it into each
+host. `Config/SourceModules.premake.lua` provides the equivalent Premake helpers. This is a source contract, not a
+runtime-loadable binary plugin ABI.
+
 ## Build Matrix
 
 Configurations are `Debug`, `Release`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`. Release and Dist define `NDEBUG`; Dist also enables link-time optimization. CI adds fatal warnings.
@@ -107,12 +134,14 @@ ASan is supported on all three operating systems. UBSan and TSan are supported w
 
 ```text
 Config/                 Project identity, client JSON, and immutable dependency lock
+SourceModules/           Shared source-level module pack linked into every engine host
 KeireCore/              Static library and public Keire/<header> API
 KeireClient/            Console application
 KeireHub/               Project discovery, creation, and editor launcher
 AssetTool/              Source scan, import, cook, and package validation CLI
 KeireAssetWorker/       Private process-isolated editor import and cook worker
 KeireTests/             Independent doctest cases
+Examples/SourceModule/  Packaged source-module SDK consumer
 Samples/KeireSandbox/   Validated starter project packaged with the SDK
 Vendor/                 Pinned runtime, test, UI, compression, ECS, and math submodules
 Scripts/Premake/        Shared policy and tracked private dependency project definitions

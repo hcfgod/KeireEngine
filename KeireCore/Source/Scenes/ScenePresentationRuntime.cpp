@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <exception>
 #include <map>
 #include <ranges>
 #include <set>
@@ -304,6 +305,117 @@ namespace Keire
             }
             state.Voice = {};
             state.Paused = false;
+        }
+
+        [[nodiscard]] ScenePresentationCheckpoint CaptureCheckpoint() const
+        {
+            ScenePresentationCheckpoint result;
+            if (const auto focus = UiTree->Focus())
+            {
+                if (const auto found = NodeEntities.find(focus.Value()); found != NodeEntities.end())
+                    result.FocusedEntity = found->second;
+            }
+            result.AudioSources.reserve(AudioSources.size());
+            for (const auto& [entity, state] : AudioSources)
+            {
+                ScenePresentationAudioCheckpoint checkpoint;
+                checkpoint.Entity = entity;
+                checkpoint.Clip = state.Clip;
+                checkpoint.ManualPlayRequested = state.ManualPlayRequested;
+                checkpoint.PlayOnAwakeConsumed = state.PlayOnAwakeConsumed;
+                if (Audio && state.Voice)
+                {
+                    if (const auto voice = Audio->Voice(state.Voice))
+                    {
+                        checkpoint.State =
+                            voice->Paused ? AudioSourcePlaybackState::Paused : AudioSourcePlaybackState::Playing;
+                        checkpoint.Frame = voice->Frame;
+                    }
+                }
+                result.AudioSources.push_back(checkpoint);
+            }
+            const auto appendEvent = [&](const RuntimeUiEvent& event)
+            {
+                const auto target = NodeEntities.find(event.Target.Value());
+                if (target != NodeEntities.end())
+                {
+                    result.PendingUiEvents.push_back(
+                        {event.Type, target->second, event.PointerX, event.PointerY, event.Button});
+                }
+            };
+            result.PendingUiEvents.reserve(DeferredUiEvents.size() + UiTree->Statistics().PendingEvents);
+            for (const auto& event : DeferredUiEvents)
+                appendEvent(event);
+            for (const auto& event : UiTree->PendingEvents())
+                appendEvent(event);
+            return result;
+        }
+
+        void ApplyCheckpoint(const ScenePresentationCheckpoint& checkpoint)
+        {
+            if (checkpoint.AudioSources.size() != AudioSources.size())
+                throw std::invalid_argument("Scene presentation audio checkpoint does not match the active scene.");
+            std::set<EntityId> checkpointEntities;
+            for (const auto& source : checkpoint.AudioSources)
+            {
+                const auto found = AudioSources.find(source.Entity);
+                const auto entity = ActiveScene ? ActiveScene->FindEntity(source.Entity) : Entity{};
+                const auto component =
+                    entity ? entity.GetComponent<AudioSourceComponent>() : Ref<AudioSourceComponent>{};
+                if (!checkpointEntities.insert(source.Entity).second || found == AudioSources.end() || !component ||
+                    found->second.Clip != source.Clip || source.State > AudioSourcePlaybackState::Paused ||
+                    (source.State != AudioSourcePlaybackState::Stopped &&
+                     (!Audio || !found->second.LoadedClip || source.Frame > found->second.LoadedClip->Frames)))
+                {
+                    throw std::invalid_argument("Scene presentation audio checkpoint is invalid or stale.");
+                }
+            }
+            if (checkpoint.FocusedEntity && !UiNodes.contains(checkpoint.FocusedEntity))
+                throw std::invalid_argument("Scene presentation UI focus checkpoint is stale.");
+            for (const auto& event : checkpoint.PendingUiEvents)
+            {
+                if (!UiNodes.contains(event.Target) || event.Type > RuntimeUiEventType::Cancel ||
+                    event.Button > RuntimeUiPointerButton::Middle || !std::isfinite(event.PointerX) ||
+                    !std::isfinite(event.PointerY))
+                {
+                    throw std::invalid_argument("Scene presentation UI event checkpoint is invalid or stale.");
+                }
+            }
+
+            for (const auto& source : checkpoint.AudioSources)
+            {
+                auto& state = AudioSources.at(source.Entity);
+                StopVoice(state);
+                state.ManualPlayRequested = source.ManualPlayRequested;
+                state.PlayOnAwakeConsumed = source.PlayOnAwakeConsumed;
+                if (source.State == AudioSourcePlaybackState::Stopped)
+                    continue;
+                const auto entity = ActiveScene->FindEntity(source.Entity);
+                const auto component = entity.GetComponent<AudioSourceComponent>();
+                AudioMixerRoutingId routing;
+                if (const auto mixer = AudioMixers.find(component->Mixer()); mixer != AudioMixers.end())
+                    routing = mixer->second.Routing;
+                state.Voice = Audio->Play(PlaybackRequest(entity, *component, state.LoadedClip, routing));
+                if (!state.Voice || !Audio->Seek(state.Voice, source.Frame))
+                    throw std::runtime_error("Scene presentation audio voice could not be restored.");
+                if (source.State == AudioSourcePlaybackState::Paused)
+                {
+                    if (!Audio->Pause(state.Voice))
+                        throw std::runtime_error("Scene presentation audio pause state could not be restored.");
+                    state.Paused = true;
+                }
+            }
+
+            const auto focus = checkpoint.FocusedEntity ? UiNodes.at(checkpoint.FocusedEntity) : RuntimeUiElementId{};
+            if (!UiTree->SetFocus(focus))
+                throw std::runtime_error("Scene presentation UI focus could not be restored.");
+            UiTree->ReplacePendingEvents({});
+            DeferredUiEvents.clear();
+            for (const auto& event : checkpoint.PendingUiEvents)
+            {
+                DeferredUiEvents.push_back(
+                    {event.Type, UiNodes.at(event.Target), event.PointerX, event.PointerY, event.Button});
+            }
         }
 
         void SynchronizeAudio(const Ref<Scene>& scene, const bool playing)
@@ -647,6 +759,32 @@ namespace Keire
             return true;
         }
         return m_Impl->UiTree->PollEvent(event);
+    }
+
+    ScenePresentationCheckpoint ScenePresentationRuntime::CaptureCheckpoint() const
+    {
+        return m_Impl->CaptureCheckpoint();
+    }
+
+    void ScenePresentationRuntime::RestoreCheckpoint(const ScenePresentationCheckpoint& checkpoint)
+    {
+        const auto rollback = m_Impl->CaptureCheckpoint();
+        try
+        {
+            m_Impl->ApplyCheckpoint(checkpoint);
+        }
+        catch (...)
+        {
+            const auto failure = std::current_exception();
+            try
+            {
+                m_Impl->ApplyCheckpoint(rollback);
+            }
+            catch (...)
+            {
+            }
+            std::rethrow_exception(failure);
+        }
     }
 
     Ref<RuntimeUiTree> ScenePresentationRuntime::Ui() const noexcept { return m_Impl->UiTree; }

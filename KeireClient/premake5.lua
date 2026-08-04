@@ -20,6 +20,7 @@ project(ProjectConfig.CLIENT_TARGET)
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
+    LinkKeireSourceModules()
     LinkKeireCore()
 
     dependson { AssetWorkerTarget }

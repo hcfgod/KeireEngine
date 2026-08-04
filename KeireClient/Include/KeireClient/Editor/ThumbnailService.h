@@ -44,7 +44,8 @@ namespace KeireEditor
     class ThumbnailService final
     {
       public:
-        explicit ThumbnailService(std::filesystem::path cacheDirectory, std::size_t queueCapacity = 256);
+        explicit ThumbnailService(std::filesystem::path cacheDirectory, std::size_t queueCapacity = 256,
+                                  Keire::Ref<Keire::JobSystem> jobs = {});
         ~ThumbnailService();
 
         ThumbnailService(const ThumbnailService&) = delete;

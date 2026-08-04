@@ -1,8 +1,12 @@
+#include "Keire/Rendering/FrameGraphSnapshot.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <vector>
 
@@ -114,4 +118,38 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
     CHECK(scene.Compiled.TransientAllocations[hdrAllocation].Kind ==
           Keire::RenderBackend::FrameGraphResourceKind::Texture);
     CHECK(scene.Compiled.TransientAllocations[hdrAllocation].CompatibilityKey == 4);
+}
+
+TEST_CASE("frame graph snapshot exports are deterministic and explicit")
+{
+    Keire::FrameGraphSnapshot snapshot;
+    snapshot.Frame = 42;
+    snapshot.ActiveTransientBytes = 2048;
+    snapshot.TheoreticalUnaliasedBytes = 3072;
+    snapshot.SavedAliasingBytes = 1024;
+    snapshot.Passes.push_back({0, 0, "Opaque", Keire::FrameGraphSnapshotPassKind::Graphics, {}, {0}, {}});
+    snapshot.Resources.push_back(
+        {0, "HDR scene", Keire::FrameGraphSnapshotResourceKind::Texture, 0, 0, 0, 16, 2048, false, true});
+
+    const auto directory = std::filesystem::path("Build") / "FrameGraphSnapshotTests";
+    const auto json = directory / "graph.json";
+    const auto dot = directory / "graph.dot";
+    std::filesystem::remove_all(directory);
+    CHECK_FALSE(std::filesystem::exists(json));
+    Keire::ExportFrameGraphJson(snapshot, json);
+    Keire::ExportFrameGraphDot(snapshot, dot);
+    std::ifstream jsonStream(json, std::ios::binary);
+    std::ifstream dotStream(dot, std::ios::binary);
+    const std::string jsonText(std::istreambuf_iterator<char>(jsonStream), {});
+    const std::string dotText(std::istreambuf_iterator<char>(dotStream), {});
+    CHECK(jsonText.find("\"savedAliasingBytes\": 1024") != std::string::npos);
+    CHECK(dotText.find("0: Opaque") != std::string::npos);
+    const auto firstJson = jsonText;
+    Keire::ExportFrameGraphJson(snapshot, json);
+    std::ifstream secondJsonStream(json, std::ios::binary);
+    CHECK(std::string(std::istreambuf_iterator<char>(secondJsonStream), {}) == firstJson);
+    jsonStream.close();
+    dotStream.close();
+    secondJsonStream.close();
+    std::filesystem::remove_all(directory);
 }

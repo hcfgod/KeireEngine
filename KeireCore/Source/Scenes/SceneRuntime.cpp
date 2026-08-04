@@ -855,7 +855,7 @@ namespace Keire
             VfxBackendMode = backend;
         }
 
-        void InitializeVfx() { InitializeVfx(Assets ? VfxBackend::Gpu : VfxBackend::Cpu); }
+        void InitializeVfx() { InitializeVfx(DeterministicSimulation || !Assets ? VfxBackend::Cpu : VfxBackend::Gpu); }
 
         void SynchronizeVfx(const float deltaSeconds)
         {
@@ -1547,6 +1547,7 @@ namespace Keire
         Ref<PhysicsWorld> PhysicsWorldService;
         Ref<VfxWorld> VfxWorldService;
         VfxBackend VfxBackendMode = VfxBackend::Cpu;
+        bool DeterministicSimulation = false;
         std::thread::id OwnerThread;
         ScenePlayState PlayState = ScenePlayState::Stopped;
         SceneRuntimeDiagnostic Failure;
@@ -1576,6 +1577,145 @@ namespace Keire
     Ref<ScenePresentationRuntime> SceneRuntimeSession::Presentation() const noexcept { return m_Impl->Presentation; }
     Ref<PhysicsWorld> SceneRuntimeSession::Physics() const noexcept { return m_Impl->PhysicsWorldService; }
     Ref<VfxWorld> SceneRuntimeSession::Vfx() const noexcept { return m_Impl->VfxWorldService; }
+
+    std::vector<ScenePhysicsCheckpointBody> SceneRuntimeSession::CapturePhysicsCheckpoint() const
+    {
+        m_Impl->RequireOwner("CapturePhysicsCheckpoint");
+        std::vector<ScenePhysicsCheckpointBody> result;
+        if (!m_Impl->PhysicsWorldService)
+            return result;
+        result.reserve(m_Impl->PhysicsBodies.size());
+        for (const auto& [entity, runtime] : m_Impl->PhysicsBodies)
+        {
+            if (!runtime.Body)
+                continue;
+            const auto state = m_Impl->PhysicsWorldService->TryGetBody(runtime.Body);
+            if (!state)
+                throw std::runtime_error("A scene physics checkpoint could not resolve a runtime body.");
+            result.push_back({entity, state->Position, state->Rotation, state->LinearVelocity, state->AngularVelocity,
+                              state->Sleeping});
+        }
+        return result;
+    }
+
+    void SceneRuntimeSession::RestorePhysicsCheckpoint(const std::span<const ScenePhysicsCheckpointBody> bodies)
+    {
+        m_Impl->RequireOwner("RestorePhysicsCheckpoint");
+        if (!m_Impl->PhysicsWorldService)
+        {
+            if (!bodies.empty())
+                throw std::runtime_error("A physics checkpoint cannot be restored without an active physics world.");
+            return;
+        }
+
+        std::set<EntityId> identities;
+        for (const auto& body : bodies)
+        {
+            const auto found = m_Impl->PhysicsBodies.find(body.Entity);
+            if (!body.Entity || !identities.insert(body.Entity).second || found == m_Impl->PhysicsBodies.end() ||
+                !found->second.Body || !Math::IsFinite(body.Position) || !Math::IsFinite(body.Rotation) ||
+                !Math::IsFinite(body.LinearVelocity) || !Math::IsFinite(body.AngularVelocity))
+            {
+                throw std::runtime_error("A scene physics checkpoint is incompatible with the runtime scene.");
+            }
+        }
+        const auto liveBodyCount = static_cast<std::size_t>(std::ranges::count_if(
+            m_Impl->PhysicsBodies, [](const auto& entry) { return static_cast<bool>(entry.second.Body); }));
+        if (identities.size() != liveBodyCount)
+            throw std::runtime_error("A scene physics checkpoint does not contain every runtime body.");
+
+        for (const auto& body : bodies)
+        {
+            const auto runtimeBody = m_Impl->PhysicsBodies.at(body.Entity).Body;
+            m_Impl->PhysicsWorldService->SetBodyState(
+                runtimeBody,
+                {runtimeBody, body.Position, body.Rotation, body.LinearVelocity, body.AngularVelocity, body.Sleeping});
+        }
+    }
+
+    std::vector<SceneAnimatorCheckpoint> SceneRuntimeSession::CaptureAnimatorCheckpoint() const
+    {
+        m_Impl->RequireOwner("CaptureAnimatorCheckpoint");
+        std::vector<SceneAnimatorCheckpoint> result;
+        result.reserve(m_Impl->Animators.size());
+        for (const auto& [entity, runtime] : m_Impl->Animators)
+        {
+            if (runtime && runtime->Instance)
+                result.push_back({entity, runtime->Instance->CaptureCheckpoint()});
+        }
+        return result;
+    }
+
+    void SceneRuntimeSession::RestoreAnimatorCheckpoint(const std::span<const SceneAnimatorCheckpoint> animators)
+    {
+        m_Impl->RequireOwner("RestoreAnimatorCheckpoint");
+        std::map<EntityId, AnimatorInstance*> live;
+        for (const auto& [entity, runtime] : m_Impl->Animators)
+            if (runtime && runtime->Instance)
+                live.emplace(entity, runtime->Instance.get());
+        std::set<EntityId> identities;
+        for (const auto& animator : animators)
+            if (!animator.Entity || !identities.insert(animator.Entity).second || !live.contains(animator.Entity))
+                throw std::runtime_error("An animator checkpoint is incompatible with the runtime scene.");
+        if (identities.size() != live.size())
+            throw std::runtime_error("An animator checkpoint does not contain every runtime animator.");
+
+        std::vector<SceneAnimatorCheckpoint> rollback;
+        rollback.reserve(animators.size());
+        try
+        {
+            for (const auto& animator : animators)
+            {
+                auto* instance = live.at(animator.Entity);
+                rollback.push_back({animator.Entity, instance->CaptureCheckpoint()});
+                instance->RestoreCheckpoint(animator.State);
+            }
+        }
+        catch (...)
+        {
+            const auto original = std::current_exception();
+            for (auto iterator = rollback.rbegin(); iterator != rollback.rend(); ++iterator)
+            {
+                try
+                {
+                    live.at(iterator->Entity)->RestoreCheckpoint(iterator->State);
+                }
+                catch (...)
+                {
+                }
+            }
+            std::rethrow_exception(original);
+        }
+    }
+
+    void SceneRuntimeSession::SetDeterministicSimulation(const bool enabled)
+    {
+        m_Impl->RequireOwner("SetDeterministicSimulation");
+        if (m_Impl->DeterministicSimulation == enabled)
+            return;
+        m_Impl->DeterministicSimulation = enabled;
+        if (m_Impl->PlayState != ScenePlayState::Stopped && m_Impl->Runtime)
+        {
+            m_Impl->InitializeVfx();
+            m_Impl->SynchronizeVfx(0.0F);
+        }
+    }
+
+    std::vector<std::byte> SceneRuntimeSession::CaptureVfxCheckpoint() const
+    {
+        m_Impl->RequireOwner("CaptureVfxCheckpoint");
+        if (!m_Impl->VfxWorldService)
+            throw std::logic_error("Scene VFX checkpoint state is unavailable.");
+        return m_Impl->VfxWorldService->CaptureCheckpoint();
+    }
+
+    void SceneRuntimeSession::RestoreVfxCheckpoint(const std::span<const std::byte> checkpoint)
+    {
+        m_Impl->RequireOwner("RestoreVfxCheckpoint");
+        if (!m_Impl->VfxWorldService)
+            throw std::logic_error("Scene VFX checkpoint state is unavailable.");
+        m_Impl->VfxWorldService->RestoreCheckpoint(checkpoint);
+    }
 
     bool SceneRuntimeSession::PlayVfx(const EntityId entityId, const AssetId effect, const bool restart)
     {

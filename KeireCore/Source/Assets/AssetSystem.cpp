@@ -1,5 +1,6 @@
 #include "Keire/Assets/AssetSystem.h"
 
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Log.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
@@ -86,6 +87,11 @@ namespace Keire
         [[nodiscard]] std::uint64_t ThreadHash() noexcept
         {
             return static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
+        }
+
+        [[nodiscard]] JobPriority ToJobPriority(const AssetPriority priority) noexcept
+        {
+            return static_cast<JobPriority>(priority);
         }
     } // namespace
 
@@ -190,10 +196,9 @@ namespace Keire
             std::size_t Bytes = 0;
         };
 
-        using WorkerJob = std::variant<Job, StreamJob>;
-
-        explicit Impl(AssetSystemSpecification value, Ref<EventBus> events)
-            : Specification(std::move(value)), Events(std::move(events)), OwnerThread(std::this_thread::get_id())
+        explicit Impl(AssetSystemSpecification value, Ref<EventBus> events, Ref<JobSystem> jobs)
+            : Specification(std::move(value)), Events(std::move(events)), Scheduler(std::move(jobs)),
+              OwnerThread(std::this_thread::get_id())
         {
             if (Specification.QueueCapacity == 0)
                 throw std::invalid_argument("Asset queue capacity must be greater than zero.");
@@ -246,79 +251,77 @@ namespace Keire
 
         void StartWorkers()
         {
-            Workers.reserve(Specification.WorkerCount);
-            for (std::size_t index = 0; index < Specification.WorkerCount; ++index)
-                Workers.emplace_back([this] { WorkerMain(); });
+            if (!Scheduler)
+            {
+                JobSystemSpecification jobs;
+                jobs.WorkerCount = 1;
+                jobs.BlockingWorkerCount = std::clamp<std::size_t>(Specification.WorkerCount, 1, 8);
+                jobs.QueueCapacity = Specification.QueueCapacity;
+                Scheduler = CreateRef<JobSystem>(jobs);
+                OwnScheduler = true;
+            }
+            WorkScope = Scheduler->CreateScope("Assets");
         }
 
-        [[nodiscard]] bool HasJobs() const noexcept
+        void QueueLoad(Job job, const AssetPriority priority)
         {
-            return std::ranges::any_of(Jobs, [](const auto& queue) { return !queue.empty(); }) || !StreamJobs.empty();
+            JobDescription description;
+            description.Name = "Asset load";
+            description.Priority = ToJobPriority(priority);
+            description.Class = JobClass::Blocking;
+            description.Domain = JobDomain::Streaming;
+            (void)WorkScope->Submit(std::move(description),
+                                    [this, job = std::move(job)](JobContext& context) mutable
+                                    {
+                                        if (context.StopRequested())
+                                        {
+                                            job.State->Cancel();
+                                            return;
+                                        }
+                                        job.State->SetLoading(job.Reload);
+                                        Completion completion{job.State, {}, {}, job.Reload, true};
+                                        completion.ApplyReload = job.Decoder.ApplyReload;
+                                        try
+                                        {
+                                            completion.Value = LoadValue(job);
+                                        }
+                                        catch (const std::exception& error)
+                                        {
+                                            completion.Diagnostic = {"load", error.what()};
+                                        }
+                                        catch (...)
+                                        {
+                                            completion.Diagnostic = {"load",
+                                                                     "The asset decoder reported an unknown failure."};
+                                        }
+                                        if (context.StopRequested())
+                                        {
+                                            job.State->Cancel();
+                                            return;
+                                        }
+                                        std::scoped_lock lock(Mutex);
+                                        Completions.push_back(std::move(completion));
+                                    });
         }
 
-        [[nodiscard]] WorkerJob PopJob()
+        void QueueStream(StreamJob job, const AssetPriority priority)
         {
-            for (auto& queue : Jobs)
-            {
-                if (!queue.empty())
-                {
-                    Job job = std::move(queue.front());
-                    queue.pop_front();
-                    return job;
-                }
-            }
-            if (!StreamJobs.empty())
-            {
-                StreamJob job = std::move(StreamJobs.front());
-                StreamJobs.pop_front();
-                return job;
-            }
-            throw std::logic_error("Asset worker woke without a queued job.");
-        }
-
-        void WorkerMain() noexcept
-        {
-            for (;;)
-            {
-                WorkerJob job;
-                {
-                    std::unique_lock lock(Mutex);
-                    WorkAvailable.wait(lock, [this] { return Stopping || HasJobs(); });
-                    if (Stopping && !HasJobs())
-                        return;
-                    job = PopJob();
-                }
-
-                if (auto* assetJob = std::get_if<Job>(&job))
-                {
-                    assetJob->State->SetLoading(assetJob->Reload);
-                    Completion completion{assetJob->State, {}, {}, assetJob->Reload, true};
-                    completion.ApplyReload = assetJob->Decoder.ApplyReload;
-                    try
-                    {
-                        completion.Value = LoadValue(*assetJob);
-                    }
-                    catch (const std::exception& error)
-                    {
-                        completion.Diagnostic = {"load", error.what()};
-                    }
-                    catch (...)
-                    {
-                        completion.Diagnostic = {"load", "The asset decoder reported an unknown failure."};
-                    }
-                    {
-                        std::scoped_lock lock(Mutex);
-                        Completions.push_back(std::move(completion));
-                    }
-                }
-                else
-                {
-                    RunStreamJob(std::get<StreamJob>(job));
-                    std::scoped_lock lock(Mutex);
-                    if (QueueSize > 0)
-                        --QueueSize;
-                }
-            }
+            JobDescription description;
+            description.Name = "Asset range read";
+            description.Priority = ToJobPriority(priority);
+            description.Class = JobClass::Blocking;
+            description.Domain = JobDomain::Streaming;
+            (void)WorkScope->Submit(std::move(description),
+                                    [this, job = std::move(job)](JobContext& context) mutable
+                                    {
+                                        if (context.StopRequested())
+                                            job.Operation->Cancel();
+                                        else
+                                            RunStreamJob(job);
+                                        std::scoped_lock lock(Mutex);
+                                        if (QueueSize > 0)
+                                            --QueueSize;
+                                    });
         }
 
         [[nodiscard]] std::vector<std::byte> DecodeEntry(const Detail::CatalogEntry& entry) const
@@ -475,20 +478,19 @@ namespace Keire
 
         AssetSystemSpecification Specification;
         Ref<EventBus> Events;
+        Ref<JobSystem> Scheduler;
+        Ref<JobScope> WorkScope;
         std::thread::id OwnerThread;
         std::unordered_map<AssetTypeId, AssetDecoderRegistration> Decoders;
         std::vector<MountRecord> Mounts;
         std::unordered_map<AssetId, ResolvedEntry> Resolved;
         std::unordered_map<AssetId, Ref<Detail::AssetHandleState>> States;
-        std::array<std::deque<Job>, 5> Jobs;
-        std::deque<StreamJob> StreamJobs;
         std::vector<Ref<AssetStreamOperation>> StreamOperations;
         std::deque<Completion> Completions;
-        std::vector<std::thread> Workers;
         mutable std::mutex Mutex;
-        std::condition_variable WorkAvailable;
         bool Open = true;
         bool Stopping = false;
+        bool OwnScheduler = false;
         std::size_t QueueSize = 0;
         std::size_t QueueHighWaterMark = 0;
         std::uint64_t Sequence = 0;
@@ -498,8 +500,8 @@ namespace Keire
         std::uint64_t Evictions = 0;
     };
 
-    AssetSystem::AssetSystem(AssetSystemSpecification specification, Ref<EventBus> events)
-        : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(events)))
+    AssetSystem::AssetSystem(AssetSystemSpecification specification, Ref<EventBus> events, Ref<JobSystem> jobs)
+        : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(events), std::move(jobs)))
     {
         try
         {
@@ -575,8 +577,9 @@ namespace Keire
             {
                 for (const auto nested : dependency->second.Entry.Dependencies)
                     queueDependency(nested);
-                m_Impl->Jobs[static_cast<std::size_t>(priority)].push_back(
-                    {dependencyState, dependency->second, dependencyDecoder->second, false, ++m_Impl->Sequence});
+                m_Impl->QueueLoad(
+                    {dependencyState, dependency->second, dependencyDecoder->second, false, ++m_Impl->Sequence},
+                    priority);
             }
             catch (...)
             {
@@ -588,10 +591,9 @@ namespace Keire
         for (const auto dependency : entry->second.Entry.Dependencies)
             queueDependency(dependency);
 
-        auto& queue = m_Impl->Jobs[static_cast<std::size_t>(priority)];
         try
         {
-            queue.push_back({state, entry->second, decoder->second, false, ++m_Impl->Sequence});
+            m_Impl->QueueLoad({state, entry->second, decoder->second, false, ++m_Impl->Sequence}, priority);
         }
         catch (...)
         {
@@ -600,7 +602,6 @@ namespace Keire
         }
         ++m_Impl->QueueSize;
         m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
-        m_Impl->WorkAvailable.notify_one();
         return state;
     }
 
@@ -719,8 +720,8 @@ namespace Keire
                 continue;
             }
 
-            m_Impl->Jobs[static_cast<std::size_t>(AssetPriority::Normal)].push_back(
-                {state, entry->second, decoder->second, false, ++m_Impl->Sequence});
+            m_Impl->QueueLoad({state, entry->second, decoder->second, false, ++m_Impl->Sequence},
+                              AssetPriority::Normal);
             if (pendingResolve != m_Impl->Completions.end())
                 m_Impl->Completions.erase(pendingResolve);
             state->SetLoading(false);
@@ -728,8 +729,7 @@ namespace Keire
             m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
             queuedRecovery = true;
         }
-        if (queuedRecovery)
-            m_Impl->WorkAvailable.notify_all();
+        (void)queuedRecovery;
     }
 
     bool AssetSystem::Unmount(const std::filesystem::path& catalogPath)
@@ -836,12 +836,10 @@ namespace Keire
             if (decoder == m_Impl->Decoders.end() || entry->second.Entry.Type != state->second->Type())
                 return false;
             m_Impl->Completions.erase(pending);
-            m_Impl->Jobs[static_cast<std::size_t>(priority)].push_back(
-                {state->second, entry->second, decoder->second, false, ++m_Impl->Sequence});
+            m_Impl->QueueLoad({state->second, entry->second, decoder->second, false, ++m_Impl->Sequence}, priority);
             ++m_Impl->QueueSize;
             m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
             ++m_Impl->Reloads;
-            m_Impl->WorkAvailable.notify_one();
             return true;
         }
         if (currentState != AssetState::Ready && currentState != AssetState::Failed)
@@ -849,18 +847,16 @@ namespace Keire
         const auto decoder = m_Impl->Decoders.find(state->second->Type());
         if (decoder == m_Impl->Decoders.end() || entry->second.Entry.Type != state->second->Type())
             return false;
-        m_Impl->Jobs[static_cast<std::size_t>(priority)].push_back(
-            {state->second, entry->second, decoder->second, true, ++m_Impl->Sequence});
+        m_Impl->QueueLoad({state->second, entry->second, decoder->second, true, ++m_Impl->Sequence}, priority);
         state->second->SetLoading(true);
         ++m_Impl->QueueSize;
         m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
         ++m_Impl->Reloads;
-        m_Impl->WorkAvailable.notify_one();
         return true;
     }
 
     Ref<AssetStreamOperation> AssetSystem::ReadRangeAsync(const AssetId id, const std::uint64_t offset,
-                                                          const std::size_t bytes)
+                                                          const std::size_t bytes, const AssetPriority priority)
     {
         m_Impl->RequireOwnerThread("ReadRangeAsync");
         std::scoped_lock lock(m_Impl->Mutex);
@@ -885,11 +881,10 @@ namespace Keire
                                  state == AssetStreamState::Cancelled;
                       });
         auto operation = CreateRef<AssetStreamOperation>();
-        m_Impl->StreamJobs.push_back({operation, entry->second, offset, bytes});
+        m_Impl->QueueStream({operation, entry->second, offset, bytes}, priority);
         m_Impl->StreamOperations.push_back(operation);
         ++m_Impl->QueueSize;
         m_Impl->QueueHighWaterMark = std::max(m_Impl->QueueHighWaterMark, m_Impl->QueueSize);
-        m_Impl->WorkAvailable.notify_one();
         return operation;
     }
 
@@ -1035,6 +1030,42 @@ namespace Keire
         return found->second.Entry.Metadata;
     }
 
+    std::optional<AssetStreamLayout> AssetSystem::TryGetStreamLayout(const AssetId id) const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        const auto found = m_Impl->Resolved.find(id);
+        if (found == m_Impl->Resolved.end())
+            return std::nullopt;
+
+        const auto& entry = found->second.Entry;
+        AssetStreamLayout layout;
+        layout.Version = entry.StreamLayoutVersion;
+        layout.MonolithicCompatibility = entry.StreamLayoutVersion == 0;
+        if (entry.Segments.empty())
+        {
+            if (entry.UncompressedBytes != 0 && entry.UncompressedBytes <= std::numeric_limits<std::size_t>::max())
+            {
+                layout.Segments.push_back(
+                    {AssetStreamSegmentKind::Data, 0, 0, static_cast<std::size_t>(entry.UncompressedBytes)});
+            }
+            return layout;
+        }
+
+        layout.Segments.reserve(entry.Segments.size());
+        for (const auto& segment : entry.Segments)
+        {
+            if (segment.Kind > static_cast<std::uint8_t>(AssetStreamSegmentKind::AnimationWindow) ||
+                segment.UncompressedBytes > std::numeric_limits<std::size_t>::max())
+            {
+                throw std::runtime_error("Asset catalog contains a stream segment unsupported by this build.");
+            }
+            layout.Segments.push_back({static_cast<AssetStreamSegmentKind>(segment.Kind), segment.Segment,
+                                       segment.UncompressedOffset, static_cast<std::size_t>(segment.UncompressedBytes),
+                                       segment.WindowStartSeconds, segment.WindowEndSeconds});
+        }
+        return layout;
+    }
+
     bool AssetSystem::IsOpen() const noexcept
     {
         std::scoped_lock lock(m_Impl->Mutex);
@@ -1045,7 +1076,6 @@ namespace Keire
     {
         if (!m_Impl)
             return;
-        std::vector<Ref<Detail::AssetHandleState>> cancelled;
         std::vector<Ref<AssetStreamOperation>> streamOperations;
         {
             std::scoped_lock lock(m_Impl->Mutex);
@@ -1053,30 +1083,21 @@ namespace Keire
                 return;
             m_Impl->Open = false;
             m_Impl->Stopping = true;
-            for (auto& queue : m_Impl->Jobs)
-            {
-                for (auto& job : queue)
-                    cancelled.push_back(job.State);
-                queue.clear();
-            }
-            for (auto& completion : m_Impl->Completions)
-                cancelled.push_back(completion.State);
             m_Impl->Completions.clear();
-            m_Impl->StreamJobs.clear();
             streamOperations = m_Impl->StreamOperations;
         }
-        for (const auto& state : cancelled)
-            state->Cancel();
         for (const auto& operation : streamOperations)
             operation->Cancel();
-        m_Impl->WorkAvailable.notify_all();
-        for (auto& worker : m_Impl->Workers)
+        if (m_Impl->WorkScope)
         {
-            if (worker.joinable())
-                worker.join();
+            m_Impl->WorkScope->Cancel();
+            m_Impl->WorkScope->Wait();
+            m_Impl->WorkScope.Reset();
         }
-        m_Impl->Workers.clear();
         for (const auto& [id, state] : m_Impl->States)
             state->Cancel();
+        if (m_Impl->OwnScheduler && m_Impl->Scheduler)
+            m_Impl->Scheduler->Close();
+        m_Impl->Scheduler.Reset();
     }
 } // namespace Keire

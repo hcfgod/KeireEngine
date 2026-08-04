@@ -19,5 +19,6 @@ project(RuntimeTarget)
         VendorIncludeDirs.json
     }
 
+    LinkKeireSourceModules()
     LinkKeireCore()
     LinkSDL3()

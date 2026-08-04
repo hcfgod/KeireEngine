@@ -2,16 +2,164 @@
 
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Animation/RiggingSystem.h"
+#include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Audio/AudioAssets.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 
 #include <atomic>
+#include <cstring>
 #include <exception>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 
 namespace Keire
 {
+    namespace
+    {
+        template <typename Unsigned>
+        [[nodiscard]] Unsigned ReadStreamValue(const std::span<const std::byte> bytes, std::size_t& cursor)
+        {
+            static_assert(std::is_unsigned_v<Unsigned>);
+            if (cursor > bytes.size() || bytes.size() - cursor < sizeof(Unsigned))
+                throw std::runtime_error("Cooked asset stream metadata is truncated.");
+            Unsigned value = 0;
+            for (std::size_t index = 0; index < sizeof(Unsigned); ++index)
+                value |= static_cast<Unsigned>(std::to_integer<std::uint8_t>(bytes[cursor++])) << (index * 8U);
+            return value;
+        }
+
+        [[nodiscard]] Detail::CatalogSegment MakeSegment(const AssetStreamSegmentKind kind, const std::uint32_t segment,
+                                                         const std::uint64_t offset, const std::uint64_t bytes,
+                                                         const float windowStart = 0.0F, const float windowEnd = 0.0F)
+        {
+            return {static_cast<std::uint8_t>(kind), segment, offset, bytes, windowStart, windowEnd};
+        }
+
+        [[nodiscard]] std::vector<Detail::CatalogSegment> BuildStreamSegments(const AssetTypeId type,
+                                                                              const std::span<const std::byte> bytes,
+                                                                              const std::size_t streamPageBytes)
+        {
+            if (bytes.empty())
+                return {};
+
+            if (type == Texture2DAsset::StaticType())
+            {
+                constexpr char Magic[] = "KEIRETEX";
+                if (bytes.size() < 12U || std::memcmp(bytes.data(), Magic, 8U) != 0)
+                    throw std::runtime_error("Texture stream metadata has an invalid signature.");
+                std::size_t cursor = 8U;
+                const auto version = ReadStreamValue<std::uint32_t>(bytes, cursor);
+                if (version < 1U || version > 3U)
+                    throw std::runtime_error("Texture stream metadata has an unsupported version.");
+                const std::size_t settingsBytes = version == 1U ? 10U : version == 2U ? 11U : 13U;
+                if (cursor > bytes.size() || bytes.size() - cursor < settingsBytes)
+                    throw std::runtime_error("Texture stream metadata is truncated.");
+                cursor += settingsBytes;
+                static_cast<void>(ReadStreamValue<std::uint32_t>(bytes, cursor));
+                const auto mipCount = ReadStreamValue<std::uint32_t>(bytes, cursor);
+                if (mipCount == 0U || mipCount > 15U)
+                    throw std::runtime_error("Texture stream metadata contains an invalid mip count.");
+
+                std::vector<Detail::CatalogSegment> mips;
+                mips.reserve(mipCount);
+                const auto metadataBytes = cursor;
+                for (std::uint32_t mip = 0; mip < mipCount; ++mip)
+                {
+                    const auto offset = cursor;
+                    static_cast<void>(ReadStreamValue<std::uint32_t>(bytes, cursor));
+                    static_cast<void>(ReadStreamValue<std::uint32_t>(bytes, cursor));
+                    const auto payloadBytes = ReadStreamValue<std::uint64_t>(bytes, cursor);
+                    if (payloadBytes > bytes.size() - cursor)
+                        throw std::runtime_error("Texture stream mip extends beyond its payload.");
+                    cursor += static_cast<std::size_t>(payloadBytes);
+                    mips.push_back(MakeSegment(AssetStreamSegmentKind::TextureMip, mip, offset, cursor - offset));
+                }
+                if (cursor != bytes.size())
+                    throw std::runtime_error("Texture stream metadata contains trailing data.");
+
+                std::vector<Detail::CatalogSegment> result;
+                result.reserve(mips.size() + 1U);
+                result.push_back(MakeSegment(AssetStreamSegmentKind::Metadata, 0, 0, metadataBytes));
+                for (auto mip = mips.rbegin(); mip != mips.rend(); ++mip)
+                    result.push_back(*mip);
+                return result;
+            }
+
+            if (type == MeshAsset::StaticType())
+            {
+                const auto mesh = MeshAsset::Decode(bytes);
+                constexpr std::size_t SerializedVertexBytes = 72U;
+                const auto vertexBytes = mesh->Vertices().size() * SerializedVertexBytes;
+                const auto indexBytes = mesh->Indices().size_bytes();
+                if (vertexBytes > bytes.size() || indexBytes > bytes.size() - vertexBytes)
+                    throw std::runtime_error("Mesh stream payload size is invalid.");
+                const auto vertexOffset = bytes.size() - vertexBytes - indexBytes;
+                const auto indexOffset = vertexOffset + vertexBytes;
+                std::vector<Detail::CatalogSegment> result;
+                result.reserve(mesh->Lods().size() + 1U);
+                result.push_back(MakeSegment(AssetStreamSegmentKind::Metadata, 0, 0, vertexOffset));
+                for (std::size_t reverse = mesh->Lods().size(); reverse > 0; --reverse)
+                {
+                    const auto lodIndex = reverse - 1U;
+                    const auto& lod = mesh->Lods()[lodIndex];
+                    std::uint64_t lastIndex = 0;
+                    for (std::uint32_t submeshIndex = 0; submeshIndex < lod.SubmeshCount; ++submeshIndex)
+                    {
+                        const auto& submesh = mesh->Submeshes()[lod.FirstSubmesh + submeshIndex];
+                        lastIndex =
+                            std::max(lastIndex, static_cast<std::uint64_t>(submesh.FirstIndex) + submesh.IndexCount);
+                    }
+                    const auto end = indexOffset + lastIndex * sizeof(std::uint32_t);
+                    if (end > bytes.size() || end <= vertexOffset)
+                        throw std::runtime_error("Mesh LOD stream range is invalid.");
+                    result.push_back(MakeSegment(AssetStreamSegmentKind::MeshLod, static_cast<std::uint32_t>(lodIndex),
+                                                 vertexOffset, end - vertexOffset));
+                }
+                return result;
+            }
+
+            if (type == AudioClipAsset::StaticType())
+            {
+                const auto audio = AudioClipAsset::Decode(bytes);
+                std::size_t versionCursor = 8U;
+                const auto version = ReadStreamValue<std::uint32_t>(bytes, versionCursor);
+                const std::size_t headerBytes = version == 1U ? 28U : 40U;
+                if (bytes.size() <= headerBytes)
+                    throw std::runtime_error("Audio stream payload does not contain sample data.");
+                const auto payloadBytes = bytes.size() - headerBytes;
+                const auto pageBytes = std::max<std::size_t>(4096U, streamPageBytes);
+                const auto pageCount = (payloadBytes + pageBytes - 1U) / pageBytes;
+                std::vector<Detail::CatalogSegment> result;
+                result.reserve(pageCount + 1U);
+                result.push_back(MakeSegment(AssetStreamSegmentKind::Metadata, 0, 0, headerBytes));
+                for (std::size_t page = 0; page < pageCount; ++page)
+                {
+                    const auto offset = page * pageBytes;
+                    const auto count = std::min(pageBytes, payloadBytes - offset);
+                    const auto start =
+                        audio->DurationSeconds() * static_cast<float>(offset) / static_cast<float>(payloadBytes);
+                    const auto end = audio->DurationSeconds() * static_cast<float>(offset + count) /
+                                     static_cast<float>(payloadBytes);
+                    result.push_back(MakeSegment(AssetStreamSegmentKind::AudioPage, static_cast<std::uint32_t>(page),
+                                                 headerBytes + offset, count, start, end));
+                }
+                return result;
+            }
+
+            if (type == AnimationClipAsset::StaticType())
+            {
+                const auto animation = AnimationClipAsset::Decode(bytes);
+                return {MakeSegment(AssetStreamSegmentKind::AnimationWindow, 0, 0, bytes.size(), 0.0F,
+                                    animation->Duration())};
+            }
+
+            return {MakeSegment(AssetStreamSegmentKind::Data, 0, 0, bytes.size())};
+        }
+    } // namespace
+
     AssetCookResult AssetCooker::Cook(const AssetDatabase& database, const AssetBuildProfile& profile,
                                       const std::filesystem::path& outputDirectory, const std::stop_token cancellation,
                                       AssetOperationProgressCallback progress)
@@ -31,6 +179,16 @@ namespace Keire
             throw std::invalid_argument("Asset build profile contains invalid compression or shard settings.");
         if (profile.StreamPageBytes < 4096U || profile.StreamPageBytes > 16U * 1024U * 1024U)
             throw std::invalid_argument("Asset stream page size must be in the range 4 KiB..16 MiB.");
+        auto jobs = database.m_Impl->Specification.Jobs;
+        if (!jobs)
+        {
+            JobSystemSpecification jobSpecification;
+            jobSpecification.WorkerCount =
+                std::clamp<std::size_t>(std::max(1U, std::thread::hardware_concurrency()), 1, 8);
+            jobSpecification.BlockingWorkerCount = 1;
+            jobs = CreateRef<JobSystem>(jobSpecification);
+        }
+        auto cookingScope = jobs->CreateScope("Asset cooking");
         const auto records = database.Records();
         struct PreparedAsset final
         {
@@ -365,10 +523,21 @@ namespace Keire
                     }
                     else
                     {
-                        std::vector<std::jthread> workers;
+                        std::vector<JobHandle> workers;
                         workers.reserve(workerCount);
                         for (std::size_t worker = 0; worker < workerCount; ++worker)
-                            workers.emplace_back(preparePages);
+                        {
+                            JobDescription description;
+                            description.Name = "Compress asset pages";
+                            description.Domain = JobDomain::Tooling;
+                            workers.push_back(
+                                cookingScope->Submit(std::move(description), [&](JobContext&) { preparePages(); }));
+                        }
+                        for (const auto& worker : workers)
+                        {
+                            (void)worker.Wait();
+                            worker.RethrowIfFailed();
+                        }
                     }
                     if (failure)
                         std::rethrow_exception(failure);
@@ -392,7 +561,9 @@ namespace Keire
                 entry.Offset = packBytes;
                 entry.CompressedBytes = compressedBytes;
                 entry.UncompressedBytes = bytes.size();
+                entry.StreamLayoutVersion = 1;
                 entry.Digest = Detail::Sha256(bytes);
+                entry.Segments = BuildStreamSegments(asset.Type, bytes, profile.StreamPageBytes);
                 entry.Dependencies = std::move(asset.Dependencies);
                 entry.Metadata = asset.Imported.Metadata;
                 for (const auto& page : pages)

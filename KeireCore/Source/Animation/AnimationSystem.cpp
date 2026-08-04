@@ -2064,6 +2064,120 @@ namespace Keire
         return result;
     }
 
+    AnimatorCheckpoint AnimatorInstance::CaptureCheckpoint() const
+    {
+        AnimatorCheckpoint result;
+        result.Playing = m_Playing;
+        result.PreviousRoot = m_PreviousRoot;
+        result.HasPreviousRootRotation = m_HasPreviousRootRotation;
+        const auto& definition = m_Graph->Definition();
+        result.Parameters.reserve(definition.ParameterDefinitions.size());
+        for (const auto& parameter : definition.ParameterDefinitions)
+        {
+            const auto& runtime = m_Parameters.at(parameter.Name);
+            result.Parameters.push_back(
+                {runtime.Id, runtime.Type, runtime.FloatValue, runtime.IntegerValue, runtime.BooleanValue});
+        }
+        result.Layers.reserve(m_Layers.size());
+        for (const auto& layer : m_Layers)
+        {
+            AnimatorCheckpointLayer captured{layer.Id, layer.StateId, layer.Time, layer.Weight, layer.NormalizedTime};
+            if (layer.Transition)
+            {
+                const auto& transition = *layer.Transition;
+                captured.Transition = AnimatorCheckpointTransition{
+                    transition.Id,         transition.SourceStateId,   transition.DestinationStateId,
+                    transition.SourceTime, transition.DestinationTime, transition.Elapsed,
+                    transition.Duration};
+            }
+            result.Layers.push_back(std::move(captured));
+        }
+        return result;
+    }
+
+    void AnimatorInstance::RestoreCheckpoint(const AnimatorCheckpoint& checkpoint)
+    {
+        const auto& definition = m_Graph->Definition();
+        if (checkpoint.Parameters.size() != definition.ParameterDefinitions.size() ||
+            checkpoint.Layers.size() != definition.Layers.size() ||
+            !Math::IsFinite(checkpoint.PreviousRoot.Translation) || !Math::IsFinite(checkpoint.PreviousRoot.Rotation) ||
+            !Math::IsFinite(checkpoint.PreviousRoot.Scale))
+        {
+            throw std::invalid_argument("Animator checkpoint is incompatible or contains non-finite state.");
+        }
+
+        std::map<std::string, RuntimeParameter, std::less<>> parameters;
+        std::set<std::string, std::less<>> parameterIds;
+        for (const auto& captured : checkpoint.Parameters)
+        {
+            const auto* parameter = FindParameterById(definition, captured.Id);
+            if (!parameter || parameter->Type != captured.Type || !parameterIds.insert(captured.Id).second ||
+                !std::isfinite(captured.FloatValue))
+            {
+                throw std::invalid_argument("Animator checkpoint parameter state is incompatible.");
+            }
+            parameters.emplace(parameter->Name, RuntimeParameter{captured.Type, captured.Id, captured.FloatValue,
+                                                                 captured.IntegerValue, captured.BooleanValue});
+        }
+
+        std::vector<RuntimeLayer> layers;
+        layers.reserve(checkpoint.Layers.size());
+        std::set<std::string, std::less<>> layerIds;
+        for (const auto& captured : checkpoint.Layers)
+        {
+            const auto* layer = FindLayer(definition, captured.Id);
+            if (!layer || !FindState(*layer, captured.StateId) || !layerIds.insert(captured.Id).second ||
+                !std::isfinite(captured.Time) || captured.Time < 0.0F || !std::isfinite(captured.Weight) ||
+                captured.Weight < 0.0F || captured.Weight > 1.0F || !std::isfinite(captured.NormalizedTime) ||
+                captured.NormalizedTime < 0.0F || captured.NormalizedTime > 1.0F)
+            {
+                throw std::invalid_argument("Animator checkpoint layer state is incompatible.");
+            }
+            RuntimeLayer runtime{captured.Id, captured.StateId, captured.Time, captured.Weight,
+                                 captured.NormalizedTime};
+            if (captured.Transition)
+            {
+                const auto& transition = *captured.Transition;
+                if (!FindState(*layer, transition.SourceStateId) || !FindState(*layer, transition.DestinationStateId) ||
+                    !std::isfinite(transition.SourceTime) || transition.SourceTime < 0.0F ||
+                    !std::isfinite(transition.DestinationTime) || transition.DestinationTime < 0.0F ||
+                    !std::isfinite(transition.Elapsed) || transition.Elapsed < 0.0F ||
+                    !std::isfinite(transition.Duration) || transition.Duration < 0.0F)
+                {
+                    throw std::invalid_argument("Animator checkpoint transition state is incompatible.");
+                }
+                runtime.Transition = RuntimeTransition{transition.SourceStateId,
+                                                       transition.DestinationStateId,
+                                                       transition.SourceTime,
+                                                       transition.DestinationTime,
+                                                       transition.Elapsed,
+                                                       transition.Duration,
+                                                       transition.Id};
+            }
+            layers.push_back(std::move(runtime));
+        }
+
+        m_Parameters = std::move(parameters);
+        m_Layers = std::move(layers);
+        m_Playing = checkpoint.Playing;
+        m_PreviousRoot = checkpoint.PreviousRoot;
+        m_PreviousRoot.Rotation = Math::Normalize(m_PreviousRoot.Rotation);
+        m_HasPreviousRootRotation = checkpoint.HasPreviousRootRotation;
+        if (m_Layers.empty())
+        {
+            m_State.clear();
+            m_Time = 0.0F;
+        }
+        else
+        {
+            const auto* layer = FindLayer(definition, m_Layers.front().Id);
+            const auto* state = layer ? FindState(*layer, m_Layers.front().StateId) : nullptr;
+            m_State = state ? state->Name : std::string{};
+            m_Time = m_Layers.front().Time;
+        }
+        PublishDebugSnapshot();
+    }
+
     bool AnimatorInstance::Reload(Ref<const AnimationGraphAsset> graph)
     {
         if (!graph || graph->Definition().Layers.empty())

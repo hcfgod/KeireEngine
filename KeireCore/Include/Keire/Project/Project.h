@@ -15,6 +15,8 @@
 
 namespace Keire
 {
+    inline constexpr std::uint32_t CurrentProjectSchemaVersion = 2;
+
     enum class ProjectTemplate : std::uint8_t
     {
         Empty,
@@ -42,10 +44,20 @@ namespace Keire
     enum class ProjectStatus : std::uint8_t
     {
         Ready,
+        UpgradeAvailable,
+        RecoveryRequired,
         Missing,
         Invalid,
         RequiresNewerEngine,
         InUse
+    };
+
+    struct RequiredSourceModule
+    {
+        std::string Id;
+        std::string VersionRange;
+
+        [[nodiscard]] bool operator==(const RequiredSourceModule&) const = default;
     };
 
     class ProjectId final
@@ -66,13 +78,14 @@ namespace Keire
 
     struct ProjectDescriptor
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = CurrentProjectSchemaVersion;
         ProjectId Id;
         std::string Name;
         std::string CreatedWithEngineVersion;
         std::string MinimumEngineVersion;
         AssetId StartupScene;
         AssetId DefaultInput;
+        std::vector<RequiredSourceModule> RequiredModules;
     };
 
     struct ProjectCreateSpecification

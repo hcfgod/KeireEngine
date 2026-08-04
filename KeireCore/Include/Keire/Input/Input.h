@@ -44,6 +44,12 @@ namespace Keire
         Canceled
     };
 
+    enum class InputContextRole : std::uint8_t
+    {
+        Gameplay,
+        EditorControl
+    };
+
     class InputDeviceId final
     {
       public:
@@ -142,6 +148,27 @@ namespace Keire
         std::uint64_t Frame = 0;
         std::uint64_t TimestampNanoseconds = 0;
         double DurationSeconds = 0.0;
+    };
+
+    struct FixedTickInputAction
+    {
+        std::uint64_t Context = 0;
+        AssetId ContextAsset;
+        AssetId Map;
+        AssetId Action;
+        InputUserId User;
+        InputActionPhase Phase = InputActionPhase::Waiting;
+        InputValue Value;
+        bool Started = false;
+        bool Performed = false;
+        bool Canceled = false;
+    };
+
+    struct FixedTickInputSnapshot
+    {
+        std::uint64_t Tick = 0;
+        std::uint64_t InputMapFingerprint = 0;
+        std::vector<FixedTickInputAction> Actions;
     };
 
     struct InputSystemSpecification
@@ -321,13 +348,18 @@ namespace Keire
         [[nodiscard]] bool UnpairDevice(InputUserId user, InputDeviceId device);
         [[nodiscard]] bool SetControlScheme(InputUserId user, std::string scheme, bool locked = true);
         [[nodiscard]] bool ClearControlSchemeLock(InputUserId user);
-        [[nodiscard]] Ref<InputActionContext> CreateActionContext(AssetId asset, InputUserId user);
+        [[nodiscard]] Ref<InputActionContext> CreateActionContext(AssetId asset, InputUserId user,
+                                                                  InputContextRole role = InputContextRole::Gameplay);
         [[nodiscard]] Ref<InputActionContext> CreateActionContext(InputActionAssetDefinition definition,
-                                                                  InputUserId user);
+                                                                  InputUserId user,
+                                                                  InputContextRole role = InputContextRole::Gameplay);
         [[nodiscard]] Ref<InteractiveRebindOperation> BeginInteractiveRebind(const Ref<InputActionContext>& context,
                                                                              AssetId binding,
                                                                              InteractiveRebindOptions options = {});
         [[nodiscard]] std::uint64_t Frame() const noexcept;
+        [[nodiscard]] FixedTickInputSnapshot CaptureFixedTick(std::uint64_t tick);
+        void ApplyFixedTick(const FixedTickInputSnapshot& snapshot);
+        void SetGameplayPlayback(bool enabled);
         [[nodiscard]] bool IsOpen() const noexcept;
         void Close() noexcept;
 

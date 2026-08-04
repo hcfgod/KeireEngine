@@ -14,6 +14,8 @@
 
 namespace Keire
 {
+    class JobSystem;
+
     enum class NavigationMode : std::uint8_t
     {
         Disabled,
@@ -250,7 +252,7 @@ namespace Keire
     class KEIRE_API NavigationSystem final : public RefCounted
     {
       public:
-        explicit NavigationSystem(NavigationSystemSpecification specification = {});
+        explicit NavigationSystem(NavigationSystemSpecification specification = {}, Ref<JobSystem> jobs = {});
         ~NavigationSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] Ref<NavigationWorld> CreateWorld();

@@ -184,6 +184,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawPrefabOverrides(Keire::UiFrame& ui);
     void DrawBuildSettings(Keire::UiFrame& ui);
     void DrawProfiler(Keire::UiFrame& ui);
+    void DrawRenderGraph(Keire::UiFrame& ui);
+    void DrawArchitectureDashboard(Keire::UiFrame& ui);
     void DrawPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport, std::string_view label);
     void DrawProject(Keire::UiFrame& ui);
     [[nodiscard]] const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept override;
@@ -487,6 +489,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::UiPanelRegistration m_PrefabOverrides;
     Keire::UiPanelRegistration m_BuildSettings;
     Keire::UiPanelRegistration m_Profiler;
+    Keire::UiPanelRegistration m_RenderGraph;
+    Keire::UiPanelRegistration m_ArchitectureDashboard;
     struct PrefabEditingStage
     {
         Keire::AssetId Asset;
@@ -535,6 +539,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_Error;
     std::string m_Notice;
     std::string m_AssetStatus;
+    std::string m_RenderGraphStatus;
     std::string m_AudioMixerPreviewDiagnostic;
     std::string m_VfxEffectPreviewDiagnostic;
     Keire::Ref<Keire::AssetDatabase> m_AssetDatabase;
@@ -651,6 +656,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_ProfilerShowAllManagedCallbacks = false;
     bool m_ProfilerShowAllHotspots = false;
     bool m_ProfilerShowAllCounters = false;
+    std::string m_ReplayPath;
+    std::int64_t m_ReplaySeekTick = 0;
+    bool m_ReplayPerformanceProfile = false;
+    std::string m_ReplayActionStatus;
     struct ProfilerPresentationCache
     {
         std::uint64_t FrameSequence = 0;

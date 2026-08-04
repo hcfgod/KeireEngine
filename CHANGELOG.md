@@ -5,6 +5,17 @@ version tags.
 
 ## Unreleased
 
+- Added the integrated architecture foundation: an application-owned dependency/work-stealing job system and managed
+  jobs bridge; hierarchical memory tracking and arenas; string interning, generational handles, canonical asset-path
+  indexing, and documented structured diagnostics; explicit budgeted streaming and fence-safe retirement; immutable
+  frame-graph snapshots with editor visualization/export; fixed-tick deterministic replay/checkpoints and runtime CLI;
+  schema-v2 transactional project upgrades; and dependency-resolved source modules shared by every host and packaged
+  with native/managed SDK examples. Existing whole-asset loads, stable IDs, frame-graph compilation, and GPU retirement
+  contracts remain source-compatible. Catalog schema 3 adds semantic texture-mip, mesh-LOD, audio-page, and animation-
+  window layouts with monolithic fallback; replay restoration is transactional and captures physics, animation,
+  managed behaviours, logical audio/UI presentation, and canonical CPU VFX state; application memory domains now
+  account authoritative asset, transient renderer, VFX GPU, and fence-retired bytes; and editor/tool asset cooking uses
+  its injected process scheduler instead of constructing a pool for each cook.
 - Made Material Graph iteration non-blocking: node-position edits now stay in editor metadata and never rebuild runtime
   materials, exposed parameter values publish to the scene immediately without shader regeneration, and CPU preview
   rendering is cancelable, progressive, and coalesced off the UI thread with allocation-free per-sample graph caches.

@@ -174,8 +174,8 @@ namespace Keire::Detail
         const Json document = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                           reinterpret_cast<const char*>(bytes.data() + bytes.size()));
         const auto schemaVersion = document.value("schemaVersion", 0);
-        if (!document.is_object() || (schemaVersion != 1 && schemaVersion != 2) || !document.contains("assets") ||
-            !document["assets"].is_array())
+        if (!document.is_object() || (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3) ||
+            !document.contains("assets") || !document["assets"].is_array())
             throw std::runtime_error("Asset catalog has an unsupported or malformed schema: " + PathToUtf8(path));
 
         CatalogData catalog;
@@ -193,6 +193,7 @@ namespace Keire::Detail
             entry.Offset = item.at("offset").get<std::uint64_t>();
             entry.CompressedBytes = item.at("compressedBytes").get<std::uint64_t>();
             entry.UncompressedBytes = item.at("uncompressedBytes").get<std::uint64_t>();
+            entry.StreamLayoutVersion = schemaVersion >= 3 ? 1U : 0U;
             entry.Digest = ParseDigest(item.at("sha256").get<std::string>());
             if (item.contains("pages"))
             {
@@ -229,6 +230,25 @@ namespace Keire::Detail
             {
                 for (const auto& dependency : item["dependencies"])
                     entry.Dependencies.push_back(AssetId::Parse(dependency.get<std::string>()));
+            }
+            if (item.contains("segments"))
+            {
+                if (!item.at("segments").is_array())
+                    throw std::runtime_error("Asset catalog contains malformed stream segments.");
+                for (const auto& segment : item.at("segments"))
+                {
+                    CatalogSegment decoded{
+                        segment.at("kind").get<std::uint8_t>(),    segment.at("segment").get<std::uint32_t>(),
+                        segment.at("offset").get<std::uint64_t>(), segment.at("bytes").get<std::uint64_t>(),
+                        segment.value("windowStart", 0.0F),        segment.value("windowEnd", 0.0F)};
+                    if (decoded.Kind > 5 || decoded.UncompressedBytes == 0 ||
+                        decoded.UncompressedOffset > entry.UncompressedBytes ||
+                        decoded.UncompressedBytes > entry.UncompressedBytes - decoded.UncompressedOffset ||
+                        !std::isfinite(decoded.WindowStartSeconds) || !std::isfinite(decoded.WindowEndSeconds) ||
+                        decoded.WindowStartSeconds < 0.0F || decoded.WindowEndSeconds < decoded.WindowStartSeconds)
+                        throw std::runtime_error("Asset catalog contains an invalid stream segment.");
+                    entry.Segments.push_back(decoded);
+                }
             }
             if (item.contains("metadata"))
             {
@@ -277,6 +297,14 @@ namespace Keire::Detail
                                  {"uncompressedOffset", page.UncompressedOffset},
                                  {"uncompressedBytes", page.UncompressedBytes},
                                  {"sha256", DigestToString(page.Digest)}});
+            Json segments = Json::array();
+            for (const auto& segment : entry.Segments)
+                segments.push_back({{"kind", segment.Kind},
+                                    {"segment", segment.Segment},
+                                    {"offset", segment.UncompressedOffset},
+                                    {"bytes", segment.UncompressedBytes},
+                                    {"windowStart", segment.WindowStartSeconds},
+                                    {"windowEnd", segment.WindowEndSeconds}});
             assets.push_back({{"id", entry.Id.ToString()},
                               {"type", entry.Type.ToString()},
                               {"pack", entry.PackPath.generic_string()},
@@ -285,10 +313,11 @@ namespace Keire::Detail
                               {"uncompressedBytes", entry.UncompressedBytes},
                               {"sha256", DigestToString(entry.Digest)},
                               {"pages", std::move(pages)},
+                              {"segments", std::move(segments)},
                               {"dependencies", std::move(dependencies)},
                               {"metadata", std::move(metadata)}});
         }
-        const Json document{{"schemaVersion", 2}, {"assets", std::move(assets)}};
+        const Json document{{"schemaVersion", 3}, {"assets", std::move(assets)}};
         std::filesystem::create_directories(path.parent_path());
         WriteTextFileAtomically(path, document.dump(2) + '\n');
     }

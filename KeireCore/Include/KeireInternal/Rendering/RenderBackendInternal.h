@@ -10,8 +10,10 @@
 #include "Keire/ECS/Components/ReflectionProbeComponent.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Streaming/StreamingSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
@@ -226,6 +228,7 @@ namespace Keire::RenderBackend
         std::vector<ShapeSample> ShapeSamples;
         float ShapeSampleWeight = 0.0F;
         std::uint64_t Revision = 0;
+        std::uint64_t EstimatedBytes = 0;
 
         [[nodiscard]] bool Empty() const noexcept { return !Vertices && !AssetVertices && !Indices; }
     };
@@ -239,6 +242,7 @@ namespace Keire::RenderBackend
         std::array<Vector4, 9> DiffuseIrradiance{};
         std::uint32_t MipLevels = 1;
         bool HasDiffuseIrradiance = false;
+        std::uint64_t EstimatedBytes = 0;
 
         [[nodiscard]] bool Empty() const noexcept { return !Texture && !Sampler; }
     };
@@ -258,6 +262,7 @@ namespace Keire::RenderBackend
         std::vector<SDL_GPUTransferBuffer*> TransientTransferBuffers;
         std::chrono::steady_clock::time_point SubmittedAt;
         bool IncludesGpuVfx = false;
+        std::uint64_t RetiredBytes = 0;
     };
 
     struct GpuTextureEntry final
@@ -1126,7 +1131,7 @@ namespace Keire::RenderBackend
     struct RenderSharedState final : public std::enable_shared_from_this<RenderSharedState>
     {
         RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,
-                          Ref<AssetSystem> assets);
+                          Ref<AssetSystem> assets, Ref<JobSystem> jobs, Ref<StreamingSystem> streaming);
         ~RenderSharedState();
 
         void RequireOwner(const char* operation) const;
@@ -1231,6 +1236,7 @@ namespace Keire::RenderBackend
         Ref<WindowSystem> Windows;
         Ref<Window> Window;
         Ref<AssetSystem> Assets;
+        Ref<StreamingSystem> Streaming;
         std::thread::id OwnerThread;
         std::thread::id RenderThreadId;
         SDL_Window* NativeWindow = nullptr;
@@ -1285,6 +1291,7 @@ namespace Keire::RenderBackend
         std::vector<GpuTextureResources> PendingRetiredTextures;
         std::vector<SDL_GPUGraphicsPipeline*> PendingRetiredPipelines;
         std::vector<ForwardPlusGpuResources> PendingRetiredForwardPlus;
+        std::uint64_t PendingRetiredBytes = 0;
         std::vector<SDL_GPUBuffer*> FrameTransientBuffers;
         std::vector<SDL_GPUTransferBuffer*> FrameUploadTransfers;
         SDL_GPUCommandBuffer* FrameUploadCommands = nullptr;
@@ -1305,7 +1312,9 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* VfxFinalizePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetRenderPipeline = nullptr;
         SDL_GPUComputePipeline* VfxFilterRenderPipeline = nullptr;
-        std::jthread VfxPipelineWarmupThread;
+        Ref<JobSystem> Jobs;
+        Ref<JobScope> RenderJobs;
+        JobHandle VfxPipelineWarmupJob;
         std::atomic<GpuVfxPipelineWarmupState> VfxPipelineWarmupState{GpuVfxPipelineWarmupState::NotStarted};
         std::atomic<std::uint64_t> VfxPipelineWarmupMicroseconds{0};
         std::string VfxPipelineWarmupFailure;

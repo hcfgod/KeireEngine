@@ -18,6 +18,7 @@
 
 namespace Keire
 {
+    class JobSystem;
     struct VfxParameterOverride;
 
     enum class ManagedLogLevel : std::uint8_t
@@ -393,10 +394,21 @@ namespace Keire
         std::string Message;
     };
 
+    struct ManagedBehaviourCheckpoint
+    {
+        std::string TypeName;
+        ComponentTypeId ComponentType;
+        std::uint64_t World = 0;
+        AssetId Entity;
+        std::string State;
+        bool Enabled = true;
+        bool Faulted = false;
+    };
+
     class KEIRE_API ScriptSystem final : public RefCounted
     {
       public:
-        explicit ScriptSystem(ScriptSystemSpecification specification = {});
+        explicit ScriptSystem(ScriptSystemSpecification specification = {}, Ref<JobSystem> jobs = {});
         ~ScriptSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] ManagedBuildOperationId StartBuild(ManagedBuildRequest request);
@@ -425,6 +437,8 @@ namespace Keire
         [[nodiscard]] ManagedCallbackMetrics CallbackMetrics() const;
         [[nodiscard]] bool RetryBehaviour(ManagedBehaviourInstanceId instance);
         [[nodiscard]] bool SetBehaviourEnabled(ManagedBehaviourInstanceId instance, bool enabled);
+        [[nodiscard]] std::vector<ManagedBehaviourCheckpoint> CaptureReplayCheckpoint();
+        void RestoreReplayCheckpoint(std::span<const ManagedBehaviourCheckpoint> checkpoint);
         void InstallManagedComponents(Ref<ComponentRegistry> registry);
         void SetAssetSystem(Ref<AssetSystem> assets);
         void PumpManagedAssets();

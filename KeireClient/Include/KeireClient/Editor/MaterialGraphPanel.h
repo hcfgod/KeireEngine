@@ -7,8 +7,8 @@
 
 #include <atomic>
 #include <cstdint>
-#include <future>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -41,6 +41,7 @@ namespace KeireEditor
         ~MaterialGraphPanel() noexcept;
 
         void Attach(Keire::UiWorkspace& workspace);
+        void SetJobSystem(Keire::Ref<Keire::JobSystem> jobs);
         void Draw(Keire::UiFrame& ui);
         void UpdatePreview(const Keire::MaterialGraphCompilation& compilation,
                            const MaterialGraphPreviewSettings& settings);
@@ -59,11 +60,18 @@ namespace KeireEditor
             bool FinalQuality = false;
         };
 
+        struct PreviewRenderState
+        {
+            std::mutex Mutex;
+            std::optional<PreviewRenderResult> Result;
+        };
+
         void DrawHeader(Keire::UiFrame& ui);
         void DrawPreview(Keire::UiFrame& ui);
         void DrawCanvas(Keire::UiFrame& ui);
         void DrawInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
+        void EnsureJobScope();
         [[nodiscard]] bool AddNode(Keire::MaterialGraphNodeKind kind,
                                    Keire::MaterialGraphValueType type = Keire::MaterialGraphValueType::Scalar);
         void Report(std::string message) noexcept;
@@ -96,11 +104,15 @@ namespace KeireEditor
         std::string m_Message;
         std::uint32_t m_PreviewWidth = 320;
         std::uint32_t m_PreviewHeight = 220;
-        std::future<PreviewRenderResult> m_PreviewRender;
+        Keire::Ref<Keire::JobSystem> m_JobSystem;
+        Keire::Ref<Keire::JobScope> m_JobScope;
+        Keire::JobHandle m_PreviewRender;
+        std::shared_ptr<PreviewRenderState> m_PreviewRenderState;
         std::shared_ptr<std::atomic<std::uint64_t>> m_PreviewCancellation =
             std::make_shared<std::atomic<std::uint64_t>>(1);
         std::uint64_t m_PreviewGeneration = 1;
         bool m_PreviewRefinement = false;
         bool m_PreviewDirty = false;
+        bool m_OwnJobSystem = false;
     };
 } // namespace KeireEditor

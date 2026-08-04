@@ -178,7 +178,7 @@ namespace KeireEditor
             ProjectRoot = std::filesystem::absolute(root).lexically_normal();
             AssetRoot = ProjectRoot / "Assets";
             PreferencePath = ProjectRoot / "Library" / "Editor" / "asset-browser.settings";
-            Thumbnails = std::make_unique<ThumbnailService>(ProjectRoot / "Library" / "Thumbnails");
+            Thumbnails = std::make_unique<ThumbnailService>(ProjectRoot / "Library" / "Thumbnails", 256, Scheduler);
             LoadPreferences();
             RefreshFolderCache(true);
         }
@@ -1769,6 +1769,7 @@ namespace KeireEditor
         std::filesystem::path RenamingFolder;
         std::filesystem::path PendingDeleteFolder;
         std::unique_ptr<ThumbnailService> Thumbnails;
+        Keire::Ref<Keire::JobSystem> Scheduler;
         std::unordered_map<Keire::AssetId, Keire::Ref<Keire::UiImage>> Images;
         std::unordered_map<Keire::AssetId, std::string> ImageDigests;
         std::uint64_t ObservedRecordRevision = 0;
@@ -1811,6 +1812,7 @@ namespace KeireEditor
     }
     AssetBrowserPanel::~AssetBrowserPanel() { Close(); }
     void AssetBrowserPanel::SetProjectRoot(const std::filesystem::path& root) { m_Impl->SetProjectRoot(root); }
+    void AssetBrowserPanel::SetJobSystem(Keire::Ref<Keire::JobSystem> jobs) { m_Impl->Scheduler = std::move(jobs); }
     void AssetBrowserPanel::SetUndoContext(Keire::Ref<Keire::UndoContext> context)
     {
         m_Impl->SetUndoContext(std::move(context));

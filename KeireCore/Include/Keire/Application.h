@@ -3,17 +3,24 @@
 #include "Keire/Api.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Audio/AudioSystem.h"
+#include "Keire/Diagnostics/Diagnostic.h"
 #include "Keire/Diagnostics/Profiler.h"
 #include "Keire/Event.h"
 #include "Keire/Input/Input.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Layer.h"
 #include "Keire/Log.h"
+#include "Keire/Memory/MemorySystem.h"
+#include "Keire/Modules/EngineModule.h"
 #include "Keire/Navigation/NavigationSystem.h"
 #include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Rendering/RenderSystem.h"
+#include "Keire/Replay/ReplaySystem.h"
 #include "Keire/Scenes/SceneSystem.h"
 #include "Keire/Scripting/ScriptSystem.h"
+#include "Keire/Streaming/StreamingSystem.h"
+#include "Keire/StringInterner.h"
 #include "Keire/Time.h"
 #include "Keire/Ui.h"
 #include "Keire/Undo.h"
@@ -29,7 +36,13 @@ namespace Keire
         WindowSpecification MainWindow;
         EventBusSpecification Events;
         ProfilerSpecification Profiling;
+        DiagnosticSystemSpecification Diagnostics;
+        MemorySystemSpecification Memory;
+        JobSystemSpecification Jobs;
+        ModuleRegistrySpecification Modules;
         AssetSystemSpecification Assets;
+        StreamingBudgetSpecification Streaming;
+        ReplaySystemSpecification Replay;
         ScriptSystemSpecification Scripting;
         PhysicsSystemSpecification Physics;
         AudioSystemSpecification Audio;
@@ -72,7 +85,15 @@ namespace Keire
 
         [[nodiscard]] Ref<EventBus> Events() const noexcept;
         [[nodiscard]] Ref<Profiler> GetProfiler() const noexcept;
+        [[nodiscard]] Ref<DiagnosticCatalog> DiagnosticDefinitions() const noexcept;
+        [[nodiscard]] Ref<DiagnosticSink> DiagnosticReports() const noexcept;
+        [[nodiscard]] Ref<MemorySystem> Memory() const noexcept;
+        [[nodiscard]] Ref<StringInterner> Strings() const noexcept;
+        [[nodiscard]] Ref<JobSystem> Jobs() const noexcept;
+        [[nodiscard]] Ref<ModuleRegistry> Modules() const noexcept;
         [[nodiscard]] Ref<AssetSystem> Assets() const noexcept;
+        [[nodiscard]] Ref<StreamingSystem> Streaming() const noexcept;
+        [[nodiscard]] Ref<ReplaySystem> Replay() const noexcept;
         [[nodiscard]] Ref<ScriptSystem> Scripts() const noexcept;
         [[nodiscard]] Ref<PhysicsSystem> Physics() const noexcept;
         [[nodiscard]] Ref<AudioSystem> Audio() const noexcept;

@@ -781,7 +781,8 @@ namespace KeireEditor
                                 const auto input = m_Controller.InputSystem();
                                 if (!input)
                                     throw std::runtime_error("The input system is not available.");
-                                m_RebindContext = input->CreateActionContext(inputDocument, inputContext->User());
+                                m_RebindContext = input->CreateActionContext(inputDocument, inputContext->User(),
+                                                                             Keire::InputContextRole::EditorControl);
                                 m_Rebind = input->BeginInteractiveRebind(m_RebindContext, binding->Id);
                                 m_Message = "Listening for a control...";
                             }

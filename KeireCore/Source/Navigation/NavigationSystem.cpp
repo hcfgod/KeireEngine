@@ -1,5 +1,7 @@
 #include "Keire/Navigation/NavigationSystem.h"
 
+#include "Keire/Jobs/JobSystem.h"
+
 #include <DetourAlloc.h>
 #include <DetourNavMesh.h>
 #include <DetourNavMeshBuilder.h>
@@ -39,6 +41,9 @@ namespace Keire
             std::uint32_t MaximumWorlds = 0;
             std::uint32_t MaximumAgentsPerWorld = 0;
             std::uint32_t MaximumAsyncQueries = 0;
+            Ref<JobSystem> Scheduler;
+            Ref<JobScope> Scope;
+            bool OwnScheduler = false;
         };
 
         struct NavigationWorldState final
@@ -509,7 +514,8 @@ namespace Keire
         mutable std::mutex Mutex;
         mutable std::condition_variable Completed;
         NavigationPathResult Value;
-        std::jthread Worker;
+        JobHandle Worker;
+        std::stop_source Cancellation;
     };
 
     NavigationPathOperation::NavigationPathOperation(std::unique_ptr<Impl> implementation)
@@ -535,11 +541,7 @@ namespace Keire
         return m_Impl->Completed.wait_for(lock, timeout,
                                           [this] { return m_Impl->Value.State != NavigationPathState::Pending; });
     }
-    void NavigationPathOperation::Cancel() noexcept
-    {
-        if (m_Impl->Worker.joinable())
-            m_Impl->Worker.request_stop();
-    }
+    void NavigationPathOperation::Cancel() noexcept { m_Impl->Cancellation.request_stop(); }
 
     class NavigationWorld::Impl final
     {
@@ -630,17 +632,24 @@ namespace Keire
         }
         const auto state = m_Impl->State;
         const auto service = m_Impl->Service;
-        auto* implementation = operation->m_Impl.get();
         try
         {
-            implementation->Worker = std::jthread(
-                [implementation, state, service, mesh, query, generation,
-                 obstacles = std::move(obstacles)](const std::stop_token stop)
+            JobDescription description;
+            description.Name = "Navigation path query";
+            description.Domain = JobDomain::Simulation;
+            operation->m_Impl->Worker = m_Impl->Service->Scope->Submit(
+                std::move(description),
+                [operation, state, service, mesh, query, generation,
+                 obstacles = std::move(obstacles)](JobContext& context)
                 {
+                    std::stop_source cancellation;
+                    std::stop_callback jobCancellation(context.StopToken(), [&] { cancellation.request_stop(); });
+                    std::stop_callback operationCancellation(operation->m_Impl->Cancellation.get_token(),
+                                                             [&] { cancellation.request_stop(); });
                     NavigationPathResult result;
                     try
                     {
-                        result = SolvePath(*mesh, query, stop, obstacles);
+                        result = SolvePath(*mesh, query, cancellation.get_token(), obstacles);
                     }
                     catch (const std::exception& exception)
                     {
@@ -662,10 +671,10 @@ namespace Keire
                              state->Generation.load(std::memory_order_acquire) != generation)
                         result.State = NavigationPathState::Stale;
                     {
-                        std::scoped_lock lock(implementation->Mutex);
-                        implementation->Value = std::move(result);
+                        std::scoped_lock lock(operation->m_Impl->Mutex);
+                        operation->m_Impl->Value = std::move(result);
                     }
-                    implementation->Completed.notify_all();
+                    operation->m_Impl->Completed.notify_all();
                     service->AsyncQueries.fetch_sub(1, std::memory_order_acq_rel);
                 });
         }
@@ -932,18 +941,29 @@ namespace Keire
     class NavigationSystem::Impl final
     {
       public:
-        explicit Impl(const NavigationSystemSpecification& specification) : Owner(std::this_thread::get_id())
+        Impl(const NavigationSystemSpecification& specification, Ref<JobSystem> jobs)
+            : Owner(std::this_thread::get_id())
         {
             Service->MaximumWorlds = specification.MaximumWorlds;
             Service->MaximumAgentsPerWorld = specification.MaximumAgentsPerWorld;
             Service->MaximumAsyncQueries = specification.MaximumAsyncQueries;
+            if (!jobs)
+            {
+                JobSystemSpecification jobSpecification;
+                jobSpecification.WorkerCount = 2;
+                jobSpecification.BlockingWorkerCount = 1;
+                jobs = CreateRef<JobSystem>(jobSpecification);
+                Service->OwnScheduler = true;
+            }
+            Service->Scheduler = std::move(jobs);
+            Service->Scope = Service->Scheduler->CreateScope("Navigation");
         }
         std::thread::id Owner;
         std::shared_ptr<NavigationServiceState> Service = std::make_shared<NavigationServiceState>();
     };
 
-    NavigationSystem::NavigationSystem(const NavigationSystemSpecification specification)
-        : m_Impl(std::make_unique<Impl>(specification))
+    NavigationSystem::NavigationSystem(const NavigationSystemSpecification specification, Ref<JobSystem> jobs)
+        : m_Impl(std::make_unique<Impl>(specification, std::move(jobs)))
     {
         if (specification.Mode == NavigationMode::Disabled || specification.MaximumWorlds == 0 ||
             specification.MaximumWorlds > 4096 || specification.MaximumAgentsPerWorld == 0 ||
@@ -973,5 +993,14 @@ namespace Keire
         if (std::this_thread::get_id() != m_Impl->Owner)
             throw std::logic_error("NavigationSystem::Close must run on the owner thread.");
         m_Impl->Service->Open.store(false, std::memory_order_release);
+        if (m_Impl->Service->Scope)
+        {
+            m_Impl->Service->Scope->Cancel();
+            m_Impl->Service->Scope->Wait();
+            m_Impl->Service->Scope.Reset();
+        }
+        if (m_Impl->Service->OwnScheduler && m_Impl->Service->Scheduler)
+            m_Impl->Service->Scheduler->Close();
+        m_Impl->Service->Scheduler.Reset();
     }
 } // namespace Keire

@@ -188,6 +188,42 @@ TEST_CASE("physics gravity can be authored and changed without recreating a body
     CHECK_THROWS_AS(world->SetGravityEnabled({}, false), std::invalid_argument);
 }
 
+TEST_CASE("physics body checkpoint state restores transforms velocities and sleep state")
+{
+    const auto system = CreatePhysics();
+    const auto world = system->CreateWorld();
+    Keire::PhysicsBodyDefinition definition;
+    definition.Motion = Keire::PhysicsMotionType::Dynamic;
+    definition.Shape = Keire::ColliderShape::Sphere;
+    definition.UseGravity = false;
+    const auto body = world->CreateBody(definition);
+
+    Keire::PhysicsBodyState checkpoint;
+    checkpoint.Body = body;
+    checkpoint.Position = {4.0F, 5.0F, 6.0F};
+    checkpoint.Rotation = Keire::Math::Normalize(Keire::Quaternion{0.1F, 0.2F, 0.3F, 0.9F});
+    checkpoint.LinearVelocity = {1.0F, 2.0F, 3.0F};
+    checkpoint.AngularVelocity = {0.25F, 0.5F, 0.75F};
+    checkpoint.Sleeping = false;
+    world->SetBodyState(body, checkpoint);
+
+    const auto restored = world->TryGetBody(body);
+    REQUIRE(restored);
+    CHECK(restored->Position.X == doctest::Approx(checkpoint.Position.X));
+    CHECK(restored->Position.Y == doctest::Approx(checkpoint.Position.Y));
+    CHECK(restored->Position.Z == doctest::Approx(checkpoint.Position.Z));
+    CHECK(restored->LinearVelocity.X == doctest::Approx(checkpoint.LinearVelocity.X));
+    CHECK(restored->AngularVelocity.Z == doctest::Approx(checkpoint.AngularVelocity.Z));
+    CHECK_FALSE(restored->Sleeping);
+    checkpoint.LinearVelocity = {};
+    checkpoint.AngularVelocity = {};
+    checkpoint.Sleeping = true;
+    world->SetBodyState(body, checkpoint);
+    REQUIRE(world->TryGetBody(body));
+    CHECK(world->TryGetBody(body)->Sleeping);
+    CHECK_THROWS_AS(world->SetBodyState({}, checkpoint), std::invalid_argument);
+}
+
 TEST_CASE("project collision matrix filters contacts and reciprocal queries inside each physics world")
 {
     Keire::PhysicsSystemSpecification specification;

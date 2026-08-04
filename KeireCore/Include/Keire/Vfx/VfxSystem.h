@@ -1434,6 +1434,9 @@ namespace Keire
         CaptureRenderSnapshot(std::size_t maximumParticles = VfxRenderSnapshot::MaximumParticles) const;
         /// Produces a bounded owning tool/debug snapshot without throwing.
         [[nodiscard]] VfxDebugSnapshot CaptureDebugSnapshot() const noexcept;
+        [[nodiscard]] VfxBackend Backend() const noexcept;
+        [[nodiscard]] std::vector<std::byte> CaptureCheckpoint() const;
+        void RestoreCheckpoint(std::span<const std::byte> checkpoint);
         /// Performs a world-wide reset, stopping every effect and invalidating every handle. On GPU this advances the
         /// world reset revision; use Stop for handle-local retirement. Safe to call repeatedly.
         void Clear() noexcept;

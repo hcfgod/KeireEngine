@@ -4,6 +4,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireInternal/FileSystem.h"
+#include "KeireProjectModules/SourceModulePack.h"
 
 #include <array>
 #include <cstdint>
@@ -338,6 +339,7 @@ namespace Keire
     {
         const auto commandLine = ParseCommandLine(arguments);
         ApplicationSpecification specification;
+        specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
 
         if (std::filesystem::exists(commandLine.ConfigurationPath))
             specification.MainWindow = LoadWindowSpecification(commandLine.ConfigurationPath);

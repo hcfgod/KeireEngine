@@ -2,9 +2,11 @@
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/BuildInfo.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Log.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Project/ProjectAuthoringSettings.h"
+#include "Keire/Project/ProjectUpgrade.h"
 #include "Keire/Rendering/LightingBaker.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
@@ -16,6 +18,7 @@
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireProjectModules/SourceModulePack.h"
 
 #include <nlohmann/json.hpp>
 
@@ -48,6 +51,9 @@ namespace
         Keire::AssetBuildProfile Profile;
         std::chrono::seconds WorkerTimeout = std::chrono::minutes(10);
         bool Force = false;
+        bool ApplyUpgrade = false;
+        bool RecoverUpgrade = false;
+        bool RollbackUpgrade = false;
     };
 
     [[nodiscard]] std::uint64_t ParseUnsigned(const std::string_view value, const char* option)
@@ -120,6 +126,12 @@ namespace
                 result.Profile.Target = ParseTarget(requireValue());
             else if (option == "--force")
                 result.Force = true;
+            else if (option == "--apply")
+                result.ApplyUpgrade = true;
+            else if (option == "--recover")
+                result.RecoverUpgrade = true;
+            else if (option == "--rollback")
+                result.RollbackUpgrade = true;
             else
                 throw std::invalid_argument("Unknown option: " + std::string(option));
         }
@@ -136,6 +148,7 @@ namespace
                      "                      [--compression-level <level>] [--pack-mib <size>]\n"
                      "                      [--worker-timeout-seconds <seconds>]\n"
                      "                      [--target <host|windows|linux|macos>]\n"
+                     "  KeireAssetTool upgrade-project [--project <path>] [--apply|--recover|--rollback]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
         std::cout << "  KeireAssetTool bake-lighting [--project <path>] [--input <scene.keirescene>] [--force]\n";
         std::cout << "  KeireAssetTool convert-mesh --input <model> [--output <file.keiremesh>]\n";
@@ -365,7 +378,8 @@ namespace
             throw std::filesystem::filesystem_error("Could not remove previous cooked output.", backup, error);
     }
 
-    void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output, const bool scripting)
+    void WriteRuntimeManifest(const Keire::Project& project, const std::filesystem::path& output,
+                              const Keire::ModuleRegistry& modules, const bool scripting)
     {
         const auto& descriptor = project.Descriptor();
         if (!descriptor.StartupScene)
@@ -380,8 +394,11 @@ namespace
             physicsLayerNames.push_back(authoring.PhysicsLayerNames[index]);
             physicsCollisionMatrix.push_back(authoring.PhysicsCollisionMatrix[index]);
         }
+        nlohmann::json moduleCatalog = nlohmann::json::array();
+        for (const auto& module : modules.OrderedCatalog())
+            moduleCatalog.push_back({{"id", module.Id}, {"version", module.Version.ToString()}});
         nlohmann::json manifest{
-            {"schemaVersion", 3},
+            {"schemaVersion", 4},
             {"startupScene", descriptor.StartupScene.ToString()},
             {"defaultInput",
              descriptor.DefaultInput ? nlohmann::json(descriptor.DefaultInput.ToString()) : nlohmann::json(nullptr)},
@@ -392,6 +409,7 @@ namespace
               {"configuration", build.Configuration},
               {"platform", build.Platform},
               {"architecture", build.Architecture}}},
+            {"sourceModules", std::move(moduleCatalog)},
             {"managedAssemblyRoots",
              scripting ? nlohmann::json::array({"ManagedAssemblies"}) : nlohmann::json::array()},
             {"subsystems", {{"scripting", scripting}, {"physics", true}, {"audio", true}, {"navigation", true}}},
@@ -466,11 +484,78 @@ namespace
                 std::cout << "Converted " << input.string() << " to " << output.string() << '\n';
                 return 0;
             }
+            if (commandLine.Command == "upgrade-project")
+            {
+                const auto actionCount = static_cast<unsigned>(commandLine.ApplyUpgrade) +
+                                         static_cast<unsigned>(commandLine.RecoverUpgrade) +
+                                         static_cast<unsigned>(commandLine.RollbackUpgrade);
+                if (actionCount > 1)
+                    throw std::invalid_argument(
+                        "upgrade-project accepts only one of --apply, --recover, or --rollback.");
+                auto modules = Keire::CreateRef<Keire::ModuleRegistry>(
+                    Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
+                Keire::ProjectUpgradeService upgrades(commandLine.Project, modules->ProjectUpgrades());
+                if (upgrades.State() == Keire::ProjectUpgradeTransactionState::Interrupted)
+                {
+                    if (commandLine.RecoverUpgrade)
+                    {
+                        upgrades.Recover();
+                        std::cout << "Recovered the interrupted project upgrade.\n";
+                    }
+                    else if (commandLine.RollbackUpgrade)
+                    {
+                        upgrades.Rollback();
+                        std::cout << "Rolled back the interrupted project upgrade.\n";
+                    }
+                    else
+                    {
+                        if (commandLine.ApplyUpgrade)
+                            throw std::invalid_argument("Use --recover or --rollback for an interrupted upgrade.");
+                        std::cout << "Interrupted upgrade detected. Re-run with --recover or --rollback.\n";
+                    }
+                    return 0;
+                }
+                if (commandLine.RecoverUpgrade || commandLine.RollbackUpgrade)
+                    throw std::invalid_argument("The project has no interrupted upgrade transaction.");
+                const auto plan = upgrades.Plan();
+                std::cout << "Project schema " << plan.CurrentSchema << " -> " << plan.TargetSchema << '\n';
+                std::cout << "Estimated backup: " << plan.EstimatedBackupBytes << " bytes\n";
+                for (const auto& step : plan.Steps)
+                {
+                    std::cout << "  " << step.Id << " (" << step.FromSchema << " -> " << step.ToSchema << ")\n";
+                    for (const auto& path : step.AffectedPaths)
+                        std::cout << "    " << path.generic_string() << '\n';
+                    if (!step.Warning.empty())
+                        std::cout << "    warning: " << step.Warning << '\n';
+                }
+                if (plan.Steps.empty())
+                    std::cout << "Project schema is current.\n";
+                else if (commandLine.ApplyUpgrade)
+                {
+                    upgrades.Apply(plan);
+                    std::cout << "Project upgrade completed.\n";
+                }
+                else
+                    std::cout << "Dry run only; re-run with --apply to publish this plan.\n";
+                return 0;
+            }
 
+            auto modules = Keire::CreateRef<Keire::ModuleRegistry>(
+                Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
             const auto project = Keire::Project::Open(commandLine.Project);
+            modules->ValidateRequired(project->Descriptor().RequiredModules);
             const auto executable = std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])).lexically_normal();
             Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
+            databaseSpecification.Jobs = Keire::CreateRef<Keire::JobSystem>();
             databaseSpecification.Importers = Keire::CreateBuiltinAssetImporters();
+            for (auto& importer : modules->Importers())
+            {
+                if (std::ranges::find(databaseSpecification.Importers, importer.Name,
+                                      &Keire::AssetImporterRegistration::Name) != databaseSpecification.Importers.end())
+                    throw std::invalid_argument("A source module importer duplicates an existing importer: " +
+                                                importer.Name);
+                databaseSpecification.Importers.push_back(std::move(importer));
+            }
             auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             if (commandLine.Command == "scan")
             {
@@ -522,7 +607,7 @@ namespace
                     result = Keire::AssetCooker::Cook(*database, commandLine.Profile, staging);
                     Keire::AssetCooker::Validate(result.CatalogPath);
                     CopyManagedAssemblies(managed, staging);
-                    WriteRuntimeManifest(*project, staging, managed.Scripting);
+                    WriteRuntimeManifest(*project, staging, *modules, managed.Scripting);
                     PublishCookOutput(staging, output);
                 }
                 catch (...)

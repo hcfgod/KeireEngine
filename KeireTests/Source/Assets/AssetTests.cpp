@@ -2,14 +2,18 @@
 
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Log.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
+#include "Keire/Streaming/StreamingSystem.h"
 #include "KeireTests/TestSupport.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/FileSystem.h"
+
+#include <nlohmann/json.hpp>
 
 #include <array>
 #include <atomic>
@@ -1268,10 +1272,128 @@ TEST_CASE("Cooked asset pages support bounded asynchronous range reads")
     const auto result = operation->Result();
     REQUIRE(result.size() == 6144);
     CHECK(std::ranges::equal(result, std::as_bytes(std::span(payload)).subspan(3584, 6144)));
+
+    Keire::StreamingBudgetSpecification streamingSpecification;
+    streamingSpecification.General.CpuBytes = 8192;
+    auto streaming = Keire::CreateRef<Keire::StreamingSystem>(streamingSpecification, assets);
+    const auto residency = streaming->Request(
+        {.Asset = record->Id, .Range = {.Offset = 3584, .Bytes = 6144}, .Priority = Keire::AssetPriority::High});
+    for (std::size_t attempt = 0; attempt < 500 && !streaming->Snapshot(residency).CpuBytes; ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        (void)streaming->Pump();
+    }
+    CHECK(streaming->Snapshot(residency).State == Keire::ResidencyState::Resident);
+    CHECK(streaming->ResidentData(residency) == result);
+    REQUIRE(streaming->Statistics().size() == 5);
+    CHECK(streaming->Statistics().front().ResidentCpuBytes == result.size());
+    std::thread retirementReporter([&] { streaming->ReportRetired(Keire::StreamingClass::Texture, 128U, 512U); });
+    retirementReporter.join();
+    auto retirementStatistics = streaming->Statistics();
+    CHECK(retirementStatistics[1].RetiredCpuBytes == 128U);
+    CHECK(retirementStatistics[1].RetiredGpuBytes == 512U);
+    std::thread retirementReleaser([&] { streaming->ReleaseRetired(Keire::StreamingClass::Texture, 128U, 512U); });
+    retirementReleaser.join();
+    retirementStatistics = streaming->Statistics();
+    CHECK(retirementStatistics[1].RetiredCpuBytes == 0U);
+    CHECK(retirementStatistics[1].RetiredGpuBytes == 0U);
+    CHECK(streaming->Release(residency));
+    CHECK_THROWS_AS((void)streaming->Snapshot(residency), std::invalid_argument);
+    streaming->Close();
+
     CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, 0, 8193), std::invalid_argument);
     CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, payload.size() - 10U, 20), std::out_of_range);
     assets->Close();
     CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, 0, 1), std::logic_error);
+}
+
+TEST_CASE("Cooked stream layouts expose semantic segments and preserve monolithic catalogs")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.StreamTexture";
+    importer.Type = Keire::Texture2DAsset::StaticType();
+    importer.Extensions = {".streamtexture"};
+    importer.Import = [](std::span<const std::byte>)
+    {
+        Keire::TextureImportSettings settings;
+        std::vector<Keire::TextureMipLevel> mips;
+        for (std::uint32_t dimension = 64U; dimension != 0U; dimension /= 2U)
+        {
+            Keire::TextureMipLevel mip;
+            mip.Width = dimension;
+            mip.Height = dimension;
+            mip.Pixels.resize(static_cast<std::size_t>(dimension) * dimension * 4U, std::byte{0x5a});
+            mips.push_back(std::move(mip));
+            if (dimension == 1U)
+                break;
+        }
+        return Keire::Texture2DAsset::Encode(settings, mips);
+    };
+    Keire::JobSystemSpecification jobSpecification;
+    jobSpecification.WorkerCount = 2;
+    jobSpecification.BlockingWorkerCount = 1;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(jobSpecification);
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
+        .ProjectRoot = project.Root, .Importers = {importer, Keire::CreateTexture2DAssetImporter()}, .Jobs = jobs});
+    const std::string source = "semantic texture";
+    const auto texture = database->CreateAsset("Textures/Test.streamtexture", importer,
+                                               std::as_bytes(std::span(source.data(), source.size())));
+    Keire::AssetBuildProfile profile;
+    profile.StreamPageBytes = 4096U;
+    const auto submittedBeforeCook = jobs->Statistics().SubmittedJobs;
+    const auto cooked = Keire::AssetCooker::Cook(*database, profile, project.Root / "SemanticCook");
+    CHECK(jobs->Statistics().SubmittedJobs > submittedBeforeCook);
+
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Cooked;
+    specification.Mounts.push_back({cooked.CatalogPath});
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+    const auto layout = assets->TryGetStreamLayout(texture);
+    REQUIRE(layout);
+    CHECK(layout->Version == 1U);
+    CHECK_FALSE(layout->MonolithicCompatibility);
+    CHECK(std::ranges::any_of(layout->Segments, [](const Keire::AssetStreamSegment& segment)
+                              { return segment.Kind == Keire::AssetStreamSegmentKind::Metadata; }));
+    const auto mip = std::ranges::find_if(
+        layout->Segments, [](const Keire::AssetStreamSegment& segment)
+        { return segment.Kind == Keire::AssetStreamSegmentKind::TextureMip && segment.Segment == 2U; });
+    REQUIRE(mip != layout->Segments.end());
+
+    auto streaming = Keire::CreateRef<Keire::StreamingSystem>(Keire::StreamingBudgetSpecification{}, assets);
+    const auto request = streaming->RequestTextureMip(texture, 2U);
+    for (std::size_t attempt = 0; attempt < 500 && streaming->Snapshot(request).State == Keire::ResidencyState::Loading;
+         ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        (void)streaming->Pump();
+    }
+    CHECK(streaming->Snapshot(request).State == Keire::ResidencyState::Resident);
+    CHECK(streaming->ResidentData(request).size() == mip->Bytes);
+    streaming->Close();
+    assets->Close();
+
+    auto legacyDocument = nlohmann::json::parse(ReadAll(cooked.CatalogPath));
+    legacyDocument["schemaVersion"] = 2;
+    for (auto& entry : legacyDocument["assets"])
+        entry.erase("segments");
+    const auto legacyCatalog = cooked.CatalogPath.parent_path() / "legacy-catalog.json";
+    {
+        std::ofstream output(legacyCatalog, std::ios::binary | std::ios::trunc);
+        output << legacyDocument.dump(2) << '\n';
+        REQUIRE(output.good());
+    }
+    specification.Mounts = {{legacyCatalog}};
+    auto legacyAssets = Keire::CreateRef<Keire::AssetSystem>(specification);
+    const auto legacyLayout = legacyAssets->TryGetStreamLayout(texture);
+    REQUIRE(legacyLayout);
+    CHECK(legacyLayout->Version == 0U);
+    CHECK(legacyLayout->MonolithicCompatibility);
+    REQUIRE(legacyLayout->Segments.size() == 1U);
+    CHECK(legacyLayout->Segments.front().Kind == Keire::AssetStreamSegmentKind::Data);
+    legacyAssets->Close();
+    database.Reset();
+    jobs->Close();
 }
 
 TEST_CASE("Asset database editor imports report failures without discarding the last-good catalog")

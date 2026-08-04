@@ -565,6 +565,17 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Awake));
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Enable));
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Start));
+    const auto replayCheckpoint = scripts->CaptureReplayCheckpoint();
+    REQUIRE(replayCheckpoint.size() == 1U);
+    CHECK(replayCheckpoint.front().Enabled);
+    REQUIRE(scripts->SetBehaviourEnabled(instance, false));
+    REQUIRE_FALSE(scripts->CaptureReplayCheckpoint().front().Enabled);
+    CHECK_NOTHROW(scripts->RestoreReplayCheckpoint(replayCheckpoint));
+    CHECK(scripts->CaptureReplayCheckpoint().front().Enabled);
+    auto incompatibleReplayCheckpoint = replayCheckpoint;
+    incompatibleReplayCheckpoint.front().Entity = Keire::AssetId::Generate();
+    CHECK_THROWS_AS(scripts->RestoreReplayCheckpoint(incompatibleReplayCheckpoint), std::runtime_error);
+    CHECK(scripts->CaptureReplayCheckpoint().front().Enabled);
     const auto callbackMetrics = scripts->Metrics();
     CHECK(callbackMetrics.CallbackInvocations >= 3);
     CHECK(callbackMetrics.ManagedInteropCalls >= 3);

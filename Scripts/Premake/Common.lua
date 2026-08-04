@@ -55,6 +55,11 @@ function LinkKeireCore()
     filter {}
 end
 
+function LinkKeireSourceModules()
+    includedirs { "../SourceModules/Include" }
+    links { ProjectConfig.PROJECT_NAMESPACE .. "SourceModules" }
+end
+
 function LinkSDL3()
     externalincludedirs { DependencyManifest.SDL3Include }
     links { DependencyManifest.SDL3PlatformLinks }

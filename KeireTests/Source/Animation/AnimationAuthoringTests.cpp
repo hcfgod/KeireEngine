@@ -539,6 +539,18 @@ TEST_CASE("Animator supports explicit play, cross-fade, stop, and restart contro
     CHECK(sample.LocalPose[1].Translation.X == doctest::Approx(2.0F));
     REQUIRE(animator.DebugSnapshot());
     CHECK(animator.DebugSnapshot()->Layers.front().InTransition);
+    const auto checkpoint = animator.CaptureCheckpoint();
+    (void)animator.Update(0.25F);
+    animator.RestoreCheckpoint(checkpoint);
+    sample = animator.Update(0.0F);
+    CHECK(sample.State == "Idle");
+    CHECK(sample.LocalPose[1].Translation.X == doctest::Approx(2.0F));
+    REQUIRE(animator.DebugSnapshot());
+    CHECK(animator.DebugSnapshot()->Layers.front().InTransition);
+    auto malformedCheckpoint = checkpoint;
+    malformedCheckpoint.Layers.front().Time = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(animator.RestoreCheckpoint(malformedCheckpoint), std::invalid_argument);
+    CHECK(animator.Update(0.0F).LocalPose[1].Translation.X == doctest::Approx(2.0F));
 
     animator.Stop();
     sample = animator.Update(1.0F);

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace Keire
 {
@@ -44,6 +45,32 @@ namespace Keire
         float SynchronizationMilliseconds = 0.0F;
     };
 
+    struct ScenePresentationAudioCheckpoint
+    {
+        EntityId Entity;
+        AssetId Clip;
+        AudioSourcePlaybackState State = AudioSourcePlaybackState::Stopped;
+        std::uint64_t Frame = 0;
+        bool ManualPlayRequested = false;
+        bool PlayOnAwakeConsumed = false;
+    };
+
+    struct ScenePresentationUiEventCheckpoint
+    {
+        RuntimeUiEventType Type = RuntimeUiEventType::Click;
+        EntityId Target;
+        float PointerX = 0.0F;
+        float PointerY = 0.0F;
+        RuntimeUiPointerButton Button = RuntimeUiPointerButton::Primary;
+    };
+
+    struct ScenePresentationCheckpoint
+    {
+        EntityId FocusedEntity;
+        std::vector<ScenePresentationAudioCheckpoint> AudioSources;
+        std::vector<ScenePresentationUiEventCheckpoint> PendingUiEvents;
+    };
+
     class KEIRE_API ScenePresentationRuntime final : public RefCounted
     {
       public:
@@ -70,6 +97,8 @@ namespace Keire
         void PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
         void Navigate(RuntimeUiNavigation navigation);
         [[nodiscard]] bool PollUiEvent(RuntimeUiEvent& event);
+        [[nodiscard]] ScenePresentationCheckpoint CaptureCheckpoint() const;
+        void RestoreCheckpoint(const ScenePresentationCheckpoint& checkpoint);
 
         [[nodiscard]] Ref<RuntimeUiTree> Ui() const noexcept;
         [[nodiscard]] ScenePresentationRuntimeStatistics Statistics() const;
