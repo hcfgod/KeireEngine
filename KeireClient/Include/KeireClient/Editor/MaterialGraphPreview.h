@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
@@ -21,6 +22,7 @@ namespace KeireEditor
         float Exposure = 1.0F;
         float EnvironmentIntensity = 1.0F;
         float RotationDegrees = 33.0F;
+        std::function<bool()> CancellationRequested;
     };
 
     [[nodiscard]] std::vector<std::byte> RenderMaterialGraphPreview(const MaterialGraphPreviewRequest& request);

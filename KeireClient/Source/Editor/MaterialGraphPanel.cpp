@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <ranges>
 #include <set>
@@ -150,6 +151,13 @@ namespace KeireEditor
 
     } // namespace
 
+    MaterialGraphPanel::~MaterialGraphPanel() noexcept
+    {
+        m_PreviewCancellation->fetch_add(1, std::memory_order_release);
+        if (m_PreviewRender.valid())
+            m_PreviewRender.wait();
+    }
+
     void MaterialGraphPanel::Attach(Keire::UiWorkspace& workspace)
     {
         m_Registration = workspace.RegisterPanel({"editor.material-graph", "Material Graph", false});
@@ -272,6 +280,24 @@ namespace KeireEditor
     void MaterialGraphPanel::DrawPreview(Keire::UiFrame& ui)
     {
         const auto& theme = m_Controller.MaterialGraphTheme();
+        if (m_PreviewRender.valid() && m_PreviewRender.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        {
+            auto result = m_PreviewRender.get();
+            if (result.Generation == m_PreviewGeneration)
+            {
+                if (result.Error.empty())
+                {
+                    m_PreviewImage = ui.CreateImage(result.Width, result.Height, result.Pixels);
+                    if (!result.FinalQuality)
+                    {
+                        m_PreviewRefinement = true;
+                        m_PreviewDirty = true;
+                    }
+                }
+                else
+                    Report(std::move(result.Error));
+            }
+        }
         ui.TextColored(theme.Accent, "LIVE MATERIAL PREVIEW");
         auto preview = m_Controller.MaterialGraphState().PreviewSettings();
         bool previewChanged = false;
@@ -292,9 +318,13 @@ namespace KeireEditor
         {
             m_PreviewWidth = previewWidth;
             m_PreviewHeight = previewHeight;
+            m_PreviewRefinement = false;
             m_PreviewDirty = true;
+            if (++m_PreviewGeneration == 0)
+                ++m_PreviewGeneration;
+            m_PreviewCancellation->store(m_PreviewGeneration, std::memory_order_release);
         }
-        if (m_PreviewDirty)
+        if (m_PreviewDirty && !m_PreviewRender.valid())
         {
             try
             {
@@ -311,19 +341,46 @@ namespace KeireEditor
                 const auto& lastGoodDefinition = m_Controller.MaterialGraphState().LastGoodDefinition();
                 if (!lastGoodDefinition)
                     return;
-                const auto pixels = RenderMaterialGraphPreview({
-                    .Output = lastGoodDefinition->Output,
-                    .Mesh = m_PreviewSettings.Mesh,
-                    .CustomMesh = std::move(customMesh),
-                    .Definition = &*lastGoodDefinition,
-                    .Properties = m_PreviewProperties,
-                    .Width = m_PreviewWidth,
-                    .Height = m_PreviewHeight,
-                    .Exposure = m_PreviewSettings.Exposure,
-                    .EnvironmentIntensity = m_PreviewSettings.EnvironmentIntensity,
-                    .RotationDegrees = m_PreviewSettings.RotationDegrees,
-                });
-                m_PreviewImage = ui.CreateImage(m_PreviewWidth, m_PreviewHeight, pixels);
+                const auto generation = m_PreviewGeneration;
+                const bool finalQuality = m_PreviewRefinement;
+                const auto width = finalQuality ? m_PreviewWidth : std::max(96U, m_PreviewWidth / 2U);
+                const auto height = finalQuality ? m_PreviewHeight : std::max(64U, m_PreviewHeight / 2U);
+                auto definition = *lastGoodDefinition;
+                auto properties = m_PreviewProperties;
+                auto settings = m_PreviewSettings;
+                auto cancellation = m_PreviewCancellation;
+                m_PreviewRender = std::async(
+                    std::launch::async,
+                    [generation, width, height, definition = std::move(definition), properties = std::move(properties),
+                     settings = std::move(settings), customMesh = std::move(customMesh),
+                     cancellation = std::move(cancellation), finalQuality]() mutable
+                    {
+                        PreviewRenderResult result{
+                            .Generation = generation, .Width = width, .Height = height, .FinalQuality = finalQuality};
+                        try
+                        {
+                            result.Pixels = RenderMaterialGraphPreview({
+                                .Output = definition.Output,
+                                .Mesh = settings.Mesh,
+                                .CustomMesh = std::move(customMesh),
+                                .Definition = &definition,
+                                .Properties = properties,
+                                .Width = width,
+                                .Height = height,
+                                .Exposure = settings.Exposure,
+                                .EnvironmentIntensity = settings.EnvironmentIntensity,
+                                .RotationDegrees = settings.RotationDegrees,
+                                .CancellationRequested = [cancellation, generation]
+                                { return cancellation->load(std::memory_order_acquire) != generation; },
+                            });
+                        }
+                        catch (const std::exception& error)
+                        {
+                            result.Error = error.what();
+                        }
+                        return result;
+                    });
+                m_PreviewRefinement = false;
                 m_PreviewDirty = false;
             }
             catch (const std::exception& error)
@@ -332,6 +389,8 @@ namespace KeireEditor
                 m_PreviewDirty = false;
             }
         }
+        if (m_PreviewDirty || m_PreviewRender.valid())
+            ui.TextColored(theme.MutedText, "Updating preview...");
         if (m_PreviewImage)
             ui.Image(m_PreviewImage, {static_cast<float>(m_PreviewWidth), static_cast<float>(m_PreviewHeight)});
         else
@@ -343,7 +402,11 @@ namespace KeireEditor
     {
         m_PreviewProperties = compilation.Properties;
         m_PreviewSettings = settings;
+        m_PreviewRefinement = false;
         m_PreviewDirty = true;
+        if (++m_PreviewGeneration == 0)
+            ++m_PreviewGeneration;
+        m_PreviewCancellation->store(m_PreviewGeneration, std::memory_order_release);
     }
 
     void MaterialGraphPanel::ClearPreview() noexcept
@@ -351,7 +414,11 @@ namespace KeireEditor
         m_PreviewImage.Reset();
         m_PreviewProperties.clear();
         m_PreviewSettings = {};
+        m_PreviewRefinement = false;
         m_PreviewDirty = false;
+        if (++m_PreviewGeneration == 0)
+            ++m_PreviewGeneration;
+        m_PreviewCancellation->store(m_PreviewGeneration, std::memory_order_release);
         m_AssetPicker.Clear();
         m_NodeAssetPicker.Clear();
     }
@@ -736,8 +803,7 @@ namespace KeireEditor
             if (node && canvasNode != model.Nodes.end())
                 try
                 {
-                    (void)document.EditNode(*node, [position = canvasNode->Position](Keire::MaterialGraphNode& value)
-                                            { value.EditorPosition = position; });
+                    (void)document.MoveNode(*node, canvasNode->Position);
                 }
                 catch (const std::exception& error)
                 {

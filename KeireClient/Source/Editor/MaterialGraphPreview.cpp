@@ -26,6 +26,12 @@ namespace KeireEditor
     {
         constexpr std::size_t MaximumPreviewTriangles = 500'000;
 
+        void CheckPreviewCancellation(const MaterialGraphPreviewRequest& request)
+        {
+            if (request.CancellationRequested && request.CancellationRequested())
+                throw std::runtime_error("Material Graph preview rendering was superseded.");
+        }
+
         struct PreviewMaterial
         {
             Keire::Vector4 BaseColor{0.72F, 0.72F, 0.74F, 1.0F};
@@ -268,7 +274,15 @@ namespace KeireEditor
                 : m_Definition(definition), m_Properties(properties), m_Visiting(definition.Nodes.size(), 0)
             {
                 for (std::size_t index = 0; index < definition.Nodes.size(); ++index)
+                {
                     m_Nodes.emplace(definition.Nodes[index].Id, index);
+                    for (const auto& pin : definition.Nodes[index].Pins)
+                        if (pin.Direction == Keire::MaterialGraphPinDirection::Output)
+                        {
+                            m_CacheIndices.emplace(std::pair{definition.Nodes[index].Id, pin.Id}, m_Cache.size());
+                            m_Cache.emplace_back();
+                        }
+                }
                 for (const auto& connection : definition.Connections)
                     m_Incoming.emplace(std::pair{connection.Input.Node, connection.Input.Pin}, connection.Output);
                 const auto master = std::ranges::find(definition.Nodes, Keire::MaterialGraphNodeKind::Master,
@@ -282,7 +296,7 @@ namespace KeireEditor
                 m_Uv = uv;
                 m_Normal = Normalize(normal);
                 m_Position = position;
-                m_Cache.clear();
+                std::ranges::fill(m_Cache, std::nullopt);
                 std::ranges::fill(m_Visiting, std::uint8_t{0});
             }
 
@@ -447,8 +461,11 @@ namespace KeireEditor
                 if (located == m_Nodes.end())
                     throw std::invalid_argument("Preview graph connection references a missing node.");
                 const auto index = located->second;
-                if (const auto cached = m_Cache.find({endpoint.Node, endpoint.Pin}); cached != m_Cache.end())
-                    return cached->second;
+                const auto cacheIndex = m_CacheIndices.find({endpoint.Node, endpoint.Pin});
+                if (cacheIndex == m_CacheIndices.end())
+                    throw std::invalid_argument("Preview graph connection references a missing output pin.");
+                if (const auto& cached = m_Cache[cacheIndex->second])
+                    return *cached;
                 if (m_Visiting[index])
                     throw std::invalid_argument("Preview graph contains an expression cycle.");
                 m_Visiting[index] = true;
@@ -1509,7 +1526,7 @@ namespace KeireEditor
                 case Keire::MaterialGraphNodeKind::Master:
                     throw std::invalid_argument("The Material Graph Master node cannot be used as an expression.");
                 }
-                m_Cache[{endpoint.Node, endpoint.Pin}] = result;
+                m_Cache[cacheIndex->second] = result;
                 return result;
             }
 
@@ -1517,7 +1534,8 @@ namespace KeireEditor
             std::span<const Keire::ShaderPropertyDefinition> m_Properties;
             std::map<Keire::AssetId, std::size_t> m_Nodes;
             std::map<std::pair<Keire::AssetId, Keire::AssetId>, Keire::MaterialGraphEndpoint> m_Incoming;
-            std::map<std::pair<Keire::AssetId, Keire::AssetId>, PreviewGraphValue> m_Cache;
+            std::map<std::pair<Keire::AssetId, Keire::AssetId>, std::size_t> m_CacheIndices;
+            std::vector<std::optional<PreviewGraphValue>> m_Cache;
             std::vector<std::uint8_t> m_Visiting;
             const Keire::MaterialGraphNode* m_Master = nullptr;
             Keire::Vector2 m_Uv;
@@ -1805,6 +1823,7 @@ namespace KeireEditor
             { return (x - first.X) * (second.Y - first.Y) - (y - first.Y) * (second.X - first.X); };
             for (std::size_t index = 0; index + 2 < geometry.Indices.size(); index += 3)
             {
+                CheckPreviewCancellation(request);
                 const auto i0 = geometry.Indices[index];
                 const auto i1 = geometry.Indices[index + 1];
                 const auto i2 = geometry.Indices[index + 2];
@@ -1823,6 +1842,8 @@ namespace KeireEditor
                 const int maximumY = std::min(static_cast<int>(height) - 1,
                                               static_cast<int>(std::ceil(std::max({first.Y, second.Y, third.Y}))));
                 for (int y = minimumY; y <= maximumY; ++y)
+                {
+                    CheckPreviewCancellation(request);
                     for (int x = minimumX; x <= maximumX; ++x)
                     {
                         const float sampleX = static_cast<float>(x) + 0.5F;
@@ -1856,6 +1877,7 @@ namespace KeireEditor
                                   shaded[1] * alpha + background[1] * (1.0F - alpha),
                                   shaded[2] * alpha + background[2] * (1.0F - alpha), 1.0F});
                     }
+                }
             }
         }
     } // namespace
@@ -1871,11 +1893,14 @@ namespace KeireEditor
             throw std::invalid_argument("Material Graph preview lighting controls are outside their supported range.");
         std::vector<std::byte> pixels(static_cast<std::size_t>(request.Width) * request.Height * 4U);
         for (std::uint32_t y = 0; y < request.Height; ++y)
+        {
+            CheckPreviewCancellation(request);
             for (std::uint32_t x = 0; x < request.Width; ++x)
             {
                 const auto background = Background(x, y);
                 PutPixel(pixels, request.Width, x, y, {background[0], background[1], background[2], 1.0F});
             }
+        }
 
         PreviewGeometry geometry;
         switch (request.Mesh)

@@ -52,11 +52,109 @@ namespace KeireEditor
             return true;
         }
 
+        [[nodiscard]] bool ApplyParameterDefault(const Keire::MaterialGraphNode& node,
+                                                 Keire::ShaderPropertyDefinition& property)
+        {
+            switch (node.ValueType)
+            {
+            case Keire::MaterialGraphValueType::Scalar:
+                if (const auto* value = std::get_if<float>(&node.Value))
+                {
+                    property.DefaultValue = {*value, 0.0F, 0.0F, 0.0F};
+                    return true;
+                }
+                break;
+            case Keire::MaterialGraphValueType::Vector2:
+                if (const auto* value = std::get_if<Keire::Vector2>(&node.Value))
+                {
+                    property.DefaultValue = {value->X, value->Y, 0.0F, 0.0F};
+                    return true;
+                }
+                break;
+            case Keire::MaterialGraphValueType::Vector3:
+                if (const auto* value = std::get_if<Keire::Vector3>(&node.Value))
+                {
+                    property.DefaultValue = {value->X, value->Y, value->Z, 0.0F};
+                    return true;
+                }
+                break;
+            case Keire::MaterialGraphValueType::Vector4:
+                if (const auto* value = std::get_if<Keire::Vector4>(&node.Value))
+                {
+                    property.DefaultValue = *value;
+                    return true;
+                }
+                break;
+            case Keire::MaterialGraphValueType::Color:
+                if (const auto* value = std::get_if<Keire::Color>(&node.Value))
+                {
+                    property.DefaultValue = {value->Red, value->Green, value->Blue, value->Alpha};
+                    return true;
+                }
+                break;
+            case Keire::MaterialGraphValueType::Texture2D:
+                if (const auto* value = std::get_if<Keire::AssetId>(&node.Value))
+                {
+                    property.DefaultTexture = *value;
+                    return true;
+                }
+                break;
+            case Keire::MaterialGraphValueType::MaterialAttributes:
+            case Keire::MaterialGraphValueType::Bsdf:
+                break;
+            }
+            return false;
+        }
+
+        [[nodiscard]] bool BuildParameterOnlyCompilation(const Keire::MaterialGraphDefinition& previousDefinition,
+                                                         const Keire::MaterialGraphCompilation& previousCompilation,
+                                                         const Keire::MaterialGraphDefinition& definition,
+                                                         Keire::MaterialGraphCompilation& compilation)
+        {
+            if (previousDefinition.Nodes.size() != definition.Nodes.size())
+                return false;
+
+            auto normalized = definition;
+            std::vector<std::size_t> changedParameters;
+            for (std::size_t index = 0; index < definition.Nodes.size(); ++index)
+            {
+                const auto& before = previousDefinition.Nodes[index];
+                auto& after = normalized.Nodes[index];
+                if (before.Id == after.Id && before.Kind == Keire::MaterialGraphNodeKind::Parameter &&
+                    after.Kind == Keire::MaterialGraphNodeKind::Parameter && before.Value != after.Value)
+                {
+                    after.Value = before.Value;
+                    changedParameters.push_back(index);
+                }
+            }
+            if (changedParameters.empty() || normalized != previousDefinition)
+                return false;
+
+            compilation = previousCompilation;
+            for (const auto index : changedParameters)
+            {
+                const auto& node = definition.Nodes[index];
+                const auto property =
+                    std::ranges::find(compilation.Properties, node.Symbol, &Keire::ShaderPropertyDefinition::Name);
+                if (property == compilation.Properties.end() || !ApplyParameterDefault(node, *property))
+                    return false;
+            }
+            return true;
+        }
+
         [[nodiscard]] std::vector<Keire::Ref<Keire::ShaderAsset>>
         CompileDevelopmentShaders(const Keire::MaterialGraphCompilation& compilation,
                                   const Keire::MaterialGraphCompileOptions& options)
         {
-            const auto importer = Keire::CreateShaderAssetImporter();
+            Keire::ShaderImporterSpecification importerSpecification;
+#if defined(_WIN32)
+            importerSpecification.Formats = {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV};
+#elif defined(__APPLE__)
+            importerSpecification.Formats = {Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl};
+#else
+            importerSpecification.Formats = {Keire::ShaderBinaryFormat::SpirV};
+#endif
+            const auto importer = Keire::CreateShaderAssetImporter(std::move(importerSpecification));
             if (!importer.ContextualImport)
                 throw std::logic_error("Live Material Graph compilation requires the contextual shader importer.");
 
@@ -342,6 +440,16 @@ namespace KeireEditor
                     });
     }
 
+    bool MaterialGraphDocument::MoveNode(const Keire::AssetId node, const Keire::Vector2 position)
+    {
+        auto candidate = m_Host.Draft();
+        const auto found = std::ranges::find(candidate.Nodes, node, &Keire::MaterialGraphNode::Id);
+        if (found == candidate.Nodes.end())
+            throw std::invalid_argument("Material Graph node is unavailable.");
+        found->EditorPosition = position;
+        return m_Host.EditMetadata("Move Material Graph node", std::move(candidate));
+    }
+
     bool MaterialGraphDocument::RemoveNode(const Keire::AssetId node)
     {
         return Edit("Remove Material Graph node",
@@ -505,6 +613,18 @@ namespace KeireEditor
 
     void MaterialGraphDocument::QueueCompilation(const Keire::MaterialGraphDefinition& definition)
     {
+        if (!m_PendingDefinition && !m_BackgroundCompilation.valid() && m_LastGoodDefinition && m_LastGoodCompilation)
+        {
+            Keire::MaterialGraphCompilation compilation;
+            if (BuildParameterOnlyCompilation(*m_LastGoodDefinition, *m_LastGoodCompilation, definition, compilation))
+            {
+                if (++m_RequestedGeneration == 0)
+                    ++m_RequestedGeneration;
+                m_CompileDebounceSeconds = 0.0;
+                ApplyCompilation(definition, std::move(compilation));
+                return;
+            }
+        }
         const bool compilationAlreadyQueued = m_PendingDefinition.has_value();
         m_PendingDefinition = definition;
         if (!compilationAlreadyQueued)

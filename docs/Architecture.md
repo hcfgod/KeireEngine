@@ -484,6 +484,15 @@ Eye outputs are authored through the same ABI with output-specific neutral defau
 are packed into the ordinary material-property block; a zero-property sentinel keeps resource layouts valid on strict
 graphics backends.
 
+Material Graph authoring separates serialized editor metadata from runtime-affecting edits. Node layout uses the
+document host's validated metadata transaction and preserves undo/redo without invoking preview publication. Exposed
+parameter defaults patch the last-good material compilation and publish immediately; topology, pin defaults, keywords,
+and other shader-affecting changes use the generation-checked background compiler. Live shader imports request only the
+host runtime format plus SPIR-V reflection, while ordinary asset imports continue to emit every supported platform
+format. CPU preview jobs own immutable graph/property snapshots, are canceled by a shared generation token, publish a
+quick reduced-resolution image first, and refine only when the graph remains unchanged; UI resources are created only
+on the editor thread.
+
 Windowing translates SDL drop sessions into an engine-owned event containing only opaque window identity, logical
 position, and filesystem paths. Editor hit-test adapters resolve Project folders or the Scene viewport. External import
 then moves to a worker, stages confined source/metadata pairs, validates with UI-independent importer option values,

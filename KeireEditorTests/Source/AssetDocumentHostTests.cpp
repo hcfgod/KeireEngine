@@ -55,6 +55,17 @@ TEST_CASE("Asset document host validates edits and coordinates undo save discard
     CHECK_FALSE(document.Dirty());
     CHECK(preview == TestDefinition{1, "baseline"});
 
+    CHECK(document.EditMetadata("Change editor metadata", {1, "layout"}));
+    CHECK(document.Draft() == TestDefinition{1, "layout"});
+    CHECK(preview == TestDefinition{1, "baseline"});
+    CHECK(document.Undo());
+    CHECK(document.Draft() == TestDefinition{1, "baseline"});
+    CHECK(preview == TestDefinition{1, "baseline"});
+    CHECK(document.Redo());
+    CHECK(document.Draft() == TestDefinition{1, "layout"});
+    CHECK(preview == TestDefinition{1, "baseline"});
+    CHECK(document.Undo());
+
     CHECK(document.Edit("Change value", {2, "edited"}));
     CHECK(document.Dirty());
     CHECK(preview == TestDefinition{2, "edited"});

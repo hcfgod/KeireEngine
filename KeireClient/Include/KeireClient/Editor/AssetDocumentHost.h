@@ -128,15 +128,12 @@ namespace KeireEditor
 
         bool Edit(const std::string_view name, Definition candidate)
         {
-            RequireOpen();
-            if (name.empty())
-                throw std::invalid_argument("An asset document edit requires an undo name.");
-            if (candidate == m_Draft)
-                return false;
-            auto before = m_Draft;
-            Apply(candidate);
-            RecordApplied(name, AppliedDefinitions{std::move(before), std::move(candidate)});
-            return true;
+            return EditImpl(name, std::move(candidate), true);
+        }
+
+        bool EditMetadata(const std::string_view name, Definition candidate)
+        {
+            return EditImpl(name, std::move(candidate), false);
         }
 
         void Save()
@@ -252,43 +249,60 @@ namespace KeireEditor
                 m_Specification.Preview(m_Asset, definition);
         }
 
-        void Apply(const Definition& definition)
+        void Apply(const Definition& definition, const bool updatePreview = true)
         {
             m_Specification.Validate(definition);
-            try
+            if (updatePreview)
             {
-                ApplyPreview(definition);
-            }
-            catch (...)
-            {
-                const auto failure = std::current_exception();
                 try
                 {
-                    ApplyPreview(m_Draft);
+                    ApplyPreview(definition);
                 }
                 catch (...)
                 {
-                    // Preserve the original preview failure even when best-effort restoration also fails.
-                    (void)0;
-                }
-                try
-                {
-                    std::rethrow_exception(failure);
-                }
-                catch (const std::exception& error)
-                {
-                    m_Diagnostic = error.what();
-                    throw;
+                    const auto failure = std::current_exception();
+                    try
+                    {
+                        ApplyPreview(m_Draft);
+                    }
+                    catch (...)
+                    {
+                        // Preserve the original preview failure even when best-effort restoration also fails.
+                        (void)0;
+                    }
+                    try
+                    {
+                        std::rethrow_exception(failure);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        m_Diagnostic = error.what();
+                        throw;
+                    }
                 }
             }
             m_Draft = definition;
             m_Diagnostic.clear();
         }
 
+        bool EditImpl(const std::string_view name, Definition candidate, const bool updatePreview)
+        {
+            RequireOpen();
+            if (name.empty())
+                throw std::invalid_argument("An asset document edit requires an undo name.");
+            if (candidate == m_Draft)
+                return false;
+            auto before = m_Draft;
+            Apply(candidate, updatePreview);
+            RecordApplied(name, AppliedDefinitions{std::move(before), std::move(candidate), updatePreview});
+            return true;
+        }
+
         struct AppliedDefinitions final
         {
             Definition Before;
             Definition After;
+            bool UpdatePreview = true;
         };
 
         void RecordApplied(const std::string_view name, AppliedDefinitions definitions)
@@ -308,15 +322,15 @@ namespace KeireEditor
                                        : beforeSize + afterSize;
             m_Undo->RecordApplied(Keire::CreateUndoCommand(
                 std::string(name),
-                [lifetime, after = std::move(definitions.After)]
+                [lifetime, after = std::move(definitions.After), updatePreview = definitions.UpdatePreview]
                 {
                     if (const auto state = lifetime.lock(); state && state->Owner)
-                        state->Owner->ApplyIfCurrent(state->Serial, after);
+                        state->Owner->ApplyIfCurrent(state->Serial, after, updatePreview);
                 },
-                [lifetime, before = std::move(definitions.Before)]
+                [lifetime, before = std::move(definitions.Before), updatePreview = definitions.UpdatePreview]
                 {
                     if (const auto state = lifetime.lock(); state && state->Owner)
-                        state->Owner->ApplyIfCurrent(state->Serial, before);
+                        state->Owner->ApplyIfCurrent(state->Serial, before, updatePreview);
                 },
                 estimated,
                 [lifetime]
@@ -326,11 +340,11 @@ namespace KeireEditor
                 }));
         }
 
-        void ApplyIfCurrent(const std::uint64_t serial, const Definition& definition)
+        void ApplyIfCurrent(const std::uint64_t serial, const Definition& definition, const bool updatePreview)
         {
             if (!IsOpen() || m_Serial != serial)
                 return;
-            Apply(definition);
+            Apply(definition, updatePreview);
         }
 
         Specification m_Specification;

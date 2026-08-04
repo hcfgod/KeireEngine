@@ -1047,6 +1047,15 @@ namespace Keire
         if (specification.Timeout.count() <= 0 || specification.MaximumOutputBytes == 0 ||
             specification.MaximumOutputBytes > 256U * 1024U * 1024U)
             throw std::invalid_argument("Shader importer limits are invalid.");
+        if (specification.Formats.empty() || specification.Formats.size() > 3 ||
+            !std::ranges::all_of(specification.Formats,
+                                 [](const ShaderBinaryFormat format) { return format <= ShaderBinaryFormat::Msl; }) ||
+            std::ranges::find(specification.Formats, ShaderBinaryFormat::SpirV) == specification.Formats.end())
+            throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
+        auto uniqueFormats = specification.Formats;
+        std::ranges::sort(uniqueFormats);
+        if (std::ranges::adjacent_find(uniqueFormats) != uniqueFormats.end())
+            throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
         result.Version = 2;
@@ -1087,14 +1096,14 @@ namespace Keire
             stagedIncludeRoots.reserve(includeRoots.size());
             for (const auto& includeRoot : includeRoots)
                 stagedIncludeRoots.push_back(stagedRoot / std::filesystem::relative(includeRoot, context.ProjectRoot));
-            const std::array formats = {std::pair{"DXIL", ShaderBinaryFormat::Dxil},
-                                        std::pair{"SPIRV", ShaderBinaryFormat::SpirV},
-                                        std::pair{"MSL", ShaderBinaryFormat::Msl}};
-            for (const auto& [name, format] : formats)
+            for (const auto format : specification.Formats)
             {
+                const auto name = format == ShaderBinaryFormat::Dxil    ? std::string_view("DXIL")
+                                  : format == ShaderBinaryFormat::SpirV ? std::string_view("SPIRV")
+                                                                        : std::string_view("MSL");
                 const auto extension = format == ShaderBinaryFormat::Msl ? ".metal" : ".bin";
-                const auto vertexPath = temporary.Path() / (std::string("vertex-") + name + extension);
-                const auto fragmentPath = temporary.Path() / (std::string("fragment-") + name + extension);
+                const auto vertexPath = temporary.Path() / (std::string("vertex-") + std::string(name) + extension);
+                const auto fragmentPath = temporary.Path() / (std::string("fragment-") + std::string(name) + extension);
                 definition.Variants.push_back(
                     {format,
                      Compile(compiler, source, name, "vertex", definition.VertexEntry, vertexPath, stagedIncludeRoots,
@@ -1126,8 +1135,8 @@ namespace Keire
             ValidateReflection(Json::parse(Text(ReadFile(vertexReflection, specification.MaximumOutputBytes))),
                                Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))),
                                definition);
-            ValidateDefinition(definition, true);
-            return {ShaderAsset::Encode(definition), definition.Dependencies};
+            ValidateDefinition(definition, specification.Formats.size() == 3);
+            return {ToBytes(Json::to_cbor(EncodeShaderJson(definition))), definition.Dependencies};
         };
         result.Cook = [](const std::span<const std::byte> bytes, const AssetTargetPlatform requested)
         {

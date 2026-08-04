@@ -99,6 +99,7 @@ namespace KeireEditor
         [[nodiscard]] bool AddNode(Keire::MaterialGraphNode node);
         [[nodiscard]] bool EditNode(Keire::AssetId node,
                                     const std::function<void(Keire::MaterialGraphNode&)>& operation);
+        [[nodiscard]] bool MoveNode(Keire::AssetId node, Keire::Vector2 position);
         [[nodiscard]] bool RemoveNode(Keire::AssetId node);
         [[nodiscard]] bool AddConnection(Keire::MaterialGraphConnection connection);
         [[nodiscard]] bool RemoveConnection(Keire::AssetId connection);

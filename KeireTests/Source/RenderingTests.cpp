@@ -244,6 +244,12 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
 
     const auto importer = Keire::CreateShaderAssetImporter();
     REQUIRE(importer.Cook);
+    Keire::ShaderImporterSpecification missingReflection;
+    missingReflection.Formats = {Keire::ShaderBinaryFormat::Dxil};
+    CHECK_THROWS_AS((void)Keire::CreateShaderAssetImporter(std::move(missingReflection)), std::invalid_argument);
+    Keire::ShaderImporterSpecification duplicateFormat;
+    duplicateFormat.Formats = {Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::SpirV};
+    CHECK_THROWS_AS((void)Keire::CreateShaderAssetImporter(std::move(duplicateFormat)), std::invalid_argument);
     const auto windows = Keire::ShaderAsset::Decode(importer.Cook(encoded, Keire::AssetTargetPlatform::Windows));
     REQUIRE(windows->Definition().Variants.size() == 2);
     CHECK(windows->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);

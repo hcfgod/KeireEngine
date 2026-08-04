@@ -5,7 +5,10 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 
+#include <atomic>
 #include <cstdint>
+#include <future>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -34,7 +37,8 @@ namespace KeireEditor
     class MaterialGraphPanel final
     {
       public:
-        explicit MaterialGraphPanel(IMaterialGraphPanelController& controller) noexcept : m_Controller(controller) {}
+        explicit MaterialGraphPanel(IMaterialGraphPanelController& controller) : m_Controller(controller) {}
+        ~MaterialGraphPanel() noexcept;
 
         void Attach(Keire::UiWorkspace& workspace);
         void Draw(Keire::UiFrame& ui);
@@ -45,6 +49,16 @@ namespace KeireEditor
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
+        struct PreviewRenderResult
+        {
+            std::uint64_t Generation = 0;
+            std::uint32_t Width = 0;
+            std::uint32_t Height = 0;
+            std::vector<std::byte> Pixels;
+            std::string Error;
+            bool FinalQuality = false;
+        };
+
         void DrawHeader(Keire::UiFrame& ui);
         void DrawPreview(Keire::UiFrame& ui);
         void DrawCanvas(Keire::UiFrame& ui);
@@ -82,6 +96,11 @@ namespace KeireEditor
         std::string m_Message;
         std::uint32_t m_PreviewWidth = 320;
         std::uint32_t m_PreviewHeight = 220;
+        std::future<PreviewRenderResult> m_PreviewRender;
+        std::shared_ptr<std::atomic<std::uint64_t>> m_PreviewCancellation =
+            std::make_shared<std::atomic<std::uint64_t>>(1);
+        std::uint64_t m_PreviewGeneration = 1;
+        bool m_PreviewRefinement = false;
         bool m_PreviewDirty = false;
     };
 } // namespace KeireEditor

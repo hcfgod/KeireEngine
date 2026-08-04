@@ -5,6 +5,12 @@ version tags.
 
 ## Unreleased
 
+- Made Material Graph iteration non-blocking: node-position edits now stay in editor metadata and never rebuild runtime
+  materials, exposed parameter values publish to the scene immediately without shader regeneration, and CPU preview
+  rendering is cancelable, progressive, and coalesced off the UI thread with allocation-free per-sample graph caches.
+  Live structural shader builds
+  now emit only the current host's runtime format plus SPIR-V reflection data while normal asset imports retain the full
+  cross-platform DXIL/SPIR-V/MSL set.
 - Added production spatial lighting: oriented reflection probes with box projection and two-probe blending, static
   lightmaps, SH9 light-probe volumes, emissive-to-GI, eight-channel mixed shadow masks, realtime/baked/mixed lights,
   deterministic point/spot shadow-atlas allocation, contact-shadow refinement, packed light cookies, and an atomic

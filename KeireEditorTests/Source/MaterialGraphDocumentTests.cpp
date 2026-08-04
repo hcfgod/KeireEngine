@@ -101,6 +101,20 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
     CHECK(canvas.Nodes.front().Label == "PBR Master");
     CHECK(canvas.Nodes.front().Pins.size() == document.Definition().Nodes.front().Pins.size());
     CHECK(canvas.Node(canvas.Nodes.front().Id) == document.Definition().Nodes.front().Id);
+    const auto masterId = document.Definition().Nodes.front().Id;
+    REQUIRE(document.MoveNode(masterId, {420.0F, 180.0F}));
+    CHECK(document.Definition().Nodes.front().EditorPosition == Keire::Vector2{420.0F, 180.0F});
+    CHECK_FALSE(document.CompilationPending());
+    CHECK(previewCount == 1);
+    CHECK(liveApplyCount == 1);
+    REQUIRE(document.Undo());
+    CHECK_FALSE(document.CompilationPending());
+    CHECK(previewCount == 1);
+    CHECK(liveApplyCount == 1);
+    REQUIRE(document.Redo());
+    CHECK_FALSE(document.CompilationPending());
+    CHECK(previewCount == 1);
+    CHECK(liveApplyCount == 1);
 
     auto custom =
         Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Custom, Keire::MaterialGraphValueType::Color);
@@ -145,7 +159,7 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
     CHECK_FALSE(persisted.empty());
 }
 
-TEST_CASE("Material Graph live apply coalesces edits and compiles shaders only when runtime code changes")
+TEST_CASE("Material Graph live apply publishes parameters immediately and compiles only when runtime code changes")
 {
     std::vector<std::size_t> publishedShaderCounts;
     std::vector<float> publishedRoughness;
@@ -187,17 +201,15 @@ TEST_CASE("Material Graph live apply coalesces edits and compiles shaders only w
     REQUIRE(publishedShaderCounts.back() == 1);
     REQUIRE(publishedRoughness.back() == doctest::Approx(0.2F));
 
+    const auto publicationsBeforeParameters = publishedShaderCounts.size();
     REQUIRE(document.EditNode(roughness.Id, [](Keire::MaterialGraphNode& node) { node.Value = 0.45F; }));
-    document.AdvanceCompilation(0.04);
+    CHECK_FALSE(document.CompilationPending());
+    REQUIRE(publishedShaderCounts.size() == publicationsBeforeParameters + 1);
+    CHECK(publishedShaderCounts.back() == 0);
+    CHECK(publishedRoughness.back() == doctest::Approx(0.45F));
     REQUIRE(document.EditNode(roughness.Id, [](Keire::MaterialGraphNode& node) { node.Value = 0.8F; }));
-    document.AdvanceCompilation(0.04);
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (document.CompilationPending() && std::chrono::steady_clock::now() < deadline)
-    {
-        std::this_thread::yield();
-        document.AdvanceCompilation(0.0);
-    }
-    REQUIRE_FALSE(document.CompilationPending());
+    CHECK_FALSE(document.CompilationPending());
+    REQUIRE(publishedShaderCounts.size() == publicationsBeforeParameters + 2);
     CHECK(publishedShaderCounts.back() == 0);
     CHECK(publishedRoughness.back() == doctest::Approx(0.8F));
 
@@ -292,6 +304,9 @@ TEST_CASE("Material Graph live preview renders every built-in shape and custom m
     request.Width = 96;
     request.Exposure = 0.0F;
     CHECK_THROWS_AS((void)KeireEditor::RenderMaterialGraphPreview(request), std::invalid_argument);
+    request.Exposure = 1.0F;
+    request.CancellationRequested = [] { return true; };
+    CHECK_THROWS_AS((void)KeireEditor::RenderMaterialGraphPreview(request), std::runtime_error);
 }
 
 TEST_CASE("Material Graph live preview evaluates procedural nodes instead of property-name approximations")

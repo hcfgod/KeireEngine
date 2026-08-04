@@ -393,6 +393,8 @@ namespace Keire
         std::filesystem::path Compiler;
         std::chrono::milliseconds Timeout = std::chrono::seconds(30);
         std::size_t MaximumOutputBytes = std::size_t{64} * 1024U * 1024U;
+        std::vector<ShaderBinaryFormat> Formats{ShaderBinaryFormat::Dxil, ShaderBinaryFormat::SpirV,
+                                                ShaderBinaryFormat::Msl};
     };
 
     [[nodiscard]] KEIRE_API AssetImporterRegistration
