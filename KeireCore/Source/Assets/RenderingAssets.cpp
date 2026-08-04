@@ -297,6 +297,7 @@ namespace Keire
                     {"usesInstancing", definition.UsesInstancing},
                     {"usesImageBasedLighting", definition.UsesImageBasedLighting},
                     {"spatialLightingAbiVersion", definition.SpatialLightingAbiVersion},
+                    {"usesVertexMaterialParameters", definition.UsesVertexMaterialParameters},
                     {"properties", std::move(properties)},
                     {"dependencies", std::move(dependencies)},
                     {"variants", std::move(variants)}};
@@ -322,6 +323,7 @@ namespace Keire
             result.UsesInstancing = source.value("usesInstancing", false);
             result.UsesImageBasedLighting = source.value("usesImageBasedLighting", false);
             result.SpatialLightingAbiVersion = source.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
+            result.UsesVertexMaterialParameters = source.value("usesVertexMaterialParameters", false);
             for (const auto& property : source.at("properties"))
             {
                 ShaderPropertyDefinition decoded;
@@ -495,7 +497,8 @@ namespace Keire
             if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
                 vertex.value("storage_buffers", 0U) != (definition.UsesInstancing ? 1U : 0U) ||
                 fragment.value("storage_buffers", 0U) != expectedFragmentStorageBuffers ||
-                vertex.value("samplers", 0U) != 0 || vertex.value("uniform_buffers", 0U) != 1 ||
+                vertex.value("samplers", 0U) != 0 ||
+                vertex.value("uniform_buffers", 0U) != (definition.UsesVertexMaterialParameters ? 2U : 1U) ||
                 (fragmentUniformBuffers != minimumFragmentUniformBuffers &&
                  fragmentUniformBuffers != expectedFragmentUniformBuffers) ||
                 fragment.value("samplers", 0U) != expectedSamplers)
@@ -590,7 +593,14 @@ namespace Keire
                     throw std::invalid_argument("Shader includes may not use absolute paths.");
                 std::vector<std::filesystem::path> candidates{normalized.parent_path() / include};
                 for (const auto& root : includeRoots)
-                    candidates.push_back(std::filesystem::relative(root, context.ProjectRoot) / include);
+                {
+                    const auto relativeRoot = std::filesystem::relative(root, context.ProjectRoot).lexically_normal();
+                    const auto includeText = include.lexically_normal().generic_string();
+                    const auto rootText = relativeRoot.generic_string();
+                    if (rootText == "." || includeText == rootText || includeText.starts_with(rootText + '/'))
+                        candidates.push_back(include);
+                    candidates.push_back(relativeRoot / include);
+                }
                 std::optional<std::filesystem::path> resolved;
                 for (const auto& candidate : candidates)
                 {
@@ -642,6 +652,7 @@ namespace Keire
             result.UsesImageBasedLighting = manifest.value("usesImageBasedLighting", false);
             result.SpatialLightingAbiVersion =
                 manifest.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
+            result.UsesVertexMaterialParameters = manifest.value("usesVertexMaterialParameters", false);
             if (result.SpatialLightingAbiVersion != 0U && result.SpatialLightingAbiVersion != 2U)
                 throw std::invalid_argument("Shader spatial-lighting ABI version is unsupported.");
             if (result.SpatialLightingAbiVersion == 2U &&

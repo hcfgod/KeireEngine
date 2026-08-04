@@ -2,6 +2,7 @@
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -103,14 +104,102 @@ TEST_CASE("Material Graph source and cooked assets preserve stable graph identit
 
     const auto importer = Keire::CreateMaterialGraphAssetImporter();
     CHECK(importer.Name == "Keire.MaterialGraph");
-    CHECK(importer.Version == 2);
+    CHECK(importer.Version == 13);
     CHECK(importer.Extensions == std::vector<std::string>{".keirematerialgraph"});
+}
+
+TEST_CASE("Material Graph v2 catalogs stable node identities and migrates v1 sources")
+{
+    const auto catalog = Keire::MaterialGraphNodeCatalog();
+    REQUIRE(catalog.size() > 70);
+    std::vector<std::string_view> typeIds;
+    for (const auto& descriptor : catalog)
+    {
+        CHECK_FALSE(descriptor.TypeId.empty());
+        CHECK(Keire::MaterialGraphNodeTypeId(descriptor.Kind) == descriptor.TypeId);
+        CHECK(Keire::FindMaterialGraphNodeDescriptor(descriptor.TypeId) == &descriptor);
+        const auto node = Keire::CreateMaterialGraphNode(descriptor.TypeId, descriptor.DefaultValueType);
+        CHECK(node.Kind == descriptor.Kind);
+        CHECK(node.TypeId == descriptor.TypeId);
+        typeIds.push_back(descriptor.TypeId);
+    }
+    std::ranges::sort(typeIds);
+    CHECK(std::ranges::adjacent_find(typeIds) == typeIds.end());
+    CHECK(Keire::FindMaterialGraphNodeDescriptor("keire.invalid.missing") == nullptr);
+    CHECK_THROWS_AS((void)Keire::CreateMaterialGraphNode("keire.invalid.missing"), std::invalid_argument);
+
+    const auto definition = Keire::CreateDefaultMaterialGraph();
+    const auto encoded = Keire::MaterialGraphAsset::EncodeSource(definition);
+    auto legacy = nlohmann::json::parse(std::string(reinterpret_cast<const char*>(encoded.data()), encoded.size()));
+    legacy["schemaVersion"] = 1;
+    for (auto& node : legacy["nodes"])
+        node.erase("typeId");
+    const auto legacyText = legacy.dump(2);
+    const auto legacyBytes = std::as_bytes(std::span(legacyText));
+    const auto migrated = Keire::MaterialGraphAsset::DecodeSource(legacyBytes);
+    CHECK(migrated.SchemaVersion == 2);
+    REQUIRE(migrated.Nodes.size() == definition.Nodes.size());
+    CHECK(migrated.Nodes.front().TypeId == "keire.output.material");
+
+    auto previousV2 = nlohmann::json::parse(std::string(reinterpret_cast<const char*>(encoded.data()), encoded.size()));
+    auto& previousPins = previousV2["nodes"][0]["pins"];
+    for (auto pin = previousPins.begin(); pin != previousPins.end();)
+        pin = pin->at("name").get<std::string>() == "MaterialAttributes" ? previousPins.erase(pin) : std::next(pin);
+    const auto previousV2Text = previousV2.dump(2);
+    const auto previousV2Bytes = std::as_bytes(std::span(previousV2Text));
+    const auto upgradedFirst = Keire::MaterialGraphAsset::DecodeSource(previousV2Bytes);
+    const auto upgradedSecond = Keire::MaterialGraphAsset::DecodeSource(previousV2Bytes);
+    const auto attributesFirst =
+        std::ranges::find(upgradedFirst.Nodes.front().Pins, "MaterialAttributes", &Keire::MaterialGraphPin::Name);
+    const auto attributesSecond =
+        std::ranges::find(upgradedSecond.Nodes.front().Pins, "MaterialAttributes", &Keire::MaterialGraphPin::Name);
+    REQUIRE(attributesFirst != upgradedFirst.Nodes.front().Pins.end());
+    REQUIRE(attributesSecond != upgradedSecond.Nodes.front().Pins.end());
+    CHECK(attributesFirst->Id == attributesSecond->Id);
+}
+
+TEST_CASE("Material Graph v2 lowers multi-output nodes and parameter authoring metadata")
+{
+    auto graph = Keire::CreateDefaultMaterialGraph();
+    auto tint = Parameter("AuthorTint", Keire::MaterialGraphValueType::Color, Keire::Color{0.2F, 0.4F, 0.8F, 1.0F});
+    tint.ParameterMetadata.Description = "Primary art-directed surface tint.";
+    tint.ParameterMetadata.Category = "Surface / Paint";
+    tint.ParameterMetadata.SortPriority = 10;
+    tint.ParameterMetadata.Minimum = 0.0F;
+    tint.ParameterMetadata.Maximum = 1.0F;
+    tint.ParameterMetadata.Step = 0.01F;
+    auto mask = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::ComponentMask,
+                                               Keire::MaterialGraphValueType::Vector4);
+    graph.Nodes.insert(graph.Nodes.end(), {tint, mask});
+    Connect(graph, tint, "Value", mask, "Value");
+    Connect(graph, mask, "RGB", graph.Nodes.front(), "BaseColor");
+    Connect(graph, mask, "R", graph.Nodes.front(), "Roughness");
+
+    const auto compilation = Keire::CompileMaterialGraph(graph);
+    const auto diagnostic = compilation.Diagnostics.empty() ? std::string{} : compilation.Diagnostics.front().Message;
+    INFO(diagnostic);
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Properties.size() == 1);
+    CHECK(compilation.Properties.front().Category == "Surface / Paint");
+    CHECK(compilation.Properties.front().Minimum == 0.0F);
+    CHECK(compilation.Properties.front().Maximum == 1.0F);
+    CHECK(compilation.Properties.front().Step == 0.01F);
+    REQUIRE(compilation.Variants.size() == 1);
+    CHECK(compilation.Variants.front().Hlsl.find("(_KeireMaterial_AuthorTint).xyz") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("(_KeireMaterial_AuthorTint).x") != std::string::npos);
+    CHECK(compilation.Variants.front().Manifest.find("Surface / Paint") != std::string::npos);
+    CHECK(compilation.Variants.front().Manifest.find("\"minimum\"") != std::string::npos);
+
+    mask.TypeId = "keire.math.add";
+    graph.Nodes.back() = mask;
+    CHECK_THROWS_AS(Keire::ValidateMaterialGraph(graph), std::invalid_argument);
 }
 
 TEST_CASE("Material Graph compiles every output model to bounded runtime shader manifests")
 {
     constexpr std::array outputs{Keire::MaterialGraphOutput::Surface, Keire::MaterialGraphOutput::Transparent,
-                                 Keire::MaterialGraphOutput::Decal, Keire::MaterialGraphOutput::Unlit};
+                                 Keire::MaterialGraphOutput::Decal,   Keire::MaterialGraphOutput::Unlit,
+                                 Keire::MaterialGraphOutput::Hair,    Keire::MaterialGraphOutput::Eye};
     for (const auto output : outputs)
     {
         const auto graph = Keire::CreateDefaultMaterialGraph(output);
@@ -125,6 +214,21 @@ TEST_CASE("Material Graph compiles every output model to bounded runtime shader 
             CHECK(compilation.Variants.front().Manifest.find("\"blend\": true") != std::string::npos);
         else
             CHECK(compilation.Variants.front().Manifest.find("\"blend\": false") != std::string::npos);
+        const auto& manifest = compilation.Variants.front().Manifest;
+        if (output == Keire::MaterialGraphOutput::Unlit)
+        {
+            CHECK(manifest.find("\"receivesShadows\": false") != std::string::npos);
+            CHECK(manifest.find("\"usesForwardPlus\": false") != std::string::npos);
+            CHECK(manifest.find("\"usesImageBasedLighting\": false") != std::string::npos);
+        }
+        else
+        {
+            CHECK(manifest.find("\"receivesShadows\": true") != std::string::npos);
+            CHECK(manifest.find("\"usesForwardPlus\": true") != std::string::npos);
+            CHECK(manifest.find("\"usesImageBasedLighting\": true") != std::string::npos);
+        }
+        if (output == Keire::MaterialGraphOutput::Hair)
+            CHECK(manifest.find("\"culling\": \"None\"") != std::string::npos);
     }
 }
 
@@ -154,7 +258,11 @@ TEST_CASE("Material Graph generated HLSL compiles through the production shader 
                                                       Keire::MaterialGraphValueType::Vector3);
     auto fresnel =
         Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Fresnel, Keire::MaterialGraphValueType::Scalar);
-    graph.Nodes.insert(graph.Nodes.end(), {texture, sample, roughness, uv, noise, modulate, worldNormal, fresnel});
+    auto vertexOffset =
+        Parameter("VertexOffset", Keire::MaterialGraphValueType::Vector3, Keire::Vector3{0.0F, 0.0F, 0.0F});
+    auto depthOffset = Parameter("DepthOffset", Keire::MaterialGraphValueType::Scalar, 0.0F);
+    graph.Nodes.insert(graph.Nodes.end(), {texture, sample, roughness, uv, noise, modulate, worldNormal, fresnel,
+                                           vertexOffset, depthOffset});
     Connect(graph, texture, "Value", sample, "Texture");
     Connect(graph, sample, "RGBA", graph.Nodes.front(), "BaseColor");
     Connect(graph, uv, "UV", noise, "UV");
@@ -163,6 +271,8 @@ TEST_CASE("Material Graph generated HLSL compiles through the production shader 
     Connect(graph, modulate, "Result", graph.Nodes.front(), "Roughness");
     Connect(graph, worldNormal, "Vector", fresnel, "Normal");
     Connect(graph, fresnel, "Fresnel", graph.Nodes.front(), "ClearCoat");
+    Connect(graph, vertexOffset, "Value", graph.Nodes.front(), "WorldPositionOffset");
+    Connect(graph, depthOffset, "Value", graph.Nodes.front(), "PixelDepthOffset");
     const auto compilation = Keire::CompileMaterialGraph(graph, options);
     REQUIRE(compilation.Succeeded());
     REQUIRE(compilation.Variants.size() == 1);
@@ -190,7 +300,26 @@ TEST_CASE("Material Graph generated HLSL compiles through the production shader 
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
     CHECK(imported.Diagnostics.empty());
     CHECK(compilation.Variants.front().Hlsl.find("MaterialNoise") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("MaterialValueNoise") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("graphClearCoat") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("EvaluateGraphDirectLighting") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("ForwardPlusLights") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find(
+              "StructuredBuffer<MaterialGraphLocalLight> ForwardPlusLights : register(t5, space2)") !=
+          std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("StructuredBuffer<uint4> ForwardPlusTiles : register(t6, space2)") !=
+          std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find(
+              "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t7, space2)") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("register(t16, space2)") == std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("EvaluateDirectionalShadow") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("EvaluateDiffuseEnvironment") != std::string::npos);
+    CHECK(compilation.Variants.front().Manifest.find("\"usesVertexMaterialParameters\": true") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("cbuffer VertexMaterialData : register(b1, space1)") !=
+          std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("_KeireVertexMaterial_VertexOffset.xyz") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("SV_Depth") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("Keep the fixed interpolator ABI dense") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("SurfaceParameters.y > 0.5F") != std::string::npos);
 }
 
@@ -240,6 +369,140 @@ TEST_CASE("Material Graph advanced node library lowers modern layered materials 
     CHECK(hlsl.find("graphSheenColor") != std::string::npos);
 }
 
+TEST_CASE("Material Graph production node library lowers advanced coordinates sampling and surface utilities")
+{
+    auto graph = Keire::CreateDefaultMaterialGraph();
+    auto texture = Parameter("AdvancedTexture", Keire::MaterialGraphValueType::Texture2D, Keire::AssetId{});
+    auto uv = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::UV, Keire::MaterialGraphValueType::Vector2);
+    auto time = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Time);
+    auto panner = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Panner);
+    auto noise = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::GradientNoise);
+    auto heightNormal = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::HeightToNormal);
+    auto wave = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Wave);
+    auto worldPosition = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::WorldPosition);
+    auto worldNormal = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::WorldNormal);
+    auto triplanar = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::TriplanarSample);
+    auto sampleLevel = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::TextureSampleLevel);
+    auto overlay = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::BlendOverlay);
+    auto facing = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::FacingRatio);
+    auto blackbody = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Blackbody);
+    auto screenPosition = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::ScreenPosition);
+    auto dither = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Dither);
+    graph.Nodes.insert(graph.Nodes.end(),
+                       {texture, uv, time, panner, noise, heightNormal, wave, worldPosition, worldNormal, triplanar,
+                        sampleLevel, overlay, facing, blackbody, screenPosition, dither});
+
+    Connect(graph, uv, "UV", panner, "UV");
+    Connect(graph, time, "Seconds", panner, "Time");
+    Connect(graph, panner, "UV", noise, "UV");
+    Connect(graph, noise, "Noise", heightNormal, "Height");
+    Connect(graph, heightNormal, "Normal", graph.Nodes.front(), "Normal");
+    Connect(graph, panner, "UV", wave, "UV");
+    Connect(graph, wave, "Wave", graph.Nodes.front(), "Roughness");
+    Connect(graph, texture, "Value", triplanar, "Texture");
+    Connect(graph, worldPosition, "Vector", triplanar, "Position");
+    Connect(graph, worldNormal, "Vector", triplanar, "Normal");
+    Connect(graph, triplanar, "RGBA", overlay, "Base");
+    Connect(graph, texture, "Value", sampleLevel, "Texture");
+    Connect(graph, panner, "UV", sampleLevel, "UV");
+    Connect(graph, sampleLevel, "RGBA", overlay, "Blend");
+    Connect(graph, overlay, "Color", graph.Nodes.front(), "BaseColor");
+    Connect(graph, worldNormal, "Vector", facing, "Normal");
+    Connect(graph, facing, "Ratio", graph.Nodes.front(), "ClearCoat");
+    Connect(graph, blackbody, "Color", graph.Nodes.front(), "Emission");
+    Connect(graph, noise, "Noise", dither, "Alpha");
+    Connect(graph, screenPosition, "UV", dither, "Screen Position");
+    Connect(graph, dither, "Value", graph.Nodes.front(), "Opacity");
+
+    const auto compilation = Keire::CompileMaterialGraph(graph);
+    const auto diagnostic = compilation.Diagnostics.empty() ? std::string{} : compilation.Diagnostics.front().Message;
+    INFO(diagnostic);
+    REQUIRE(compilation.Succeeded());
+    CHECK(compilation.Statistics.UnusedNodeCount == 0);
+    CHECK(compilation.Statistics.TextureSampleCount == 4);
+    const auto& hlsl = compilation.Variants.front().Hlsl;
+    CHECK(hlsl.find(".SampleLevel(") != std::string::npos);
+    CHECK(hlsl.find("MaterialOverlayBlend") != std::string::npos);
+    CHECK(hlsl.find("MaterialBlackbody") != std::string::npos);
+    CHECK(hlsl.find("MaterialDitherThreshold") != std::string::npos);
+    CHECK(hlsl.find("ddx(") != std::string::npos);
+}
+
+TEST_CASE("Material Graph composes typed material attributes and four production BSDF lobes")
+{
+    auto graph = Keire::CreateDefaultMaterialGraph();
+    auto baseColor =
+        Parameter("LayerBaseColor", Keire::MaterialGraphValueType::Color, Keire::Color{0.3F, 0.12F, 0.06F, 1.0F});
+    auto standard = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::StandardSurfaceBsdf);
+    auto clearCoat = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::ClearCoatBsdf);
+    auto sheen = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::SheenBsdf);
+    auto subsurface = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::SubsurfaceBsdf);
+    auto transmission = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::TransmissionBsdf);
+    auto attributes = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::BsdfToMaterialAttributes);
+    auto breakAttributes = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::BreakMaterialAttributes);
+    auto makeAttributes = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::MakeMaterialAttributes);
+    auto blendAttributes = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::BlendMaterialAttributes);
+    graph.Nodes.insert(graph.Nodes.end(), {baseColor, standard, clearCoat, sheen, subsurface, transmission, attributes,
+                                           breakAttributes, makeAttributes, blendAttributes});
+
+    Connect(graph, baseColor, "Value", standard, "BaseColor");
+    Connect(graph, standard, "BSDF", clearCoat, "Base");
+    Connect(graph, clearCoat, "BSDF", sheen, "Base");
+    Connect(graph, sheen, "BSDF", subsurface, "Base");
+    Connect(graph, subsurface, "BSDF", transmission, "Base");
+    Connect(graph, transmission, "BSDF", attributes, "BSDF");
+    Connect(graph, attributes, "Attributes", breakAttributes, "Attributes");
+    Connect(graph, breakAttributes, "BaseColor", makeAttributes, "BaseColor");
+    Connect(graph, breakAttributes, "Roughness", makeAttributes, "Roughness");
+    Connect(graph, attributes, "Attributes", blendAttributes, "A");
+    Connect(graph, makeAttributes, "Attributes", blendAttributes, "B");
+    Connect(graph, blendAttributes, "Attributes", graph.Nodes.front(), "MaterialAttributes");
+
+    const auto source = Keire::MaterialGraphAsset::EncodeSource(graph);
+    const auto decoded = Keire::MaterialGraphAsset::DecodeSource(source);
+    CHECK(decoded == graph);
+    const auto compilation = Keire::CompileMaterialGraph(decoded);
+    const auto diagnostic = compilation.Diagnostics.empty() ? std::string{} : compilation.Diagnostics.front().Message;
+    INFO(diagnostic);
+    REQUIRE(compilation.Succeeded());
+    CHECK(compilation.Statistics.UnusedNodeCount == 0);
+    const auto& hlsl = compilation.Variants.front().Hlsl;
+    CHECK(hlsl.find("struct MaterialGraphSurface") != std::string::npos);
+    CHECK(hlsl.find("MakeStandardMaterialGraphBsdf") != std::string::npos);
+    CHECK(hlsl.find("ApplyMaterialGraphClearCoat") != std::string::npos);
+    CHECK(hlsl.find("ApplyMaterialGraphSheen") != std::string::npos);
+    CHECK(hlsl.find("ApplyMaterialGraphSubsurface") != std::string::npos);
+    CHECK(hlsl.find("ApplyMaterialGraphTransmission") != std::string::npos);
+    CHECK(hlsl.find("BlendMaterialGraphSurfaces") != std::string::npos);
+    CHECK(hlsl.find("const MaterialGraphSurface graphMaterialAttributes") != std::string::npos);
+
+    TemporaryDirectory directory;
+    const auto generatedSource = directory.Path / compilation.Variants.front().GeneratedSource;
+    auto manifestPath = generatedSource;
+    manifestPath.replace_extension(".keireshader");
+    WriteText(generatedSource, hlsl);
+    WriteText(manifestPath, compilation.Variants.front().Manifest);
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path / "Assets";
+    context.SourcePath = manifestPath;
+    context.RelativePath = manifestPath.lexically_relative(context.SourceRoot);
+    context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
+    { return ReadBytes(root / relative); };
+    const auto imported = Keire::CreateShaderAssetImporter().ContextualImport(context, ReadBytes(manifestPath));
+    CHECK(imported.Diagnostics.empty());
+    const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
+    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
+    CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
+    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+
+    auto invalidParameter = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Parameter,
+                                                           Keire::MaterialGraphValueType::MaterialAttributes);
+    invalidParameter.Symbol = "InvalidAttributes";
+    graph.Nodes.push_back(std::move(invalidParameter));
+    CHECK_THROWS_AS(Keire::ValidateMaterialGraph(graph), std::invalid_argument);
+}
+
 TEST_CASE("Material Graph diagnostics identify unused work and validation rejects malformed disconnected nodes")
 {
     auto graph = Keire::CreateDefaultMaterialGraph();
@@ -258,6 +521,36 @@ TEST_CASE("Material Graph diagnostics identify unused work and validation reject
     CHECK_THROWS_AS(Keire::ValidateMaterialGraph(graph), std::invalid_argument);
 }
 
+TEST_CASE("Material Graph stage analysis rejects fragment-only expressions in world-position offset")
+{
+    auto graph = Keire::CreateDefaultMaterialGraph();
+    auto time = Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Time);
+    graph.Nodes.push_back(time);
+    Connect(graph, time, "Seconds", graph.Nodes.front(), "WorldPositionOffset");
+
+    const auto compilation = Keire::CompileMaterialGraph(graph);
+    CHECK_FALSE(compilation.Succeeded());
+    REQUIRE_FALSE(compilation.Diagnostics.empty());
+    CHECK(compilation.Diagnostics.back().Severity == Keire::MaterialGraphDiagnosticSeverity::Error);
+    CHECK(compilation.Diagnostics.back().Message.find("shader stage") != std::string::npos);
+}
+
+TEST_CASE("Material Graph vertex displacement only declares material uniforms when its expression uses parameters")
+{
+    auto graph = Keire::CreateDefaultMaterialGraph();
+    auto offset =
+        Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Constant, Keire::MaterialGraphValueType::Vector3);
+    offset.Value = Keire::Vector3{0.0F, 0.05F, 0.0F};
+    graph.Nodes.push_back(offset);
+    Connect(graph, offset, "Value", graph.Nodes.front(), "WorldPositionOffset");
+
+    const auto compilation = Keire::CompileMaterialGraph(graph);
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1);
+    CHECK(compilation.Variants.front().Manifest.find("\"usesVertexMaterialParameters\": false") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("cbuffer VertexMaterialData") == std::string::npos);
+}
+
 TEST_CASE("Material Graph keeps pre-layered PBR master assets source compatible")
 {
     auto graph = Keire::CreateDefaultMaterialGraph();
@@ -269,36 +562,55 @@ TEST_CASE("Material Graph keeps pre-layered PBR master assets source compatible"
                   });
     const auto compilation = Keire::CompileMaterialGraph(graph);
     REQUIRE(compilation.Succeeded());
-    CHECK(compilation.Variants.front().Hlsl.find("const float graphSpecular = 0.5") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("const float graphSpecular = saturate(0.5F)") != std::string::npos);
 }
 
-TEST_CASE("Sandbox Material Graph examples decode and increase in authored complexity")
+TEST_CASE("Sandbox Material Graph examples decode and compile across the authored progression")
 {
     const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Materials/MaterialGraphs";
     constexpr std::array names{std::string_view("01_BasicPaint.keirematerialgraph"),
                                std::string_view("02_TexturedSurface.keirematerialgraph"),
                                std::string_view("03_ProceduralEmissive.keirematerialgraph"),
                                std::string_view("04_ClearCoatDetail.keirematerialgraph"),
-                               std::string_view("05_AdaptiveTechSurface.keirematerialgraph")};
-    constexpr std::array expectedNodes{3U, 10U, 10U, 12U, 17U};
-    constexpr std::array expectedVariants{1U, 1U, 1U, 1U, 2U};
-    std::size_t previousConnections = 0;
+                               std::string_view("05_AdaptiveTechSurface.keirematerialgraph"),
+                               std::string_view("06_AnisotropicBrushedMetal.keirematerialgraph"),
+                               std::string_view("07_TransmissionGlass.keirematerialgraph"),
+                               std::string_view("08_ProceduralVertexDisplacement.keirematerialgraph"),
+                               std::string_view("09_HolographicVoronoi.keirematerialgraph")};
+    constexpr std::array expectedNodes{3U, 10U, 10U, 12U, 17U, 3U, 7U, 6U, 11U};
+    constexpr std::array expectedConnections{2U, 10U, 11U, 14U, 21U, 2U, 6U, 5U, 12U};
+    constexpr std::array expectedVariants{1U, 1U, 1U, 1U, 2U, 1U, 1U, 1U, 1U};
     for (std::size_t index = 0; index < names.size(); ++index)
     {
-        const auto bytes = ReadBytes(root / names[index]);
-        const auto graph = Keire::MaterialGraphAsset::DecodeSource(bytes);
-        INFO(names[index]);
-        CHECK(graph.Nodes.size() == expectedNodes[index]);
-        CHECK(graph.Connections.size() >= previousConnections);
-        previousConnections = graph.Connections.size();
-        const auto compilation = Keire::CompileMaterialGraph(graph);
-        const auto diagnostic =
-            compilation.Diagnostics.empty() ? std::string{} : compilation.Diagnostics.front().Message;
-        INFO(diagnostic);
-        REQUIRE(compilation.Succeeded());
-        CHECK(compilation.Statistics.UnusedNodeCount == 0);
-        CHECK(compilation.Statistics.VariantCount == expectedVariants[index]);
+        SUBCASE(names[index].data())
+        {
+            const auto bytes = ReadBytes(root / names[index]);
+            const auto graph = Keire::MaterialGraphAsset::DecodeSource(bytes);
+            INFO(names[index]);
+            CHECK(graph.Nodes.size() == expectedNodes[index]);
+            CHECK(graph.Connections.size() == expectedConnections[index]);
+            const auto compilation = Keire::CompileMaterialGraph(graph);
+            const auto diagnostic =
+                compilation.Diagnostics.empty() ? std::string{} : compilation.Diagnostics.front().Message;
+            INFO(diagnostic);
+            REQUIRE(compilation.Succeeded());
+            CHECK(compilation.Statistics.UnusedNodeCount == 0);
+            CHECK(compilation.Statistics.VariantCount == expectedVariants[index]);
+        }
     }
+}
+
+TEST_CASE("Material Graph migrates structured schema-v1 assets without changing their topology")
+{
+    const auto path = std::filesystem::current_path() /
+                      "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/09_HolographicVoronoi.keirematerialgraph";
+    const auto graph = Keire::MaterialGraphAsset::DecodeSource(ReadBytes(path));
+    CHECK(graph.SchemaVersion == 2);
+    CHECK(graph.Nodes.size() == 11);
+    CHECK(graph.Connections.size() == 12);
+    CHECK_NOTHROW(Keire::ValidateMaterialGraph(graph));
+    const auto roundTrip = Keire::MaterialGraphAsset::DecodeSource(Keire::MaterialGraphAsset::EncodeSource(graph));
+    CHECK(roundTrip == graph);
 }
 
 TEST_CASE("Material Graph lowers texture UV parallax normal detail and emission authoring")
@@ -394,7 +706,7 @@ TEST_CASE("Material Graph custom functions confine recursive includes and retain
     const auto compilation = Keire::CompileMaterialGraph(graph, options);
     REQUIRE(compilation.Succeeded());
     CHECK(compilation.Dependencies.size() == 2);
-    CHECK(compilation.Variants.front().Hlsl.find("#include \"Assets/Shaders/MaterialNodes/Fresnel.hlsli\"") !=
+    CHECK(compilation.Variants.front().Hlsl.find("#include \"Shaders/MaterialNodes/Fresnel.hlsli\"") !=
           std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateFresnel") != std::string::npos);
 
@@ -452,6 +764,7 @@ TEST_CASE("Material Graph instances merge typed overrides and bake concrete shad
     graph.Nodes.push_back(
         Parameter("Tint", Keire::MaterialGraphValueType::Color, Keire::Color{1.0F, 1.0F, 1.0F, 1.0F}));
     graph.Nodes.push_back(Parameter("Roughness", Keire::MaterialGraphValueType::Scalar, 0.5F));
+    graph.Nodes.push_back(Parameter("Metallic", Keire::MaterialGraphValueType::Scalar, 0.65F));
 
     Keire::MaterialGraphInstanceDefinition root;
     root.Parent = Keire::AssetId::Parse("ab000000-0000-4000-8000-000000000009");
@@ -464,7 +777,8 @@ TEST_CASE("Material Graph instances merge typed overrides and bake concrete shad
     const std::array ancestry{root, child};
 
     const auto resolved = Keire::ResolveMaterialGraphInstance(graph, ancestry);
-    CHECK(resolved.Properties.size() == 2);
+    CHECK(resolved.Properties.size() == 3);
+    CHECK(std::get<float>(resolved.Properties.at("Metallic")) == doctest::Approx(0.65F));
     CHECK(resolved.Keywords == std::vector<std::string>{"DETAIL", "QUALITY_LOW"});
     const auto shader = Keire::AssetId::Parse("ab000000-0000-4000-8000-000000000011");
     bool resolverReceivedExpectedKeywords = false;
@@ -490,4 +804,78 @@ TEST_CASE("Material Graph instances merge typed overrides and bake concrete shad
 
     child.Properties["Roughness"] = Keire::Color{};
     CHECK_THROWS_AS((void)Keire::ResolveMaterialGraphInstance(graph, std::array{root, child}), std::invalid_argument);
+}
+
+TEST_CASE("Material Graph instance import publishes an assignable runtime material")
+{
+    const auto graphAsset = Keire::AssetId::Parse("ac000000-0000-4000-8000-000000000001");
+    const auto rootAsset = Keire::AssetId::Parse("ac000000-0000-4000-8000-000000000002");
+    const auto childAsset = Keire::AssetId::Parse("ac000000-0000-4000-8000-000000000003");
+    const auto materialAsset = Keire::AssetId::Parse("ac000000-0000-4000-8000-000000000004");
+    const auto shaderAsset = Keire::AssetId::Parse("ac000000-0000-4000-8000-000000000005");
+
+    auto graph = Keire::CreateDefaultMaterialGraph();
+    graph.Nodes.push_back(
+        Parameter("Tint", Keire::MaterialGraphValueType::Color, Keire::Color{1.0F, 1.0F, 1.0F, 1.0F}));
+    graph.Nodes.push_back(Parameter("Roughness", Keire::MaterialGraphValueType::Scalar, 0.5F));
+    Keire::MaterialGraphInstanceDefinition root;
+    root.Parent = graphAsset;
+    root.Properties["Tint"] = Keire::Color{0.2F, 0.4F, 0.8F, 1.0F};
+    Keire::MaterialGraphInstanceDefinition child;
+    child.Parent = rootAsset;
+    child.Properties["Roughness"] = 0.18F;
+
+    const auto graphBytes = Keire::MaterialGraphAsset::EncodeSource(graph);
+    const auto rootBytes = Keire::MaterialGraphInstanceAsset::EncodeSource(root);
+    Keire::AssetImportContext context;
+    context.Asset = childAsset;
+    context.ProjectRoot = "C:/MaterialGraphInstanceTest";
+    context.SourceRoot = context.ProjectRoot / "Assets";
+    context.ReadProjectFile = [&](const std::filesystem::path& path)
+    {
+        const auto normalized = path.lexically_normal().generic_string();
+        if (normalized == "Assets/Graphs/Parent.keirematerialgraph")
+            return graphBytes;
+        if (normalized == "Assets/Instances/Root.keirematerialinstance")
+            return rootBytes;
+        throw std::runtime_error("Unexpected Material Graph instance test dependency.");
+    };
+    context.ResolveAssetSource = [&](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
+    {
+        if (asset == graphAsset)
+            return Keire::AssetImportSource{graphAsset, Keire::MaterialGraphAsset::StaticType(),
+                                            "Graphs/Parent.keirematerialgraph"};
+        if (asset == rootAsset)
+            return Keire::AssetImportSource{rootAsset, Keire::MaterialGraphInstanceAsset::StaticType(),
+                                            "Instances/Root.keirematerialinstance"};
+        return std::nullopt;
+    };
+    context.ResolveSubAssetId = [materialAsset](const std::string_view key)
+    {
+        CHECK(key == "material/default");
+        return materialAsset;
+    };
+    std::string resolvedShaderKey;
+    context.ResolveSubAssetIdFor = [&](const Keire::AssetId parent, const std::string_view key)
+    {
+        CHECK(parent == graphAsset);
+        resolvedShaderKey = key;
+        return shaderAsset;
+    };
+
+    const auto importer = Keire::CreateMaterialGraphInstanceAssetImporter();
+    CHECK(importer.Version == 2);
+    REQUIRE(importer.ContextualImport);
+    const auto imported = importer.ContextualImport(context, Keire::MaterialGraphInstanceAsset::EncodeSource(child));
+    CHECK(imported.AssetDependencies == std::vector<Keire::AssetId>{graphAsset, rootAsset});
+    REQUIRE(imported.SubAssets.size() == 1);
+    CHECK(imported.SubAssets.front().Id == materialAsset);
+    CHECK(imported.SubAssets.front().Type == Keire::MaterialAsset::StaticType());
+    CHECK(resolvedShaderKey.starts_with("shader/"));
+    CHECK(std::ranges::find(imported.SubAssets.front().AssetDependencies, shaderAsset) !=
+          imported.SubAssets.front().AssetDependencies.end());
+    const auto material = Keire::MaterialAsset::Decode(imported.SubAssets.front().Bytes);
+    CHECK(material->Definition().Shader == shaderAsset);
+    CHECK(std::get<float>(material->Definition().Properties.at("Roughness")) == doctest::Approx(0.18F));
+    CHECK(std::get<Keire::Color>(material->Definition().Properties.at("Tint")) == Keire::Color{0.2F, 0.4F, 0.8F, 1.0F});
 }

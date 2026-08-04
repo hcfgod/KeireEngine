@@ -110,6 +110,27 @@ namespace Keire
             return extension;
         }
 
+        [[nodiscard]] AssetId DeriveSubAssetId(const AssetId parent, const std::string_view key)
+        {
+            if (!parent || key.empty())
+                throw std::invalid_argument("Generated subassets require a valid parent and non-empty key.");
+            std::string identity = parent.ToString();
+            identity.push_back('\n');
+            identity.append(key);
+            const auto digest = Detail::Sha256(std::as_bytes(std::span(identity)));
+            std::uint64_t high = 0;
+            std::uint64_t low = 0;
+            for (std::size_t index = 0; index < 8; ++index)
+            {
+                high = (high << 8U) | std::to_integer<std::uint8_t>(digest[index]);
+                low = (low << 8U) | std::to_integer<std::uint8_t>(digest[index + 8U]);
+            }
+            // Preserve the UUID layout used by AssetId::Generate while deriving the payload deterministically.
+            high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
+            low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
+            return AssetId(high, low);
+        }
+
         [[nodiscard]] AssetTypeId InferType(const std::filesystem::path& path)
         {
             static const std::unordered_set<std::string> TextExtensions{
@@ -804,24 +825,19 @@ namespace Keire
             };
             context.ImportSettings = record.ImportSettings;
             context.ResolveSubAssetId = [parent = record.Id](const std::string_view key)
+            { return DeriveSubAssetId(parent, key); };
+            context.ResolveSubAssetIdFor = [](const AssetId parent, const std::string_view key)
+            { return DeriveSubAssetId(parent, key); };
+            context.ResolveAssetSource = [this,
+                                          current = AssetImportSource{record.Id, record.Type, record.RelativePath}](
+                                             const AssetId asset) -> std::optional<AssetImportSource>
             {
-                if (key.empty())
-                    throw std::invalid_argument("Generated subasset keys must not be empty.");
-                std::string identity = parent.ToString();
-                identity.push_back('\n');
-                identity.append(key);
-                const auto digest = Detail::Sha256(std::as_bytes(std::span(identity)));
-                std::uint64_t high = 0;
-                std::uint64_t low = 0;
-                for (std::size_t index = 0; index < 8; ++index)
-                {
-                    high = (high << 8U) | std::to_integer<std::uint8_t>(digest[index]);
-                    low = (low << 8U) | std::to_integer<std::uint8_t>(digest[index + 8U]);
-                }
-                // Preserve the UUID layout used by AssetId::Generate while deriving the payload deterministically.
-                high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
-                low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
-                return AssetId(high, low);
+                if (asset == current.Id)
+                    return current;
+                const auto found = std::ranges::find(Records, asset, &AssetSourceRecord::Id);
+                if (found == Records.end())
+                    return std::nullopt;
+                return AssetImportSource{found->Id, found->Type, found->RelativePath};
             };
             return context;
         }
@@ -1070,7 +1086,8 @@ namespace Keire
             {
                 if (error)
                     throw std::runtime_error("Could not enumerate the asset source directory.");
-                if (!iterator->is_regular_file() || iterator->path().extension() == ".keiremeta")
+                if (!iterator->is_regular_file() || iterator->path().extension() == ".keiremeta" ||
+                    Detail::IsTransientFile(iterator->path()))
                     continue;
                 auto record = ReadMetadata(SourceRoot, iterator->path(), Specification.MaximumSourceBytes,
                                            digestSources, InferImporter(iterator->path()));

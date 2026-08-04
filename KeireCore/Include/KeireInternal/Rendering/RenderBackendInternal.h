@@ -305,6 +305,7 @@ namespace Keire::RenderBackend
         bool UsesInstancing = false;
         bool UsesImageBasedLighting = false;
         bool UsesSpatialLighting = false;
+        bool UsesVertexMaterialParameters = false;
     };
 
     struct GpuMaterialEntry final
@@ -526,6 +527,7 @@ namespace Keire::RenderBackend
         Vector4 SurfaceParameters;
         Vector4 LocalLightCounts;
         std::array<AssetLocalLightUniform, MaximumShaderLocalLights> LocalLights;
+        Vector4 FrameParameters;
     };
 
     struct AssetLocalLightUniforms final
@@ -569,7 +571,7 @@ namespace Keire::RenderBackend
     };
 
     static_assert(sizeof(AssetObjectUniforms) == sizeof(float) * 64);
-    static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * (20 + MaximumShaderLocalLights * 16));
+    static_assert(sizeof(AssetSceneUniforms) == sizeof(float) * (24 + MaximumShaderLocalLights * 16));
     static_assert(sizeof(AssetLocalLightUniform) == sizeof(float) * 16);
     static_assert(sizeof(AssetLocalLightUniforms) == sizeof(float) * (4 + MaximumShaderLocalLights * 16));
     static_assert(sizeof(AssetSceneUniforms) <= 4096);
@@ -688,6 +690,9 @@ namespace Keire::RenderBackend
         std::vector<LightProbeVolume> LightProbeVolumes;
         bool DrawGrid = false;
         VfxRenderSnapshot Vfx;
+        float MaterialTimeSeconds = 0.0F;
+        float MaterialDeltaSeconds = 0.0F;
+        std::uint64_t FrameIndex = 0;
     };
 
     [[nodiscard]] inline SceneLighting ResolveLighting(const Ref<Scene>& scene)

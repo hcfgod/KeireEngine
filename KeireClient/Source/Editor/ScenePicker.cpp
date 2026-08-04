@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 
@@ -249,5 +250,28 @@ namespace KeireEditor
                 selected.push_back(entity.Id());
         }
         return selected;
+    }
+
+    std::vector<Keire::EntityId> ResolveMaterialDropTargets(const Keire::Entity& target)
+    {
+        std::vector<Keire::EntityId> result;
+        if (!target)
+            return result;
+        if (target.GetComponent<Keire::MeshRendererComponent>())
+        {
+            result.push_back(target.Id());
+            return result;
+        }
+
+        auto pending = target.Children();
+        for (std::size_t index = 0; index < pending.size(); ++index)
+        {
+            const auto& candidate = pending[index];
+            if (candidate.GetComponent<Keire::MeshRendererComponent>())
+                result.push_back(candidate.Id());
+            const auto children = candidate.Children();
+            pending.insert(pending.end(), children.begin(), children.end());
+        }
+        return result;
     }
 } // namespace KeireEditor

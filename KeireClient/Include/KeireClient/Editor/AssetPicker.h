@@ -29,6 +29,9 @@ namespace KeireEditor
 
         [[nodiscard]] static bool Accepts(const Keire::AssetSourceRecord& record, const AssetPickerOptions& options);
         [[nodiscard]] static bool AcceptsEnvironmentTexture(const Keire::AssetSourceRecord& record);
+        [[nodiscard]] static std::optional<Keire::AssetId>
+        ResolveCompatibleAsset(std::span<const Keire::AssetSourceRecord> records, Keire::AssetId dropped,
+                               const AssetPickerOptions& options);
 
         [[nodiscard]] std::string_view Diagnostic() const noexcept { return m_Diagnostic; }
         void Clear() noexcept;

@@ -34,7 +34,7 @@ namespace Keire
     struct ProfilerSpecification
     {
         ProfilerMode Mode = ProfilerMode::Disabled;
-        std::size_t MaximumSpansPerFrame = 16U * 1024U;
+        std::size_t MaximumSpansPerFrame = std::size_t{16} * 1024U;
         std::size_t MaximumCountersPerFrame = 1024U;
         std::size_t MaximumRetainedFrameSummaries = 600U;
     };

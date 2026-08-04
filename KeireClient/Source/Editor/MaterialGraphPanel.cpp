@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -24,72 +25,50 @@ namespace KeireEditor
             Keire::MaterialGraphValueType Type = Keire::MaterialGraphValueType::Scalar;
         };
 
-        constexpr std::array NodeEntries{
-            NodeEntry{Keire::MaterialGraphNodeKind::Parameter, "Inputs", "Scalar Parameter"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Parameter, "Inputs", "Color Parameter",
-                      Keire::MaterialGraphValueType::Color},
-            NodeEntry{Keire::MaterialGraphNodeKind::Parameter, "Inputs", "Texture2D Parameter",
-                      Keire::MaterialGraphValueType::Texture2D},
-            NodeEntry{Keire::MaterialGraphNodeKind::Constant, "Inputs", "Constant"},
-            NodeEntry{Keire::MaterialGraphNodeKind::UV, "Inputs", "UV0", Keire::MaterialGraphValueType::Vector2},
-            NodeEntry{Keire::MaterialGraphNodeKind::VertexColor, "Inputs", "Vertex Color",
-                      Keire::MaterialGraphValueType::Color},
-            NodeEntry{Keire::MaterialGraphNodeKind::WorldPosition, "Inputs", "World Position",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::WorldNormal, "Inputs", "World Normal",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::ViewDirection, "Inputs", "View Direction",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::TextureSample, "Texture & UV", "Sample Texture 2D",
-                      Keire::MaterialGraphValueType::Color},
-            NodeEntry{Keire::MaterialGraphNodeKind::UVTransform, "Texture & UV", "UV Transform",
-                      Keire::MaterialGraphValueType::Vector2},
-            NodeEntry{Keire::MaterialGraphNodeKind::RotateUV, "Texture & UV", "Rotate UV",
-                      Keire::MaterialGraphValueType::Vector2},
-            NodeEntry{Keire::MaterialGraphNodeKind::Parallax, "Texture & UV", "Parallax Offset",
-                      Keire::MaterialGraphValueType::Vector2},
-            NodeEntry{Keire::MaterialGraphNodeKind::NormalMap, "Surface", "Normal Map",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::DetailNormal, "Surface", "Detail Normal",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::Fresnel, "Surface", "Fresnel"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Desaturate, "Surface", "Desaturate",
-                      Keire::MaterialGraphValueType::Color},
-            NodeEntry{Keire::MaterialGraphNodeKind::Add, "Math", "Add"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Subtract, "Math", "Subtract"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Multiply, "Math", "Multiply"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Divide, "Math", "Divide"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Power, "Math", "Power"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Minimum, "Math", "Minimum"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Maximum, "Math", "Maximum"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Lerp, "Math", "Lerp"},
-            NodeEntry{Keire::MaterialGraphNodeKind::OneMinus, "Math", "One Minus"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Clamp, "Math", "Saturate"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Absolute, "Math", "Absolute"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Floor, "Math", "Floor"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Ceiling, "Math", "Ceiling"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Fraction, "Math", "Fraction"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Sine, "Math", "Sine"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Cosine, "Math", "Cosine"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Normalize, "Math", "Normalize",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::Length, "Math", "Vector Length",
-                      Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::Dot, "Math", "Dot Product", Keire::MaterialGraphValueType::Vector3},
-            NodeEntry{Keire::MaterialGraphNodeKind::Remap, "Math", "Remap"},
-            NodeEntry{Keire::MaterialGraphNodeKind::SmoothStep, "Math", "Smooth Step"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Step, "Math", "Step"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Posterize, "Math", "Posterize"},
-            NodeEntry{Keire::MaterialGraphNodeKind::SimpleNoise, "Procedural", "Simple Noise"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Keyword, "Logic & Variants", "Keyword"},
-            NodeEntry{Keire::MaterialGraphNodeKind::StaticSwitch, "Logic & Variants", "Static Switch"},
-            NodeEntry{Keire::MaterialGraphNodeKind::Custom, "Advanced", "Custom Function"},
-        };
+        [[nodiscard]] const std::vector<NodeEntry>& NodeEntries()
+        {
+            static const auto entries = []
+            {
+                std::vector<NodeEntry> result{
+                    {Keire::MaterialGraphNodeKind::Parameter, "Parameters", "Scalar Parameter"},
+                    {Keire::MaterialGraphNodeKind::Parameter, "Parameters", "Vector2 Parameter",
+                     Keire::MaterialGraphValueType::Vector2},
+                    {Keire::MaterialGraphNodeKind::Parameter, "Parameters", "Vector3 Parameter",
+                     Keire::MaterialGraphValueType::Vector3},
+                    {Keire::MaterialGraphNodeKind::Parameter, "Parameters", "Vector4 Parameter",
+                     Keire::MaterialGraphValueType::Vector4},
+                    {Keire::MaterialGraphNodeKind::Parameter, "Parameters", "Color Parameter",
+                     Keire::MaterialGraphValueType::Color},
+                    {Keire::MaterialGraphNodeKind::Parameter, "Parameters", "Texture2D Parameter",
+                     Keire::MaterialGraphValueType::Texture2D},
+                    {Keire::MaterialGraphNodeKind::Constant, "Constants", "Scalar Constant"},
+                    {Keire::MaterialGraphNodeKind::Constant, "Constants", "Vector2 Constant",
+                     Keire::MaterialGraphValueType::Vector2},
+                    {Keire::MaterialGraphNodeKind::Constant, "Constants", "Vector3 Constant",
+                     Keire::MaterialGraphValueType::Vector3},
+                    {Keire::MaterialGraphNodeKind::Constant, "Constants", "Vector4 Constant",
+                     Keire::MaterialGraphValueType::Vector4},
+                    {Keire::MaterialGraphNodeKind::Constant, "Constants", "Color Constant",
+                     Keire::MaterialGraphValueType::Color},
+                };
+                for (const auto& descriptor : Keire::MaterialGraphNodeCatalog())
+                {
+                    if (!descriptor.UserCreatable || descriptor.Kind == Keire::MaterialGraphNodeKind::Parameter ||
+                        descriptor.Kind == Keire::MaterialGraphNodeKind::Constant)
+                        continue;
+                    result.push_back(
+                        {descriptor.Kind, descriptor.Category, descriptor.DisplayName, descriptor.DefaultValueType});
+                }
+                return result;
+            }();
+            return entries;
+        }
 
         constexpr std::array PreviewNames{std::string_view("Sphere"), std::string_view("Plane"),
                                           std::string_view("Cube"), std::string_view("Custom Mesh")};
         constexpr std::array OutputNames{std::string_view("Surface PBR"), std::string_view("Transparent PBR"),
-                                         std::string_view("Decal PBR"), std::string_view("Unlit")};
+                                         std::string_view("Decal PBR"),   std::string_view("Unlit"),
+                                         std::string_view("Hair PBR"),    std::string_view("Eye PBR")};
         constexpr std::array TextureSemanticNames{
             std::string_view("Generic"),   std::string_view("Base Color"),
             std::string_view("Normal"),    std::string_view("Metallic / Roughness"),
@@ -203,10 +182,13 @@ namespace KeireEditor
     {
         auto& document = m_Controller.MaterialGraphState();
         const auto& theme = m_Controller.MaterialGraphTheme();
-        ui.TextColored(document.Publishable() ? theme.Success : theme.Warning,
-                       document.Publishable() ? "GENERATED SHADER READY" : "PREVIEW USING LAST GOOD SHADER");
+        const bool compiling = document.CompilationPending();
+        ui.TextColored(!compiling && document.Publishable() ? theme.Success : theme.Warning,
+                       compiling                ? "LIVE COMPILING + UPDATING SCENE"
+                       : document.Publishable() ? "GENERATED SHADER READY"
+                                                : "PREVIEW USING LAST GOOD SHADER");
         ui.SameLine();
-        if (auto disabled = ui.BeginDisabled(!document.Dirty() || !document.Publishable()); disabled)
+        if (auto disabled = ui.BeginDisabled(!document.Dirty() || !document.Publishable() || compiling); disabled)
             if (ui.Button("Save"))
             {
                 try
@@ -392,6 +374,15 @@ namespace KeireEditor
             m_InspectorSymbol = node->Symbol;
             m_InspectorInclude = node->Include.generic_string();
             m_InspectorFunction = node->Function;
+            m_InspectorDescription = node->ParameterMetadata.Description;
+            m_InspectorCategory = node->ParameterMetadata.Category;
+            m_InspectorSortPriority = node->ParameterMetadata.SortPriority;
+            m_InspectorHasMinimum = node->ParameterMetadata.Minimum.has_value();
+            m_InspectorHasMaximum = node->ParameterMetadata.Maximum.has_value();
+            m_InspectorHasStep = node->ParameterMetadata.Step.has_value();
+            m_InspectorMinimum = node->ParameterMetadata.Minimum.value_or(0.0F);
+            m_InspectorMaximum = node->ParameterMetadata.Maximum.value_or(1.0F);
+            m_InspectorStep = node->ParameterMetadata.Step.value_or(0.01F);
         }
 
         ui.TextColored(m_Controller.MaterialGraphTheme().Accent, "NODE INSPECTOR");
@@ -400,6 +391,21 @@ namespace KeireEditor
         if (node->Kind == Keire::MaterialGraphNodeKind::Parameter ||
             node->Kind == Keire::MaterialGraphNodeKind::Keyword)
             (void)ui.InputText("Shader Symbol", m_InspectorSymbol);
+        if (node->Kind == Keire::MaterialGraphNodeKind::Parameter)
+        {
+            (void)ui.InputText("Description", m_InspectorDescription);
+            (void)ui.InputText("Parameter Group", m_InspectorCategory);
+            (void)ui.DragScalar("Sort Priority", m_InspectorSortPriority, 1.0, -10'000.0, 10'000.0);
+            (void)ui.Checkbox("Override Minimum", m_InspectorHasMinimum);
+            if (m_InspectorHasMinimum)
+                (void)ui.DragScalar("Minimum", m_InspectorMinimum, 0.01);
+            (void)ui.Checkbox("Override Maximum", m_InspectorHasMaximum);
+            if (m_InspectorHasMaximum)
+                (void)ui.DragScalar("Maximum", m_InspectorMaximum, 0.01);
+            (void)ui.Checkbox("Override Step", m_InspectorHasStep);
+            if (m_InspectorHasStep)
+                (void)ui.DragScalar("Step", m_InspectorStep, 0.001, 0.0001, 1'000.0);
+        }
         if (node->Kind == Keire::MaterialGraphNodeKind::Custom)
         {
             (void)ui.InputText("Safe Include", m_InspectorInclude);
@@ -412,9 +418,20 @@ namespace KeireEditor
                 const auto nodeId = node->Id;
                 const auto oldSymbol = node->Symbol;
                 const auto kind = node->Kind;
+                Keire::MaterialGraphParameterMetadata metadata;
+                metadata.Description = m_InspectorDescription;
+                metadata.Category = m_InspectorCategory;
+                metadata.SortPriority = static_cast<std::int32_t>(std::round(m_InspectorSortPriority));
+                if (m_InspectorHasMinimum)
+                    metadata.Minimum = static_cast<float>(m_InspectorMinimum);
+                if (m_InspectorHasMaximum)
+                    metadata.Maximum = static_cast<float>(m_InspectorMaximum);
+                if (m_InspectorHasStep)
+                    metadata.Step = static_cast<float>(m_InspectorStep);
                 (void)document.Edit("Edit Material Graph node properties",
                                     [nodeId, oldSymbol, kind, name = m_InspectorName, symbol = m_InspectorSymbol,
-                                     include = m_InspectorInclude, function = m_InspectorFunction](auto& definition)
+                                     include = m_InspectorInclude, function = m_InspectorFunction,
+                                     metadata = std::move(metadata)](auto& definition)
                                     {
                                         auto candidate =
                                             std::ranges::find(definition.Nodes, nodeId, &Keire::MaterialGraphNode::Id);
@@ -424,6 +441,7 @@ namespace KeireEditor
                                         candidate->Symbol = symbol;
                                         candidate->Include = include;
                                         candidate->Function = function;
+                                        candidate->ParameterMetadata = metadata;
                                         if (kind == Keire::MaterialGraphNodeKind::Keyword)
                                         {
                                             auto keyword = std::ranges::find(definition.Keywords, oldSymbol,
@@ -646,7 +664,7 @@ namespace KeireEditor
         if (auto combo = ui.BeginCombo("Add Node", "Choose..."); combo)
         {
             const auto search = Lower(m_NodeSearch);
-            for (const auto& entry : NodeEntries)
+            for (const auto& entry : NodeEntries())
             {
                 const auto path = std::string(entry.Category) + " / " + std::string(entry.Name);
                 if (!search.empty() && Lower(path).find(search) == std::string::npos)
@@ -807,7 +825,10 @@ namespace KeireEditor
             auto node = Keire::CreateMaterialGraphNode(kind, type);
             if (kind == Keire::MaterialGraphNodeKind::Parameter)
             {
-                const auto base = type == Keire::MaterialGraphValueType::Color       ? "BaseColor"
+                const auto base = type == Keire::MaterialGraphValueType::Vector2     ? "Vector2"
+                                  : type == Keire::MaterialGraphValueType::Vector3   ? "Vector3"
+                                  : type == Keire::MaterialGraphValueType::Vector4   ? "Vector4"
+                                  : type == Keire::MaterialGraphValueType::Color     ? "BaseColor"
                                   : type == Keire::MaterialGraphValueType::Texture2D ? "Texture"
                                                                                      : "Scalar";
                 node.Symbol = UniqueSymbol(m_Controller.MaterialGraphState().Definition(), base);

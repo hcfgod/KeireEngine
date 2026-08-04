@@ -107,7 +107,7 @@ namespace Keire
     struct WindowEventHeader
     {
         std::uint64_t TimestampNanoseconds = 0;
-        WindowId Window{};
+        WindowId Window;
     };
 
     struct QuitEvent

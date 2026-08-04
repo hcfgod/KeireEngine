@@ -984,28 +984,32 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             }
                         }
                         InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker);
-                        if (assets && renderer->Mesh())
+                        Keire::Ref<const Keire::MeshAsset> mesh;
+                        if (!renderer->Mesh() || renderer->Mesh() == Keire::MeshAsset::CubeId())
+                            mesh = Keire::MeshAsset::Cube();
+                        else if (renderer->Mesh() == Keire::MeshAsset::ErrorId())
+                            mesh = Keire::MeshAsset::Error();
+                        else if (assets)
                         {
-                            const auto mesh =
-                                assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::High)
-                                    .TryGetLoaded();
-                            if (mesh)
+                            mesh = assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::High)
+                                       .TryGetLoaded();
+                        }
+                        if (mesh)
+                        {
+                            ui.TextColored(theme.MutedText, "Material Slots");
+                            for (std::size_t slot = 0; slot < mesh->MaterialSlots().size(); ++slot)
                             {
-                                ui.TextColored(theme.MutedText, "Material Slots");
-                                for (std::size_t slot = 0; slot < mesh->MaterialSlots().size(); ++slot)
+                                auto material = renderer->Material(slot);
+                                if (!material)
+                                    material = mesh->MaterialSlots()[slot].DefaultMaterial;
+                                const auto label =
+                                    mesh->MaterialSlots()[slot].Name + "##material-slot-" + std::to_string(slot);
+                                if (propertyEditor.EditAsset(label, material, Keire::MaterialAsset::StaticType()))
                                 {
-                                    auto material = renderer->Material(slot);
-                                    if (!material)
-                                        material = mesh->MaterialSlots()[slot].DefaultMaterial;
-                                    const auto label =
-                                        mesh->MaterialSlots()[slot].Name + "##material-slot-" + std::to_string(slot);
-                                    if (propertyEditor.EditAsset(label, material, Keire::MaterialAsset::StaticType()))
-                                    {
-                                        m_Controller.RecordInspectorUndo(
-                                            "Change Material Slot", "mesh-renderer.material." + std::to_string(slot) +
-                                                                        "." + entity.Id().ToString());
-                                        sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
-                                    }
+                                    m_Controller.RecordInspectorUndo("Change Material Slot",
+                                                                     "mesh-renderer.material." + std::to_string(slot) +
+                                                                         "." + entity.Id().ToString());
+                                    sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
                                 }
                             }
                         }

@@ -1037,30 +1037,92 @@ void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, c
     if (!scene)
         throw std::runtime_error("Open a scene before dropping a material.");
     const auto destination = scene->FindEntity(entity);
-    const auto renderer = destination.GetComponent<Keire::MeshRendererComponent>();
-    if (!renderer)
-        throw std::runtime_error("Drop a material directly over an entity with a Mesh Renderer.");
+    const auto destinations = KeireEditor::ResolveMaterialDropTargets(destination);
+    if (destinations.empty())
+        throw std::runtime_error("Drop a material over a rendered entity or a model root with rendered children.");
     const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
     if (!record)
         throw std::runtime_error("The dropped material no longer exists in the project database.");
 
-    const auto source = m_AssetDatabase->Specification().ProjectRoot /
-                        m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    const auto material = Keire::MaterialAsset::DecodeSource(ReadBytes(source));
-    std::optional<Keire::Color> materialTint;
-    if (const auto tint = material.Properties.find("Tint"); tint != material.Properties.end())
+    auto runtimeMaterial = asset;
+    if (record->Type == Keire::MaterialGraphAsset::StaticType() ||
+        record->Type == Keire::MaterialGraphInstanceAsset::StaticType())
     {
-        if (const auto* color = std::get_if<Keire::Color>(&tint->second))
-            materialTint = *color;
+        const auto assets = Owner().Assets();
+        const auto generated =
+            assets ? std::ranges::find_if(record->SubAssets,
+                                          [&assets](const Keire::AssetId subAsset)
+                                          {
+                                              const auto type = assets->TryGetType(subAsset);
+                                              return type && *type == Keire::MaterialAsset::StaticType();
+                                          })
+                   : record->SubAssets.end();
+        if (generated == record->SubAssets.end())
+        {
+            if (!m_AssetOperations)
+                throw std::runtime_error(
+                    "The material source runtime material is not available in the mounted catalog.");
+            m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction, {.ReloadAsset = asset});
+            m_PendingMaterialAssignment = PendingMaterialAssignment{entity, asset};
+            m_SceneDocument->SetStatus("Compiling " + record->RelativePath.stem().string() + " before assigning it...");
+            return;
+        }
+        runtimeMaterial = *generated;
+    }
+    else if (record->Type != Keire::MaterialAsset::StaticType())
+        throw std::runtime_error(
+            "Only materials, Material Graphs, and material instances can be assigned to a Mesh Renderer.");
+
+    std::optional<Keire::Color> materialTint;
+    if (record->Type == Keire::MaterialAsset::StaticType())
+    {
+        const auto source = m_AssetDatabase->Specification().ProjectRoot /
+                            m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
+        const auto material = Keire::MaterialAsset::DecodeSource(ReadBytes(source));
+        if (const auto tint = material.Properties.find("Tint"); tint != material.Properties.end())
+            if (const auto* color = std::get_if<Keire::Color>(&tint->second))
+                materialTint = *color;
     }
     RecordSceneUndo("Assign Material");
-    m_SceneDocument->SetMeshRendererMaterial(entity, 0, asset);
-    if (materialTint)
-        m_SceneDocument->SetComponentProperty(entity, Keire::MeshRendererComponent::StaticType(), "tint",
-                                              *materialTint);
+    for (const auto target : destinations)
+    {
+        m_SceneDocument->SetMeshRendererMaterial(target, 0, runtimeMaterial);
+        if (materialTint)
+            m_SceneDocument->SetComponentProperty(target, Keire::MeshRendererComponent::StaticType(), "tint",
+                                                  *materialTint);
+    }
     m_SceneDocument->Select(destination.Id().Value());
     m_SelectedAsset = {};
-    m_SceneDocument->SetStatus("Assigned " + record->RelativePath.stem().string() + " to " + destination.Name() + ".");
+    m_SceneDocument->SetStatus(
+        "Assigned " + record->RelativePath.stem().string() + " to " + destination.Name() +
+        (destinations.size() == 1 ? "." : " (" + std::to_string(destinations.size()) + " rendered children)."));
+}
+
+void EditorWorkspaceLayer::CompletePendingMaterialAssignment(const Keire::AssetId refreshedAsset)
+{
+    if (!m_PendingMaterialAssignment)
+        return;
+    const auto pending = *m_PendingMaterialAssignment;
+    const auto record = m_AssetDatabase ? m_AssetDatabase->Find(pending.Source) : std::nullopt;
+    const auto assets = Owner().Assets();
+    const bool available = record && assets &&
+                           std::ranges::any_of(record->SubAssets,
+                                               [&assets](const Keire::AssetId id)
+                                               {
+                                                   const auto type = assets->TryGetType(id);
+                                                   return type && *type == Keire::MaterialAsset::StaticType();
+                                               });
+    if (!available)
+    {
+        if (refreshedAsset != pending.Source)
+            return;
+        m_PendingMaterialAssignment.reset();
+        m_SceneDocument->SetStatus(
+            "Material source compilation did not publish a runtime material; the previous material was kept.");
+        return;
+    }
+    m_PendingMaterialAssignment.reset();
+    AssignDroppedMaterial(pending.Entity, pending.Source);
 }
 
 void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
@@ -1129,6 +1191,10 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         environment.SkyVisible =
             environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
         Keire::SceneRenderRequest renderRequest{scene, m_GameRenderView, false, environment};
+        const auto& materialTime = Owner().GetTime();
+        renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
+        renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
+        renderRequest.FrameIndex = materialTime.FrameCount();
         if (const auto play = m_SceneDocument->PlaySession(); play && play->State() != Keire::ScenePlayState::Stopped)
             if (const auto vfx = play->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();

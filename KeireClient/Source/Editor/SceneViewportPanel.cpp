@@ -63,6 +63,19 @@ namespace
         return {width, height};
     }
 
+    [[nodiscard]] std::optional<Keire::MeshBounds>
+    ResolveImportedMeshBounds(const Keire::Ref<Keire::AssetSystem>& assets, const Keire::AssetId mesh)
+    {
+        if (!assets)
+            return std::nullopt;
+        const auto metadata = assets->TryGetMetadata(mesh);
+        if (!metadata || !metadata->LocalBounds)
+            return std::nullopt;
+        const auto& bounds = *metadata->LocalBounds;
+        return Keire::MeshBounds{{bounds.Minimum[0], bounds.Minimum[1], bounds.Minimum[2]},
+                                 {bounds.Maximum[0], bounds.Maximum[1], bounds.Maximum[2]}};
+    }
+
     void DrawEmptyState(Keire::UiFrame& ui, const std::string_view heading, const std::string_view primary,
                         const std::string_view detail)
     {
@@ -141,6 +154,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     const auto& theme = m_Controller.SceneViewportTheme();
     const auto database = m_Controller.SceneViewportAssetDatabase();
     const auto assetSystem = m_Controller.SceneViewportAssetSystem();
+    const KeireEditor::MeshBoundsResolver resolveMeshBounds = [assetSystem](const Keire::AssetId mesh)
+    { return ResolveImportedMeshBounds(assetSystem, mesh); };
     const auto renderer = m_Controller.SceneViewportRenderer();
     const auto activeScene = document.ActiveScene();
     if (ui.WindowFocused())
@@ -207,6 +222,10 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             environment.SkyVisible =
                 environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
         Keire::SceneRenderRequest renderRequest{renderScene, m_RenderView, !playActive, environment};
+        const auto& materialTime = m_Controller.SceneViewportTime();
+        renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
+        renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
+        renderRequest.FrameIndex = materialTime.FrameCount();
         if (playActive)
             if (const auto vfx = document.PlaySession()->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
@@ -265,8 +284,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                     }
                     if (!activeScene || !activeScene->IsOpen())
                         throw std::runtime_error("Create or open a scene before dropping meshes or materials.");
-                    const auto hit =
-                        KeireEditor::PickSceneEntity(activeScene, imageRect, ui.PointerState().Position, camera);
+                    const auto hit = KeireEditor::PickSceneEntity(activeScene, imageRect, ui.PointerState().Position,
+                                                                  camera, resolveMeshBounds);
                     m_Controller.RouteSceneViewportAsset(record->Type, asset, hit);
                 }
             }
@@ -361,6 +380,10 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             environment.SkyVisible =
                 environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
+            const auto& materialTime = m_Controller.SceneViewportTime();
+            renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
+            renderRequest.MaterialDeltaSeconds = static_cast<float>(materialTime.DeltaTime().Seconds());
+            renderRequest.FrameIndex = materialTime.FrameCount();
             if (playActive)
                 if (const auto vfx = document.PlaySession()->Vfx())
                     renderRequest.Vfx = vfx->CaptureRenderSnapshot();
@@ -394,18 +417,6 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     if (renderScene)
     {
         const bool allowManipulation = !playActive && !m_Controller.SceneViewportPlayReviewActive();
-        const auto resolveMeshBounds = [assetSystem](const Keire::AssetId mesh) -> std::optional<Keire::MeshBounds>
-        {
-            const auto assets = assetSystem;
-            if (!assets)
-                return std::nullopt;
-            const auto metadata = assets->TryGetMetadata(mesh);
-            if (!metadata || !metadata->LocalBounds)
-                return std::nullopt;
-            const auto& bounds = *metadata->LocalBounds;
-            return Keire::MeshBounds{{bounds.Minimum[0], bounds.Minimum[1], bounds.Minimum[2]},
-                                     {bounds.Maximum[0], bounds.Maximum[1], bounds.Maximum[2]}};
-        };
         const auto pointer = ui.PointerState();
         std::vector<Keire::AssetId> selectionBeforePointer;
         if (imageState.Hovered && pointer.LeftPressed)
@@ -477,17 +488,8 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
 {
     const auto scene = m_Controller.SceneViewportDocument().ActiveScene();
     const auto assets = m_Controller.SceneViewportAssetSystem();
-    const auto resolveMeshBounds = [assets](const Keire::AssetId mesh) -> std::optional<Keire::MeshBounds>
-    {
-        if (!assets)
-            return std::nullopt;
-        const auto metadata = assets->TryGetMetadata(mesh);
-        if (!metadata || !metadata->LocalBounds)
-            return std::nullopt;
-        const auto& bounds = *metadata->LocalBounds;
-        return Keire::MeshBounds{{bounds.Minimum[0], bounds.Minimum[1], bounds.Minimum[2]},
-                                 {bounds.Maximum[0], bounds.Maximum[1], bounds.Maximum[2]}};
-    };
+    const KeireEditor::MeshBoundsResolver resolveMeshBounds = [assets](const Keire::AssetId mesh)
+    { return ResolveImportedMeshBounds(assets, mesh); };
     const auto pointer = ui.PointerState();
     const bool viewportHovered = imageState.Hovered;
     const bool navigationRegion = viewportHovered || m_Camera->Capturing();

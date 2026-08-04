@@ -19,8 +19,54 @@ version tags.
 - Expanded Material Graph into a layered production surface workflow with clear coat, sheen, dielectric specular,
   Fresnel, world/vertex inputs, UV rotation, procedural noise, remap/shaping/vector math, searchable categorized creation,
   typed pin defaults, texture asset/semantic editing, node duplication, adaptive exposure/environment/rotation previews,
-  reachability and cost diagnostics, strict disconnected-node validation, and five progressively advanced Sandbox graphs.
+  reachability and cost diagnostics, strict disconnected-node validation, and nine progressively advanced Sandbox graphs.
   Corrected generated alpha clipping to consume the renderer's alpha-mode/cutoff ABI in the declared order.
+- Added Material Graph schema v2 and a stable 100-plus-node catalog with stage metadata, deterministic schema-v1 pin
+  migration, endpoint-aware multi-output lowering, background debounced compilation, and stale-result rejection. Added
+  typed Material Attributes plus Make/Break/Blend operations; composable Standard Surface, Clear Coat, Sheen, Subsurface,
+  and Transmission BSDF nodes; Hair and Eye outputs; anisotropy, thickness, IOR, refraction, subsurface, world-position
+  offset, and pixel-depth offset. Generated shaders now evaluate Forward+ lights, shadows, image-based lighting, layered
+  surface lobes, and vertex/pixel displacement through the fixed renderer ABI. New Sandbox graphs cover anisotropic
+  metal, transmission glass, procedural vertex displacement, and a layered holographic surface.
+- Material Graph instances now resolve their bounded graph/instance parent chain during import and publish a stable
+  ordinary runtime-material subasset with complete shader, texture, and ancestry dependencies. Instances can be dropped
+  on rendered entities or selected in Mesh Renderer slots through the same renderer-safe aliasing used by graph assets.
+- Fixed Material Graph Forward+ buffer registers to follow the graph's actual sampler range instead of assuming the
+  spatial-lighting ABI's fixed sixteen samplers. The dense HLSL/DXIL resource layout now matches SDL's D3D12 root
+  signature, preventing `CreateGraphicsPipelineState` from rejecting generated graph shaders with `E_INVALIDARG`;
+  importer version 11 refreshes every affected generated shader.
+- Fixed procedural vertex-displacement graphs declaring a phantom vertex material buffer when their offset expression
+  only used mesh data and constants. Graphs that do use exposed vertex parameters now receive a dedicated dense
+  `space1` material buffer; importer version 12 refreshes both vertex-layout cases.
+- Fixed Material Graph scene integration: imports now publish deterministic compiled-shader and default runtime-material
+  subassets, graph assets can be dropped onto rendered entities or into Inspector material slots, and assignments retain
+  renderer-safe `MaterialAsset` IDs. Built-in cube renderers now expose their default material slot and appear explicitly
+  in mesh pickers. Material Graph canvases honor scalar broadcast and Color/Vector4 coercion without rejecting valid
+  saved cables while opening a graph. Graph drops now wait for an uncataloged runtime material to compile and remount
+  before changing the renderer, preventing transient missing assets from replacing the previous material with pink.
+  Generated graph shaders now retain the complete fixed pixel-interpolator ABI, preventing Direct3D 12 from rejecting
+  simpler graphs whose optimized DXIL previously exposed sparse stage inputs; importer version 4 forces safe reimport.
+- Fixed Material Graph visual authoring parity: the live mesh preview now evaluates built-in graph nodes per sample,
+  the shared node canvas clips all graph drawing and drag feedback to its viewport, and generated procedural noise uses
+  smooth four-octave value noise instead of a blocky nearest-cell octave. Retuned the Sandbox Procedural Emissive graph
+  for finer, controlled energy detail on scaled built-in meshes; importer version 5 refreshes generated shaders.
+- Fixed Material Graph scene iteration and model drops: valid parameter-default edits now publish the stable generated
+  material as an immediate development revision, Save targets the parent graph and every generated runtime subasset for
+  compilation/hot reload, viewport drops ray-test imported mesh bounds, and transform-only model roots apply slot zero
+  across rendered descendants. Graph defaults now participate in instance resolution before overrides; importer version
+  6 refreshes generated materials. Corrected the Sandbox textured pyramid's inverted OBJ winding so back-face culling no
+  longer exposes interior faces under PBR graph materials.
+- Material Graph scene iteration now coalesces continuous edits on a 75 ms live interval. Exposed-value changes take a
+  material-only fast path, while edits that change generated code compile off the UI thread and publish every in-memory
+  shader revision before the material revision, so assigned scene renderers no longer retain stale shader bytecode.
+  Generated custom-node includes are emitted relative to their confined include root, and the transmission-glass sample
+  exposes tint, opacity, transmission, IOR, refraction, and thickness as instant runtime parameters; importer version 13
+  refreshes generated shader variants.
+- Fixed asset scans racing atomic source writes: engine temporary files and editor backups are no longer indexed or
+  assigned persistent metadata. Material Graph Save now stages its complete generated directory outside the asset root,
+  preserves metadata for retained variants, removes stale variant sidecars, and restores the previous directory if the
+  canonical graph source cannot be published. Ninja prebuild and prelink commands now create their declared outputs on
+  Windows, restoring no-op incremental builds instead of recompiling KeireCore on every target invocation.
 - Completed an animation production pass with import-time key compression presets and measured errors, retarget mapping
   diagnostics, state-machine subgraphs, live transition visualization, transient preview playback, immutable pose and
   trajectory debugging, state-machine profiling, serialized foot-grounding settings, transactional ground adaptation,

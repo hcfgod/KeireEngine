@@ -16,7 +16,7 @@ namespace Keire
     struct UndoSpecification
     {
         std::size_t DefaultMaximumCommands = 256;
-        std::size_t DefaultMaximumBytes = 64U * 1024U * 1024U;
+        std::size_t DefaultMaximumBytes = std::size_t{64} * 1024U * 1024U;
         std::size_t MaximumContexts = 64;
         std::size_t MaximumTransactionDepth = 16;
     };

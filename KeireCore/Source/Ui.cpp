@@ -386,6 +386,9 @@ namespace Keire
             case UiScope::Kind::DragTarget:
                 ImGui::EndDragDropTarget();
                 break;
+            case UiScope::Kind::Clip:
+                ImGui::GetWindowDrawList()->PopClipRect();
+                break;
             }
             Scopes.pop_back();
         }
@@ -680,6 +683,21 @@ namespace Keire
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::DragTarget);
         return UiDragTargetScope(*this, visible);
+    }
+
+    UiClipScope UiFrame::PushClipRect(const UiItemRect rectangle)
+    {
+        m_Impl->RequireActive("PushClipRect");
+        if (!std::isfinite(rectangle.Minimum.X) || !std::isfinite(rectangle.Minimum.Y) ||
+            !std::isfinite(rectangle.Maximum.X) || !std::isfinite(rectangle.Maximum.Y) ||
+            rectangle.Maximum.X <= rectangle.Minimum.X || rectangle.Maximum.Y <= rectangle.Minimum.Y)
+        {
+            throw std::invalid_argument("UI clip rectangle must be finite with positive extents.");
+        }
+        ImGui::GetWindowDrawList()->PushClipRect({rectangle.Minimum.X, rectangle.Minimum.Y},
+                                                 {rectangle.Maximum.X, rectangle.Maximum.Y}, true);
+        m_Impl->OpenScope(UiScope::Kind::Clip);
+        return UiClipScope(*this);
     }
 
     UiPanelScope UiFrame::BeginPanel(UiPanelRegistration& panel, const UiWindowOptions options)

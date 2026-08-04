@@ -20,11 +20,18 @@ project(AssetWorkerTarget)
     local commandRepositoryRoot = (_ACTION == "ninja" or _ACTION == "gmake") and "." or ".."
     local workerRuntimeDirectory =
         commandRepositoryRoot .. "/Build/Bin/" .. OutputDir .. "/" .. AssetWorkerTarget
+    local workerPrelinkStamp = commandRepositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/" ..
+                                   AssetWorkerTarget .. "/" .. AssetWorkerTarget .. ".prelinkevents"
     local function CopyWindowsRuntime(source)
         local windowsSource = source:gsub("/", "\\")
         local windowsRuntimeDirectory = workerRuntimeDirectory:gsub("/", "\\")
-        return "if not exist " .. windowsRuntimeDirectory .. " mkdir " .. windowsRuntimeDirectory
-            .. " && copy /Y " .. windowsSource .. "\\*.dll " .. windowsRuntimeDirectory .. "\\"
+        local command = "mkdir " .. windowsRuntimeDirectory .. " >nul 2>&1 & copy /Y " .. windowsSource ..
+                            "\\*.dll " .. windowsRuntimeDirectory .. "\\"
+        if _ACTION == "ninja" then
+            command = command .. " && powershell -NoProfile -ExecutionPolicy Bypass -File " .. commandRepositoryRoot ..
+                          "/Scripts/Windows/touch-ninja-stamp.ps1 -Path " .. workerPrelinkStamp .. " && exit /b 0"
+        end
+        return command
     end
     local function CopyUnixRuntime(source)
         return "mkdir -p " .. workerRuntimeDirectory .. " && cp -R " .. source .. "/. " .. workerRuntimeDirectory .. "/"

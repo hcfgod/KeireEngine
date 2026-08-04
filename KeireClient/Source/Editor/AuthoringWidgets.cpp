@@ -392,6 +392,7 @@ namespace KeireEditor
         const Keire::UiSize size{std::max(available.Width, 120.0F), std::max(available.Height, 80.0F)};
         (void)ui.InvisibleButton(id, size);
         const auto canvas = ui.LastItemRect();
+        const auto canvasClip = ui.PushClipRect(canvas);
         const auto pointer = ui.PointerState();
         const bool canvasHovered = ui.LastItemState().Hovered;
         result.PointerGraphPosition = ToGraph(pointer.Position, canvas);

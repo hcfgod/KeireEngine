@@ -146,6 +146,9 @@ namespace Keire
         bool DrawGrid = false;
         RenderEnvironmentSettings Environment;
         VfxRenderSnapshot Vfx;
+        float MaterialTimeSeconds = 0.0F;
+        float MaterialDeltaSeconds = 0.0F;
+        std::uint64_t FrameIndex = 0;
     };
 
     struct RenderCapabilities

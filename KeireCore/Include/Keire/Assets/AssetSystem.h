@@ -52,9 +52,9 @@ namespace Keire
         std::vector<AssetDecoderRegistration> Decoders;
         std::size_t WorkerCount = 0;
         std::size_t QueueCapacity = 4096;
-        std::size_t ResidentCacheBudgetBytes = 512U * 1024U * 1024U;
-        std::size_t MaximumAssetBytes = 1024U * 1024U * 1024U;
-        std::size_t MaximumStreamReadBytes = 16U * 1024U * 1024U;
+        std::size_t ResidentCacheBudgetBytes = std::size_t{512} * 1024U * 1024U;
+        std::size_t MaximumAssetBytes = std::size_t{1024} * 1024U * 1024U;
+        std::size_t MaximumStreamReadBytes = std::size_t{16} * 1024U * 1024U;
     };
 
     struct AssetSystemStatistics

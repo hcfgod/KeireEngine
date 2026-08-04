@@ -192,6 +192,10 @@ namespace Keire::RenderBackend
         {
             throw std::invalid_argument("SceneRenderRequest environment contains invalid values.");
         }
+        if (!std::isfinite(request.MaterialTimeSeconds) || request.MaterialTimeSeconds < 0.0F ||
+            !std::isfinite(request.MaterialDeltaSeconds) || request.MaterialDeltaSeconds < 0.0F ||
+            request.MaterialDeltaSeconds > 1.0F)
+            throw std::invalid_argument("SceneRenderRequest material timing contains invalid values.");
         if (request.Vfx.Particles().size() > VfxRenderSnapshot::MaximumParticles)
             throw std::invalid_argument("SceneRenderRequest exceeds the VFX particle packet bound.");
         for (const auto& particle : request.Vfx.Particles())
@@ -254,6 +258,9 @@ namespace Keire::RenderBackend
         packet.LightProbeVolumes = ResolveLightProbeVolumes(request.Scene);
         packet.DrawGrid = request.DrawGrid;
         packet.Vfx = std::move(request.Vfx);
+        packet.MaterialTimeSeconds = request.MaterialTimeSeconds;
+        packet.MaterialDeltaSeconds = request.MaterialDeltaSeconds;
+        packet.FrameIndex = request.FrameIndex;
         const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
         const auto meshParticleCount = std::ranges::count_if(packet.Vfx.Particles(),
                                                              [](const auto& particle)
@@ -722,6 +729,7 @@ namespace Keire::RenderBackend
             result.UsesInstancing = shader->LastGood->Definition().UsesInstancing;
             result.UsesImageBasedLighting = shader->LastGood->Definition().UsesImageBasedLighting;
             result.UsesSpatialLighting = shader->LastGood->Definition().SpatialLightingAbiVersion == 2U;
+            result.UsesVertexMaterialParameters = shader->LastGood->Definition().UsesVertexMaterialParameters;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {
                 const auto found = properties.find(property.Name);

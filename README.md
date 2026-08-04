@@ -588,16 +588,26 @@ production surface uses base-color, +Y normal, packed metallic-roughness, separa
 emissive semantics with neutral fallbacks. Edits are range-checked, previewed through live immutable revisions, saved
 atomically at the edit boundary, persisted to the catalog in the background, and recorded in project-asset undo.
 
-Create a **Material Graph** from the Project panel to author Surface PBR, Transparent, Decal, or Unlit shaders on the
-same production node canvas used by VFX. Its searchable, categorized library includes texture/UV and parallax paths,
-normal/detail layering, procedural noise, Fresnel, world/vertex inputs, remap and shaping math, emission, clear coat,
-sheen, keyword/static-switch variants, and confined custom functions. Stable cables, typed input defaults, texture
-asset/semantic picking, node duplication, undo/redo, and cost-aware generated diagnostics update as the graph changes.
-The adaptive shaded sphere/plane/cube/custom-mesh preview exposes lighting, exposure, and rotation controls while
-retaining the last-good shader. Save publishes deterministic HLSL and `.keireshader` variants under the graph's
-generated asset directory and the production compiler validates DXIL, SPIR-V, and MSL. Five progressive examples live
+Create a **Material Graph** from the Project panel to author Surface PBR, Transparent, Decal, Unlit, Hair PBR, or Eye
+PBR shaders on the same production node canvas used by VFX. The schema-v2 catalog provides more than 100 typed nodes
+across texture/UV, scene inputs, math/vector/color, procedural generation, normals, parallax, Material Attributes, and
+composable Standard/Clear Coat/Sheen/Subsurface/Transmission BSDF layers. It also includes keyword/static-switch
+variants and confined custom functions. Stable cables, typed input defaults, texture asset/semantic picking, node
+duplication, undo/redo, and cost-aware generated diagnostics update as the graph changes.
+The adaptive shaded sphere/plane/cube/custom-mesh preview executes the graph's built-in nodes per pixel, including UV,
+procedural, shaping, emission, normal, attributes, and BSDF paths, while exposing lighting, exposure, and rotation
+controls. Revisioned background compilation is debounced, discards stale completions, and retains the last-good shader.
+The shared graph canvas clips all cards, pins, cables, labels, and drag feedback to its viewport.
+Valid parameter-default edits publish an immutable development-material revision immediately, so entities using the
+graph update while it is authored; invalid edits leave the last-good scene material intact. Save queues a targeted
+compile and hot reload of deterministic HLSL and `.keireshader` variants under the graph's generated asset directory,
+where the production compiler validates DXIL, SPIR-V, and MSL. Import exposes a stable compiled material beneath the
+graph, so the graph can be selected in Mesh Renderer material slots or dropped directly onto a rendered Scene entity.
+Drop picking uses imported mesh bounds, and dropping on a model root applies slot zero to all rendered descendants.
+Built-in cube renderers expose the same material-slot workflow. Nine progressive examples live
 under `Samples/KeireSandbox/Assets/Materials/MaterialGraphs`. Typed `.keirematerialinstance` assets support
-bounded parent chains, property overrides, and keyword overrides. See
+bounded parent chains, property overrides, and keyword overrides, and import as assignable runtime material subassets.
+They work in Mesh Renderer slots and viewport drops without duplicating their parent graph. See
 [Shaders And Materials](docs/ShadersAndMaterials.md) for the contracts and safe-include rules.
 
 The Sandbox startup scene uses an imported humanoid model from `Assets/Meshes/T-Pose.fbx`, an Idle animation source,

@@ -267,7 +267,8 @@ namespace Keire
             Popup,
             Table,
             DragSource,
-            DragTarget
+            DragTarget,
+            Clip
         };
 
         UiScope(UiFrame& frame, Kind kind, bool visible, bool closeRequired) noexcept;
@@ -391,6 +392,13 @@ namespace Keire
         UiDragTargetScope(UiFrame& frame, bool visible) noexcept : UiScope(frame, Kind::DragTarget, visible, visible) {}
     };
 
+    class KEIRE_API UiClipScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiClipScope(UiFrame& frame) noexcept : UiScope(frame, Kind::Clip, true, true) {}
+    };
+
     class KEIRE_API UiPanelScope final : public UiScope
     {
       private:
@@ -432,6 +440,7 @@ namespace Keire
         [[nodiscard]] UiDragSourceScope BeginDragSource();
         [[nodiscard]] UiDragTargetScope BeginDragTarget();
         [[nodiscard]] UiDragTargetScope BeginDragTarget(UiItemRect area, std::string_view id);
+        [[nodiscard]] UiClipScope PushClipRect(UiItemRect rectangle);
         [[nodiscard]] UiPanelScope BeginPanel(UiPanelRegistration& panel, UiWindowOptions options = {});
         void OpenPopup(std::string_view id);
         void CloseCurrentPopup();

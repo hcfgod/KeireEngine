@@ -69,6 +69,15 @@ namespace KeireEditor
         std::string m_InspectorSymbol;
         std::string m_InspectorInclude;
         std::string m_InspectorFunction;
+        std::string m_InspectorDescription;
+        std::string m_InspectorCategory;
+        double m_InspectorSortPriority = 0.0;
+        double m_InspectorMinimum = 0.0;
+        double m_InspectorMaximum = 1.0;
+        double m_InspectorStep = 0.01;
+        bool m_InspectorHasMinimum = false;
+        bool m_InspectorHasMaximum = false;
+        bool m_InspectorHasStep = false;
         std::string m_NodeSearch;
         std::string m_Message;
         std::uint32_t m_PreviewWidth = 320;

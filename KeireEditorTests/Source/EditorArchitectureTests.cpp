@@ -1160,6 +1160,44 @@ TEST_CASE("scene picker selects transform-only and rendered entities by nearest 
     CHECK(KeireEditor::PickSceneEntity(scene, viewport, {100.0F, 100.0F}, camera) == transformOnly.Id());
 }
 
+TEST_CASE("scene material drops use imported bounds and expand model roots to rendered descendants")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000033"),
+                                                Keire::SceneAsset::EmptyDefinition("Material drop targets"));
+    auto root = scene->CreateEntity("Model root");
+    auto rendered = scene->CreateEntity("Offset mesh");
+    rendered.SetParent(root, false);
+    auto renderer = rendered.AddComponent<Keire::MeshRendererComponent>();
+    REQUIRE(renderer);
+    const auto mesh = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000034");
+    renderer->SetMesh(mesh);
+    auto nested = scene->CreateEntity("Nested mesh");
+    nested.SetParent(root, false);
+    REQUIRE(nested.AddComponent<Keire::MeshRendererComponent>());
+
+    Keire::RenderCamera camera;
+    camera.View = Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {}, {0.0F, 1.0F, 0.0F});
+    camera.Projection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 100.0F);
+    const Keire::UiItemRect viewport{{0.0F, 0.0F}, {200.0F, 200.0F}};
+    CHECK_FALSE(KeireEditor::PickSceneEntity(scene, viewport, {145.0F, 100.0F}, camera));
+    const auto picked =
+        KeireEditor::PickSceneEntity(scene, viewport, {145.0F, 100.0F}, camera,
+                                     [mesh](const Keire::AssetId requested) -> std::optional<Keire::MeshBounds>
+                                     {
+                                         if (requested == mesh)
+                                             return Keire::MeshBounds{{-4.0F, -0.5F, -0.5F}, {4.0F, 0.5F, 0.5F}};
+                                         return std::nullopt;
+                                     });
+    CHECK(picked == rendered.Id());
+
+    auto targets = KeireEditor::ResolveMaterialDropTargets(root);
+    std::ranges::sort(targets);
+    std::vector expected{rendered.Id(), nested.Id()};
+    std::ranges::sort(expected);
+    CHECK(targets == expected);
+    CHECK(KeireEditor::ResolveMaterialDropTargets(rendered) == std::vector{rendered.Id()});
+}
+
 TEST_CASE("scene framing bounds use imported mesh metadata and transformed descendants")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000031"),
@@ -1254,7 +1292,18 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
     router.Route(Keire::MaterialAsset::StaticType(), asset, target, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
+    commands.Material = {};
+    router.Route(Keire::MaterialGraphAsset::StaticType(), asset, target, commands);
+    CHECK(commands.Material == asset);
+    CHECK(commands.Target == target);
+    commands.Material = {};
+    router.Route(Keire::MaterialGraphInstanceAsset::StaticType(), asset, target, commands);
+    CHECK(commands.Material == asset);
+    CHECK(commands.Target == target);
     CHECK_THROWS_AS(router.Route(Keire::MaterialAsset::StaticType(), asset, {}, commands), std::invalid_argument);
+    CHECK_THROWS_AS(router.Route(Keire::MaterialGraphAsset::StaticType(), asset, {}, commands), std::invalid_argument);
+    CHECK_THROWS_AS(router.Route(Keire::MaterialGraphInstanceAsset::StaticType(), asset, {}, commands),
+                    std::invalid_argument);
     CHECK_THROWS_AS(
         router.Route(Keire::AssetTypeId::Parse("ed170000-0000-4000-8000-000000000042"), asset, {}, commands),
         std::invalid_argument);
@@ -1762,4 +1811,47 @@ TEST_CASE("Asset picker filters environment textures without exposing raw asset 
     auto mesh = hdr;
     mesh.Type = Keire::MeshAsset::StaticType();
     CHECK_FALSE(KeireEditor::AssetPicker::Accepts(mesh, options));
+}
+
+TEST_CASE("Asset picker resolves graph and instance drops and built-in meshes to renderer-safe assets")
+{
+    Keire::AssetSourceRecord graph;
+    graph.Id = Keire::AssetId::Generate();
+    graph.Type = Keire::MaterialGraphAsset::StaticType();
+    graph.RelativePath = "Materials/Layered.keirematerialgraph";
+    const auto compiledShader = Keire::AssetId::Generate();
+    const auto runtimeMaterial = Keire::AssetId::Generate();
+    graph.SubAssets = {compiledShader, runtimeMaterial};
+    Keire::AssetSourceRecord instance;
+    instance.Id = Keire::AssetId::Generate();
+    instance.Type = Keire::MaterialGraphInstanceAsset::StaticType();
+    instance.RelativePath = "Materials/LayeredInstance.keirematerialinstance";
+    const auto instanceMaterial = Keire::AssetId::Generate();
+    instance.SubAssets = {instanceMaterial};
+    const std::array records{graph, instance};
+
+    KeireEditor::AssetPickerOptions materialOptions;
+    materialOptions.Label = "Material";
+    materialOptions.ExpectedType = Keire::MaterialAsset::StaticType();
+    materialOptions.ResolveType = [runtimeMaterial,
+                                   instanceMaterial](const Keire::AssetId asset) -> std::optional<Keire::AssetTypeId>
+    {
+        return asset == runtimeMaterial || asset == instanceMaterial ? std::optional{Keire::MaterialAsset::StaticType()}
+                                                                     : std::nullopt;
+    };
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, graph.Id, materialOptions) == runtimeMaterial);
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, runtimeMaterial, materialOptions) ==
+          runtimeMaterial);
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, instance.Id, materialOptions) == instanceMaterial);
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, instanceMaterial, materialOptions) ==
+          instanceMaterial);
+    materialOptions.ResolveType = {};
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, graph.Id, materialOptions));
+
+    KeireEditor::AssetPickerOptions meshOptions;
+    meshOptions.Label = "Mesh";
+    meshOptions.ExpectedType = Keire::MeshAsset::StaticType();
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::MeshAsset::CubeId(), meshOptions) ==
+          Keire::MeshAsset::CubeId());
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset({}, Keire::AssetId::Generate(), meshOptions));
 }

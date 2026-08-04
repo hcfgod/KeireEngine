@@ -32,6 +32,7 @@ namespace Keire::Detail
     [[nodiscard]] std::string PathToUtf8(const std::filesystem::path& path);
     [[nodiscard]] std::filesystem::path PathFromUtf8(std::string_view value);
     [[nodiscard]] std::filesystem::path PathWithSuffix(const std::filesystem::path& path, std::string_view suffix);
+    [[nodiscard]] bool IsTransientFile(const std::filesystem::path& path);
     [[nodiscard]] std::string ReadTextFile(const std::filesystem::path& path, std::size_t maximumBytes);
     void PublishFileAtomically(const std::filesystem::path& temporary, const std::filesystem::path& destination);
     void WriteFileAtomically(const std::filesystem::path& path, std::span<const std::byte> contents);

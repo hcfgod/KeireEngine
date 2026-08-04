@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
 
 #include <functional>
+#include <future>
 #include <optional>
 #include <span>
 #include <string>
@@ -32,6 +33,10 @@ namespace KeireEditor
         Keire::MaterialGraphCompileOptions CompileOptions;
         std::function<void(Keire::AssetId, const Keire::MaterialGraphCompilation&, const MaterialGraphPreviewSettings&)>
             Preview;
+        std::function<void(Keire::AssetId, const Keire::MaterialGraphDefinition&,
+                           const Keire::MaterialGraphCompilation&,
+                           std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders)>
+            LiveApply;
         std::function<void(Keire::AssetId)> StopPreview;
         std::function<void(Keire::AssetId, std::span<const std::byte>)> Persist;
     };
@@ -104,17 +109,37 @@ namespace KeireEditor
         void SetCompileOptions(Keire::MaterialGraphCompileOptions options);
         void SetPreviewSettings(MaterialGraphPreviewSettings settings);
         [[nodiscard]] const MaterialGraphPreviewSettings& PreviewSettings() const noexcept { return m_PreviewSettings; }
+        void AdvanceCompilation(double deltaSeconds);
+        [[nodiscard]] bool CompilationPending() const noexcept;
 
       private:
-        void CompileAndPreview(const Keire::MaterialGraphDefinition& definition);
-        void RecompileCurrent();
+        struct BackgroundCompilation
+        {
+            std::uint64_t Generation = 0;
+            Keire::MaterialGraphDefinition Definition;
+            Keire::MaterialGraphCompilation Compilation;
+            std::vector<Keire::Ref<Keire::ShaderAsset>> DevelopmentShaders;
+        };
+
+        void QueueCompilation(const Keire::MaterialGraphDefinition& definition);
+        void StartPendingCompilation();
+        void ConsumeBackgroundCompilation(bool wait);
+        void ApplyCompilation(Keire::MaterialGraphDefinition definition, Keire::MaterialGraphCompilation compilation,
+                              std::vector<Keire::Ref<Keire::ShaderAsset>> developmentShaders = {});
+        void CompileAndPreview(const Keire::MaterialGraphDefinition& definition, bool compileDevelopmentShaders);
+        void RecompileCurrent(bool compileDevelopmentShaders = false);
 
         MaterialGraphDocumentSpecification m_Specification;
         Host m_Host;
         Keire::MaterialGraphCompilation m_Compilation;
         std::optional<Keire::MaterialGraphCompilation> m_LastGoodCompilation;
         std::optional<Keire::MaterialGraphDefinition> m_LastGoodDefinition;
+        std::optional<Keire::MaterialGraphDefinition> m_PendingDefinition;
+        std::future<BackgroundCompilation> m_BackgroundCompilation;
         MaterialGraphPreviewSettings m_PreviewSettings;
         std::string m_Diagnostic;
+        double m_CompileDebounceSeconds = 0.0;
+        std::uint64_t m_RequestedGeneration = 0;
+        std::uint64_t m_InFlightGeneration = 0;
     };
 } // namespace KeireEditor

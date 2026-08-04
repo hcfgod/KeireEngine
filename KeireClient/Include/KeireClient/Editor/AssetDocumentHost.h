@@ -133,9 +133,9 @@ namespace KeireEditor
                 throw std::invalid_argument("An asset document edit requires an undo name.");
             if (candidate == m_Draft)
                 return false;
-            const auto before = m_Draft;
+            auto before = m_Draft;
             Apply(candidate);
-            RecordApplied(name, before, std::move(candidate));
+            RecordApplied(name, AppliedDefinitions{std::move(before), std::move(candidate)});
             return true;
         }
 
@@ -212,6 +212,8 @@ namespace KeireEditor
                 }
                 catch (...)
                 {
+                    // Preview cancellation is advisory during noexcept document teardown.
+                    (void)0;
                 }
             }
             m_Asset = {};
@@ -266,6 +268,8 @@ namespace KeireEditor
                 }
                 catch (...)
                 {
+                    // Preserve the original preview failure even when best-effort restoration also fails.
+                    (void)0;
                 }
                 try
                 {
@@ -281,7 +285,13 @@ namespace KeireEditor
             m_Diagnostic.clear();
         }
 
-        void RecordApplied(const std::string_view name, Definition before, Definition after)
+        struct AppliedDefinitions final
+        {
+            Definition Before;
+            Definition After;
+        };
+
+        void RecordApplied(const std::string_view name, AppliedDefinitions definitions)
         {
             if (!m_Undo || !m_Undo->IsOpen())
                 return;
@@ -291,19 +301,19 @@ namespace KeireEditor
                 return m_Specification.EstimateSize ? m_Specification.EstimateSize(definition)
                                                     : m_Specification.Encode(definition).size();
             };
-            const auto beforeSize = estimate(before);
-            const auto afterSize = estimate(after);
+            const auto beforeSize = estimate(definitions.Before);
+            const auto afterSize = estimate(definitions.After);
             const auto estimated = beforeSize > std::numeric_limits<std::size_t>::max() - afterSize
                                        ? std::numeric_limits<std::size_t>::max()
                                        : beforeSize + afterSize;
             m_Undo->RecordApplied(Keire::CreateUndoCommand(
                 std::string(name),
-                [lifetime, after]
+                [lifetime, after = std::move(definitions.After)]
                 {
                     if (const auto state = lifetime.lock(); state && state->Owner)
                         state->Owner->ApplyIfCurrent(state->Serial, after);
                 },
-                [lifetime, before]
+                [lifetime, before = std::move(definitions.Before)]
                 {
                     if (const auto state = lifetime.lock(); state && state->Owner)
                         state->Owner->ApplyIfCurrent(state->Serial, before);

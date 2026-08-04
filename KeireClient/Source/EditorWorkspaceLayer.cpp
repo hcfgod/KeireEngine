@@ -74,37 +74,6 @@ namespace
         return found == themes.end() ? nullptr : &*found;
     }
 
-    [[nodiscard]] bool FileIsNewerThan(const std::filesystem::path& path,
-                                       const std::filesystem::file_time_type reference) noexcept
-    {
-        std::error_code error;
-        const auto modified = std::filesystem::last_write_time(path, error);
-        return error || modified > reference;
-    }
-
-    [[nodiscard]] bool AssetSourcesAreNewerThanCatalog(const std::filesystem::path& assetsRoot,
-                                                       const std::filesystem::path& catalog) noexcept
-    {
-        std::error_code error;
-        if (!std::filesystem::is_regular_file(catalog, error) || error)
-            return true;
-        const auto catalogTime = std::filesystem::last_write_time(catalog, error);
-        if (error)
-            return true;
-        for (std::filesystem::recursive_directory_iterator
-                 iterator(assetsRoot, std::filesystem::directory_options::skip_permission_denied, error),
-             end;
-             iterator != end; iterator.increment(error))
-        {
-            if (error)
-                return true;
-            if (iterator->is_regular_file(error) && !error && FileIsNewerThan(iterator->path(), catalogTime))
-                return true;
-            error.clear();
-        }
-        return false;
-    }
-
     [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
     {
         std::ifstream input(path, std::ios::binary);
@@ -451,6 +420,10 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                   if (m_MaterialGraphPanel)
                       m_MaterialGraphPanel->UpdatePreview(compilation, settings);
               },
+              .LiveApply = [this](const Keire::AssetId asset, const Keire::MaterialGraphDefinition& definition,
+                                  const Keire::MaterialGraphCompilation& compilation,
+                                  const std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders)
+              { ApplyMaterialGraphDevelopmentRevision(asset, definition, compilation, developmentShaders); },
               .StopPreview =
                   [this](const Keire::AssetId)
               {
@@ -1183,6 +1156,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
     }
     if (m_MaterialDocument->Dirty() && m_SelectedAsset != m_MaterialDocument->Asset())
         CommitMaterialDraft();
+    m_MaterialGraphDocument->AdvanceCompilation(time.UnscaledDeltaTime().Seconds());
     UpdateMaterialCatalogRefresh(time);
     if (m_SceneDocument->LoadOperation() && m_SceneDocument->LoadOperation()->State() == Keire::SceneLoadState::Failed)
     {

@@ -168,6 +168,10 @@ $testsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireTests\premake5
 $assetToolPremake = Get-Content (Join-Path (Get-RepositoryRoot) "AssetTool\premake5.lua") -Raw
 $assetToolSource = Get-Content (Join-Path (Get-RepositoryRoot) "AssetTool\Source\Main.cpp") -Raw
 $assetWorkerPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireAssetWorker\premake5.lua") -Raw
+Assert-True ($corePremake.Contains('touch-ninja-stamp.ps1') -and
+             $assetWorkerPremake.Contains('touch-ninja-stamp.ps1') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Windows\touch-ninja-stamp.ps1'))) `
+    "Ninja prebuild and prelink rules publish their declared Windows outputs"
 $managedPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Managed.lua") -Raw
 $unixFfmpegBuild = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\ffmpeg.sh") -Raw
 $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw

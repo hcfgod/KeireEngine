@@ -204,6 +204,33 @@ TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
     CHECK_THROWS((void)database->Refresh());
 }
 
+TEST_CASE("Asset database ignores files used for atomic writes and editor backups")
+{
+    TemporaryAssetProject project;
+    project.Write("Stable.fast", "stable");
+    project.Write("Stable.fast.tmp.123456789", "in-flight source");
+    project.Write("Stable.fast.keiremeta.tmp.987654321", "in-flight metadata");
+    project.Write("Stable.fast.asset-operation.tmp", "asset operation");
+    project.Write("Stable.fast~", "editor backup");
+
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.TransientFiles";
+    importer.Type = Keire::AssetTypeId::Parse("f1000000-0000-4000-8000-000000000012");
+    importer.Extensions = {".fast"};
+    importer.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    REQUIRE(database->Records().size() == 1);
+    CHECK(database->Records().front().RelativePath == std::filesystem::path("Stable.fast"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Stable.fast.tmp.123456789.keiremeta"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Stable.fast.keiremeta.tmp.987654321.keiremeta"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Stable.fast.asset-operation.tmp.keiremeta"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Stable.fast~.keiremeta"));
+    CHECK(database->Refresh() == 1);
+}
+
 TEST_CASE("C sharp source files use the text asset fallback")
 {
     TemporaryAssetProject project;
@@ -1110,7 +1137,16 @@ TEST_CASE("Generated subassets keep stable identities and are published with the
         const std::string source(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         if (source == "without child")
             return output;
+        REQUIRE(context.ResolveSubAssetId);
+        REQUIRE(context.ResolveSubAssetIdFor);
+        REQUIRE(context.ResolveAssetSource);
         const auto child = context.ResolveSubAssetId("material/stable");
+        CHECK(context.ResolveSubAssetIdFor(context.Asset, "material/stable") == child);
+        const auto parentSource = context.ResolveAssetSource(context.Asset);
+        REQUIRE(parentSource);
+        CHECK(parentSource->Id == context.Asset);
+        CHECK(parentSource->Type == Keire::TextAsset::StaticType());
+        CHECK(parentSource->RelativePath == context.RelativePath);
         const std::string generated = "generated material payload";
         const auto generatedBytes = std::as_bytes(std::span(generated.data(), generated.size()));
         output.SubAssets.push_back({child,

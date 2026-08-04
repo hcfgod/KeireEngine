@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <functional>
 #include <iterator>
 #include <mutex>
+#include <ranges>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
@@ -131,7 +133,7 @@ namespace Keire::Detail
             std::ifstream right(second, std::ios::binary);
             if (!left || !right)
                 return false;
-            std::array<char, 64U * 1024U> leftBytes{};
+            std::array<char, std::size_t{64} * 1024U> leftBytes{};
             std::array<char, leftBytes.size()> rightBytes{};
             while (left && right)
             {
@@ -233,6 +235,20 @@ namespace Keire::Detail
         auto result = path;
         result += PathFromUtf8(suffix).native();
         return result;
+    }
+
+    bool IsTransientFile(const std::filesystem::path& path)
+    {
+        const auto filename = PathToUtf8(path.filename());
+        if (filename.empty() || filename.ends_with('~') || path.extension() == ".tmp")
+            return true;
+
+        const auto marker = filename.rfind(".tmp.");
+        if (marker == std::string::npos)
+            return false;
+        const auto uniqueSuffix = std::string_view(filename).substr(marker + 5);
+        return !uniqueSuffix.empty() &&
+               std::ranges::all_of(uniqueSuffix, [](const unsigned char character) { return std::isdigit(character); });
     }
 
     bool TryRenamePathWithRetry(const std::filesystem::path& source, const std::filesystem::path& destination,

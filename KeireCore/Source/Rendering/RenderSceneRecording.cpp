@@ -2767,9 +2767,11 @@ namespace Keire::RenderBackend
                                            item.ReceiveShadows ? 1.0F : 0.0F, item.CastShadows ? 1.0F : 0.0F};
                 scene.LocalLightCounts = localLights.Counts;
                 scene.LocalLights = localLights.Lights;
+                scene.FrameParameters = {packet.MaterialTimeSeconds, packet.MaterialDeltaSeconds,
+                                         static_cast<float>(packet.FrameIndex & 0x00ffffffULL), 0.0F};
                 SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                 SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
-                std::array<Vector4, 64> numericProperties;
+                std::array<Vector4, 64> numericProperties{};
                 std::ranges::copy(material->NumericProperties, numericProperties.begin());
                 if (material->TintSlot && !material->UsesInstancing)
                 {
@@ -2779,9 +2781,11 @@ namespace Keire::RenderBackend
                     tint.Z *= item.Tint.Blue;
                     tint.W *= item.Tint.Alpha;
                 }
-                SDL_PushGPUFragmentUniformData(
-                    commands, 1, numericProperties.data(),
-                    static_cast<std::uint32_t>(material->NumericProperties.size() * sizeof(Vector4)));
+                const auto numericPropertyBytes = static_cast<std::uint32_t>(
+                    std::max<std::size_t>(material->NumericProperties.size(), 1U) * sizeof(Vector4));
+                if (material->UsesVertexMaterialParameters)
+                    SDL_PushGPUVertexUniformData(commands, 1, numericProperties.data(), numericPropertyBytes);
+                SDL_PushGPUFragmentUniformData(commands, 1, numericProperties.data(), numericPropertyBytes);
                 if (material->ReceivesShadows)
                 {
                     if (fragmentSlot2Binding != FragmentSlot2Binding::Shadows)
@@ -3027,14 +3031,19 @@ namespace Keire::RenderBackend
                                                        static_cast<float>(composed->Surface.AlphaMode), 1.0F, 0.0F};
                             scene.LocalLightCounts = localLights.Counts;
                             scene.LocalLights = localLights.Lights;
+                            scene.FrameParameters = {packet.MaterialTimeSeconds, packet.MaterialDeltaSeconds,
+                                                     static_cast<float>(packet.FrameIndex & 0x00ffffffULL), 0.0F};
                             SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                             SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
-                            if (!composed->NumericProperties.empty())
-                            {
-                                SDL_PushGPUFragmentUniformData(
-                                    commands, 1, composed->NumericProperties.data(),
-                                    static_cast<std::uint32_t>(composed->NumericProperties.size() * sizeof(Vector4)));
-                            }
+                            const Vector4 bindingSentinel{};
+                            const auto* numericProperties = composed->NumericProperties.empty()
+                                                                ? &bindingSentinel
+                                                                : composed->NumericProperties.data();
+                            const auto numericPropertyBytes = static_cast<std::uint32_t>(
+                                std::max<std::size_t>(composed->NumericProperties.size(), 1U) * sizeof(Vector4));
+                            if (composed->UsesVertexMaterialParameters)
+                                SDL_PushGPUVertexUniformData(commands, 1, numericProperties, numericPropertyBytes);
+                            SDL_PushGPUFragmentUniformData(commands, 1, numericProperties, numericPropertyBytes);
                             if (composed->ReceivesShadows)
                                 SDL_PushGPUFragmentUniformData(commands, 2, &shadowUniforms, sizeof(shadowUniforms));
                             else

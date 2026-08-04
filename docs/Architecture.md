@@ -401,15 +401,34 @@ refreshed after the editor becomes usable.
 second graph interaction implementation. It owns graph validation, undo/redo, compile options, generated diagnostics,
 and the last-good preview definition and compilation. `MaterialGraphPanel` owns only transient selection, inspector
 buffers, searchable node-palette state, graph gestures, output/preview controls, bounded adaptive software-preview
-pixels, and presentation. The graph compiler computes reverse reachability from the single Master node before lowering;
-the resulting immutable statistics and advisory diagnostics expose unused work, texture samples, estimated ALU, and
+pixels, and presentation. The preview evaluates the validated built-in graph per shaded sample using the same coercion,
+UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
+retain a bounded node-default fallback. The shared stable canvas installs an RAII draw-list clip covering the exact
+canvas rectangle, so nodes and connection feedback cannot escape into adjacent preview or inspector regions. The graph
+schema-v2 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, and legal shader
+stages. Schema-v1 data is upgraded through deterministic derived pin IDs, so migration does not dirty the same asset
+differently across machines. The compiler computes endpoint-aware reverse reachability from the single Master node
+before lowering vertex and fragment expressions; structured Material Attributes and BSDF values remain typed through
+validation and preview, then lower into private generated-shader structs rather than entering the renderer property ABI.
+The resulting immutable statistics and advisory diagnostics expose unused work, texture samples, estimated ALU, and
 variant pressure without weakening compile success. Built-in nodes are validated against canonical pin contracts even
-when disconnected, while legacy Master nodes accept neutral defaults for newer clear-coat and sheen inputs. The workspace
-supplies confined include reads, nonblocking custom-mesh resolution through the asset system, and persistence.
-Publication writes deterministic shader variants beneath the graph asset's ID-owned generated directory before writing
-the graph source, then queues the ordinary asset import boundary. Runtime `MaterialGraphAsset` and
-`MaterialGraphInstanceAsset` remain immutable data; instance resolution and baking are explicit, bounded operations and
-do not introduce mutable renderer-global material state.
+when disconnected, while legacy Master nodes accept neutral defaults for later surface and attributes inputs. Graph
+compilation is revisioned, debounced, and performed away from the owner thread; stale completions are discarded and only
+the newest valid result can replace the last-good preview. The workspace supplies confined include reads, nonblocking
+custom-mesh resolution through the asset system, and persistence.
+Successful graph revisions bake parameter defaults into the stable generated material and publish that material through
+the owner-thread development-asset boundary, giving scene renderers immediate immutable revisions without accepting an
+invalid graph. Save stages the complete deterministic shader directory under `Library/Transactions`, preserves metadata
+for retained variants, moves the previous generated directory aside, and publishes the canonical graph source only
+after the staged directory is live. Any source-publication failure restores the previous generated directory while
+preserving the original exception. The asset scanner ignores engine atomic-write temporaries and editor backups, so a
+concurrent scan cannot assign identities to files that will disappear at commit. A successful save then queues a
+targeted import of the parent graph, every generated shader/material subasset, and dependent loaded assets. Runtime
+`MaterialGraphAsset` and `MaterialGraphInstanceAsset` remain immutable
+data; instance resolution starts from graph defaults before applying bounded ancestry overrides and does not introduce
+mutable renderer-global material state. Instance import resolves source-indexed graph/instance ancestry and publishes
+its own stable ordinary `MaterialAsset` subasset referencing the root graph's deterministic shader variant; editor
+pickers and viewport drops alias the authoring instance to that renderer-safe identity.
 Catalog-producing editor work is isolated in the private `KeireAssetWorker` executable. `AssetOperationService` owns
 one child at a time, prioritizes external imports and explicit actions ahead of cook and coalesced material refreshes,
 and exchanges versioned request/progress/result documents under `Library/AssetOperations/<operation-id>`. A worker
@@ -450,6 +469,20 @@ semantic importer key, reconciled into the parent's metadata, validated with the
 the same transactional catalog as the parent. Model materials and embedded texture variants use this path. Material
 extraction reimports the model in the isolated asset worker, transactionally creates editable source assets, and only
 then publishes the replacement development catalog and source index.
+
+Material Graph import uses the same generated-subasset boundary: each keyword variant becomes a compiled `ShaderAsset`
+and the final subasset is the graph's default `MaterialAsset`. Editor assignment resolves the user-facing graph to that
+material identity before writing scene data, so `RenderSystem` continues to consume only its ordinary material/shader
+asset contract. Graph source, generated variants, and the runtime material therefore reload and cook as one dependency
+transaction without teaching Mesh Renderer components about authoring graph types.
+
+Generated material shaders obey the fixed six-lane mesh vertex ABI and the renderer's complete pixel-interpolator ABI,
+including variants whose graph does not consume every lane. Their vertex stage applies world-position offset before
+projection; the fragment stage applies bounded pixel-depth offset and evaluates metallic/roughness PBR, Forward+ local
+lights, shadows, image-based lighting, clear coat, sheen, subsurface, anisotropy, transmission, and refraction. Hair and
+Eye outputs are authored through the same ABI with output-specific neutral defaults and raster state. Graph parameters
+are packed into the ordinary material-property block; a zero-property sentinel keeps resource layouts valid on strict
+graphics backends.
 
 Windowing translates SDL drop sessions into an engine-owned event containing only opaque window identity, logical
 position, and filesystem paths. Editor hit-test adapters resolve Project folders or the Scene viewport. External import

@@ -195,6 +195,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::AssetId AssetBrowserSceneAsset() const noexcept override;
     [[nodiscard]] bool AssetBrowserSceneDirty() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> AssetBrowserManagedAssetTypes() const override;
+    [[nodiscard]] static bool FileIsNewerThan(const std::filesystem::path& path,
+                                              std::filesystem::file_time_type reference) noexcept;
+    [[nodiscard]] static bool AssetSourcesAreNewerThanCatalog(const std::filesystem::path& assetsRoot,
+                                                              const std::filesystem::path& catalog) noexcept;
     void RefreshAssetBrowserRecords();
     void SetAssetBrowserSelected(Keire::AssetId asset) noexcept override;
     void ClearAssetBrowserSceneSelection() noexcept override;
@@ -292,6 +296,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                             KeireEditor::AssetMutationPhase phase);
     void ApplyAssetImportResult(const Keire::AssetImportResult& result, bool reloadLoadedAssets,
                                 Keire::AssetId reloadAsset = {});
+    void CompletePendingMaterialAssignment(Keire::AssetId refreshedAsset);
     void QueueMaterialCatalogRefresh(Keire::AssetId reloadAsset = {});
     void UpdateMaterialCatalogRefresh(const Keire::Time& time);
     void FlushMaterialCatalogRefresh() noexcept;
@@ -388,6 +393,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void PreviewVfxEffect(Keire::AssetId asset, const Keire::VfxEffectDefinition& definition);
     void OpenMaterialGraph(Keire::AssetId asset);
     void SaveMaterialGraph();
+    void
+    ApplyMaterialGraphDevelopmentRevision(Keire::AssetId asset, const Keire::MaterialGraphDefinition& definition,
+                                          const Keire::MaterialGraphCompilation& compilation,
+                                          std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders) noexcept;
     void PersistMaterialGraph(Keire::AssetId asset, std::span<const std::byte> bytes);
     void EnsureEditorVfxPreviewWorld(std::uint32_t minimumParticleCapacity);
     void ResetEditorVfxPreviewWorld() noexcept;
@@ -546,6 +555,12 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     };
     std::vector<PendingAssetMutation> m_PendingAssetMutations;
     std::vector<PendingPrefabCreation> m_PendingPrefabCreations;
+    struct PendingMaterialAssignment
+    {
+        Keire::EntityId Entity;
+        Keire::AssetId Source;
+    };
+    std::optional<PendingMaterialAssignment> m_PendingMaterialAssignment;
     Keire::ManagedBuildOperationId m_LastManagedReload;
     Keire::ManagedBuildOperationId m_LastManagedBuildReport;
     Keire::Ref<Keire::InputActionContext> m_InputContext;

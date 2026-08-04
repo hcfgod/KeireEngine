@@ -5,14 +5,18 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <system_error>
+#include <thread>
 #include <vector>
 
 namespace
@@ -25,37 +29,24 @@ namespace
         return {bytes.begin(), bytes.end()};
     }
 
-    void WriteText(const std::filesystem::path& path, const std::string_view text)
+    void DrainCompilation(KeireEditor::MaterialGraphDocument& document, const double debounceSeconds = 0.075)
     {
-        std::filesystem::create_directories(path.parent_path());
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-        output.write(text.data(), static_cast<std::streamsize>(text.size()));
-        if (!output)
-            throw std::runtime_error("Cannot write Material Graph editor test file.");
+        document.AdvanceCompilation(debounceSeconds);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (document.CompilationPending() && std::chrono::steady_clock::now() < deadline)
+        {
+            std::this_thread::yield();
+            document.AdvanceCompilation(0.0);
+        }
+        REQUIRE_FALSE(document.CompilationPending());
     }
 
-    struct TemporaryDirectory final
-    {
-        TemporaryDirectory()
-            : Path(std::filesystem::temp_directory_path() /
-                   ("KeireMaterialGraphEditor-" + Keire::AssetId::Generate().ToString()))
-        {
-            std::filesystem::create_directories(Path);
-        }
-
-        ~TemporaryDirectory()
-        {
-            std::error_code error;
-            std::filesystem::remove_all(Path, error);
-        }
-
-        std::filesystem::path Path;
-    };
 } // namespace
 
 TEST_CASE("Material Graph document reuses the stable canvas and preserves last-good preview")
 {
     std::size_t previewCount = 0;
+    std::size_t liveApplyCount = 0;
     std::size_t persistCount = 0;
     std::vector<std::byte> persisted;
     bool includeAvailable = false;
@@ -81,6 +72,16 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
              CHECK(supportedPreview);
              ++previewCount;
          },
+         .LiveApply =
+             [&liveApplyCount](Keire::AssetId, const Keire::MaterialGraphDefinition& definition,
+                               const Keire::MaterialGraphCompilation& compilation,
+                               std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders)
+         {
+             CHECK_FALSE(definition.Nodes.empty());
+             CHECK(compilation.Succeeded());
+             CHECK(developmentShaders.size() <= compilation.Variants.size());
+             ++liveApplyCount;
+         },
          .Persist =
              [&persistCount, &persisted](Keire::AssetId, const std::span<const std::byte> bytes)
          {
@@ -93,6 +94,7 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
     REQUIRE(document.LastGoodCompilation());
     REQUIRE(document.LastGoodDefinition());
     CHECK(previewCount == 1);
+    CHECK(liveApplyCount == 1);
     const auto initialPreviewDefinition = *document.LastGoodDefinition();
     const auto canvas = document.BuildCanvasModel();
     REQUIRE(canvas.Nodes.size() == 1);
@@ -104,30 +106,111 @@ TEST_CASE("Material Graph document reuses the stable canvas and preserves last-g
         Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Custom, Keire::MaterialGraphValueType::Color);
     custom.Include = "Assets/Shaders/Nodes/Custom.hlsli";
     REQUIRE(document.AddNode(custom));
+    CHECK(document.CompilationPending());
+    document.AdvanceCompilation(0.07);
+    CHECK(document.CompilationPending());
+    DrainCompilation(document, 0.005);
     CHECK_FALSE(document.Publishable());
     REQUIRE(document.LastGoodCompilation());
     REQUIRE(document.LastGoodDefinition());
     CHECK(*document.LastGoodDefinition() == initialPreviewDefinition);
     CHECK(previewCount == 1);
+    CHECK(liveApplyCount == 1);
     CHECK_THROWS_AS(document.Save(), std::logic_error);
 
     includeAvailable = true;
     REQUIRE(document.EditNode(custom.Id, [](Keire::MaterialGraphNode& node) { node.Name = "Safe Custom Node"; }));
+    DrainCompilation(document);
+    INFO(document.Diagnostic());
     REQUIRE(document.Publishable());
     CHECK(previewCount == 2);
+    CHECK(liveApplyCount == 2);
     REQUIRE(document.Undo());
+    DrainCompilation(document);
     CHECK(previewCount == 3);
+    CHECK(liveApplyCount == 3);
     REQUIRE(document.Redo());
+    DrainCompilation(document);
     CHECK(previewCount == 4);
+    CHECK(liveApplyCount == 4);
     document.SetPreviewSettings({.Mesh = Keire::MaterialGraphPreviewMesh::Cube,
                                  .Exposure = 1.4F,
                                  .EnvironmentIntensity = 0.8F,
                                  .RotationDegrees = -25.0F});
     CHECK(previewCount == 5);
+    CHECK(liveApplyCount == 4);
     CHECK_THROWS_AS(document.SetPreviewSettings({.Exposure = 0.0F}), std::invalid_argument);
     document.Save();
     CHECK(persistCount == 1);
     CHECK_FALSE(persisted.empty());
+}
+
+TEST_CASE("Material Graph live apply coalesces edits and compiles shaders only when runtime code changes")
+{
+    std::vector<std::size_t> publishedShaderCounts;
+    std::vector<float> publishedRoughness;
+    KeireEditor::MaterialGraphDocument document(
+        {.LiveApply =
+             [&publishedShaderCounts,
+              &publishedRoughness](Keire::AssetId, const Keire::MaterialGraphDefinition&,
+                                   const Keire::MaterialGraphCompilation& compilation,
+                                   const std::span<const Keire::Ref<Keire::ShaderAsset>> shaders)
+         {
+             publishedShaderCounts.push_back(shaders.size());
+             const auto roughness = std::ranges::find(compilation.Properties, std::string("LiveRoughness"),
+                                                      &Keire::ShaderPropertyDefinition::Name);
+             if (roughness != compilation.Properties.end())
+                 publishedRoughness.push_back(roughness->DefaultValue.X);
+         },
+         .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    document.Create(Keire::AssetId::Generate());
+    REQUIRE(publishedShaderCounts == std::vector<std::size_t>{0});
+
+    auto roughness =
+        Keire::CreateMaterialGraphNode(Keire::MaterialGraphNodeKind::Parameter, Keire::MaterialGraphValueType::Scalar);
+    roughness.Name = "Live Roughness";
+    roughness.Symbol = "LiveRoughness";
+    roughness.Value = 0.2F;
+    REQUIRE(document.AddNode(roughness));
+    const auto& master = document.Definition().Nodes.front();
+    const auto roughnessInput =
+        std::ranges::find(master.Pins, std::string("Roughness"), &Keire::MaterialGraphPin::Name);
+    REQUIRE(roughnessInput != master.Pins.end());
+    const auto masterId = master.Id;
+    const auto roughnessInputId = roughnessInput->Id;
+    const auto baseColorInput =
+        std::ranges::find(master.Pins, std::string("BaseColor"), &Keire::MaterialGraphPin::Name);
+    REQUIRE(baseColorInput != master.Pins.end());
+    const auto baseColorPin = baseColorInput->Id;
+    REQUIRE(document.AddConnection({{}, {roughness.Id, roughness.Pins.front().Id}, {masterId, roughnessInputId}}));
+    DrainCompilation(document);
+    REQUIRE(publishedShaderCounts.back() == 1);
+    REQUIRE(publishedRoughness.back() == doctest::Approx(0.2F));
+
+    REQUIRE(document.EditNode(roughness.Id, [](Keire::MaterialGraphNode& node) { node.Value = 0.45F; }));
+    document.AdvanceCompilation(0.04);
+    REQUIRE(document.EditNode(roughness.Id, [](Keire::MaterialGraphNode& node) { node.Value = 0.8F; }));
+    document.AdvanceCompilation(0.04);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (document.CompilationPending() && std::chrono::steady_clock::now() < deadline)
+    {
+        std::this_thread::yield();
+        document.AdvanceCompilation(0.0);
+    }
+    REQUIRE_FALSE(document.CompilationPending());
+    CHECK(publishedShaderCounts.back() == 0);
+    CHECK(publishedRoughness.back() == doctest::Approx(0.8F));
+
+    REQUIRE(document.EditNode(masterId,
+                              [baseColorPin](Keire::MaterialGraphNode& node)
+                              {
+                                  const auto pin =
+                                      std::ranges::find(node.Pins, baseColorPin, &Keire::MaterialGraphPin::Id);
+                                  REQUIRE(pin != node.Pins.end());
+                                  pin->DefaultValue = Keire::Color{0.1F, 0.25F, 0.8F, 1.0F};
+                              }));
+    DrainCompilation(document);
+    CHECK(publishedShaderCounts.back() == 1);
 }
 
 TEST_CASE("Material Graph document validates interactive cables and replacement warnings")
@@ -211,6 +294,41 @@ TEST_CASE("Material Graph live preview renders every built-in shape and custom m
     CHECK_THROWS_AS((void)KeireEditor::RenderMaterialGraphPreview(request), std::invalid_argument);
 }
 
+TEST_CASE("Material Graph live preview evaluates procedural nodes instead of property-name approximations")
+{
+    const auto source = std::filesystem::current_path() /
+                        "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/03_ProceduralEmissive.keirematerialgraph";
+    const auto graph = Keire::MaterialGraphAsset::DecodeSource(ReadBytes(source));
+    const auto compilation = Keire::CompileMaterialGraph(graph);
+    REQUIRE(compilation.Succeeded());
+
+    KeireEditor::MaterialGraphPreviewRequest request{
+        .Output = graph.Output,
+        .Mesh = Keire::MaterialGraphPreviewMesh::Plane,
+        .Definition = &graph,
+        .Properties = compilation.Properties,
+        .Width = 128,
+        .Height = 96,
+        .Exposure = 1.0F,
+        .EnvironmentIntensity = 1.0F,
+        .RotationDegrees = 0.0F,
+    };
+    const auto evaluated = KeireEditor::RenderMaterialGraphPreview(request);
+    CHECK(KeireEditor::RenderMaterialGraphPreview(request) == evaluated);
+
+    request.Definition = nullptr;
+    const auto propertyApproximation = KeireEditor::RenderMaterialGraphPreview(request);
+    CHECK(evaluated != propertyApproximation);
+    std::uint64_t evaluatedBlue = 0;
+    std::uint64_t approximatedBlue = 0;
+    for (std::size_t index = 2; index < evaluated.size(); index += 4)
+    {
+        evaluatedBlue += std::to_integer<std::uint8_t>(evaluated[index]);
+        approximatedBlue += std::to_integer<std::uint8_t>(propertyApproximation[index]);
+    }
+    CHECK(evaluatedBlue > approximatedBlue);
+}
+
 TEST_CASE("Material Graph Sandbox progression compiles without dead authored work")
 {
     const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Materials/MaterialGraphs";
@@ -221,6 +339,7 @@ TEST_CASE("Material Graph Sandbox progression compiles without dead authored wor
                                std::string_view("05_AdaptiveTechSurface.keirematerialgraph")};
     constexpr std::array expectedNodes{3U, 10U, 10U, 12U, 17U};
     constexpr std::array expectedVariants{1U, 1U, 1U, 1U, 2U};
+    KeireEditor::MaterialGraphDocument document({.Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
     for (std::size_t index = 0; index < names.size(); ++index)
     {
         const auto bytes = ReadBytes(root / names[index]);
@@ -234,44 +353,56 @@ TEST_CASE("Material Graph Sandbox progression compiles without dead authored wor
         REQUIRE(compilation.Succeeded());
         CHECK(compilation.Statistics.UnusedNodeCount == 0);
         CHECK(compilation.Statistics.VariantCount == expectedVariants[index]);
+        document.Open(Keire::AssetId::Generate(), bytes, index + 1U, {});
+        const auto canvas = document.BuildCanvasModel();
+        CHECK(canvas.Nodes.size() == graph.Nodes.size());
+        CHECK(canvas.Connections.size() == graph.Connections.size());
+        document.Close();
     }
 }
 
-TEST_CASE("Material Graph hero example compiles every variant through production shader backends")
+TEST_CASE("Material Graph hero example imports compiled shader and runtime material subassets")
 {
     const auto path = std::filesystem::current_path() /
                       "Samples/KeireSandbox/Assets/Materials/MaterialGraphs/05_AdaptiveTechSurface.keirematerialgraph";
     const auto bytes = ReadBytes(path);
-    const auto graph = Keire::MaterialGraphAsset::DecodeSource(bytes);
-    Keire::MaterialGraphCompileOptions options;
-    options.GeneratedSource = "Assets/Generated/HeroMaterial.hlsl";
-    const auto compilation = Keire::CompileMaterialGraph(graph, options);
-    REQUIRE(compilation.Succeeded());
-    REQUIRE(compilation.Variants.size() == 2);
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.ProjectRoot = std::filesystem::current_path();
+    context.SourceRoot = context.ProjectRoot / "Samples/KeireSandbox/Assets";
+    context.SourcePath = path;
+    context.RelativePath = path.lexically_relative(context.SourceRoot);
+    context.ReadProjectFile = [root = context.ProjectRoot](const std::filesystem::path& relative)
+    { return ReadBytes(root / relative); };
+    std::map<std::string, Keire::AssetId, std::less<>> generatedIds;
+    context.ResolveSubAssetId = [&generatedIds](const std::string_view key)
+    { return generatedIds.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+    const auto importer = Keire::CreateMaterialGraphAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    const auto imported = importer.ContextualImport(context, bytes);
+    REQUIRE(imported.SubAssets.size() == 3);
 
-    TemporaryDirectory directory;
-    for (const auto& variant : compilation.Variants)
+    std::size_t shaders = 0;
+    const Keire::AssetGeneratedSubAsset* runtimeMaterial = nullptr;
+    for (const auto& subAsset : imported.SubAssets)
     {
-        const auto source = directory.Path / variant.GeneratedSource;
-        auto manifest = source;
-        manifest.replace_extension(".keireshader");
-        WriteText(source, variant.Hlsl);
-        WriteText(manifest, variant.Manifest);
-
-        Keire::AssetImportContext context;
-        context.ProjectRoot = directory.Path;
-        context.SourceRoot = directory.Path / "Assets";
-        context.SourcePath = manifest;
-        context.RelativePath = manifest.lexically_relative(context.SourceRoot);
-        context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
-        { return ReadBytes(root / relative); };
-        const auto importer = Keire::CreateShaderAssetImporter();
-        REQUIRE(importer.ContextualImport);
-        const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
-        const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
-        CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
-        CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
-        CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
-        CHECK(imported.Diagnostics.empty());
+        if (subAsset.Type == Keire::ShaderAsset::StaticType())
+        {
+            ++shaders;
+            const auto shader = Keire::ShaderAsset::Decode(subAsset.Bytes);
+            REQUIRE(shader);
+            CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
+            CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
+            CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+        }
+        else if (subAsset.Type == Keire::MaterialAsset::StaticType())
+            runtimeMaterial = &subAsset;
     }
+    CHECK(shaders == 2);
+    REQUIRE(runtimeMaterial != nullptr);
+    const auto material = Keire::MaterialAsset::Decode(runtimeMaterial->Bytes);
+    REQUIRE(material);
+    CHECK(material->Definition().Shader);
+    CHECK(std::ranges::find(runtimeMaterial->AssetDependencies, material->Definition().Shader) !=
+          runtimeMaterial->AssetDependencies.end());
 }

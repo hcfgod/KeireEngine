@@ -82,6 +82,13 @@ namespace Keire
         std::string Message;
     };
 
+    struct AssetImportSource
+    {
+        AssetId Id;
+        AssetTypeId Type;
+        std::filesystem::path RelativePath;
+    };
+
     struct AssetImportContext
     {
         AssetId Asset;
@@ -90,10 +97,12 @@ namespace Keire
         std::filesystem::path SourcePath;
         std::filesystem::path MetadataPath;
         std::filesystem::path RelativePath;
-        std::size_t MaximumDependencyBytes = 64U * 1024U * 1024U;
+        std::size_t MaximumDependencyBytes = std::size_t{64} * 1024U * 1024U;
         std::function<std::vector<std::byte>(const std::filesystem::path&)> ReadProjectFile;
         AssetImportSettings ImportSettings;
         std::function<AssetId(std::string_view)> ResolveSubAssetId;
+        std::function<AssetId(AssetId, std::string_view)> ResolveSubAssetIdFor;
+        std::function<std::optional<AssetImportSource>(AssetId)> ResolveAssetSource;
     };
 
     struct AssetGeneratedSubAsset
@@ -159,7 +168,7 @@ namespace Keire
         std::filesystem::path CacheDirectory = "Library/AssetCache";
         std::chrono::milliseconds ChangeDebounce = std::chrono::milliseconds(250);
         std::chrono::milliseconds ChangeMonitorInterval = std::chrono::milliseconds(100);
-        std::size_t MaximumSourceBytes = 1024U * 1024U * 1024U;
+        std::size_t MaximumSourceBytes = std::size_t{1024} * 1024U * 1024U;
         std::vector<AssetImporterRegistration> Importers;
     };
 
@@ -375,7 +384,7 @@ namespace Keire
         AssetTargetPlatform Target = AssetTargetPlatform::Host;
         int CompressionLevel = 1;
         std::uint64_t MaximumPackBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
-        std::size_t StreamPageBytes = 256U * 1024U;
+        std::size_t StreamPageBytes = std::size_t{256} * 1024U;
         bool Strict = false;
         std::vector<AssetId> Roots;
         // Strict cooks use the catalog produced by the already-compiled runtime managed generation. Keeping the
@@ -401,7 +410,7 @@ namespace Keire
                                                   std::stop_token cancellation = {},
                                                   AssetOperationProgressCallback progress = {});
         static void Validate(const std::filesystem::path& catalogPath,
-                             std::size_t maximumAssetBytes = 1024U * 1024U * 1024U);
+                             std::size_t maximumAssetBytes = std::size_t{1024} * 1024U * 1024U);
 
       private:
         friend class AssetDatabase;

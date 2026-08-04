@@ -101,6 +101,7 @@ namespace Keire
         std::vector<ShaderVariant> Variants;
         bool UsesImageBasedLighting = false;
         std::uint8_t SpatialLightingAbiVersion = 0;
+        bool UsesVertexMaterialParameters = false;
     };
 
     class KEIRE_API ShaderAsset final : public Asset
@@ -391,7 +392,7 @@ namespace Keire
     {
         std::filesystem::path Compiler;
         std::chrono::milliseconds Timeout = std::chrono::seconds(30);
-        std::size_t MaximumOutputBytes = 64U * 1024U * 1024U;
+        std::size_t MaximumOutputBytes = std::size_t{64} * 1024U * 1024U;
     };
 
     [[nodiscard]] KEIRE_API AssetImporterRegistration

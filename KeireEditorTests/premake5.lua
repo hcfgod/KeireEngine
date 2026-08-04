@@ -17,6 +17,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InputActionsDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialGraphDocument.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialGraphPublication.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialGraphPreview.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialInspectorPanel.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ManagedDataDocument.cpp",

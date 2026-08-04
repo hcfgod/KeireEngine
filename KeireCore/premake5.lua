@@ -26,15 +26,33 @@ project(ProjectConfig.CORE_TARGET)
 
     defines { "KEIRE_BUILDING_LIBRARY", "DT_POLYREF64" }
 
+    local commandRepositoryRoot = (_ACTION == "ninja" or _ACTION == "gmake") and "." or ".."
+    local windowsScripts = commandRepositoryRoot .. "/Scripts/Windows"
+    local unixScripts = commandRepositoryRoot .. "/Scripts/Unix"
+    local windowsPrebuildCommands = {
+        "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts .. "/build-info.ps1",
+        "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts .. "/builtin-shaders.ps1",
+        "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts .. "/builtin-skinning.ps1",
+        "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts .. "/builtin-vfx.ps1"
+    }
+    if _ACTION == "ninja" then
+        local prebuildDirectory = commandRepositoryRoot .. "/Build/Intermediates/" .. OutputDir .. "/" ..
+                                      ProjectConfig.CORE_TARGET
+        table.insert(windowsPrebuildCommands,
+                     "powershell -NoProfile -ExecutionPolicy Bypass -File " .. windowsScripts ..
+                         "/touch-ninja-stamp.ps1 -Path " .. prebuildDirectory .. "/" ..
+                         ProjectConfig.CORE_TARGET .. ".prebuild && exit /b 0")
+    end
+
     filter "system:windows"
-        prebuildcommands {
-            "if exist Scripts\\Windows\\build-info.ps1 (powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\build-info.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\builtin-shaders.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\builtin-skinning.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\\Windows\\builtin-vfx.ps1) else (powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\build-info.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\builtin-shaders.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\builtin-skinning.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File ..\\Scripts\\Windows\\builtin-vfx.ps1)"
-        }
+        prebuildcommands(windowsPrebuildCommands)
 
     filter { "system:linux or macosx" }
         prebuildcommands {
-            "if [ -f Scripts/Unix/build-info.sh ]; then bash Scripts/Unix/build-info.sh; else bash ../Scripts/Unix/build-info.sh; fi",
-            "if [ -f Scripts/Unix/builtin-shaders.sh ]; then bash Scripts/Unix/builtin-shaders.sh && bash Scripts/Unix/builtin-skinning.sh && bash Scripts/Unix/builtin-vfx.sh; else bash ../Scripts/Unix/builtin-shaders.sh && bash ../Scripts/Unix/builtin-skinning.sh && bash ../Scripts/Unix/builtin-vfx.sh; fi"
+            "bash " .. unixScripts .. "/build-info.sh",
+            "bash " .. unixScripts .. "/builtin-shaders.sh",
+            "bash " .. unixScripts .. "/builtin-skinning.sh",
+            "bash " .. unixScripts .. "/builtin-vfx.sh"
         }
 
     filter {}

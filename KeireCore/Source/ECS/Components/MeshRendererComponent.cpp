@@ -31,11 +31,13 @@ namespace Keire
         }
     } // namespace
 
-    MeshRendererComponent::MeshRendererComponent() : Component(StaticType()) {}
+    MeshRendererComponent::MeshRendererComponent() : Component(StaticType()), m_Mesh(MeshAsset::CubeId()) {}
 
     void MeshRendererComponent::SetMesh(const AssetId mesh)
     {
-        m_Mesh = mesh;
+        // An empty renderer mesh has always resolved to the built-in cube at runtime. Store that semantic explicitly
+        // so authoring tools can expose its material layout without querying an unavailable database record.
+        m_Mesh = mesh ? mesh : MeshAsset::CubeId();
         NotifyChanged();
     }
 
@@ -117,7 +119,7 @@ namespace Keire
 
     void MeshRendererComponent::Reset()
     {
-        m_Mesh = {};
+        m_Mesh = MeshAsset::CubeId();
         m_Materials.clear();
         m_Tint = {0.25F, 0.55F, 1.0F, 1.0F};
         m_Visible = true;

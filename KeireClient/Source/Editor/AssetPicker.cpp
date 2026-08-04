@@ -47,6 +47,7 @@ namespace
     struct AssetPickerCandidate final
     {
         Keire::AssetId Id;
+        Keire::AssetId DropAlias;
         std::string DisplayLabel;
         std::string SelectionLabel;
     };
@@ -61,6 +62,10 @@ namespace
             return "Animation Clip";
         if (type == Keire::RigDefinitionAsset::StaticType())
             return "Rig";
+        if (type == Keire::ShaderAsset::StaticType())
+            return "Compiled Shader";
+        if (type == Keire::MaterialAsset::StaticType())
+            return "Compiled Material";
         return "Generated Asset";
     }
 
@@ -88,23 +93,34 @@ namespace
             capacity += record.SubAssets.size();
 
         std::vector<AssetPickerCandidate> result;
-        result.reserve(capacity);
+        result.reserve(capacity + 1U);
+        if (options.ExpectedType == Keire::MeshAsset::StaticType())
+        {
+            const auto cube = Keire::MeshAsset::CubeId();
+            result.push_back({cube, {}, "Built-in / Cube", "Built-in / Cube##" + cube.ToString()});
+        }
         for (const auto& record : records)
         {
             if (AcceptsCandidate(record, record.Id, record.Type, options))
             {
                 auto label = record.RelativePath.generic_string();
-                result.push_back({record.Id, label, label + "##" + record.Id.ToString()});
+                result.push_back({record.Id, {}, label, label + "##" + record.Id.ToString()});
             }
             if (!options.ResolveType)
+            {
                 continue;
+            }
             for (const auto subAsset : record.SubAssets)
             {
-                const auto type = options.ResolveType(subAsset);
+                auto type = options.ResolveType(subAsset);
                 if (!type || !AcceptsCandidate(record, subAsset, *type, options))
                     continue;
                 auto label = record.RelativePath.generic_string() + " / " + GeneratedAssetLabel(*type);
-                result.push_back({subAsset, label, label + "##" + subAsset.ToString()});
+                const auto materialSource = record.Type == Keire::MaterialGraphAsset::StaticType() ||
+                                            record.Type == Keire::MaterialGraphInstanceAsset::StaticType();
+                const auto dropAlias =
+                    materialSource && *type == Keire::MaterialAsset::StaticType() ? record.Id : Keire::AssetId{};
+                result.push_back({subAsset, dropAlias, label, label + "##" + subAsset.ToString()});
             }
         }
         return result;
@@ -131,6 +147,18 @@ namespace KeireEditor
         }
         const auto extension = Lower(record.RelativePath.extension().string());
         return extension == ".hdr" || extension == ".exr";
+    }
+
+    std::optional<Keire::AssetId>
+    AssetPicker::ResolveCompatibleAsset(const std::span<const Keire::AssetSourceRecord> records,
+                                        const Keire::AssetId dropped, const AssetPickerOptions& options)
+    {
+        if (!dropped)
+            return std::nullopt;
+        const auto candidates = BuildCandidates(records, options);
+        const auto found = std::ranges::find_if(candidates, [dropped](const auto& candidate)
+                                                { return candidate.Id == dropped || candidate.DropAlias == dropped; });
+        return found == candidates.end() ? std::nullopt : std::optional<Keire::AssetId>(found->Id);
     }
 
     bool AssetPicker::Draw(Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> records,
@@ -187,14 +215,13 @@ namespace KeireEditor
                     try
                     {
                         const auto assets = DecodeAssetPayload(payload);
-                        const auto dropped =
-                            assets.empty() ? candidates.end()
-                                           : std::ranges::find(candidates, assets.front(), &AssetPickerCandidate::Id);
-                        if (dropped == candidates.end())
+                        const auto dropped = assets.empty() ? std::optional<Keire::AssetId>{}
+                                                            : ResolveCompatibleAsset(records, assets.front(), options);
+                        if (!dropped)
                             m_Diagnostic = "The dropped asset is not compatible with this field.";
                         else
                         {
-                            value = dropped->Id;
+                            value = *dropped;
                             changed = true;
                             m_Diagnostic.clear();
                         }

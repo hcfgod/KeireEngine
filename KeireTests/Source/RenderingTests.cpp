@@ -478,6 +478,53 @@ TEST_CASE("Assimp imports a deterministic static OBJ into the Kéire mesh format
     CHECK(mesh->Vertices().front().Tangent.X == doctest::Approx(1.0F));
 }
 
+TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward normals")
+{
+    const auto projectRoot = std::filesystem::current_path() / "Samples/KeireSandbox";
+    const auto sourceRoot = projectRoot / "Assets";
+    const auto sourcePath = sourceRoot / "Meshes/TexturedPyramid.obj";
+    REQUIRE(std::filesystem::is_regular_file(sourcePath));
+
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("c0ffee00-0000-4000-8000-000000000001");
+    context.ProjectRoot = projectRoot;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = sourcePath;
+    context.RelativePath = "Meshes/TexturedPyramid.obj";
+    context.ReadProjectFile = [projectRoot](const std::filesystem::path& relative)
+    { return ReadTestBytes(projectRoot / relative); };
+    std::unordered_map<std::string, Keire::AssetId> subAssets;
+    context.ResolveSubAssetId = [&subAssets](const std::string_view key)
+    { return subAssets.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto importer = Keire::CreateMeshAssetImporter();
+    const auto output = importer.ContextualImport(context, ReadTestBytes(sourcePath));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    REQUIRE(mesh->Indices().size() % 3U == 0U);
+    for (std::size_t triangle = 0; triangle < mesh->Indices().size(); triangle += 3U)
+    {
+        REQUIRE(mesh->Indices()[triangle] < mesh->Vertices().size());
+        REQUIRE(mesh->Indices()[triangle + 1U] < mesh->Vertices().size());
+        REQUIRE(mesh->Indices()[triangle + 2U] < mesh->Vertices().size());
+        const auto& first = mesh->Vertices()[mesh->Indices()[triangle]];
+        const auto& second = mesh->Vertices()[mesh->Indices()[triangle + 1U]];
+        const auto& third = mesh->Vertices()[mesh->Indices()[triangle + 2U]];
+        const Keire::Vector3 firstEdge{second.Position.X - first.Position.X, second.Position.Y - first.Position.Y,
+                                       second.Position.Z - first.Position.Z};
+        const Keire::Vector3 secondEdge{third.Position.X - first.Position.X, third.Position.Y - first.Position.Y,
+                                        third.Position.Z - first.Position.Z};
+        const Keire::Vector3 faceNormal{firstEdge.Y * secondEdge.Z - firstEdge.Z * secondEdge.Y,
+                                        firstEdge.Z * secondEdge.X - firstEdge.X * secondEdge.Z,
+                                        firstEdge.X * secondEdge.Y - firstEdge.Y * secondEdge.X};
+        const Keire::Vector3 authoredNormal{first.Normal.X + second.Normal.X + third.Normal.X,
+                                            first.Normal.Y + second.Normal.Y + third.Normal.Y,
+                                            first.Normal.Z + second.Normal.Z + third.Normal.Z};
+        const float agreement =
+            faceNormal.X * authoredNormal.X + faceNormal.Y * authoredNormal.Y + faceNormal.Z * authoredNormal.Z;
+        CHECK(agreement > 0.0F);
+    }
+}
+
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
@@ -740,6 +787,9 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     CHECK_THROWS_AS(camera->SetVerticalFieldOfViewDegrees(180.0F), std::invalid_argument);
 
     auto renderer = Keire::CreateRef<Keire::MeshRendererComponent>();
+    CHECK(renderer->Mesh() == Keire::MeshAsset::CubeId());
+    renderer->SetMesh({});
+    CHECK(renderer->Mesh() == Keire::MeshAsset::CubeId());
     renderer->SetMesh(Keire::MeshAsset::CubeId());
     renderer->SetMaterial(Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000002"));
     renderer->SetMaterial(2, Keire::AssetId::Parse("b1b2c3d4-1000-4000-8000-000000000003"));

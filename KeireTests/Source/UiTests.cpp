@@ -9,6 +9,7 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -128,6 +129,21 @@ namespace
                 ui.DrawTriangle({120.0F, 50.0F}, {130.0F, 30.0F}, {140.0F, 50.0F}, {0.0F, 1.0F, 1.0F, 1.0F});
                 ui.DrawFilledTriangle({145.0F, 50.0F}, {155.0F, 30.0F}, {165.0F, 50.0F}, {1.0F, 0.5F, 0.0F, 1.0F});
                 ui.DrawOverlayText({170.0F, 30.0F}, {1.0F, 1.0F, 1.0F, 1.0F}, "overlay");
+                {
+                    const auto content = ui.ContentRect();
+                    const Keire::UiItemRect clipRectangle{{content.Minimum.X + 4.0F, content.Minimum.Y + 4.0F},
+                                                          {content.Minimum.X + 28.0F, content.Minimum.Y + 28.0F}};
+                    const auto clip = ui.PushClipRect(clipRectangle);
+                    const auto& activeClip = ImGui::GetWindowDrawList()->_ClipRectStack.back();
+                    CHECK(activeClip.x == doctest::Approx(clipRectangle.Minimum.X));
+                    CHECK(activeClip.y == doctest::Approx(clipRectangle.Minimum.Y));
+                    CHECK(activeClip.z == doctest::Approx(clipRectangle.Maximum.X));
+                    CHECK(activeClip.w == doctest::Approx(clipRectangle.Maximum.Y));
+                    ui.DrawLine({0.0F, 0.0F}, {80.0F, 80.0F}, {1.0F, 1.0F, 1.0F, 1.0F});
+                }
+                CHECK_THROWS_AS((void)ui.PushClipRect({{0.0F, 0.0F}, {0.0F, 1.0F}}), std::invalid_argument);
+                CHECK_THROWS_AS((void)ui.PushClipRect({{0.0F, 0.0F}, {std::numeric_limits<float>::infinity(), 1.0F}}),
+                                std::invalid_argument);
                 CHECK_THROWS_AS(ui.DrawCircle({0.0F, 0.0F}, -1.0F, {}), std::invalid_argument);
                 bool checked = false;
                 (void)ui.Checkbox("Check", checked);

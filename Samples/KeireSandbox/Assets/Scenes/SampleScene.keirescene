@@ -34,7 +34,7 @@
             "mask": 4294967295,
             "maximumSlope": 50.0,
             "radius": 0.3499999940395355,
-            "runtimeId": "e72f044e-cfa5-47c3-befd-e82f829e3753",
+            "runtimeId": "bfa641e0-3aae-4db8-bd8f-a13443b2984c",
             "skinWidth": 0.03999999910593033,
             "stepHeight": 0.3499999940395355
           },
@@ -250,7 +250,7 @@
             "castShadows": true,
             "giReceive": 0,
             "lightmapScale": 1.0,
-            "material": "3132442d-9879-4138-bcb5-15d693c3938e",
+            "material": "fb5f2683-f3d9-516c-a24e-3817e6386ab9",
             "mesh": "c0ffee00-0000-4000-8000-000000000001",
             "preserveLightmapUvs": true,
             "receiveShadows": true,
@@ -373,7 +373,7 @@
               1.0
             ],
             "indirectMultiplier": 1.0,
-            "intensity": 1.2549999952316284,
+            "intensity": 4.501999855041504,
             "shadowBias": 0.054999999701976776,
             "shadowResolution": 2,
             "shadowStrength": 1.0,
@@ -392,7 +392,7 @@
       "parent": null
     },
     {
-      "active": true,
+      "active": false,
       "components": [
         {
           "data": {
@@ -488,8 +488,8 @@
             "castShadows": true,
             "giReceive": 0,
             "lightmapScale": 1.0,
-            "material": "3132442d-9879-4138-bcb5-15d693c3938e",
-            "mesh": null,
+            "material": "56dfa187-c6e1-5788-9930-3f525451f3b9",
+            "mesh": "4b454952-4543-5542-454d-455348000001",
             "preserveLightmapUvs": true,
             "receiveShadows": true,
             "staticLighting": false,
@@ -1131,8 +1131,8 @@
             "receiveShadows": true,
             "staticLighting": false,
             "tint": [
-              0.25,
-              0.550000011920929,
+              1.0,
+              1.0,
               1.0,
               1.0
             ],

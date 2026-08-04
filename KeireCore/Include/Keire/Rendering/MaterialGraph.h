@@ -22,7 +22,9 @@ namespace Keire
         Surface,
         Transparent,
         Decal,
-        Unlit
+        Unlit,
+        Hair,
+        Eye
     };
 
     enum class MaterialGraphValueType : std::uint8_t
@@ -32,13 +34,24 @@ namespace Keire
         Vector3,
         Vector4,
         Color,
-        Texture2D
+        Texture2D,
+        MaterialAttributes,
+        Bsdf
     };
 
     enum class MaterialGraphPinDirection : std::uint8_t
     {
         Input,
         Output
+    };
+
+    enum class MaterialGraphShaderStage : std::uint8_t
+    {
+        None = 0,
+        Vertex = 1U << 0U,
+        Fragment = 1U << 1U,
+        Compute = 1U << 2U,
+        All = (1U << 0U) | (1U << 1U) | (1U << 2U)
     };
 
     enum class MaterialGraphNodeKind : std::uint8_t
@@ -85,7 +98,67 @@ namespace Keire
         RotateUV,
         SimpleNoise,
         Desaturate,
-        Posterize
+        Posterize,
+        Round,
+        Truncate,
+        Sign,
+        Modulo,
+        SquareRoot,
+        ReciprocalSquareRoot,
+        Exponential2,
+        Logarithm2,
+        Tangent,
+        ArcSine,
+        ArcCosine,
+        ArcTangent2,
+        Cross,
+        Distance,
+        Reflect,
+        Refract,
+        AppendVector,
+        ComponentMask,
+        UV1,
+        WorldTangent,
+        CameraPosition,
+        ObjectPosition,
+        Time,
+        DeltaTime,
+        ScreenPosition,
+        DerivativeX,
+        DerivativeY,
+        FilterWidth,
+        DepthFade,
+        Luminance,
+        HueShift,
+        Checkerboard,
+        VoronoiNoise,
+        Panner,
+        PolarCoordinates,
+        SphereMask,
+        RadialGradient,
+        LinearGradient,
+        Contrast,
+        Saturation,
+        BlendOverlay,
+        Blackbody,
+        ReflectionVector,
+        FacingRatio,
+        Dither,
+        GradientNoise,
+        Wave,
+        TriplanarSample,
+        TextureSampleLevel,
+        HeightToNormal,
+        FlattenNormal,
+        MakeMaterialAttributes,
+        BreakMaterialAttributes,
+        BlendMaterialAttributes,
+        StandardSurfaceBsdf,
+        ClearCoatBsdf,
+        SheenBsdf,
+        SubsurfaceBsdf,
+        TransmissionBsdf,
+        BsdfToMaterialAttributes
     };
 
     enum class MaterialGraphDiagnosticSeverity : std::uint8_t
@@ -103,7 +176,30 @@ namespace Keire
         Custom
     };
 
-    using MaterialGraphValue = std::variant<float, Vector2, Vector3, Vector4, Color, AssetId>;
+    struct MaterialGraphMaterialAttributesValue
+    {
+        bool operator==(const MaterialGraphMaterialAttributesValue&) const = default;
+    };
+
+    struct MaterialGraphBsdfValue
+    {
+        bool operator==(const MaterialGraphBsdfValue&) const = default;
+    };
+
+    using MaterialGraphValue = std::variant<float, Vector2, Vector3, Vector4, Color, AssetId,
+                                            MaterialGraphMaterialAttributesValue, MaterialGraphBsdfValue>;
+
+    struct MaterialGraphParameterMetadata
+    {
+        std::string Description;
+        std::string Category;
+        std::int32_t SortPriority = 0;
+        std::optional<float> Minimum;
+        std::optional<float> Maximum;
+        std::optional<float> Step;
+
+        bool operator==(const MaterialGraphParameterMetadata&) const = default;
+    };
 
     struct MaterialGraphPin
     {
@@ -120,6 +216,7 @@ namespace Keire
     {
         AssetId Id;
         MaterialGraphNodeKind Kind = MaterialGraphNodeKind::Constant;
+        std::string TypeId;
         std::string Name;
         Vector2 EditorPosition;
         MaterialGraphValueType ValueType = MaterialGraphValueType::Scalar;
@@ -128,6 +225,7 @@ namespace Keire
         std::string Symbol;
         std::filesystem::path Include;
         std::string Function;
+        MaterialGraphParameterMetadata ParameterMetadata;
         std::vector<MaterialGraphPin> Pins;
 
         bool operator==(const MaterialGraphNode&) const = default;
@@ -162,7 +260,7 @@ namespace Keire
 
     struct MaterialGraphDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         MaterialGraphOutput Output = MaterialGraphOutput::Surface;
         std::vector<MaterialGraphNode> Nodes;
         std::vector<MaterialGraphConnection> Connections;
@@ -227,6 +325,18 @@ namespace Keire
         std::size_t MaximumConnections = 4096;
         std::size_t MaximumCustomIncludes = 64;
         std::function<std::optional<std::string>(const std::filesystem::path&)> ReadInclude;
+    };
+
+    struct MaterialGraphNodeDescriptor
+    {
+        MaterialGraphNodeKind Kind = MaterialGraphNodeKind::Constant;
+        std::string_view TypeId;
+        std::string_view DisplayName;
+        std::string_view Category;
+        MaterialGraphValueType DefaultValueType = MaterialGraphValueType::Scalar;
+        MaterialGraphShaderStage Stages = MaterialGraphShaderStage::All;
+        std::size_t EstimatedAluInstructions = 0;
+        bool UserCreatable = true;
     };
 
     struct MaterialGraphInstanceDefinition
@@ -295,6 +405,12 @@ namespace Keire
     CreateDefaultMaterialGraph(MaterialGraphOutput output = MaterialGraphOutput::Surface);
     [[nodiscard]] KEIRE_API MaterialGraphNode CreateMaterialGraphNode(
         MaterialGraphNodeKind kind, MaterialGraphValueType valueType = MaterialGraphValueType::Scalar);
+    [[nodiscard]] KEIRE_API MaterialGraphNode
+    CreateMaterialGraphNode(std::string_view typeId, MaterialGraphValueType valueType = MaterialGraphValueType::Scalar);
+    [[nodiscard]] KEIRE_API std::string_view MaterialGraphNodeTypeId(MaterialGraphNodeKind kind) noexcept;
+    [[nodiscard]] KEIRE_API const MaterialGraphNodeDescriptor*
+    FindMaterialGraphNodeDescriptor(std::string_view typeId) noexcept;
+    [[nodiscard]] KEIRE_API std::span<const MaterialGraphNodeDescriptor> MaterialGraphNodeCatalog() noexcept;
     KEIRE_API void ValidateMaterialGraph(const MaterialGraphDefinition& definition);
     [[nodiscard]] KEIRE_API MaterialGraphCompilation
     CompileMaterialGraph(const MaterialGraphDefinition& definition, const MaterialGraphCompileOptions& options = {});
