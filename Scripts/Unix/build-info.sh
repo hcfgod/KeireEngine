@@ -48,9 +48,9 @@ output="$directory/BuildInfo.generated.h"
 mkdir -p "$directory"
 temporary="$(mktemp "$output.XXXXXX.tmp")"
 trap 'rm -f "$temporary"' EXIT
-printf '#pragma once\n\n#define KEIRE_BUILD_PROJECT_VERSION "%s"\n#define KEIRE_BUILD_PROJECT_NAME "%s"\n#define KEIRE_BUILD_GIT_COMMIT "%s"\n#define KEIRE_BUILD_GIT_DIRTY %s\n' \
+printf '#pragma once\n\n#define KEIRE_BUILD_PROJECT_VERSION "%s"\n#define KEIRE_BUILD_PROJECT_NAME "%s"\n#define KEIRE_BUILD_REPOSITORY_SLUG "%s"\n#define KEIRE_BUILD_GIT_COMMIT "%s"\n#define KEIRE_BUILD_GIT_DIRTY %s\n' \
   "$(c_string_escape "$PROJECT_VERSION")" "$(c_string_escape "$PROJECT_DISPLAY_NAME")" \
-  "$(c_string_escape "$commit")" "$dirty" > "$temporary"
+  "$(c_string_escape "$REPOSITORY_SLUG")" "$(c_string_escape "$commit")" "$dirty" > "$temporary"
 if [[ ! -f "$output" ]] || ! cmp -s "$temporary" "$output"; then
   mv "$temporary" "$output"
 else

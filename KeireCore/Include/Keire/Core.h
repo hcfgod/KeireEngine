@@ -16,6 +16,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Audio/AudioSystem.h"
+#include "Keire/Build/PlayerBuild.h"
 #include "Keire/BuildInfo.h"
 #include "Keire/Diagnostics/Diagnostic.h"
 #include "Keire/Diagnostics/Profiler.h"

@@ -113,6 +113,22 @@ KeireRuntime --content Cooked --record Captures\run.keirereplay --profile strict
 KeireRuntime --content Cooked --verify Captures\run.keirereplay --headless --output Captures\result.json
 ```
 
+Standalone desktop players use saved Build Profiles and separately installed Build Support. In the editor, open
+**Build > Build Profiles**, choose Windows/Linux/macOS and x86_64/ARM64, then use **Build** or **Build & Run**. Successful
+players are published to `<Project>/Build/<profile-output-slug>/`; foreign targets can be assembled on any host, while
+Build & Run requires a matching host. Missing support opens the Hub's **Build Support** page for the selected target.
+Player icons are selected from imported image assets, Windows game executables launch without a console, and packaged
+runtime scenes plus authored Game UI present directly through the native renderer without initializing editor ImGui.
+
+Automation uses the same isolated pipeline:
+
+```powershell
+KeireAssetTool build-player --project C:\Projects\Game --profile "Windows Dist" --status build-status.json
+```
+
+See [Desktop Player Builds](docs/PlayerBuilds.md) for profile/settings files, offline support installation, layouts,
+signing-hook JSON, release scripts, and the native platform matrix.
+
 SDK source modules are compiled with the application. See `Examples/SourceModule`: CMake's
 `keire_define_source_module_pack` creates the shared static pack and `keire_link_source_module_pack` links it into each
 host. `Config/SourceModules.premake.lua` provides the equivalent Premake helpers. This is a source contract, not a
@@ -478,6 +494,12 @@ Interactive editor startup requires a validated project; the normal launcher ope
 `Config/Client.json` is optional when implicit, while an explicitly named missing file is an error. Window, Hub UI, and
 full project editor smoke modes are bounded; the latter exercises project locks, assets, scenes, input, workspace, and
 clean shutdown.
+
+Windows editor, Hub, and runtime executables carry the repository Kéire icon in both Visual Studio and Ninja builds.
+Desktop player icon settings remain optional: packaging uses the selected Texture2D when present and otherwise
+generates the built-in Kéire artwork for the Windows executable/ICO, Linux desktop entry, or macOS application bundle.
+The Hub is single-instance per installed executable. Repeated editor or Build Support launches activate the existing
+tray-owned Hub, and one **Show Hub** action restores and focuses it; shutdown closes the tray handle before SDL exits.
 
 ## Application, Layers, Events, And Time
 

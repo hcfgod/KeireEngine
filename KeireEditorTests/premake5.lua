@@ -7,6 +7,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     files
     {
         "Source/**.cpp",
+        "../KeireHub/Source/HubInstance.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetOperationService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetPicker.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/AssetBrowserFolderCache.cpp",
@@ -41,6 +42,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     includedirs
     {
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Include",
+        "../KeireHub/Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 

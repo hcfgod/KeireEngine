@@ -35,9 +35,10 @@ namespace Keire
 {
     const BuildInfo& GetBuildInfo() noexcept
     {
-        static constexpr BuildInfo Info{KEIRE_BUILD_PROJECT_NAME,  KEIRE_BUILD_PROJECT_VERSION, KEIRE_BUILD_GIT_COMMIT,
-                                        KEIRE_BUILD_CONFIGURATION, KEIRE_BUILD_COMPILER,        KEIRE_BUILD_PLATFORM,
-                                        KEIRE_BUILD_ARCHITECTURE,  KEIRE_BUILD_GIT_DIRTY};
+        static constexpr BuildInfo Info{
+            KEIRE_BUILD_PROJECT_NAME, KEIRE_BUILD_PROJECT_VERSION, KEIRE_BUILD_REPOSITORY_SLUG,
+            KEIRE_BUILD_GIT_COMMIT,   KEIRE_BUILD_CONFIGURATION,   KEIRE_BUILD_COMPILER,
+            KEIRE_BUILD_PLATFORM,     KEIRE_BUILD_ARCHITECTURE,    KEIRE_BUILD_GIT_DIRTY};
         return Info;
     }
 

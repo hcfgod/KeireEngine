@@ -1,0 +1,142 @@
+# Desktop Player Builds
+
+Kéire builds standalone desktop players from persistent project settings. The editor and automation use the same
+`KeireAssetTool build-player` entrypoint, and successful output is published beneath
+`<Project>/Build/<profile-output-slug>/`.
+
+## Editor Workflow
+
+Open **Build > Build Profiles** to create, duplicate, rename, delete, or select a profile. Each profile chooses Windows,
+Linux, or macOS; x86_64 or ARM64; and Development, Release, or Dist. Development uses the Debug player template and
+includes symbols by default. Release uses the optimized Release template. Dist uses the windowed production template
+and omits symbols by default. Strict target-specific asset validation applies to every configuration.
+
+The same panel edits the product name, semantic version, reverse-DNS application identifier, window title, optional
+platform icons, and signing policy. Each icon field is a searchable Texture2D asset picker that also accepts compatible
+Project-panel drag and drop. Selecting **Kéire default icon** uses the embedded player artwork. Settings are saved to:
+
+- `ProjectSettings/Player.keiresettings`
+- `ProjectSettings/BuildProfiles.keiresettings`
+
+Projects without these files receive in-memory defaults: the project name, version `0.1.0`, a project-ID-derived
+identifier, and one host Development profile. The project descriptor schema does not change.
+
+**Build** assembles any target with installed Build Support. **Build & Run** is available only when the target platform
+and architecture match the editor host. **Cancel** requests cooperative cancellation, and **Reveal Build** opens the
+last successful output. A dirty scene or dirty Project Settings document prompts for **Save All**, **Build Saved State**,
+or **Cancel**; unsaved in-memory state is never included silently.
+
+## Automation
+
+```text
+KeireAssetTool build-player --project <path> --profile <id-or-name> [--status <path>]
+```
+
+The command exits nonzero on validation, managed compilation, cooking, packaging, signing, cancellation, or publication
+failure. When `--status` is supplied it atomically replaces a schema-versioned JSON document throughout the build. The
+document contains `state`, `phase`, `progress`, `message`, `output`, and `executable`. The editor runs this command in an
+isolated child process.
+
+The pipeline validates saved settings, the startup scene, source modules, and Build Support; compiles runtime-classified
+C# assemblies; cooks strict content; copies an immutable native template and managed runtime into
+`Build/.staging/<build-id>`; applies branding and signing; validates the complete player; and atomically replaces the
+profile output. Failure and cancellation remove staging while preserving the previous successful build. A locked
+previous build fails explicitly.
+
+## Output Layouts
+
+Windows players contain `<Product>.exe`, `PlayerBuild.json`, `Content/`, `Managed/`, native dependencies, a generated
+ICO, and optional `Symbols/`. On Windows hosts, the selected or generated icon is also written into the executable's PE
+resources so Explorer, shortcuts, and the running window use it; the native runtime template already carries the Kéire
+fallback for foreign-host assembly. Packaged Windows executables use the GUI subsystem and therefore do not allocate a
+console when launched normally. Linux players contain `<Product>`, the descriptor and runtime directories, a desktop
+entry, hicolor PNG icons, and optional symbols. macOS players use `<Product>.app/Contents/{MacOS,Resources}` with
+`Info.plist`, `PlayerIcon.icns`, content, the managed runtime, and optional external symbols.
+
+`KeireRuntime --content <path>` remains available for tests and low-level consumers. With no `--content`, a packaged
+runtime locates `PlayerBuild.json` beside the executable or in its macOS Resources directory, validates its target and
+relative paths, and applies player identity, content, managed-runtime, and window settings. An explicit `--content`
+always takes precedence. The player presents the game surface directly to the native swapchain and composites authored
+Game UI draw commands with its dedicated SDL_GPU pipeline. Dear ImGui is neither initialized nor framed by the player;
+it remains an editor-only presentation backend. Managed gameplay uses the same scene-runtime presentation services as
+Play Mode for audio, VFX playback and events, authored UI interaction, and cursor control.
+
+## Build Support
+
+Build Support is installed independently of projects beneath Kéire's per-user preference directory:
+
+```text
+BuildSupport/<engine-version>/<pack-id>/
+```
+
+Open the Hub's **Build Support** page to import a `.keireplayersupport` file, monitor or cancel installation, verify and
+repair an installed module, inspect its size/status, or remove it. Selecting a missing target in the editor opens this
+page focused on that platform and architecture. Offline packages are supported directly through the filtered file
+picker.
+
+**Check Online** fetches `player-support-catalog.json` from the versioned GitHub release derived from the binary's
+repository slug and engine version. Redirects remain HTTPS-only. Before installation, the downloaded archive must match
+the catalog's exact byte size and SHA-256. Windows uses WinHTTP, macOS uses NSURLSession, and Linux uses libcurl; release
+toolchains must supply the locked libcurl build rather than an ambient command-line downloader.
+
+Packages are zstd-compressed streaming archives containing regular files only. Their manifest binds schema and engine
+versions, player ABI, platform, architecture, source-module catalog, configuration variants, paths, sizes, SHA-256
+digests, executable modes, and bounded branding slots. Installation rejects traversal, symlinks, duplicate or
+case-colliding paths, oversized entries, corruption, incompatible ABIs, and mismatched source modules. Extraction,
+registry update, repair, and removal are transactional.
+
+Release maintainers produce native modules on the target OS/toolchain:
+
+```powershell
+./Scripts/Windows/player-support.ps1 -Architecture x86_64
+./Scripts/Windows/player-support.ps1 -Architecture arm64
+```
+
+```sh
+bash Scripts/Unix/player-support.sh x86_64
+bash Scripts/Unix/player-support.sh arm64
+```
+
+The Unix script emits Linux modules on Linux and macOS modules on macOS. Each invocation builds Development, Release,
+and Dist templates, creates and verifies the archive, and writes a catalog entry containing the archive size and
+SHA-256. Publishing the six Windows/Linux/macOS × x86_64/ARM64 modules remains an explicit release operation.
+
+The equivalent low-level commands are `pack-player-support`, `verify-player-support`, `install-player-support`,
+`list-player-support`, and `remove-player-support` on `KeireAssetTool`.
+
+## Signing Hooks
+
+Signing policy is `Disabled`, `SignIfConfigured`, or `Required`. Kéire launches the configured executable directly,
+without a shell, after branding:
+
+```text
+<hook> <profile-arguments...> --request <request.json> --response <response.json>
+```
+
+The schema-1 request contains the staging root, relative main artifact, target platform/architecture/configuration,
+product identity and version, and the SHA-256 of every staged file. A successful schema-1 response is:
+
+```json
+{
+  "schemaVersion": 1,
+  "success": true,
+  "modifiedFiles": ["relative/path/changed/by/the/hook"]
+}
+```
+
+The hook must declare exactly the files it changed. An unsafe path, undeclared modification, missing required environment
+variable, timeout, nonzero exit, or malformed response fails the build. Credentials stay in environment variables or
+external credential stores and are never serialized into the project. Local hooks can wrap `signtool` or `codesign`;
+foreign-target hooks may call a remote signing service. Apple notarization and store submission are post-build release
+steps.
+
+## Native Release Matrix
+
+| Player target | Native template toolchain | Cross-host assembly | Matching-host execution |
+| --- | --- | --- | --- |
+| Windows x86_64 / ARM64 | MSVC Windows toolchain | Yes | Windows only |
+| Linux x86_64 / ARM64 | Supported Linux Clang toolchain | Yes | Linux only |
+| macOS x86_64 / ARM64 | Apple Clang and SDK | Yes | macOS only |
+
+Foreign outputs are structurally validated on the assembly host. Executable smoke testing, native signing, and platform
+distribution validation run on the target OS and architecture.

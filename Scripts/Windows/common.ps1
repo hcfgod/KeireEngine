@@ -191,7 +191,9 @@ function Test-WindowsGeneratedPackagePath {
 
     $normalized = $RelativePath.Replace('\', '/')
     $segments = $normalized.Split('/', [StringSplitOptions]::RemoveEmptyEntries)
-    foreach ($segment in $segments) {
+    for ($index = 0; $index -lt $segments.Count; ++$index) {
+        $segment = $segments[$index]
+        if ($segment -eq "Build" -and $index -eq 2 -and $segments[0] -eq "include") { continue }
         if ($segment -in @("Library", "Logs", "Build", "Temp", "SceneRecovery", "Recovery")) { return $true }
     }
 
@@ -249,7 +251,7 @@ function Get-WindowsRequiredPackagePaths {
         "examples\consumer\Main.cpp", "examples\consumer\Client.json", "examples\consumer\CMakeLists.txt", "examples\consumer\README.md",
         "examples\managed-consumer\ClientApplication.cpp", "examples\managed-consumer\CMakeLists.txt", "examples\managed-consumer\README.md",
         "examples\source-module\ClientApplication.cpp", "examples\source-module\GameplayModule.cpp", "examples\source-module\GameplayModule.h", "examples\source-module\CMakeLists.txt", "examples\source-module\README.md",
-        "Config\SourceModules.premake.lua", "docs\Diagnostics\KEIRE-AUDIO-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0002.md",
+        "Config\SourceModules.premake.lua", "docs\PlayerBuilds.md", "docs\Diagnostics\KEIRE-AUDIO-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0001.md", "docs\Diagnostics\KEIRE-REPLAY-0002.md",
         "README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json"
     )
 }

@@ -86,6 +86,7 @@ namespace Keire::RenderBackend
             throw std::logic_error("A render frame is already active.");
         FrameActive = true;
         Requests.clear();
+        RuntimeUiCommands.clear();
         ++Statistics.Frame;
         Statistics.Passes = 0;
         Statistics.Surfaces = 0;
@@ -172,6 +173,7 @@ namespace Keire::RenderBackend
     {
         FrameActive = false;
         Requests.clear();
+        RuntimeUiCommands.clear();
     }
 
     void RenderSharedState::Submit(SceneRenderRequest request)

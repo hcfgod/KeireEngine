@@ -296,7 +296,7 @@ namespace Keire
                     CreateRef<SceneSystem>(m_Impl->Specification.Scenes, m_Impl->Assets, m_Impl->EventSystem);
             }
             m_Impl->Clock = std::make_unique<Time>(m_Impl->Specification.Timing);
-            m_Impl->Windowing = CreateRef<WindowSystem>();
+            m_Impl->Windowing = CreateRef<WindowSystem>(m_Impl->Specification.Windowing);
             m_Impl->PrimaryWindow = m_Impl->Windowing->CreateWindow(m_Impl->Specification.MainWindow);
 
             auto renderSpecification = m_Impl->Specification.Render;

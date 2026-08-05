@@ -7,7 +7,8 @@ $Sources = @(
     @{ Prefix = "BuiltinUnlit"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinUnlit.hlsl") },
     @{ Prefix = "BuiltinSky"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinSky.hlsl") },
     @{ Prefix = "BuiltinShadow"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinShadow.hlsl") },
-    @{ Prefix = "BuiltinToneMap"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinToneMap.hlsl") }
+    @{ Prefix = "BuiltinToneMap"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinToneMap.hlsl") },
+    @{ Prefix = "BuiltinRuntimeUi"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinRuntimeUi.hlsl") }
 )
 $Generated = Join-Path $Root "Build\Generated\Keire\BuiltinUnlitShaders.h"
 

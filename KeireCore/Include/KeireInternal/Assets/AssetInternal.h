@@ -64,6 +64,8 @@ namespace Keire::Detail
     inline constexpr std::uint64_t PackHeaderBytes = 16;
 
     [[nodiscard]] Sha256Digest Sha256(std::span<const std::byte> bytes) noexcept;
+    [[nodiscard]] Sha256Digest Sha256File(const std::filesystem::path& path,
+                                          std::uintmax_t maximumBytes = 16ULL * 1024ULL * 1024ULL * 1024ULL);
     [[nodiscard]] std::string DigestToString(const Sha256Digest& digest);
     [[nodiscard]] Sha256Digest ParseDigest(std::string_view value);
     [[nodiscard]] CatalogData LoadCatalog(const std::filesystem::path& path);

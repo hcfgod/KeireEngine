@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/LightingPanel.h"
@@ -44,6 +45,7 @@ namespace KeireEditor
     class InputActionsPanel;
     class AudioMixerPanel;
     class MaterialGraphPanel;
+    class PlayerBuildService;
     class VfxEffectPanel;
     class InspectorPanel;
     class HierarchyPanel;
@@ -100,6 +102,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         DeleteTheme,
         DirtyTheme,
         DirtyScene,
+        DirtyPlayerBuild,
         RenameEntity
     };
 
@@ -131,6 +134,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawDeleteDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace, std::string_view title, bool theme);
     void DrawDirtyThemeDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawDirtySceneDialog(Keire::UiFrame& ui);
+    void DrawDirtyPlayerBuildDialog(Keire::UiFrame& ui);
     void DrawThemeEditor(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     [[nodiscard]] KeireEditor::InputActionsDocument& InputActionsState() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& InputActionsTheme() const noexcept override;
@@ -310,6 +314,17 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void CookAssets();
     void StartManagedBuild();
     void UpdateManagedBuild(const Keire::Time& time);
+    void RequestPlayerBuild(bool runAfterBuild);
+    void StartPlayerBuild(bool runAfterBuild);
+    void UpdatePlayerBuild();
+    void BindPlayerBuildCommands();
+    void InitializePlayerBuild();
+    void ShutdownPlayerBuild() noexcept;
+    void SavePlayerBuildConfiguration();
+    void OpenBuildSupportHub(const Keire::PlayerBuildProfile& profile);
+    void RevealPlayerBuild();
+    [[nodiscard]] bool CanBuildPlayer(bool runAfterBuild) const noexcept;
+    [[nodiscard]] bool CanRevealPlayerBuild() const noexcept;
     void CreateInputActions(Keire::InputActionAssetDefinition definition, std::string_view baseName);
     [[nodiscard]] KeireEditor::AnimatorControllerDocument& AnimatorControllerState() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& AnimatorControllerTheme() const noexcept override;
@@ -533,6 +548,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::optional<Keire::SceneDefinition> m_PendingPlayEditorBefore;
     std::unique_ptr<KeireEditor::ExternalAssetImportController> m_ExternalAssetImport;
     std::unique_ptr<KeireEditor::AssetOperationService> m_AssetOperations;
+    std::unique_ptr<KeireEditor::PlayerBuildService> m_PlayerBuildService;
     Keire::UiThemeDefinition m_Theme;
     Keire::UiThemeId m_PendingTheme;
     Dialog m_Dialog = Dialog::None;
@@ -569,6 +585,14 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::optional<PendingMaterialAssignment> m_PendingMaterialAssignment;
     Keire::ManagedBuildOperationId m_LastManagedReload;
     Keire::ManagedBuildOperationId m_LastManagedBuildReport;
+    Keire::PlayerSettings m_PlayerSettings;
+    Keire::PlayerBuildProfiles m_PlayerBuildProfiles;
+    Keire::AssetId m_PlayerSigningEditProfile;
+    KeireEditor::AssetPicker m_WindowsPlayerIconPicker;
+    KeireEditor::AssetPicker m_LinuxPlayerIconPicker;
+    KeireEditor::AssetPicker m_MacOSPlayerIconPicker;
+    std::string m_PlayerSigningArgumentsText;
+    std::string m_PlayerSigningEnvironmentText;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
     std::optional<Keire::InputCaptureOverride> m_ManagedInputCaptureOverride;
@@ -692,12 +716,12 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::ScenePlayState m_PlayResumeState = Keire::ScenePlayState::Stopped;
     std::unordered_set<Keire::AssetId> m_PlayEditorTouchedEntities;
     bool m_PlayStartPending = false;
+    bool m_PlayerBuildSettingsLoaded = false;
+    bool m_PendingPlayerBuildRun = false;
+    bool m_PlayerBuildReported = false;
     bool m_CloseThemeAfterDecision = false;
     bool m_OpenDialog = false;
     bool m_Smoke = false;
     bool m_InitializeProject = false;
     int m_GameAspect = 0;
-    int m_BuildConfiguration = 0;
-    int m_BuildPlatform = 0;
-    bool m_BuildSymbols = true;
 };

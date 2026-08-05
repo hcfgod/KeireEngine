@@ -1,7 +1,5 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
-#include <chrono>
-
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -20,6 +18,7 @@
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
@@ -34,7 +33,6 @@
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
-
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -58,7 +56,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
 namespace
 {
     const Keire::UiLayoutInfo* ActiveLayout(const std::vector<Keire::UiLayoutInfo>& layouts)
@@ -730,6 +727,7 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
             return state != Keire::ManagedBuildState::Generating && state != Keire::ManagedBuildState::Compiling &&
                    state != Keire::ManagedBuildState::Publishing;
         });
+    BindPlayerBuildCommands();
     m_CommandRouter->Bind(
         KeireEditor::EditorCommand::CancelAssetOperation,
         [this]
@@ -853,6 +851,7 @@ void EditorWorkspaceLayer::OnAttach()
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
+            InitializePlayerBuild();
             RefreshAssetBrowserRecords();
             const auto catalog = project->AssetCatalog();
             std::error_code catalogError;
@@ -969,6 +968,7 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
+    ShutdownPlayerBuild();
     if (m_AssetOperations)
         m_AssetOperations->Shutdown();
     try
@@ -1129,6 +1129,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         UpdateManagedBuild(time);
         ContinuePendingPlayMode();
     }
+    UpdatePlayerBuild();
     if (!m_AssetDatabase)
         return;
     Keire::ProfileScope assetWork(Owner().GetProfiler(), Keire::ProfileCategory::Assets, "Asset work");

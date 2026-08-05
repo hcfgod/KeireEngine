@@ -13,6 +13,7 @@ project(ProjectConfig.CLIENT_TARGET)
         "Source/**.cpp",
         "Source/**.cxx"
     }
+    AddKeireApplicationIcon()
 
     includedirs
     {
@@ -23,7 +24,7 @@ project(ProjectConfig.CLIENT_TARGET)
     LinkKeireSourceModules()
     LinkKeireCore()
 
-    dependson { AssetWorkerTarget }
+    dependson { AssetWorkerTarget, AssetToolTarget, RuntimeTarget }
     AddKeireManagedRuntimeDependency()
 
     local clientCommandPrefix = _ACTION == "ninja" and "KeireClient/" or ""

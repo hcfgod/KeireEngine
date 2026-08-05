@@ -89,6 +89,7 @@ Copy-Item "$sdlInstall\cmake\*" "$stage\third-party\SDL3\cmake\" -Recurse
 Copy-Item "$sdlInstall\licenses\SDL3" "$stage\third-party\SDL3\licenses\" -Recurse
 Copy-Item "$Root\README.md", "$Root\LICENSE.txt", "$Root\THIRD_PARTY_NOTICES.md" $stage
 Copy-Item "$Root\docs\Diagnostics\*" "$stage\docs\Diagnostics\" -Recurse
+Copy-Item "$Root\docs\PlayerBuilds.md" "$stage\docs\"
 Copy-Item "$Root\Config\SourceModules.premake.lua" "$stage\Config\"
 Copy-Item "$Root\Examples\Consumer\*" "$stage\examples\consumer\" -Recurse
 Copy-Item "$Root\Examples\ManagedConsumer\*" "$stage\examples\managed-consumer\" -Recurse

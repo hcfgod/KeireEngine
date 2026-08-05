@@ -2,7 +2,10 @@
 #include "KeireProjectModules/SourceModulePack.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/Build/PlayerPackage.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/WindowInternal.h"
 
 #include <nlohmann/json.hpp>
 
@@ -51,6 +54,11 @@ namespace
         RuntimeReplayAction ReplayAction = RuntimeReplayAction::None;
         std::filesystem::path ReplayPath;
         std::filesystem::path OutputPath;
+        std::filesystem::path ManagedRuntime;
+        std::string ProductName = "Keire Runtime";
+        std::string ProductVersion;
+        std::string WindowTitle = "Kéire Runtime";
+        std::string ApplicationIdentifier;
         Keire::ReplayProfile ReplayProfile = Keire::ReplayProfile::StrictVerified;
         bool Headless = false;
     };
@@ -168,6 +176,9 @@ namespace
     [[nodiscard]] RuntimeCommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
     {
         RuntimeCommandLine result;
+        const auto executable =
+            std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).lexically_normal();
+        const auto packaged = Keire::Detail::LoadPackagedPlayerConfiguration(executable);
         for (std::size_t index = 1; index < arguments.Size(); ++index)
         {
             const auto option = arguments[index];
@@ -237,11 +248,24 @@ namespace
             else
                 throw Keire::CommandLineError("Unknown runtime option: " + std::string(option));
         }
+        if (packaged)
+        {
+            if (result.Content.empty())
+                result.Content = packaged->Content;
+            result.ManagedRuntime = packaged->ManagedRuntime;
+            result.ProductName = packaged->Settings.ProductName;
+            result.ProductVersion = packaged->Settings.Version;
+            result.WindowTitle = packaged->Settings.WindowTitle;
+            result.ApplicationIdentifier = packaged->Settings.ApplicationIdentifier;
+        }
         if (result.Content.empty())
-            throw Keire::CommandLineError("KeireRuntime requires --content <path>.");
+            throw Keire::CommandLineError(
+                "KeireRuntime requires --content <path> unless launched from a packaged player.");
         if (!result.OutputPath.empty() && result.ReplayAction == RuntimeReplayAction::None)
             throw Keire::CommandLineError("--output requires --record, --play, or --verify.");
         result.Content = std::filesystem::absolute(result.Content).lexically_normal();
+        if (result.ManagedRuntime.empty())
+            result.ManagedRuntime = executable.parent_path() / "Managed";
         return result;
     }
 
@@ -450,6 +474,8 @@ namespace
             surface.Width = std::max(pixels.Width, 1U);
             surface.Height = std::max(pixels.Height, 1U);
             m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderSystemInternalAccess::SetPresentationSurface(*Owner().Renderer(), m_View->Surface());
+            m_EventSink = Keire::WindowSystemInternalAccess::AddEventSink(*Owner().Windows(), this, HandleNativeEvent);
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(this);
             if (m_DefaultInput)
@@ -459,8 +485,8 @@ namespace
                     m_InputUser = input->CreateUser("Player");
                     for (const auto& device : input->Devices())
                     {
-                        if (device.Connected)
-                            (void)input->PairDevice(m_InputUser, device.Id);
+                        if (device.Connected && !input->PairDevice(m_InputUser, device.Id))
+                            throw std::runtime_error("The player could not claim a connected input device.");
                     }
                     m_InputContext = input->CreateActionContext(m_DefaultInput, m_InputUser);
                 }
@@ -469,6 +495,13 @@ namespace
 
         void OnDetach() noexcept override
         {
+            ApplyManagedCursorMode(true);
+            if (m_EventSink)
+            {
+                if (const auto windows = Owner().Windows())
+                    Keire::WindowSystemInternalAccess::RemoveEventSink(*windows, m_EventSink);
+                m_EventSink = 0;
+            }
             try
             {
                 const auto replay = Owner().Replay();
@@ -483,6 +516,8 @@ namespace
             }
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(nullptr);
+            if (const auto renderer = Owner().Renderer())
+                Keire::RenderSystemInternalAccess::SetPresentationSurface(*renderer, {});
             if (m_Presentation)
                 m_Presentation->Clear();
             if (m_Runtime)
@@ -505,7 +540,6 @@ namespace
 
         void OnUpdate(const Keire::Time& time) override
         {
-            m_DeltaTime = static_cast<float>(time.DeltaTime().Seconds());
             if (!m_Runtime)
             {
                 if (m_Load->State() == Keire::SceneLoadState::Failed)
@@ -581,37 +615,66 @@ namespace
             Keire::SceneRenderRequest renderRequest{m_Scene, m_View, false, environment};
             if (const auto vfx = m_Runtime->Vfx())
                 renderRequest.Vfx = vfx->CaptureRenderSnapshot();
+            Owner().Renderer()->SubmitRuntimeUi(m_Presentation->Ui());
             Owner().Renderer()->Submit(std::move(renderRequest));
             if (m_CommandLine.Frames != 0 && ++m_RenderedFrames >= m_CommandLine.Frames)
                 Owner().RequestExit();
         }
 
-        void OnUi(Keire::UiFrame& ui) override
+        static void HandleNativeEvent(void* context, const SDL_Event& event) noexcept
         {
-            if (m_View)
+            try
             {
-                ui.Image(m_View->Surface(), ui.ContentAvailable());
-                const auto rectangle = ui.LastItemRect();
-                if (m_Presentation)
+                static_cast<RuntimeLayer*>(context)->ProcessNativeEvent(event);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        void ProcessNativeEvent(const SDL_Event& event)
+        {
+            if (!m_Presentation)
+                return;
+            const auto logical = Owner().MainWindow()->LogicalSize();
+            const auto pixels = Owner().MainWindow()->PixelSize();
+            const float scaleX = logical.Width == 0 ? 1.0F : static_cast<float>(pixels.Width) / logical.Width;
+            const float scaleY = logical.Height == 0 ? 1.0F : static_cast<float>(pixels.Height) / logical.Height;
+            const auto move = [&](const float x, const float y)
+            {
+                m_PointerX = x * scaleX;
+                m_PointerY = y * scaleY;
+                m_Presentation->PointerMove(m_PointerX, m_PointerY);
+            };
+            if (event.type == SDL_EVENT_MOUSE_MOTION)
+                move(event.motion.x, event.motion.y);
+            else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP)
+            {
+                move(event.button.x, event.button.y);
+                const bool pressed = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+                if (event.button.button == SDL_BUTTON_LEFT)
                 {
-                    m_Presentation->Draw(ui, rectangle.Minimum.X, rectangle.Minimum.Y);
-                    const auto pointer = ui.PointerState();
-                    const float localX = pointer.Position.X - rectangle.Minimum.X;
-                    const float localY = pointer.Position.Y - rectangle.Minimum.Y;
-                    m_Presentation->PointerMove(localX, localY);
-                    if (rectangle.Contains(pointer.Position))
-                    {
-                        if (pointer.LeftPressed)
-                            m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
-                        if (pointer.RightPressed)
-                            m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary,
-                                                          true);
-                    }
-                    if (pointer.LeftReleased)
-                        m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
-                    if (pointer.RightReleased)
-                        m_Presentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Secondary, false);
+                    m_PrimaryPointerDown = pressed;
+                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Primary,
+                                                  pressed);
                 }
+                else if (event.button.button == SDL_BUTTON_RIGHT)
+                {
+                    m_SecondaryPointerDown = pressed;
+                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Secondary,
+                                                  pressed);
+                }
+            }
+            else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST)
+            {
+                if (m_PrimaryPointerDown)
+                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Primary,
+                                                  false);
+                if (m_SecondaryPointerDown)
+                    m_Presentation->PointerButton(m_PointerX, m_PointerY, Keire::RuntimeUiPointerButton::Secondary,
+                                                  false);
+                m_PrimaryPointerDown = false;
+                m_SecondaryPointerDown = false;
             }
         }
 
@@ -626,7 +689,41 @@ namespace
             }
         }
 
-        [[nodiscard]] float ManagedDeltaTime() const noexcept override { return m_DeltaTime; }
+        [[nodiscard]] float ManagedDeltaTime() const noexcept override
+        {
+            return static_cast<float>(Owner().GetTime().DeltaTime().Seconds());
+        }
+
+        [[nodiscard]] float ManagedFixedDeltaTime() const noexcept override
+        {
+            return static_cast<float>(Owner().GetTime().FixedDeltaTime().Seconds());
+        }
+
+        [[nodiscard]] float ManagedUnscaledDeltaTime() const noexcept override
+        {
+            return static_cast<float>(Owner().GetTime().UnscaledDeltaTime().Seconds());
+        }
+
+        [[nodiscard]] double ManagedElapsedTime() const noexcept override
+        {
+            return Owner().GetTime().TimeSinceStartup().Seconds();
+        }
+
+        void SetManagedCursorVisible(const bool visible) noexcept override
+        {
+            m_ManagedCursorVisible = visible;
+            ApplyManagedCursorMode();
+        }
+
+        void SetManagedCursorLocked(const bool locked) noexcept override
+        {
+            m_ManagedCursorLocked = locked;
+            ApplyManagedCursorMode();
+        }
+
+        [[nodiscard]] bool IsManagedCursorVisible() const noexcept override { return m_ManagedCursorVisible; }
+
+        [[nodiscard]] bool IsManagedCursorLocked() const noexcept override { return m_ManagedCursorLocked; }
 
         [[nodiscard]] Keire::Vector2 ReadManagedInput(const std::string_view action) noexcept override
         {
@@ -801,6 +898,81 @@ namespace
             }
         }
 
+        [[nodiscard]] bool PlayManagedVfx(const Keire::AssetId entity, const Keire::AssetId effect,
+                                          const bool restart) noexcept override
+        {
+            try
+            {
+                return m_Runtime && m_Runtime->PlayVfx(Keire::EntityId(entity), effect, restart);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool StopManagedVfx(const Keire::AssetId entity) noexcept override
+        {
+            try
+            {
+                return m_Runtime && m_Runtime->StopVfx(Keire::EntityId(entity));
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool PauseManagedVfx(const Keire::AssetId entity, const bool paused) noexcept override
+        {
+            try
+            {
+                return m_Runtime && m_Runtime->PauseVfx(Keire::EntityId(entity), paused);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool IsManagedVfxAlive(const Keire::AssetId entity) const noexcept override
+        {
+            try
+            {
+                return m_Runtime && m_Runtime->IsVfxAlive(Keire::EntityId(entity));
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool SendManagedVfxEvent(const Keire::AssetId entity, const std::string_view eventName,
+                                               const std::uint32_t spawnCount) noexcept override
+        {
+            try
+            {
+                return m_Runtime && m_Runtime->SendVfxEvent(Keire::EntityId(entity), eventName, spawnCount);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        [[nodiscard]] bool SetManagedVfxParameter(const Keire::AssetId entity,
+                                                  const Keire::VfxParameterOverride& value) noexcept override
+        {
+            try
+            {
+                return m_Runtime && m_Runtime->SetVfxParameter(Keire::EntityId(entity), value);
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
         [[nodiscard]] bool SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept override
         {
             try
@@ -832,6 +1004,26 @@ namespace
         }
 
       private:
+        void ApplyManagedCursorMode(const bool restore = false) noexcept
+        {
+            try
+            {
+                const auto windows = Owner().Windows();
+                const auto window = Owner().MainWindow();
+                if (!windows || !window)
+                    return;
+                const auto mode =
+                    restore ? Keire::CursorMode::Normal
+                            : (m_ManagedCursorLocked
+                                   ? Keire::CursorMode::RelativeLocked
+                                   : (m_ManagedCursorVisible ? Keire::CursorMode::Normal : Keire::CursorMode::Hidden));
+                windows->SetCursorMode(window->Id(), mode);
+            }
+            catch (...)
+            {
+            }
+        }
+
         Keire::AssetId m_StartupScene;
         Keire::AssetId m_DefaultInput;
         Keire::RenderEnvironmentSettings m_Rendering;
@@ -845,9 +1037,15 @@ namespace
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         Keire::Ref<Keire::ScenePresentationRuntime> m_Presentation;
+        Keire::WindowSystemInternalAccess::EventSinkToken m_EventSink = 0;
+        float m_PointerX = 0.0F;
+        float m_PointerY = 0.0F;
+        bool m_PrimaryPointerDown = false;
+        bool m_SecondaryPointerDown = false;
         Keire::InputUserId m_InputUser;
         Keire::Ref<Keire::InputActionContext> m_InputContext;
-        float m_DeltaTime = 0.0F;
+        bool m_ManagedCursorVisible = true;
+        bool m_ManagedCursorLocked = false;
     };
 
     class RuntimeApplication final : public Keire::Application
@@ -1152,7 +1350,7 @@ namespace Keire
 {
     ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
     {
-        return {"--content <path> [runtime/replay options]", RuntimeOptions};
+        return {"[--content <path>] [runtime/replay options]", RuntimeOptions};
     }
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
@@ -1160,13 +1358,16 @@ namespace Keire
         const auto commandLine = ParseCommandLine(arguments);
         auto manifest = LoadManifest(commandLine.Content);
         ApplicationSpecification specification;
+        specification.Windowing.ApplicationName = commandLine.ProductName;
+        specification.Windowing.ApplicationVersion = commandLine.ProductVersion;
+        specification.Windowing.ApplicationIdentifier = commandLine.ApplicationIdentifier;
         specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
         auto moduleValidation = CreateRef<ModuleRegistry>(specification.Modules);
         moduleValidation->ValidateCatalog(manifest.RequiredModules);
         if (commandLine.Scene)
             manifest.StartupScene = commandLine.Scene;
         const auto replayFingerprints = BuildReplayFingerprints(manifest, *moduleValidation);
-        specification.MainWindow.Title = "Kéire Runtime";
+        specification.MainWindow.Title = commandLine.WindowTitle;
         specification.MainWindow.Visible = commandLine.Frames == 0 && !commandLine.Headless;
         specification.TargetFrameRate = specification.MainWindow.Visible ? 0 : 240;
         specification.SuspendWhenMainWindowMinimized = false;
@@ -1174,23 +1375,17 @@ namespace Keire
         specification.Assets.Mounts.push_back({commandLine.Content / "catalog.json", 0, false});
         specification.Scenes.Mode = SceneMode::Enabled;
         specification.Render.Mode = RenderMode::Rendered;
-        specification.Ui.Mode = UiMode::Rendered;
-        specification.Ui.Workspace.Enabled = false;
+        specification.Ui.Mode = UiMode::Disabled;
         specification.Input.Mode = manifest.DefaultInput ? InputMode::Enabled : InputMode::Disabled;
+        specification.Input.AutoJoin = false;
         if (manifest.Scripting)
         {
             specification.Scripting.Mode = ScriptMode::Enabled;
             specification.Scripting.ProjectRoot = commandLine.Content;
             specification.Scripting.AssemblyDirectory = ".";
-            specification.Scripting.RuntimeHostDirectory =
-                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).parent_path() /
-                "Managed";
-            specification.Scripting.RuntimeRootDirectory =
-                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).parent_path() /
-                "Managed" / "Dotnet";
-            specification.Scripting.ManagedApiAssembly =
-                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).parent_path() /
-                "Managed" / "Keire.Managed.dll";
+            specification.Scripting.RuntimeHostDirectory = commandLine.ManagedRuntime;
+            specification.Scripting.RuntimeRootDirectory = commandLine.ManagedRuntime / "Dotnet";
+            specification.Scripting.ManagedApiAssembly = commandLine.ManagedRuntime / "Keire.Managed.dll";
         }
         if (manifest.Physics || manifest.Navigation)
         {

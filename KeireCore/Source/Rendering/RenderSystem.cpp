@@ -7,6 +7,7 @@
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Log.h"
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Ui/RuntimeUi.h"
 
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/WindowInternal.h"
@@ -169,6 +170,19 @@ namespace Keire
     }
 
     void RenderSystem::Submit(SceneRenderRequest request) { m_Impl->State->Submit(std::move(request)); }
+    void RenderSystem::SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree)
+    {
+        auto& state = *m_Impl->State;
+        state.RequireOwner("SubmitRuntimeUi");
+        if (!state.FrameActive)
+            throw std::logic_error("Runtime UI submissions are accepted only during an active render frame.");
+        state.RuntimeUiCommands.clear();
+        if (tree)
+        {
+            const auto commands = tree->DrawCommands();
+            state.RuntimeUiCommands.assign(commands.begin(), commands.end());
+        }
+    }
     void RenderSystem::RequestGpuVfxPipelineWarmup()
     {
         m_Impl->State->RequireOwner("RequestGpuVfxPipelineWarmup");
@@ -585,6 +599,26 @@ namespace Keire
             surface.m_Impl->State->FailedWidth = 0;
             surface.m_Impl->State->FailedHeight = 0;
         }
+    }
+
+    void RenderSystemInternalAccess::SetPresentationSurface(RenderSystem& renderer, const Ref<RenderSurface>& surface)
+    {
+        auto& rendererState = renderer.m_Impl->State;
+        rendererState->RequireOwner("SetPresentationSurface");
+        if (!surface)
+        {
+            rendererState->PresentationSurface.reset();
+            return;
+        }
+        const auto surfaceOwner = surface->m_Impl->State->Owner.lock();
+        if (surfaceOwner != rendererState)
+            throw std::invalid_argument("A presentation surface must belong to its renderer.");
+        rendererState->PresentationSurface = surface->m_Impl->State;
+    }
+
+    std::size_t RenderSystemInternalAccess::RuntimeUiCommandCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->RuntimeUiCommands.size();
     }
 
     void* RenderSystemInternalAccess::SurfaceState(RenderSurface& surface) noexcept

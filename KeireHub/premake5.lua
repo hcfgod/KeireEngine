@@ -13,6 +13,7 @@ project(ProjectConfig.HUB_TARGET)
         "Source/**.cpp",
         "Source/**.cxx"
     }
+    AddKeireApplicationIcon()
 
     includedirs
     {
@@ -31,3 +32,8 @@ project(ProjectConfig.HUB_TARGET)
     LinkKeireCore()
 
     LinkSDL3()
+
+    filter "system:windows"
+        linkoptions { "/STACK:8388608" }
+
+    filter {}

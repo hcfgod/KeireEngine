@@ -8,8 +8,6 @@
 #include "Keire/BuiltinVfxShaders.h"
 #include "Keire/Log.h"
 
-#include <imgui_impl_sdlgpu3.h>
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -4161,40 +4159,7 @@ namespace Keire::RenderBackend
             Statistics.FrameUploadMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uploadStarted).count();
 
-            SDL_GPUTexture* swapchain = nullptr;
-            const auto swapchainStarted = std::chrono::steady_clock::now();
-            if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, NativeWindow, &swapchain, nullptr, nullptr))
-            {
-                (void)SDL_CancelGPUCommandBuffer(commands);
-                commands = nullptr;
-                throw std::runtime_error("SDL_WaitAndAcquireGPUSwapchainTexture failed: " + LastSdlError());
-            }
-            Statistics.SwapchainWaitMilliseconds =
-                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - swapchainStarted).count();
-
-            const auto uiRecordingStarted = std::chrono::steady_clock::now();
-            if (swapchain)
-            {
-                const bool renderUi = drawData && drawData->DisplaySize.x > 0.0F && drawData->DisplaySize.y > 0.0F;
-                if (renderUi)
-                    ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commands);
-
-                SDL_GPUColorTargetInfo target{};
-                target.texture = swapchain;
-                target.clear_color = {Specification.SwapchainClearColor.Red, Specification.SwapchainClearColor.Green,
-                                      Specification.SwapchainClearColor.Blue, Specification.SwapchainClearColor.Alpha};
-                target.load_op = SDL_GPU_LOADOP_CLEAR;
-                target.store_op = SDL_GPU_STOREOP_STORE;
-                SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
-                if (!pass)
-                    throw std::runtime_error("SDL_BeginGPURenderPass(swapchain) failed: " + LastSdlError());
-                if (renderUi)
-                    ImGui_ImplSDLGPU3_RenderDrawData(drawData, commands, pass);
-                SDL_EndGPURenderPass(pass);
-                ++Statistics.Passes;
-            }
-            Statistics.UiRecordingMilliseconds =
-                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uiRecordingStarted).count();
+            RecordSwapchain(commands, drawData);
 
             const auto submissionStarted = std::chrono::steady_clock::now();
             SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
@@ -4286,7 +4251,6 @@ namespace Keire::RenderBackend
         StopRenderThread();
         FrameExecutionActive = false;
         ActiveGpuSubmissionSerial = 0;
-
         if (Device)
             (void)SDL_WaitForGPUIdle(Device);
         for (const auto& surface : LiveSurfaces())
@@ -4372,7 +4336,7 @@ namespace Keire::RenderBackend
         }
         InFlight.clear();
         Requests.clear();
-
+        RuntimeUiCommands.clear();
         for (auto& pipelines : Pipelines)
         {
             if (pipelines.GpuVfxMesh)
@@ -4475,13 +4439,14 @@ namespace Keire::RenderBackend
         if (ToneMapPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
         ToneMapPipeline = nullptr;
+        if (const auto pipeline = std::exchange(RuntimeUiPipeline, nullptr))
+            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
         ReleaseMeshResources(ErrorMesh);
         ReleaseMeshResources(DefaultMesh);
         if (GridBuffer)
             SDL_ReleaseGPUBuffer(Device, GridBuffer);
         GridBuffer = nullptr;
         GridVertexCount = 0;
-
         if (WindowClaimed && Device && NativeWindow)
             SDL_ReleaseWindowFromGPUDevice(Device, NativeWindow);
         WindowClaimed = false;

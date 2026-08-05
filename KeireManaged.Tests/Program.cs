@@ -15,9 +15,38 @@ var tests = new (string Name, Action Run)[]
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
+    ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
     ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
 };
+
+static unsafe void NativeUiButtonDispatchClockContract()
+{
+    NativeUiDispatchFixture.Install();
+    var button = new Keire.UiButton(new Keire.Entity(17, new Keire.EntityId(23, 29)));
+    int clicks = 0;
+    Action clicked = () => ++clicks;
+    button.Clicked += clicked;
+    try
+    {
+        NativeUiDispatchFixture.QueueClick();
+        Keire.UiButton.DispatchNativeClicks();
+        Assert(clicks == 1, "The first native click must be dispatched.");
+
+        NativeUiDispatchFixture.QueueClick();
+        Keire.UiButton.DispatchNativeClicks();
+        Assert(clicks == 1, "A button dispatch must run at most once for the same player frame clock value.");
+
+        NativeUiDispatchFixture.AdvanceFrame();
+        Keire.UiButton.DispatchNativeClicks();
+        Assert(clicks == 2, "Advancing the player frame clock must make the next native click dispatchable.");
+    }
+    finally
+    {
+        button.Clicked -= clicked;
+        NativeUiDispatchFixture.Uninstall();
+    }
+}
 
 static void ManagedJobExecutionContract()
 {
@@ -398,6 +427,43 @@ static void Advance(ProductionWeaponRuntime runtime, float seconds, uint firstTi
     int steps = (int)MathF.Ceiling(seconds / step);
     for (int index = 0; index < steps; ++index)
         runtime.Tick(step, default, unchecked(firstTick + (uint)index));
+}
+
+file static unsafe class NativeUiDispatchFixture
+{
+    private static double s_Elapsed = 1.0;
+    private static int s_PendingClicks;
+
+    public static void Install()
+    {
+        s_Elapsed = 1.0;
+        s_PendingClicks = 0;
+        Keire.NativeRuntime.ElapsedTimeIcall = &ElapsedTime;
+        Keire.NativeRuntime.ConsumeUiClickIcall = &ConsumeUiClick;
+    }
+
+    public static void QueueClick() => ++s_PendingClicks;
+
+    public static void AdvanceFrame() => s_Elapsed += 1.0;
+
+    public static void Uninstall()
+    {
+        Keire.NativeRuntime.ElapsedTimeIcall = null;
+        Keire.NativeRuntime.ConsumeUiClickIcall = null;
+        s_PendingClicks = 0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static double ElapsedTime() => s_Elapsed;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ConsumeUiClick(ulong world, ulong entityHigh, ulong entityLow)
+    {
+        if (world != 17 || entityHigh != 23 || entityLow != 29 || s_PendingClicks == 0)
+            return 0;
+        --s_PendingClicks;
+        return 1;
+    }
 }
 
 file sealed class RecordingSink : IWeaponRuntimeSink

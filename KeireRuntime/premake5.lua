@@ -8,6 +8,7 @@ project(RuntimeTarget)
     {
         "Source/**.cpp"
     }
+    AddKeireApplicationIcon()
 
     includedirs
     {
@@ -22,3 +23,9 @@ project(RuntimeTarget)
     LinkKeireSourceModules()
     LinkKeireCore()
     LinkSDL3()
+
+    filter { "system:windows", "configurations:Dist" }
+        kind "WindowedApp"
+        entrypoint "mainCRTStartup"
+
+    filter {}

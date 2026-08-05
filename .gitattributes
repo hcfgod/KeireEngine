@@ -15,5 +15,7 @@
 *.hpp text eol=lf
 
 *.exe binary
+*.ico binary
+*.res binary
 *.zip binary
 *.gz binary

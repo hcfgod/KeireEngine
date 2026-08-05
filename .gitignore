@@ -5,6 +5,14 @@
 
 # Build outputs
 Build/
+!KeireCore/Include/Keire/Build/
+!KeireCore/Include/Keire/Build/**
+!KeireCore/Include/KeireInternal/Build/
+!KeireCore/Include/KeireInternal/Build/**
+!KeireCore/Source/Build/
+!KeireCore/Source/Build/**
+!KeireTests/Source/Build/
+!KeireTests/Source/Build/**
 Artifacts/
 Logs/
 Library/

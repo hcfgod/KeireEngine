@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL_gpu.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -36,6 +37,8 @@ namespace Keire
         static void InjectDeviceLoss(RenderSystem& renderer);
         [[nodiscard]] static std::uint32_t SaturateRendererQueue(RenderSystem& renderer);
         static void RequestSurfaceSize(RenderSurface& surface, std::uint32_t width, std::uint32_t height);
+        static void SetPresentationSurface(RenderSystem& renderer, const Ref<RenderSurface>& surface);
+        [[nodiscard]] static std::size_t RuntimeUiCommandCount(const RenderSystem& renderer) noexcept;
         [[nodiscard]] static void* SurfaceState(RenderSurface& surface) noexcept;
         static void WaitIdle(RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t MaterialBindingBuildCount(const RenderSystem& renderer) noexcept;

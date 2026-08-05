@@ -333,6 +333,7 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     const auto addedEffect = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000d");
     const auto prefab = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000e");
     const auto ignoredEntity = Keire::AssetId::Parse("10000000-0000-4000-8000-00000000000f");
+    const auto projectedManagedAsset = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000010");
 
     const std::string managedState =
         "{\"Version\":1,\"Fields\":["
@@ -346,6 +347,10 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
         "]},"
         "{\"StableId\":\"20000000-0000-4000-8000-000000000003\",\"Name\":\"Target\","
         "\"Type\":\"Keire.Entity\",\"Aliases\":[],\"Value\":" +
+        ManagedReference(ignoredEntity) +
+        "},{\"StableId\":\"\",\"Name\":\"projectedAsset\",\"Type\":\"\",\"Aliases\":[],\"Value\":" +
+        ManagedReference(projectedManagedAsset) +
+        "},{\"StableId\":\"\",\"Name\":\"projectedEntity\",\"Type\":\"\",\"Aliases\":[],\"Value\":" +
         ManagedReference(ignoredEntity) + "}]}";
 
     auto definition = Keire::SceneAsset::EmptyDefinition("Authored Dependencies");
@@ -364,7 +369,9 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
          "{\"clip\":" + JsonString(clip.ToString()) + ",\"mixer\":" + JsonString(mixer.ToString()) + "}"},
         {Keire::VfxEmitterComponent::StaticType(), 1, true, "{\"effect\":" + JsonString(effect.ToString()) + "}"},
         {Keire::ComponentTypeId::Parse("40000000-0000-4000-8000-000000000001"), 1, true,
-         "{\"managedState\":" + JsonString(managedState) + "}"},
+         "{\"managedState\":" + JsonString(managedState) +
+             ",\"projectedAsset\":" + JsonString(projectedManagedAsset.ToString()) +
+             ",\"projectedEntity\":" + JsonString(ignoredEntity.ToString()) + "}"},
     };
     definition.Objects.push_back(object);
     definition.PrefabInstances.push_back(
@@ -384,10 +391,21 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
 
     const auto importer = Keire::CreateSceneAssetImporter();
     REQUIRE(importer.ContextualImport);
-    const auto first = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
-    const auto second = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
-    auto expected = std::vector{graph, skeleton, skinnedMesh,   avatarMask,   collisionMesh, physicsMaterial, clip,
-                                mixer, effect,   managedDirect, managedArray, overrideAsset, addedEffect,     prefab};
+    Keire::AssetImportContext context;
+    context.ResolveAssetSource =
+        [projectedManagedAsset](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
+    {
+        if (asset != projectedManagedAsset)
+            return std::nullopt;
+        return Keire::AssetImportSource{projectedManagedAsset,
+                                        Keire::AssetTypeId::Parse("11000000-0000-4000-8000-000000000001"),
+                                        "Audio/Confirm.wav"};
+    };
+    const auto first = importer.ContextualImport(context, Keire::SceneAsset::Encode(definition));
+    const auto second = importer.ContextualImport(context, Keire::SceneAsset::Encode(definition));
+    auto expected = std::vector{graph,           skeleton,      skinnedMesh, avatarMask, collisionMesh,
+                                physicsMaterial, clip,          mixer,       effect,     managedDirect,
+                                managedArray,    overrideAsset, addedEffect, prefab,     projectedManagedAsset};
     std::ranges::sort(expected);
     CHECK(first.AssetDependencies == expected);
     CHECK(second.AssetDependencies == expected);
@@ -556,7 +574,7 @@ TEST_CASE("Newer scene importers upgrade older metadata revisions but reject fut
     auto database = Keire::CreateRef<Keire::AssetDatabase>(specification);
     CHECK_NOTHROW((void)database->ImportAll());
 
-    writeMetadata(Keire::CurrentSceneSchemaVersion + 1);
+    writeMetadata(Keire::CreateSceneAssetImporter().Version + 1);
     database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
     CHECK_THROWS_WITH_AS((void)database->ImportAll(),
                          "No compatible importer is registered for asset: Legacy.keirescene", std::runtime_error);

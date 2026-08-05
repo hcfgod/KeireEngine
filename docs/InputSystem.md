@@ -21,6 +21,8 @@ a platform/test SDL build without disabling keyboard and mouse.
 Create an `InputUser`, pair its devices, then create a context for an `InputActionAsset` ID. Devices are exclusive by
 default. Keyboard and mouse are normally paired together; gamepads are exclusive unless both the application and the
 pairing request opt into sharing. Automatic join is enabled by default and bounded by `MaximumUsers` (four by default).
+When an unlocked user owns devices from multiple binding groups, meaningful input selects `KeyboardMouse` or `Gamepad`
+before the frame's actions are evaluated. `SetControlScheme(..., true)` keeps an explicitly locked scheme unchanged.
 
 ```cpp
 const auto input = application.Input();
@@ -37,7 +39,8 @@ const Keire::InputVector2 value = move.Value().AsAxis2D();
 Action phases are `Started`, `Performed`, and `Canceled`, with `Waiting` and `Disabled` polling states. RAII
 subscriptions disconnect safely, including from inside a callback. Successful asset revisions cancel active actions
 before rebuilding and preserve enabled map IDs, users, schemes, subscriptions, and valid binding overrides. A malformed
-reload stays on the last-good asset revision.
+reload stays on the last-good asset revision. A press and release received within one outer frame still publishes its
+phase transitions even though the final polled value is released.
 
 ## Rebinding And Cursor Control
 

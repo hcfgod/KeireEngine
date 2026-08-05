@@ -33,6 +33,7 @@ namespace Keire
 {
     struct ApplicationSpecification
     {
+        WindowSystemSpecification Windowing;
         WindowSpecification MainWindow;
         EventBusSpecification Events;
         ProfilerSpecification Profiling;

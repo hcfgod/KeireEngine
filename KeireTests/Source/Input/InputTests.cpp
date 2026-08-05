@@ -285,6 +285,164 @@ namespace
       private:
         std::shared_ptr<RelativeInputResult> m_Result;
     };
+
+    struct MouseTapResult final
+    {
+        bool Started = false;
+        bool Performed = false;
+        bool Canceled = false;
+        bool Held = true;
+    };
+
+    class MouseTapLayer final : public Keire::Layer
+    {
+      public:
+        explicit MouseTapLayer(std::shared_ptr<MouseTapResult> result) : Layer("MouseTap"), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            const auto input = Owner().Input();
+            REQUIRE(input);
+            const auto user = input->CreateUser("Mouse tap");
+            REQUIRE(input->PairDevice(user, Keire::InputDeviceId(2)));
+            m_Context = input->CreateActionContext(Keire::InputActionAsset::DefaultDefinition(), user);
+            REQUIRE(m_Context->EnableMap("Player"));
+            m_Fire = m_Context->FindAction("Player", "Fire");
+            REQUIRE(m_Fire);
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Frame++ == 0)
+            {
+                PushButton(true);
+                PushButton(false);
+                return;
+            }
+            m_Result->Started = m_Fire.WasStartedThisFrame();
+            m_Result->Performed = m_Fire.WasPerformedThisFrame();
+            m_Result->Canceled = m_Fire.WasCanceledThisFrame();
+            m_Result->Held = m_Fire.Value().AsBoolean();
+            Owner().RequestExit();
+        }
+
+      private:
+        static void PushButton(const bool down)
+        {
+            SDL_Event event{};
+            event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+            event.button.timestamp = SDL_GetTicksNS();
+            event.button.button = SDL_BUTTON_LEFT;
+            event.button.down = down;
+            REQUIRE(SDL_PushEvent(&event));
+        }
+
+        std::shared_ptr<MouseTapResult> m_Result;
+        Keire::Ref<Keire::InputActionContext> m_Context;
+        Keire::InputActionHandle m_Fire;
+        std::uint32_t m_Frame = 0;
+    };
+
+    class MouseTapApplication final : public Keire::Application
+    {
+      public:
+        MouseTapApplication(Keire::ApplicationSpecification specification, std::shared_ptr<MouseTapResult> result)
+            : Application(std::move(specification)), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<MouseTapLayer>(m_Result)); }
+
+      private:
+        std::shared_ptr<MouseTapResult> m_Result;
+    };
+
+    struct MixedDeviceInputResult final
+    {
+        bool BeganWithGamepadScheme = false;
+        bool SwitchedToKeyboardMouse = false;
+        bool FireHeld = false;
+        bool FirePerformed = false;
+    };
+
+    class MixedDeviceInputLayer final : public Keire::Layer
+    {
+      public:
+        explicit MixedDeviceInputLayer(std::shared_ptr<MixedDeviceInputResult> result)
+            : Layer("MixedDeviceInput"), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            const auto input = Owner().Input();
+            REQUIRE(input);
+            m_User = input->CreateUser("Standalone player");
+            REQUIRE(input->PairDevice(m_User, Keire::InputDeviceId(1)));
+            REQUIRE(input->PairDevice(m_User, Keire::InputDeviceId(2)));
+            REQUIRE(input->SetControlScheme(m_User, "Gamepad", false));
+            m_Context = input->CreateActionContext(Keire::InputActionAsset::DefaultDefinition(), m_User);
+            REQUIRE(m_Context->EnableMap("Player"));
+            m_Fire = m_Context->FindAction("Player", "Fire");
+            REQUIRE(m_Fire);
+
+            const auto users = input->Users();
+            const auto user = std::ranges::find(users, m_User, &Keire::InputUserDescriptor::Id);
+            REQUIRE(user != users.end());
+            m_Result->BeganWithGamepadScheme = user->ControlScheme == "Gamepad";
+            PushButton(true);
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            const auto input = Owner().Input();
+            m_Result->FireHeld = m_Fire.Value().AsBoolean();
+            m_Result->FirePerformed = m_Fire.WasPerformedThisFrame();
+            const auto users = input->Users();
+            const auto user = std::ranges::find(users, m_User, &Keire::InputUserDescriptor::Id);
+            REQUIRE(user != users.end());
+            m_Result->SwitchedToKeyboardMouse = user->ControlScheme == "KeyboardMouse";
+            PushButton(false);
+            Owner().RequestExit();
+        }
+
+      private:
+        static void PushButton(const bool down)
+        {
+            SDL_Event event{};
+            event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+            event.button.timestamp = SDL_GetTicksNS();
+            event.button.button = SDL_BUTTON_LEFT;
+            event.button.down = down;
+            REQUIRE(SDL_PushEvent(&event));
+        }
+
+        std::shared_ptr<MixedDeviceInputResult> m_Result;
+        Keire::InputUserId m_User;
+        Keire::Ref<Keire::InputActionContext> m_Context;
+        Keire::InputActionHandle m_Fire;
+    };
+
+    class MixedDeviceInputApplication final : public Keire::Application
+    {
+      public:
+        MixedDeviceInputApplication(Keire::ApplicationSpecification specification,
+                                    std::shared_ptr<MixedDeviceInputResult> result)
+            : Application(std::move(specification)), m_Result(std::move(result))
+        {
+        }
+
+      protected:
+        void OnInitialize() override { (void)PushLayer(std::make_unique<MixedDeviceInputLayer>(m_Result)); }
+
+      private:
+        std::shared_ptr<MixedDeviceInputResult> m_Result;
+    };
 } // namespace
 
 TEST_CASE("Input action assets validate and serialize canonically")
@@ -354,6 +512,54 @@ TEST_CASE("Application input processes one immutable action snapshot per outer f
     CHECK(result->Rebound);
     CHECK(result->ReloadedOverrides == 1);
     CHECK(result->CaptureOverrideActive);
+}
+
+TEST_CASE("Input preserves mouse button taps that begin and end within one action snapshot")
+{
+    UseDummyVideoDriver();
+    InputProject project;
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Title = "Mouse tap input test";
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = project.Catalog;
+    specification.Input.Mode = Keire::InputMode::Enabled;
+    specification.Input.AutoJoin = false;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+
+    auto result = std::make_shared<MouseTapResult>();
+    MouseTapApplication application(std::move(specification), result);
+    CHECK(application.Run() == 0);
+    CHECK(result->Started);
+    CHECK(result->Performed);
+    CHECK(result->Canceled);
+    CHECK_FALSE(result->Held);
+}
+
+TEST_CASE("Input switches a mixed-device standalone user to the active mouse control scheme")
+{
+    UseDummyVideoDriver();
+    InputProject project;
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Title = "Mixed-device input test";
+    specification.MainWindow.Visible = false;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = project.Catalog;
+    specification.Input.Mode = Keire::InputMode::Enabled;
+    specification.Input.AutoJoin = false;
+    specification.Ui.Mode = Keire::UiMode::Disabled;
+    specification.ManageLogging = false;
+    specification.TargetFrameRate = 240;
+
+    auto result = std::make_shared<MixedDeviceInputResult>();
+    MixedDeviceInputApplication application(std::move(specification), result);
+    CHECK(application.Run() == 0);
+    CHECK(result->BeganWithGamepadScheme);
+    CHECK(result->SwitchedToKeyboardMouse);
+    CHECK(result->FireHeld);
+    CHECK(result->FirePerformed);
 }
 
 TEST_CASE("Application rejects enabled input without assets")

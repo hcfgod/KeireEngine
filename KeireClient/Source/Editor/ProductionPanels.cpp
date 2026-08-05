@@ -2,13 +2,21 @@
 
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
+#include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
+
+#include "KeireInternal/Build/PlayerSupport.h"
+#include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Process.h"
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <ranges>
 #include <set>
@@ -17,30 +25,74 @@
 
 namespace
 {
-    [[nodiscard]] std::string PrefabOverrideName(const Keire::PrefabOverrideKind kind)
+    struct PlayerTargetChoice final
     {
-        switch (kind)
+        Keire::PlayerPlatform Platform;
+        Keire::PlayerArchitecture Architecture;
+        std::string_view Label;
+    };
+
+    constexpr std::array PlayerTargets{
+        PlayerTargetChoice{Keire::PlayerPlatform::Windows, Keire::PlayerArchitecture::X86_64, "Windows x64"},
+        PlayerTargetChoice{Keire::PlayerPlatform::Windows, Keire::PlayerArchitecture::Arm64, "Windows ARM64"},
+        PlayerTargetChoice{Keire::PlayerPlatform::Linux, Keire::PlayerArchitecture::X86_64, "Linux x64"},
+        PlayerTargetChoice{Keire::PlayerPlatform::Linux, Keire::PlayerArchitecture::Arm64, "Linux ARM64"},
+        PlayerTargetChoice{Keire::PlayerPlatform::MacOS, Keire::PlayerArchitecture::X86_64, "macOS x64"},
+        PlayerTargetChoice{Keire::PlayerPlatform::MacOS, Keire::PlayerArchitecture::Arm64, "macOS ARM64"}};
+
+    [[nodiscard]] std::string Lowercase(std::string value)
+    {
+        std::ranges::transform(value, value.begin(), [](const unsigned char character)
+                               { return static_cast<char>(std::tolower(character)); });
+        return value;
+    }
+
+    template <typename Projection>
+    [[nodiscard]] std::string UniqueProfileValue(const Keire::PlayerBuildProfiles& profiles, std::string base,
+                                                 Projection projection)
+    {
+        for (std::uint32_t suffix = 1;; ++suffix)
         {
-        case Keire::PrefabOverrideKind::RenameObject:
-            return "Rename object";
-        case Keire::PrefabOverrideKind::SetObjectActive:
-            return "Set active";
-        case Keire::PrefabOverrideKind::SetObjectTransform:
-            return "Set transform";
-        case Keire::PrefabOverrideKind::SetObjectLayer:
-            return "Set layer";
-        case Keire::PrefabOverrideKind::SetComponentProperty:
-            return "Set component property";
-        case Keire::PrefabOverrideKind::AddComponent:
-            return "Add component";
-        case Keire::PrefabOverrideKind::RemoveComponent:
-            return "Remove component";
-        case Keire::PrefabOverrideKind::AddObject:
-            return "Add object";
-        case Keire::PrefabOverrideKind::RemoveObject:
-            return "Remove object";
+            const auto candidate = suffix == 1 ? base : base + ' ' + std::to_string(suffix);
+            const auto lowered = Lowercase(candidate);
+            if (std::ranges::none_of(profiles.Profiles, [&](const auto& profile)
+                                     { return Lowercase(std::string(std::invoke(projection, profile))) == lowered; }))
+                return candidate;
         }
-        return "Unknown override";
+    }
+
+    [[nodiscard]] std::string JoinList(const std::vector<std::string>& values)
+    {
+        std::string result;
+        for (const auto& value : values)
+        {
+            if (!result.empty())
+                result += "; ";
+            result += value;
+        }
+        return result;
+    }
+
+    [[nodiscard]] std::vector<std::string> SplitList(const std::string_view text)
+    {
+        std::vector<std::string> result;
+        std::size_t begin = 0;
+        while (begin <= text.size())
+        {
+            const auto end = text.find(';', begin);
+            auto value =
+                std::string(text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin));
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0)
+                value.erase(value.begin());
+            while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0)
+                value.pop_back();
+            if (!value.empty())
+                result.push_back(std::move(value));
+            if (end == std::string_view::npos)
+                break;
+            begin = end + 1;
+        }
+        return result;
     }
 
     [[nodiscard]] std::string ProfileCategoryName(const Keire::ProfileCategory category)
@@ -178,215 +230,297 @@ namespace
     }
 } // namespace
 
-void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
-{
-    if (auto panel = ui.BeginPanel(m_PrefabOverrides); panel)
-    {
-        if (m_PrefabEditingStage)
-        {
-            ui.Text("Prefab Mode");
-            ui.Text(m_PrefabEditingStage->RelativePath.generic_string());
-            ui.TextColored(m_Theme.MutedText,
-                           "This isolated stage does not modify the open scene. Save publishes the prefab source; "
-                           "Discard restores the previous scene document.");
-            if (ui.Button("Save Prefab"))
-            {
-                try
-                {
-                    SavePrefabEditingStage();
-                }
-                catch (const std::exception& error)
-                {
-                    ReportError("Prefab", error.what());
-                }
-            }
-            ui.SameLine();
-            if (ui.Button("Save and Close"))
-            {
-                try
-                {
-                    SavePrefabEditingStage();
-                    ClosePrefabEditingStage();
-                }
-                catch (const std::exception& error)
-                {
-                    ReportError("Prefab", error.what());
-                }
-            }
-            ui.SameLine();
-            if (ui.Button("Discard and Close"))
-                ClosePrefabEditingStage();
-            ui.Separator();
-            ui.Text("Edit prefab objects in the Scene viewport and Inspector.");
-            return;
-        }
-
-        const auto scene = m_SceneDocument ? m_SceneDocument->EditingScene() : Keire::Ref<Keire::Scene>{};
-        if (!scene || !m_SceneDocument->Selection())
-        {
-            DrawEmptyState(ui, "No prefab instance selected", "Select an object in a prefab instance.",
-                           "Instance mappings and overrides will appear here.");
-            return;
-        }
-
-        auto definition = scene->Snapshot();
-        const auto selection = m_SceneDocument->Selection();
-        const auto instance = std::ranges::find_if(
-            definition.PrefabInstances,
-            [selection](const Keire::PrefabInstanceDefinition& candidate)
-            {
-                return candidate.Root == selection ||
-                       std::ranges::any_of(candidate.Objects, [selection](const Keire::PrefabObjectMapping& mapping)
-                                           { return mapping.Instance == selection; });
-            });
-        if (instance == definition.PrefabInstances.end())
-        {
-            DrawEmptyState(ui, "Selection is not a prefab instance", "Select an inherited prefab object.",
-                           "Regular scene objects do not have prefab overrides.");
-            return;
-        }
-
-        ui.Text("Prefab: " + instance->Prefab.ToString());
-        ui.Text("Instance root: " + instance->Root.ToString());
-        ui.Text(std::to_string(instance->Objects.size()) + " inherited objects");
-        ui.Separator();
-        ui.Text(std::to_string(instance->Overrides.size()) + " overrides");
-        for (std::size_t index = 0; index < instance->Overrides.size(); ++index)
-        {
-            const auto& overrideValue = instance->Overrides[index];
-            auto id = ui.PushId(std::to_string(index));
-            std::string label = PrefabOverrideName(overrideValue.Kind);
-            if (!overrideValue.Property.empty())
-                label += "  " + overrideValue.Property;
-            auto node = ui.BeginTreeNode(label);
-            if (node)
-            {
-                ui.Text("Object: " + overrideValue.Object.ToString());
-                if (overrideValue.Component)
-                    ui.Text("Component: " + overrideValue.Component.ToString());
-            }
-        }
-
-        ui.Separator();
-        const auto instanceRoot = instance->Root;
-        if (ui.Button("Apply to Prefab"))
-        {
-            try
-            {
-                ApplySelectedPrefabOverrides();
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Prefab", error.what());
-            }
-        }
-        ui.SameLine();
-        if (ui.Button("Revert All Overrides"))
-        {
-            try
-            {
-                RecordSceneUndo("Revert Prefab Overrides");
-                auto replacement = scene->Snapshot();
-                const auto found = std::ranges::find(replacement.PrefabInstances, instanceRoot,
-                                                     &Keire::PrefabInstanceDefinition::Root);
-                if (found == replacement.PrefabInstances.end())
-                    throw std::runtime_error("Prefab instance changed before the operation completed.");
-                if (!m_AssetDatabase || !Owner().GetProject())
-                    throw std::runtime_error("The prefab asset database is unavailable.");
-                const auto projectRoot = Owner().GetProject()->Root();
-                const auto composed = Keire::ComposePrefab(
-                    found->Prefab,
-                    [&](const Keire::AssetId prefab)
-                    {
-                        const auto record = m_AssetDatabase->Find(prefab);
-                        if (!record || record->Type != Keire::PrefabAsset::StaticType())
-                            return Keire::Ref<Keire::PrefabAsset>{};
-                        return Keire::PrefabAsset::Decode(ReadBytes(projectRoot / "Assets" / record->RelativePath));
-                    });
-                if (!KeireEditor::RevertPrefabInstance(replacement, instanceRoot, composed))
-                    throw std::runtime_error("Prefab instance changed before the operation completed.");
-                auto rebuilt =
-                    Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
-                rebuilt->MarkDirty();
-                m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
-                m_SceneDocument->SetStatus("Prefab instance overrides reverted.");
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Prefab", error.what());
-            }
-        }
-        ui.SameLine();
-        if (ui.Button("Unpack"))
-        {
-            try
-            {
-                RecordSceneUndo("Unpack Prefab");
-                auto replacement = scene->Snapshot();
-                if (!KeireEditor::UnpackPrefab(replacement, instanceRoot))
-                    throw std::runtime_error("Prefab instance changed before the operation completed.");
-                auto rebuilt =
-                    Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
-                rebuilt->MarkDirty();
-                m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
-                m_SceneDocument->SetStatus("Prefab instance unpacked.");
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Prefab", error.what());
-            }
-        }
-        ui.SameLine();
-        if (ui.Button("Unpack Completely"))
-        {
-            try
-            {
-                RecordSceneUndo("Unpack Prefab Completely");
-                auto replacement = scene->Snapshot();
-                if (!KeireEditor::UnpackPrefab(replacement, instanceRoot, true))
-                    throw std::runtime_error("Prefab instance changed before the operation completed.");
-                auto rebuilt =
-                    Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
-                rebuilt->MarkDirty();
-                m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
-                m_SceneDocument->SetStatus("Prefab instance hierarchy unpacked.");
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Prefab", error.what());
-            }
-        }
-        ui.TextColored(
-            m_Theme.MutedText,
-            "Root placement is scene-owned. Nested roots require a variant so source ownership is preserved.");
-    }
-}
-
 void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
 {
     if (auto panel = ui.BeginPanel(m_BuildSettings); panel)
     {
-        constexpr std::array Configurations{"Development", "Release", "Dist"};
-        constexpr std::array Platforms{"Current desktop", "Windows x64", "Windows ARM64", "Linux x64",
-                                       "Linux ARM64",     "macOS x64",   "macOS ARM64"};
-        if (auto combo = ui.BeginCombo("Profile", Configurations[static_cast<std::size_t>(m_BuildConfiguration)]);
-            combo)
+        if (!m_PlayerBuildSettingsLoaded)
         {
-            for (std::size_t index = 0; index < Configurations.size(); ++index)
+            ui.TextColored(m_Theme.Error, "Player build settings could not be loaded.");
+            ui.TextColored(m_Theme.MutedText,
+                           "Correct ProjectSettings/Player.keiresettings and BuildProfiles.keiresettings, then "
+                           "reopen the project.");
+            return;
+        }
+
+        bool profileChanged = false;
+        bool settingsChanged = false;
+        auto active = std::ranges::find(m_PlayerBuildProfiles.Profiles, m_PlayerBuildProfiles.ActiveProfile,
+                                        &Keire::PlayerBuildProfile::Id);
+        if (active == m_PlayerBuildProfiles.Profiles.end())
+        {
+            ui.TextColored(m_Theme.Error, "The active player build profile is missing.");
+            return;
+        }
+
+        if (auto combo = ui.BeginCombo("Build Profile", active->Name); combo)
+        {
+            for (const auto& profile : m_PlayerBuildProfiles.Profiles)
             {
-                if (ui.Selectable(Configurations[index], m_BuildConfiguration == static_cast<int>(index)))
-                    m_BuildConfiguration = static_cast<int>(index);
+                const auto selected = profile.Id == m_PlayerBuildProfiles.ActiveProfile;
+                if (ui.Selectable(profile.Name + "###PlayerProfile" + profile.Id.ToString(), selected))
+                {
+                    m_PlayerBuildProfiles.ActiveProfile = profile.Id;
+                    m_PlayerSigningEditProfile = {};
+                    profileChanged = true;
+                }
             }
         }
-        if (auto combo = ui.BeginCombo("Platform", Platforms[static_cast<std::size_t>(m_BuildPlatform)]); combo)
+        if (ui.Button("Create"))
         {
-            for (std::size_t index = 0; index < Platforms.size(); ++index)
+            auto profile = Keire::DefaultPlayerBuildProfiles().Profiles.front();
+            profile.Id = Keire::AssetId::Generate();
+            profile.Name =
+                UniqueProfileValue(m_PlayerBuildProfiles, "Desktop Development", &Keire::PlayerBuildProfile::Name);
+            profile.OutputSlug = UniqueProfileValue(m_PlayerBuildProfiles, "Desktop-Development",
+                                                    &Keire::PlayerBuildProfile::OutputSlug);
+            m_PlayerBuildProfiles.ActiveProfile = profile.Id;
+            m_PlayerBuildProfiles.Profiles.push_back(std::move(profile));
+            m_PlayerSigningEditProfile = {};
+            profileChanged = true;
+        }
+        ui.SameLine();
+        if (ui.Button("Duplicate"))
+        {
+            auto profile = *active;
+            profile.Id = Keire::AssetId::Generate();
+            profile.Name =
+                UniqueProfileValue(m_PlayerBuildProfiles, profile.Name + " Copy", &Keire::PlayerBuildProfile::Name);
+            profile.OutputSlug = UniqueProfileValue(m_PlayerBuildProfiles, profile.OutputSlug + "-Copy",
+                                                    &Keire::PlayerBuildProfile::OutputSlug);
+            m_PlayerBuildProfiles.ActiveProfile = profile.Id;
+            m_PlayerBuildProfiles.Profiles.push_back(std::move(profile));
+            m_PlayerSigningEditProfile = {};
+            profileChanged = true;
+        }
+        ui.SameLine();
+        if (auto disabled = ui.BeginDisabled(m_PlayerBuildProfiles.Profiles.size() <= 1); disabled)
+        {
+            if (ui.Button("Delete"))
             {
-                if (ui.Selectable(Platforms[index], m_BuildPlatform == static_cast<int>(index)))
-                    m_BuildPlatform = static_cast<int>(index);
+                m_PlayerBuildProfiles.Profiles.erase(active);
+                m_PlayerBuildProfiles.ActiveProfile = m_PlayerBuildProfiles.Profiles.front().Id;
+                m_PlayerSigningEditProfile = {};
+                profileChanged = true;
             }
         }
-        (void)ui.Checkbox("Include symbols", m_BuildSymbols);
+
+        active = std::ranges::find(m_PlayerBuildProfiles.Profiles, m_PlayerBuildProfiles.ActiveProfile,
+                                   &Keire::PlayerBuildProfile::Id);
+        if (active == m_PlayerBuildProfiles.Profiles.end())
+            return;
+        auto& profile = *active;
+        ui.Separator();
+
+        profileChanged |= ui.InputText("Profile Name", profile.Name);
+        profileChanged |= ui.InputText("Output Folder", profile.OutputSlug);
+        const auto target = std::ranges::find_if(
+            PlayerTargets, [&](const auto& choice)
+            { return choice.Platform == profile.Platform && choice.Architecture == profile.Architecture; });
+        const auto targetLabel = target == PlayerTargets.end() ? std::string_view("Unknown") : target->Label;
+        if (auto combo = ui.BeginCombo("Target", targetLabel); combo)
+        {
+            for (const auto& choice : PlayerTargets)
+            {
+                const bool selected =
+                    choice.Platform == profile.Platform && choice.Architecture == profile.Architecture;
+                if (ui.Selectable(choice.Label, selected))
+                {
+                    profile.Platform = choice.Platform;
+                    profile.Architecture = choice.Architecture;
+                    profileChanged = true;
+                }
+            }
+        }
+        constexpr std::array configurations{Keire::PlayerBuildConfiguration::Development,
+                                            Keire::PlayerBuildConfiguration::Release,
+                                            Keire::PlayerBuildConfiguration::Dist};
+        if (auto combo = ui.BeginCombo("Configuration", Keire::ToString(profile.Configuration)); combo)
+        {
+            for (const auto configuration : configurations)
+            {
+                if (ui.Selectable(Keire::ToString(configuration), profile.Configuration == configuration))
+                {
+                    profile.Configuration = configuration;
+                    if (configuration == Keire::PlayerBuildConfiguration::Development)
+                        profile.IncludeSymbols = true;
+                    else if (configuration == Keire::PlayerBuildConfiguration::Dist)
+                        profile.IncludeSymbols = false;
+                    profileChanged = true;
+                }
+            }
+        }
+        profileChanged |= ui.Checkbox("Include Symbols", profile.IncludeSymbols);
+
+        std::string supportStatus;
+        bool supportInstalled = false;
+        try
+        {
+            const auto modules = Owner().Modules();
+            const auto support = Keire::Detail::ResolvePlayerSupport(m_ExecutablePath, profile.Platform,
+                                                                     profile.Architecture, profile.Configuration,
+                                                                     modules ? modules->Fingerprint() : std::string{});
+            supportInstalled = true;
+            supportStatus = support.DevelopmentFallback ? "Available from this development build"
+                                                        : "Installed: " + support.Manifest.Id;
+        }
+        catch (const std::exception& error)
+        {
+            supportStatus = error.what();
+        }
+        ui.TextColored(supportInstalled ? m_Theme.Success : m_Theme.Warning, supportStatus);
+        if (!supportInstalled && ui.Button("Open Build Support"))
+        {
+            try
+            {
+                OpenBuildSupportHub(profile);
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Build Support", error.what());
+            }
+        }
+
+        ui.Separator();
+        if (auto branding = ui.BeginTreeNode("Player Identity & Branding", true); branding)
+        {
+            settingsChanged |= ui.InputText("Product Name", m_PlayerSettings.ProductName);
+            settingsChanged |= ui.InputText("Semantic Version", m_PlayerSettings.Version);
+            settingsChanged |= ui.InputText("Application Identifier", m_PlayerSettings.ApplicationIdentifier);
+            settingsChanged |= ui.InputText("Window Title", m_PlayerSettings.WindowTitle);
+            KeireEditor::AssetPickerOptions iconOptions;
+            iconOptions.EmptyLabel = "Kéire default icon";
+            iconOptions.ExpectedType = Keire::Texture2DAsset::StaticType();
+            iconOptions.Label = "Windows Icon";
+            settingsChanged |=
+                m_WindowsPlayerIconPicker.Draw(ui, m_AssetRecords, m_PlayerSettings.WindowsIcon, iconOptions);
+            if (!m_WindowsPlayerIconPicker.Diagnostic().empty())
+                ui.TextColored(m_Theme.Warning, m_WindowsPlayerIconPicker.Diagnostic());
+            iconOptions.Label = "Linux Icon";
+            settingsChanged |=
+                m_LinuxPlayerIconPicker.Draw(ui, m_AssetRecords, m_PlayerSettings.LinuxIcon, iconOptions);
+            if (!m_LinuxPlayerIconPicker.Diagnostic().empty())
+                ui.TextColored(m_Theme.Warning, m_LinuxPlayerIconPicker.Diagnostic());
+            iconOptions.Label = "macOS Icon";
+            settingsChanged |=
+                m_MacOSPlayerIconPicker.Draw(ui, m_AssetRecords, m_PlayerSettings.MacOSIcon, iconOptions);
+            if (!m_MacOSPlayerIconPicker.Diagnostic().empty())
+                ui.TextColored(m_Theme.Warning, m_MacOSPlayerIconPicker.Diagnostic());
+            ui.TextColored(m_Theme.MutedText,
+                           "Choose an imported image asset. Kéire default icon uses the built-in player artwork.");
+        }
+
+        if (auto signing = ui.BeginTreeNode("Signing", false); signing)
+        {
+            constexpr std::array policies{Keire::PlayerSigningPolicy::Disabled,
+                                          Keire::PlayerSigningPolicy::SignIfConfigured,
+                                          Keire::PlayerSigningPolicy::Required};
+            if (auto combo = ui.BeginCombo("Policy", Keire::ToString(profile.Signing.Policy)); combo)
+            {
+                for (const auto policy : policies)
+                {
+                    if (ui.Selectable(Keire::ToString(policy), profile.Signing.Policy == policy))
+                    {
+                        profile.Signing.Policy = policy;
+                        profileChanged = true;
+                    }
+                }
+            }
+            auto command = Keire::Detail::PathToUtf8(profile.Signing.Command);
+            if (ui.InputText("Hook Executable", command))
+            {
+                profile.Signing.Command = Keire::Detail::PathFromUtf8(command);
+                profileChanged = true;
+            }
+            if (m_PlayerSigningEditProfile != profile.Id)
+            {
+                m_PlayerSigningEditProfile = profile.Id;
+                m_PlayerSigningArgumentsText = JoinList(profile.Signing.Arguments);
+                m_PlayerSigningEnvironmentText = JoinList(profile.Signing.RequiredEnvironment);
+            }
+            if (ui.InputText("Hook Arguments", m_PlayerSigningArgumentsText))
+            {
+                profile.Signing.Arguments = SplitList(m_PlayerSigningArgumentsText);
+                profileChanged = true;
+            }
+            if (ui.InputText("Required Environment", m_PlayerSigningEnvironmentText))
+            {
+                profile.Signing.RequiredEnvironment = SplitList(m_PlayerSigningEnvironmentText);
+                profileChanged = true;
+            }
+            auto timeout = static_cast<std::int64_t>(profile.Signing.TimeoutSeconds);
+            if (ui.DragInteger("Timeout (seconds)", timeout, 1.0, 1, 3600))
+            {
+                profile.Signing.TimeoutSeconds = static_cast<std::uint32_t>(timeout);
+                profileChanged = true;
+            }
+            ui.TextColored(m_Theme.MutedText, "Separate hook arguments and environment names with semicolons.");
+        }
+
+        if (profileChanged || settingsChanged)
+        {
+            try
+            {
+                SavePlayerBuildConfiguration();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Player Build Settings", error.what());
+            }
+        }
+
+        ui.Separator();
+        const auto playerStatus =
+            m_PlayerBuildService ? m_PlayerBuildService->Status() : KeireEditor::PlayerBuildStatus{};
+        if (m_PlayerBuildService && m_PlayerBuildService->Busy())
+        {
+            const auto overlay =
+                playerStatus.Phase.empty() ? playerStatus.Message : playerStatus.Phase + ": " + playerStatus.Message;
+            ui.ProgressBar(playerStatus.Progress, {0.0F, 18.0F}, overlay);
+        }
+        else if (playerStatus.State != KeireEditor::PlayerBuildState::Idle)
+        {
+            const auto color = playerStatus.State == KeireEditor::PlayerBuildState::Succeeded   ? m_Theme.Success
+                               : playerStatus.State == KeireEditor::PlayerBuildState::Cancelled ? m_Theme.Warning
+                                                                                                : m_Theme.Error;
+            ui.TextColored(color, playerStatus.Message);
+        }
+        if (auto disabled = ui.BeginDisabled(!m_CommandRouter->Available(KeireEditor::EditorCommand::BuildPlayer));
+            disabled)
+        {
+            if (ui.Button("Build"))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildPlayer);
+        }
+        ui.SameLine();
+        if (auto disabled =
+                ui.BeginDisabled(!m_CommandRouter->Available(KeireEditor::EditorCommand::BuildAndRunPlayer));
+            disabled)
+        {
+            if (ui.Button("Build & Run"))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildAndRunPlayer);
+        }
+        ui.SameLine();
+        if (auto disabled =
+                ui.BeginDisabled(!m_CommandRouter->Available(KeireEditor::EditorCommand::CancelPlayerBuild));
+            disabled)
+        {
+            if (ui.Button("Cancel"))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::CancelPlayerBuild);
+        }
+        ui.SameLine();
+        if (auto disabled =
+                ui.BeginDisabled(!m_CommandRouter->Available(KeireEditor::EditorCommand::RevealPlayerBuild));
+            disabled)
+        {
+            if (ui.Button("Reveal Build"))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::RevealPlayerBuild);
+        }
+        if (profile.Platform != Keire::HostPlayerPlatform() || profile.Architecture != Keire::HostPlayerArchitecture())
+        {
+            ui.TextColored(m_Theme.MutedText,
+                           "Foreign targets can be assembled here; Build & Run requires a matching editor host.");
+        }
+
         ui.Separator();
 
         const auto scripts = Owner().Scripts();
@@ -451,7 +585,7 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
                 CookAssets();
         }
         ui.TextColored(m_Theme.MutedText,
-                       "Native build, launch, packaging, and debugger-wait commands use Scripts/project launchers.");
+                       "Standalone outputs are published atomically under <Project>/Build/<profile output folder>.");
     }
 }
 
@@ -474,7 +608,13 @@ void EditorWorkspaceLayer::StartManagedBuild()
     }
     if (request.Assemblies.empty())
         throw std::runtime_error("The project contains no .keireasm assembly definitions.");
-    request.Configuration = m_BuildConfiguration == 0 ? "Debug" : "Release";
+    request.Configuration = "Debug";
+    if (m_PlayerBuildSettingsLoaded)
+    {
+        const auto& profile = Keire::FindPlayerBuildProfile(m_PlayerBuildProfiles, m_PlayerBuildProfiles.ActiveProfile);
+        if (profile.Configuration != Keire::PlayerBuildConfiguration::Development)
+            request.Configuration = "Release";
+    }
     (void)scripts->StartBuild(std::move(request));
 }
 

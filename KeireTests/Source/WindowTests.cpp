@@ -372,3 +372,14 @@ TEST_CASE("Shutdown makes surviving window handles inert")
     CHECK_NOTHROW(window->SetVisible(false));
     window.Reset();
 }
+
+TEST_CASE("Window system shutdown closes surviving system tray handles")
+{
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto tray = system->CreateSystemTray({.Tooltip = "Kéire tray shutdown test", .Actions = {{"Close", [] {}}}});
+    system->Shutdown();
+    CHECK_NOTHROW(tray->Close());
+    CHECK_FALSE(tray->IsAvailable());
+    tray.Reset();
+}

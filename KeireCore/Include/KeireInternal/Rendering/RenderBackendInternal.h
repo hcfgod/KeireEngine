@@ -14,6 +14,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Streaming/StreamingSystem.h"
+#include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
@@ -432,6 +433,14 @@ namespace Keire::RenderBackend
     static_assert(alignof(GpuRenderVertex) == 16);
     static_assert(sizeof(GpuMeshVertex) == 96);
     static_assert(alignof(GpuMeshVertex) == 16);
+
+    struct RuntimeUiVertex final
+    {
+        Vector2 Position;
+        Color ColorValue;
+    };
+
+    static_assert(sizeof(RuntimeUiVertex) == sizeof(float) * 6);
 
     [[nodiscard]] constexpr bool SupportsComputeSkinning(const std::string_view driver,
                                                          const SkinningMethod method) noexcept
@@ -1141,6 +1150,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateSkyShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateRuntimeUiShader(bool vertex) const;
         void EnsureFrameUploadContext();
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(SDL_GPUCommandBuffer* commands, std::span<const std::byte> bytes,
@@ -1195,6 +1205,8 @@ namespace Keire::RenderBackend
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                 const SceneRenderPacket& packet);
         void RecordSurface(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
+        void RecordSwapchain(SDL_GPUCommandBuffer*& commands, ImDrawData* drawData);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateRuntimeUiPipeline();
         void EndFrame(ImDrawData* drawData);
         void ExecuteFrame(ImDrawData* drawData);
         void StartRenderThread();
@@ -1250,6 +1262,7 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* RuntimeUiPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;
         SDL_GPUSampler* ToneMapSampler = nullptr;
         SDL_GPUTexture* EmptyShadowTexture = nullptr;
@@ -1284,6 +1297,8 @@ namespace Keire::RenderBackend
         std::vector<std::pair<SamplerDescription, SDL_GPUSampler*>> SamplerCache;
         std::vector<RenderPipelineSet> Pipelines;
         std::vector<std::weak_ptr<RenderSurfaceState>> Surfaces;
+        std::weak_ptr<RenderSurfaceState> PresentationSurface;
+        std::vector<RuntimeUiDrawCommand> RuntimeUiCommands;
         std::vector<QueuedSceneRequest> Requests;
         std::vector<SurfaceResources> PendingRetired;
         std::vector<GpuMeshResources> PendingRetiredMeshes;

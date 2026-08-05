@@ -19,6 +19,7 @@ namespace Keire
     class JobSystem;
     class AssetSystem;
     class Scene;
+    class RuntimeUiTree;
     class Window;
     class WindowSystem;
 
@@ -244,6 +245,7 @@ namespace Keire
         [[nodiscard]] Ref<RenderSurface> CreateSurface(RenderSurfaceSpecification specification = {});
         [[nodiscard]] Ref<RenderView> CreateView(RenderSurfaceSpecification specification = {});
         void Submit(SceneRenderRequest request);
+        void SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree);
         void RequestGpuVfxPipelineWarmup();
 
         [[nodiscard]] RenderMode Mode() const noexcept;

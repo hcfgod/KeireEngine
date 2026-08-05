@@ -22,7 +22,8 @@ namespace Keire
     namespace Detail
     {
         class FolderDialogState;
-    }
+        class OpenFileDialogState;
+    } // namespace Detail
 
     enum class WindowMode : std::uint8_t
     {
@@ -48,6 +49,13 @@ namespace Keire
         bool Visible = true;
         bool Maximized = false;
         WindowMode Mode = WindowMode::Windowed;
+    };
+
+    struct WindowSystemSpecification
+    {
+        std::string ApplicationName;
+        std::string ApplicationVersion;
+        std::string ApplicationIdentifier;
     };
 
     class WindowId
@@ -278,6 +286,37 @@ namespace Keire
         Ref<Detail::FolderDialogState> m_State;
     };
 
+    enum class OpenFileDialogStatus : std::uint8_t
+    {
+        Pending,
+        Selected,
+        Cancelled,
+        Failed
+    };
+
+    struct OpenFileDialogSpecification
+    {
+        std::string Title = "Open File";
+        std::filesystem::path DefaultLocation;
+        std::string FilterName;
+        std::string Extension;
+    };
+
+    class KEIRE_API OpenFileDialogOperation final : public RefCounted
+    {
+      public:
+        ~OpenFileDialogOperation() override;
+        [[nodiscard]] OpenFileDialogStatus Status() const noexcept;
+        [[nodiscard]] std::filesystem::path SelectedPath() const;
+        [[nodiscard]] std::string Diagnostic() const;
+
+      private:
+        friend class WindowSystem;
+        template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);
+        explicit OpenFileDialogOperation(Ref<Detail::OpenFileDialogState> state);
+        Ref<Detail::OpenFileDialogState> m_State;
+    };
+
     enum class SaveFileDialogStatus : std::uint8_t
     {
         Pending,
@@ -342,7 +381,7 @@ namespace Keire
     class KEIRE_API WindowSystem final : public RefCounted
     {
       public:
-        WindowSystem();
+        explicit WindowSystem(WindowSystemSpecification specification = {});
         ~WindowSystem() override;
 
         [[nodiscard]] Ref<Window> CreateWindow(const WindowSpecification& specification = {});
@@ -350,6 +389,8 @@ namespace Keire
         [[nodiscard]] std::optional<WindowEvent> PollEvent();
         [[nodiscard]] Ref<FolderDialogOperation> ShowFolderDialog(WindowId parent,
                                                                   const std::filesystem::path& defaultLocation = {});
+        [[nodiscard]] Ref<OpenFileDialogOperation> ShowOpenFileDialog(WindowId parent,
+                                                                      const OpenFileDialogSpecification& specification);
         [[nodiscard]] Ref<SaveFileDialogOperation> ShowSaveFileDialog(WindowId parent,
                                                                       const SaveFileDialogSpecification& specification);
         void SetClipboardText(std::string_view text);

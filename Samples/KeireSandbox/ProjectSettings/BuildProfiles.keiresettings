@@ -1,0 +1,22 @@
+{
+  "activeProfile": "10000000-0000-4000-8000-000000000001",
+  "profiles": [
+    {
+      "architecture": "x86_64",
+      "configuration": "release",
+      "id": "10000000-0000-4000-8000-000000000001",
+      "includeSymbols": true,
+      "name": "Desktop Development",
+      "outputSlug": "Desktop-Development",
+      "platform": "windows",
+      "signing": {
+        "arguments": [],
+        "command": "",
+        "policy": "disabled",
+        "requiredEnvironment": [],
+        "timeoutSeconds": 600
+      }
+    }
+  ],
+  "schemaVersion": 1
+}

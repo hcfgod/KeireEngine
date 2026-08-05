@@ -5,6 +5,38 @@ version tags.
 
 ## Unreleased
 
+- Added linked Kéire application artwork for Windows editor, Hub, and runtime executables. Desktop player builds now
+  generate fallback artwork when no icon is selected and embed the selected or generated multi-resolution icon into
+  Windows player executables while retaining the existing Linux and macOS platform assets.
+- Fixed duplicate and stale Project Hub tray entries by enforcing one Hub process per executable installation and
+  closing surviving tray handles during window-system shutdown. Secondary editor and Build Support launches now
+  activate the existing Hub, and one **Show Hub** action restores and focuses it after pending native events settle.
+- Added production desktop player builds with persistent player settings and Build Profiles; Windows, Linux, and macOS
+  x86_64/ARM64 Build Support packages; isolated managed-build/cook/assembly/signing execution; transactional output under
+  each project's `Build` directory; packaged-runtime discovery; target branding; Hub import/repair/removal; editor
+  build, run, cancel, reveal, dirty-state, and missing-support workflows; HTTPS release-catalog download with verified
+  archive installation and offline import; release scripts; and CLI automation/status documents.
+- Fixed packaged players presenting their offscreen game surface through Dear ImGui's fallback debug window. Runtime
+  scenes now present directly to the native swapchain and authored Game UI is composited by a dedicated SDL_GPU path;
+  standalone players no longer initialize, frame, dock, or submit Dear ImGui. Windows packages are patched to the GUI
+  subsystem so launching a game does not allocate a console, and platform icon settings now use searchable Texture2D
+  asset pickers instead of raw asset-ID text fields.
+- Fixed standalone Game UI buttons stopping native click dispatch after the first frame because the player did not
+  publish its elapsed frame clock to managed scripts. Players now provide the complete managed time contract and apply
+  managed cursor visibility and relative-lock requests to the native game window.
+- Fixed standalone scene cooking omitting managed `AssetReference<T>` values whose legacy serialized field metadata did
+  not retain its managed type. Scene imports now validate projected references against the project asset index, so UI
+  sounds and other managed-only asset dependencies are included in packaged players.
+- Fixed quick mouse clicks disappearing from gameplay input when button-down and button-up events arrived during the
+  same rendered frame. Action snapshots now retain both transitions, allowing standalone `Input.Pressed` actions such
+  as Fire to observe the click while keeping the final held state released.
+- Fixed standalone mouse actions being filtered when a connected controller made `Gamepad` the player's initial
+  control scheme. Unlocked users now switch between gamepad and keyboard/mouse binding groups from the device that is
+  actively producing input, so left-click Fire works with controllers or virtual gamepads connected.
+- Fixed standalone managed VFX handles inheriting no-op service defaults even though Play Mode forwarded those calls
+  to the live scene. Packaged players now route play, stop, pause, alive-state, event, and parameter operations through
+  their `SceneRuntimeSession`, restoring input-driven effects such as the FPS showcase weapon fire.
+
 - Hardened managed runtime validation by giving every integration-test process isolated assembly directories, and
   corrected the pinned Coral host patch so the configured bundled .NET root is applied before HostFXR discovery. The
   patched Coral native host now also builds warning-clean under MSVC with bounded string copying and a portable host

@@ -119,6 +119,18 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
         }
         if (auto build = ui.BeginMenu("Build"); build)
         {
+            if (ui.MenuItem("Build Player", false, m_CommandRouter->Available(KeireEditor::EditorCommand::BuildPlayer)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildPlayer);
+            if (ui.MenuItem("Build & Run Player", false,
+                            m_CommandRouter->Available(KeireEditor::EditorCommand::BuildAndRunPlayer)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildAndRunPlayer);
+            if (ui.MenuItem("Cancel Player Build", false,
+                            m_CommandRouter->Available(KeireEditor::EditorCommand::CancelPlayerBuild)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::CancelPlayerBuild);
+            if (ui.MenuItem("Reveal Player Build", false,
+                            m_CommandRouter->Available(KeireEditor::EditorCommand::RevealPlayerBuild)))
+                (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::RevealPlayerBuild);
+            ui.Separator();
             if (ui.MenuItem("Build Scripts    Ctrl+Shift+B", false,
                             m_CommandRouter->Available(KeireEditor::EditorCommand::BuildScripts)))
             {
@@ -486,6 +498,9 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
     case Dialog::DirtyScene:
         ui.OpenPopup("Unsaved Scene Changes");
         break;
+    case Dialog::DirtyPlayerBuild:
+        ui.OpenPopup("Unsaved Player Build State");
+        break;
     case Dialog::RenameEntity:
         ui.OpenPopup("Rename Entity");
         break;
@@ -506,6 +521,7 @@ void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& w
     DrawDeleteDialog(ui, workspace, "Delete Theme", true);
     DrawDirtyThemeDialog(ui, workspace);
     DrawDirtySceneDialog(ui);
+    DrawDirtyPlayerBuildDialog(ui);
 }
 
 void EditorWorkspaceLayer::DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace,
@@ -709,6 +725,59 @@ void EditorWorkspaceLayer::DrawDirtySceneDialog(Keire::UiFrame& ui)
             ui.CloseCurrentPopup();
         }
         ui.TextColored(m_Theme.MutedText, "Save is atomic; Cancel leaves the scene and selection unchanged.");
+    }
+}
+
+void EditorWorkspaceLayer::DrawDirtyPlayerBuildDialog(Keire::UiFrame& ui)
+{
+    if (auto popup = ui.BeginPopupModal("Unsaved Player Build State"); popup)
+    {
+        ui.Text("The active scene or project settings contain unsaved changes.");
+        ui.TextColored(m_Theme.MutedText, "Standalone builds always use files saved on disk.");
+        if (ui.Button("Save All"))
+        {
+            try
+            {
+                if (m_SceneDocument && m_SceneDocument->Dirty())
+                    SaveScene();
+                if (m_ProjectSettingsDocument && m_ProjectSettingsDocument->Dirty())
+                    m_ProjectSettingsDocument->Save();
+                if ((!m_SceneDocument || !m_SceneDocument->Dirty()) &&
+                    (!m_ProjectSettingsDocument || !m_ProjectSettingsDocument->Dirty()))
+                {
+                    const auto runAfterBuild = std::exchange(m_PendingPlayerBuildRun, false);
+                    m_Dialog = Dialog::None;
+                    ui.CloseCurrentPopup();
+                    StartPlayerBuild(runAfterBuild);
+                }
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Player Build", error.what());
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Build Saved State"))
+        {
+            try
+            {
+                const auto runAfterBuild = std::exchange(m_PendingPlayerBuildRun, false);
+                m_Dialog = Dialog::None;
+                ui.CloseCurrentPopup();
+                StartPlayerBuild(runAfterBuild);
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Player Build", error.what());
+            }
+        }
+        ui.SameLine();
+        if (ui.Button("Cancel"))
+        {
+            m_PendingPlayerBuildRun = false;
+            m_Dialog = Dialog::None;
+            ui.CloseCurrentPopup();
+        }
     }
 }
 

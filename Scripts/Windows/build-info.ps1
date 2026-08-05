@@ -43,6 +43,7 @@ if (Test-GitRepository $Root) {
 
 $version = ConvertTo-CStringContent $Project.PROJECT_VERSION
 $displayName = ConvertTo-CStringContent $Project.PROJECT_DISPLAY_NAME
+$repositorySlug = ConvertTo-CStringContent $Project.REPOSITORY_SLUG
 $commit = ConvertTo-CStringContent $commit
 $dirtyLiteral = if ($dirty) { "true" } else { "false" }
 $content = @"
@@ -50,6 +51,7 @@ $content = @"
 
 #define KEIRE_BUILD_PROJECT_VERSION "$version"
 #define KEIRE_BUILD_PROJECT_NAME "$displayName"
+#define KEIRE_BUILD_REPOSITORY_SLUG "$repositorySlug"
 #define KEIRE_BUILD_GIT_COMMIT "$commit"
 #define KEIRE_BUILD_GIT_DIRTY $dirtyLiteral
 "@

@@ -29,6 +29,11 @@ so it continues at the bounded background pump rate. If the platform cannot crea
 instead so it can always be recovered from the taskbar. Tray Quit follows the same deferred action boundary and performs
 normal layer/UI/render/window/log shutdown. Exiting an editor does not restore the Hub automatically.
 
+Only one Hub process owns the window and tray entry for a canonical Hub executable. A later repository launch, editor
+Build Support request, or direct executable launch sends its activation to that primary process and exits before
+creating UI or tray state. Window-system shutdown closes any surviving tray handle before SDL teardown, including when
+layer cleanup was interrupted, so normal exit and tray Quit do not leave a stale notification-area entry.
+
 ## Launcher Workflows
 
 Windows:

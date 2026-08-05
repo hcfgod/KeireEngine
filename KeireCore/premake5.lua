@@ -55,6 +55,9 @@ project(ProjectConfig.CORE_TARGET)
             "bash " .. unixScripts .. "/builtin-vfx.sh"
         }
 
+    filter "system:macosx"
+        files { "Source/Build/PlayerSupportDownloadMac.mm" }
+
     filter {}
 
     externalincludedirs

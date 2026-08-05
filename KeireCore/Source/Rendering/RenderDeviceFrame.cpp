@@ -8,12 +8,227 @@
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
+#include <imgui_impl_sdlgpu3.h>
+#include <stb_easy_font.h>
+
 #include <cstring>
 #include <future>
 #include <stdexcept>
 
 namespace Keire::RenderBackend
 {
+    namespace
+    {
+        constexpr std::size_t MaximumRuntimeUiVertices = 1'000'000;
+        constexpr std::size_t MaximumRuntimeUiTextBytes = 4096;
+
+        struct EasyFontVertex final
+        {
+            float X = 0.0F;
+            float Y = 0.0F;
+            float Z = 0.0F;
+            std::array<std::uint8_t, 4> Color{};
+        };
+
+        static_assert(sizeof(EasyFontVertex) == 16);
+
+        void AppendRuntimeUiRectangle(std::vector<RuntimeUiVertex>& output, const RuntimeUiRect rectangle,
+                                      const Color color)
+        {
+            if (rectangle.Empty() || color.Alpha <= 0.0F || output.size() > MaximumRuntimeUiVertices - 6U)
+                return;
+            const RuntimeUiVertex topLeft{{rectangle.X, rectangle.Y}, color};
+            const RuntimeUiVertex topRight{{rectangle.X + rectangle.Width, rectangle.Y}, color};
+            const RuntimeUiVertex bottomLeft{{rectangle.X, rectangle.Y + rectangle.Height}, color};
+            const RuntimeUiVertex bottomRight{{rectangle.X + rectangle.Width, rectangle.Y + rectangle.Height}, color};
+            output.insert(output.end(), {topLeft, topRight, bottomRight, topLeft, bottomRight, bottomLeft});
+        }
+
+        void AppendRuntimeUiBorder(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
+        {
+            const float thickness = std::min(command.BorderWidth, std::min(command.Rect.Width, command.Rect.Height));
+            if (thickness <= 0.0F || command.BorderColor.Alpha <= 0.0F)
+                return;
+            const auto append = [&](const RuntimeUiRect rectangle)
+            { AppendRuntimeUiRectangle(output, rectangle.Intersect(command.ClipRect), command.BorderColor); };
+            append({command.Rect.X, command.Rect.Y, command.Rect.Width, thickness});
+            append({command.Rect.X, command.Rect.Y + command.Rect.Height - thickness, command.Rect.Width, thickness});
+            append({command.Rect.X, command.Rect.Y + thickness, thickness,
+                    std::max(0.0F, command.Rect.Height - thickness * 2.0F)});
+            append({command.Rect.X + command.Rect.Width - thickness, command.Rect.Y + thickness, thickness,
+                    std::max(0.0F, command.Rect.Height - thickness * 2.0F)});
+        }
+
+        void AppendRuntimeUiText(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
+        {
+            if (command.Text.empty() || command.FontSize <= 0.0F || command.ColorValue.Alpha <= 0.0F ||
+                output.size() >= MaximumRuntimeUiVertices)
+                return;
+            std::string text = command.Text.substr(0, MaximumRuntimeUiTextBytes);
+            const float scale = command.FontSize / 12.0F;
+            const float width = static_cast<float>(stb_easy_font_width(text.data())) * scale;
+            const float height = static_cast<float>(stb_easy_font_height(text.data())) * scale;
+            float originX = command.Rect.X;
+            float originY = command.Rect.Y;
+            if (command.HorizontalAlignment == RuntimeUiAlignment::Center)
+                originX += (command.Rect.Width - width) * 0.5F;
+            else if (command.HorizontalAlignment == RuntimeUiAlignment::End)
+                originX += command.Rect.Width - width;
+            if (command.VerticalAlignment == RuntimeUiAlignment::Center)
+                originY += (command.Rect.Height - height) * 0.5F;
+            else if (command.VerticalAlignment == RuntimeUiAlignment::End)
+                originY += command.Rect.Height - height;
+
+            const auto bufferBytes = std::min<std::size_t>(text.size() * 300U, std::numeric_limits<int>::max());
+            std::vector<std::byte> buffer(bufferBytes);
+            const int quads =
+                stb_easy_font_print(0.0F, 0.0F, text.data(), nullptr, buffer.data(), static_cast<int>(buffer.size()));
+            const auto* vertices = reinterpret_cast<const EasyFontVertex*>(buffer.data());
+            for (int quad = 0; quad < quads && output.size() <= MaximumRuntimeUiVertices - 6U; ++quad)
+            {
+                const auto glyph = std::span(vertices + quad * 4, 4);
+                float minimumX = glyph.front().X;
+                float minimumY = glyph.front().Y;
+                float maximumX = glyph.front().X;
+                float maximumY = glyph.front().Y;
+                for (const auto& vertex : glyph)
+                {
+                    minimumX = std::min(minimumX, vertex.X);
+                    minimumY = std::min(minimumY, vertex.Y);
+                    maximumX = std::max(maximumX, vertex.X);
+                    maximumY = std::max(maximumY, vertex.Y);
+                }
+                const RuntimeUiRect rectangle{originX + minimumX * scale, originY + minimumY * scale,
+                                              (maximumX - minimumX) * scale, (maximumY - minimumY) * scale};
+                AppendRuntimeUiRectangle(output, rectangle.Intersect(command.ClipRect), command.ColorValue);
+            }
+        }
+
+        [[nodiscard]] std::vector<RuntimeUiVertex>
+        BuildRuntimeUiVertices(const std::span<const RuntimeUiDrawCommand> commands)
+        {
+            std::vector<RuntimeUiVertex> result;
+            result.reserve(std::min<std::size_t>(commands.size() * 12U, MaximumRuntimeUiVertices));
+            for (const auto& command : commands)
+            {
+                if (result.size() >= MaximumRuntimeUiVertices)
+                    break;
+                switch (command.Type)
+                {
+                case RuntimeUiDrawType::Quad:
+                    AppendRuntimeUiRectangle(result, command.Rect.Intersect(command.ClipRect), command.ColorValue);
+                    AppendRuntimeUiBorder(result, command);
+                    break;
+                case RuntimeUiDrawType::Image:
+                    AppendRuntimeUiRectangle(result, command.Rect.Intersect(command.ClipRect), command.ColorValue);
+                    break;
+                case RuntimeUiDrawType::Text:
+                    AppendRuntimeUiText(result, command);
+                    break;
+                case RuntimeUiDrawType::PushClip:
+                case RuntimeUiDrawType::PopClip:
+                    break;
+                }
+            }
+            return result;
+        }
+    } // namespace
+
+    void RenderSharedState::RecordSwapchain(SDL_GPUCommandBuffer*& commands, ImDrawData* drawData)
+    {
+        SDL_GPUTexture* swapchain = nullptr;
+        std::uint32_t swapchainWidth = 0;
+        std::uint32_t swapchainHeight = 0;
+        const auto swapchainStarted = std::chrono::steady_clock::now();
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(commands, NativeWindow, &swapchain, &swapchainWidth,
+                                                   &swapchainHeight))
+        {
+            (void)SDL_CancelGPUCommandBuffer(commands);
+            commands = nullptr;
+            throw std::runtime_error("SDL_WaitAndAcquireGPUSwapchainTexture failed: " + LastSdlError());
+        }
+        Statistics.SwapchainWaitMilliseconds =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - swapchainStarted).count();
+
+        const auto uiRecordingStarted = std::chrono::steady_clock::now();
+        if (swapchain)
+        {
+            const bool renderEditorUi = drawData && drawData->DisplaySize.x > 0.0F && drawData->DisplaySize.y > 0.0F;
+            bool presentedSurface = false;
+            SDL_GPUBuffer* runtimeUiBuffer = nullptr;
+            std::uint32_t runtimeUiVertexCount = 0;
+            if (!RuntimeUiCommands.empty())
+            {
+                const auto vertices = BuildRuntimeUiVertices(RuntimeUiCommands);
+                if (!vertices.empty())
+                {
+                    if (!RuntimeUiPipeline)
+                        RuntimeUiPipeline = CreateRuntimeUiPipeline();
+                    runtimeUiBuffer =
+                        UploadBuffer(commands, std::as_bytes(std::span(vertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
+                    FrameTransientBuffers.push_back(runtimeUiBuffer);
+                    runtimeUiVertexCount = static_cast<std::uint32_t>(vertices.size());
+                }
+            }
+            if (const auto presentation = PresentationSurface.lock();
+                presentation && presentation->Resources.SampledColor && presentation->Width != 0 &&
+                presentation->Height != 0 && swapchainWidth != 0 && swapchainHeight != 0)
+            {
+                const bool submitted = std::ranges::any_of(Requests, [surface = presentation.get()](const auto& request)
+                                                           { return request.Surface == surface; });
+                SDL_GPUBlitInfo blit{};
+                blit.source.texture = submitted && presentation->HasOutput ? presentation->Resources.ExchangeColor
+                                                                           : presentation->Resources.SampledColor;
+                blit.source.w = presentation->Width;
+                blit.source.h = presentation->Height;
+                blit.destination.texture = swapchain;
+                blit.destination.w = swapchainWidth;
+                blit.destination.h = swapchainHeight;
+                blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+                blit.filter = SDL_GPU_FILTER_LINEAR;
+                SDL_BlitGPUTexture(commands, &blit);
+                presentedSurface = true;
+            }
+            if (renderEditorUi)
+                ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commands);
+
+            if (renderEditorUi || runtimeUiBuffer || !presentedSurface)
+            {
+                SDL_GPUColorTargetInfo target{};
+                target.texture = swapchain;
+                target.clear_color = {Specification.SwapchainClearColor.Red, Specification.SwapchainClearColor.Green,
+                                      Specification.SwapchainClearColor.Blue, Specification.SwapchainClearColor.Alpha};
+                target.load_op = presentedSurface ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+                target.store_op = SDL_GPU_STOREOP_STORE;
+                SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(commands, &target, 1, nullptr);
+                if (!pass)
+                    throw std::runtime_error("SDL_BeginGPURenderPass(swapchain) failed: " + LastSdlError());
+                if (runtimeUiBuffer)
+                {
+                    const SDL_GPUViewport viewport{
+                        0.0F, 0.0F, static_cast<float>(swapchainWidth), static_cast<float>(swapchainHeight),
+                        0.0F, 1.0F};
+                    const Vector4 viewportUniform{static_cast<float>(swapchainWidth),
+                                                  static_cast<float>(swapchainHeight), 0.0F, 0.0F};
+                    const SDL_GPUBufferBinding binding{runtimeUiBuffer, 0};
+                    SDL_BindGPUGraphicsPipeline(pass, RuntimeUiPipeline);
+                    SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+                    SDL_SetGPUViewport(pass, &viewport);
+                    SDL_PushGPUVertexUniformData(commands, 0, &viewportUniform, sizeof(viewportUniform));
+                    SDL_DrawGPUPrimitives(pass, runtimeUiVertexCount, 1, 0, 0);
+                    ++Statistics.DrawCalls;
+                    Statistics.Triangles += runtimeUiVertexCount / 3U;
+                }
+                if (renderEditorUi)
+                    ImGui_ImplSDLGPU3_RenderDrawData(drawData, commands, pass);
+                SDL_EndGPURenderPass(pass);
+                ++Statistics.Passes;
+            }
+        }
+        Statistics.UiRecordingMilliseconds =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uiRecordingStarted).count();
+    }
+
     RenderSharedState::RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows,
                                          Ref<Keire::Window> window, Ref<AssetSystem> assets, Ref<JobSystem> jobs,
                                          Ref<StreamingSystem> streaming)
@@ -377,6 +592,104 @@ namespace Keire::RenderBackend
         if (!shader)
             throw std::runtime_error("SDL_CreateGPUShader(tone map) failed: " + LastSdlError());
         return shader;
+    }
+
+    SDL_GPUShader* RenderSharedState::CreateRuntimeUiShader(const bool vertex) const
+    {
+        SDL_GPUShaderCreateInfo information{};
+        information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+        information.num_uniform_buffers = vertex ? 1U : 0U;
+        const auto formats = SDL_GetGPUShaderFormats(Device);
+        if (formats & SDL_GPU_SHADERFORMAT_DXIL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_DXIL;
+            information.code = vertex ? Detail::BuiltinRuntimeUiVertexDxil : Detail::BuiltinRuntimeUiFragmentDxil;
+            information.code_size =
+                vertex ? Detail::BuiltinRuntimeUiVertexDxilSize : Detail::BuiltinRuntimeUiFragmentDxilSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_MSL)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_MSL;
+            information.code = vertex ? Detail::BuiltinRuntimeUiVertexMsl : Detail::BuiltinRuntimeUiFragmentMsl;
+            information.code_size =
+                vertex ? Detail::BuiltinRuntimeUiVertexMslSize : Detail::BuiltinRuntimeUiFragmentMslSize;
+        }
+        else if (formats & SDL_GPU_SHADERFORMAT_SPIRV)
+        {
+            information.format = SDL_GPU_SHADERFORMAT_SPIRV;
+            information.entrypoint = vertex ? "VSMain" : "PSMain";
+            information.code = vertex ? Detail::BuiltinRuntimeUiVertexSpirV : Detail::BuiltinRuntimeUiFragmentSpirV;
+            information.code_size =
+                vertex ? Detail::BuiltinRuntimeUiVertexSpirVSize : Detail::BuiltinRuntimeUiFragmentSpirVSize;
+        }
+        else
+            throw std::runtime_error("The active SDL_GPU backend exposes no supported runtime UI shader format.");
+        SDL_GPUShader* shader = SDL_CreateGPUShader(Device, &information);
+        if (!shader)
+            throw std::runtime_error("SDL_CreateGPUShader(runtime UI) failed: " + LastSdlError());
+        return shader;
+    }
+
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateRuntimeUiPipeline()
+    {
+        SDL_GPUShader* vertex = nullptr;
+        SDL_GPUShader* fragment = nullptr;
+        try
+        {
+            vertex = CreateRuntimeUiShader(true);
+            fragment = CreateRuntimeUiShader(false);
+
+            const SDL_GPUVertexBufferDescription buffer{0, sizeof(RuntimeUiVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
+            const std::array attributes{
+                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(RuntimeUiVertex, Position)},
+                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(RuntimeUiVertex, ColorValue)},
+            };
+            SDL_GPUVertexInputState input{};
+            input.vertex_buffer_descriptions = &buffer;
+            input.num_vertex_buffers = 1;
+            input.vertex_attributes = attributes.data();
+            input.num_vertex_attributes = static_cast<std::uint32_t>(attributes.size());
+
+            SDL_GPUColorTargetDescription color{};
+            color.format = SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
+            color.blend_state.enable_blend = true;
+            color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+            color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            color.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            color.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+            color.blend_state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G |
+                                                 SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
+            SDL_GPUGraphicsPipelineTargetInfo target{};
+            target.color_target_descriptions = &color;
+            target.num_color_targets = 1;
+
+            SDL_GPUGraphicsPipelineCreateInfo information{};
+            information.vertex_shader = vertex;
+            information.fragment_shader = fragment;
+            information.vertex_input_state = input;
+            information.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+            information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+            information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+            information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+            information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            information.target_info = target;
+            SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);
+            if (!pipeline)
+                throw std::runtime_error("SDL_CreateGPUGraphicsPipeline(runtime UI) failed: " + LastSdlError());
+            SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            return pipeline;
+        }
+        catch (...)
+        {
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            if (vertex)
+                SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
     }
 
     void RenderSharedState::EnsureFrameUploadContext()

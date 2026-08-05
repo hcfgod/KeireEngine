@@ -25,6 +25,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Asset Browser](AssetBrowser.md) | Folder navigation, List/Grid modes, thumbnails, selection, and file operations | Designers and editor authors |
 | [Project System](ProjectSystem.md) | Project identity, directory isolation, locks, templates, and recent registry | Editor and tooling authors |
 | [Project Hub](ProjectHub.md) | Create/open/reveal workflows, launcher behavior, and smoke modes | Artists, designers, and editor authors |
+| [Desktop Player Builds](PlayerBuilds.md) | Build profiles, Build Support, layouts, automation, branding, and signing hooks | Designers, build engineers, and release authors |
 | [Scene System](SceneSystem.md) | Scene assets, mutable instances, async loading, activation, and events | Runtime and subsystem authors |
 | [Scene Authoring](SceneAuthoring.md) | Hierarchy/Inspector workflow, dirty prompts, undo, save, and recovery | Designers and editor authors |
 | [ECS And Components](ECSAndComponents.md) | Entities, layers, registration, component lifetime, lifecycle, transforms, and scene schema v4 | Runtime and component authors |

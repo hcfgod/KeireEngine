@@ -313,6 +313,12 @@ assert_true grep -q 'TrashRecords()' "$ROOT/KeireClient/Source/Editor/AssetBrows
 assert_true grep -q 'class KEIRE_API UndoService' "$ROOT/KeireCore/Include/Keire/Undo.h"
 assert_true grep -q 'CreateSystemTray' "$ROOT/KeireHub/Source/HubApplication.cpp"
 assert_true grep -q 'Show Hub' "$ROOT/KeireHub/Source/HubApplication.cpp"
+assert_true grep -q 'PollActivation' "$ROOT/KeireHub/Source/HubApplication.cpp"
+assert_true grep -q 'HubInstanceCoordinator' "$ROOT/KeireHub/Source/HubInstance.cpp"
+assert_true grep -q 'AddKeireApplicationIcon' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -q "windows-resource-update" "$ROOT/Scripts/Windows/player-support.ps1"
+assert_true test -f "$ROOT/Config/Branding/Keire.ico"
+assert_true test -f "$ROOT/Config/Branding/Keire.res"
 assert_true grep -q '"schemaVersion": 2' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true grep -q '"components"' "$ROOT/Samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene"
 assert_true test -z "$(find "$ROOT/Samples/KeireSandbox/Assets" -type f \
@@ -434,7 +440,10 @@ done
 : > "$package_stage/include/Core/Ui.h"
 : > "$package_stage/include/Core/UiWorkspace.h"
 : > "$package_stage/bin/CoreRuntime"
+mkdir -p "$package_stage/include/Core/Build"
+: > "$package_stage/include/Core/Build/PlayerBuild.h"
 assert_true validate_package_stage "$package_stage" Client Hub Core Core
+assert_true assert_package_generated_data_free "$package_stage"
 for generated_path in \
   samples/KeireSandbox/Build/generated.make \
   samples/KeireSandbox/Logs/Core.log \

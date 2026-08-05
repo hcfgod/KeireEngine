@@ -324,6 +324,13 @@ $processSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\P
 Assert-True ($processSource.Contains('"/select," + utf8Path') -and $processSource.Contains('std::filesystem::weakly_canonical')) "Absolute platform file-manager reveal routing"
 $hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp") -Raw
 Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('Show Hub') -and $hubSource.Contains('m_Tray->IsAvailable()')) "Project Hub tray backgrounding"
+$hubInstanceSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubInstance.cpp") -Raw
+$playerSupportSource = Get-Content (Join-Path $Windows "player-support.ps1") -Raw
+Assert-True ($hubSource.Contains('PollActivation') -and $hubInstanceSource.Contains('HubInstanceCoordinator')) "Single-instance Project Hub activation"
+Assert-True ($playerSupportSource.Contains("kind = 'windows-resource-update'") -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) "Config\Branding\Keire.ico")) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) "Config\Branding\Keire.res")) -and
+             $premakePolicy.Contains('AddKeireApplicationIcon')) "Windows application and player icon resources"
 $sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
 $sampleSceneDocument = $sampleScene | ConvertFrom-Json
 Assert-True ([int]$sampleSceneDocument.schemaVersion -ge 2 -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Current-schema component sample scene"
@@ -437,7 +444,11 @@ try {
         New-Item -ItemType File -Force $file | Out-Null
     }
     Remove-Item (Join-Path $packageStage "third-party\spdlog") -Recurse -Force
+    $publicBuildHeader = Join-Path $packageStage "include\Core\Build\PlayerBuild.h"
+    New-Item -ItemType Directory -Force (Split-Path $publicBuildHeader) | Out-Null
+    New-Item -ItemType File -Force $publicBuildHeader | Out-Null
     Assert-WindowsPackageStage $packageStage Client Hub Core Core
+    Assert-WindowsPackageGeneratedDataFree $packageStage
     foreach ($generatedPath in @(
         "samples\KeireSandbox\Build\generated.vcxproj",
         "samples\KeireSandbox\Logs\Core.log",

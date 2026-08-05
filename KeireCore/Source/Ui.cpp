@@ -180,13 +180,11 @@ namespace Keire
                 throw std::invalid_argument("UI drawing colors must contain finite values in 0..1.");
             return ImGui::ColorConvertFloat4ToU32({color.Red, color.Green, color.Blue, color.Alpha});
         }
-
         void ValidateDrawing(const float thickness, const float rounding = 0.0F)
         {
             if (!std::isfinite(thickness) || thickness <= 0.0F || !std::isfinite(rounding) || rounding < 0.0F)
                 throw std::invalid_argument("UI drawing dimensions must be finite and positive.");
         }
-
         [[nodiscard]] ImGuiWindowFlags ToImGuiWindowFlags(const UiWindowOptions options) noexcept
         {
             ImGuiWindowFlags flags = ImGuiWindowFlags_None;
@@ -204,7 +202,6 @@ namespace Keire
                 flags |= ImGuiWindowFlags_NoSavedSettings;
             return flags;
         }
-
         void ApplyTheme(const UiTheme theme)
         {
             switch (theme)
@@ -432,7 +429,6 @@ namespace Keire
     }
 
     UiScope::~UiScope() { Reset(); }
-
     void UiScope::Reset() noexcept
     {
         if (m_Frame && m_CloseRequired && !m_Lifetime.expired())
@@ -440,10 +436,8 @@ namespace Keire
         m_Frame = nullptr;
         m_CloseRequired = false;
     }
-
     UiFrame::UiFrame() : m_Impl(std::make_unique<Impl>()) {}
     UiFrame::~UiFrame() = default;
-
     UiWindowScope UiFrame::BeginWindow(std::string_view title, bool* open, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginWindow");
@@ -452,7 +446,6 @@ namespace Keire
         m_Impl->OpenScope(UiScope::Kind::Window);
         return UiWindowScope(*this, visible);
     }
-
     UiChildScope UiFrame::BeginChild(std::string_view id, const UiSize size, const bool border)
     {
         m_Impl->RequireActive("BeginChild");
@@ -462,7 +455,6 @@ namespace Keire
         m_Impl->OpenScope(UiScope::Kind::Child);
         return UiChildScope(*this, visible);
     }
-
     UiMenuBarScope UiFrame::BeginMenuBar()
     {
         m_Impl->RequireActive("BeginMenuBar");

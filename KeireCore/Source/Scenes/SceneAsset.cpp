@@ -35,6 +35,7 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4U * 1024U * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
+        constexpr std::uint32_t SceneAssetImporterVersion = 6;
 
         [[nodiscard]] const Json* FindMember(const Json& value, const std::string_view canonical,
                                              const std::string_view alternate = {})
@@ -90,6 +91,18 @@ namespace Keire
             return AssetId(high->get<std::uint64_t>(), low->get<std::uint64_t>());
         }
 
+        [[nodiscard]] std::optional<AssetId> TryParseAssetId(const std::string_view value)
+        {
+            try
+            {
+                return AssetId::Parse(value);
+            }
+            catch (const std::invalid_argument&)
+            {
+                return std::nullopt;
+            }
+        }
+
         void CollectManagedAssetReferenceValue(const Json& value, std::set<AssetId>& dependencies)
         {
             if (const auto direct = ManagedAssetReferenceId(value))
@@ -108,7 +121,24 @@ namespace Keire
                     CollectManagedAssetReferenceValue(member, dependencies);
         }
 
-        void CollectManagedStateDependencies(const Json& data, std::set<AssetId>& dependencies)
+        void CollectProjectedManagedAssetDependencies(const AssetImportContext& context, const Json& data,
+                                                      std::set<AssetId>& dependencies)
+        {
+            if (!context.ResolveAssetSource || !data.is_object())
+                return;
+
+            for (const auto& [name, value] : data.items())
+            {
+                if (name == "managedState" || !value.is_string())
+                    continue;
+                const auto candidate = TryParseAssetId(value.get_ref<const std::string&>());
+                if (candidate && *candidate && context.ResolveAssetSource(*candidate))
+                    dependencies.insert(*candidate);
+            }
+        }
+
+        void CollectManagedStateDependencies(const AssetImportContext& context, const Json& data,
+                                             std::set<AssetId>& dependencies)
         {
             const auto* serializedState = FindMember(data, "managedState");
             if (!serializedState)
@@ -131,6 +161,7 @@ namespace Keire
                 }
                 CollectManagedAssetReferenceValue(*value, dependencies);
             }
+            CollectProjectedManagedAssetDependencies(context, data, dependencies);
         }
 
         void CollectVfxParameterOverrideDependencies(const std::string& source, std::set<AssetId>& dependencies)
@@ -152,7 +183,8 @@ namespace Keire
             }
         }
 
-        void CollectComponentDependencies(const SceneComponentDefinition& component, std::set<AssetId>& dependencies)
+        void CollectComponentDependencies(const AssetImportContext& context, const SceneComponentDefinition& component,
+                                          std::set<AssetId>& dependencies)
         {
             const auto data = Json::parse(component.Data);
             if (component.Type == MeshRendererComponent::StaticType())
@@ -196,16 +228,18 @@ namespace Keire
                     CollectVfxParameterOverrideDependencies(overrides->get_ref<const std::string&>(), dependencies);
                 }
             }
-            CollectManagedStateDependencies(data, dependencies);
+            CollectManagedStateDependencies(context, data, dependencies);
         }
 
-        void CollectObjectDependencies(const SceneObjectDefinition& object, std::set<AssetId>& dependencies)
+        void CollectObjectDependencies(const AssetImportContext& context, const SceneObjectDefinition& object,
+                                       std::set<AssetId>& dependencies)
         {
             for (const auto& component : object.Components)
-                CollectComponentDependencies(component, dependencies);
+                CollectComponentDependencies(context, component, dependencies);
         }
 
-        void CollectOverrideDependencies(const std::vector<PrefabOverrideDefinition>& overrides,
+        void CollectOverrideDependencies(const AssetImportContext& context,
+                                         const std::vector<PrefabOverrideDefinition>& overrides,
                                          std::set<AssetId>& dependencies)
         {
             for (const auto& overrideValue : overrides)
@@ -223,23 +257,24 @@ namespace Keire
                     CollectVfxParameterOverrideDependencies(std::get<std::string>(overrideValue.Value), dependencies);
                 }
                 if (overrideValue.AddedComponent)
-                    CollectComponentDependencies(*overrideValue.AddedComponent, dependencies);
+                    CollectComponentDependencies(context, *overrideValue.AddedComponent, dependencies);
                 if (overrideValue.AddedObject)
-                    CollectObjectDependencies(*overrideValue.AddedObject, dependencies);
+                    CollectObjectDependencies(context, *overrideValue.AddedObject, dependencies);
             }
         }
 
-        [[nodiscard]] std::vector<AssetId> AuthoredDependencies(const SceneDefinition& definition)
+        [[nodiscard]] std::vector<AssetId> AuthoredDependencies(const AssetImportContext& context,
+                                                                const SceneDefinition& definition)
         {
             std::set<AssetId> unique;
             for (const auto& instance : definition.PrefabInstances)
             {
                 InsertDependency(unique, instance.Prefab);
-                CollectOverrideDependencies(instance.Overrides, unique);
+                CollectOverrideDependencies(context, instance.Overrides, unique);
             }
-            CollectOverrideDependencies(definition.PrefabOverrides, unique);
+            CollectOverrideDependencies(context, definition.PrefabOverrides, unique);
             for (const auto& object : definition.Objects)
-                CollectObjectDependencies(object, unique);
+                CollectObjectDependencies(context, object, unique);
             InsertDependency(unique, definition.BakedLighting);
             return {unique.begin(), unique.end()};
         }
@@ -1030,15 +1065,15 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Scene";
-        result.Version = CurrentSceneSchemaVersion;
+        result.Version = SceneAssetImporterVersion;
         result.Type = SceneAsset::StaticType();
         result.Extensions = {".keirescene"};
-        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             const auto parsed = SceneAsset::Decode(bytes);
             AssetImportOutput output;
             output.Bytes = SceneAsset::Encode(parsed->Definition());
-            output.AssetDependencies = AuthoredDependencies(parsed->Definition());
+            output.AssetDependencies = AuthoredDependencies(context, parsed->Definition());
             return output;
         };
         return result;

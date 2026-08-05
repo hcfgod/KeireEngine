@@ -317,6 +317,10 @@ assets or the exclusive lock. Each detached KeireClient process revalidates and 
 `samples/KeireSandbox` is a complete project and is validated through the same asset tool contract as user projects.
 KeireClient keeps native window placement below project-local `Library/UserSettings`: normal bounds remain separate from
 maximized/fullscreen state, restore occurs before the window becomes visible, and minimized state is never persisted.
+The Hub coordinates one primary process per canonical executable identity. Secondary launches send a bounded Show or
+Build Support activation request and exit without creating a window or tray handle. The primary polls activation on its
+owner thread. `WindowSystem` tracks weak tray ownership and closes every surviving native tray before SDL shutdown, so
+layer teardown, explicit Quit, and exceptional application shutdown converge on the same idempotent cleanup path.
 
 ## Scene Ownership
 
@@ -580,6 +584,20 @@ crosses this boundary.
 confined rollback-capable file operations. `AssetCooker` sorts stable IDs, writes deterministic sharded packs and a
 versioned build profile into staging, then atomically publishes the directory. The editor and `KeireAssetTool` call the
 same public APIs. Detailed contracts live in [Asset Runtime](AssetRuntime.md) and [Asset Pipeline](AssetPipeline.md).
+
+Standalone player builds add a second transaction above cooking. Public value types own player identity and persistent
+profile policy; internal Build Support code owns immutable native-template discovery, archive verification, branding,
+signing-hook isolation, staged layout validation, and atomic directory publication. The editor only persists saved
+profile choices and supervises `KeireAssetTool build-player`; it does not duplicate build logic or pass unsaved scene
+state to the child. `KeireRuntime` retains explicit `--content` mounting while packaged startup discovers a validated
+relative layout from `PlayerBuild.json`. Platform packs remain separate from projects and install transactionally under
+the per-user preference root. Packaged runtime views are designated as native presentation surfaces and blitted directly
+to the swapchain. `RuntimeUiTree` remains the shared Game UI layout, interaction, and draw-command model: editor previews
+adapt those commands to editor UI, while standalone players submit them to a dedicated SDL_GPU compositor and do not
+initialize or frame Dear ImGui. Windows assembly patches the copied PE template to the GUI subsystem without changing
+the low-level console runtime used by tests and SDK consumers. Windows-host assembly also replaces the executable icon
+resource with the selected or generated multi-resolution ICO; the template's linked resource supplies the fallback on
+other assembly hosts. See [Desktop Player Builds](PlayerBuilds.md).
 Contextual importers may publish typed generated sub-assets. Their IDs are derived from the parent identity plus a
 semantic importer key, reconciled into the parent's metadata, validated with their own dependencies, and flattened into
 the same transactional catalog as the parent. Model materials and embedded texture variants use this path. Material

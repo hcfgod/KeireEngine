@@ -52,6 +52,8 @@ namespace Keire
             SDL_JoystickID NativeId = 0;
             SDL_Gamepad* Gamepad = nullptr;
             std::unordered_map<std::string, InputValue> Controls;
+            std::unordered_set<std::string> PressedControls;
+            std::unordered_set<std::string> ReleasedControls;
         };
 
         struct UserState
@@ -640,6 +642,23 @@ namespace Keire
                 user.Descriptor.ControlScheme = gamepad ? "Gamepad" : keyboard && mouse ? "KeyboardMouse" : "";
             }
 
+            void SelectSchemeForInput(const RawControlEvent& event)
+            {
+                if (!event.Press && event.Value.Magnitude() < 0.2F)
+                    return;
+                for (auto& [id, user] : Users)
+                {
+                    (void)id;
+                    if (user.SchemeLocked || !Contains(user.Descriptor.Devices, event.Device))
+                        continue;
+                    if (event.Type == InputDeviceType::Gamepad)
+                        user.Descriptor.ControlScheme = "Gamepad";
+                    else if (Contains(user.Descriptor.Devices, InputDeviceId(1)) &&
+                             Contains(user.Descriptor.Devices, InputDeviceId(2)))
+                        user.Descriptor.ControlScheme = "KeyboardMouse";
+                }
+            }
+
             [[nodiscard]] bool DevicePaired(const InputDeviceId device) const
             {
                 return std::ranges::any_of(Users, [&](const auto& item)
@@ -706,10 +725,12 @@ namespace Keire
                 for (const auto& event : EventsBuffer)
                 {
                     AutoJoin(event);
+                    SelectSchemeForInput(event);
                     auto found = Devices.find(event.Device);
                     if (found != Devices.end())
                     {
-                        auto& control = found->second.Controls[event.Path];
+                        auto& device = found->second;
+                        auto& control = device.Controls[event.Path];
                         if (event.Path == "<Mouse>/delta" || event.Path == "<Mouse>/scroll")
                         {
                             control.Type = event.Value.Type;
@@ -717,7 +738,15 @@ namespace Keire
                             control.Y += event.Value.Y;
                         }
                         else
+                        {
+                            const bool wasPressed = control.Magnitude() >= 0.5F;
+                            const bool isPressed = event.Value.Magnitude() >= 0.5F;
+                            if (!wasPressed && isPressed)
+                                device.PressedControls.insert(event.Path);
+                            else if (wasPressed && !isPressed)
+                                device.ReleasedControls.insert(event.Path);
                             control = event.Value;
+                        }
                     }
                     CaptureRebind(event);
                     LastTimestamp = std::max(LastTimestamp, event.Timestamp);
@@ -738,6 +767,12 @@ namespace Keire
                 EventsBuffer.clear();
                 Devices.at(InputDeviceId(2)).Controls["<Mouse>/delta"] = VectorValue(0.0F, 0.0F);
                 Devices.at(InputDeviceId(2)).Controls["<Mouse>/scroll"] = VectorValue(0.0F, 0.0F);
+                for (auto& [id, device] : Devices)
+                {
+                    (void)id;
+                    device.PressedControls.clear();
+                    device.ReleasedControls.clear();
+                }
             }
 
             [[nodiscard]] bool UserOwns(const InputUserId user, const InputDeviceId device) const
@@ -844,6 +879,69 @@ namespace Keire
                                            });
             }
 
+            struct ActionTransitions final
+            {
+                const InputBindingDefinition* Binding = nullptr;
+                InputDeviceId Device;
+                bool Pressed = false;
+                bool Released = false;
+            };
+
+            [[nodiscard]] ActionTransitions ReadActionTransitions(const InputContextState& context,
+                                                                  const InputActionMapDefinition& map,
+                                                                  const InputActionDefinition& action) const
+            {
+                ActionTransitions result;
+                const auto user = Users.find(context.User);
+                if (user == Users.end() || Suspended)
+                    return result;
+                const bool hasTransitions = std::ranges::any_of(user->second.Descriptor.Devices,
+                                                                [&](const InputDeviceId deviceId)
+                                                                {
+                                                                    const auto device = Devices.find(deviceId);
+                                                                    return device != Devices.end() &&
+                                                                           (!device->second.PressedControls.empty() ||
+                                                                            !device->second.ReleasedControls.empty());
+                                                                });
+                if (!hasTransitions)
+                    return result;
+                for (const auto& binding : map.Bindings)
+                {
+                    if (binding.Action != action.Id || !binding.Composite.empty() ||
+                        context.DisabledBindings.contains(binding.Id) || !GroupAllowed(user->second, binding))
+                    {
+                        continue;
+                    }
+                    const auto overridden = context.Overrides.find(binding.Id);
+                    const std::string_view path =
+                        overridden == context.Overrides.end() ? binding.Path : overridden->second;
+                    const std::string pathKey(path);
+                    if (map.CapturePolicy == InputCapturePolicy::RespectUiCapture &&
+                        !context.CaptureBypassMaps.contains(map.Id))
+                    {
+                        const bool keyboard = path.starts_with("<Keyboard>");
+                        const bool pointer = path.starts_with("<Mouse>");
+                        if ((keyboard && CurrentCapture.Keyboard) || (pointer && CurrentCapture.Pointer))
+                            continue;
+                    }
+                    for (const auto deviceId : user->second.Descriptor.Devices)
+                    {
+                        const auto device = Devices.find(deviceId);
+                        if (device == Devices.end() || !device->second.Descriptor.Connected)
+                            continue;
+                        const bool pressed = device->second.PressedControls.contains(pathKey);
+                        const bool released = device->second.ReleasedControls.contains(pathKey);
+                        if (!pressed && !released)
+                            continue;
+                        result.Binding = &binding;
+                        result.Device = deviceId;
+                        result.Pressed = result.Pressed || pressed;
+                        result.Released = result.Released || released;
+                    }
+                }
+                return result;
+            }
+
             void Emit(InputContextState& context, ActionRuntime& runtime, const InputActionMapDefinition& map,
                       const InputActionDefinition& action, const InputDeviceId device, const InputActionPhase phase,
                       const InputValue value)
@@ -893,6 +991,9 @@ namespace Keire
                         }
                         const InputBindingDefinition* winning = nullptr;
                         auto [value, device] = EvaluateAction(context, map, action, &winning);
+                        const auto transitions = ReadActionTransitions(context, map, action);
+                        if (!winning && transitions.Binding)
+                            winning = transitions.Binding;
                         if (IsRelativeAction(context, map, action))
                         {
                             runtime.PendingRelativeValue.Type = action.ValueType;
@@ -908,6 +1009,47 @@ namespace Keire
                             if (!runtime.Value.NearlyEquals(value))
                                 Emit(context, runtime, map, action, device, InputActionPhase::Performed, value);
                             runtime.Active = active;
+                            continue;
+                        }
+                        if (!runtime.Active && !active && transitions.Pressed && transitions.Released)
+                        {
+                            const InputValue pressedValue{action.ValueType, 1.0F, 0.0F};
+                            runtime.Active = true;
+                            runtime.PressTimestamp = LastTimestamp;
+                            runtime.HoldPerformed = false;
+                            Emit(context, runtime, map, action, transitions.Device, InputActionPhase::Started,
+                                 pressedValue);
+                            if (interaction.empty() || interaction == "Press" || interaction == "Tap" ||
+                                action.Type == InputActionType::Value)
+                            {
+                                Emit(context, runtime, map, action, transitions.Device, InputActionPhase::Performed,
+                                     pressedValue);
+                            }
+                            else if (interaction == "MultiTap")
+                            {
+                                const auto delay = Parameter(interactions.front().Parameters, "delay", 0.75);
+                                if (runtime.LastReleaseTimestamp == 0 ||
+                                    static_cast<double>(LastTimestamp - runtime.LastReleaseTimestamp) /
+                                            1'000'000'000.0 <=
+                                        delay)
+                                {
+                                    ++runtime.TapCount;
+                                }
+                                else
+                                    runtime.TapCount = 1;
+                                if (runtime.TapCount >= static_cast<std::uint32_t>(
+                                                            Parameter(interactions.front().Parameters, "count", 2.0)))
+                                {
+                                    Emit(context, runtime, map, action, transitions.Device, InputActionPhase::Performed,
+                                         pressedValue);
+                                    runtime.TapCount = 0;
+                                }
+                                runtime.LastReleaseTimestamp = LastTimestamp;
+                            }
+                            Emit(context, runtime, map, action, transitions.Device, InputActionPhase::Canceled,
+                                 InputValue{action.ValueType});
+                            runtime.Active = false;
+                            runtime.HoldPerformed = false;
                             continue;
                         }
                         if (!runtime.Active && active)

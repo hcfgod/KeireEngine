@@ -52,6 +52,15 @@ function LinkKeireCore()
     filter {}
         links { DependencyManifest.CoralNetHostLibrary }
 
+    filter "system:windows"
+        links { "winhttp" }
+
+    filter "system:linux"
+        links { "curl" }
+
+    filter "system:macosx"
+        links { "Foundation.framework" }
+
     filter {}
 end
 
@@ -69,6 +78,14 @@ function LinkSDL3()
 
     filter { "configurations:Release or Dist" }
         links { DependencyManifest.SDL3ReleaseLibrary }
+
+    filter {}
+end
+
+function AddKeireApplicationIcon()
+    local iconResource = _ACTION == "ninja" and "Config/Branding/Keire.res" or "../Config/Branding/Keire.res"
+    filter "system:windows"
+        linkoptions { '"' .. iconResource .. '"' }
 
     filter {}
 end

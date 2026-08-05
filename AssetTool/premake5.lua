@@ -20,3 +20,8 @@ project(AssetToolTarget)
     LinkKeireSourceModules()
     LinkKeireCore()
     LinkSDL3()
+
+    filter "system:windows"
+        linkoptions { "/STACK:8388608" }
+
+    filter {}

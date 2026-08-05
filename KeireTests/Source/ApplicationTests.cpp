@@ -1,4 +1,6 @@
 #include "Keire/Application.h"
+#include "Keire/Ui/RuntimeUi.h"
+#include "KeireInternal/RenderInternal.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
@@ -267,6 +269,64 @@ namespace
         }
     };
 
+    class RuntimeUiOnlyLayer final : public Keire::Layer
+    {
+      public:
+        RuntimeUiOnlyLayer(bool& updated, bool& editorUiCalled)
+            : Layer("RuntimeUiOnly"), m_Updated(updated), m_EditorUiCalled(editorUiCalled)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            const auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+            CHECK_THROWS_AS(Owner().Renderer()->SubmitRuntimeUi(tree), std::logic_error);
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+            const auto panel = tree->Create(Keire::RuntimeUiElementType::Panel);
+            Keire::RuntimeUiStyle style;
+            style.Background = {0.2F, 0.4F, 0.8F, 1.0F};
+            REQUIRE(tree->SetStyle(panel, style));
+            tree->Layout(320.0F, 180.0F);
+            Owner().Renderer()->SubmitRuntimeUi(tree);
+            CHECK(Keire::RenderSystemInternalAccess::RuntimeUiCommandCount(*Owner().Renderer()) > 0);
+            m_Updated = true;
+            Owner().RequestExit();
+        }
+
+        void OnUi(Keire::UiFrame&) override { m_EditorUiCalled = true; }
+
+      private:
+        bool& m_Updated;
+        bool& m_EditorUiCalled;
+    };
+
+    class RuntimeUiOnlyApplication final : public Keire::Application
+    {
+      public:
+        RuntimeUiOnlyApplication(bool& updated, bool& editorUiCalled)
+            : Application(Specification()), m_Updated(updated), m_EditorUiCalled(editorUiCalled)
+        {
+            (void)PushLayer(std::make_unique<RuntimeUiOnlyLayer>(m_Updated, m_EditorUiCalled));
+        }
+
+      private:
+        [[nodiscard]] static Keire::ApplicationSpecification Specification()
+        {
+            auto specification = HiddenApplicationSpecification("runtime-ui-only");
+            specification.Render.Mode = Keire::RenderMode::Headless;
+            specification.Ui.Mode = Keire::UiMode::Disabled;
+            return specification;
+        }
+
+        bool& m_Updated;
+        bool& m_EditorUiCalled;
+    };
+
     class DeferredMutationLayer final : public Keire::Layer
     {
       public:
@@ -522,6 +582,18 @@ TEST_CASE("Application accepts cross-thread exit and runs only once")
     ThreadExitApplication application;
     CHECK(application.Run() == 4);
     CHECK_THROWS_AS((void)application.Run(), std::logic_error);
+}
+
+TEST_CASE("Runtime UI submits without initializing or invoking editor UI")
+{
+    UseApplicationDummyVideoDriver();
+    bool updated = false;
+    bool editorUiCalled = false;
+    RuntimeUiOnlyApplication application(updated, editorUiCalled);
+    CHECK(application.Run() == 0);
+    CHECK(updated);
+    CHECK_FALSE(editorUiCalled);
+    CHECK_FALSE(application.UiEnabled());
 }
 
 TEST_CASE("Application defers layer mutation requested during event traversal")

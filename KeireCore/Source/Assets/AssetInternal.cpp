@@ -93,6 +93,64 @@ namespace Keire::Detail
             state[7] += h;
         }
 
+        class Sha256Builder final
+        {
+          public:
+            void Update(std::span<const std::byte> bytes) noexcept
+            {
+                m_TotalBytes += bytes.size();
+                if (m_Buffered > 0)
+                {
+                    const auto copied = std::min(bytes.size(), m_Buffer.size() - m_Buffered);
+                    std::copy_n(bytes.data(), copied, m_Buffer.data() + m_Buffered);
+                    m_Buffered += copied;
+                    bytes = bytes.subspan(copied);
+                    if (m_Buffered == m_Buffer.size())
+                    {
+                        Transform(m_State, m_Buffer.data());
+                        m_Buffered = 0;
+                    }
+                }
+                while (bytes.size() >= m_Buffer.size())
+                {
+                    Transform(m_State, bytes.data());
+                    bytes = bytes.subspan(m_Buffer.size());
+                }
+                if (!bytes.empty())
+                {
+                    std::copy(bytes.begin(), bytes.end(), m_Buffer.begin());
+                    m_Buffered = bytes.size();
+                }
+            }
+
+            [[nodiscard]] Sha256Digest Finish() noexcept
+            {
+                std::array<std::byte, 128> tail{};
+                if (m_Buffered > 0)
+                    std::copy_n(m_Buffer.data(), m_Buffered, tail.data());
+                tail[m_Buffered] = std::byte{0x80};
+                const std::size_t padded = m_Buffered < 56U ? 64U : 128U;
+                const auto bitLength = m_TotalBytes * 8U;
+                for (std::size_t index = 0; index < 8; ++index)
+                    tail[padded - 1U - index] = static_cast<std::byte>(bitLength >> (index * 8U));
+                Transform(m_State, tail.data());
+                if (padded == 128U)
+                    Transform(m_State, tail.data() + 64U);
+
+                Sha256Digest digest{};
+                for (std::size_t index = 0; index < m_State.size(); ++index)
+                    StoreBigEndian(m_State[index], digest.data() + index * 4U);
+                return digest;
+            }
+
+          private:
+            std::array<std::uint32_t, 8> m_State{0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
+                                                 0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
+            std::array<std::byte, 64> m_Buffer{};
+            std::size_t m_Buffered = 0;
+            std::uint64_t m_TotalBytes = 0;
+        };
+
         [[nodiscard]] std::vector<std::byte> ReadBounded(const std::filesystem::path& path,
                                                          const std::uintmax_t maximum)
         {
@@ -111,32 +169,32 @@ namespace Keire::Detail
 
     Sha256Digest Sha256(const std::span<const std::byte> bytes) noexcept
     {
-        std::array<std::uint32_t, 8> state{0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
-                                           0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
-        std::size_t offset = 0;
-        while (bytes.size() - offset >= 64U)
+        Sha256Builder builder;
+        builder.Update(bytes);
+        return builder.Finish();
+    }
+
+    Sha256Digest Sha256File(const std::filesystem::path& path, const std::uintmax_t maximumBytes)
+    {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error || size > maximumBytes)
+            throw std::runtime_error("Could not hash bounded file: " + PathToUtf8(path));
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream)
+            throw std::runtime_error("Could not open file for hashing: " + PathToUtf8(path));
+        Sha256Builder builder;
+        std::array<std::byte, 1024U * 1024U> buffer{};
+        while (stream)
         {
-            Transform(state, bytes.data() + offset);
-            offset += 64U;
+            stream.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+            const auto count = stream.gcount();
+            if (count > 0)
+                builder.Update(std::span(buffer).first(static_cast<std::size_t>(count)));
         }
-
-        std::array<std::byte, 128> tail{};
-        const std::size_t remaining = bytes.size() - offset;
-        if (remaining > 0)
-            std::copy_n(bytes.data() + offset, remaining, tail.data());
-        tail[remaining] = std::byte{0x80};
-        const std::size_t padded = remaining < 56U ? 64U : 128U;
-        const auto bitLength = static_cast<std::uint64_t>(bytes.size()) * 8U;
-        for (std::size_t index = 0; index < 8; ++index)
-            tail[padded - 1U - index] = static_cast<std::byte>(bitLength >> (index * 8U));
-        Transform(state, tail.data());
-        if (padded == 128U)
-            Transform(state, tail.data() + 64U);
-
-        Sha256Digest digest{};
-        for (std::size_t index = 0; index < state.size(); ++index)
-            StoreBigEndian(state[index], digest.data() + index * 4U);
-        return digest;
+        if (!stream.eof())
+            throw std::runtime_error("Could not hash file: " + PathToUtf8(path));
+        return builder.Finish();
     }
 
     std::string DigestToString(const Sha256Digest& digest)

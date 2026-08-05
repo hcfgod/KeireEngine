@@ -29,6 +29,15 @@ namespace Keire
             std::string Error;
         };
 
+        class OpenFileDialogState final : public RefCounted
+        {
+          public:
+            mutable std::mutex Mutex;
+            OpenFileDialogStatus Status = OpenFileDialogStatus::Pending;
+            std::filesystem::path Path;
+            std::string Error;
+        };
+
         class SaveFileDialogState final : public RefCounted
         {
           public:
@@ -126,6 +135,11 @@ namespace Keire
             WeakRef<Detail::FolderDialogState> State;
         };
 
+        struct OpenFileDialogRequest final
+        {
+            WeakRef<Detail::OpenFileDialogState> State;
+        };
+
         struct SaveFileDialogRequest final
         {
             WeakRef<Detail::SaveFileDialogState> State;
@@ -149,6 +163,27 @@ namespace Keire
             {
                 state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
                 state->Status = FolderDialogStatus::Selected;
+            }
+        }
+
+        void SDLCALL OpenFileDialogCompleted(void* userData, const char* const* files, int)
+        {
+            std::unique_ptr<OpenFileDialogRequest> request(static_cast<OpenFileDialogRequest*>(userData));
+            const auto state = request->State.Lock();
+            if (!state)
+                return;
+            std::scoped_lock lock(state->Mutex);
+            if (!files)
+            {
+                state->Status = OpenFileDialogStatus::Failed;
+                state->Error = LastSdlError();
+            }
+            else if (!files[0])
+                state->Status = OpenFileDialogStatus::Cancelled;
+            else
+            {
+                state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
+                state->Status = OpenFileDialogStatus::Selected;
             }
         }
 
@@ -214,6 +249,30 @@ namespace Keire
     }
 
     std::string FolderDialogOperation::Diagnostic() const
+    {
+        std::scoped_lock lock(m_State->Mutex);
+        return m_State->Error;
+    }
+
+    OpenFileDialogOperation::OpenFileDialogOperation(Ref<Detail::OpenFileDialogState> state) : m_State(std::move(state))
+    {
+    }
+
+    OpenFileDialogOperation::~OpenFileDialogOperation() = default;
+
+    OpenFileDialogStatus OpenFileDialogOperation::Status() const noexcept
+    {
+        std::scoped_lock lock(m_State->Mutex);
+        return m_State->Status;
+    }
+
+    std::filesystem::path OpenFileDialogOperation::SelectedPath() const
+    {
+        std::scoped_lock lock(m_State->Mutex);
+        return m_State->Path;
+    }
+
+    std::string OpenFileDialogOperation::Diagnostic() const
     {
         std::scoped_lock lock(m_State->Mutex);
         return m_State->Error;
@@ -423,7 +482,7 @@ namespace Keire
             WindowId m_Id;
         };
 
-        Impl() : m_OwnerThread(std::this_thread::get_id())
+        explicit Impl(WindowSystemSpecification specification) : m_OwnerThread(std::this_thread::get_id())
         {
             bool expected = false;
             if (!HasActiveSystem.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
@@ -433,10 +492,15 @@ namespace Keire
 
             try
             {
-                const auto version = GetVersionString();
-                const std::string applicationName(GetBuildInfo().ProjectName);
+                const auto version =
+                    specification.ApplicationVersion.empty() ? GetVersionString() : specification.ApplicationVersion;
+                const auto applicationName = specification.ApplicationName.empty()
+                                                 ? std::string(GetBuildInfo().ProjectName)
+                                                 : specification.ApplicationName;
+                const auto* identifier =
+                    specification.ApplicationIdentifier.empty() ? nullptr : specification.ApplicationIdentifier.c_str();
 
-                if (!SDL_SetAppMetadata(applicationName.c_str(), version.c_str(), nullptr))
+                if (!SDL_SetAppMetadata(applicationName.c_str(), version.c_str(), identifier))
                 {
                     throw WindowError("SDL_SetAppMetadata", LastSdlError());
                 }
@@ -589,9 +653,13 @@ namespace Keire
             while (true)
             {
                 const bool eventAvailable = SDL_PollEvent(&event);
-                DrainTrayActions();
                 if (!eventAvailable)
+                {
+                    // Native window events queued by a previous hide/minimize must settle before a tray action can
+                    // restore the window. Running the action between those events can immediately hide it again.
+                    DrainTrayActions();
                     break;
+                }
 
                 for (const auto& sink : m_EventSinks)
                 {
@@ -742,9 +810,10 @@ namespace Keire
             return std::nullopt;
         }
 
-        void RegisterTrayDispatch(const std::shared_ptr<TrayDispatchState>& dispatch)
+        void RegisterSystemTray(const Ref<SystemTray>& tray, const std::shared_ptr<TrayDispatchState>& dispatch)
         {
             RequireOwner("CreateSystemTray");
+            m_SystemTrays.emplace_back(tray);
             m_TrayDispatch.push_back(dispatch);
         }
 
@@ -755,6 +824,16 @@ namespace Keire
 
             RequireOwner("Shutdown");
             DrainDeferredDestruction();
+
+            std::vector<Ref<SystemTray>> trays;
+            trays.reserve(m_SystemTrays.size());
+            for (const auto& weak : m_SystemTrays)
+                if (auto tray = weak.Lock())
+                    trays.push_back(std::move(tray));
+            m_SystemTrays.clear();
+            m_TrayDispatch.clear();
+            for (const auto& tray : trays)
+                tray->Close();
 
             std::vector<SDL_Window*> natives;
             {
@@ -1271,10 +1350,14 @@ namespace Keire
         };
         std::vector<EventSinkRecord> m_EventSinks;
         WindowSystemInternalAccess::EventSinkToken m_NextEventSinkToken = 1;
+        std::vector<WeakRef<SystemTray>> m_SystemTrays;
         std::vector<std::weak_ptr<TrayDispatchState>> m_TrayDispatch;
     };
 
-    WindowSystem::WindowSystem() : m_Impl(CreateRef<Impl>()) {}
+    WindowSystem::WindowSystem(WindowSystemSpecification specification)
+        : m_Impl(CreateRef<Impl>(std::move(specification)))
+    {
+    }
 
     WindowSystem::~WindowSystem()
     {
@@ -1309,6 +1392,27 @@ namespace Keire
         const auto location = defaultLocation.empty() ? std::string{} : Utf8PathString(defaultLocation);
         SDL_ShowOpenFolderDialog(FolderDialogCompleted, request.release(), m_Impl->NativeHandle(parent),
                                  location.empty() ? nullptr : location.c_str(), false);
+        return operation;
+    }
+
+    Ref<OpenFileDialogOperation> WindowSystem::ShowOpenFileDialog(const WindowId parent,
+                                                                  const OpenFileDialogSpecification& specification)
+    {
+        if (specification.Title.empty() || specification.Title.size() > 256 || specification.FilterName.size() > 128 ||
+            specification.Extension.size() > 32 || specification.Extension.find('*') != std::string::npos ||
+            specification.Extension.find('.') != std::string::npos)
+            throw std::invalid_argument("Open file dialog specification is invalid.");
+        auto state = CreateRef<Detail::OpenFileDialogState>();
+        auto operation = CreateRef<OpenFileDialogOperation>(state);
+        auto request = std::make_unique<OpenFileDialogRequest>();
+        request->State = state;
+        const auto location =
+            specification.DefaultLocation.empty() ? std::string{} : Utf8PathString(specification.DefaultLocation);
+        SDL_DialogFileFilter filter{specification.FilterName.c_str(), specification.Extension.c_str()};
+        const SDL_DialogFileFilter* filters = specification.Extension.empty() ? nullptr : &filter;
+        const int filterCount = filters ? 1 : 0;
+        SDL_ShowOpenFileDialog(OpenFileDialogCompleted, request.release(), m_Impl->NativeHandle(parent), filters,
+                               filterCount, location.empty() ? nullptr : location.c_str(), false);
         return operation;
     }
 
@@ -1352,7 +1456,7 @@ namespace Keire
         auto dispatch = std::make_shared<TrayDispatchState>(specification.Actions);
         auto tray =
             CreateRef<SystemTray>(std::make_unique<SystemTray::Impl>(std::move(specification), std::move(dispatch)));
-        m_Impl->RegisterTrayDispatch(tray->m_Impl->Dispatch);
+        m_Impl->RegisterSystemTray(tray, tray->m_Impl->Dispatch);
         return tray;
     }
 
