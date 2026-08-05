@@ -95,6 +95,13 @@ Assert-True ($securityWorkflow -match "(?m)^  security-status:\s*$") "Security a
 Assert-True ($securityWorkflow -match "(?m)^    if: always\(\)\s*$") "Security sentinel always runs"
 Assert-True ($securityWorkflow.Contains("ENABLE_ADVANCED_SECURITY")) "Advanced security opt-in variable"
 Assert-True (-not $securityWorkflow.Contains("continue-on-error")) "Strict advanced security checks"
+$python = (Get-Command python -ErrorAction Stop).Source
+& $python (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-text-integrity.py")
+if ($LASTEXITCODE -ne 0) { throw "Versioned text integrity validation failed." }
+& $python (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-source-budgets.py")
+if ($LASTEXITCODE -ne 0) { throw "Source-file budget validation failed." }
+& $python (Join-Path (Get-RepositoryRoot) "Scripts\Tests\validate-workflows.py")
+if ($LASTEXITCODE -ne 0) { throw "GitHub Actions workflow parsing failed." }
 $emptyRepository = Join-Path ([IO.Path]::GetTempPath()) ("template-empty-git-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory $emptyRepository | Out-Null
 try {
@@ -146,6 +153,15 @@ Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScri
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
 Assert-True ($dependencyScript.Contains('shader-compiler.ps1')) "Host shader compiler bootstrap"
+$coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
+$coralBootstrapPatch = Get-Content (Join-Path $coralRoot "0004-keire-apply-host-settings-before-discovery.patch") -Raw
+Assert-True ($coralBootstrapPatch.IndexOf('m_Settings = std::move(InSettings);') -lt
+             $coralBootstrapPatch.IndexOf('if (!LoadHostFXR())')) "Bundled .NET root is installed before Coral host discovery"
+$coralWarningPatch = Get-Content (Join-Path $coralRoot "0005-keire-warning-clean-native-host.patch") -Raw
+Assert-True ($coralWarningPatch.Contains('memcpy(buffer, InString.data(), InString.size() * sizeof(UCChar))') -and
+             $coralWarningPatch.Contains('buffer[InString.size()] = {};') -and
+             $coralWarningPatch.Contains('reinterpret_cast<const UCChar*>(UINTPTR_MAX)') -and
+             $coralWarningPatch.Contains('target_compile_options(Coral.Native PRIVATE /wd4996)')) "Warning-clean Coral native host patch"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
 $windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
@@ -202,6 +218,10 @@ Assert-True ($managedPremake.Contains('buildinputs(managedBuildInputs)') -and
 Assert-True ($managedPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "ManagedRuntimeApi"') -and
              $managedPremake.Contains('addManagedBuildInput(managedSourceRoot)') -and
              $managedPremake.Contains('os.matchdirs')) "Collision-free managed source inventory dependencies"
+Assert-True ($premakePolicy.Contains('externalanglebrackets "On"') -and
+             $premakePolicy.Contains('externalwarnings "Off"') -and
+             -not $premakePolicy.Contains('"/external:W0"') -and
+             $managedPremake.Contains('objdir ("../../Build/Intermediates/"')) "Warning-clean Visual Studio generation"
 Assert-True ($managedPremake.Contains('Scripts/Windows/build-managed.ps1') -and
              $managedPremake.Contains('Scripts/Unix/build-managed.sh') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Premake\ManagedBuildAnchor.cpp'))) "Managed runtime API wrapper integration"

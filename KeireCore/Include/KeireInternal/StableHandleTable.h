@@ -2,6 +2,7 @@
 
 #include "Keire/StableHandle.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <mutex>
@@ -17,6 +18,15 @@ namespace Keire::Internal
       public:
         using Handle = StableHandle<Tag>;
 
+        void Reserve(const std::size_t capacity)
+        {
+            if (capacity > std::numeric_limits<std::uint32_t>::max())
+                throw std::length_error("The stable handle table capacity is too large.");
+            std::scoped_lock lock(m_Mutex);
+            m_Slots.reserve(capacity);
+            m_Free.reserve(capacity);
+        }
+
         template <typename... Args> [[nodiscard]] Handle Emplace(Args&&... args)
         {
             std::scoped_lock lock(m_Mutex);
@@ -27,14 +37,21 @@ namespace Keire::Internal
                     throw std::length_error("The stable handle table is full.");
                 index = static_cast<std::uint32_t>(m_Slots.size());
                 m_Slots.emplace_back();
+                try
+                {
+                    m_Slots.back().Value.emplace(std::forward<Args>(args)...);
+                }
+                catch (...)
+                {
+                    m_Slots.pop_back();
+                    throw;
+                }
+                return Handle::FromParts(index, m_Slots.back().Generation);
             }
-            else
-            {
-                index = m_Free.back();
-                m_Free.pop_back();
-            }
+            index = m_Free.back();
             auto& slot = m_Slots[index];
             slot.Value.emplace(std::forward<Args>(args)...);
+            m_Free.pop_back();
             return Handle::FromParts(index, slot.Generation);
         }
 

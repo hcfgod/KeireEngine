@@ -101,6 +101,8 @@ namespace Keire
         std::size_t RetiredCpuBytes = 0;
         std::size_t RetiredGpuBytes = 0;
         std::uint64_t Requests = 0;
+        std::uint64_t CompletedRequests = 0;
+        std::uint64_t CancelledRequests = 0;
         std::uint64_t Misses = 0;
         std::uint64_t Evictions = 0;
         std::uint64_t Failures = 0;

@@ -5,7 +5,9 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <exception>
 #include <fstream>
@@ -30,8 +32,8 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::size_t MaximumDescriptorBytes = 1024U * 1024U;
-        constexpr std::size_t MaximumJournalBytes = 4U * 1024U * 1024U;
+        constexpr std::size_t MaximumDescriptorBytes = std::size_t{1024} * 1024U;
+        constexpr std::size_t MaximumJournalBytes = std::size_t{4} * 1024U * 1024U;
 
         [[nodiscard]] std::filesystem::path MarkerPath(const std::filesystem::path& root)
         {
@@ -56,11 +58,24 @@ namespace Keire
             if (normalized.empty() || normalized.is_absolute() || normalized == ".." ||
                 (!normalized.empty() && *normalized.begin() == ".."))
                 throw std::invalid_argument("Project upgrade path escapes the project root.");
-            const auto candidate = (root / normalized).lexically_normal();
-            const auto rootText = root.generic_string();
-            const auto candidateText = candidate.generic_string();
-            if (candidateText.size() <= rootText.size() || candidateText.compare(0, rootText.size(), rootText) != 0 ||
-                candidateText[rootText.size()] != '/')
+            const auto canonicalRoot = std::filesystem::weakly_canonical(root);
+            auto candidate = canonicalRoot;
+            for (const auto& component : normalized)
+            {
+                candidate /= component;
+                std::error_code statusError;
+                const auto status = std::filesystem::symlink_status(candidate, statusError);
+                if (!statusError && std::filesystem::is_symlink(status))
+                    throw std::invalid_argument("Project upgrade paths may not traverse symbolic links.");
+#if defined(_WIN32)
+                const auto attributes = GetFileAttributesW(candidate.wstring().c_str());
+                if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                    throw std::invalid_argument("Project upgrade paths may not traverse reparse points.");
+#endif
+            }
+            candidate = std::filesystem::weakly_canonical(candidate);
+            const auto mismatch = std::ranges::mismatch(canonicalRoot, candidate);
+            if (mismatch.in1 != canonicalRoot.end() || mismatch.in2 == candidate.end())
                 throw std::invalid_argument("Project upgrade path escapes the project root.");
             return candidate;
         }
@@ -102,7 +117,7 @@ namespace Keire
           public:
             explicit ProjectLock(const std::filesystem::path& root)
             {
-                const auto path = root / "Library" / "Editor.lock";
+                const auto path = ConfinedPath(root, std::filesystem::path("Library") / "Editor.lock");
                 std::filesystem::create_directories(path.parent_path());
 #if defined(_WIN32)
                 m_Handle = CreateFileW(path.wstring().c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
@@ -148,18 +163,73 @@ namespace Keire
 
         [[nodiscard]] Json ReadJournal(const std::filesystem::path& active)
         {
-            return Json::parse(Detail::ReadTextFile(active / "journal.json", MaximumJournalBytes));
+            auto journal = Json::parse(Detail::ReadTextFile(ConfinedPath(active, "journal.json"), MaximumJournalBytes));
+            try
+            {
+                if (!journal.is_object() || journal.at("schemaVersion").get<std::uint32_t>() != 1 ||
+                    !journal.at("transactionId").is_string() || !journal.at("phase").is_string() ||
+                    !journal.at("fromSchema").is_number_unsigned() ||
+                    !journal.at("targetSchema").is_number_unsigned() || !journal.at("published").is_number_unsigned() ||
+                    !journal.at("steps").is_array() || !journal.at("files").is_array())
+                    throw std::runtime_error("Project upgrade journal has an invalid schema.");
+
+                const auto transactionId = journal.at("transactionId").get<std::string>();
+                if (transactionId.empty() || transactionId.size() > 128 ||
+                    !std::ranges::all_of(
+                        transactionId, [](const unsigned char character)
+                        { return std::isalnum(character) != 0 || character == '-' || character == '_'; }))
+                    throw std::runtime_error("Project upgrade journal has an invalid transaction ID.");
+
+                const auto phase = journal.at("phase").get<std::string>();
+                constexpr std::array ValidPhases{"initializing", "snapshotted", "prepared",
+                                                 "ready",        "publishing",  "completed"};
+                if (std::ranges::find(ValidPhases, phase) == ValidPhases.end())
+                    throw std::runtime_error("Project upgrade journal has an invalid transaction phase.");
+
+                const auto& steps = journal.at("steps");
+                const auto& files = journal.at("files");
+                if (steps.size() > 4096 || files.size() > 4096 ||
+                    journal.at("published").get<std::size_t>() > files.size())
+                    throw std::runtime_error("Project upgrade journal exceeds its structural limits.");
+                std::vector<std::string> uniqueSteps;
+                for (const auto& step : steps)
+                {
+                    if (!step.is_string())
+                        throw std::runtime_error("Project upgrade journal contains an invalid step.");
+                    auto id = step.get<std::string>();
+                    if (id.empty() || std::ranges::find(uniqueSteps, id) != uniqueSteps.end())
+                        throw std::runtime_error("Project upgrade journal contains a duplicate or empty step.");
+                    uniqueSteps.push_back(std::move(id));
+                }
+                std::vector<std::string> uniquePaths;
+                for (const auto& file : files)
+                {
+                    if (!file.is_object() || !file.at("path").is_string() || !file.at("existed").is_boolean())
+                        throw std::runtime_error("Project upgrade journal contains an invalid file record.");
+                    auto path = file.at("path").get<std::string>();
+                    if (path.empty() || path.size() > 1024 || std::ranges::find(uniquePaths, path) != uniquePaths.end())
+                        throw std::runtime_error("Project upgrade journal contains a duplicate or invalid path.");
+                    uniquePaths.push_back(std::move(path));
+                }
+            }
+            catch (const nlohmann::json::exception& exception)
+            {
+                throw std::runtime_error("Project upgrade journal has an invalid schema: " +
+                                         std::string(exception.what()));
+            }
+            return journal;
         }
 
         void WriteJournal(const std::filesystem::path& active, const Json& journal)
         {
-            Detail::WriteTextFileAtomically(active / "journal.json", journal.dump(2) + '\n');
+            Detail::WriteTextFileAtomically(ConfinedPath(active, "journal.json"), journal.dump(2) + '\n');
         }
 
         [[nodiscard]] std::vector<std::byte> ReadFile(const std::filesystem::path& path)
         {
             const auto size = std::filesystem::file_size(path);
-            if (size > (std::numeric_limits<std::size_t>::max)())
+            if (size > (std::numeric_limits<std::size_t>::max)() ||
+                size > static_cast<std::uintmax_t>((std::numeric_limits<std::streamsize>::max)()))
                 throw std::runtime_error("Project upgrade file exceeds the addressable size.");
             std::vector<std::byte> bytes(static_cast<std::size_t>(size));
             std::ifstream stream(path, std::ios::binary);
@@ -189,9 +259,9 @@ namespace Keire
     class ProjectUpgradeService::Impl final
     {
       public:
-        Impl(std::filesystem::path root, std::vector<ProjectUpgradeStep> additional)
-            : Root(ResolveProjectRoot(root)), UpgradesRoot(Root / "Library" / "ProjectUpgrades"),
-              Active(UpgradesRoot / "Active")
+        Impl(const std::filesystem::path& root, std::vector<ProjectUpgradeStep> additional)
+            : Root(ResolveProjectRoot(root)),
+              Active(ConfinedPath(Root, std::filesystem::path("Library") / "ProjectUpgrades" / "Active"))
         {
             Steps.push_back(ProjectUpgradeService::CreateVersion1To2Step());
             for (auto& step : additional)
@@ -223,6 +293,22 @@ namespace Keire
                 throw std::runtime_error("Interrupted project upgrade requires an unavailable step: " +
                                          std::string(id));
             return *found;
+        }
+
+        [[nodiscard]] std::filesystem::path TransactionPath(const std::filesystem::path& relative = {}) const
+        {
+            auto path = std::filesystem::path("Library") / "ProjectUpgrades" / "Active";
+            if (!relative.empty())
+                path /= relative;
+            return ConfinedPath(Root, path);
+        }
+
+        [[nodiscard]] std::filesystem::path UpgradePath(const std::filesystem::path& relative = {}) const
+        {
+            auto path = std::filesystem::path("Library") / "ProjectUpgrades";
+            if (!relative.empty())
+                path /= relative;
+            return ConfinedPath(Root, path);
         }
 
         [[nodiscard]] ProjectUpgradePlan BuildPlan() const
@@ -264,25 +350,110 @@ namespace Keire
             return plan;
         }
 
+        [[nodiscard]] bool JournalExists() const noexcept
+        {
+            std::error_code error;
+            const bool exists = std::filesystem::is_regular_file(Active / "journal.json", error);
+            return !error && exists;
+        }
+
+        void ValidateJournalPlan(const Json& journal) const
+        {
+            auto schema = journal.at("fromSchema").get<std::uint32_t>();
+            std::vector<std::filesystem::path> expectedPaths;
+            for (const auto& id : journal.at("steps"))
+            {
+                const auto& step = FindStep(id.get<std::string>());
+                if (step.FromSchema != schema)
+                    throw std::runtime_error("Project upgrade journal contains a discontinuous step sequence.");
+                schema = step.ToSchema;
+                for (const auto& path : step.AffectedPaths)
+                    if (std::ranges::find(expectedPaths, path) == expectedPaths.end())
+                        expectedPaths.push_back(path);
+            }
+            if (schema != journal.at("targetSchema").get<std::uint32_t>())
+                throw std::runtime_error("Project upgrade journal does not reach its declared target schema.");
+            std::ranges::sort(expectedPaths);
+
+            std::vector<std::filesystem::path> persistedPaths;
+            persistedPaths.reserve(journal.at("files").size());
+            for (const auto& file : journal.at("files"))
+            {
+                auto path = std::filesystem::path(file.at("path").get<std::string>());
+                (void)ConfinedPath(Root, path);
+                persistedPaths.push_back(std::move(path));
+            }
+            std::ranges::sort(persistedPaths);
+            if (persistedPaths != expectedPaths)
+                throw std::runtime_error("Project upgrade journal file records do not match its registered steps.");
+        }
+
+        void SnapshotBefore(const Json& journal) const
+        {
+            const auto beforeRoot = TransactionPath("before");
+            std::filesystem::remove_all(beforeRoot);
+            std::filesystem::create_directories(beforeRoot);
+            for (const auto& file : journal.at("files"))
+            {
+                if (!file.at("existed").get<bool>())
+                    continue;
+                const auto relative = std::filesystem::path(file.at("path").get<std::string>());
+                const auto source = ConfinedPath(Root, relative);
+                if (!std::filesystem::is_regular_file(source))
+                    throw std::runtime_error("Project upgrade source disappeared before it was snapshotted: " +
+                                             relative.string());
+                Detail::WriteFileAtomically(TransactionPath(std::filesystem::path("before") / relative),
+                                            ReadFile(source));
+            }
+        }
+
+        void ResetStaging(const Json& journal) const
+        {
+            const auto stagingRoot = TransactionPath("staging");
+            std::filesystem::remove_all(stagingRoot);
+            std::filesystem::create_directories(stagingRoot);
+            for (const auto& file : journal.at("files"))
+            {
+                if (!file.at("existed").get<bool>())
+                    continue;
+                const auto relative = std::filesystem::path(file.at("path").get<std::string>());
+                const auto before = TransactionPath(std::filesystem::path("before") / relative);
+                if (!std::filesystem::is_regular_file(before))
+                    throw std::runtime_error("Project upgrade snapshot is incomplete: " + relative.string());
+                Detail::WriteFileAtomically(TransactionPath(std::filesystem::path("staging") / relative),
+                                            ReadFile(before));
+            }
+        }
+
+        void RunSteps(Json& journal) const
+        {
+            ValidateJournalPlan(journal);
+            ResetStaging(journal);
+            journal["phase"] = "prepared";
+            WriteJournal(TransactionPath(), journal);
+            ProjectUpgradeStepContext context{Root, TransactionPath("staging")};
+            for (const auto& id : journal.at("steps"))
+            {
+                const auto& step = FindStep(id.get<std::string>());
+                step.Apply(context);
+                if (step.Validate)
+                    step.Validate(context);
+            }
+            ValidateStagedProject(Root, context.StagingRoot, journal.at("targetSchema").get<std::uint32_t>());
+            journal["phase"] = "ready";
+            WriteJournal(TransactionPath(), journal);
+        }
+
         void Prepare(const ProjectUpgradePlan& plan)
         {
-            if (std::filesystem::exists(Active))
+            std::error_code activeError;
+            if (std::filesystem::exists(Active, activeError) || activeError)
                 throw std::logic_error("An interrupted project upgrade must be recovered or rolled back first.");
-            std::filesystem::create_directories(Active / "staging");
-            std::filesystem::create_directories(Active / "before");
             Json files = Json::array();
             for (const auto& relative : plan.AffectedPaths)
             {
                 const auto source = ConfinedPath(Root, relative);
-                const auto staging = ConfinedPath(Active / "staging", relative);
-                const auto before = ConfinedPath(Active / "before", relative);
                 const bool existed = std::filesystem::is_regular_file(source);
-                if (existed)
-                {
-                    const auto bytes = ReadFile(source);
-                    Detail::WriteFileAtomically(staging, bytes);
-                    Detail::WriteFileAtomically(before, bytes);
-                }
                 files.push_back({{"path", relative.generic_string()}, {"existed", existed}});
             }
             Json steps = Json::array();
@@ -290,85 +461,107 @@ namespace Keire
                 steps.push_back(step.Id);
             Json journal{{"schemaVersion", 1},
                          {"transactionId", TransactionId()},
-                         {"phase", "prepared"},
+                         {"phase", "initializing"},
                          {"fromSchema", plan.CurrentSchema},
                          {"targetSchema", plan.TargetSchema},
                          {"published", 0},
                          {"steps", std::move(steps)},
                          {"files", std::move(files)}};
-            WriteJournal(Active, journal);
-
-            ProjectUpgradeStepContext context{Root, Active / "staging"};
-            for (const auto& planned : plan.Steps)
-            {
-                const auto& step = FindStep(planned.Id);
-                step.Apply(context);
-                if (step.Validate)
-                    step.Validate(context);
-            }
-            ValidateStagedProject(Root, context.StagingRoot, plan.TargetSchema);
-            journal["phase"] = "ready";
-            WriteJournal(Active, journal);
+            std::filesystem::create_directories(TransactionPath());
+            WriteJournal(TransactionPath(), journal);
+            SnapshotBefore(journal);
+            journal["phase"] = "snapshotted";
+            WriteJournal(TransactionPath(), journal);
+            RunSteps(journal);
         }
 
         void Publish(Json journal)
         {
+            ValidateJournalPlan(journal);
+            const auto phase = journal.at("phase").get<std::string>();
+            if (phase == "completed")
+            {
+                std::filesystem::remove_all(TransactionPath());
+                RetainThreeBackups(UpgradePath("Backups"));
+                return;
+            }
+            if (phase != "ready" && phase != "publishing")
+                throw std::runtime_error("Project upgrade journal is not ready for publication.");
             const auto& files = journal.at("files");
             std::size_t published = journal.value("published", std::size_t{0});
+            if (published > files.size())
+                throw std::runtime_error("Project upgrade journal has an invalid publication cursor.");
             journal["phase"] = "publishing";
-            WriteJournal(Active, journal);
+            WriteJournal(TransactionPath(), journal);
             for (; published < files.size(); ++published)
             {
                 const auto relative = std::filesystem::path(files[published].at("path").get<std::string>());
-                const auto staged = ConfinedPath(Active / "staging", relative);
+                const auto staged = TransactionPath(std::filesystem::path("staging") / relative);
                 if (!std::filesystem::is_regular_file(staged))
                     throw std::runtime_error("Project upgrade staged output is missing: " + relative.string());
                 Detail::WriteFileAtomically(ConfinedPath(Root, relative), ReadFile(staged));
                 journal["published"] = published + 1;
-                WriteJournal(Active, journal);
+                WriteJournal(TransactionPath(), journal);
             }
 
-            const auto backup = UpgradesRoot / "Backups" / journal.at("transactionId").get<std::string>();
+            const auto transactionId = journal.at("transactionId").get<std::string>();
             for (const auto& file : files)
             {
                 if (!file.at("existed").get<bool>())
                     continue;
                 const auto relative = std::filesystem::path(file.at("path").get<std::string>());
-                Detail::WriteFileAtomically(ConfinedPath(backup, relative),
-                                            ReadFile(ConfinedPath(Active / "before", relative)));
+                Detail::WriteFileAtomically(UpgradePath(std::filesystem::path("Backups") / transactionId / relative),
+                                            ReadFile(TransactionPath(std::filesystem::path("before") / relative)));
             }
-            Detail::WriteTextFileAtomically(backup / "receipt.json", journal.dump(2) + '\n');
             journal["phase"] = "completed";
-            WriteJournal(Active, journal);
-            std::filesystem::remove_all(Active);
-            RetainThreeBackups(UpgradesRoot / "Backups");
+            Detail::WriteTextFileAtomically(
+                UpgradePath(std::filesystem::path("Backups") / transactionId / "receipt.json"), journal.dump(2) + '\n');
+            WriteJournal(TransactionPath(), journal);
+            std::filesystem::remove_all(TransactionPath());
+            RetainThreeBackups(UpgradePath("Backups"));
         }
 
         void RestoreBefore()
         {
-            auto journal = ReadJournal(Active);
+            auto journal = ReadJournal(TransactionPath());
+            ValidateJournalPlan(journal);
             const auto& files = journal.at("files");
             for (auto iterator = files.rbegin(); iterator != files.rend(); ++iterator)
             {
                 const auto relative = std::filesystem::path(iterator->at("path").get<std::string>());
                 const auto destination = ConfinedPath(Root, relative);
                 if (iterator->at("existed").get<bool>())
-                    Detail::WriteFileAtomically(destination, ReadFile(ConfinedPath(Active / "before", relative)));
+                    Detail::WriteFileAtomically(destination,
+                                                ReadFile(TransactionPath(std::filesystem::path("before") / relative)));
                 else
                     std::filesystem::remove(destination);
             }
-            std::filesystem::remove_all(Active);
+            std::filesystem::remove_all(TransactionPath());
+        }
+
+        void Abort()
+        {
+            if (!JournalExists())
+            {
+                std::filesystem::remove_all(TransactionPath());
+                return;
+            }
+            const auto journal = ReadJournal(TransactionPath());
+            const auto phase = journal.at("phase").get<std::string>();
+            if (phase == "publishing" || phase == "completed")
+                RestoreBefore();
+            else
+                std::filesystem::remove_all(TransactionPath());
         }
 
         std::filesystem::path Root;
-        std::filesystem::path UpgradesRoot;
         std::filesystem::path Active;
         std::vector<ProjectUpgradeStep> Steps;
     };
 
     ProjectUpgradeService::ProjectUpgradeService(std::filesystem::path projectRoot,
                                                  std::vector<ProjectUpgradeStep> additionalSteps)
-        : m_Impl(std::make_unique<Impl>(std::move(projectRoot), std::move(additionalSteps)))
+        : m_Impl(std::make_unique<Impl>(projectRoot, std::move(additionalSteps)))
     {
     }
 
@@ -391,17 +584,14 @@ namespace Keire
         try
         {
             m_Impl->Prepare(current);
-            m_Impl->Publish(ReadJournal(m_Impl->Active));
+            m_Impl->Publish(ReadJournal(m_Impl->TransactionPath()));
         }
         catch (...)
         {
             const auto original = std::current_exception();
             try
             {
-                if (std::filesystem::is_regular_file(m_Impl->Active / "journal.json"))
-                    m_Impl->RestoreBefore();
-                else
-                    std::filesystem::remove_all(m_Impl->Active);
+                m_Impl->Abort();
             }
             catch (...)
             {
@@ -413,40 +603,48 @@ namespace Keire
     void ProjectUpgradeService::Recover()
     {
         ProjectLock lock(m_Impl->Root);
-        if (!std::filesystem::is_regular_file(m_Impl->Active / "journal.json"))
+        std::error_code activeError;
+        if (!std::filesystem::exists(m_Impl->Active, activeError) || activeError)
             throw std::logic_error("There is no interrupted project upgrade to recover.");
-        auto journal = ReadJournal(m_Impl->Active);
-        const auto phase = journal.at("phase").get<std::string>();
-        if (phase == "prepared")
+        if (!m_Impl->JournalExists())
         {
-            ProjectUpgradeStepContext context{m_Impl->Root, m_Impl->Active / "staging"};
-            for (const auto& id : journal.at("steps"))
-            {
-                const auto& step = m_Impl->FindStep(id.get<std::string>());
-                step.Apply(context);
-                if (step.Validate)
-                    step.Validate(context);
-            }
-            ValidateStagedProject(m_Impl->Root, context.StagingRoot, journal.at("targetSchema").get<std::uint32_t>());
-            journal["phase"] = "ready";
-            WriteJournal(m_Impl->Active, journal);
+            std::filesystem::remove_all(m_Impl->TransactionPath());
+            return;
         }
+        auto journal = ReadJournal(m_Impl->TransactionPath());
+        m_Impl->ValidateJournalPlan(journal);
+        auto phase = journal.at("phase").get<std::string>();
+        if (phase == "initializing")
+        {
+            m_Impl->SnapshotBefore(journal);
+            journal["phase"] = "snapshotted";
+            WriteJournal(m_Impl->TransactionPath(), journal);
+            phase = "snapshotted";
+        }
+        if (phase == "snapshotted" || phase == "prepared")
+        {
+            m_Impl->RunSteps(journal);
+            phase = "ready";
+        }
+        if (phase != "ready" && phase != "publishing" && phase != "completed")
+            throw std::runtime_error("Interrupted project upgrade has an unsupported journal phase.");
         m_Impl->Publish(std::move(journal));
     }
 
     void ProjectUpgradeService::Rollback()
     {
         ProjectLock lock(m_Impl->Root);
-        if (!std::filesystem::is_regular_file(m_Impl->Active / "journal.json"))
+        std::error_code activeError;
+        if (!std::filesystem::exists(m_Impl->Active, activeError) || activeError)
             throw std::logic_error("There is no interrupted project upgrade to roll back.");
-        m_Impl->RestoreBefore();
+        m_Impl->Abort();
     }
 
     ProjectUpgradeTransactionState ProjectUpgradeService::State() const noexcept
     {
-        return std::filesystem::is_regular_file(m_Impl->Active / "journal.json")
-                   ? ProjectUpgradeTransactionState::Interrupted
-                   : ProjectUpgradeTransactionState::Clean;
+        std::error_code error;
+        const bool exists = std::filesystem::exists(m_Impl->Active, error);
+        return error || exists ? ProjectUpgradeTransactionState::Interrupted : ProjectUpgradeTransactionState::Clean;
     }
 
     const std::filesystem::path& ProjectUpgradeService::Root() const noexcept { return m_Impl->Root; }

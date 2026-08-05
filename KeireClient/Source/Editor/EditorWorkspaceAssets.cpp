@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "Keire/Assets/BuiltinAssetRegistry.h"
+
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
@@ -138,6 +140,14 @@ namespace
     }
 
 } // namespace
+
+void EditorWorkspaceLayer::ConfigureAssetImporters(Keire::AssetDatabaseSpecification& specification) const
+{
+    specification.Importers = Keire::CreateBuiltinAssetImporters();
+    if (const auto modules = Owner().Modules())
+        for (auto& importer : modules->Importers())
+            specification.Importers.push_back(std::move(importer));
+}
 
 bool EditorWorkspaceLayer::FileIsNewerThan(const std::filesystem::path& path,
                                            const std::filesystem::file_time_type reference) noexcept
@@ -2882,7 +2892,7 @@ void EditorWorkspaceLayer::OpenMaterialGraph(const Keire::AssetId asset)
         if (error || !SameOrChild(root, path) || !std::filesystem::is_regular_file(path, error) || error)
             return std::nullopt;
         const auto size = std::filesystem::file_size(path, error);
-        if (error || size > 1024U * 1024U)
+        if (error || size > std::uintmax_t{1024} * 1024U)
             return std::nullopt;
         try
         {

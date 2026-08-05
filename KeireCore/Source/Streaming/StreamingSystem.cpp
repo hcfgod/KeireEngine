@@ -57,6 +57,22 @@ namespace Keire
                    state == AssetStreamState::Cancelled;
         }
 
+        template <typename T> void SaturatingAdd(T& target, const T value) noexcept
+        {
+            target =
+                value > (std::numeric_limits<T>::max)() - target ? (std::numeric_limits<T>::max)() : target + value;
+        }
+
+        [[nodiscard]] std::size_t ScaledBudget(const std::size_t bytes, const float scale) noexcept
+        {
+            if (bytes == 0)
+                return 0;
+            const auto scaled = static_cast<long double>(bytes) * static_cast<long double>(scale);
+            return scaled >= static_cast<long double>((std::numeric_limits<std::size_t>::max)())
+                       ? (std::numeric_limits<std::size_t>::max)()
+                       : static_cast<std::size_t>(scaled);
+        }
+
         [[nodiscard]] AssetStreamSegment ResolveSegment(const AssetSystem& assets, const AssetId asset,
                                                         const StreamingSegmentKind kind, const std::uint32_t segment)
         {
@@ -94,7 +110,7 @@ namespace Keire
 
         Impl(StreamingBudgetSpecification specification, Ref<AssetSystem> assets, Ref<DiagnosticSink> diagnostics,
              Ref<MemorySystem> memory)
-            : Specification(std::move(specification)), Assets(std::move(assets)), Diagnostics(std::move(diagnostics)),
+            : Specification(specification), Assets(std::move(assets)), Diagnostics(std::move(diagnostics)),
               Memory(std::move(memory)), Owner(std::this_thread::get_id())
         {
             if (!Assets)
@@ -107,6 +123,8 @@ namespace Keire
             }
             for (std::size_t index = 0; index < StreamingClassCount; ++index)
                 Statistics[index].Class = static_cast<StreamingClass>(index);
+            Requests.Reserve(Specification.MaximumRequests);
+            Active.reserve(Specification.MaximumRequests);
             if (Memory)
                 MemoryDomain = Memory->RegisterDomain("Streaming");
         }
@@ -127,20 +145,6 @@ namespace Keire
             Memory->ReportExternal(MemoryDomain, bytes);
         }
 
-        void ApplyRetirementReports() noexcept
-        {
-            for (std::size_t index = 0; index < StreamingClassCount; ++index)
-            {
-                auto& statistics = Statistics[index];
-                statistics.RetiredCpuBytes += RetiredCpuReports[index].exchange(0, std::memory_order_acq_rel);
-                statistics.RetiredGpuBytes += RetiredGpuReports[index].exchange(0, std::memory_order_acq_rel);
-                const auto releasedCpu = RetiredCpuReleases[index].exchange(0, std::memory_order_acq_rel);
-                const auto releasedGpu = RetiredGpuReleases[index].exchange(0, std::memory_order_acq_rel);
-                statistics.RetiredCpuBytes -= std::min(statistics.RetiredCpuBytes, releasedCpu);
-                statistics.RetiredGpuBytes -= std::min(statistics.RetiredGpuBytes, releasedGpu);
-            }
-        }
-
         StreamingBudgetSpecification Specification;
         Ref<AssetSystem> Assets;
         Ref<DiagnosticSink> Diagnostics;
@@ -151,20 +155,15 @@ namespace Keire
         Internal::StableHandleTable<ResidencyRequestTag, RequestRecord> Requests;
         std::vector<ResidencyRequestHandle> Active;
         std::array<StreamingClassStatistics, StreamingClassCount> Statistics{};
-        std::array<std::atomic_size_t, StreamingClassCount> RetiredCpuReports{};
-        std::array<std::atomic_size_t, StreamingClassCount> RetiredGpuReports{};
-        std::array<std::atomic_size_t, StreamingClassCount> RetiredCpuReleases{};
-        std::array<std::atomic_size_t, StreamingClassCount> RetiredGpuReleases{};
         std::atomic_uint64_t AudioUnderruns{0};
         std::uint64_t ReportedAudioUnderruns = 0;
         std::uint64_t Sequence = 0;
-        bool Open = true;
+        std::atomic_bool Open = true;
     };
 
     StreamingSystem::StreamingSystem(StreamingBudgetSpecification specification, Ref<AssetSystem> assets,
                                      Ref<DiagnosticSink> diagnostics, Ref<MemorySystem> memory)
-        : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(assets), std::move(diagnostics),
-                                        std::move(memory)))
+        : m_Impl(std::make_unique<Impl>(specification, std::move(assets), std::move(diagnostics), std::move(memory)))
     {
     }
 
@@ -173,7 +172,8 @@ namespace Keire
     ResidencyRequestHandle StreamingSystem::Request(StreamedAssetRequest request)
     {
         m_Impl->RequireOwner("Request");
-        if (!m_Impl->Open)
+        std::scoped_lock stateLock(m_Impl->Mutex);
+        if (!m_Impl->Open.load(std::memory_order_acquire))
             throw std::logic_error("StreamingSystem is closed.");
         if (!request.Asset || !ValidClass(request.Class) || request.Range.Bytes == 0 ||
             !std::isfinite(request.WindowStartSeconds) || !std::isfinite(request.WindowEndSeconds) ||
@@ -186,20 +186,32 @@ namespace Keire
 
         auto operation =
             m_Impl->Assets->ReadRangeAsync(request.Asset, request.Range.Offset, request.Range.Bytes, request.Priority);
+        if (!operation)
+            throw std::runtime_error("The asset system returned no streaming operation.");
+        auto operationGuard = operation;
         const auto requestClass = request.Class;
         const auto bytes = request.Range.Bytes;
-        const auto handle = m_Impl->Requests.Emplace(Impl::RequestRecord{std::move(request),
-                                                                         std::move(operation),
-                                                                         ResidencyState::Loading,
-                                                                         {},
-                                                                         std::chrono::steady_clock::now(),
-                                                                         ++m_Impl->Sequence});
+        ResidencyRequestHandle handle;
+        try
+        {
+            handle = m_Impl->Requests.Emplace(Impl::RequestRecord{request,
+                                                                  std::move(operation),
+                                                                  ResidencyState::Loading,
+                                                                  {},
+                                                                  std::chrono::steady_clock::now(),
+                                                                  ++m_Impl->Sequence});
+        }
+        catch (...)
+        {
+            operationGuard->Cancel();
+            throw;
+        }
         m_Impl->Active.push_back(handle);
         auto& statistics = m_Impl->Statistics[ClassIndex(requestClass)];
-        statistics.RequestedBytes += bytes;
-        statistics.InFlightBytes += bytes;
-        ++statistics.Requests;
-        ++statistics.Misses;
+        SaturatingAdd(statistics.RequestedBytes, bytes);
+        SaturatingAdd(statistics.InFlightBytes, bytes);
+        SaturatingAdd(statistics.Requests, std::uint64_t{1});
+        SaturatingAdd(statistics.Misses, std::uint64_t{1});
         m_Impl->UpdateMemory();
         return handle;
     }
@@ -215,6 +227,7 @@ namespace Keire
     ResidencyRequestHandle StreamingSystem::RequestTextureMip(const AssetId asset, const std::uint32_t mip,
                                                               const AssetPriority priority, const bool pinned)
     {
+        m_Impl->RequireOwner("RequestTextureMip");
         const auto segment = ResolveSegment(*m_Impl->Assets, asset, StreamingSegmentKind::TextureMip, mip);
         return RequestTextureMip(asset, mip, {segment.Offset, segment.Bytes, segment.Bytes}, priority, pinned);
     }
@@ -230,6 +243,7 @@ namespace Keire
     ResidencyRequestHandle StreamingSystem::RequestMeshLod(const AssetId asset, const std::uint32_t lod,
                                                            const AssetPriority priority, const bool pinned)
     {
+        m_Impl->RequireOwner("RequestMeshLod");
         const auto segment = ResolveSegment(*m_Impl->Assets, asset, StreamingSegmentKind::MeshLod, lod);
         return RequestMeshLod(asset, lod, {segment.Offset, segment.Bytes, segment.Bytes}, priority, pinned);
     }
@@ -245,6 +259,7 @@ namespace Keire
     ResidencyRequestHandle StreamingSystem::RequestAudioPage(const AssetId asset, const std::uint32_t page,
                                                              const AssetPriority priority, const bool pinned)
     {
+        m_Impl->RequireOwner("RequestAudioPage");
         const auto segment = ResolveSegment(*m_Impl->Assets, asset, StreamingSegmentKind::AudioPage, page);
         return Request({asset,
                         StreamingClass::Audio,
@@ -269,6 +284,7 @@ namespace Keire
     ResidencyRequestHandle StreamingSystem::RequestAnimationWindow(const AssetId asset, const std::uint32_t window,
                                                                    const AssetPriority priority, const bool pinned)
     {
+        m_Impl->RequireOwner("RequestAnimationWindow");
         const auto segment = ResolveSegment(*m_Impl->Assets, asset, StreamingSegmentKind::AnimationWindow, window);
         return RequestAnimationWindow(asset, segment.WindowStartSeconds, segment.WindowEndSeconds, window,
                                       {segment.Offset, segment.Bytes, 0}, priority, pinned);
@@ -276,60 +292,104 @@ namespace Keire
 
     bool StreamingSystem::Cancel(const ResidencyRequestHandle handle) noexcept
     {
-        bool cancelled = false;
-        (void)m_Impl->Requests.With(
-            handle,
-            [&](Impl::RequestRecord& record)
-            {
-                if (record.State == ResidencyState::Requested || record.State == ResidencyState::Loading)
+        try
+        {
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            bool cancelled = false;
+            (void)m_Impl->Requests.With(
+                handle,
+                [&](Impl::RequestRecord& record)
                 {
-                    record.Operation->Cancel();
-                    record.State = ResidencyState::Cancelled;
-                    auto& statistics = m_Impl->Statistics[ClassIndex(record.Request.Class)];
-                    statistics.InFlightBytes -= std::min(statistics.InFlightBytes, record.Request.Range.Bytes);
-                    statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
-                    cancelled = true;
-                }
-            });
-        m_Impl->UpdateMemory();
-        return cancelled;
+                    if (record.State == ResidencyState::Requested || record.State == ResidencyState::Loading)
+                    {
+                        record.Operation->Cancel();
+                        record.Operation.Reset();
+                        record.State = ResidencyState::Cancelled;
+                        auto& statistics = m_Impl->Statistics[ClassIndex(record.Request.Class)];
+                        statistics.InFlightBytes -= std::min(statistics.InFlightBytes, record.Request.Range.Bytes);
+                        statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
+                        SaturatingAdd(statistics.CancelledRequests, std::uint64_t{1});
+                        cancelled = true;
+                    }
+                });
+            m_Impl->UpdateMemory();
+            return cancelled;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     bool StreamingSystem::Release(const ResidencyRequestHandle handle) noexcept
     {
-        (void)Cancel(handle);
-        (void)m_Impl->Requests.With(
-            handle,
-            [&](Impl::RequestRecord& record)
-            {
-                if (record.State == ResidencyState::Resident)
+        try
+        {
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            (void)m_Impl->Requests.With(
+                handle,
+                [&](Impl::RequestRecord& record)
                 {
                     auto& statistics = m_Impl->Statistics[ClassIndex(record.Request.Class)];
-                    statistics.ResidentCpuBytes -= std::min(statistics.ResidentCpuBytes, record.Data.size());
-                    statistics.ResidentGpuBytes -=
-                        std::min(statistics.ResidentGpuBytes, record.Request.Range.EstimatedGpuBytes);
-                    statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
-                }
-            });
-        std::erase(m_Impl->Active, handle);
-        const auto erased = m_Impl->Requests.Erase(handle);
-        m_Impl->UpdateMemory();
-        return erased;
+                    if (record.State == ResidencyState::Requested || record.State == ResidencyState::Loading)
+                    {
+                        record.Operation->Cancel();
+                        record.Operation.Reset();
+                        record.State = ResidencyState::Cancelled;
+                        statistics.InFlightBytes -= std::min(statistics.InFlightBytes, record.Request.Range.Bytes);
+                        statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
+                        SaturatingAdd(statistics.CancelledRequests, std::uint64_t{1});
+                    }
+                    else if (record.State == ResidencyState::Resident)
+                    {
+                        statistics.ResidentCpuBytes -= std::min(statistics.ResidentCpuBytes, record.Data.size());
+                        statistics.ResidentGpuBytes -=
+                            std::min(statistics.ResidentGpuBytes, record.Request.Range.EstimatedGpuBytes);
+                        statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
+                    }
+                });
+            std::erase(m_Impl->Active, handle);
+            const auto erased = m_Impl->Requests.Erase(handle);
+            m_Impl->UpdateMemory();
+            return erased;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     bool StreamingSystem::SetPinned(const ResidencyRequestHandle handle, const bool pinned) noexcept
     {
-        return m_Impl->Requests.With(handle, [pinned](Impl::RequestRecord& record) { record.Request.Pinned = pinned; });
+        try
+        {
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            return m_Impl->Requests.With(handle,
+                                         [pinned](Impl::RequestRecord& record) { record.Request.Pinned = pinned; });
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     bool StreamingSystem::Touch(const ResidencyRequestHandle handle) noexcept
     {
-        return m_Impl->Requests.With(handle,
-                                     [&](Impl::RequestRecord& record) { record.LastTouch = ++m_Impl->Sequence; });
+        try
+        {
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            return m_Impl->Requests.With(handle,
+                                         [&](Impl::RequestRecord& record) { record.LastTouch = ++m_Impl->Sequence; });
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     ResidencySnapshot StreamingSystem::Snapshot(const ResidencyRequestHandle handle) const
     {
+        std::scoped_lock stateLock(m_Impl->Mutex);
         ResidencySnapshot result;
         if (!m_Impl->Requests.With(
                 handle,
@@ -353,6 +413,7 @@ namespace Keire
 
     std::vector<std::byte> StreamingSystem::ResidentData(const ResidencyRequestHandle handle) const
     {
+        std::scoped_lock stateLock(m_Impl->Mutex);
         std::vector<std::byte> result;
         if (!m_Impl->Requests.With(handle, [&](const Impl::RequestRecord& record) { result = record.Data; }))
             throw std::invalid_argument("Streaming residency handle is stale or foreign.");
@@ -362,89 +423,106 @@ namespace Keire
     std::size_t StreamingSystem::Pump()
     {
         m_Impl->RequireOwner("Pump");
-        m_Impl->ApplyRetirementReports();
         std::size_t completed = 0;
-        for (const auto handle : m_Impl->Active)
+        bool reportUnderrun = false;
+        Ref<DiagnosticSink> diagnostics;
         {
-            (void)m_Impl->Requests.With(
-                handle,
-                [&](Impl::RequestRecord& record)
-                {
-                    if (record.State != ResidencyState::Loading || !IsTerminal(record.Operation->State()))
-                        return;
-                    auto& statistics = m_Impl->Statistics[ClassIndex(record.Request.Class)];
-                    statistics.InFlightBytes -= std::min(statistics.InFlightBytes, record.Request.Range.Bytes);
-                    if (record.Operation->State() == AssetStreamState::Succeeded)
-                    {
-                        record.Data = record.Operation->Result();
-                        record.Operation.Reset();
-                        record.State = ResidencyState::Resident;
-                        statistics.ResidentCpuBytes += record.Data.size();
-                        statistics.ResidentGpuBytes += record.Request.Range.EstimatedGpuBytes;
-                        const auto elapsed = std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - record.Started);
-                        const auto completedRequests = statistics.Requests - statistics.Failures;
-                        statistics.AverageLatencyMilliseconds +=
-                            (elapsed.count() - statistics.AverageLatencyMilliseconds) /
-                            static_cast<double>(std::max<std::uint64_t>(1, completedRequests));
-                    }
-                    else
-                    {
-                        record.State = record.Operation->State() == AssetStreamState::Cancelled
-                                           ? ResidencyState::Cancelled
-                                           : ResidencyState::Failed;
-                        record.Operation.Reset();
-                        statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
-                        if (record.State == ResidencyState::Failed)
-                            ++statistics.Failures;
-                    }
-                    ++completed;
-                });
-        }
-
-        const auto underruns = m_Impl->AudioUnderruns.load(std::memory_order_relaxed);
-        if (underruns != m_Impl->ReportedAudioUnderruns)
-        {
-            m_Impl->Statistics[ClassIndex(StreamingClass::Audio)].AudioUnderruns = underruns;
-            if (m_Impl->Diagnostics)
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            if (!m_Impl->Open.load(std::memory_order_acquire))
+                return 0;
+            for (const auto handle : m_Impl->Active)
             {
-                try
-                {
-                    m_Impl->Diagnostics->Report({DiagnosticId("KEIRE-AUDIO-0001"), DiagnosticSeverity::Warning,
-                                                 "Audio streaming underrun; silence was emitted while preserving the "
-                                                 "logical sample cursor."});
-                }
-                catch (...)
-                {
-                }
+                (void)m_Impl->Requests.With(
+                    handle,
+                    [&](Impl::RequestRecord& record)
+                    {
+                        if (record.State != ResidencyState::Loading)
+                            return;
+                        const auto operationState = record.Operation->State();
+                        if (!IsTerminal(operationState))
+                            return;
+                        std::vector<std::byte> result;
+                        if (operationState == AssetStreamState::Succeeded)
+                            result = record.Operation->Result();
+                        auto& statistics = m_Impl->Statistics[ClassIndex(record.Request.Class)];
+                        statistics.InFlightBytes -= std::min(statistics.InFlightBytes, record.Request.Range.Bytes);
+                        record.Operation.Reset();
+                        if (operationState == AssetStreamState::Succeeded)
+                        {
+                            record.Data = std::move(result);
+                            record.State = ResidencyState::Resident;
+                            SaturatingAdd(statistics.ResidentCpuBytes, record.Data.size());
+                            SaturatingAdd(statistics.ResidentGpuBytes, record.Request.Range.EstimatedGpuBytes);
+                            SaturatingAdd(statistics.CompletedRequests, std::uint64_t{1});
+                            const auto elapsed = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - record.Started);
+                            statistics.AverageLatencyMilliseconds +=
+                                (elapsed.count() - statistics.AverageLatencyMilliseconds) /
+                                static_cast<double>(statistics.CompletedRequests);
+                        }
+                        else
+                        {
+                            record.State = operationState == AssetStreamState::Cancelled ? ResidencyState::Cancelled
+                                                                                         : ResidencyState::Failed;
+                            statistics.RequestedBytes -=
+                                std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
+                            if (record.State == ResidencyState::Failed)
+                                SaturatingAdd(statistics.Failures, std::uint64_t{1});
+                            else
+                                SaturatingAdd(statistics.CancelledRequests, std::uint64_t{1});
+                        }
+                        ++completed;
+                    });
             }
-            m_Impl->ReportedAudioUnderruns = underruns;
+
+            const auto underruns = m_Impl->AudioUnderruns.load(std::memory_order_relaxed);
+            if (underruns != m_Impl->ReportedAudioUnderruns)
+            {
+                m_Impl->Statistics[ClassIndex(StreamingClass::Audio)].AudioUnderruns = underruns;
+                m_Impl->ReportedAudioUnderruns = underruns;
+                reportUnderrun = true;
+                diagnostics = m_Impl->Diagnostics;
+            }
+            m_Impl->UpdateMemory();
+        }
+        if (reportUnderrun && diagnostics)
+        {
+            try
+            {
+                diagnostics->Report({DiagnosticId("KEIRE-AUDIO-0001"), DiagnosticSeverity::Warning,
+                                     "Audio streaming underrun; silence was emitted while preserving the logical "
+                                     "sample cursor."});
+            }
+            catch (...)
+            {
+            }
         }
         completed += EvictToBudgets();
-        m_Impl->UpdateMemory();
         return completed;
     }
 
     std::size_t StreamingSystem::EvictToBudgets()
     {
         m_Impl->RequireOwner("EvictToBudgets");
+        std::scoped_lock stateLock(m_Impl->Mutex);
+        if (!m_Impl->Open.load(std::memory_order_acquire))
+            return 0;
         std::size_t evicted = 0;
         for (std::size_t classIndex = 0; classIndex < StreamingClassCount; ++classIndex)
         {
             const auto assetClass = static_cast<StreamingClass>(classIndex);
             const auto budget = BudgetFor(m_Impl->Specification, assetClass);
             auto& statistics = m_Impl->Statistics[classIndex];
-            const auto cpuThreshold =
-                static_cast<std::size_t>(budget.CpuBytes * m_Impl->Specification.EvictionThreshold);
-            const auto gpuThreshold =
-                static_cast<std::size_t>(budget.GpuBytes * m_Impl->Specification.EvictionThreshold);
+            const auto cpuThreshold = ScaledBudget(budget.CpuBytes, m_Impl->Specification.EvictionThreshold);
+            const auto gpuThreshold = ScaledBudget(budget.GpuBytes, m_Impl->Specification.EvictionThreshold);
             const bool cpuExceeded = budget.CpuBytes != 0 && statistics.ResidentCpuBytes > cpuThreshold;
             const bool gpuExceeded = budget.GpuBytes != 0 && statistics.ResidentGpuBytes > gpuThreshold;
             if (!cpuExceeded && !gpuExceeded)
                 continue;
-            const auto cpuTarget = static_cast<std::size_t>(budget.CpuBytes * m_Impl->Specification.EvictionTarget);
-            const auto gpuTarget = static_cast<std::size_t>(budget.GpuBytes * m_Impl->Specification.EvictionTarget);
+            const auto cpuTarget = ScaledBudget(budget.CpuBytes, m_Impl->Specification.EvictionTarget);
+            const auto gpuTarget = ScaledBudget(budget.GpuBytes, m_Impl->Specification.EvictionTarget);
             std::vector<std::pair<std::uint64_t, ResidencyRequestHandle>> candidates;
+            candidates.reserve(m_Impl->Active.size());
             for (const auto handle : m_Impl->Active)
             {
                 (void)m_Impl->Requests.With(handle,
@@ -470,10 +548,9 @@ namespace Keire
                         statistics.ResidentGpuBytes -=
                             std::min(statistics.ResidentGpuBytes, record.Request.Range.EstimatedGpuBytes);
                         statistics.RequestedBytes -= std::min(statistics.RequestedBytes, record.Request.Range.Bytes);
-                        record.Data.clear();
-                        record.Data.shrink_to_fit();
+                        std::vector<std::byte>().swap(record.Data);
                         record.State = ResidencyState::Evicted;
-                        ++statistics.Evictions;
+                        SaturatingAdd(statistics.Evictions, std::uint64_t{1});
                         ++evicted;
                     });
             }
@@ -484,16 +561,8 @@ namespace Keire
 
     std::vector<StreamingClassStatistics> StreamingSystem::Statistics() const
     {
+        std::scoped_lock stateLock(m_Impl->Mutex);
         auto result = std::vector<StreamingClassStatistics>(m_Impl->Statistics.begin(), m_Impl->Statistics.end());
-        for (std::size_t index = 0; index < StreamingClassCount; ++index)
-        {
-            result[index].RetiredCpuBytes += m_Impl->RetiredCpuReports[index].load(std::memory_order_acquire);
-            result[index].RetiredGpuBytes += m_Impl->RetiredGpuReports[index].load(std::memory_order_acquire);
-            const auto releasedCpu = m_Impl->RetiredCpuReleases[index].load(std::memory_order_acquire);
-            const auto releasedGpu = m_Impl->RetiredGpuReleases[index].load(std::memory_order_acquire);
-            result[index].RetiredCpuBytes -= std::min(result[index].RetiredCpuBytes, releasedCpu);
-            result[index].RetiredGpuBytes -= std::min(result[index].RetiredGpuBytes, releasedGpu);
-        }
         result[ClassIndex(StreamingClass::Audio)].AudioUnderruns =
             m_Impl->AudioUnderruns.load(std::memory_order_relaxed);
         return result;
@@ -504,9 +573,19 @@ namespace Keire
     {
         if (!ValidClass(assetClass))
             return;
-        const auto index = ClassIndex(assetClass);
-        m_Impl->RetiredCpuReports[index].fetch_add(cpuBytes, std::memory_order_release);
-        m_Impl->RetiredGpuReports[index].fetch_add(gpuBytes, std::memory_order_release);
+        try
+        {
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            if (!m_Impl->Open.load(std::memory_order_acquire))
+                return;
+            auto& statistics = m_Impl->Statistics[ClassIndex(assetClass)];
+            SaturatingAdd(statistics.RetiredCpuBytes, cpuBytes);
+            SaturatingAdd(statistics.RetiredGpuBytes, gpuBytes);
+            m_Impl->UpdateMemory();
+        }
+        catch (...)
+        {
+        }
     }
 
     void StreamingSystem::ReleaseRetired(const StreamingClass assetClass, const std::size_t cpuBytes,
@@ -514,39 +593,69 @@ namespace Keire
     {
         if (!ValidClass(assetClass))
             return;
-        const auto index = ClassIndex(assetClass);
-        m_Impl->RetiredCpuReleases[index].fetch_add(cpuBytes, std::memory_order_release);
-        m_Impl->RetiredGpuReleases[index].fetch_add(gpuBytes, std::memory_order_release);
+        try
+        {
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            if (!m_Impl->Open.load(std::memory_order_acquire))
+                return;
+            auto& statistics = m_Impl->Statistics[ClassIndex(assetClass)];
+            statistics.RetiredCpuBytes -= std::min(statistics.RetiredCpuBytes, cpuBytes);
+            statistics.RetiredGpuBytes -= std::min(statistics.RetiredGpuBytes, gpuBytes);
+            m_Impl->UpdateMemory();
+        }
+        catch (...)
+        {
+        }
     }
 
     void StreamingSystem::ReportAudioUnderrun() noexcept
     {
-        m_Impl->AudioUnderruns.fetch_add(1, std::memory_order_relaxed);
+        if (m_Impl && m_Impl->Open.load(std::memory_order_acquire))
+            m_Impl->AudioUnderruns.fetch_add(1, std::memory_order_relaxed);
     }
 
-    bool StreamingSystem::IsOpen() const noexcept { return m_Impl->Open; }
+    bool StreamingSystem::IsOpen() const noexcept { return m_Impl && m_Impl->Open.load(std::memory_order_acquire); }
 
     void StreamingSystem::Close() noexcept
     {
-        if (!m_Impl || !m_Impl->Open)
+        if (!m_Impl)
             return;
-        m_Impl->Open = false;
-        m_Impl->ApplyRetirementReports();
-        const auto active = std::move(m_Impl->Active);
-        for (const auto handle : active)
+        try
         {
-            (void)Cancel(handle);
-            (void)m_Impl->Requests.Erase(handle);
+            std::scoped_lock stateLock(m_Impl->Mutex);
+            if (!m_Impl->Open.exchange(false, std::memory_order_acq_rel))
+                return;
+            for (const auto handle : m_Impl->Active)
+            {
+                (void)m_Impl->Requests.With(
+                    handle,
+                    [&](Impl::RequestRecord& record)
+                    {
+                        if (record.State == ResidencyState::Requested || record.State == ResidencyState::Loading)
+                        {
+                            auto& statistics = m_Impl->Statistics[ClassIndex(record.Request.Class)];
+                            SaturatingAdd(statistics.CancelledRequests, std::uint64_t{1});
+                        }
+                        if (record.Operation)
+                            record.Operation->Cancel();
+                        record.Operation.Reset();
+                    });
+                (void)m_Impl->Requests.Erase(handle);
+            }
+            m_Impl->Active.clear();
+            for (auto& statistics : m_Impl->Statistics)
+            {
+                statistics.RequestedBytes = 0;
+                statistics.InFlightBytes = 0;
+                statistics.ResidentCpuBytes = 0;
+                statistics.ResidentGpuBytes = 0;
+                statistics.RetiredCpuBytes = 0;
+                statistics.RetiredGpuBytes = 0;
+            }
+            m_Impl->UpdateMemory();
         }
-        for (auto& statistics : m_Impl->Statistics)
+        catch (...)
         {
-            statistics.RequestedBytes = 0;
-            statistics.InFlightBytes = 0;
-            statistics.ResidentCpuBytes = 0;
-            statistics.ResidentGpuBytes = 0;
-            statistics.RetiredCpuBytes = 0;
-            statistics.RetiredGpuBytes = 0;
         }
-        m_Impl->UpdateMemory();
     }
 } // namespace Keire

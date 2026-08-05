@@ -158,6 +158,10 @@ namespace Keire
                 {DiagnosticId("KEIRE-REPLAY-0001"), "Replay divergence",
                  "Canonical deterministic state differs from the recorded state for a fixed tick.",
                  "KEIRE-REPLAY-0001.md"});
+            m_Impl->DiagnosticDefinitionService->Register(
+                {DiagnosticId("KEIRE-REPLAY-0002"), "Replay session failure",
+                 "Replay recording, decoding, restoration, or finalization failed and the session was stopped.",
+                 "KEIRE-REPLAY-0002.md"});
             m_Impl->MemoryService = CreateRef<MemorySystem>(m_Impl->Specification.Memory);
             m_Impl->StringService = CreateRef<StringInterner>();
             const auto jobMemoryDomain = m_Impl->MemoryService->RegisterDomain("Jobs");
@@ -670,6 +674,54 @@ namespace Keire
                                                             static_cast<double>(statistics.FailedLoads));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Evictions",
                                                             static_cast<double>(statistics.Evictions));
+                    }
+                    if (m_Impl->StreamingService)
+                    {
+                        double requestedBytes = 0.0;
+                        double inFlightBytes = 0.0;
+                        double residentCpuBytes = 0.0;
+                        double residentGpuBytes = 0.0;
+                        double retiredBytes = 0.0;
+                        double requests = 0.0;
+                        double completed = 0.0;
+                        double cancelled = 0.0;
+                        double failures = 0.0;
+                        double evictions = 0.0;
+                        double successfulLatencyTotal = 0.0;
+                        for (const auto& statistics : m_Impl->StreamingService->Statistics())
+                        {
+                            requestedBytes += static_cast<double>(statistics.RequestedBytes);
+                            inFlightBytes += static_cast<double>(statistics.InFlightBytes);
+                            residentCpuBytes += static_cast<double>(statistics.ResidentCpuBytes);
+                            residentGpuBytes += static_cast<double>(statistics.ResidentGpuBytes);
+                            retiredBytes += static_cast<double>(statistics.RetiredCpuBytes);
+                            retiredBytes += static_cast<double>(statistics.RetiredGpuBytes);
+                            requests += static_cast<double>(statistics.Requests);
+                            completed += static_cast<double>(statistics.CompletedRequests);
+                            cancelled += static_cast<double>(statistics.CancelledRequests);
+                            failures += static_cast<double>(statistics.Failures);
+                            evictions += static_cast<double>(statistics.Evictions);
+                            successfulLatencyTotal += statistics.AverageLatencyMilliseconds *
+                                                      static_cast<double>(statistics.CompletedRequests);
+                        }
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming requested bytes",
+                                                            requestedBytes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming in-flight bytes",
+                                                            inFlightBytes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming resident CPU bytes",
+                                                            residentCpuBytes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming resident GPU bytes",
+                                                            residentGpuBytes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming retired bytes",
+                                                            retiredBytes);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming requests", requests);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming completed", completed);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming cancelled", cancelled);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming failures", failures);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming evictions", evictions);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Assets, "Streaming successful latency ms",
+                                                            completed == 0.0 ? 0.0
+                                                                             : successfulLatencyTotal / completed);
                     }
                     if (m_Impl->AudioService)
                     {

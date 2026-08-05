@@ -18,6 +18,11 @@ filesystem monitoring, process reaping, audio callbacks, and the logger retain t
 Strict simulation domains use submission order and deterministic partitions instead of stealing. Editor and tool asset
 databases inject the same process-owned scheduler into catalog cooking; the small internal scheduler remains only as a
 source-compatible fallback for standalone database consumers that do not provide one.
+Dependency registration is serialized against dependency completion, so a dependent cannot become runnable until its
+entire immutable dependency set is attached. Submission and close share one lifecycle gate, worker-initiated close
+never self-joins, and overflow from each job's fixed scratch arena uses the configured upstream memory resource.
+Stable-handle slot creation is transactional for both new and reused indices, so a throwing value constructor cannot
+strand an unreachable slot or consume configured capacity.
 
 `MemorySystem` exposes hierarchical domains, tracked PMR resources, immutable current/peak/allocation/external-byte
 snapshots, an owner-thread frame arena, per-job scratch arenas, and fence-owned renderer upload storage. It does not
@@ -46,6 +51,13 @@ publication; bounded aging in the shared scheduler prevents starvation. Each cla
 accounting. Audio underruns are reported atomically; the callback emits silence without waiting, allocating, decoding,
 locking a completion, or performing file I/O.
 
+Request creation and `Pump` remain construction-thread operations because they coordinate with the application frame
+boundary. Cancellation, release, pin/touch, snapshots, statistics, retirement reports, and idempotent close are
+synchronized and may be issued by worker consumers. Handle/free-list storage is reserved to the configured request
+capacity, so `noexcept` release and close do not allocate. Successful completion count is the denominator for reported
+load latency; failures and cancellations have separate counters. Aggregate streaming bytes, failures, and evictions
+are also published to the Assets profiler category.
+
 Renderer resource replacement uses the fence retirement queue. GPU bytes remain charged until their submission fence
 signals, and CPU pages remain owned by snapshots, jobs, or consumers until their last reference releases. The compiled
 frame graph publishes an immutable inspection snapshot containing deterministic pass order, resource lifetimes,
@@ -71,6 +83,12 @@ Jolt transforms/velocities/sleep state, animator layers and transitions, managed
 queued UI events, logical audio voice frames/pause state, and VFX emitter/random/spawn state. Strict replay selects the
 canonical CPU VFX path and stores CPU particles; performance captures retain GPU emitter progress without claiming
 cross-device bit identity. Networking and rollback transport remain outside this layer.
+Replay input and checkpoints are decoded under the configured total-size and rewind budgets before allocation, and
+variable-count fields are bounded before reservation. Recording charges the exact metadata, input, compressed
+checkpoint, header, and footer sizes as data is captured, so it fails before retained tick data can exceed the eventual
+file limit. Playback advances on the recorded logical tick rather than the host frame's tick argument. Recording,
+decoding, restore, verification, and finalization faults transition the session to `Failed` and emit
+`KEIRE-REPLAY-0002`; `Close` remains non-throwing without hiding that terminal state.
 
 ## Project upgrades and source modules
 
@@ -81,12 +99,22 @@ the staged project, can recover or roll back an interrupted transaction, and ret
 backups under `Library/ProjectUpgrades`. Hub application requires plan confirmation. `upgrade-project` is dry-run unless
 `--apply` is explicit and also exposes recovery and rollback.
 
+Upgrade journals are written before snapshot work begins and use explicit initializing, snapshotted, prepared, ready,
+publishing, and completed phases. Recovery rebuilds staging from the immutable before-image before rerunning a step,
+so callbacks need not tolerate a half-written prior attempt. Journal schema, step continuity, affected-file sets, and
+transaction IDs are validated before use. Canonical confinement rejects symbolic links and Windows reparse points;
+the same check covers the editor lock, journal, snapshots, staging, and backup storage below `Library`, not only affected
+project files. An orphaned `Active` directory is recognized as interrupted state and can be safely cleared.
+
 `EngineModule` is a source-level interface. The registry deterministically resolves versions and dependencies, rejects
 duplicates/cycles/mismatches before service startup, collects components, importers, decoders, replay serializers,
 diagnostics, upgrade steps, and memory domains through one transactional registration context, freezes afterward, and
 stops modules in reverse order. The same static source-module pack links into editor/client, runtime, AssetTool, and the
 asset worker. Its ordered catalog is embedded in cooked manifests and replay fingerprints. There is deliberately no
 `LoadLibrary`, `dlopen`, runtime unloading, or public binary plugin ABI.
+The editor composes built-in asset importers with the registry's ordered module importers before constructing its asset
+database; existing duplicate-name and duplicate-extension validation rejects collisions. Caret version ranges follow
+SemVer's pre-1.0 compatibility rules and reject an unrepresentable overflowing exclusive bound.
 
 ## Persistence boundary
 

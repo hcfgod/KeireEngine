@@ -23,11 +23,15 @@ local function addManagedBuildInput(input)
     table.insert(managedBuildInputs, input)
 end
 
--- Directory timestamps make raw generated-project builds notice source additions and removals. The proxy project uses
--- a distinct name so Ninja never confuses the KeireManaged source directory with the project phony target.
-addManagedBuildInput(managedSourceRoot)
-for _, directory in ipairs(os.matchdirs(path.join(managedSourceRoot, "**"))) do
-    addManagedBuildInput(directory)
+-- Ninja needs directory timestamps to notice source additions and removals without an intervening generation step.
+-- Visual Studio rejects directories as custom-build file dependencies; the repository launcher regenerates its project
+-- inventory before every normal build. The proxy uses a distinct name so Ninja never confuses the source directory
+-- with the project phony target.
+if _ACTION == "ninja" then
+    addManagedBuildInput(managedSourceRoot)
+    for _, directory in ipairs(os.matchdirs(path.join(managedSourceRoot, "**"))) do
+        addManagedBuildInput(directory)
+    end
 end
 for _, source in ipairs(os.matchfiles(path.join(managedSourceRoot, "**.cs"))) do
     addManagedBuildInput(source)
@@ -46,6 +50,7 @@ end
 
 project(KeireManagedProject)
     location "../../Build/Projects/KeireManaged"
+    objdir ("../../Build/Intermediates/" .. OutputDir .. "/" .. KeireManagedProject)
 
     if _ACTION == "ninja" then
         kind "StaticLib"

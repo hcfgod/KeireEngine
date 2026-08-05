@@ -6,3 +6,4 @@ meaning of the ID.
 
 - [KEIRE-AUDIO-0001](KEIRE-AUDIO-0001.md): audio streaming underrun
 - [KEIRE-REPLAY-0001](KEIRE-REPLAY-0001.md): deterministic replay divergence
+- [KEIRE-REPLAY-0002](KEIRE-REPLAY-0002.md): replay session or recording finalization failure

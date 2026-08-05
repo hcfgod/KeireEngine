@@ -16,7 +16,10 @@ following portability and lifetime changes until they can be accepted upstream:
 5. allow nethost to resolve hostfxr from an application-owned bundled .NET root;
 6. release an existing managed handle before move-assignment so collectible reload cannot leak objects into a
    retiring load context;
-7. keep Windows, Linux, and macOS x64/ARM64 code paths buildable.
+7. apply host settings before HostFXR discovery so an application-owned bundled `.NET` root is actually honored;
+8. keep Coral's native host warning-clean under MSVC without hiding warnings outside its deprecated compatibility
+   implementation;
+9. keep Windows, Linux, and macOS x64/ARM64 code paths buildable.
 
 Do not modify a downloaded Coral tree in place. The dependency bootstrap must copy it into a commit-keyed build cache,
 apply this patch set there, and record both the upstream commit and patch-set digest in the dependency manifest.

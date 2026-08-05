@@ -291,6 +291,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void InstantiateDroppedPrefab(Keire::AssetId asset) override;
     void CreateDroppedMeshEntity(Keire::AssetId asset) override;
     void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
+    void ConfigureAssetImporters(Keire::AssetDatabaseSpecification& specification) const;
     void
     ImportAssets(KeireEditor::AssetOperationPriority priority = KeireEditor::AssetOperationPriority::ExplicitAction);
     void UpdateAssetOperations();

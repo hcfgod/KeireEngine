@@ -12,16 +12,26 @@ import sys
 from pathlib import Path
 
 
-SUMMARY_PATTERN = re.compile(r"^(Frame|Average|P95|P99):\s+([0-9]+(?:\.[0-9]+)?)\s+ms(?:\s|$)")
+SUMMARY_PATTERN = re.compile(
+    r"^(Frame|Average|P95|P99):\s+([0-9]+(?:\.[0-9]+)?)\s+ms(?:\s|$)"
+)
 STUTTER_PATTERN = re.compile(r"^Stutters:\s+([0-9]+)\s*$")
 
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--snapshot", type=Path, required=True, help="Copy Full Snapshot profiler text.")
-    parser.add_argument("--history", type=Path, required=True, help="Copy Frame CSV profiler history.")
-    parser.add_argument("--metadata", type=Path, required=True, help="Capture hardware metadata JSON.")
-    parser.add_argument("--config", type=Path, default=Path("Config/PerformanceGates.json"))
+    parser.add_argument(
+        "--snapshot", type=Path, required=True, help="Copy Full Snapshot profiler text."
+    )
+    parser.add_argument(
+        "--history", type=Path, required=True, help="Copy Frame CSV profiler history."
+    )
+    parser.add_argument(
+        "--metadata", type=Path, required=True, help="Capture hardware metadata JSON."
+    )
+    parser.add_argument(
+        "--config", type=Path, default=Path("Config/PerformanceGates.json")
+    )
     parser.add_argument("--profile", default="sandbox-vfx-reference")
     return parser.parse_args()
 
@@ -49,11 +59,15 @@ def parse_snapshot(path: Path) -> tuple[dict[str, float], int, dict[str, float]]
                 raise ValueError(f"Malformed profiler counter: {line}")
             name = parts[2]
             if name in counters:
-                raise ValueError(f"Profiler snapshot contains duplicate counter {name!r}.")
+                raise ValueError(
+                    f"Profiler snapshot contains duplicate counter {name!r}."
+                )
             counters[name] = float(parts[3])
     missing = sorted({"Average", "P95", "P99"}.difference(summary))
     if missing or stutters is None:
-        raise ValueError(f"Profiler snapshot is missing summary values: {missing or ['Stutters']}")
+        raise ValueError(
+            f"Profiler snapshot is missing summary values: {missing or ['Stutters']}"
+        )
     return summary, stutters, counters
 
 
@@ -83,7 +97,9 @@ def validate(options: argparse.Namespace) -> list[str]:
 
     expected_hardware = profile["hardwareId"]
     if metadata.get("hardwareId") != expected_hardware:
-        failures.append(f"hardwareId is {metadata.get('hardwareId')!r}; expected {expected_hardware!r}")
+        failures.append(
+            f"hardwareId is {metadata.get('hardwareId')!r}; expected {expected_hardware!r}"
+        )
     for field, pattern_key in (
         ("gpuBackend", "gpuBackendPattern"),
         ("gpuName", "gpuNamePattern"),
@@ -92,19 +108,32 @@ def validate(options: argparse.Namespace) -> list[str]:
     ):
         value = str(metadata.get(field, ""))
         if re.search(profile[pattern_key], value) is None:
-            failures.append(f"{field} {value!r} does not match {profile[pattern_key]!r}")
+            failures.append(
+                f"{field} {value!r} does not match {profile[pattern_key]!r}"
+            )
     for field in ("resolution", "workload"):
         if metadata.get(field) != profile[field]:
-            failures.append(f"{field} is {metadata.get(field)!r}; expected {profile[field]!r}")
+            failures.append(
+                f"{field} is {metadata.get(field)!r}; expected {profile[field]!r}"
+            )
     allowed_configurations = set(profile["allowedBuildConfigurations"])
     if metadata.get("buildConfiguration") not in allowed_configurations:
-        failures.append(f"buildConfiguration must be one of {sorted(allowed_configurations)}")
-    if re.fullmatch(r"[0-9a-fA-F]{40,64}", str(metadata.get("engineCommit", ""))) is None:
-        failures.append("engineCommit must be a full 40-64 digit hexadecimal source revision")
+        failures.append(
+            f"buildConfiguration must be one of {sorted(allowed_configurations)}"
+        )
+    if (
+        re.fullmatch(r"[0-9a-fA-F]{40,64}", str(metadata.get("engineCommit", "")))
+        is None
+    ):
+        failures.append(
+            "engineCommit must be a full 40-64 digit hexadecimal source revision"
+        )
 
     minimum_frames = int(profile["minimumHistoryFrames"])
     if len(history) < minimum_frames:
-        failures.append(f"history has {len(history)} frames; at least {minimum_frames} are required")
+        failures.append(
+            f"history has {len(history)} frames; at least {minimum_frames} are required"
+        )
     history_summary = {
         "Average": sum(history) / len(history) if history else math.inf,
         "P95": percentile(history, 0.95) if history else math.inf,
@@ -112,25 +141,33 @@ def validate(options: argparse.Namespace) -> list[str]:
     }
     for name, maximum in profile["maximumSummaryMilliseconds"].items():
         if summary[name] > maximum:
-            failures.append(f"snapshot {name} is {summary[name]:.4f} ms; maximum is {maximum:.4f} ms")
+            failures.append(
+                f"snapshot {name} is {summary[name]:.4f} ms; maximum is {maximum:.4f} ms"
+            )
         tolerance = max(0.05, history_summary[name] * 0.05)
         if abs(summary[name] - history_summary[name]) > tolerance:
             failures.append(
                 f"snapshot {name} ({summary[name]:.4f} ms) disagrees with history ({history_summary[name]:.4f} ms)"
             )
     if stutters > profile["maximumStutters"]:
-        failures.append(f"snapshot reports {stutters} stutters; maximum is {profile['maximumStutters']}")
+        failures.append(
+            f"snapshot reports {stutters} stutters; maximum is {profile['maximumStutters']}"
+        )
 
     for name, minimum in profile.get("minimumCounters", {}).items():
         if name not in counters:
             failures.append(f"required counter {name!r} is missing")
         elif counters[name] < minimum:
-            failures.append(f"counter {name!r} is {counters[name]:.4f}; minimum is {minimum:.4f}")
+            failures.append(
+                f"counter {name!r} is {counters[name]:.4f}; minimum is {minimum:.4f}"
+            )
     for name, maximum in profile.get("maximumCounters", {}).items():
         if name not in counters:
             failures.append(f"required counter {name!r} is missing")
         elif counters[name] > maximum:
-            failures.append(f"counter {name!r} is {counters[name]:.4f}; maximum is {maximum:.4f}")
+            failures.append(
+                f"counter {name!r} is {counters[name]:.4f}; maximum is {maximum:.4f}"
+            )
     return failures
 
 
@@ -139,7 +176,9 @@ def main() -> int:
     try:
         failures = validate(options)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
-        print(f"Performance gate could not evaluate the capture: {error}", file=sys.stderr)
+        print(
+            f"Performance gate could not evaluate the capture: {error}", file=sys.stderr
+        )
         return 2
     if failures:
         print(f"Performance gate {options.profile!r} failed:", file=sys.stderr)

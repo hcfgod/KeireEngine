@@ -86,7 +86,7 @@ namespace KeireEditor
 
         const auto entities = scene->Query<Keire::VfxEmitterComponent>();
         result.reserve(entities.size());
-        for (const auto entity : entities)
+        for (const auto& entity : entities)
         {
             const auto emitter = entity.GetComponent<Keire::VfxEmitterComponent>();
             const auto transform = entity.GetComponent<Keire::TransformComponent>();

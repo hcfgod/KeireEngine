@@ -12,7 +12,7 @@ struct SDL_Window;
 
 namespace Keire::Detail
 {
-    [[nodiscard]] inline constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool vertex) noexcept
+    [[nodiscard]] constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool vertex) noexcept
     {
         return vertex ? 1U : 2U;
     }

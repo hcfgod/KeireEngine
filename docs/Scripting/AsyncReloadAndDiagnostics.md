@@ -24,6 +24,30 @@ private async Task RefreshAsync(CancellationToken cancellation)
 
 The context does not make an entity immortal. Validate handles after asynchronous suspension.
 
+## Managed Jobs
+
+Use `Jobs.Run` for a parameterless worker delegate or `Jobs.Submit` when the callback needs a `JobContext`, priority,
+blocking/compute class, name, or dependencies. Managed job callbacks execute on scheduler workers. They may perform
+thread-safe computation and I/O, but must return to the Behaviour synchronization context before mutating entities,
+components, windows, or other owner-thread services.
+
+`JobHandle.Completion` preserves the original managed exception, publishes cancellation as a cancelled task, and runs
+continuations asynchronously. `Cancel` requests cooperative cancellation through `JobContext.CancellationToken`.
+Successful dependencies are omitted from later native submissions because their ordering constraint is already
+satisfied; live, failed, and cancelled dependencies retain native scheduler semantics. Reload and shutdown cancel and
+drain the managed job scope before retiring the generation. Native scope cancellation is bridged into the token of a
+running managed delegate, so cooperative work cannot be stranded waiting for a token that changes only after shutdown.
+Native job records are capacity-bounded and terminal records are reclaimed under pressure, so sequential long-running
+editor sessions do not exhaust a lifetime counter.
+
+```csharp
+JobHandle build = Jobs.Submit(
+    context => BuildNavigationChunk(context.CancellationToken),
+    new JobDescription { Name = "Build navigation chunk", Priority = JobPriority.Low });
+
+await build.Completion;
+```
+
 ## Lifetime Cancellation
 
 Every `Behaviour` exposes `LifetimeToken`. Kéire cancels it during:

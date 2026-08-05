@@ -104,14 +104,17 @@ namespace
 
     [[nodiscard]] std::string FormatBytes(const std::uint64_t bytes)
     {
+        constexpr std::uint64_t Kibibyte = 1024U;
+        constexpr std::uint64_t Mebibyte = Kibibyte * 1024U;
+        constexpr std::uint64_t Gibibyte = Mebibyte * 1024U;
         std::ostringstream result;
         result << std::fixed << std::setprecision(1);
-        if (bytes >= 1024U * 1024U * 1024U)
-            result << static_cast<double>(bytes) / static_cast<double>(1024U * 1024U * 1024U) << " GiB";
-        else if (bytes >= 1024U * 1024U)
-            result << static_cast<double>(bytes) / static_cast<double>(1024U * 1024U) << " MiB";
-        else if (bytes >= 1024U)
-            result << static_cast<double>(bytes) / 1024.0 << " KiB";
+        if (bytes >= Gibibyte)
+            result << static_cast<double>(bytes) / static_cast<double>(Gibibyte) << " GiB";
+        else if (bytes >= Mebibyte)
+            result << static_cast<double>(bytes) / static_cast<double>(Mebibyte) << " MiB";
+        else if (bytes >= Kibibyte)
+            result << static_cast<double>(bytes) / static_cast<double>(Kibibyte) << " KiB";
         else
             result << bytes << " B";
         return result.str();
@@ -396,10 +399,21 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
             const auto color = diagnostic.Severity == Keire::ManagedDiagnosticSeverity::Error     ? m_Theme.Error
                                : diagnostic.Severity == Keire::ManagedDiagnosticSeverity::Warning ? m_Theme.Warning
                                                                                                   : m_Theme.MutedText;
-            std::string message =
-                diagnostic.Code.empty() ? diagnostic.Message : diagnostic.Code + ": " + diagnostic.Message;
+            std::string message = diagnostic.Message;
+            if (!diagnostic.Code.empty())
+            {
+                message.insert(0, ": ");
+                message.insert(0, diagnostic.Code);
+            }
             if (!diagnostic.Source.empty())
-                message = diagnostic.Source.generic_string() + ":" + std::to_string(diagnostic.Line) + " " + message;
+            {
+                auto location = diagnostic.Source.generic_string();
+                location += ':';
+                location += std::to_string(diagnostic.Line);
+                location += ' ';
+                location += message;
+                message = std::move(location);
+            }
             ui.TextColored(color, message);
         }
         const bool managedBusy = scriptStatus.State == Keire::ManagedBuildState::Generating ||
@@ -1153,9 +1167,11 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                     ui.Text("  requested " + FormatBytes(statistics.RequestedBytes) + " / in flight " +
                             FormatBytes(statistics.InFlightBytes) + " / retired " +
                             FormatBytes(statistics.RetiredCpuBytes + statistics.RetiredGpuBytes));
-                    ui.Text("  misses " + std::to_string(statistics.Misses) + " / evictions " +
-                            std::to_string(statistics.Evictions) + " / failures " +
-                            std::to_string(statistics.Failures) + " / latency " +
+                    ui.Text("  completed " + std::to_string(statistics.CompletedRequests) + " / cancelled " +
+                            std::to_string(statistics.CancelledRequests) + " / misses " +
+                            std::to_string(statistics.Misses));
+                    ui.Text("  evictions " + std::to_string(statistics.Evictions) + " / failures " +
+                            std::to_string(statistics.Failures) + " / successful latency " +
                             std::to_string(statistics.AverageLatencyMilliseconds) + " ms");
                     if (statistics.AudioUnderruns != 0)
                         ui.TextColored(m_Theme.Warning,

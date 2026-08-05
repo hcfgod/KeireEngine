@@ -56,6 +56,7 @@ namespace Keire
             std::uint64_t Sequence = 0;
             std::size_t RemainingDependencies = 0;
             JobStatus Status = JobStatus::Waiting;
+            bool DependencyRegistrationComplete = false;
             bool CompletionCallbacksFinished = false;
             std::atomic<bool> CancellationRequested{false};
             std::stop_source StopSource;
@@ -72,7 +73,7 @@ namespace Keire
         {
           public:
             JobSchedulerState(JobSystemSpecification value, std::pmr::memory_resource* scratchUpstream)
-                : Specification(std::move(value)),
+                : Specification(value),
                   ScratchUpstream(scratchUpstream ? scratchUpstream : std::pmr::get_default_resource())
             {
             }
@@ -85,6 +86,7 @@ namespace Keire
             std::atomic<bool> Accepting{true};
             std::atomic<bool> Stopping{false};
             std::atomic<bool> DeterministicSimulation{false};
+            std::mutex SubmissionMutex;
             std::mutex WakeMutex;
             std::condition_variable Wake;
             std::mutex InjectionMutex;
@@ -145,7 +147,8 @@ namespace Keire
         {
             {
                 std::scoped_lock lock(job->Mutex);
-                if (IsTerminal(job->Status))
+                if (job->Status != JobStatus::Waiting || !job->DependencyRegistrationComplete ||
+                    job->RemainingDependencies != 0)
                     return;
                 job->Status = JobStatus::Queued;
             }
@@ -175,7 +178,7 @@ namespace Keire
 
         void FinishJob(const std::shared_ptr<Detail::JobSchedulerState>& scheduler,
                        const std::shared_ptr<Detail::JobState>& job, const JobStatus status,
-                       std::exception_ptr failure = {})
+                       const std::exception_ptr& failure = {})
         {
             std::vector<std::shared_ptr<Detail::JobState>> dependents;
             JobStatus previousStatus = JobStatus::Waiting;
@@ -219,7 +222,7 @@ namespace Keire
                         dependent->DependencyFailure = failure;
                     }
                     --dependent->RemainingDependencies;
-                    ready = dependent->RemainingDependencies == 0;
+                    ready = dependent->RemainingDependencies == 0 && dependent->DependencyRegistrationComplete;
                     cancel =
                         ready && (dependent->CancellationRequested.load(std::memory_order_acquire) ||
                                   (dependent->Description.DependencyPolicy == JobDependencyPolicy::RequireSuccess &&
@@ -362,7 +365,8 @@ namespace Keire
             {
                 std::pmr::vector<std::byte> scratchStorage(scheduler->Specification.ScratchBytesPerJob,
                                                            scheduler->ScratchUpstream);
-                std::pmr::monotonic_buffer_resource scratch(scratchStorage.data(), scratchStorage.size());
+                std::pmr::monotonic_buffer_resource scratch(scratchStorage.data(), scratchStorage.size(),
+                                                            scheduler->ScratchUpstream);
                 JobContext::Impl implementation(job, workerIndex, &scratch);
                 JobContext context(implementation);
                 job->Function(context);
@@ -529,21 +533,16 @@ namespace Keire
             return;
         }
         JobResult result;
-        bool invoke = false;
         {
             std::scoped_lock lock(m_State->Mutex);
-            if (m_State->CompletionCallbacksFinished)
+            if (!m_State->CompletionCallbacksFinished)
             {
-                result = {m_State->Status, m_State->Failure ? m_State->Failure : m_State->DependencyFailure};
-                invoke = true;
+                m_State->CompletionCallbacks.push_back(std::move(completion));
+                return;
             }
-            else
-            {
-                m_State->CompletionCallbacks.push_back(completion);
-            }
+            result = {m_State->Status, m_State->Failure ? m_State->Failure : m_State->DependencyFailure};
         }
-        if (invoke)
-            completion(result);
+        completion(result);
     }
 
     void JobHandle::Cancel() const noexcept
@@ -592,87 +591,111 @@ namespace Keire
         if (!function)
             throw std::invalid_argument("A job function is required.");
         const auto state = shared_from_this();
+        std::scoped_lock submissionLock(SubmissionMutex);
         if (!Accepting.load(std::memory_order_acquire))
             throw std::logic_error("The job system is closed.");
+
+        for (const auto& dependencyHandle : description.Dependencies)
+        {
+            const auto dependency = dependencyHandle.m_State;
+            if (!dependency)
+                throw std::invalid_argument("Job dependencies must be valid.");
+            if (dependency->Scheduler.lock() != state)
+                throw std::invalid_argument("Job dependencies must use one scheduler.");
+        }
+        auto job = std::make_shared<JobState>();
+        job->Scheduler = state;
+        job->Description = std::move(description);
+        job->Function = std::move(function);
         const auto outstanding = Outstanding.fetch_add(1, std::memory_order_acq_rel) + 1;
         if (outstanding > Specification.QueueCapacity)
         {
             Outstanding.fetch_sub(1, std::memory_order_relaxed);
             throw std::length_error("The job queue capacity was reached.");
         }
-
-        auto job = std::make_shared<JobState>();
-        job->Scheduler = state;
-        job->Description = std::move(description);
-        job->Function = std::move(function);
         job->Id = NextId.fetch_add(1, std::memory_order_relaxed);
         job->Sequence = NextSequence.fetch_add(1, std::memory_order_relaxed);
         if (scopeState)
             job->Scope = std::static_pointer_cast<ScopeState>(scopeState);
 
-        if (DeterministicSimulation.load(std::memory_order_acquire) && job->Description.Domain == JobDomain::Simulation)
+        try
         {
             std::scoped_lock lock(RegistryMutex);
-            if (const auto previous = LastDeterministicSimulation.lock())
-                job->Description.Dependencies.push_back(JobHandle(previous));
-            LastDeterministicSimulation = job;
+            const bool deterministic = DeterministicSimulation.load(std::memory_order_acquire) &&
+                                       job->Description.Domain == JobDomain::Simulation;
+            if (deterministic)
+                if (const auto previous = LastDeterministicSimulation.lock())
+                    job->Description.Dependencies.push_back(JobHandle(previous));
+            Registry.push_back(job);
+            if (deterministic)
+                LastDeterministicSimulation = job;
+        }
+        catch (...)
+        {
+            Outstanding.fetch_sub(1, std::memory_order_relaxed);
+            throw;
         }
 
         Waiting.fetch_add(1, std::memory_order_relaxed);
         Submitted.fetch_add(1, std::memory_order_relaxed);
+
+        bool ready = false;
+        bool cancel = false;
+        std::exception_ptr registrationFailure;
         {
-            std::scoped_lock lock(RegistryMutex);
-            Registry.push_back(job);
+            std::scoped_lock jobLock(job->Mutex);
+            try
+            {
+                for (const auto& dependencyHandle : job->Description.Dependencies)
+                {
+                    const auto& dependency = dependencyHandle.m_State;
+                    std::scoped_lock dependencyLock(dependency->Mutex);
+                    if (dependency->Status == JobStatus::Succeeded)
+                        continue;
+                    if (dependency->Status == JobStatus::Failed || dependency->Status == JobStatus::Cancelled)
+                    {
+                        if (!job->DependencyFailure)
+                        {
+                            job->DependencyFailure =
+                                dependency->Failure ? dependency->Failure : dependency->DependencyFailure;
+                        }
+                        continue;
+                    }
+                    dependency->Dependents.push_back(job);
+                    ++job->RemainingDependencies;
+                }
+
+                if (const auto scope = job->Scope.lock())
+                {
+                    std::scoped_lock scopeLock(scope->Mutex);
+                    scope->Jobs.push_back(job);
+                    if (scope->Cancelled.load(std::memory_order_acquire))
+                    {
+                        job->CancellationRequested.store(true, std::memory_order_release);
+                        job->StopSource.request_stop();
+                    }
+                }
+            }
+            catch (...)
+            {
+                registrationFailure = std::current_exception();
+            }
+            job->DependencyRegistrationComplete = true;
+            ready = job->RemainingDependencies == 0;
+            cancel =
+                registrationFailure || job->CancellationRequested.load(std::memory_order_acquire) ||
+                (job->Description.DependencyPolicy == JobDependencyPolicy::RequireSuccess && job->DependencyFailure);
         }
 
-        bool dependencyFailure = false;
-        for (const auto& dependencyHandle : job->Description.Dependencies)
+        if (registrationFailure)
         {
-            const auto dependency = dependencyHandle.m_State;
-            if (!dependency)
-            {
-                FinishJob(state, job, JobStatus::Cancelled,
-                          std::make_exception_ptr(std::invalid_argument("Job dependencies must be valid.")));
-                throw std::invalid_argument("Job dependencies must be valid.");
-            }
-            if (dependency->Scheduler.lock() != state)
-            {
-                FinishJob(state, job, JobStatus::Cancelled,
-                          std::make_exception_ptr(std::invalid_argument("Job dependencies must use one scheduler.")));
-                throw std::invalid_argument("Job dependencies must use one scheduler.");
-            }
-            std::scoped_lock lock(dependency->Mutex);
-            if (dependency->Status == JobStatus::Succeeded)
-                continue;
-            if (dependency->Status == JobStatus::Failed || dependency->Status == JobStatus::Cancelled)
-            {
-                dependencyFailure = true;
-                job->DependencyFailure = dependency->Failure ? dependency->Failure : dependency->DependencyFailure;
-                continue;
-            }
-            dependency->Dependents.push_back(job);
-            ++job->RemainingDependencies;
+            FinishJob(state, job, JobStatus::Cancelled, registrationFailure);
+            std::rethrow_exception(registrationFailure);
         }
-
-        if (const auto scope = job->Scope.lock())
-        {
-            std::scoped_lock lock(scope->Mutex);
-            scope->Jobs.push_back(job);
-            if (scope->Cancelled.load(std::memory_order_acquire))
-            {
-                job->CancellationRequested.store(true, std::memory_order_release);
-                job->StopSource.request_stop();
-            }
-        }
-
-        if (job->RemainingDependencies == 0)
-        {
-            if ((job->Description.DependencyPolicy == JobDependencyPolicy::RequireSuccess && dependencyFailure) ||
-                job->CancellationRequested.load(std::memory_order_acquire))
-                FinishJob(state, job, JobStatus::Cancelled, job->DependencyFailure);
-            else
-                Enqueue(state, job);
-        }
+        if (ready && cancel)
+            FinishJob(state, job, JobStatus::Cancelled, job->DependencyFailure);
+        else if (ready)
+            Enqueue(state, job);
         return JobHandle(std::move(job));
     }
 
@@ -751,15 +774,18 @@ namespace Keire
             return Submit(std::move(description), [](JobContext&) {});
         const auto grain = std::max<std::size_t>(1, minimumGrain);
         std::vector<JobHandle> chunks;
+        chunks.reserve(1U + ((count - 1U) / grain));
         const auto dependencies = description.Dependencies;
-        for (std::size_t begin = 0; begin < count; begin += grain)
+        auto sharedFunction = std::make_shared<ParallelJobFunction>(std::move(function));
+        for (std::size_t begin = 0; begin < count;)
         {
             auto chunkDescription = description;
             chunkDescription.Name += " [" + std::to_string(begin) + "]";
             chunkDescription.Dependencies = dependencies;
-            const auto end = std::min(count, begin + grain);
-            chunks.push_back(Submit(std::move(chunkDescription),
-                                    [function, begin, end](JobContext& context) { function(begin, end, context); }));
+            const auto end = begin + std::min(grain, count - begin);
+            chunks.push_back(Submit(std::move(chunkDescription), [sharedFunction, begin, end](JobContext& context)
+                                    { (*sharedFunction)(begin, end, context); }));
+            begin = end;
         }
         description.Name += " completion";
         description.Dependencies = std::move(chunks);
@@ -803,12 +829,15 @@ namespace Keire
     void JobSystem::Close() noexcept
     {
         const auto state = m_State;
-        if (!state || !state->Accepting.exchange(false, std::memory_order_acq_rel))
-            return;
-        state->Stopping.store(true, std::memory_order_release);
         std::vector<std::shared_ptr<Detail::JobState>> jobs;
         {
-            std::scoped_lock lock(state->RegistryMutex);
+            if (!state)
+                return;
+            std::scoped_lock submissionLock(state->SubmissionMutex);
+            if (!state->Accepting.exchange(false, std::memory_order_acq_rel))
+                return;
+            state->Stopping.store(true, std::memory_order_release);
+            std::scoped_lock registryLock(state->RegistryMutex);
             for (const auto& weakJob : state->Registry)
             {
                 if (const auto job = weakJob.lock())
@@ -821,17 +850,32 @@ namespace Keire
             job->StopSource.request_stop();
         }
         state->Wake.notify_all();
+        const auto currentThread = std::this_thread::get_id();
+        const bool workerInitiated = std::ranges::any_of(state->Workers, [&](const auto& worker)
+                                                         { return worker->Thread.get_id() == currentThread; }) ||
+                                     std::ranges::any_of(state->BlockingWorkers, [&](const auto& worker)
+                                                         { return worker.get_id() == currentThread; });
         for (auto& worker : state->Workers)
         {
             worker->Thread.request_stop();
             if (worker->Thread.joinable())
-                worker->Thread.join();
+            {
+                if (workerInitiated)
+                    worker->Thread.detach();
+                else
+                    worker->Thread.join();
+            }
         }
         for (auto& worker : state->BlockingWorkers)
         {
             worker.request_stop();
             if (worker.joinable())
-                worker.join();
+            {
+                if (workerInitiated)
+                    worker.detach();
+                else
+                    worker.join();
+            }
         }
         for (const auto& job : jobs)
         {
@@ -840,7 +884,7 @@ namespace Keire
                 std::scoped_lock lock(job->Mutex);
                 status = job->Status;
             }
-            if (!IsTerminal(status))
+            if (status != JobStatus::Running && !IsTerminal(status))
                 FinishJob(state, job, JobStatus::Cancelled);
         }
     }
@@ -885,15 +929,18 @@ namespace Keire
             return Submit(std::move(description), [](JobContext&) {});
         const auto grain = std::max<std::size_t>(1, minimumGrain);
         std::vector<JobHandle> chunks;
+        chunks.reserve(1U + ((count - 1U) / grain));
         const auto dependencies = description.Dependencies;
-        for (std::size_t begin = 0; begin < count; begin += grain)
+        auto sharedFunction = std::make_shared<ParallelJobFunction>(std::move(function));
+        for (std::size_t begin = 0; begin < count;)
         {
             auto chunkDescription = description;
             chunkDescription.Name += " [" + std::to_string(begin) + "]";
             chunkDescription.Dependencies = dependencies;
-            const auto end = std::min(count, begin + grain);
-            chunks.push_back(Submit(std::move(chunkDescription),
-                                    [function, begin, end](JobContext& context) { function(begin, end, context); }));
+            const auto end = begin + std::min(grain, count - begin);
+            chunks.push_back(Submit(std::move(chunkDescription), [sharedFunction, begin, end](JobContext& context)
+                                    { (*sharedFunction)(begin, end, context); }));
+            begin = end;
         }
         description.Name += " completion";
         description.Dependencies = std::move(chunks);

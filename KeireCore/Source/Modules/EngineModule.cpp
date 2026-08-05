@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <limits>
 #include <map>
 #include <ranges>
 #include <set>
@@ -39,6 +40,13 @@ namespace Keire
             if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
                 throw std::invalid_argument("Module version must use major.minor.patch integers.");
             return result;
+        }
+
+        void IncrementVersionComponent(std::uint32_t& component)
+        {
+            if (component == (std::numeric_limits<std::uint32_t>::max)())
+                throw std::invalid_argument("Module version range upper bound overflows.");
+            ++component;
         }
 
         template <typename T, typename Key>
@@ -85,15 +93,17 @@ namespace Keire
             auto maximum = *result.MinimumInclusive;
             if (maximum.Major > 0)
             {
-                ++maximum.Major;
+                IncrementVersionComponent(maximum.Major);
                 maximum.Minor = 0;
                 maximum.Patch = 0;
             }
-            else
+            else if (maximum.Minor > 0)
             {
-                ++maximum.Minor;
+                IncrementVersionComponent(maximum.Minor);
                 maximum.Patch = 0;
             }
+            else
+                IncrementVersionComponent(maximum.Patch);
             result.MaximumExclusive = maximum;
             return result;
         }
@@ -102,7 +112,7 @@ namespace Keire
             const auto exact = ModuleVersion::Parse(value);
             result.MinimumInclusive = exact;
             auto maximum = exact;
-            ++maximum.Patch;
+            IncrementVersionComponent(maximum.Patch);
             result.MaximumExclusive = maximum;
             return result;
         }
@@ -211,7 +221,7 @@ namespace Keire
     class ModuleRegistry::Impl final
     {
       public:
-        explicit Impl(ModuleRegistrySpecification specification)
+        explicit Impl(ModuleRegistrySpecification&& specification)
         {
             std::map<std::string, std::pair<ModuleDescriptor, Ref<EngineModule>>, std::less<>> candidates;
             for (auto& module : specification.Modules)

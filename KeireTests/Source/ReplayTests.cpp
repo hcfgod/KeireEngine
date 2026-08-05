@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <vector>
 
 namespace
@@ -47,6 +48,46 @@ namespace
                     REQUIRE(bytes.size() == sizeof(value));
                     std::memcpy(&value, bytes.data(), sizeof(value));
                 }};
+    }
+
+    [[nodiscard]] std::uint32_t ReadLittleU32(const std::vector<char>& bytes, const std::size_t offset)
+    {
+        std::uint32_t result = 0;
+        for (std::size_t index = 0; index < sizeof(result); ++index)
+            result |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + index])) << (index * 8U);
+        return result;
+    }
+
+    [[nodiscard]] std::uint64_t ReadLittleU64(const std::vector<char>& bytes, const std::size_t offset)
+    {
+        std::uint64_t result = 0;
+        for (std::size_t index = 0; index < sizeof(result); ++index)
+            result |= static_cast<std::uint64_t>(static_cast<unsigned char>(bytes[offset + index])) << (index * 8U);
+        return result;
+    }
+
+    void WriteLittleU64(std::vector<char>& bytes, const std::size_t offset, const std::uint64_t value)
+    {
+        for (std::size_t index = 0; index < sizeof(value); ++index)
+            bytes[offset + index] = static_cast<char>(value >> (index * 8U));
+    }
+
+    [[nodiscard]] std::size_t FindChunk(const std::vector<char>& bytes, const std::uint32_t wantedType)
+    {
+        constexpr std::size_t fileHeaderBytes = 12U + sizeof(std::uint32_t);
+        constexpr std::size_t chunkHeaderBytes = sizeof(std::uint32_t) * 2U + sizeof(std::uint64_t) * 3U + 32U;
+        std::size_t offset = fileHeaderBytes;
+        while (offset <= bytes.size() && chunkHeaderBytes <= bytes.size() - offset)
+        {
+            const auto type = ReadLittleU32(bytes, offset);
+            if (type == wantedType)
+                return offset;
+            const auto storedBytes = ReadLittleU64(bytes, offset + 24U);
+            if (storedBytes > bytes.size() - offset - chunkHeaderBytes)
+                break;
+            offset += chunkHeaderBytes + static_cast<std::size_t>(storedBytes);
+        }
+        return bytes.size();
     }
 } // namespace
 
@@ -128,7 +169,7 @@ TEST_CASE("replay seek restores a checkpoint and deterministically advances to t
     int state = 0;
     Keire::ReplaySystemSpecification specification;
     specification.CheckpointIntervalTicks = 2;
-    specification.RewindBudgetBytes = 1;
+    specification.RewindBudgetBytes = 1024;
     auto recorder = Keire::CreateRef<Keire::ReplaySystem>(specification);
     recorder->RegisterSerializer(IntegerSerializer(state));
     recorder->BeginRecording({path});
@@ -151,7 +192,7 @@ TEST_CASE("replay seek restores a checkpoint and deterministically advances to t
     const auto input = playback->BeginFixedTick({});
     CHECK(input.Tick == 3);
     state = 3;
-    playback->EndFixedTick(3);
+    playback->EndFixedTick(101);
     CHECK(playback->Status().CurrentTick == 3);
     CHECK_FALSE(playback->ShouldAdvanceFixedTick());
 }
@@ -194,5 +235,88 @@ TEST_CASE("replay checkpoint restoration rolls every serializer back when a late
     CHECK_THROWS_WITH_AS(playback->BeginPlayback({path}), "intentional checkpoint restore failure", std::runtime_error);
     CHECK(first == 10);
     CHECK(second == 20);
-    CHECK(playback->Status().State == Keire::ReplaySessionState::Idle);
+    CHECK(playback->Status().State == Keire::ReplaySessionState::Failed);
+    CHECK_FALSE(playback->Status().Diagnostic.empty());
+}
+
+TEST_CASE("replay enforces rewind and decoded-size budgets before retaining data")
+{
+    ReplayDirectory directory;
+    int state = 0;
+    Keire::ReplaySystemSpecification tinyBudget;
+    tinyBudget.RewindBudgetBytes = 1;
+    auto recorder = Keire::CreateRef<Keire::ReplaySystem>(tinyBudget);
+    recorder->RegisterSerializer(IntegerSerializer(state));
+    CHECK_THROWS_WITH_AS(recorder->BeginRecording({directory.Path / "too-small.keirereplay"}),
+                         "Replay checkpoints exceed the configured rewind-memory budget.", std::length_error);
+    CHECK(recorder->Status().State == Keire::ReplaySessionState::Failed);
+    CHECK_FALSE(recorder->Status().Diagnostic.empty());
+
+    Keire::ReplaySystemSpecification fileBudget;
+    fileBudget.CheckpointIntervalTicks = 1000;
+    fileBudget.RewindBudgetBytes = 512;
+    fileBudget.MaximumReplayBytes = 1024;
+    auto boundedRecorder = Keire::CreateRef<Keire::ReplaySystem>(fileBudget);
+    boundedRecorder->RegisterSerializer(IntegerSerializer(state));
+    boundedRecorder->BeginRecording({directory.Path / "bounded-recording.keirereplay"});
+    bool recordingLimitReached = false;
+    for (std::uint64_t tick = 1; tick <= 32; ++tick)
+    {
+        (void)boundedRecorder->BeginFixedTick({.Tick = tick});
+        state = static_cast<int>(tick);
+        try
+        {
+            boundedRecorder->EndFixedTick(tick);
+        }
+        catch (const std::length_error&)
+        {
+            recordingLimitReached = true;
+            break;
+        }
+    }
+    CHECK(recordingLimitReached);
+    CHECK(boundedRecorder->Status().State == Keire::ReplaySessionState::Failed);
+    CHECK_FALSE(boundedRecorder->Status().Diagnostic.empty());
+
+    const auto validPath = directory.Path / "bounded.keirereplay";
+    auto valid = Keire::CreateRef<Keire::ReplaySystem>();
+    valid->RegisterSerializer(IntegerSerializer(state));
+    valid->BeginRecording({validPath});
+    (void)valid->BeginFixedTick({.Tick = 1});
+    state = 1;
+    valid->EndFixedTick(1);
+    valid->Stop();
+
+    std::ifstream input(validPath, std::ios::binary);
+    std::vector<char> bytes(std::istreambuf_iterator<char>(input), {});
+    const auto checkpoint = FindChunk(bytes, 3);
+    REQUIRE(checkpoint < bytes.size());
+    WriteLittleU64(bytes, checkpoint + 16U, (std::numeric_limits<std::uint64_t>::max)());
+    const auto oversizedPath = directory.Path / "oversized.keirereplay";
+    std::ofstream output(oversizedPath, std::ios::binary | std::ios::trunc);
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    output.close();
+
+    auto playback = Keire::CreateRef<Keire::ReplaySystem>();
+    playback->RegisterSerializer(IntegerSerializer(state));
+    CHECK_THROWS_WITH_AS(playback->BeginPlayback({oversizedPath}),
+                         "Replay decoded data exceeds the configured size limit.", std::runtime_error);
+    CHECK(playback->Status().State == Keire::ReplaySessionState::Failed);
+}
+
+TEST_CASE("replay close exposes recording publication failures without throwing")
+{
+    ReplayDirectory directory;
+    int state = 0;
+    auto recorder = Keire::CreateRef<Keire::ReplaySystem>();
+    recorder->RegisterSerializer(IntegerSerializer(state));
+    recorder->BeginRecording({directory.Path});
+    (void)recorder->BeginFixedTick({.Tick = 1});
+    state = 1;
+    recorder->EndFixedTick(1);
+
+    CHECK_NOTHROW(recorder->Close());
+    CHECK_FALSE(recorder->IsOpen());
+    CHECK(recorder->Status().State == Keire::ReplaySessionState::Failed);
+    CHECK_FALSE(recorder->Status().Diagnostic.empty());
 }

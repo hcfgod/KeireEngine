@@ -2,7 +2,6 @@
 
 #include <chrono>
 
-#include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -850,7 +849,7 @@ void EditorWorkspaceLayer::OnAttach()
                                             std::move(projectSettingsUndo));
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
-            databaseSpecification.Importers = Keire::CreateBuiltinAssetImporters();
+            ConfigureAssetImporters(databaseSpecification);
             m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
@@ -1258,14 +1257,15 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
     }
     if (ui.Shortcut({.Key = Keire::UiKey::B, .Shift = true, .Primary = true, .Global = true}))
         (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::BuildScripts);
-    if (ui.Shortcut({.Key = Keire::UiKey::Z, .Shift = true, .Primary = true, .Global = true}))
+    const bool shiftRedo = ui.Shortcut({.Key = Keire::UiKey::Z, .Shift = true, .Primary = true, .Global = true});
+    const bool undo = !shiftRedo && ui.Shortcut({.Key = Keire::UiKey::Z, .Primary = true, .Global = true});
+    const bool alternateRedo = !shiftRedo && !undo &&
+                               (ui.Shortcut({.Key = Keire::UiKey::Y, .Primary = true, .Global = true}) ||
+                                ui.Shortcut({.Key = Keire::UiKey::R, .Primary = true, .Global = true}));
+    if (shiftRedo || alternateRedo)
         (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
-    else if (ui.Shortcut({.Key = Keire::UiKey::Z, .Primary = true, .Global = true}))
+    else if (undo)
         (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Undo);
-    else if (ui.Shortcut({.Key = Keire::UiKey::Y, .Primary = true, .Global = true}))
-        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
-    else if (ui.Shortcut({.Key = Keire::UiKey::R, .Primary = true, .Global = true}))
-        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
     if (m_CommandRouter->Available(KeireEditor::EditorCommand::DuplicateSelection) &&
         m_ActiveUndoContext == m_SceneDocument->History() &&
         ui.Shortcut({.Key = Keire::UiKey::D, .Primary = true, .Global = true}))

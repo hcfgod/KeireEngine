@@ -14,6 +14,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -32,6 +33,10 @@ namespace Keire
         constexpr std::uint32_t ChunkCheckpoint = 3;
         constexpr std::uint32_t ChunkEnd = 4;
         constexpr std::uint32_t ChunkCompressed = 1;
+        constexpr std::size_t ReplayFileHeaderBytes = ReplayMagic.size() + sizeof(ReplayVersion);
+        constexpr std::size_t ReplayChunkHeaderBytes =
+            sizeof(std::uint32_t) * 2U + sizeof(std::uint64_t) * 3U + Detail::Sha256Digest{}.size();
+        constexpr std::size_t EncodedInputActionBytes = sizeof(std::uint64_t) * 7U + sizeof(std::uint32_t) * 3U + 3U;
 
         template <typename T> void AppendUnsigned(std::vector<std::byte>& output, const T value)
         {
@@ -74,9 +79,20 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] std::vector<std::byte> Compress(const std::span<const std::byte> input)
+        void RequireAppendCapacity(const std::vector<std::byte>& output, const std::size_t additional,
+                                   const std::size_t maximumBytes)
         {
-            std::vector<std::byte> result(ZSTD_compressBound(input.size()));
+            if (output.size() > maximumBytes || additional > maximumBytes - output.size())
+                throw std::runtime_error("Replay output exceeds the configured file-size limit.");
+        }
+
+        [[nodiscard]] std::vector<std::byte> Compress(const std::span<const std::byte> input,
+                                                      const std::size_t maximumBytes)
+        {
+            const auto bound = ZSTD_compressBound(input.size());
+            if (ZSTD_isError(bound) || bound > maximumBytes)
+                throw std::runtime_error("Replay checkpoint exceeds the configured compressed-size limit.");
+            std::vector<std::byte> result(bound);
             const auto bytes = ZSTD_compress(result.data(), result.size(), input.data(), input.size(), 3);
             if (ZSTD_isError(bytes))
                 throw std::runtime_error(std::string("Replay checkpoint compression failed: ") +
@@ -96,9 +112,18 @@ namespace Keire
         }
 
         [[nodiscard]] std::vector<std::byte> EncodeInput(const FixedTickInputSnapshot& snapshot,
-                                                         const Detail::Sha256Digest& state)
+                                                         const Detail::Sha256Digest& state,
+                                                         const std::size_t maximumBytes)
         {
+            constexpr std::size_t fixedBytes = sizeof(snapshot.Tick) + sizeof(snapshot.InputMapFingerprint) +
+                                               sizeof(std::uint32_t) + Detail::Sha256Digest{}.size();
+            if (snapshot.Actions.size() > std::numeric_limits<std::uint32_t>::max() || maximumBytes < fixedBytes ||
+                snapshot.Actions.size() > (maximumBytes - fixedBytes) / EncodedInputActionBytes)
+            {
+                throw std::length_error("Replay input exceeds the configured file-size limit.");
+            }
             std::vector<std::byte> result;
+            result.reserve(fixedBytes + snapshot.Actions.size() * EncodedInputActionBytes);
             AppendUnsigned(result, snapshot.Tick);
             AppendUnsigned(result, snapshot.InputMapFingerprint);
             AppendUnsigned(result, static_cast<std::uint32_t>(snapshot.Actions.size()));
@@ -137,6 +162,11 @@ namespace Keire
             result.Snapshot.Tick = ReadUnsigned<std::uint64_t>(bytes, offset);
             result.Snapshot.InputMapFingerprint = ReadUnsigned<std::uint64_t>(bytes, offset);
             const auto count = ReadUnsigned<std::uint32_t>(bytes, offset);
+            if (offset > bytes.size() || result.State.size() > bytes.size() - offset ||
+                count > (bytes.size() - offset - result.State.size()) / EncodedInputActionBytes)
+            {
+                throw std::runtime_error("Replay input action count exceeds the chunk payload.");
+            }
             result.Snapshot.Actions.reserve(count);
             for (std::uint32_t index = 0; index < count; ++index)
             {
@@ -148,11 +178,20 @@ namespace Keire
                 action.Action = {ReadUnsigned<std::uint64_t>(bytes, offset),
                                  ReadUnsigned<std::uint64_t>(bytes, offset)};
                 action.User = InputUserId(ReadUnsigned<std::uint32_t>(bytes, offset));
-                action.Phase = static_cast<InputActionPhase>(ReadUnsigned<std::uint8_t>(bytes, offset));
-                action.Value.Type = static_cast<InputValueType>(ReadUnsigned<std::uint8_t>(bytes, offset));
+                const auto phase = ReadUnsigned<std::uint8_t>(bytes, offset);
+                const auto valueType = ReadUnsigned<std::uint8_t>(bytes, offset);
+                if (phase > static_cast<std::uint8_t>(InputActionPhase::Canceled) ||
+                    valueType > static_cast<std::uint8_t>(InputValueType::Axis2D))
+                {
+                    throw std::runtime_error("Replay input action contains an unsupported enum value.");
+                }
+                action.Phase = static_cast<InputActionPhase>(phase);
+                action.Value.Type = static_cast<InputValueType>(valueType);
                 action.Value.X = std::bit_cast<float>(ReadUnsigned<std::uint32_t>(bytes, offset));
                 action.Value.Y = std::bit_cast<float>(ReadUnsigned<std::uint32_t>(bytes, offset));
                 const auto flags = ReadUnsigned<std::uint8_t>(bytes, offset);
+                if ((flags & ~std::uint8_t{7}) != 0)
+                    throw std::runtime_error("Replay input action contains unsupported flags.");
                 action.Started = (flags & 1U) != 0;
                 action.Performed = (flags & 2U) != 0;
                 action.Canceled = (flags & 4U) != 0;
@@ -166,8 +205,11 @@ namespace Keire
 
         void AddChunk(std::vector<std::byte>& output, const std::uint32_t type, const std::uint32_t flags,
                       const std::uint64_t tick, const std::span<const std::byte> stored,
-                      const std::span<const std::byte> uncompressed)
+                      const std::span<const std::byte> uncompressed, const std::size_t maximumBytes)
         {
+            RequireAppendCapacity(output, ReplayChunkHeaderBytes, maximumBytes);
+            if (stored.size() > maximumBytes - output.size() - ReplayChunkHeaderBytes)
+                throw std::runtime_error("Replay output exceeds the configured file-size limit.");
             AppendUnsigned(output, type);
             AppendUnsigned(output, flags);
             AppendUnsigned(output, tick);
@@ -194,20 +236,23 @@ namespace Keire
         {
             FixedTickInputSnapshot Input;
             Detail::Sha256Digest State{};
+            std::vector<std::byte> Encoded;
         };
 
         struct Checkpoint final
         {
             std::uint64_t Tick = 0;
             std::vector<std::byte> Data;
+            std::vector<std::byte> Stored;
         };
 
         Impl(ReplaySystemSpecification specification, Ref<DiagnosticSink> diagnostics, Ref<MemorySystem> memory)
-            : Specification(std::move(specification)), Diagnostics(std::move(diagnostics)), Memory(std::move(memory)),
+            : Specification(specification), Diagnostics(std::move(diagnostics)), Memory(std::move(memory)),
               Owner(std::this_thread::get_id())
         {
             if (Specification.CheckpointIntervalTicks == 0 || Specification.RewindBudgetBytes == 0 ||
-                Specification.MaximumReplayBytes < 1024)
+                Specification.MaximumReplayBytes < 1024 ||
+                Specification.RewindBudgetBytes > Specification.MaximumReplayBytes)
                 throw std::invalid_argument("Replay system limits are invalid.");
             if (Memory)
                 MemoryDomain = Memory->RegisterDomain("Replay");
@@ -221,16 +266,34 @@ namespace Keire
                 throw std::logic_error("ReplaySystem is closed.");
         }
 
+        void RequireCheckpointCapacity(const std::vector<std::byte>& output, const std::size_t additional) const
+        {
+            if (output.size() > Specification.RewindBudgetBytes ||
+                additional > Specification.RewindBudgetBytes - output.size())
+            {
+                throw std::length_error("Replay checkpoints exceed the configured rewind-memory budget.");
+            }
+        }
+
         [[nodiscard]] std::vector<std::byte> CaptureCheckpoint() const
         {
+            if (Serializers.size() > std::numeric_limits<std::uint32_t>::max())
+                throw std::length_error("Replay checkpoint contains too many serializers.");
             std::vector<std::byte> result;
+            RequireCheckpointCapacity(result, sizeof(std::uint32_t));
             AppendUnsigned(result, static_cast<std::uint32_t>(Serializers.size()));
             for (const auto& [id, serializer] : Serializers)
             {
                 const auto state = serializer.Capture();
+                RequireCheckpointCapacity(result, sizeof(std::uint32_t));
+                const auto afterStringLength = result.size() + sizeof(std::uint32_t);
+                if (id.size() > Specification.RewindBudgetBytes - afterStringLength)
+                    throw std::length_error("Replay checkpoints exceed the configured rewind-memory budget.");
                 AppendString(result, id);
+                RequireCheckpointCapacity(result, sizeof(std::uint32_t) + sizeof(std::uint64_t));
                 AppendUnsigned(result, serializer.Version);
                 AppendUnsigned(result, static_cast<std::uint64_t>(state.size()));
+                RequireCheckpointCapacity(result, state.size());
                 AppendBytes(result, state);
             }
             return result;
@@ -246,6 +309,9 @@ namespace Keire
 
             std::size_t offset = 0;
             const auto count = ReadUnsigned<std::uint32_t>(bytes, offset);
+            constexpr std::size_t minimumSerializerBytes = sizeof(std::uint32_t) * 2U + sizeof(std::uint64_t);
+            if (count > (bytes.size() - offset) / minimumSerializerBytes)
+                throw std::runtime_error("Replay checkpoint serializer count exceeds the payload.");
             std::vector<RestoreEntry> entries;
             entries.reserve(count);
             std::map<std::string, bool, std::less<>> seen;
@@ -301,9 +367,81 @@ namespace Keire
         void AddCheckpoint(const std::uint64_t tick)
         {
             auto checkpoint = Checkpoint{tick, CaptureCheckpoint()};
-            RewindBytes += checkpoint.Data.size();
+            if (RewindBytes > Specification.RewindBudgetBytes ||
+                checkpoint.Data.size() > Specification.RewindBudgetBytes - RewindBytes)
+            {
+                throw std::length_error("Replay checkpoints exceed the configured rewind-memory budget.");
+            }
+            checkpoint.Stored = Compress(checkpoint.Data, Specification.MaximumReplayBytes);
+            const auto encodedBytes = EncodedChunkBytes(checkpoint.Stored.size());
+            RequireRecordingCapacity(encodedBytes);
+            const auto checkpointBytes = checkpoint.Data.size();
             Checkpoints.push_back(std::move(checkpoint));
+            RewindBytes += checkpointBytes;
+            RecordingBytes += encodedBytes;
             UpdateMemory();
+        }
+
+        [[nodiscard]] std::string MetadataText() const
+        {
+            const Json metadata{{"profile", static_cast<std::uint8_t>(Profile)},
+                                {"checkpointInterval", Specification.CheckpointIntervalTicks},
+                                {"engineBuild", Fingerprints.EngineBuild},
+                                {"project", Fingerprints.Project},
+                                {"modules", Fingerprints.Modules},
+                                {"content", Fingerprints.Content},
+                                {"deterministicConfiguration", Fingerprints.DeterministicConfiguration}};
+            return metadata.dump();
+        }
+
+        [[nodiscard]] static std::size_t EncodedChunkBytes(const std::size_t payloadBytes)
+        {
+            if (payloadBytes > (std::numeric_limits<std::size_t>::max)() - ReplayChunkHeaderBytes)
+                throw std::length_error("Replay chunk size overflows the addressable range.");
+            return ReplayChunkHeaderBytes + payloadBytes;
+        }
+
+        void RequireRecordingCapacity(const std::size_t additional) const
+        {
+            if (RecordingBytes > Specification.MaximumReplayBytes ||
+                additional > Specification.MaximumReplayBytes - RecordingBytes)
+            {
+                throw std::length_error("Replay recording exceeds the configured file-size limit.");
+            }
+        }
+
+        void SetFailure(std::string_view operation, std::string_view message) noexcept
+        {
+            Session.State = ReplaySessionState::Failed;
+            try
+            {
+                Session.Diagnostic = std::string(operation) + ": " + std::string(message);
+                if (Diagnostics)
+                {
+                    Diagnostics->Report(
+                        {DiagnosticId("KEIRE-REPLAY-0002"), DiagnosticSeverity::Error, Session.Diagnostic});
+                }
+            }
+            catch (...)
+            {
+                Session.Diagnostic.clear();
+            }
+        }
+
+        void SetCurrentExceptionFailure(const std::string_view operation) noexcept
+        {
+            try
+            {
+                throw;
+            }
+            catch (const std::exception& error)
+            {
+                SetFailure(operation, error.what());
+            }
+            catch (...)
+            {
+                SetFailure(operation, "unknown failure");
+            }
         }
 
         void UpdateMemory() noexcept
@@ -312,7 +450,10 @@ namespace Keire
             {
                 std::size_t bytes = RewindBytes;
                 for (const auto& tick : Ticks)
-                    bytes += tick.Input.Actions.capacity() * sizeof(FixedTickInputAction) + sizeof(TickRecord);
+                    bytes += tick.Input.Actions.capacity() * sizeof(FixedTickInputAction) + tick.Encoded.capacity() +
+                             sizeof(TickRecord);
+                for (const auto& checkpoint : Checkpoints)
+                    bytes += checkpoint.Data.capacity() - checkpoint.Data.size() + checkpoint.Stored.capacity();
                 Memory->ReportExternal(MemoryDomain, bytes);
             }
         }
@@ -320,32 +461,26 @@ namespace Keire
         void WriteRecording()
         {
             std::vector<std::byte> output;
+            RequireAppendCapacity(output, ReplayFileHeaderBytes, Specification.MaximumReplayBytes);
             AppendBytes(output, std::as_bytes(std::span(ReplayMagic)));
             AppendUnsigned(output, ReplayVersion);
-            const Json metadata{{"profile", static_cast<std::uint8_t>(Profile)},
-                                {"checkpointInterval", Specification.CheckpointIntervalTicks},
-                                {"engineBuild", Fingerprints.EngineBuild},
-                                {"project", Fingerprints.Project},
-                                {"modules", Fingerprints.Modules},
-                                {"content", Fingerprints.Content},
-                                {"deterministicConfiguration", Fingerprints.DeterministicConfiguration}};
-            const auto metadataText = metadata.dump();
+            const auto metadataText = MetadataText();
             AddChunk(output, ChunkMetadata, 0, 0, std::as_bytes(std::span(metadataText)),
-                     std::as_bytes(std::span(metadataText)));
+                     std::as_bytes(std::span(metadataText)), Specification.MaximumReplayBytes);
             for (const auto& tick : Ticks)
             {
-                const auto input = EncodeInput(tick.Input, tick.State);
-                AddChunk(output, ChunkInput, 0, tick.Input.Tick, input, input);
+                AddChunk(output, ChunkInput, 0, tick.Input.Tick, tick.Encoded, tick.Encoded,
+                         Specification.MaximumReplayBytes);
             }
             for (const auto& checkpoint : Checkpoints)
             {
-                const auto compressed = Compress(checkpoint.Data);
-                AddChunk(output, ChunkCheckpoint, ChunkCompressed, checkpoint.Tick, compressed, checkpoint.Data);
+                AddChunk(output, ChunkCheckpoint, ChunkCompressed, checkpoint.Tick, checkpoint.Stored, checkpoint.Data,
+                         Specification.MaximumReplayBytes);
             }
             const auto fileDigest = Detail::Sha256(output);
-            AddChunk(output, ChunkEnd, 0, Ticks.size(), fileDigest, fileDigest);
-            if (output.size() > Specification.MaximumReplayBytes)
-                throw std::runtime_error("Replay output exceeds the configured file-size limit.");
+            AddChunk(output, ChunkEnd, 0, Ticks.size(), fileDigest, fileDigest, Specification.MaximumReplayBytes);
+            if (output.size() != RecordingBytes)
+                throw std::logic_error("Replay recording size accounting diverged from its encoded output.");
             Detail::WriteFileAtomically(Path, output);
         }
 
@@ -355,7 +490,9 @@ namespace Keire
             if (!stream)
                 throw std::runtime_error("Replay file could not be opened.");
             const auto length = stream.tellg();
-            if (length < 0 || static_cast<std::uint64_t>(length) > Specification.MaximumReplayBytes)
+            if (length < 0 || static_cast<std::uint64_t>(length) > Specification.MaximumReplayBytes ||
+                static_cast<std::uint64_t>(length) >
+                    static_cast<std::uint64_t>((std::numeric_limits<std::streamsize>::max)()))
                 throw std::runtime_error("Replay file exceeds the configured file-size limit.");
             std::vector<std::byte> bytes(static_cast<std::size_t>(length));
             stream.seekg(0, std::ios::beg);
@@ -368,7 +505,9 @@ namespace Keire
             if (ReadUnsigned<std::uint32_t>(bytes, offset) != ReplayVersion)
                 throw std::runtime_error("Replay file version is unsupported.");
             bool metadataRead = false;
+            bool checkpointRead = false;
             bool endRead = false;
+            std::size_t decodedBytes = 0;
             while (offset < bytes.size())
             {
                 const auto chunkStart = offset;
@@ -377,6 +516,23 @@ namespace Keire
                 const auto tick = ReadUnsigned<std::uint64_t>(bytes, offset);
                 const auto uncompressedSize = ReadUnsigned<std::uint64_t>(bytes, offset);
                 const auto storedSize = ReadUnsigned<std::uint64_t>(bytes, offset);
+                if (type < ChunkMetadata || type > ChunkEnd)
+                    throw std::runtime_error("Replay file contains an unknown chunk type.");
+                if ((!metadataRead && type != ChunkMetadata) || endRead)
+                    throw std::runtime_error("Replay chunks are not in a valid structural order.");
+                if (type == ChunkInput && checkpointRead)
+                    throw std::runtime_error("Replay input chunks may not follow checkpoint chunks.");
+                if (type == ChunkCheckpoint)
+                    checkpointRead = true;
+                if ((type == ChunkCheckpoint && flags != ChunkCompressed) || (type != ChunkCheckpoint && flags != 0))
+                    throw std::runtime_error("Replay chunk contains unsupported flags.");
+                if (uncompressedSize > Specification.MaximumReplayBytes ||
+                    uncompressedSize > (std::numeric_limits<std::size_t>::max)() ||
+                    uncompressedSize >
+                        Specification.MaximumReplayBytes - std::min(decodedBytes, Specification.MaximumReplayBytes))
+                {
+                    throw std::runtime_error("Replay decoded data exceeds the configured size limit.");
+                }
                 Detail::Sha256Digest digest{};
                 if (offset > bytes.size() || digest.size() > bytes.size() - offset)
                     throw std::runtime_error("Replay chunk digest is truncated.");
@@ -387,18 +543,24 @@ namespace Keire
                     throw std::runtime_error("Replay chunk payload is truncated or oversized.");
                 const auto stored = std::span(bytes).subspan(offset, static_cast<std::size_t>(storedSize));
                 offset += static_cast<std::size_t>(storedSize);
-                const auto decoded = (flags & ChunkCompressed) != 0
-                                         ? Decompress(stored, static_cast<std::size_t>(uncompressedSize))
-                                         : std::vector<std::byte>(stored.begin(), stored.end());
+                if ((flags & ChunkCompressed) == 0 && storedSize != uncompressedSize)
+                    throw std::runtime_error("Replay uncompressed chunk sizes do not match.");
+                auto decoded = (flags & ChunkCompressed) != 0
+                                   ? Decompress(stored, static_cast<std::size_t>(uncompressedSize))
+                                   : std::vector<std::byte>(stored.begin(), stored.end());
+                decodedBytes += decoded.size();
                 if (decoded.size() != uncompressedSize || Detail::Sha256(decoded) != digest)
                     throw std::runtime_error("Replay chunk failed its SHA-256 integrity check.");
                 if (type == ChunkMetadata)
                 {
-                    if (metadataRead)
-                        throw std::runtime_error("Replay metadata chunk is duplicated.");
+                    if (metadataRead || tick != 0)
+                        throw std::runtime_error("Replay metadata chunk is duplicated or has an invalid tick.");
                     const auto metadata = Json::parse(reinterpret_cast<const char*>(decoded.data()),
                                                       reinterpret_cast<const char*>(decoded.data() + decoded.size()));
-                    Profile = static_cast<ReplayProfile>(metadata.at("profile").get<std::uint8_t>());
+                    const auto profile = metadata.at("profile").get<std::uint8_t>();
+                    if (profile > static_cast<std::uint8_t>(ReplayProfile::PerformanceCapture))
+                        throw std::runtime_error("Replay metadata contains an unsupported profile.");
+                    Profile = static_cast<ReplayProfile>(profile);
                     Fingerprints = {metadata.value("engineBuild", ""), metadata.value("project", ""),
                                     metadata.value("modules", ""), metadata.value("content", ""),
                                     metadata.value("deterministicConfiguration", "")};
@@ -409,15 +571,25 @@ namespace Keire
                     const auto input = DecodeInput(decoded);
                     if (input.Snapshot.Tick != tick || (!Ticks.empty() && tick <= Ticks.back().Input.Tick))
                         throw std::runtime_error("Replay input ticks are not strictly ordered.");
-                    Ticks.push_back({input.Snapshot, input.State});
+                    Ticks.push_back({input.Snapshot, input.State, {}});
                 }
                 else if (type == ChunkCheckpoint)
                 {
-                    Checkpoints.push_back({tick, decoded});
-                    RewindBytes += decoded.size();
+                    if ((!Checkpoints.empty() && tick <= Checkpoints.back().Tick) ||
+                        RewindBytes > Specification.RewindBudgetBytes ||
+                        decoded.size() > Specification.RewindBudgetBytes - RewindBytes)
+                    {
+                        throw std::runtime_error(
+                            "Replay checkpoints are unordered or exceed the configured rewind-memory budget.");
+                    }
+                    const auto checkpointBytes = decoded.size();
+                    Checkpoints.push_back({tick, std::move(decoded), {}});
+                    RewindBytes += checkpointBytes;
                 }
                 else if (type == ChunkEnd)
                 {
+                    if (endRead || tick != Ticks.size())
+                        throw std::runtime_error("Replay footer is duplicated or has an invalid tick count.");
                     if (decoded.size() != Detail::Sha256Digest{}.size() ||
                         !std::ranges::equal(decoded, Detail::Sha256(std::span(bytes).first(chunkStart))))
                         throw std::runtime_error("Replay file footer integrity check failed.");
@@ -425,11 +597,18 @@ namespace Keire
                         throw std::runtime_error("Replay file contains data after its footer.");
                     endRead = true;
                 }
-                else
-                    throw std::runtime_error("Replay file contains an unknown chunk type.");
             }
             if (!metadataRead || !endRead || Ticks.empty() || Checkpoints.empty())
                 throw std::runtime_error("Replay file is incomplete.");
+            if (Checkpoints.front().Tick != 0 || Checkpoints.back().Tick > Ticks.back().Input.Tick)
+                throw std::runtime_error("Replay checkpoint ticks are outside the recorded timeline.");
+            for (auto checkpoint = std::next(Checkpoints.begin()); checkpoint != Checkpoints.end(); ++checkpoint)
+            {
+                const auto input = std::ranges::lower_bound(Ticks, checkpoint->Tick, {},
+                                                            [](const TickRecord& value) { return value.Input.Tick; });
+                if (input == Ticks.end() || input->Input.Tick != checkpoint->Tick)
+                    throw std::runtime_error("Replay checkpoint does not correspond to a recorded logical tick.");
+            }
             if (!FingerprintsMatch(request.ExpectedFingerprints, Fingerprints))
                 throw std::runtime_error("Replay fingerprints do not match the active certified configuration.");
             UpdateMemory();
@@ -451,6 +630,7 @@ namespace Keire
         ReplaySessionState StateBeforePause = ReplaySessionState::Idle;
         std::size_t PlaybackIndex = 0;
         std::size_t RewindBytes = 0;
+        std::size_t RecordingBytes = 0;
         bool StepRequested = false;
         bool Seeking = false;
         std::uint64_t SeekTarget = 0;
@@ -459,7 +639,7 @@ namespace Keire
 
     ReplaySystem::ReplaySystem(ReplaySystemSpecification specification, Ref<DiagnosticSink> diagnostics,
                                Ref<MemorySystem> memory)
-        : m_Impl(std::make_unique<Impl>(std::move(specification), std::move(diagnostics), std::move(memory)))
+        : m_Impl(std::make_unique<Impl>(specification, std::move(diagnostics), std::move(memory)))
     {
     }
 
@@ -469,8 +649,10 @@ namespace Keire
     {
         m_Impl->RequireOwner("RegisterSerializer");
         if (m_Impl->Session.State != ReplaySessionState::Idle || serializer.Id.empty() || serializer.Version == 0 ||
-            !serializer.Capture || !serializer.Restore ||
-            !m_Impl->Serializers.emplace(serializer.Id, serializer).second)
+            !serializer.Capture || !serializer.Restore)
+            throw std::invalid_argument("Replay serializer registration is invalid, duplicated, or frozen.");
+        auto id = serializer.Id;
+        if (!m_Impl->Serializers.emplace(std::move(id), std::move(serializer)).second)
             throw std::invalid_argument("Replay serializer registration is invalid, duplicated, or frozen.");
     }
 
@@ -482,15 +664,35 @@ namespace Keire
         if (request.Profile == ReplayProfile::StrictVerified &&
             std::ranges::any_of(m_Impl->Serializers, [](const auto& item) { return !item.second.Deterministic; }))
             throw std::logic_error("Strict replay recording requires deterministic serializers for every subsystem.");
-        m_Impl->Ticks.clear();
-        m_Impl->Checkpoints.clear();
-        m_Impl->RewindBytes = 0;
-        m_Impl->Path = std::move(request.Path);
-        m_Impl->Profile = request.Profile;
-        m_Impl->Fingerprints = std::move(request.Fingerprints);
-        m_Impl->Session = {.State = ReplaySessionState::Recording, .Profile = m_Impl->Profile};
-        m_Impl->AddCheckpoint(0);
-        m_Impl->Session.CheckpointCount = 1;
+        try
+        {
+            m_Impl->Ticks.clear();
+            m_Impl->Checkpoints.clear();
+            m_Impl->RewindBytes = 0;
+            m_Impl->RecordingBytes = ReplayFileHeaderBytes;
+            m_Impl->Path = std::move(request.Path);
+            m_Impl->Profile = request.Profile;
+            m_Impl->Fingerprints = std::move(request.Fingerprints);
+            const auto metadataBytes = Impl::EncodedChunkBytes(m_Impl->MetadataText().size());
+            m_Impl->RequireRecordingCapacity(metadataBytes);
+            m_Impl->RecordingBytes += metadataBytes;
+            const auto footerBytes = Impl::EncodedChunkBytes(Detail::Sha256Digest{}.size());
+            m_Impl->RequireRecordingCapacity(footerBytes);
+            m_Impl->RecordingBytes += footerBytes;
+            m_Impl->Session = {.State = ReplaySessionState::Recording, .Profile = m_Impl->Profile};
+            m_Impl->AddCheckpoint(0);
+            m_Impl->Session.CheckpointCount = 1;
+        }
+        catch (...)
+        {
+            m_Impl->Ticks.clear();
+            m_Impl->Checkpoints.clear();
+            m_Impl->RewindBytes = 0;
+            m_Impl->RecordingBytes = 0;
+            m_Impl->SetCurrentExceptionFailure("Replay recording startup failed");
+            m_Impl->UpdateMemory();
+            throw;
+        }
     }
 
     void ReplaySystem::BeginPlayback(ReplayPlaybackRequest request)
@@ -498,21 +700,25 @@ namespace Keire
         m_Impl->RequireOwner("BeginPlayback");
         if (m_Impl->Session.State != ReplaySessionState::Idle)
             throw std::logic_error("Replay playback cannot start in the current state.");
-        m_Impl->Ticks.clear();
-        m_Impl->Checkpoints.clear();
-        m_Impl->RewindBytes = 0;
-        m_Impl->ReadPlayback(request);
-        if (m_Impl->Profile == ReplayProfile::StrictVerified &&
-            std::ranges::any_of(m_Impl->Serializers, [](const auto& item) { return !item.second.Deterministic; }))
-            throw std::logic_error("Strict replay playback requires deterministic serializers for every subsystem.");
-        m_Impl->PlaybackIndex = 0;
-        m_Impl->Seeking = false;
-        m_Impl->Session = {.State = request.Verify ? ReplaySessionState::Verifying : ReplaySessionState::Playing,
-                           .Profile = m_Impl->Profile,
-                           .TickCount = m_Impl->Ticks.size(),
-                           .CheckpointCount = m_Impl->Checkpoints.size()};
         try
         {
+            m_Impl->Ticks.clear();
+            m_Impl->Checkpoints.clear();
+            m_Impl->RewindBytes = 0;
+            m_Impl->RecordingBytes = 0;
+            m_Impl->ReadPlayback(request);
+            if (m_Impl->Profile == ReplayProfile::StrictVerified &&
+                std::ranges::any_of(m_Impl->Serializers, [](const auto& item) { return !item.second.Deterministic; }))
+            {
+                throw std::logic_error(
+                    "Strict replay playback requires deterministic serializers for every subsystem.");
+            }
+            m_Impl->PlaybackIndex = 0;
+            m_Impl->Seeking = false;
+            m_Impl->Session = {.State = request.Verify ? ReplaySessionState::Verifying : ReplaySessionState::Playing,
+                               .Profile = m_Impl->Profile,
+                               .TickCount = m_Impl->Ticks.size(),
+                               .CheckpointCount = m_Impl->Checkpoints.size()};
             m_Impl->RestoreCheckpoint(m_Impl->Checkpoints.front().Data);
         }
         catch (...)
@@ -520,7 +726,8 @@ namespace Keire
             m_Impl->Ticks.clear();
             m_Impl->Checkpoints.clear();
             m_Impl->RewindBytes = 0;
-            m_Impl->Session = {};
+            m_Impl->RecordingBytes = 0;
+            m_Impl->SetCurrentExceptionFailure("Replay playback startup failed");
             m_Impl->UpdateMemory();
             throw;
         }
@@ -530,7 +737,17 @@ namespace Keire
     {
         m_Impl->RequireOwner("Stop");
         if (m_Impl->Session.State == ReplaySessionState::Recording)
-            m_Impl->WriteRecording();
+        {
+            try
+            {
+                m_Impl->WriteRecording();
+            }
+            catch (...)
+            {
+                m_Impl->SetCurrentExceptionFailure("Replay recording finalization failed");
+                throw;
+            }
+        }
         m_Impl->Session.State = ReplaySessionState::Idle;
         m_Impl->CurrentInput = {};
         m_Impl->StepRequested = false;
@@ -572,7 +789,15 @@ namespace Keire
         if (checkpoint == m_Impl->Checkpoints.begin())
             return false;
         const auto selected = std::prev(checkpoint);
-        m_Impl->RestoreCheckpoint(selected->Data);
+        try
+        {
+            m_Impl->RestoreCheckpoint(selected->Data);
+        }
+        catch (...)
+        {
+            m_Impl->SetCurrentExceptionFailure("Replay seek restoration failed");
+            throw;
+        }
         const auto resume = std::ranges::upper_bound(m_Impl->Ticks, selected->Tick, {},
                                                      [](const Impl::TickRecord& value) { return value.Input.Tick; });
         m_Impl->PlaybackIndex = static_cast<std::size_t>(std::distance(m_Impl->Ticks.begin(), resume));
@@ -604,7 +829,11 @@ namespace Keire
         m_Impl->CurrentInput = m_Impl->Ticks[m_Impl->PlaybackIndex].Input;
         if (liveInput.InputMapFingerprint != 0 &&
             liveInput.InputMapFingerprint != m_Impl->CurrentInput.InputMapFingerprint)
+        {
+            m_Impl->SetFailure("Replay input replacement failed",
+                               "the active input-map fingerprint does not match the recording");
             throw std::runtime_error("Replay input-map fingerprint does not match the active input contexts.");
+        }
         return m_Impl->CurrentInput;
     }
 
@@ -613,24 +842,49 @@ namespace Keire
         m_Impl->RequireOwner("EndFixedTick");
         if (m_Impl->Session.State == ReplaySessionState::Recording)
         {
-            const auto state = m_Impl->StateHash();
-            m_Impl->Ticks.push_back({m_Impl->CurrentInput, state});
-            m_Impl->Session.CurrentTick = tick;
-            m_Impl->Session.TickCount = m_Impl->Ticks.size();
-            if (tick % m_Impl->Specification.CheckpointIntervalTicks == 0)
+            try
             {
-                m_Impl->AddCheckpoint(tick);
-                m_Impl->Session.CheckpointCount = m_Impl->Checkpoints.size();
+                if (m_Impl->CurrentInput.Tick != tick)
+                    throw std::logic_error("Replay recording received mismatched logical and application ticks.");
+                const auto state = m_Impl->StateHash();
+                auto encoded = EncodeInput(m_Impl->CurrentInput, state, m_Impl->Specification.MaximumReplayBytes);
+                const auto encodedBytes = Impl::EncodedChunkBytes(encoded.size());
+                m_Impl->RequireRecordingCapacity(encodedBytes);
+                m_Impl->Ticks.push_back({m_Impl->CurrentInput, state, std::move(encoded)});
+                m_Impl->RecordingBytes += encodedBytes;
+                m_Impl->Session.CurrentTick = m_Impl->CurrentInput.Tick;
+                m_Impl->Session.TickCount = m_Impl->Ticks.size();
+                if (m_Impl->CurrentInput.Tick != 0 &&
+                    m_Impl->CurrentInput.Tick % m_Impl->Specification.CheckpointIntervalTicks == 0)
+                {
+                    m_Impl->AddCheckpoint(m_Impl->CurrentInput.Tick);
+                    m_Impl->Session.CheckpointCount = m_Impl->Checkpoints.size();
+                }
+                m_Impl->UpdateMemory();
             }
-            m_Impl->UpdateMemory();
+            catch (...)
+            {
+                m_Impl->SetCurrentExceptionFailure("Replay tick recording failed");
+                throw;
+            }
             return;
         }
         if (!ReplacesGameplayInput() || m_Impl->PlaybackIndex >= m_Impl->Ticks.size())
             return;
         if (m_Impl->Session.State == ReplaySessionState::Paused && !m_Impl->StepRequested && !m_Impl->Seeking)
             return;
-        const auto actual = m_Impl->StateHash();
+        Detail::Sha256Digest actual;
+        try
+        {
+            actual = m_Impl->StateHash();
+        }
+        catch (...)
+        {
+            m_Impl->SetCurrentExceptionFailure("Replay state verification failed");
+            throw;
+        }
         const auto& expected = m_Impl->Ticks[m_Impl->PlaybackIndex];
+        const auto logicalTick = expected.Input.Tick;
         if ((m_Impl->Profile == ReplayProfile::StrictVerified ||
              m_Impl->Session.State == ReplaySessionState::Verifying ||
              m_Impl->StateBeforePause == ReplaySessionState::Verifying) &&
@@ -638,15 +892,16 @@ namespace Keire
         {
             m_Impl->Session.State = ReplaySessionState::Diverged;
             m_Impl->Session.Divergence =
-                ReplayDivergence{tick, expected.State, actual, "Canonical replay state hash diverged."};
+                ReplayDivergence{logicalTick, expected.State, actual, "Canonical replay state hash diverged."};
             if (m_Impl->Diagnostics)
-                m_Impl->Diagnostics->Report({DiagnosticId("KEIRE-REPLAY-0001"), DiagnosticSeverity::Error,
-                                             "Replay verification diverged at tick " + std::to_string(tick) + "."});
+                m_Impl->Diagnostics->Report(
+                    {DiagnosticId("KEIRE-REPLAY-0001"), DiagnosticSeverity::Error,
+                     "Replay verification diverged at tick " + std::to_string(logicalTick) + "."});
             return;
         }
         ++m_Impl->PlaybackIndex;
-        m_Impl->Session.CurrentTick = tick;
-        if (m_Impl->Seeking && tick >= m_Impl->SeekTarget)
+        m_Impl->Session.CurrentTick = logicalTick;
+        if (m_Impl->Seeking && logicalTick >= m_Impl->SeekTarget)
             m_Impl->Seeking = false;
         if (m_Impl->StepRequested)
             m_Impl->StepRequested = false;
@@ -670,7 +925,7 @@ namespace Keire
 
     bool ReplaySystem::UsesStrictScheduling() const noexcept
     {
-        return m_Impl->Profile == ReplayProfile::StrictVerified && m_Impl->Session.State != ReplaySessionState::Idle;
+        return m_Impl->Profile == ReplayProfile::StrictVerified && ReplacesGameplayInput();
     }
 
     bool ReplaySystem::IsOpen() const noexcept { return m_Impl->Open; }
@@ -686,12 +941,15 @@ namespace Keire
         }
         catch (...)
         {
+            m_Impl->SetCurrentExceptionFailure("Replay recording finalization failed");
         }
         m_Impl->Open = false;
-        m_Impl->Session.State = ReplaySessionState::Idle;
+        if (m_Impl->Session.State != ReplaySessionState::Failed)
+            m_Impl->Session.State = ReplaySessionState::Idle;
         m_Impl->Ticks.clear();
         m_Impl->Checkpoints.clear();
         m_Impl->RewindBytes = 0;
+        m_Impl->RecordingBytes = 0;
         m_Impl->UpdateMemory();
     }
 } // namespace Keire

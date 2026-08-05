@@ -24,7 +24,8 @@ class PerformanceGateTests(unittest.TestCase):
             metadata_path = root / "metadata.json"
             snapshot_path.write_text(snapshot, encoding="utf-8", newline="\n")
             history_path.write_text(
-                "sequence,duration_us\n" + "".join(f"{index},5000\n" for index in range(300)),
+                "sequence,duration_us\n"
+                + "".join(f"{index},5000\n" for index in range(300)),
                 encoding="utf-8",
                 newline="\n",
             )

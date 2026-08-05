@@ -15,7 +15,80 @@ var tests = new (string Name, Action Run)[]
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
     ("Entity exposes the production layer contract", EntityLayerContract),
     ("Behaviour lifecycle contracts are synchronized", BehaviourLifecycleContract),
+    ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
+    ("Managed jobs preserve terminal dependency semantics", ManagedJobDependencyContract),
 };
+
+static void ManagedJobExecutionContract()
+{
+    int invocations = 0;
+    var succeeded = new Keire.ManagedJobState(
+        context =>
+        {
+            Assert(!context.IsCancellationRequested, "A normal managed job must receive a live cancellation token.");
+            ++invocations;
+        });
+    succeeded.SetId(41);
+    Assert(succeeded.Invoke(0, 0) == 0 && invocations == 1,
+           "The managed job work phase must execute its delegate exactly once.");
+    Assert(succeeded.Status == Keire.JobStatus.Running, "The managed job must report Running during execution.");
+    Assert(succeeded.Invoke(1, 0) == 0, "The managed job success phase must complete.");
+    succeeded.Completion.GetAwaiter().GetResult();
+    Assert(succeeded.Status == Keire.JobStatus.Succeeded && succeeded.Completion.IsCompletedSuccessfully,
+           "A successful managed delegate must publish a successful completion task.");
+
+    var failed = new Keire.ManagedJobState(_ => throw new InvalidOperationException("expected managed failure"));
+    failed.SetId(42);
+    Assert(failed.Invoke(0, 0) != 0, "A throwing managed delegate must fail its native work phase.");
+    Assert(failed.Invoke(2, 0) == 0 && failed.Status == Keire.JobStatus.Failed,
+           "The native failure phase must publish Failed.");
+    AssertThrows<InvalidOperationException>(() => failed.Completion.GetAwaiter().GetResult(),
+                                            "The original managed exception must flow through Completion.");
+
+    bool observedCancellation = false;
+    var cancelled = new Keire.ManagedJobState(context => observedCancellation = context.IsCancellationRequested);
+    cancelled.SetId(43);
+    Assert(cancelled.Invoke(0, 1) == 0 && observedCancellation,
+           "A stop-requested managed job must observe cancellation before its delegate runs.");
+    Assert(cancelled.Invoke(3, 0) == 0 && cancelled.Status == Keire.JobStatus.Cancelled,
+           "The native cancellation phase must publish Cancelled.");
+    AssertThrows<TaskCanceledException>(() => cancelled.Completion.GetAwaiter().GetResult(),
+                                        "A cancelled managed job must publish a cancelled completion task.");
+
+    CancellationToken propagatedToken = default;
+    var scopeCancelled = new Keire.ManagedJobState(context => propagatedToken = context.CancellationToken);
+    scopeCancelled.SetId(44);
+    Assert(scopeCancelled.Invoke(0, 0) == 0 && !propagatedToken.IsCancellationRequested,
+           "A running managed job must begin with a live token.");
+    Assert(scopeCancelled.Invoke(4, 0) == 0 && propagatedToken.IsCancellationRequested,
+           "Native scope cancellation must propagate to the running managed cancellation token.");
+    Assert(scopeCancelled.Invoke(3, 0) == 0, "The scope-cancelled job must publish its terminal state.");
+}
+
+static void ManagedJobDependencyContract()
+{
+    var activeState = new Keire.ManagedJobState(_ => { });
+    activeState.SetId(51);
+    var succeededState = new Keire.ManagedJobState(_ => { });
+    succeededState.SetId(52);
+    Assert(succeededState.Invoke(0, 0) == 0 && succeededState.Invoke(1, 0) == 0,
+           "The completed dependency fixture must succeed.");
+
+    ulong[] dependencies = Keire.Jobs.CollectDependencyIds(
+        new[] { new Keire.JobHandle(activeState), new Keire.JobHandle(succeededState) }, out bool cancelled);
+    Assert(!cancelled && dependencies.Length == 1 && dependencies[0] == 51,
+           "Succeeded dependencies must be omitted because their ordering constraint is already satisfied.");
+    var failedState = new Keire.ManagedJobState(_ => throw new InvalidOperationException("expected dependency failure"));
+    failedState.SetId(53);
+    Assert(failedState.Invoke(0, 0) != 0 && failedState.Invoke(2, 0) == 0,
+           "The failed dependency fixture must publish a terminal failure.");
+    dependencies = Keire.Jobs.CollectDependencyIds(new[] { new Keire.JobHandle(failedState) }, out cancelled);
+    Assert(cancelled && dependencies.Length == 0,
+           "A reclaimed failed dependency must still cancel dependent work without requiring a native record.");
+    AssertThrows<ArgumentException>(() =>
+        Keire.Jobs.CollectDependencyIds(new[] { default(Keire.JobHandle) }, out _),
+                                    "Invalid dependency handles must be rejected before native submission.");
+}
 
 static void BehaviourLifecycleContract()
 {

@@ -78,13 +78,12 @@ public static unsafe class Jobs
         if (description.Dependencies.Count > 1024)
             throw new ArgumentOutOfRangeException(nameof(description), "A managed job accepts at most 1024 dependencies.");
 
-        ulong[] dependencies = new ulong[description.Dependencies.Count];
-        for (int index = 0; index < dependencies.Length; ++index)
+        ulong[] dependencies = CollectDependencyIds(description.Dependencies, out bool cancelledByDependency);
+        if (cancelledByDependency)
         {
-            JobHandle dependency = description.Dependencies[index];
-            if (!dependency.IsValid)
-                throw new ArgumentException("Managed job dependencies must be valid handles.", nameof(description));
-            dependencies[index] = dependency.Id;
+            var cancelled = new ManagedJobState(callback);
+            cancelled.Invoke(3, 0);
+            return new JobHandle(cancelled);
         }
 
         var state = new ManagedJobState(callback);
@@ -100,6 +99,32 @@ public static unsafe class Jobs
         }
         state.SetId(id);
         return new JobHandle(state);
+    }
+
+    internal static ulong[] CollectDependencyIds(IReadOnlyList<JobHandle> dependencies,
+                                                 out bool cancelledByDependency)
+    {
+        ulong[] result = new ulong[dependencies.Count];
+        int retained = 0;
+        cancelledByDependency = false;
+        for (int index = 0; index < dependencies.Count; ++index)
+        {
+            JobHandle dependency = dependencies[index];
+            if (!dependency.IsValid)
+                throw new ArgumentException("Managed job dependencies must be valid handles.", nameof(dependencies));
+            JobStatus status = dependency.Status;
+            if (status == JobStatus.Succeeded)
+                continue;
+            if (status is JobStatus.Failed or JobStatus.Cancelled)
+            {
+                cancelledByDependency = true;
+                continue;
+            }
+            result[retained++] = dependency.Id;
+        }
+        if (retained != result.Length)
+            Array.Resize(ref result, retained);
+        return result;
     }
 
     public static JobHandle Run(Action callback, JobDescription? description = null)
@@ -150,6 +175,12 @@ internal sealed class ManagedJobState
 
     internal byte Invoke(byte phase, byte stopRequested)
     {
+        if (phase == 4)
+        {
+            if (!_cancellation.IsCancellationRequested)
+                _cancellation.Cancel();
+            return 0;
+        }
         if (phase == 0)
         {
             if (stopRequested != 0)

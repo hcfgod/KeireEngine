@@ -10,6 +10,7 @@ reference; these guides provide the details needed to develop, integrate, valida
 | [Architecture](Architecture.md) | System boundaries, ownership, implementation strategy, and release shape | Engine maintainers |
 | [Structured Diagnostics](Diagnostics/README.md) | Stable diagnostic IDs, packaged remediation pages, and editor links | Engine, tooling, and support authors |
 | [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, release blockers, and closure gates | Leads, maintainers, and release engineers |
+| [Maintainability Boundaries](Maintainability.md) | Enforced source-unit budgets and decomposition seams | Engine and editor contributors |
 | [Runtime Lifecycle](RuntimeLifecycle.md) | Startup, frame order, threading, layer mutation, events, time, UI, and shutdown | Runtime and layer authors |
 | [Gameplay Foundations](GameplayFoundations.md) | Prefabs, managed builds, physics, audio graphs, navigation, profiling, and current adapter scope | Gameplay and subsystem authors |
 | [Undo And Redo](UndoRedo.md) | Contexts, commands, transactions, limits, merging, threading, and editor routing | Runtime, editor, and tooling authors |

@@ -1243,7 +1243,7 @@ TEST_CASE("Generated model materials can be extracted as editable source assets"
 TEST_CASE("Cooked asset pages support bounded asynchronous range reads")
 {
     TemporaryAssetProject project;
-    std::string payload(20U * 1024U, '\0');
+    std::string payload(std::size_t{20} * 1024U, '\0');
     for (std::size_t index = 0; index < payload.size(); ++index)
         payload[index] = static_cast<char>((index * 31U) & 0xffU);
     project.Write("Stream.bin", payload);
@@ -1287,6 +1287,19 @@ TEST_CASE("Cooked asset pages support bounded asynchronous range reads")
     CHECK(streaming->ResidentData(residency) == result);
     REQUIRE(streaming->Statistics().size() == 5);
     CHECK(streaming->Statistics().front().ResidentCpuBytes == result.size());
+    CHECK(streaming->Statistics().front().CompletedRequests == 1U);
+    CHECK(streaming->Statistics().front().AverageLatencyMilliseconds >= 0.0);
+    bool workerControlsSucceeded = false;
+    std::thread observer(
+        [&]
+        {
+            workerControlsSucceeded = streaming->Snapshot(residency).State == Keire::ResidencyState::Resident &&
+                                      streaming->Statistics().front().CompletedRequests == 1U &&
+                                      streaming->SetPinned(residency, true) && streaming->Touch(residency) &&
+                                      streaming->SetPinned(residency, false);
+        });
+    observer.join();
+    CHECK(workerControlsSucceeded);
     std::thread retirementReporter([&] { streaming->ReportRetired(Keire::StreamingClass::Texture, 128U, 512U); });
     retirementReporter.join();
     auto retirementStatistics = streaming->Statistics();
@@ -1297,9 +1310,29 @@ TEST_CASE("Cooked asset pages support bounded asynchronous range reads")
     retirementStatistics = streaming->Statistics();
     CHECK(retirementStatistics[1].RetiredCpuBytes == 0U);
     CHECK(retirementStatistics[1].RetiredGpuBytes == 0U);
-    CHECK(streaming->Release(residency));
+    const auto cancelledResidency = streaming->Request(
+        {.Asset = record->Id, .Range = {.Offset = 0, .Bytes = 128}, .Priority = Keire::AssetPriority::Normal});
+    bool workerCancellationSucceeded = false;
+    std::thread canceller([&] { workerCancellationSucceeded = streaming->Cancel(cancelledResidency); });
+    canceller.join();
+    CHECK(workerCancellationSucceeded);
+    CHECK(streaming->Snapshot(cancelledResidency).State == Keire::ResidencyState::Cancelled);
+    CHECK(streaming->Statistics().front().CancelledRequests == 1U);
+    CHECK(streaming->Release(cancelledResidency));
+    bool workerReleaseSucceeded = false;
+    std::thread releaser([&] { workerReleaseSucceeded = streaming->Release(residency); });
+    releaser.join();
+    CHECK(workerReleaseSucceeded);
     CHECK_THROWS_AS((void)streaming->Snapshot(residency), std::invalid_argument);
-    streaming->Close();
+    const auto closeCancelledResidency = streaming->Request(
+        {.Asset = record->Id, .Range = {.Offset = 0, .Bytes = 128}, .Priority = Keire::AssetPriority::Normal});
+    CHECK(closeCancelledResidency.IsValid());
+    std::thread closer([&] { streaming->Close(); });
+    closer.join();
+    CHECK_FALSE(streaming->IsOpen());
+    CHECK(streaming->Statistics().front().CancelledRequests == 2U);
+    CHECK(streaming->Statistics().front().RequestedBytes == 0U);
+    CHECK(streaming->Statistics().front().InFlightBytes == 0U);
 
     CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, 0, 8193), std::invalid_argument);
     CHECK_THROWS_AS((void)assets->ReadRangeAsync(record->Id, payload.size() - 10U, 20), std::out_of_range);

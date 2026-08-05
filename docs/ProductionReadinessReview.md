@@ -6,13 +6,26 @@ Repository snapshot: `1d23614` plus the staged VFX-catalog, graph-authoring, run
 
 Review target: modern commercial-engine and AAA team-production readiness, not feature-count parity alone
 
+> Remediation update, 2026-08-04: the engineering defects identified by the follow-up audit have been corrected and
+> validated locally. The 2026-08-02 table remains a historical snapshot; a separate provisional post-remediation grade
+> appears below. GitHub Actions is currently unable to supply hosted evidence because the account's Actions quota is
+> exhausted, which is distinct from a failing build or test.
+
+The remediation includes atomic job dependency registration and worker-safe close, bounded replay decoding and rewind,
+explicit replay failure diagnostics, crash-safe/link-safe project upgrades, editor composition of module importers,
+correct pre-1.0 caret ranges, synchronized streaming lifecycle/statistics, bounded managed-job record retention, a
+valid primary workflow, recursive quality coverage, parsed-workflow/UTF-8 gates, and enforced source-unit non-growth
+budgets. Focused tests and local validation are recorded below. VFX catalog closure, Metal/Linux evidence, sustained
+named-hardware baselines, and a clean hosted release matrix remain release gates rather than being relabeled complete.
+
 ## Executive Assessment
 
 Kéire is a substantial, thoughtfully partitioned engine and editor foundation. It has unusually strong ownership,
 determinism, asset validation, migration, profiling, and failure-isolation contracts for a project of this size. It is
 well beyond a prototype. It is not yet ready to claim complete Unity-class or AAA production parity: the frozen Unity
 6.3 VFX manifest remains mostly disabled, portable GPU timestamp queries are not available through the current SDL GPU
-boundary, rendering still has material milestones, and the primary CI workflow currently contains malformed YAML.
+boundary, rendering still has material milestones, and the review snapshot found malformed primary-workflow YAML. The
+workflow syntax has since been repaired and is parsed by both local harnesses; a hosted rerun awaits Actions quota.
 
 | Assessment | Grade | Score |
 | --- | ---: | ---: |
@@ -27,6 +40,46 @@ boundary, rendering still has material milestones, and the primary CI workflow c
 The correct description today is **production-oriented pre-release engine**, not **finished AAA production engine**.
 The largest difference is closure: every supported path needs sustained cross-platform, GPU, migration, package, and
 content-team validation, while every advertised parity catalog must have no disabled rows.
+
+## Provisional Post-Remediation Assessment
+
+This grade reflects the corrected local tree and the completed Windows validation on 2026-08-04. It is deliberately
+provisional: Windows 10 on an NVIDIA GeForce RTX 3060 (driver 32.0.15.9597) is named local evidence, but it does not
+replace the unavailable hosted Windows/Linux/macOS matrix or required Metal validation.
+
+| Assessment | Grade | Score |
+| --- | ---: | ---: |
+| Engineering foundation | A | 94/100 |
+| Current feature completeness | B | 84/100 |
+| Unity 6.3 VFX catalog parity | C- | 70/100 |
+| Observed sandbox performance | A | 94/100 |
+| Performance-evidence maturity | B+ | 86/100 |
+| Build and CI design | A- | 92/100 |
+| Release and shipping readiness | B+ | 88/100 |
+| Overall | **B+** | **89/100** |
+
+The build/CI design is graded independently from hosted execution evidence. Its workflows parse, recursively cover the
+first-party source surface, validate their compilation database, pin quality tools, enforce text and source-size
+policy, and describe broad platform, sanitizer, coverage, security, package, and GPU lanes. Hosted status is
+**not observed** while Actions quota is exhausted; it is neither counted as a pass nor misreported as a code failure.
+
+### Local remediation evidence
+
+- Debug: 492/492 core tests (30,089 assertions), 117/117 editor tests (1,596 assertions), and 17/17 rendered-output
+  tests on each of D3D12 and Vulkan.
+- Release/NDEBUG: 493/493 core tests (30,090 assertions), 117/117 editor tests (1,596 assertions), complete client
+  compilation, and 17/17 rendered-output tests on each of D3D12 and Vulkan.
+- AddressSanitizer: the rebuilt job-system group passed 7/7 tests and the transactional managed-reload lifecycle passed
+  1/1 with 118 assertions; the wider focused ownership, replay, upgrade, handle, and streaming groups also passed.
+- Managed production contracts passed 14/14 executable tests. Performance tooling passed 3/3, VFX tooling passed 8/8,
+  and the reconciled VFX manifest validated all 278 entries.
+- The Windows script harness passed workflow parsing, UTF-8 integrity, source budgets for all 440 governed files,
+  managed API freshness, and integration fixtures. The compile database covers all 242 Premake-owned translation units,
+  and the recursive C++ formatting gate covers the complete first-party surface.
+- Two dirty-development Release packages completed end to end; the final exact-tree run took 10 minutes 24 seconds
+  (the preceding run took 11 minutes 31 seconds). They validated the shipping hosts/tools, client and packaged-project
+  smoke, archive/extraction, and direct, managed, and source-module CMake SDK consumers. The dirty marker prevents these
+  local validation artifacts from being mistaken for official releases.
 
 ## Evidence Base
 
@@ -68,7 +121,7 @@ platform runs, or shipped-game evidence.
 | Input, gameplay, and runtime UI | B | Paired users, action phases, cursor ownership, Play-mode capture safety, FPS sample behavior, serialized UI, event dispatch, and gameplay service wrappers form a usable slice. The FPS controller can no longer enter a frozen scriptless first Play while startup compilation is pending. Rebinding/accessibility, multiple-local-player workflows, IME/controller navigation, and dense UI layout coverage need expansion. |
 | Performance and profiling | B+ | Typed spans/counters, worker-thread instrumentation, trace export, renderer attribution, VFX capacity/group/fence metrics, callback timing, stutter statistics, capture validation, and machine-readable reference profiles are strong. The supplied history is A-grade for observed frame pacing, but the evidence system remains B-grade because the capture is short, metadata is absent, exports do not identify the same frame, and the current SDL GPU backend reports `GPU timing supported = 0`. Completion latency is diagnostic queue latency, not GPU execution time. |
 | Tests and quality policy | B+ | 525 native tests, sanitizer configurations, 80% line-coverage policy, script harnesses, rendered backend tests, package consumers, and hygiene rules show strong intent. Test investment is uneven: math, project, Forward+, renderer-scalability, input, and physics groups have relatively few cases. Current results must be trusted only when the actual workflows parse and run. |
-| Build, CI, release, and cross-platform | D+ | The intended matrix is broad and professionally designed. However, the previously identified primary-workflow YAML defect remains an unresolved release blocker in this review, and the latest local package validation exceeded its 20-minute review window after Release tests, smoke, and several compile gates but before archive/extracted-consumer closure. Until the workflow is corrected and a clean full matrix and package run succeed, the repository cannot claim continuously verified release health. |
+| Build, CI, release, and cross-platform | D+ | Historical 2026-08-02 grade: the intended matrix was broad, but malformed workflow YAML and an incomplete package run blocked continuously verified release health. The YAML defect is now corrected locally; this score remains frozen until the hosted matrix and complete package validation provide replacement evidence. |
 | Documentation and samples | A- | The VFX guide is extensive and examples cover many workflows. Capability tables are generated from authoritative catalogs, manifest reconciliation and production-slice coverage are release-validated, and stale multi-system/event/strip milestone prose is corrected. The Kéire-specific production backlog is now explicitly separated from Unity catalog parity. Broader link/schema validation and content-team usability evidence should continue to grow. |
 
 ## Latest Performance Capture Audit
@@ -101,10 +154,12 @@ lower-value action than finding the two observed 5 ms-plus frames and validating
 
 ## Highest-Priority Findings
 
-### P0: Restore trustworthy CI
+### P0 remediation complete locally: restore trustworthy CI
 
-`.github/workflows/ci.yml:229` is malformed. Fix the indentation, run `actionlint` and `yamllint`, then require a clean
-Windows/Linux/macOS matrix before treating any release badge or compatibility claim as current evidence.
+The malformed indentation at the former `.github/workflows/ci.yml:229` is fixed. Local harnesses now parse all workflow
+files and reject duplicate YAML keys; the quality lane also runs `actionlint` and `yamllint`. A clean hosted
+Windows/Linux/macOS matrix is still required before treating a release badge or compatibility claim as current evidence,
+and cannot be obtained until the repository's GitHub Actions quota is available again.
 
 ### Closed in this pass: scene-schema release surface
 
@@ -141,13 +196,13 @@ shader-cache cold/warm behavior and first-Play latency. Reference profiles and c
 the timestamp-required profiles correctly fail until a backend can publish real device measurements. The last packaged
 cold-start result remains the historical 17.1-second failure and must be replaced by a post-warmup named-hardware run.
 
-### P1: Close package validation end to end
+### Closed locally: package validation end to end
 
-The latest local package run completed its Release tests, project smoke, asset tool/worker/runtime/hub compile gates,
-but exceeded the 20-minute review window before shader-compiler validation, staging/archive, and extracted direct and
-CMake SDK consumer checks completed. This is partial evidence, not a package pass. Capture per-stage duration, cache
-state, and the final extracted-consumer results, then establish a reviewed timeout budget that distinguishes a slow
-clean build from a deadlock.
+The final 2026-08-04 dirty-development Release package completed in 10 minutes 24 seconds, following an independent
+11-minute 31-second pass. It passed Release core/editor and D3D12/Vulkan rendering tests, project smoke, asset
+tool/worker/runtime/hub compile gates, shader-compiler validation, staging/archive/extraction, and direct, managed, and
+source-module CMake SDK consumer builds. The remaining release gate is a clean hosted/package run from the intended
+release revision, not missing local package functionality.
 
 ### Closed in this pass: reconcile VFX capability documentation
 
@@ -171,7 +226,7 @@ A production release should require all of the following:
 
 ## Recommended Order Of Work
 
-1. Fix and prove CI, then lock it with branch protection.
+1. Rerun and prove the repaired CI matrix when Actions quota is restored, then lock it with branch protection.
 2. Implement real device timestamp collection behind the existing renderer statistics contract, then establish named
    D3D12, Vulkan, and Metal reference baselines.
 3. Continue VFX closure one complete production slice at a time until the manifest has no disabled rows.

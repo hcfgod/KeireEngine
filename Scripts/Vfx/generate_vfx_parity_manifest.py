@@ -296,7 +296,9 @@ PRODUCTION_SLICES = [
         "name": "Core value modulation",
         "backendTier": "CPU and GPU",
         "implementations": sorted(
-            implementation for implementation in KEIRE_ENABLED_EQUIVALENTS if implementation.startswith("keire.operator.")
+            implementation
+            for implementation in KEIRE_ENABLED_EQUIVALENTS
+            if implementation.startswith("keire.operator.")
         ),
         "tests": [
             "KeireTests/Source/Vfx/VfxExpressionTests.cpp",
@@ -310,7 +312,9 @@ PRODUCTION_SLICES = [
         "name": "Context and particle-output pipeline",
         "backendTier": "CPU and GPU",
         "implementations": sorted(
-            implementation for implementation in KEIRE_ENABLED_EQUIVALENTS if not implementation.startswith("keire.operator.")
+            implementation
+            for implementation in KEIRE_ENABLED_EQUIVALENTS
+            if not implementation.startswith("keire.operator.")
         ),
         "tests": [
             "KeireTests/Source/Vfx/VfxGpuCapabilityTests.cpp",
@@ -529,7 +533,11 @@ def clean_markdown(value: str) -> str:
 def split_menu_path(value: str) -> list[str]:
     """Split Unity menu separators without splitting a ``<Placeholder>``."""
 
-    return [clean_markdown(part) for part in re.split(r"\s+>\s+", value) if clean_markdown(part)]
+    return [
+        clean_markdown(part)
+        for part in re.split(r"\s+>\s+", value)
+        if clean_markdown(part)
+    ]
 
 
 def slug(value: str) -> str:
@@ -553,12 +561,19 @@ def verify_snapshot(graphics_root: Path) -> tuple[Path, dict[str, Any]]:
             text=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError("The Unity source must be a Git checkout so its commit can be verified.") from error
+        raise RuntimeError(
+            "The Unity source must be a Git checkout so its commit can be verified."
+        ) from error
     if commit != GRAPHICS_COMMIT:
-        raise RuntimeError(f"Unity Graphics commit is {commit}; expected {GRAPHICS_COMMIT}.")
+        raise RuntimeError(
+            f"Unity Graphics commit is {commit}; expected {GRAPHICS_COMMIT}."
+        )
 
     package_json = json.loads(package_json_path.read_text(encoding="utf-8"))
-    if package_json.get("version") != PACKAGE_VERSION or package_json.get("unity") != UNITY_EDITOR_LINE:
+    if (
+        package_json.get("version") != PACKAGE_VERSION
+        or package_json.get("unity") != UNITY_EDITOR_LINE
+    ):
         raise RuntimeError(
             "Unexpected VFX package identity: "
             f"version={package_json.get('version')!r}, unity={package_json.get('unity')!r}."
@@ -603,7 +618,9 @@ def menu_paths(text: str) -> list[str]:
         flags=re.IGNORECASE,
     )
     if fallback:
-        return [f"{clean_markdown(fallback.group(1))} > {clean_markdown(fallback.group(2))}"]
+        return [
+            f"{clean_markdown(fallback.group(1))} > {clean_markdown(fallback.group(2))}"
+        ]
     return []
 
 
@@ -613,7 +630,9 @@ def split_table_row(line: str) -> list[str]:
 
 def is_separator_row(cells: Iterable[str]) -> bool:
     cells = list(cells)
-    return bool(cells) and all(re.fullmatch(r":?-{2,}:?", cell.replace(" ", "")) for cell in cells)
+    return bool(cells) and all(
+        re.fullmatch(r":?-{2,}:?", cell.replace(" ", "")) for cell in cells
+    )
 
 
 def parse_settings(text: str) -> list[dict[str, str]]:
@@ -632,7 +651,12 @@ def parse_settings(text: str) -> list[dict[str, str]]:
             continue
         relevant = any(
             marker in section.casefold()
-            for marker in ("settings", "configuration", "inspector window properties", "inspector properties")
+            for marker in (
+                "settings",
+                "configuration",
+                "inspector window properties",
+                "inspector properties",
+            )
         )
         if not relevant or section_table_seen or not line.lstrip().startswith("|"):
             index += 1
@@ -671,7 +695,12 @@ def parse_settings(text: str) -> list[dict[str, str]]:
 
     unique: dict[tuple[str, str, str, str], dict[str, str]] = {}
     for setting in settings:
-        key = (setting["section"], setting["name"], setting["type"], setting["description"])
+        key = (
+            setting["section"],
+            setting["name"],
+            setting["type"],
+            setting["description"],
+        )
         unique[key] = setting
     return list(unique.values())
 
@@ -715,9 +744,7 @@ def disabled_reason(kind: str, implementation: str | None, backend: str) -> str:
             "No production Kéire implementation is registered; this feature requires the schema-4 "
             "resource/output ABI and cooked GPU backend before it can be enabled."
         )
-    return (
-        f"No production Kéire {kind} implementation is registered; creation and compilation must reject this row."
-    )
+    return f"No production Kéire {kind} implementation is registered; creation and compilation must reject this row."
 
 
 def keire_implementation(category: str, label: str, reference_title: str) -> str | None:
@@ -732,7 +759,9 @@ def catalog_documents(documentation_root: Path) -> list[Path]:
     documents: list[Path] = []
     for prefix in ("Operator-", "Block-", "Context-"):
         documents.extend(documentation_root.glob(prefix + "*.md"))
-    return sorted(path for path in documents if path.name not in IGNORED_REFERENCE_PAGES)
+    return sorted(
+        path for path in documents if path.name not in IGNORED_REFERENCE_PAGES
+    )
 
 
 def classify(path: Path) -> str:
@@ -793,8 +822,16 @@ def make_entries(package_root: Path, documents: list[Path]) -> list[dict[str, An
             label = label_from_path(menu_path, heading, len(paths))
             category = category_from_path(menu_path, kind)
             implementation = keire_implementation(category, label, heading)
-            backend = "CPU and GPU" if implementation in KEIRE_ENABLED_EQUIVALENTS else backend_tier(kind, label, category)
-            support = "KÃ©ire Equivalent" if implementation in KEIRE_ENABLED_EQUIVALENTS else "Disabled"
+            backend = (
+                "CPU and GPU"
+                if implementation in KEIRE_ENABLED_EQUIVALENTS
+                else backend_tier(kind, label, category)
+            )
+            support = (
+                "Kéire Equivalent"
+                if implementation in KEIRE_ENABLED_EQUIVALENTS
+                else "Disabled"
+            )
             entries.append(
                 {
                     "id": entry_id(kind, document, label, len(paths)),
@@ -806,19 +843,33 @@ def make_entries(package_root: Path, documents: list[Path]) -> list[dict[str, An
                     "unitySettings": settings,
                     "unitySource": {
                         "documentation": f"{PACKAGE_PATH.as_posix()}/Documentation~/{document.name}",
-                        "implementations": [f"{PACKAGE_PATH.as_posix()}/{source}" for source in sources],
+                        "implementations": [
+                            f"{PACKAGE_PATH.as_posix()}/{source}" for source in sources
+                        ],
                     },
                     "keire": {
                         "support": support,
                         "implementation": implementation,
                         "backendTier": backend,
-                        "tests": KEIRE_TESTS.get(implementation, []) if implementation else [],
+                        "tests": KEIRE_TESTS.get(implementation, [])
+                        if implementation
+                        else [],
                         "documentation": ["docs/Vfx.md"] if implementation else [],
-                        "disabledReason": None if support != "Disabled" else disabled_reason(kind, implementation, backend),
+                        "disabledReason": None
+                        if support != "Disabled"
+                        else disabled_reason(kind, implementation, backend),
                     },
                 }
             )
-    return sorted(entries, key=lambda entry: (entry["kind"], entry["unityCategory"], entry["unityLabel"], entry["id"]))
+    return sorted(
+        entries,
+        key=lambda entry: (
+            entry["kind"],
+            entry["unityCategory"],
+            entry["unityLabel"],
+            entry["id"],
+        ),
+    )
 
 
 def build_manifest(graphics_root: Path) -> dict[str, Any]:
@@ -826,10 +877,17 @@ def build_manifest(graphics_root: Path) -> dict[str, Any]:
     documentation_root = package_root / "Documentation~"
     documents = catalog_documents(documentation_root)
     entries = make_entries(package_root, documents)
-    counts = {kind: sum(entry["kind"] == kind for entry in entries) for kind in ("Operator", "Block", "Context", "Output")}
+    counts = {
+        kind: sum(entry["kind"] == kind for entry in entries)
+        for kind in ("Operator", "Block", "Context", "Output")
+    }
     counts["Total"] = len(entries)
-    counts["Disabled"] = sum(entry["keire"]["support"] == "Disabled" for entry in entries)
-    counts["WithKeireImplementation"] = sum(bool(entry["keire"]["implementation"]) for entry in entries)
+    counts["Disabled"] = sum(
+        entry["keire"]["support"] == "Disabled" for entry in entries
+    )
+    counts["WithKeireImplementation"] = sum(
+        bool(entry["keire"]["implementation"]) for entry in entries
+    )
     return {
         "manifestSchema": 1,
         "program": "Kéire VFX Graph — Unity 6.3 LTS Production Parity",
@@ -873,10 +931,17 @@ def main() -> int:
         manifest = build_manifest(options.unity_source)
         encoded = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
         if options.check:
-            if not options.output.is_file() or options.output.read_text(encoding="utf-8") != encoded:
-                print(f"VFX parity manifest is stale: {options.output}", file=sys.stderr)
+            if (
+                not options.output.is_file()
+                or options.output.read_text(encoding="utf-8") != encoded
+            ):
+                print(
+                    f"VFX parity manifest is stale: {options.output}", file=sys.stderr
+                )
                 return 1
-            print(f"VFX parity manifest is current ({manifest['counts']['Total']} entries).")
+            print(
+                f"VFX parity manifest is current ({manifest['counts']['Total']} entries)."
+            )
             return 0
         options.output.parent.mkdir(parents=True, exist_ok=True)
         options.output.write_text(encoded, encoding="utf-8", newline="\n")

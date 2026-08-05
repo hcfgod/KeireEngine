@@ -15,6 +15,44 @@
 
 using namespace std::chrono_literals;
 
+namespace
+{
+    class CountingMemoryResource final : public std::pmr::memory_resource
+    {
+      public:
+        [[nodiscard]] std::size_t AllocationCount() const noexcept { return m_AllocationCount.load(); }
+
+      private:
+        void* do_allocate(const std::size_t bytes, const std::size_t alignment) override
+        {
+            m_AllocationCount.fetch_add(1);
+            return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+        }
+
+        void do_deallocate(void* pointer, const std::size_t bytes, const std::size_t alignment) override
+        {
+            std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+        }
+
+        [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override
+        {
+            return this == &other;
+        }
+
+        std::atomic<std::size_t> m_AllocationCount{0};
+    };
+
+    class ThrowingStableValue final
+    {
+      public:
+        explicit ThrowingStableValue(const bool fail)
+        {
+            if (fail)
+                throw std::runtime_error("intentional stable-handle construction failure");
+        }
+    };
+} // namespace
+
 TEST_CASE("Job dependencies propagate completion and failure")
 {
     Keire::JobSystemSpecification specification;
@@ -48,6 +86,116 @@ TEST_CASE("Job dependencies propagate completion and failure")
     REQUIRE(blocked.Wait(2s));
     CHECK(blocked.Status() == Keire::JobStatus::Cancelled);
     CHECK_THROWS_WITH_AS(blocked.RethrowIfFailed(), "job failed", std::runtime_error);
+    jobs->Close();
+}
+
+TEST_CASE("Concurrent dependency completion cannot publish a partially registered job")
+{
+    Keire::JobSystemSpecification specification;
+    specification.WorkerCount = 8;
+    specification.BlockingWorkerCount = 1;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(specification);
+
+    for (int iteration = 0; iteration < 100; ++iteration)
+    {
+        constexpr int dependencyCount = 32;
+        std::atomic<bool> release = false;
+        std::atomic<bool> submitting = false;
+        std::atomic<int> completed = 0;
+        std::atomic<bool> premature = false;
+        std::vector<Keire::JobHandle> dependencies;
+        dependencies.reserve(dependencyCount);
+        for (int index = 0; index < dependencyCount; ++index)
+        {
+            dependencies.push_back(jobs->Submit({.Name = "Concurrent dependency"},
+                                                [&](Keire::JobContext& context)
+                                                {
+                                                    while (!release.load(std::memory_order_acquire) &&
+                                                           !context.StopRequested())
+                                                    {
+                                                        std::this_thread::yield();
+                                                    }
+                                                    completed.fetch_add(1, std::memory_order_release);
+                                                }));
+        }
+
+        Keire::JobHandle dependent;
+        std::thread submitter(
+            [&]
+            {
+                Keire::JobDescription description;
+                description.Name = "Fully registered dependent";
+                description.Dependencies = dependencies;
+                submitting.store(true, std::memory_order_release);
+                dependent = jobs->Submit(std::move(description),
+                                         [&](Keire::JobContext&)
+                                         {
+                                             if (completed.load(std::memory_order_acquire) != dependencyCount)
+                                                 premature.store(true, std::memory_order_release);
+                                         });
+            });
+        while (!submitting.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        release.store(true, std::memory_order_release);
+        submitter.join();
+
+        REQUIRE(dependent.Wait(2s));
+        CHECK(dependent.Status() == Keire::JobStatus::Succeeded);
+        CHECK_FALSE(premature.load(std::memory_order_acquire));
+    }
+    jobs->Close();
+}
+
+TEST_CASE("Worker initiated job-system shutdown is safe and completes the caller")
+{
+    Keire::JobSystemSpecification specification;
+    specification.WorkerCount = 2;
+    specification.BlockingWorkerCount = 1;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(specification);
+    std::atomic<bool> releaseCloser = false;
+    std::atomic<bool> waiterStarted = false;
+    const auto closer = jobs->Submit({.Name = "Worker shutdown"},
+                                     [jobs, &releaseCloser](Keire::JobContext&)
+                                     {
+                                         while (!releaseCloser.load(std::memory_order_acquire))
+                                             std::this_thread::yield();
+                                         jobs->Close();
+                                     });
+    const auto waiter = jobs->Submit({.Name = "Worker waiting on shutdown caller"},
+                                     [closer, &waiterStarted](Keire::JobContext&)
+                                     {
+                                         waiterStarted.store(true, std::memory_order_release);
+                                         (void)closer.Wait();
+                                     });
+    while (!waiterStarted.load(std::memory_order_acquire))
+        std::this_thread::yield();
+    releaseCloser.store(true, std::memory_order_release);
+
+    REQUIRE(closer.Wait(2s));
+    CHECK(closer.Status() == Keire::JobStatus::Cancelled);
+    REQUIRE(waiter.Wait(2s));
+    CHECK(waiter.Status() == Keire::JobStatus::Cancelled);
+    CHECK_FALSE(jobs->IsOpen());
+}
+
+TEST_CASE("Job scratch overflow allocations use the configured upstream resource")
+{
+    CountingMemoryResource upstream;
+    Keire::JobSystemSpecification specification;
+    specification.WorkerCount = 1;
+    specification.BlockingWorkerCount = 1;
+    specification.ScratchBytesPerJob = 128;
+    auto jobs = Keire::CreateRef<Keire::JobSystem>(specification, &upstream);
+    const auto job = jobs->Submit({.Name = "Scratch overflow"},
+                                  [](Keire::JobContext& context)
+                                  {
+                                      std::pmr::vector<std::byte> allocation(context.ScratchResource());
+                                      allocation.resize(4096);
+                                  });
+
+    REQUIRE(job.Wait(2s));
+    CHECK(job.Status() == Keire::JobStatus::Succeeded);
+    CHECK(upstream.AllocationCount() >= 2);
     jobs->Close();
 }
 
@@ -184,6 +332,7 @@ TEST_CASE("Worker waits execute local work and allow stealing")
                                      [&](Keire::JobContext&)
                                      {
                                          std::vector<Keire::JobHandle> children;
+                                         children.reserve(128);
                                          for (int index = 0; index < 128; ++index)
                                              children.push_back(jobs->Submit({.Name = "Child"},
                                                                              [&](Keire::JobContext&)
@@ -323,6 +472,7 @@ TEST_CASE("String interning is stable and concurrent")
     CHECK(strings->Resolve(first) == "Assets/Characters/Hero");
 
     std::vector<std::thread> workers;
+    workers.reserve(8);
     std::atomic<bool> stable = true;
     for (int index = 0; index < 8; ++index)
         workers.emplace_back(
@@ -350,6 +500,21 @@ TEST_CASE("Stable handles reject stale generations")
     CHECK(second.Generation() != first.Generation());
     CHECK_FALSE(values.Erase(first));
     REQUIRE(values.With(second, [](int& value) { value += 1; }));
+}
+
+TEST_CASE("Stable handle insertion rolls back both new and reused slots when construction fails")
+{
+    struct TestHandleTag;
+    Keire::Internal::StableHandleTable<TestHandleTag, ThrowingStableValue> values;
+    values.Reserve(1);
+    CHECK_THROWS_AS((void)values.Emplace(true), std::runtime_error);
+    const auto first = values.Emplace(false);
+    CHECK(first.Index() == 0);
+    REQUIRE(values.Erase(first));
+    CHECK_THROWS_AS((void)values.Emplace(true), std::runtime_error);
+    const auto second = values.Emplace(false);
+    CHECK(second.Index() == first.Index());
+    CHECK(second.Generation() != first.Generation());
 }
 
 TEST_CASE("Structured diagnostics validate IDs and retain bounded records")

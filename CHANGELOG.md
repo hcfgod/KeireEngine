@@ -5,6 +5,22 @@ version tags.
 
 ## Unreleased
 
+- Hardened managed runtime validation by giving every integration-test process isolated assembly directories, and
+  corrected the pinned Coral host patch so the configured bundled .NET root is applied before HostFXR discovery. The
+  patched Coral native host now also builds warning-clean under MSVC with bounded string copying and a portable host
+  sentinel. Static analysis now uses a version-stable LLVM 18 gate with documented exclusions for checks that cannot
+  model the repository's lifecycle and test-macro contracts reliably. Completed the local Release package gate through
+  archive extraction and direct, managed, and source-module CMake consumer builds, and recorded the post-remediation
+  evidence separately from the unavailable hosted Actions matrix.
+
+- Hardened the architecture foundation after the production-readiness audit: job dependencies now register atomically
+  against completion and shutdown; replay enforces decode/rewind budgets and preserves explicit failure state; project
+  upgrades use canonical link-safe paths and phase-complete crash recovery; module importers reach the editor and
+  pre-1.0 caret ranges follow SemVer; streaming controls/statistics are synchronized with accurate completion latency;
+  and managed-job terminal records are reclaimed under capacity pressure with executable managed state tests. Repaired
+  the primary CI workflow, expanded recursive first-party format/tidy/Python gates, added workflow parsing and UTF-8
+  integrity checks, enforced ratcheting non-growth budgets for oversized legacy source units, and removed duplicate
+  Visual Studio external-warning flags and managed-proxy intermediate collisions from generated builds.
 - Added the integrated architecture foundation: an application-owned dependency/work-stealing job system and managed
   jobs bridge; hierarchical memory tracking and arenas; string interning, generational handles, canonical asset-path
   indexing, and documented structured diagnostics; explicit budgeted streaming and fence-safe retirement; immutable

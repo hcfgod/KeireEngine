@@ -32,7 +32,11 @@ def arguments() -> argparse.Namespace:
         default=Path("docs/VfxParityManifest.json"),
         help="Checked-in manifest to reconcile.",
     )
-    parser.add_argument("--check", action="store_true", help="Fail if reconciliation would change the manifest.")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Fail if reconciliation would change the manifest.",
+    )
     return parser.parse_args()
 
 
@@ -65,12 +69,16 @@ def reconcile(manifest: dict[str, object]) -> dict[str, object]:
             "support": "Kéire Equivalent" if enabled else "Disabled",
             "implementation": implementation,
             "backendTier": backend,
-            "tests": generator.KEIRE_TESTS.get(implementation, []) if implementation else [],
+            "tests": generator.KEIRE_TESTS.get(implementation, [])
+            if implementation
+            else [],
             "documentation": ["docs/Vfx.md"] if implementation else [],
             "disabledReason": (
                 None
                 if enabled
-                else generator.disabled_reason(str(entry.get("kind", "")), implementation, backend)
+                else generator.disabled_reason(
+                    str(entry.get("kind", "")), implementation, backend
+                )
             ),
         }
 
@@ -79,8 +87,12 @@ def reconcile(manifest: dict[str, object]) -> dict[str, object]:
         for kind in ("Operator", "Block", "Context", "Output")
     }
     counts["Total"] = len(entries)
-    counts["Disabled"] = sum(entry.get("keire", {}).get("support") == "Disabled" for entry in entries)
-    counts["WithKeireImplementation"] = sum(bool(entry.get("keire", {}).get("implementation")) for entry in entries)
+    counts["Disabled"] = sum(
+        entry.get("keire", {}).get("support") == "Disabled" for entry in entries
+    )
+    counts["WithKeireImplementation"] = sum(
+        bool(entry.get("keire", {}).get("implementation")) for entry in entries
+    )
     manifest["counts"] = counts
     manifest["productionSlices"] = generator.PRODUCTION_SLICES
     tooling = manifest.get("tooling")
@@ -98,9 +110,14 @@ def main() -> int:
         encoded = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
         if options.check:
             if original != encoded:
-                print(f"VFX parity manifest Kéire projection is stale: {options.manifest}", file=sys.stderr)
+                print(
+                    f"VFX parity manifest Kéire projection is stale: {options.manifest}",
+                    file=sys.stderr,
+                )
                 return 1
-            print(f"VFX parity manifest Kéire projection is current ({manifest['counts']['Total']} entries).")
+            print(
+                f"VFX parity manifest Kéire projection is current ({manifest['counts']['Total']} entries)."
+            )
             return 0
         options.manifest.write_text(encoded, encoding="utf-8", newline="\n")
         print(f"Reconciled {options.manifest} ({manifest['counts']['Total']} entries).")

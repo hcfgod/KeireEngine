@@ -1264,7 +1264,7 @@ namespace Keire
             {
                 try
                 {
-                    const auto document = nlohmann::json::parse(Detail::ReadTextFile(manifest, 1024U * 1024U));
+                    const auto document = nlohmann::json::parse(Detail::ReadTextFile(manifest, std::size_t{1} << 20U));
                     highestGeneration = std::max(highestGeneration, document.value("generation", std::uint64_t{0}));
                 }
                 catch (const nlohmann::json::exception&)
@@ -1551,8 +1551,24 @@ namespace Keire
                 std::uint64_t id = 0;
                 const auto lifetime = std::weak_ptr<Impl*>(runtime->Lifetime);
                 std::scoped_lock lock(runtime->ManagedJobMutex);
-                if (!runtime->ManagedJobs || runtime->ManagedJobRecords.size() >= 65536)
+                if (!runtime->ManagedJobs)
                     return 0;
+                if (runtime->ManagedJobRecords.size() >= 65536)
+                {
+                    std::set<std::uint64_t> retainedDependencies;
+                    for (std::int32_t index = 0; index < dependencyCount; ++index)
+                        retainedDependencies.emplace(dependencyIds[index]);
+                    std::erase_if(runtime->ManagedJobRecords,
+                                  [&](const auto& entry)
+                                  {
+                                      const auto status = entry.second.Work.Status();
+                                      return !retainedDependencies.contains(entry.first) &&
+                                             (status == JobStatus::Succeeded || status == JobStatus::Failed ||
+                                              status == JobStatus::Cancelled);
+                                  });
+                    if (runtime->ManagedJobRecords.size() >= 65536)
+                        return 0;
+                }
                 for (std::int32_t index = 0; index < dependencyCount; ++index)
                 {
                     const auto found = runtime->ManagedJobRecords.find(dependencyIds[index]);
@@ -1563,17 +1579,18 @@ namespace Keire
                 if (runtime->NextManagedJob == 0)
                     return 0;
                 id = runtime->NextManagedJob++;
-                work = runtime->ManagedJobs->Submit(std::move(description),
-                                                    [lifetime, callback, state](JobContext& context)
-                                                    {
-                                                        const auto locked = lifetime.lock();
-                                                        if (!locked || !*locked)
-                                                            throw std::runtime_error(
-                                                                "Managed job runtime is unavailable.");
-                                                        RuntimeScope scope(**locked);
-                                                        if (callback(state, 0, context.StopRequested() ? 1 : 0) != 0)
-                                                            throw std::runtime_error("Managed job callback failed.");
-                                                    });
+                work = runtime->ManagedJobs->Submit(
+                    std::move(description),
+                    [lifetime, callback, state](JobContext& context)
+                    {
+                        const auto locked = lifetime.lock();
+                        if (!locked || !*locked)
+                            throw std::runtime_error("Managed job runtime is unavailable.");
+                        RuntimeScope scope(**locked);
+                        std::stop_callback stop(context.StopToken(), [&] { (void)callback(state, 4, 0); });
+                        if (callback(state, 0, context.StopRequested() ? 1 : 0) != 0)
+                            throw std::runtime_error("Managed job callback failed.");
+                    });
                 work.OnComplete(
                     [lifetime, callback, state](const JobResult& result)
                     {
@@ -2095,7 +2112,7 @@ namespace Keire
                     return 0;
                 const auto name = animator->CurrentState();
                 if (destination && capacity > 0)
-                    std::memcpy(destination, name.data(), std::min<std::size_t>(name.size(), capacity));
+                    std::copy_n(name.begin(), std::min<std::size_t>(name.size(), capacity), destination);
                 return static_cast<std::int32_t>(
                     std::min<std::size_t>(name.size(), std::numeric_limits<std::int32_t>::max()));
             }
@@ -2357,7 +2374,7 @@ namespace Keire
                     return 0;
                 const auto name = entity.Name();
                 if (destination && capacity > 0)
-                    std::memcpy(destination, name.data(), std::min<std::size_t>(name.size(), capacity));
+                    std::copy_n(name.begin(), std::min<std::size_t>(name.size(), capacity), destination);
                 return static_cast<std::int32_t>(
                     std::min<std::size_t>(name.size(), std::numeric_limits<std::int32_t>::max()));
             }
@@ -3405,7 +3422,7 @@ namespace Keire
             StatusChanged.notify_all();
         }
 
-        void RunBuild(const std::stop_token cancellation, ManagedBuildRequest request,
+        void RunBuild(const std::stop_token& cancellation, const ManagedBuildRequest& request,
                       const ManagedBuildOperationId operation) noexcept
         {
             const auto staging = OutputRoot / "Generations" / std::to_string(operation.Value());
@@ -3443,7 +3460,7 @@ namespace Keire
                     if (std::filesystem::is_regular_file(cachedAssembly) &&
                         std::filesystem::is_regular_file(cachedFingerprint))
                     {
-                        cacheHit = Detail::ReadTextFile(cachedFingerprint, 1024U * 1024U) == fingerprint;
+                        cacheHit = Detail::ReadTextFile(cachedFingerprint, std::size_t{1} << 20U) == fingerprint;
                     }
                     if (cacheHit)
                     {
@@ -3482,7 +3499,7 @@ namespace Keire
                         if (!std::filesystem::is_regular_file(generationManagedApi))
                             throw std::runtime_error("Keire.Managed compilation published no API assembly.");
                         std::filesystem::create_directories(cacheDirectory);
-                        const auto assemblyBytes = Detail::ReadTextFile(generationManagedApi, 64U * 1024U * 1024U);
+                        const auto assemblyBytes = Detail::ReadTextFile(generationManagedApi, std::size_t{64} << 20U);
                         Detail::WriteFileAtomically(cachedAssembly, std::as_bytes(std::span(assemblyBytes)));
                         Detail::WriteTextFileAtomically(cachedFingerprint, fingerprint);
                     }
@@ -3557,7 +3574,7 @@ namespace Keire
                     if (cancellation.stop_requested() || Status.Operation != operation)
                         throw ManagedBuildState::Cancelled;
                 }
-                const auto active = staging;
+                const auto& active = staging;
                 Detail::WriteTextFileAtomically(OutputRoot / "active-generation.json",
                                                 "{\"generation\":" + std::to_string(operation.Value()) +
                                                     ",\"directory\":\"" +
@@ -3893,7 +3910,7 @@ namespace Keire
         {
             const auto referenceDirectory = m_Impl->ProjectRoot / "Library/ScriptAssemblies/References";
             const auto reference = referenceDirectory / ideManagedApi.filename();
-            const auto contents = Detail::ReadTextFile(ideManagedApi, 64U * 1024U * 1024U);
+            const auto contents = Detail::ReadTextFile(ideManagedApi, std::size_t{64} << 20U);
             Detail::WriteFileAtomically(reference, std::as_bytes(std::span(contents)));
             ideManagedApi = reference;
             if (!ideManagedApiProject.empty())
@@ -3948,12 +3965,12 @@ namespace Keire
              .Class = JobClass::Blocking,
              .Domain = JobDomain::Tooling},
             [implementation = m_Impl.get(), request = std::move(request), operation,
-             buildCancellation](JobContext& context) mutable
+             buildCancellation](JobContext& context)
             {
                 std::stop_source combined;
                 std::stop_callback schedulerStop(context.StopToken(), [&combined] { combined.request_stop(); });
                 std::stop_callback buildStop(buildCancellation, [&combined] { combined.request_stop(); });
-                implementation->RunBuild(combined.get_token(), std::move(request), operation);
+                implementation->RunBuild(combined.get_token(), request, operation);
             });
         return operation;
     }
@@ -5033,7 +5050,7 @@ namespace Keire
         }
     }
 
-    void ScriptSystem::InstallManagedComponents(Ref<ComponentRegistry> registry)
+    void ScriptSystem::InstallManagedComponents(const Ref<ComponentRegistry>& registry)
     {
         m_Impl->RequireOwner();
         if (!IsOpen() || !m_Impl->ActiveContext)

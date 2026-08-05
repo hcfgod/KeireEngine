@@ -39,14 +39,17 @@ class MarkdownCatalogTests(unittest.TestCase):
 
     def test_menu_split_does_not_split_placeholder_closing_brackets(self) -> None:
         self.assertEqual(
-            generator.split_menu_path("Attribute > Curve > [Add/Set] <Attribute> <Mode>"),
+            generator.split_menu_path(
+                "Attribute > Curve > [Add/Set] <Attribute> <Mode>"
+            ),
             ["Attribute", "Curve", "[Add/Set] <Attribute> <Mode>"],
         )
 
     def test_checked_manifest_preserves_exact_dynamic_labels(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
         by_document = {
-            Path(entry["unitySource"]["documentation"]).name: entry for entry in manifest["entries"]
+            Path(entry["unitySource"]["documentation"]).name: entry
+            for entry in manifest["entries"]
         }
         expected = {
             "Block-SetAttributeFromMap.md": "Attribute > Set <Attribute> From Map",
@@ -58,17 +61,26 @@ class MarkdownCatalogTests(unittest.TestCase):
         for document, menu_path in expected.items():
             with self.subTest(document=document):
                 self.assertEqual(by_document[document]["unityMenuPath"], menu_path)
-        self.assertEqual(by_document["Block-SetSpawnEvent.md"]["unityLabel"], "Set SpawnEvent <Attribute>")
+        self.assertEqual(
+            by_document["Block-SetSpawnEvent.md"]["unityLabel"],
+            "Set SpawnEvent <Attribute>",
+        )
 
 
 class RuntimeCatalogIntegrityTests(unittest.TestCase):
     def test_every_generator_mapping_exists_in_runtime_contract(self) -> None:
         runtime_ids = {entry.type_id for entry in load_runtime_catalog()}
-        self.assertTrue(set(generator.KEIRE_IMPLEMENTATIONS.values()).issubset(runtime_ids))
+        self.assertTrue(
+            set(generator.KEIRE_IMPLEMENTATIONS.values()).issubset(runtime_ids)
+        )
 
     def test_validator_rejects_mapping_drift_without_unity(self) -> None:
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        mapped = next(entry for entry in manifest["entries"] if entry["keire"]["implementation"] is not None)
+        mapped = next(
+            entry
+            for entry in manifest["entries"]
+            if entry["keire"]["implementation"] is not None
+        )
         mapped["keire"]["implementation"] = "keire.operator.add"
         encoded = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
         with tempfile.TemporaryDirectory() as temporary_directory:

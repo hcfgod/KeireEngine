@@ -27,9 +27,15 @@ BACKEND_LABEL = {
 
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=Path("docs/VfxParityManifest.json"))
-    parser.add_argument("--output", type=Path, default=Path("docs/generated/VfxCapabilities.md"))
-    parser.add_argument("--check", action="store_true", help="Fail if the generated document is stale.")
+    parser.add_argument(
+        "--manifest", type=Path, default=Path("docs/VfxParityManifest.json")
+    )
+    parser.add_argument(
+        "--output", type=Path, default=Path("docs/generated/VfxCapabilities.md")
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="Fail if the generated document is stale."
+    )
     return parser.parse_args()
 
 
@@ -95,7 +101,9 @@ def render(manifest: dict[str, object]) -> str:
         ]
     )
     for node in runtime:
-        enabled_rows = sum(row["keire"]["support"] != "Disabled" for row in mapped_rows[node.type_id])
+        enabled_rows = sum(
+            row["keire"]["support"] != "Disabled" for row in mapped_rows[node.type_id]
+        )
         lines.append(
             f"| `{escape(node.type_id)}` | {escape(node.label)} | {escape(node.node_class)} | "
             f"{escape(SUPPORT_LABEL[node.support])} | {escape(BACKEND_LABEL[node.backend])} | {enabled_rows} |"
@@ -110,8 +118,14 @@ def main() -> int:
         manifest = json.loads(options.manifest.read_text(encoding="utf-8"))
         encoded = render(manifest)
         if options.check:
-            if not options.output.is_file() or options.output.read_text(encoding="utf-8") != encoded:
-                print(f"Generated VFX capability reference is stale: {options.output}", file=sys.stderr)
+            if (
+                not options.output.is_file()
+                or options.output.read_text(encoding="utf-8") != encoded
+            ):
+                print(
+                    f"Generated VFX capability reference is stale: {options.output}",
+                    file=sys.stderr,
+                )
                 return 1
             print(f"Generated VFX capability reference is current: {options.output}")
             return 0

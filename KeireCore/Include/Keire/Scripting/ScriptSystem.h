@@ -439,7 +439,7 @@ namespace Keire
         [[nodiscard]] bool SetBehaviourEnabled(ManagedBehaviourInstanceId instance, bool enabled);
         [[nodiscard]] std::vector<ManagedBehaviourCheckpoint> CaptureReplayCheckpoint();
         void RestoreReplayCheckpoint(std::span<const ManagedBehaviourCheckpoint> checkpoint);
-        void InstallManagedComponents(Ref<ComponentRegistry> registry);
+        void InstallManagedComponents(const Ref<ComponentRegistry>& registry);
         void SetAssetSystem(Ref<AssetSystem> assets);
         void PumpManagedAssets();
         void SetRuntimeServices(IScriptRuntimeServices* services);

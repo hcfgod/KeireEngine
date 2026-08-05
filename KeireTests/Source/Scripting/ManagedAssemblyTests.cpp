@@ -31,6 +31,11 @@ namespace
         std::memcpy(result.data(), text.data(), text.size());
         return result;
     }
+
+    [[nodiscard]] std::filesystem::path UniqueTemporaryRoot(const std::string_view prefix)
+    {
+        return std::filesystem::temp_directory_path() / (std::string(prefix) + Keire::AssetId::Generate().ToString());
+    }
 } // namespace
 
 TEST_CASE("Managed assembly definitions round trip and expose dependencies")
@@ -55,7 +60,7 @@ TEST_CASE("Managed assembly definitions round trip and expose dependencies")
 
 TEST_CASE("Managed SDK settings preserve project data and resolve a validated custom SDK")
 {
-    const auto root = std::filesystem::temp_directory_path() / ("Keire-ManagedSdk-" + TestAsset(89).ToString());
+    const auto root = UniqueTemporaryRoot("Keire-ManagedSdk-");
     struct Cleanup final
     {
         std::filesystem::path Root;
@@ -94,7 +99,7 @@ TEST_CASE("Managed SDK settings preserve project data and resolve a validated cu
 
 TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
 {
-    const auto root = std::filesystem::temp_directory_path() / ("Keire-ManagedIde-" + TestAsset(90).ToString());
+    const auto root = UniqueTemporaryRoot("Keire-ManagedIde-");
     struct Cleanup final
     {
         std::filesystem::path Root;
@@ -142,7 +147,7 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
 
 TEST_CASE("Managed IDE workspace references the engine API project in source checkouts")
 {
-    const auto root = std::filesystem::temp_directory_path() / ("Keire-ManagedIdeSource-" + TestAsset(92).ToString());
+    const auto root = UniqueTemporaryRoot("Keire-ManagedIdeSource-");
     struct Cleanup final
     {
         std::filesystem::path Root;
@@ -208,7 +213,8 @@ TEST_CASE("Managed builds publish only successful replacements")
         return;
     }
 
-    const auto root = std::filesystem::absolute("Library/ManagedBuildIntegration-" + TestAsset(99).ToString());
+    const auto root =
+        std::filesystem::absolute("Library/ManagedBuildIntegration-" + Keire::AssetId::Generate().ToString());
     struct Cleanup final
     {
         std::filesystem::path Root;
@@ -276,11 +282,21 @@ TEST_CASE("Third-person sandbox gameplay assembly compiles against Keire.Managed
 #endif
     REQUIRE(std::filesystem::is_regular_file(dotnet));
     const auto root = std::filesystem::absolute("Samples/KeireSandbox");
+    const auto assemblyDirectory = "Library/SandboxScriptValidation-" + Keire::AssetId::Generate().ToString();
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{root / assemblyDirectory};
     const auto assembly = Keire::ManagedAssemblyAsset::Decode(ReadBytes(root / "Assets/Scripts/Gameplay.keireasm"));
     Keire::ScriptSystemSpecification specification;
     specification.Mode = Keire::ScriptMode::Enabled;
     specification.ProjectRoot = root;
-    specification.AssemblyDirectory = "Library/SandboxScriptValidation";
+    specification.AssemblyDirectory = assemblyDirectory;
     specification.ManagedApiAssembly = std::filesystem::absolute("Build/Managed/Keire.Managed.dll");
     specification.DotnetExecutable = dotnet;
     auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
@@ -308,7 +324,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet");
 #endif
     REQUIRE(std::filesystem::is_regular_file(dotnet));
-    const auto root = std::filesystem::absolute("Library/ManagedReloadIntegration-" + TestAsset(100).ToString());
+    const auto root = UniqueTemporaryRoot("Keire-ManagedReloadIntegration-");
     struct ReloadCleanup final
     {
         std::filesystem::path Root;

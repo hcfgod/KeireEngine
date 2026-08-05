@@ -64,6 +64,14 @@ bash Scripts/project.sh test --generator ninja --configuration Debug --toolset c
 Then run clang-format on changed first-party C++ files, its dry-run check, `git diff --check`, and `git status --short`.
 Never format or patch vendored code during ordinary engine work.
 
+The fast script harnesses additionally parse every workflow with duplicate-key rejection, scan tracked and untracked
+first-party text as strict UTF-8 for common mojibake, and enforce ratcheting limits in
+`Config/SourceFileBudgets.json`. CI runs `actionlint`, `yamllint`, Ruff,
+ShellCheck, PSScriptAnalyzer, recursive first-party clang-format, and recursive compile-database-backed clang-tidy. A
+compile-database coverage gate rejects any omitted Premake-owned translation unit; SDK examples remain covered by their
+direct and CMake package-consumer builds. A hosted workflow that did not start because Actions quota was exhausted is
+unavailable evidence, not a product failure and not a passing lane.
+
 ## Risk-Based Matrix
 
 | Change type | Required additional validation |
