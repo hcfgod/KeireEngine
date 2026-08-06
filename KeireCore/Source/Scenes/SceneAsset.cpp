@@ -891,11 +891,12 @@ namespace Keire
                                        .dump()});
         result.Objects.push_back(std::move(cube));
 
-        SceneObjectDefinition light{AssetId::Parse("a1b2c3d4-1000-4000-8000-000000000002"),
-                                    {},
-                                    "Directional Light",
-                                    true,
-                                    {{0.0F, 3.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}};
+        SceneObjectDefinition light{
+            AssetId::Parse("a1b2c3d4-1000-4000-8000-000000000002"),
+            {},
+            "Directional Light",
+            true,
+            {{0.0F, 3.0F, 0.0F}, Math::EulerDegreesToQuaternion({50.0F, -30.0F, 0.0F}), {1.0F, 1.0F, 1.0F}}};
         light.Components.push_back(MakeTransformDefinition(light.Transform));
         light.Components.push_back({DirectionalLightComponent::StaticType(), 1, true,
                                     Json({{"color", Json::array({1.0F, 1.0F, 1.0F, 1.0F})},

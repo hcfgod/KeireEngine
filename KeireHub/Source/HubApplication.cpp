@@ -523,6 +523,17 @@ namespace
 
         void ShowHub()
         {
+            if (m_Registry)
+            {
+                try
+                {
+                    m_Registry->Refresh();
+                }
+                catch (const std::exception& error)
+                {
+                    SetError(error.what());
+                }
+            }
             const auto window = Owner().MainWindow();
             window->SetVisible(true);
             window->Restore();

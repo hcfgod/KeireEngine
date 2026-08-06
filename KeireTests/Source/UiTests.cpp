@@ -149,6 +149,10 @@ namespace
                 (void)ui.Checkbox("Check", checked);
                 float value = 0.5F;
                 (void)ui.SliderFloat("Value", value, 0.0F, 1.0F);
+                int fixedValue = 14;
+                CHECK_FALSE(ui.SliderInt("Fixed Value", fixedValue, 14, 14));
+                CHECK(fixedValue == 14);
+                CHECK_THROWS_AS((void)ui.SliderInt("Reversed Value", fixedValue, 15, 14), std::invalid_argument);
                 Keire::Vector3 vector{1.0F, 2.0F, 3.0F};
                 CHECK_FALSE(ui.DragVector3("Vector", vector));
                 CHECK_THROWS_AS((void)ui.DragVector3("", vector), std::invalid_argument);

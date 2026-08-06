@@ -18,6 +18,13 @@ source in the Project panel. The same picker implementation backs typed componen
 Project-owned settings live below `<Project>/ProjectSettings` and are suitable for source control. They are distinct
 from per-user editor state under `Library`, such as dock layouts, Scene-camera navigation, and Scene-tool preferences.
 
+## Scripting SDK
+
+`Scripting.keiresettings` selects the .NET 10 SDK used for managed gameplay builds. New Empty and Starter projects
+persist **Bundled** as the default. The editor resolves that SDK from its own repository or packaged installation tree,
+independently of the project's working directory. **System PATH** checks `DOTNET_ROOT` and `PATH`; **Custom** validates
+the selected `dotnet` executable and requires an adjacent .NET 10 SDK directory.
+
 ## Entity And Physics Layers
 
 `Authoring.keiresettings` owns 32 stable layer slots and the symmetric physics collision matrix. Layer 0 is **Default**;

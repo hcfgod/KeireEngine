@@ -186,6 +186,9 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(std::filesystem::exists(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Project.keireproject"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Rendering.keiresettings"));
+    CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Scripting.keiresettings"));
+    const auto scriptingSettings = KeireTests::ReadFile(created->Root() / "ProjectSettings/Scripting.keiresettings");
+    CHECK(scriptingSettings.find(R"("sdkSelection": "bundled")") != std::string::npos);
     const auto starterSceneSource = KeireTests::ReadFile(created->Root() / "Assets/Scenes/SampleScene.keirescene");
     const std::vector<std::byte> starterSceneBytes(
         reinterpret_cast<const std::byte*>(starterSceneSource.data()),
@@ -195,6 +198,13 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(starterScene->Definition().SchemaVersion == Keire::CurrentSceneSchemaVersion);
     CHECK(std::ranges::all_of(starterScene->Definition().Objects, [](const Keire::SceneObjectDefinition& object)
                               { return object.Layer < Keire::EntityLayerCount; }));
+    const auto starterLight =
+        std::ranges::find(starterScene->Definition().Objects, "Directional Light", &Keire::SceneObjectDefinition::Name);
+    REQUIRE(starterLight != starterScene->Definition().Objects.end());
+    const auto starterLightTransform =
+        Keire::Math::ComposeTransform({}, starterLight->Transform.Rotation, {1.0F, 1.0F, 1.0F});
+    const auto starterLightDirection = Keire::Math::TransformDirection(starterLightTransform, {0.0F, 0.0F, 1.0F});
+    CHECK(starterLightDirection.Y < -0.5F);
     auto rendering = Keire::LoadRenderEnvironmentSettings(created->Root());
     CHECK(rendering.AmbientIntensity == doctest::Approx(0.75F));
     rendering.AmbientColor = {0.1F, 0.2F, 0.3F, 1.0F};
@@ -219,7 +229,7 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK_THROWS_AS(Keire::SaveRenderEnvironmentSettings(created->Root(), rendering), std::invalid_argument);
     CHECK(Keire::Project::Inspect(created->Root()) == Keire::ProjectStatus::Ready);
 
-    const auto exclusive = Keire::Project::Open(created->Root(), Keire::ProjectOpenMode::Exclusive);
+    auto exclusive = Keire::Project::Open(created->Root(), Keire::ProjectOpenMode::Exclusive);
     CHECK(Keire::Project::IsLocked(created->Root()));
     CHECK_THROWS_AS((void)Keire::Project::Open(created->Root(), Keire::ProjectOpenMode::Exclusive), std::runtime_error);
 
@@ -233,9 +243,12 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     registry->RecordOpened(*exclusive);
     REQUIRE(registry->Entries().size() == 1);
     CHECK(registry->Entries().front().Status == Keire::ProjectStatus::InUse);
-    CHECK(registry->SetPinned(exclusive->Descriptor().Id, true));
+    exclusive.Reset();
+    registry->Refresh();
+    CHECK(registry->Entries().front().Status == Keire::ProjectStatus::Ready);
+    CHECK(registry->SetPinned(descriptor.Id, true));
     CHECK(registry->Entries().front().Pinned);
-    CHECK(registry->Remove(exclusive->Descriptor().Id));
+    CHECK(registry->Remove(descriptor.Id));
     CHECK(registry->Entries().empty());
 
     CHECK_THROWS_AS((void)Keire::Project::Create({directory.Path, "../Unsafe", Keire::ProjectTemplate::Empty}),

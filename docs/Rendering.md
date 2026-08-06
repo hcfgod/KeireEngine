@@ -16,6 +16,10 @@ changes the light's color or intensity. A receiving surface does not darken mere
 shadow pass. Visible shadowing requires another surface of the caster, or separate `Cast Shadows` geometry, to be
 closer to the light along that shadow-map sample.
 
+Realtime shadows do not require **Bake Lighting**. Baking produces static indirect lightmaps, probe data, reflection
+cubemaps, and Mixed-light shadow masks. Starter scenes angle their Directional Light downward; rotating it close to the
+horizon intentionally produces very long cast shadows.
+
 Directional, point, and spot lights can opt into short-range contact refinement and texture cookies. The renderer packs
 up to eight active cookies into one deterministic 4x2 atlas, keeping the spatial PBR shader within SDL's portable
 16-sampler limit. Directional and spot lights also expose cookie scale, offset, and rotation. `Realtime` lights remain

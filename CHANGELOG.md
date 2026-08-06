@@ -5,6 +5,15 @@ version tags.
 
 ## Unreleased
 
+- Fixed the Lighting panel crashing when the lightmap and maximum resolutions both reached 16,384. Fixed-value integer
+  slider ranges now remain valid instead of throwing during UI rendering.
+- Fixed the persistent Project Hub showing a project as still open after its editor exited. Showing or reactivating the
+  Hub now refreshes OS lock-derived project status before presenting the project list.
+- New projects now persist the Bundled .NET 10 SDK selection, and development or packaged editors discover that SDK
+  from their own installation ancestry even when the Hub launches them with the game project as the working directory.
+- Starter scenes now pitch their Directional Light down toward the scene instead of casting horizontal, extremely long
+  realtime shadows across the ground.
+
 - Added linked Kéire application artwork for Windows editor, Hub, and runtime executables. Desktop player builds now
   generate fallback artwork when no icon is selected and embed the selected or generated multi-resolution icon into
   Windows player executables while retaining the existing Linux and macOS platform assets.

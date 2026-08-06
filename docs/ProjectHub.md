@@ -23,7 +23,9 @@ authorization to bypass those checks.
 After launch succeeds, the Hub hides and remains alive at a low event-pump rate. Its system-tray menu provides **Show
 Hub** and **Quit**. Minimizing a visible Hub hides it while tray support is active; closing the Hub exits the complete
 process. Show is one deferred, idempotent operation that synchronizes state, makes the window visible, restores it from
-the minimized state, raises it, and focuses it. Native tray callbacks enqueue their actions until SDL polling completes,
+the minimized state, raises it, and focuses it. Synchronization refreshes every recent project's OS lock-derived status,
+so an editor that exited while the Hub was hidden is immediately shown as ready. Native tray callbacks enqueue their
+actions until SDL polling completes,
 so a single click cannot race a reentrant window mutation. The hidden Hub retains its minimized state internally
 so it continues at the bounded background pump rate. If the platform cannot create a tray entry, the Hub minimizes
 instead so it can always be recovered from the taskbar. Tray Quit follows the same deferred action boundary and performs

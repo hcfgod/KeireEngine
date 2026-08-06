@@ -95,6 +95,19 @@ TEST_CASE("Managed SDK settings preserve project data and resolve a validated cu
     CHECK(text.find(R"("unrelated": 17)") != std::string::npos);
     CHECK(text.find(R"("sdkSelection": "systemPath")") != std::string::npos);
     CHECK(text.find(dotnet.generic_string()) != std::string::npos);
+
+    const auto installation = root / "Installation";
+    const auto runtimeRoot = installation / "Build/Bin/Debug/KeireClient/Managed/Dotnet";
+    const auto bundledRoot = installation / "Build/Dependencies/dotnet-sdk";
+#if defined(_WIN32)
+    const auto bundledDotnet = bundledRoot / "dotnet.exe";
+#else
+    const auto bundledDotnet = bundledRoot / "dotnet";
+#endif
+    std::filesystem::create_directories(bundledRoot / "sdk/10.0.100");
+    std::ofstream(bundledDotnet, std::ios::binary) << "fixture";
+    CHECK(Keire::Detail::ResolveDotnet({}, Keire::ManagedSdkSelection::Bundled, root, runtimeRoot) ==
+          std::filesystem::absolute(bundledDotnet).lexically_normal());
 }
 
 TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")

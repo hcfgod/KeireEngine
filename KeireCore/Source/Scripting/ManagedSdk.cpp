@@ -116,6 +116,7 @@ namespace Keire::Detail
                     root = parent;
                 }
             };
+            appendAncestors(runtimeRoot);
             appendAncestors(std::filesystem::current_path());
             appendAncestors(projectRoot);
 

@@ -12,7 +12,8 @@ references, private asynchronous logging, Premake generation, sanitizers, SDK pa
 automation.
 
 The editor now renders resizable Scene and Game views through an application-owned SDL_GPU pipeline. The starter scene
-contains a primary Camera, a tintable cube, and a Directional Light; Scene view adds a depth-tested grid plus Unity-style framing, locking,
+contains a primary Camera, a tintable cube, and a downward-angled Directional Light; Scene view adds a depth-tested grid
+plus Unity-style framing, locking,
 orbit, camera-local pan, dolly, fly, orthographic, and axis-snap navigation. The Project panel provides extension-free
 List/Grid views, contextual creation, multi-item file operations, delayed metadata cards, and persistent recoverable trash.
 Pinned host-side shader tooling imports HLSL into DXIL, SPIR-V, and MSL while runtime/public APIs remain backend-free.
@@ -198,7 +199,8 @@ swapchain wait time; higher applied values favor throughput at the cost of addit
 
 Spatial lighting is authored from **Window > Lighting**. Add Reflection Probe and Light Probe Volume entities from the
 Entity or Hierarchy menus, mark contributing Mesh Renderers static, choose Realtime/Baked/Mixed on lights, and enable
-emissive GI on contributing materials. **Bake Lighting** runs in the isolated asset worker and publishes lightmaps,
+emissive GI on contributing materials. Realtime shadows update without a bake. **Bake Lighting** runs in the isolated
+asset worker and publishes lightmaps,
 eight-channel mixed shadow masks, reflection cubemaps, and SH9 probe volumes as one cached lighting set. The equivalent
 headless workflow is:
 
@@ -700,7 +702,8 @@ the next editor update boundary. The Scene canvas remains available with no open
 same safe operation from an empty or populated workspace.
 
 Schema v2 scenes use stable `Entity` handles and application-registered, reference-counted Components. Transform is
-mandatory; Directional Light supplies the built-in Lambert path while its shadow fields remain future-facing. Play clones authored state, Pause freezes component
+mandatory; Directional Light supplies built-in Lambert lighting and realtime cascaded shadows. Play clones authored
+state, Pause freezes component
 updates, Step advances one fixed tick, and Stop discards runtime changes. EnTT and GLM implement ECS/math privately;
 SDK code sees only Kéire IDs, components, queries, vectors, quaternions, matrices, and colors.
 

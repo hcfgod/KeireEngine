@@ -12,6 +12,7 @@
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
@@ -292,6 +293,7 @@ namespace Keire
                                             "/Library/\n/Logs/\n/Temp/\n/Build/\n/*.csproj\n/*.sln\n");
             SaveRenderEnvironmentSettings(root, {});
             SaveProjectAuthoringSettings(root, DefaultProjectAuthoringSettings());
+            Detail::WriteManagedSdkConfiguration(root, {});
 
             ProjectDescriptor descriptor;
             descriptor.Id = ProjectId::Generate();

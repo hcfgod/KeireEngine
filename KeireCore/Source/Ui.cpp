@@ -1225,8 +1225,8 @@ namespace Keire
     bool UiFrame::SliderInt(std::string_view label, int& value, const int minimum, const int maximum)
     {
         m_Impl->RequireActive("SliderInt");
-        if (minimum >= maximum)
-            throw std::invalid_argument("SliderInt minimum must be less than maximum.");
+        if (minimum > maximum)
+            throw std::invalid_argument("SliderInt minimum must not exceed maximum.");
         const std::string safeLabel(label);
         return ImGui::SliderInt(safeLabel.c_str(), &value, minimum, maximum);
     }
