@@ -48,6 +48,31 @@ function AddKeireManagedRuntimeDependency()
     end
 end
 
+function AddKeireManagedHostStaging()
+    if _ACTION == "ninja" then
+        return
+    end
+
+    local commandRepositoryRoot = _ACTION == "gmake" and "." or ".."
+
+    filter "system:windows"
+        postbuildcommands
+        {
+            'powershell -NoProfile -ExecutionPolicy Bypass -File "' .. commandRepositoryRoot ..
+                '/Scripts/Windows/stage-managed-host.ps1" -Root "' .. commandRepositoryRoot ..
+                '" -Configuration "%{cfg.buildcfg}" -Architecture "%{cfg.architecture}" -Target "%{prj.name}"'
+        }
+
+    filter { "system:linux or macosx" }
+        postbuildcommands
+        {
+            'bash "' .. commandRepositoryRoot .. '/Scripts/Unix/stage-managed-host.sh" "' ..
+                commandRepositoryRoot .. '" "%{cfg.buildcfg}" "%{cfg.system}" "%{cfg.architecture}" "%{prj.name}"'
+        }
+
+    filter {}
+end
+
 project(KeireManagedProject)
     location "../../Build/Projects/KeireManaged"
     objdir ("../../Build/Intermediates/" .. OutputDir .. "/" .. KeireManagedProject)

@@ -20,6 +20,9 @@ function Assert-True([bool]$Condition, [string]$Message) {
 
 $project = Get-ProjectConfig
 if ($runFast) {
+& (Join-Path $PSScriptRoot "test-clean-windows.ps1")
+& (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
+& (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
@@ -29,6 +32,7 @@ $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\P
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
+Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('$Configuration = "Dist"')) "Dist editor package launcher command"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
 Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
 $launcherFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-launcher-exit-" + [guid]::NewGuid().ToString("N"))
@@ -416,6 +420,11 @@ Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Con
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 Assert-True ($packageScript.Contains('assimp-LICENSE.txt') -and $packageScript.Contains('stb-LICENSE.txt') -and $packageScript.Contains('$Lock.ASSIMP_COMMIT') -and $packageScript.Contains('$Lock.STB_COMMIT')) "Asset importer package metadata and attribution"
 Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty') -and $packageScript.Contains('manifest commit does not match')) "Asset worker and clean package policy"
+$editorPackageScript = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
+Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPackageScript.Contains('-StageOnly') -and
+    $editorPackageScript.Contains('Build\Dependencies\dotnet-sdk') -and
+    $editorPackageScript.Contains('Assert-WindowsEditorPackageStage') -and
+    $editorPackageScript.Contains('editor-package.json')) "Windows Dist editor distribution packaging"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and
     $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and

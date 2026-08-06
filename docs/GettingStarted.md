@@ -32,7 +32,9 @@ Open PowerShell at the repository root:
 ./Scripts/project.ps1 run -Generator ninja -Configuration Debug -Toolset msc
 ```
 
-Visual Studio users may select `vs2022` instead. Ninja is useful for fast local verification and is the most direct
+Visual Studio users may select `vs2022` instead. Generated Visual Studio projects stage each executable's native
+runtime dependencies after linking, and the editor project also stages its complete managed host, so **Start Debugging**
+works after a clean bootstrap and build. Ninja is useful for fast local verification and is the most direct
 cross-platform workflow.
 
 ## First Linux Build
@@ -127,17 +129,21 @@ rename rather than editing duplicated names manually.
 Generated build products are ignored and must not be committed:
 
 ```powershell
+./Scripts/project.ps1 clean
 ./Scripts/project.ps1 clean -CleanScope build
 ./Scripts/project.ps1 clean -CleanScope generated
 ```
 
 ```sh
+bash Scripts/project.sh clean
 bash Scripts/project.sh clean --clean-scope build
 bash Scripts/project.sh clean --clean-scope generated
 ```
 
-`build` removes compiled outputs, coverage, and package artifacts. `generated` removes generated project files and build
-identity. `full` removes both groups. Do not manually delete vendor submodules or dependency inputs.
+The default `full` scope removes the complete `Build` directory, package artifacts, and generated project files.
+`build` removes all build outputs and package artifacts while retaining the dependency cache and generated project
+state. `generated` removes generated project files and build identity. Do not manually delete vendor submodules or
+dependency inputs.
 
 ## Diagnose A Workstation
 

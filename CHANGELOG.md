@@ -5,6 +5,20 @@ version tags.
 
 ## Unreleased
 
+- Fixed clean Visual Studio builds producing a `KeireHub.exe` that could not start because `nethost.dll` was absent.
+  Every generated Windows executable now stages its load-time .NET host dependency after linking, while direct editor
+  builds and repository launchers share one complete managed-host staging implementation.
+- Fixed the default `clean` command leaving dependency outputs, managed builds, tools, logs, temporary files, and other
+  stale content under `Build`. A full clean now removes the complete disposable build tree on Windows, macOS, and Linux,
+  while the narrower build and generated scopes retain only their documented complementary state.
+- Added a cross-platform `package-editor` launcher command and interactive-menu option. It always runs the Dist release
+  gate and produces a native Windows, macOS, or Linux editor archive with the Hub, companion tools, complete bundled
+  .NET 10 SDK, sample project, manifests, checksums, notices, and platform launchers; macOS also includes a Hub `.app`.
+- Fixed Windows Ninja client builds failing during managed-host staging because Premake's escaped post-build stamp
+  command was interpreted as a path by `cmd.exe`; repository Ninja launchers now perform their existing staging step
+  only after the native target succeeds.
+- Windows archive publication now retries transient file-sharing failures while packaged runtime smoke processes finish
+  releasing their staged .NET host files.
 - Fixed the Lighting panel crashing when the lightmap and maximum resolutions both reached 16,384. Fixed-value integer
   slider ranges now remain valid instead of throwing during UI rendering.
 - Fixed the persistent Project Hub showing a project as still open after its editor exited. Showing or reactivating the

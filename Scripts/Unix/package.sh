@@ -2,8 +2,13 @@
 set -euo pipefail
 PLATFORM="$1"; shift
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; source "$ROOT/Scripts/Unix/common.sh"
+stage_only=0
+filtered_arguments=()
+for argument in "$@"; do
+  if [[ "$argument" == --stage-only ]]; then stage_only=1; else filtered_arguments+=("$argument"); fi
+done
 GENERATOR=ninja; CONFIGURATION=Release; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0; ALLOW_DIRTY=0
-parse_build_arguments "$@"; [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] || { printf 'Package requires Release or Dist.\n' >&2; exit 1; }
+parse_build_arguments "${filtered_arguments[@]}"; [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] || { printf 'Package requires Release or Dist.\n' >&2; exit 1; }
 load_project_config "$ROOT"; TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"; system=linux; os_name=linux; [[ "$PLATFORM" == Mac ]] && { system=macosx; os_name=macos; }
 read -r dirty development_artifact < <(package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI")
 bash "$ROOT/Scripts/Unix/build-info.sh"
@@ -20,7 +25,8 @@ output_arch="$(architecture_output_name "$ARCHITECTURE")"; name="$ARTIFACT_PREFI
 imgui_library="${PROJECT_NAMESPACE}ImGui"
 zstd_library="${PROJECT_NAMESPACE}Zstd"
 archive="$ROOT/Artifacts/$name.tar.gz"; symbols="$ROOT/Artifacts/$name-symbols.tar.gz"; symbol_stage="$ROOT/Artifacts/$name-symbols"
-rm -rf "$stage" "$symbol_stage"; rm -f "$archive" "$archive.sha256" "$symbols" "$symbols.sha256"
+rm -rf "$stage" "$symbol_stage"
+[[ $stage_only -eq 1 ]] || rm -f "$archive" "$archive.sha256" "$symbols" "$symbols.sha256"
 mkdir -p "$stage/bin" "$stage/lib" "$stage/include" "$stage/Config" "$stage/samples" "$stage/content" "$stage/docs/Diagnostics" "$stage/third-party/licenses" "$stage/third-party/SDL3" "$stage/examples/consumer" "$stage/examples/managed-consumer" "$stage/examples/source-module" "$stage/lib/cmake/$PROJECT_IDENTIFIER"
 client_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/$CLIENT_TARGET"
 hub_source="$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$HUB_TARGET/$HUB_TARGET"
@@ -113,6 +119,10 @@ expected_identity="$commit_prefix"; [[ "$dirty" == true ]] && expected_identity=
 [[ "$version_output" == *"$expected_identity"* ]] || { printf 'Packaged binary identity does not match build-manifest.json.\n' >&2; exit 1; }
 [[ "$dirty" == true || "$version_output" != *"${commit_prefix}-dirty"* ]] || { printf 'Packaged binary reports a stale dirty state.\n' >&2; exit 1; }
 assert_package_generated_data_free "$stage"
+if [[ $stage_only -eq 1 ]]; then
+  printf '==> Package stage created: %s\n' "$stage"
+  exit 0
+fi
 
 if [[ "$CONFIGURATION" == Release && "$PLATFORM" == Linux ]]; then
   command -v objcopy >/dev/null 2>&1 || { printf 'objcopy is required to package Linux Release symbols.\n' >&2; exit 1; }

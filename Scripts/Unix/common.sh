@@ -112,6 +112,7 @@ copy_tracked_tree() {
 is_generated_package_path() {
     local path="/${1//\\//}/" name
     path="$(printf '%s' "$path" | sed -E 's#^/include/[^/]+/Build/#/include/PublicApi/#')"
+    path="$(printf '%s' "$path" | sed -E 's#^/bin/Managed/Dotnet/#/bundled-dotnet/#; s#/bundled-dotnet/(.*)/Build/#/bundled-dotnet/\1/DotnetBuild/#')"
     [[ "$path" =~ /(Library|Logs|Build|Temp|SceneRecovery|Recovery)/ ]] && return 0
     name="${path%/}"; name="${name##*/}"
     [[ "$name" =~ (^|[._-])[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy]([._-]|$) || "$name" =~ \.[Tt][Mm][Pp]$ ]]
@@ -155,6 +156,72 @@ validate_package_stage() {
     [[ ! -e "$stage/third-party/spdlog" ]] || { printf 'Package contains private spdlog headers.\n' >&2; return 1; }
     [[ ! -e "$stage/third-party/assimp" && ! -e "$stage/third-party/stb" && ! -e "$stage/third-party/SDL3/include/Jolt" && ! -e "$stage/third-party/SDL3/include/recastnavigation" && ! -e "$stage/third-party/SDL3/include/miniaudio" ]] || { printf 'Package contains private implementation headers.\n' >&2; return 1; }
     find "$stage/lib/cmake" -type f -name '*Config.cmake' -print -quit 2>/dev/null | grep -q . || { printf 'Package is missing its CMake package configuration.\n' >&2; return 1; }
+    assert_package_generated_data_free "$stage"
+}
+
+editor_package_required_paths() {
+    local client="$1" hub="$2" namespace="$4"
+    local required=(
+      "bin/$client" "bin/$hub" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker"
+      "bin/${namespace}Runtime" "bin/KeireShaderCompiler" "bin/Managed/Coral.Managed.dll"
+      "bin/Managed/Coral.Managed.deps.json" "bin/Managed/Coral.Managed.runtimeconfig.json"
+      "bin/Managed/Keire.Managed.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
+      "samples/KeireSandbox/ProjectSettings/Project.keireproject"
+      "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "docs/PlayerBuilds.md" "README.md"
+      "LICENSE.txt" "THIRD_PARTY_NOTICES.md" "build-manifest.json" "editor-package.json" "launch-editor.sh"
+      "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst"
+      "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt"
+      "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/licenses/zstandard-LICENSE.txt"
+      "third-party/licenses/entt-LICENSE.txt" "third-party/licenses/glm-COPYING.txt"
+      "third-party/licenses/SDL-shadercross-LICENSE.txt"
+      "third-party/licenses/DirectXShaderCompiler-LICENSE.txt"
+      "third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt"
+      "third-party/licenses/SPIRV-Cross-LICENSE.txt" "third-party/licenses/SPIRV-Headers-LICENSE.txt"
+      "third-party/licenses/SPIRV-Tools-LICENSE.txt" "third-party/licenses/assimp-LICENSE.txt"
+      "third-party/licenses/assimp-zlib-LICENSE.txt" "third-party/licenses/stb-LICENSE.txt"
+      "third-party/licenses/Jolt-LICENSE.txt" "third-party/licenses/Recast-LICENSE.txt"
+      "third-party/licenses/miniaudio-LICENSE.txt" "third-party/licenses/Coral-LICENSE.txt"
+      "third-party/licenses/dotnet-LICENSE.txt" "third-party/licenses/dotnet-ThirdPartyNotices.txt"
+    )
+    printf '%s\n' "${required[@]}"
+}
+
+validate_editor_package_stage() {
+    local stage="$1" client="$2" hub="$3" core="$4" namespace="$5" platform="$6" path pattern
+    while IFS= read -r path; do
+        [[ -f "$stage/$path" ]] || {
+            printf 'Editor package is missing required content: %s\n' "$path" >&2
+            return 1
+        }
+    done < <(editor_package_required_paths "$client" "$hub" "$core" "$namespace")
+    for path in "bin/$client" "bin/$hub" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker" \
+      "bin/${namespace}Runtime" "bin/KeireShaderCompiler" "bin/Managed/Dotnet/dotnet" "launch-editor.sh"; do
+        [[ -x "$stage/$path" ]] || {
+            printf 'Editor package entry is not executable: %s\n' "$path" >&2
+            return 1
+        }
+    done
+    find "$stage/bin/Managed/Dotnet/sdk" -mindepth 1 -maxdepth 1 -type d -name '10.*' -print -quit 2>/dev/null |
+      grep -q . || { printf 'Editor package does not contain the .NET 10 SDK.\n' >&2; return 1; }
+    for pattern in 'libavcodec.*' 'libavformat.*' 'libavutil.*' 'libswresample.*'; do
+        find "$stage/bin" -maxdepth 1 -type f -name "$pattern" -print -quit | grep -q . || {
+            printf "Editor package is missing an FFmpeg runtime matching '%s'.\n" "$pattern" >&2
+            return 1
+        }
+    done
+    for path in include lib examples; do
+        [[ ! -e "$stage/$path" ]] || {
+            printf 'Editor package contains SDK-only content: %s\n' "$path" >&2
+            return 1
+        }
+    done
+    if [[ "$platform" == Mac ]]; then
+        [[ -x "$stage/${hub}.app/Contents/MacOS/${hub}Launcher" &&
+           -f "$stage/${hub}.app/Contents/Info.plist" ]] || {
+            printf 'macOS editor package is missing its application bundle launcher.\n' >&2
+            return 1
+        }
+    fi
     assert_package_generated_data_free "$stage"
 }
 

@@ -679,6 +679,11 @@ include/archive paths and platform requirements. SDK packages preserve SDL's off
 and nethost libraries
 followed by `SDL3::SDL3-static`. Gameplay middleware headers never cross the supported include tree.
 
+On Windows, every generated final executable that links KeireCore stages `nethost.dll` beside itself as part of its
+own build rather than relying on a launcher side effect. The editor's generated Visual Studio, Xcode, and Make projects
+also stage the Coral assemblies, first-party managed API, and bundled hostfxr/CoreCLR tree through the same scripts used
+by repository launcher builds.
+
 The pinned Dear ImGui docking sources, standard-string adapter, SDL3 platform backend, and SDL_GPU renderer compile in
 the dedicated `DearImGui` static-library project. It emits `KeireImGui.lib` on Windows and `libKeireImGui.a` on Unix,
 uses the workspace runtime/configuration/architecture/sanitizer policies, and alone disables compiler warnings for its
@@ -716,6 +721,13 @@ Packaging extracts the archive and compiles, links, and runs both consumers. CMa
 Premake builds Kéire. Release debug symbols are uploaded separately where a platform toolchain emits them; Dist is
 intentionally stripped. Export annotations describe same-toolchain shared-library preparation only, not a
 compiler-independent C++ ABI.
+
+The separate editor distribution is a Dist-only, host-native projection of that validated release stage. It retains
+the Hub, editor, runtime/asset/shader companions, media libraries, sample, manifests, and notices; replaces the
+runtime-only managed payload with the complete .NET 10 SDK; and removes SDK headers, archives, CMake metadata, and
+consumer sources. Windows, macOS, and Linux packages are produced on their respective hosts. All keep sibling native
+executables under `bin` so the existing companion resolution remains authoritative; the macOS `.app` and top-level
+launch scripts delegate into that same layout.
 
 A KeireCore prebuild step refreshes version and source-control identity under `Build/Generated` immediately before compilation, including tracked and untracked dirty state. The generator C-escapes configured strings and only rewrites the header when its content changes. The compiler supplies configuration, compiler, platform, and architecture identity. Packaging regenerates identity and verifies the staged binary's commit prefix and dirty marker against its manifest. The resulting `Keire::BuildInfo` describes the binary itself rather than the machine inspecting it.
 

@@ -35,15 +35,26 @@ function Remove-SafePath {
     Write-Host "Removed $($resolved.Path)"
 }
 
-if ($All -or $Build) {
-    Remove-SafePath (Join-Path $Root "Build\Bin")
-    Remove-SafePath (Join-Path $Root "Build\Intermediates")
-    Remove-SafePath (Join-Path $Root "Build\Coverage")
+if ($All) {
+    Remove-SafePath (Join-Path $Root "Build")
+    Remove-SafePath (Join-Path $Root "Artifacts")
+}
+elseif ($Build) {
+    $buildRoot = Join-Path $Root "Build"
+    if (Test-Path -LiteralPath $buildRoot) {
+        $preservedBuildEntries = @("Dependencies", "Generated", "Projects")
+        Get-ChildItem -LiteralPath $buildRoot -Force |
+            Where-Object { $_.Name -notin $preservedBuildEntries } |
+            ForEach-Object { Remove-SafePath $_.FullName }
+    }
     Remove-SafePath (Join-Path $Root "Artifacts")
 }
 
 if ($All -or $Generated) {
-    Remove-SafePath (Join-Path $Root "Build\Generated")
+    if ($Generated) {
+        Remove-SafePath (Join-Path $Root "Build\Generated")
+        Remove-SafePath (Join-Path $Root "Build\Projects")
+    }
 
     $rootPatterns = @(
         "*.sln",

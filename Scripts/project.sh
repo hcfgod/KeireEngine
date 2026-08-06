@@ -63,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ "$COMMAND" == package && $CONFIGURATION_SET -eq 0 ]] && CONFIGURATION=Release
+[[ "$COMMAND" == package-editor ]] && CONFIGURATION=Dist
 
 run_command() {
     local resolved_toolset
@@ -87,6 +88,10 @@ run_command() {
             [[ $ALLOW_DIRTY -eq 0 ]] || common+=(--allow-dirty)
             bash "$SCRIPT_DIR/Unix/package.sh" "$PLATFORM_NAME" "${common[@]}" --configuration "$CONFIGURATION"
             ;;
+        package-editor)
+            [[ $ALLOW_DIRTY -eq 0 ]] || common+=(--allow-dirty)
+            bash "$SCRIPT_DIR/Unix/package-editor.sh" "$PLATFORM_NAME" "${common[@]}"
+            ;;
         doctor) bash "$SCRIPT_DIR/Unix/doctor.sh" "$PLATFORM_NAME" "${common[@]}" ;;
         rename)
             [[ -n "$NAME" ]] || { printf '%s\n' '--name is required for rename.' >&2; return 1; }
@@ -108,7 +113,7 @@ show_help() {
 Usage: Scripts/project.sh <command> [options]
 
 Commands: bootstrap, generate, build, test, run, clean, coverage, package,
-          doctor, rename, vendor-update, help
+          package-editor, doctor, rename, vendor-update, help
 
 Common options:
   --generator <ninja|gmake|xcode4|compilecommands>
@@ -117,6 +122,8 @@ Common options:
   --smoke-ui (run command only; requires a graphics-capable environment)
   --smoke-project (run the sample project editor and exit after several frames)
   --editor --project <path> (open the editor directly instead of the project hub)
+  --clean-scope <full|build|generated> (clean only; full removes the complete Build directory)
+  package-editor always builds a native Dist editor archive for the current OS
 EOF
 }
 
@@ -129,10 +136,10 @@ read_setting() {
 
 show_menu() {
     while true; do
-        printf '\n%s\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run %s\n6. Coverage report\n7. Package SDK\n8. Doctor\n9. Clean\n10. Vendor update\n11. Rename template\n12. Exit\n\nChoose an option: ' "$PROJECT_IDENTIFIER" "$HUB_TARGET"
+        printf '\n%s\n1. Bootstrap prerequisites\n2. Generate project files\n3. Build\n4. Run tests\n5. Run %s\n6. Coverage report\n7. Package SDK\n8. Package Editor (Dist)\n9. Doctor\n10. Clean\n11. Vendor update\n12. Rename template\n13. Exit\n\nChoose an option: ' "$PROJECT_IDENTIFIER" "$HUB_TARGET"
         read -r choice
         case "$choice" in
-            1|2|3|4|5)
+            1|2|3|4|5|8)
                 GENERATOR="$(read_setting 'Generator' "$GENERATOR")"
                 ARCHITECTURE="$(normalize_architecture "$(read_setting 'Architecture (x86_64, ARM64)' "$ARCHITECTURE")")"
                 TOOLSET="$(read_setting 'Toolset (default, gcc, clang)' "$TOOLSET")"
@@ -141,15 +148,15 @@ show_menu() {
                 [[ "$choice" =~ ^[345]$ ]] && CONFIGURATION="$(normalize_configuration "$(read_setting 'Configuration' "$CONFIGURATION")")"
                 [[ "$choice" == 1 ]] && { optional_choice="$(read_setting 'Install optional toolchains (yes, no)' no)"; [[ "$optional_choice" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] && INSTALL_OPTIONAL=1 || INSTALL_OPTIONAL=0; }
                 [[ "$choice" == 2 ]] && { force_choice="$(read_setting 'Force regeneration (yes, no)' no)"; [[ "$force_choice" =~ ^([Yy]|[Yy][Ee][Ss])$ ]] && FORCE=1 || FORCE=0; }
-                case "$choice" in 1) run_command bootstrap;; 2) run_command generate;; 3) run_command build;; 4) run_command test;; 5) run_command run;; esac || printf '\nCommand failed.\n' >&2
+                case "$choice" in 1) run_command bootstrap;; 2) run_command generate;; 3) run_command build;; 4) run_command test;; 5) run_command run;; 8) run_command package-editor;; esac || printf '\nCommand failed.\n' >&2
                 ;;
             6) run_command coverage || printf '\nCommand failed.\n' >&2 ;;
             7) CONFIGURATION="$(normalize_configuration "$(read_setting 'Package configuration (Release, Dist)' Release)")"; run_command package || printf '\nCommand failed.\n' >&2 ;;
-            8) run_command doctor || printf '\nCommand failed.\n' >&2 ;;
-            9) CLEAN_SCOPE="$(read_setting 'Clean scope (full, build, generated)' "$CLEAN_SCOPE")"; run_command clean || printf '\nCommand failed.\n' >&2 ;;
-            10) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, SDL, json, imgui, zstd, entt, glm)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
-            11) NAME="$(read_setting 'PascalCase identifier' "$NAME")"; DISPLAY_NAME="$(read_setting 'Display name' "$NAME")"; REPOSITORY="$(read_setting 'Repository (owner/name, optional)' "$REPOSITORY")"; run_command rename || printf '\nCommand failed.\n' >&2 ;;
-            12) return ;;
+            9) run_command doctor || printf '\nCommand failed.\n' >&2 ;;
+            10) CLEAN_SCOPE="$(read_setting 'Clean scope (full, build, generated)' "$CLEAN_SCOPE")"; run_command clean || printf '\nCommand failed.\n' >&2 ;;
+            11) DEPENDENCY="$(read_setting 'Dependency (spdlog, doctest, SDL, json, imgui, zstd, entt, glm)' "$DEPENDENCY")"; TAG="$(read_setting 'Tag' "$TAG")"; run_command vendor-update || printf '\nCommand failed.\n' >&2 ;;
+            12) NAME="$(read_setting 'PascalCase identifier' "$NAME")"; DISPLAY_NAME="$(read_setting 'Display name' "$NAME")"; REPOSITORY="$(read_setting 'Repository (owner/name, optional)' "$REPOSITORY")"; run_command rename || printf '\nCommand failed.\n' >&2 ;;
+            13) return ;;
             *) printf 'Invalid menu choice.\n' >&2 ;;
         esac
         printf '\nPress Enter to return to the menu.'; read -r _

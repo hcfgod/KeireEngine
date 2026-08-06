@@ -66,6 +66,7 @@ Run `Scripts/project.bat` on Windows or `Scripts/project.sh` on Unix without a c
 | `run` | Build and run the Project Hub; optional flags open a project editor directly |
 | `coverage` | Run Clang source coverage and enforce 80% line coverage |
 | `package` | Test, smoke-run, and create runtime/SDK archives and checksums |
+| `package-editor` | Build, validate, and archive the native Dist editor distribution |
 | `doctor` | Report detected tools, versions, identity, and environment |
 | `clean` | Remove build, generated, or all disposable outputs |
 | `vendor-update` | Intentionally update one dependency lock and working tree |
@@ -76,21 +77,34 @@ Common examples:
 
 ```powershell
 ./Scripts/project.ps1 generate -Generator ninja -Architecture ARM64 -Toolset clang -Force
+./Scripts/project.ps1 clean
 ./Scripts/project.ps1 clean -CleanScope generated
 ./Scripts/project.ps1 package -Generator vs2022 -Configuration Dist
+./Scripts/project.ps1 package-editor -Generator vs2022
 #Local diagnostics only; rejected in CI and marked as a development artifact.
 ./Scripts/project.ps1 package -Generator ninja -Configuration Release -AllowDirty
 ```
 
 ```sh
 bash Scripts/project.sh generate --generator ninja --architecture ARM64 --toolset clang --force
+bash Scripts/project.sh clean
 bash Scripts/project.sh clean --clean-scope generated
 bash Scripts/project.sh package --generator ninja --configuration Dist --toolset clang
+bash Scripts/project.sh package-editor --generator ninja --toolset clang
 #Local diagnostics only; rejected in CI and marked as a development artifact.
 bash Scripts/project.sh package --generator ninja --configuration Release --allow-dirty
 ```
 
 `default` resolves before Premake runs: MSVC for Visual Studio and Windows Ninja, GCC for Windows GNU Make and Linux, and Clang for macOS. Generation stamps record the concrete toolset.
+
+`clean` defaults to the `full` scope, which removes the entire disposable `Build` directory, package artifacts, and
+generated project files. Use the narrower `build` or `generated` scope only when retaining the other group's state is
+intentional.
+
+`package-editor` always uses Dist and writes a host-native editor archive plus SHA-256 file under `Artifacts/`. Run it
+on Windows, macOS, and Linux to produce the three distributable builds; native executables, SDKs, and system frameworks
+must be packaged on their target OS. Each archive contains the Project Hub, editor and companion tools, the complete
+bundled .NET 10 SDK, sample project, notices, and a platform launcher. macOS packages also include a Project Hub `.app`.
 
 ## Architecture workflows
 
@@ -247,6 +261,10 @@ editors copy their bundled API into that generation. Repository build launchers 
 before native targets. Generated Ninja, Make, Visual Studio, and Xcode projects carry the same input-aware dependency,
 so direct project builds cannot consume a stale API DLL either. Reload therefore never combines new scripts with a
 stale API DLL.
+
+Generated Windows executable projects also copy `nethost.dll` beside their output as part of linking, and direct editor
+builds stage the complete managed host. Starting the Hub or editor from Visual Studio therefore does not depend on a
+previous launcher having populated that particular target directory.
 
 Managed gameplay now receives one shared opaque world identity per runtime scene instead of a Behaviour-instance ID.
 `Input.Held`, `Input.Pressed`, and `Input.Released` expose action phases, scene-safe entity cloning and deferred

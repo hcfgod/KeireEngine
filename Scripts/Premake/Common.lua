@@ -62,6 +62,26 @@ function LinkKeireCore()
         links { "Foundation.framework" }
 
     filter {}
+
+    if _ACTION ~= "ninja" then
+        -- Windows loads nethost before main executes, so every final executable that links KeireCore must be runnable
+        -- without depending on a repository launcher to copy the DLL. Ninja remains launcher-staged because Premake's
+        -- generated Ninja post-build stamp is not compatible with cmd.exe.
+        local commandRepositoryRoot = _ACTION == "gmake" and "." or ".."
+        local netHostRuntime = DependencyManifest.CoralNetHostRuntime
+        if _ACTION == "gmake" then
+            netHostRuntime = netHostRuntime:gsub("^%.%./", "")
+        end
+        local runtimeDirectory = commandRepositoryRoot .. "/Build/Bin/" .. OutputDir .. "/%{prj.name}"
+
+        filter "system:windows"
+            postbuildcommands
+            {
+                '{COPYFILE} "' .. netHostRuntime .. '" "' .. runtimeDirectory .. '/nethost.dll"'
+            }
+
+        filter {}
+    end
 end
 
 function LinkKeireSourceModules()

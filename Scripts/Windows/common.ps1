@@ -194,6 +194,8 @@ function Test-WindowsGeneratedPackagePath {
     for ($index = 0; $index -lt $segments.Count; ++$index) {
         $segment = $segments[$index]
         if ($segment -eq "Build" -and $index -eq 2 -and $segments[0] -eq "include") { continue }
+        if ($segment -eq "Build" -and $segments.Count -gt 3 -and $segments[0] -eq "bin" -and
+            $segments[1] -eq "Managed" -and $segments[2] -eq "Dotnet") { continue }
         if ($segment -in @("Library", "Logs", "Build", "Temp", "SceneRecovery", "Recovery")) { return $true }
     }
 
@@ -230,6 +232,29 @@ function Assert-WindowsPackageArchiveGeneratedDataFree {
     }
     finally {
         $zip.Dispose()
+    }
+}
+
+function Compress-WindowsArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePattern,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [int]$MaximumAttempts = 5,
+        [int]$RetryDelayMilliseconds = 500
+    )
+
+    if ($MaximumAttempts -lt 1) { throw "Archive compression requires at least one attempt." }
+    if ($RetryDelayMilliseconds -lt 0) { throw "Archive compression retry delay cannot be negative." }
+    for ($attempt = 1; $attempt -le $MaximumAttempts; ++$attempt) {
+        Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+        try {
+            Compress-Archive -Path $SourcePattern -DestinationPath $Destination -Force -ErrorAction Stop
+            return
+        }
+        catch {
+            if ($attempt -eq $MaximumAttempts) { throw }
+            Start-Sleep -Milliseconds $RetryDelayMilliseconds
+        }
     }
 }
 
@@ -277,6 +302,49 @@ function Assert-WindowsPackageStage {
     }
     if (-not (Get-ChildItem (Join-Path $Stage "lib\cmake") -Filter "*Config.cmake" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         throw "Package is missing its CMake package configuration."
+    }
+    Assert-WindowsPackageGeneratedDataFree $Stage
+}
+
+function Get-WindowsRequiredEditorPackagePaths {
+    param([string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
+
+    $licenses = Get-WindowsRequiredPackagePaths $ClientTarget $HubTarget $CoreTarget $Namespace |
+        Where-Object { $_.StartsWith("third-party\licenses\", [StringComparison]::OrdinalIgnoreCase) }
+    @(
+        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe",
+        "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe",
+        "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll",
+        "bin\Managed\Coral.Managed.deps.json", "bin\Managed\Coral.Managed.runtimeconfig.json",
+        "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
+        "samples\KeireSandbox\ProjectSettings\Project.keireproject",
+        "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "docs\PlayerBuilds.md", "README.md",
+        "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json", "editor-package.json",
+        "Launch-KeireEditor.cmd"
+    ) + @($licenses)
+}
+
+function Assert-WindowsEditorPackageStage {
+    param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
+
+    foreach ($path in (Get-WindowsRequiredEditorPackagePaths $ClientTarget $HubTarget $CoreTarget $Namespace)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Stage $path) -PathType Leaf)) {
+            throw "Editor package is missing required content: $path"
+        }
+    }
+    $dotnetSdk = Get-ChildItem -LiteralPath (Join-Path $Stage "bin\Managed\Dotnet\sdk") -Directory `
+        -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^10\.' } | Select-Object -First 1
+    if (-not $dotnetSdk) { throw "Editor package does not contain the .NET 10 SDK." }
+    foreach ($pattern in @("avcodec-*.dll", "avformat-*.dll", "avutil-*.dll", "swresample-*.dll")) {
+        if (-not (Get-ChildItem -LiteralPath (Join-Path $Stage "bin") -Filter $pattern -File |
+            Select-Object -First 1)) {
+            throw "Editor package is missing an FFmpeg runtime matching '$pattern'."
+        }
+    }
+    foreach ($developmentDirectory in @("include", "lib", "examples")) {
+        if (Test-Path -LiteralPath (Join-Path $Stage $developmentDirectory)) {
+            throw "Editor package contains SDK-only content: $developmentDirectory"
+        }
     }
     Assert-WindowsPackageGeneratedDataFree $Stage
 }

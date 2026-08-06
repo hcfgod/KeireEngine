@@ -26,14 +26,6 @@ project(ProjectConfig.CLIENT_TARGET)
 
     dependson { AssetWorkerTarget, AssetToolTarget, RuntimeTarget }
     AddKeireManagedRuntimeDependency()
-
-    local clientCommandPrefix = _ACTION == "ninja" and "KeireClient/" or ""
-
-    postbuildcommands
-    {
-        '{MKDIR} "' .. clientCommandPrefix .. '%{cfg.targetdir}/Managed"',
-        '{COPYFILE} "' .. clientCommandPrefix .. '../Build/Managed/Keire.Managed.dll" "' ..
-            clientCommandPrefix .. '%{cfg.targetdir}/Managed/Keire.Managed.dll"'
-    }
+    AddKeireManagedHostStaging()
 
     LinkSDL3()

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet("Release", "Dist")][string]$Configuration = "Release", [string]$Generator = "vs2022", [string]$Architecture = "", [string]$Toolset = "default", [switch]$CI, [switch]$Update, [switch]$Generate, [switch]$AllowDirty)
+param([ValidateSet("Release", "Dist")][string]$Configuration = "Release", [string]$Generator = "vs2022", [string]$Architecture = "", [string]$Toolset = "default", [switch]$CI, [switch]$Update, [switch]$Generate, [switch]$AllowDirty, [switch]$StageOnly)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot; $Project = Get-ProjectConfig; $Lock = Get-DependencyLock
@@ -27,7 +27,9 @@ Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $name = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-$Configuration"; $stage = Join-Path $Root "Artifacts\$name"
 $archive = Join-Path $Root "Artifacts\$name.zip"; $symbols = Join-Path $Root "Artifacts\$name-symbols.zip"
 Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
+if (-not $StageOnly) {
+    Remove-Item $archive, "$archive.sha256", $symbols, "$symbols.sha256" -Force -ErrorAction SilentlyContinue
+}
 New-Item -ItemType Directory -Force "$stage\bin", "$stage\lib", "$stage\include", "$stage\Config", "$stage\samples", "$stage\content", "$stage\docs\Diagnostics", "$stage\third-party\licenses", "$stage\third-party\SDL3", "$stage\examples\consumer", "$stage\examples\managed-consumer", "$stage\examples\source-module", "$stage\lib\cmake\$($Project.PROJECT_IDENTIFIER)" | Out-Null
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe" "$stage\bin\"
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe" "$stage\bin\"
@@ -187,7 +189,11 @@ if (-not $versionOutput.Contains($expectedIdentity) -or (-not $dirty -and $versi
     throw "Packaged binary identity does not match build-manifest.json."
 }
 Assert-WindowsPackageGeneratedDataFree $stage
-Compress-Archive "$stage\*" $archive
+if ($StageOnly) {
+    Write-Host "==> Package stage created: $stage"
+    return
+}
+Compress-WindowsArchive "$stage\*" $archive
 Assert-WindowsPackageArchiveGeneratedDataFree $archive
 (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name.zip" | Set-Content "$archive.sha256" -Encoding ASCII
 $symbolStage = Join-Path $Root "Artifacts\$name-symbols"
@@ -206,7 +212,7 @@ if ($Configuration -eq "Release") {
     if (Test-Path $zstdPdb) { Copy-Item $zstdPdb "$symbolStage\Zstd\" }
 }
 if ((Test-Path $symbolStage) -and (Get-ChildItem $symbolStage -File -Recurse | Select-Object -First 1)) {
-    Compress-Archive "$symbolStage\*" $symbols -Force
+    Compress-WindowsArchive "$symbolStage\*" $symbols
     (Get-FileHash $symbols -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name-symbols.zip" | Set-Content "$symbols.sha256" -Encoding ASCII
 }
 $validationRoot = Join-Path $env:LOCALAPPDATA ("CodexSdkValidation\" + [guid]::NewGuid().ToString("N"))

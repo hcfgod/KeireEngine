@@ -250,6 +250,33 @@ pass `-AllowDirty` on Windows or `--allow-dirty` on Unix for a local diagnostic 
 `dirty: true` and `developmentArtifact: true`. CI rejects the override, and publication packages require both flags to
 be false.
 
+## Editor Distribution Package
+
+The editor distribution command is separate from the SDK package and always builds Dist:
+
+```powershell
+./Scripts/project.ps1 package-editor -Generator vs2022 -Toolset msc
+```
+
+```sh
+bash Scripts/project.sh package-editor --generator ninja --toolset clang
+```
+
+Run the command on each release OS. Windows produces a `.zip`, while Linux and macOS produce `.tar.gz` archives;
+macOS also receives a Project Hub `.app` launcher. Native editor binaries and platform SDK/framework dependencies are
+not cross-packaged from a different host.
+
+The command first runs the normal Dist test, editor smoke, asset-cook, runtime-smoke, manifest, and license staging
+gate. It then publishes an end-user layout containing the Hub, editor, AssetTool, private AssetWorker, runtime, shader
+compiler, FFmpeg runtime, managed host, complete .NET 10 SDK, tracked sandbox, documentation, and third-party notices.
+SDK-only headers, static libraries, CMake metadata, and consumer examples are deliberately omitted. Validation checks
+the stage, the compressed archive, and an extracted copy; it also executes the staged and extracted .NET SDK. The
+archive has a separate `editor-package.json` referencing the locked `build-manifest.json`, and its checksum is written
+beside it under `Artifacts/`.
+
+The same clean-worktree policy as SDK packaging applies. `-AllowDirty` or `--allow-dirty` remains a local diagnostic
+escape hatch, is rejected in CI, and is recorded in both manifests.
+
 ## Final Handoff
 
 Before handing work to another maintainer:
