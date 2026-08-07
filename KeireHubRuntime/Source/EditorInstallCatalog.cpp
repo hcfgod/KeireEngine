@@ -266,17 +266,17 @@ namespace KeireHub
                 if (!ChannelEnabled(source.Channel, m_Specification) || !source.Catalog)
                     continue;
                 const auto& catalog = *source.Catalog;
+                const auto catalogExpiry = Detail::ParseUtcInstant(catalog.Identity.ExpiresAt);
+                const auto sourceExpiry = Detail::ParseUtcInstant(source.Status.ExpiresAt);
                 if (catalog.SchemaVersion != DistributionPackageCatalog::CurrentSchemaVersion ||
                     !IsPublishedSource(source.Status.State) || catalog.Identity.Channel != source.Channel ||
                     catalog.Identity.Platform != m_Specification.HostPlatform ||
                     catalog.Identity.Architecture != m_Specification.HostArchitecture ||
                     !Detail::IsDistributionKeyId(catalog.Identity.KeyId) || catalog.Identity.Sequence == 0U ||
                     catalog.Identity.Sequence > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-                    !Detail::ParseUtcInstant(catalog.Identity.ExpiresAt) ||
+                    !catalogExpiry || !sourceExpiry || *catalogExpiry != *sourceExpiry ||
                     source.Status.Sequence != catalog.Identity.Sequence ||
-                    source.Status.KeyId != catalog.Identity.KeyId ||
-                    source.Status.ExpiresAt != catalog.Identity.ExpiresAt ||
-                    catalog.Packages.size() > MaximumPackages ||
+                    source.Status.KeyId != catalog.Identity.KeyId || catalog.Packages.size() > MaximumPackages ||
                     packages.size() > MaximumPackages - catalog.Packages.size())
                 {
                     return HubStatus::Failure(InstallError(

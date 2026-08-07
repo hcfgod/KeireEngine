@@ -188,7 +188,33 @@ and shell wrappers use mode `0755`, while every other regular file uses mode `06
 3. Copy `appsettings.Production.example.json` to `appsettings.Production.json` and set an absolute storage root.
 4. Keep Kestrel on loopback. Configure Caddy with `Deployment/Caddyfile.example`, set the real DNS name, and expose only
    Caddy on port 443. Do not expose Kestrel directly or add certificate-bypass behavior.
+   Routers may translate public ports 80/443 to different internal ports by setting `KEIRE_CADDY_HTTP_PORT` and
+   `KEIRE_CADDY_HTTPS_PORT` for Caddy; clients still use ordinary public HTTPS on port 443.
 5. Run `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
+
+On Windows, an extracted self-contained package can be supervised at user sign-in without an administrator-owned
+service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `Caddyfile`, and create
+`host-settings.json` beside `scripts/start-windows-host.ps1`:
+
+```json
+{
+  "schemaVersion": 1,
+  "host": "distribution.example.org",
+  "storageRoot": "C:\\srv\\keire-distribution",
+  "httpPort": 80,
+  "httpsPort": 443,
+  "serviceExecutable": "..\\KeireDistributionService.exe",
+  "caddyExecutable": "..\\caddy.exe",
+  "caddyConfig": "..\\Caddyfile",
+  "logDirectory": "..\\Logs"
+}
+```
+
+Validate it with `./scripts/start-windows-host.ps1 -ValidateOnly`, then register PowerShell running
+`./scripts/start-windows-host.ps1 -KeepAlive` as a limited current-user Task Scheduler action triggered at sign-in.
+The supervisor is single-instance, launches both processes without visible windows, waits for their readiness
+endpoints, and restarts a process whose listening port disappears. A sign-in task starts only after that user signs in;
+unattended pre-login hosting requires an administrator-managed Windows service instead.
 
 The metadata rate limiter is fixed-window and deliberately conservative; package streams use a bounded global
 concurrency limiter and queue. Kestrel request headers and timeouts are bounded. Application logs use the JSON console

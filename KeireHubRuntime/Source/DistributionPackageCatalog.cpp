@@ -206,6 +206,8 @@ namespace KeireHub
                                .Channel = root.at("channel").get<std::string>(),
                                .Platform = root.at("platform").get<std::string>(),
                                .Architecture = root.at("architecture").get<std::string>()};
+            const auto catalogExpiry = Detail::ParseUtcInstant(result.Identity.ExpiresAt);
+            const auto expectedExpiry = Detail::ParseUtcInstant(expectedIdentity.ExpiresAt);
             if (const auto minimum = root.find("minimumSupportedHubVersion"); minimum != root.end())
             {
                 if (!minimum->is_string())
@@ -216,19 +218,17 @@ namespace KeireHub
                 result.MinimumSupportedHubVersion = std::move(version).Value();
             }
             if (result.Identity.KeyId != expectedIdentity.KeyId ||
-                result.Identity.Sequence != expectedIdentity.Sequence ||
-                result.Identity.ExpiresAt != expectedIdentity.ExpiresAt ||
-                result.Identity.Channel != expectedIdentity.Channel ||
+                result.Identity.Sequence != expectedIdentity.Sequence || !catalogExpiry || !expectedExpiry ||
+                *catalogExpiry != *expectedExpiry || result.Identity.Channel != expectedIdentity.Channel ||
                 result.Identity.Platform != expectedIdentity.Platform ||
                 result.Identity.Architecture != expectedIdentity.Architecture ||
                 !Detail::IsDistributionKeyId(result.Identity.KeyId) || result.Identity.Sequence == 0U ||
-                result.Identity.Sequence > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
-                !Detail::ParseUtcInstant(result.Identity.ExpiresAt))
+                result.Identity.Sequence > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
             {
-                return HubResult<DistributionPackageCatalog>::Failure(
-                    CatalogError(HubErrorCode::CatalogIdentityMismatch,
-                                 "The signed package catalog identity does not match its verified endpoint.",
-                                 expectedIdentity.Channel));
+                return HubResult<DistributionPackageCatalog>::Failure(CatalogError(
+                    HubErrorCode::CatalogIdentityMismatch,
+                    "The signed package catalog identity does not match its verified metadata or endpoint.",
+                    expectedIdentity.Channel));
             }
 
             const auto& packages = root.at("packages");

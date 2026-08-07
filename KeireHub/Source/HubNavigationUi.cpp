@@ -86,8 +86,10 @@ namespace KeireHub
         }
         if (!compact)
         {
-            const auto online = snapshot.Online ? "Online" : "Offline";
-            ui.TextColored(snapshot.Online ? m_Tokens.Success : m_Tokens.Warning, online);
+            const auto connection = snapshot.Settings.OfflineMode ? "Offline mode"
+                                    : snapshot.Online             ? "Online"
+                                                                  : "Unavailable";
+            ui.TextColored(snapshot.Online ? m_Tokens.Success : m_Tokens.Warning, connection);
             ui.SameLine();
             ui.TextColored(m_Tokens.MutedText, "Hub " + snapshot.HubVersion);
         }

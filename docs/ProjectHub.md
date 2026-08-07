@@ -178,9 +178,10 @@ and sensitive user-path segments are excluded.
 
 `Config/Supabase.json` enables optional email/password identity with a project HTTPS URL and modern
 `sb_publishable_...` key. The Hub never accepts or packages a Supabase secret/service-role key. Sign-up correctly
-represents email-confirmation-required responses without inventing a session; sign-in, refresh-token rotation, local
-sign-out, and profile display-name updates run on the account worker rather than the UI thread. Retryable refresh and
-profile failures preserve the authenticated UI snapshot and refresh attempts use bounded backoff.
+accepts both direct user and user-envelope response forms, represents email-confirmation-required responses without
+inventing a session, and reports confirmation-email cooldowns directly. Sign-in, refresh-token rotation, local sign-out,
+and profile display-name updates run on the account worker rather than the UI thread. Retryable refresh and profile
+failures preserve the authenticated UI snapshot and refresh attempts use bounded backoff.
 
 The only application table is `public.profiles`. It is protected by row-level security and explicit authenticated-only
 `SELECT`, `INSERT`, and `UPDATE` grants; every policy requires `auth.uid() = user_id`. Anonymous clients have no table
@@ -203,7 +204,10 @@ Catalog signatures cover the exact received bytes. The Hub validates key ID, seq
 architecture before parsing package records. Online packages are immutable SHA-256 resources. Resumable downloads use
 content-addressed cache files, `.partial` data, ETag/If-Range metadata, bounded retry, and digest verification. The task
 store and worker protocol use atomic files beneath the preference directory so interrupted work can be reconciled after
-a restart. A package catalog may carry a signed `minimumSupportedHubVersion`; update selection considers only verified
+a restart. Equivalent ISO-8601 UTC expiry spellings compare as instants at both the parsing and Installs indexing gates.
+An HTTP 304 response keeps the source online because the service revalidated the cached signed bytes; only an offline or
+failed-transport cache fallback is labeled last-known-good. A package catalog may carry a signed
+`minimumSupportedHubVersion`; update selection considers only verified
 online or last-known-good snapshots, chooses the newest semantic Hub-installer version, prefers Stable for equal
 versions, and treats a minimum-version policy without a suitable installer as a catalog error.
 

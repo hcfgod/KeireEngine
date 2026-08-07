@@ -117,7 +117,7 @@ TEST_CASE("Supabase sign-up represents email confirmation without inventing a se
         {
             return HubResult<NativeHttpResponse>::Success(JsonResponse(
                 200,
-                R"({"user":{"id":"00112233-4455-6677-8899-aabbccddeeff","email":"new@example.com","email_confirmed_at":null}})"));
+                R"({"id":"00112233-4455-6677-8899-aabbccddeeff","email":"new@example.com","email_confirmed_at":null})"));
         });
     REQUIRE(client);
     const auto result = client.Value().SignUp("new@example.com", "correct-password");
@@ -125,6 +125,36 @@ TEST_CASE("Supabase sign-up represents email confirmation without inventing a se
     CHECK(result.Value().ConfirmationRequired);
     CHECK_FALSE(result.Value().Session);
     CHECK_FALSE(result.Value().User.EmailConfirmed);
+}
+
+TEST_CASE("Supabase sign-up reports confirmation email cooldowns without blaming account data")
+{
+    auto client = SupabaseAccountClient::Create(
+        Configuration(),
+        [](const NativeHttpRequest&)
+        {
+            return HubResult<NativeHttpResponse>::Success(
+                JsonResponse(429, R"({"code":"over_email_send_rate_limit","message":"request after 21 seconds"})"));
+        });
+    REQUIRE(client);
+    const auto result = client.Value().SignUp("new@example.com", "correct-password");
+    REQUIRE_FALSE(result);
+    CHECK(result.Error().Code == HubErrorCode::AccountTransportFailed);
+    CHECK(result.Error().Retryable);
+    CHECK(result.Error().Message.find("confirmation email") != std::string::npos);
+}
+
+TEST_CASE("Supabase sign-up preserves direct session responses when confirmation is disabled")
+{
+    auto client = SupabaseAccountClient::Create(
+        Configuration(), [](const NativeHttpRequest&)
+        { return HubResult<NativeHttpResponse>::Success(JsonResponse(200, SessionJson())); });
+    REQUIRE(client);
+    const auto result = client.Value().SignUp("user@example.com", "correct-password");
+    REQUIRE(result);
+    CHECK_FALSE(result.Value().ConfirmationRequired);
+    REQUIRE(result.Value().Session);
+    CHECK(result.Value().Session->User.EmailConfirmed);
 }
 
 TEST_CASE("Supabase profile requests carry the user JWT and preserve owner identity")

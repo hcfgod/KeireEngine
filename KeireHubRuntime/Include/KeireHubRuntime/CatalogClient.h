@@ -93,6 +93,7 @@ namespace KeireHub
         CatalogSignatureMetadata Signature;
         std::string ETag;
         bool FromCache = false;
+        bool NetworkValidated = false;
     };
 
     class CatalogTrustStore final

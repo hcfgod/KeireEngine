@@ -151,6 +151,7 @@ TEST_CASE("Catalog client verifies and preserves the exact signed bytes")
     CHECK(result.Value().Signature.KeyId == signer.KeyId());
     CHECK(result.Value().Signature.Sequence == 7);
     CHECK_FALSE(result.Value().FromCache);
+    CHECK(result.Value().NetworkValidated);
     REQUIRE(observed);
     CHECK(observed->Url == "https://distribution.keire.test/v1/catalog/stable/windows/x86_64");
     CHECK_FALSE(observed->IfNoneMatch);
@@ -226,6 +227,7 @@ TEST_CASE("Catalog client persists a sequence floor and rejects signed equivocat
     const auto recovered = offline.FetchPackageCatalog("stable");
     REQUIRE(recovered);
     CHECK(recovered.Value().FromCache);
+    CHECK_FALSE(recovered.Value().NetworkValidated);
     CHECK(KeireHubTests::Text(*recovered.Value().ExactBytes) == acceptedBytes);
     CHECK(recovered.Value().Signature.Sequence == 10);
 }
@@ -314,6 +316,7 @@ TEST_CASE("Catalog client uses validated last-known-good cache for offline and t
     const auto fallback = failedNetwork.FetchPackageCatalog("stable");
     REQUIRE(fallback);
     CHECK(fallback.Value().FromCache);
+    CHECK_FALSE(fallback.Value().NetworkValidated);
     CHECK(KeireHubTests::Text(*fallback.Value().ExactBytes) == body);
 
     bool offlineTransportCalled = false;
@@ -326,6 +329,7 @@ TEST_CASE("Catalog client uses validated last-known-good cache for offline and t
     const auto offlineResult = offline.FetchPackageCatalog("stable");
     REQUIRE(offlineResult);
     CHECK(offlineResult.Value().FromCache);
+    CHECK_FALSE(offlineResult.Value().NetworkValidated);
     CHECK_FALSE(offlineTransportCalled);
 
     auto notModified = Client(signer, Options(temporary.Path()),
@@ -339,6 +343,7 @@ TEST_CASE("Catalog client uses validated last-known-good cache for offline and t
     const auto unchanged = notModified.FetchPackageCatalog("stable");
     REQUIRE(unchanged);
     CHECK(unchanged.Value().FromCache);
+    CHECK(unchanged.Value().NetworkValidated);
 }
 
 TEST_CASE("Catalog cache never promotes malformed persisted data")

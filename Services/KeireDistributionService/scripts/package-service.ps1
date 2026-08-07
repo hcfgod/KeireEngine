@@ -63,6 +63,10 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
             'publish-snapshot.sh')) {
         Copy-Item -LiteralPath (Join-Path $serviceRoot "scripts\$scriptName") -Destination $scriptsDirectory
     }
+    if ($runtimeIdentifier.StartsWith('win-', [StringComparison]::Ordinal)) {
+        Copy-Item -LiteralPath (Join-Path $serviceRoot 'scripts\start-windows-host.ps1') `
+            -Destination $scriptsDirectory
+    }
 
     if ($runtimeIdentifier.StartsWith('win-', [StringComparison]::Ordinal)) {
         $archive = "$packageDirectory.zip"

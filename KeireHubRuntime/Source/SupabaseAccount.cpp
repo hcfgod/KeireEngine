@@ -164,6 +164,13 @@ namespace KeireHub
                 return AccountError(HubErrorCode::AccountAuthenticationFailed, "That account already exists.", false,
                                     ResponseDiagnostic(response));
             }
+            if (response.StatusCode == 429U && action == "sign-up")
+            {
+                return AccountError(HubErrorCode::AccountTransportFailed,
+                                    "A confirmation email was requested too recently. Check your inbox or wait before "
+                                    "trying again.",
+                                    true, ResponseDiagnostic(response));
+            }
             if (response.StatusCode == 429U || response.StatusCode >= 500U)
             {
                 return AccountError(HubErrorCode::AccountTransportFailed,
@@ -347,7 +354,11 @@ namespace KeireHub
             return HubResult<AccountSignUpResult>::Failure(value.Error());
         try
         {
-            auto user = ParseUser(value.Value().at("user"));
+            const auto& payload = value.Value();
+            if (!payload.is_object())
+                throw std::invalid_argument("sign-up response is not an object");
+            const auto userValue = payload.find("user");
+            auto user = ParseUser(userValue == payload.end() ? payload : *userValue);
             if (!user)
                 return HubResult<AccountSignUpResult>::Failure(user.Error());
             AccountSignUpResult result{.User = user.Value()};

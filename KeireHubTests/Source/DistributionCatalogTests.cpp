@@ -103,6 +103,21 @@ namespace
                 .Body = bytes};
     }
 
+    [[nodiscard]] CatalogHttpResponse NotModifiedResponse(const KeireHubTests::TestSodiumSigner& signer,
+                                                          const CatalogHttpRequest& request,
+                                                          const std::string_view body, const std::uint64_t sequence)
+    {
+        const auto bytes = KeireHubTests::Bytes(body);
+        return {.StatusCode = 304,
+                .EffectiveUrl = request.Url,
+                .Headers = {{"X-Keire-Signature-Algorithm", "Ed25519"},
+                            {"X-Keire-Signature-Key-Id", signer.KeyId()},
+                            {"X-Keire-Signature", signer.SignBase64(bytes)},
+                            {"X-Keire-Sequence", std::to_string(sequence)},
+                            {"X-Keire-Expires", std::string(Expiry)},
+                            {"ETag", "\"sha256-" + signer.Sha256Hex(bytes) + "\""}}};
+    }
+
     [[nodiscard]] DistributionConfiguration Configuration(const KeireHubTests::TestSodiumSigner& signer)
     {
         return {.OnlineDiscoveryEnabled = true,
@@ -183,6 +198,18 @@ TEST_CASE("Distribution package catalogs strictly parse bounded generic manifest
     const auto unexpected = ParseCatalog(unknownManifest);
     REQUIRE_FALSE(unexpected);
     CHECK(unexpected.Error().Code == HubErrorCode::PackageManifestInvalid);
+
+    auto equivalentExpiry = Identity();
+    equivalentExpiry.ExpiresAt = "2035-01-01T00:00:00.0000000+00:00";
+    const auto equivalent = ParseCatalog(document, equivalentExpiry);
+    REQUIRE(equivalent);
+    CHECK(equivalent.Value().Identity.ExpiresAt == Expiry);
+
+    auto differentExpiry = Identity();
+    differentExpiry.ExpiresAt = "2035-01-01T00:00:01+00:00";
+    const auto mismatchedExpiry = ParseCatalog(document, differentExpiry);
+    REQUIRE_FALSE(mismatchedExpiry);
+    CHECK(mismatchedExpiry.Error().Code == HubErrorCode::CatalogIdentityMismatch);
 }
 
 TEST_CASE("Distribution package catalogs reject excessive, duplicate, and incompatible entries")
@@ -310,6 +337,37 @@ TEST_CASE("Distribution catalog sessions distinguish online fallback and offline
           DistributionCatalogSourceState::OfflineLastKnownGood);
     CHECK(offlineSnapshot->Content.Status.State == DistributionCatalogSourceState::OfflineLastKnownGood);
     CHECK_FALSE(offlineTransportCalled);
+}
+
+TEST_CASE("Distribution catalog sessions remain online after server revalidation")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    KeireHubTests::TestSodiumSigner signer;
+    const auto cacheRoot = temporary.Path() / "cache";
+    auto initial = DistributionCatalogSession::Create(
+        Configuration(signer), Settings(cacheRoot), Environment(temporary.Path(), signer, SuccessfulTransport(signer)));
+    REQUIRE(initial);
+    REQUIRE(initial.Value().Refresh());
+
+    const auto packages = PackageCatalog(signer.KeyId(), 7, {Package()});
+    const auto content = ContentCatalog(signer.KeyId(), 8);
+    auto revalidated = DistributionCatalogSession::Create(
+        Configuration(signer), Settings(cacheRoot),
+        Environment(
+            temporary.Path(), signer,
+            [&](const CatalogHttpRequest& request)
+            {
+                if (request.Url.find("/v1/content/") != std::string::npos)
+                {
+                    return HubResult<CatalogHttpResponse>::Success(NotModifiedResponse(signer, request, content, 8));
+                }
+                return HubResult<CatalogHttpResponse>::Success(NotModifiedResponse(signer, request, packages, 7));
+            }));
+    REQUIRE(revalidated);
+    REQUIRE(revalidated.Value().Refresh());
+    const auto snapshot = revalidated.Value().Snapshot();
+    CHECK(snapshot->PackageCatalogs.front().Status.State == DistributionCatalogSourceState::Online);
+    CHECK(snapshot->Content.Status.State == DistributionCatalogSourceState::Online);
 }
 
 TEST_CASE("Distribution catalog sessions publish typed unavailable status without an offline cache")

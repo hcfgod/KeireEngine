@@ -82,9 +82,9 @@ namespace KeireHub
         void MarkSuccess(DistributionCatalogSourceStatus& status, const VerifiedCatalogDocument& document,
                          const bool offline)
         {
-            status.State = document.FromCache ? (offline ? DistributionCatalogSourceState::OfflineLastKnownGood
-                                                         : DistributionCatalogSourceState::LastKnownGood)
-                                              : DistributionCatalogSourceState::Online;
+            status.State = document.NetworkValidated ? DistributionCatalogSourceState::Online
+                                                     : (offline ? DistributionCatalogSourceState::OfflineLastKnownGood
+                                                                : DistributionCatalogSourceState::LastKnownGood);
             status.Sequence = document.Signature.Sequence;
             status.KeyId = document.Signature.KeyId;
             status.ExpiresAt = document.Signature.ExpiresAt;

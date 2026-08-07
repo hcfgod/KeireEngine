@@ -149,7 +149,9 @@ from which the launcher was invoked.
 The Hub optionally uses Supabase Auth for email accounts and the owner-scoped profile display name. Only the public
 desktop project URL and `sb_publishable_...` key are packaged; software downloads remain authorized solely by signed
 distribution catalogs and are available without signing in. Windows stores a rotated refresh token through DPAPI;
-platforms without an implemented native secure store use session-only authentication.
+platforms without an implemented native secure store use session-only authentication. When email confirmation is
+enabled, account creation asks the user to check their inbox instead of inventing a signed-in session; immediate repeat
+attempts report the confirmation-email cooldown directly.
 
 `package-hub-installer` builds only the validated standalone Hub stage. Windows uses a Hub-only NSIS 3 template;
 macOS creates a self-contained Hub `.app` in a drag-to-Applications `.dmg`; and Linux creates a `keire-hub` `.deb`

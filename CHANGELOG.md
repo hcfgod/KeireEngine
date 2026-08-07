@@ -1,5 +1,17 @@
 # Changelog
 
+- Added a packaged Windows distribution-host supervisor for limited-user Task Scheduler deployments. It validates a
+  bounded settings file, launches Kestrel and Caddy invisibly, prevents duplicate supervisors, checks local and public
+  readiness, and restarts either process when its listening port disappears.
+- Fixed online Hub catalogs being rejected when equivalent UTC expiry timestamps used different ISO-8601 spellings,
+  restored pointer interaction across the complete custom-title-bar account and product control strip, and separated
+  explicit offline mode from an unavailable network connection in the sidebar status.
+- Fixed confirmation-required Supabase sign-ups being reported as invalid data when Auth returned the user directly,
+  and replaced the generic response for repeated sign-up email rate limits with actionable inbox and retry guidance.
+- Fixed the Installs catalog rejecting equivalent signed UTC expiry spellings after signature verification, which hid
+  valid host-compatible editor versions. Server-revalidated HTTP 304 catalogs now also retain online status instead of
+  making the sidebar report that the service is unavailable.
+
 All notable template changes are documented here. The format follows Keep a Changelog, and releases use semantic
 version tags.
 

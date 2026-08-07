@@ -15,7 +15,8 @@ foreach ($contract in @(
         "--executable 'KeireDistributionService'",
         "--executable 'tools/publisher/KeireDistributionPublisher'",
         "--executable 'scripts/health-check.sh'",
-        "--executable 'scripts/publish-snapshot.sh'"
+        "--executable 'scripts/publish-snapshot.sh'",
+        "scripts\start-windows-host.ps1"
     )) {
     if (-not $packager.Contains($contract)) {
         throw "The Windows service packager is missing '$contract'."
@@ -23,6 +24,43 @@ foreach ($contract in @(
 }
 if ($packager.Contains('& tar -czf')) {
     throw "The Windows service packager must not inherit unusable Linux modes from NTFS."
+}
+
+$windowsHost = Join-Path $Root `
+    "Services\KeireDistributionService\scripts\start-windows-host.ps1"
+$hostFixture = Join-Path ([IO.Path]::GetTempPath()) `
+    ("keire-distribution-windows-host-test-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Force (Join-Path $hostFixture "distribution"), `
+        (Join-Path $hostFixture "logs") | Out-Null
+    foreach ($fileName in @("KeireDistributionService.exe", "caddy.exe", "Caddyfile")) {
+        [IO.File]::WriteAllText((Join-Path $hostFixture $fileName), "fixture", [Text.UTF8Encoding]::new($false))
+    }
+    $settingsPath = Join-Path $hostFixture "host-settings.json"
+    @{
+        schemaVersion = 1
+        host = "distribution.example.test"
+        storageRoot = "distribution"
+        httpPort = 50254
+        httpsPort = 50255
+        serviceExecutable = "KeireDistributionService.exe"
+        caddyExecutable = "caddy.exe"
+        caddyConfig = "Caddyfile"
+        logDirectory = "logs"
+    } | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding UTF8
+    Invoke-CheckedWindowsCommand {
+        & $windowsHost -SettingsPath $settingsPath -ValidateOnly
+    } "Windows distribution host settings validation"
+
+    $invalidSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
+    $invalidSettings.host = "https://not-a-host.example"
+    $invalidSettings | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding UTF8
+    Assert-Throws {
+        & $windowsHost -SettingsPath $settingsPath -ValidateOnly 2>$null
+    } "Invalid Windows distribution host name rejection"
+}
+finally {
+    Remove-Item -LiteralPath $hostFixture -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) `

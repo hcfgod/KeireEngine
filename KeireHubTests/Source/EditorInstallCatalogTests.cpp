@@ -217,6 +217,28 @@ TEST_CASE("Editor install catalog refresh rejects invalid bounded sources withou
     CHECK(catalog.Snapshot() == before);
 }
 
+TEST_CASE("Editor install catalogs compare verified expiry timestamps as UTC instants")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    EditorInstallationRegistry registry(temporary.Path() / "installations.json");
+    EditorInstallCatalog catalog(registry, Specification());
+    auto editor = Package("keire.editor", "1.0.0", PackageKind::Editor);
+
+    auto equivalentExpiry = Catalog("stable", {editor});
+    equivalentExpiry.Status.ExpiresAt = "2035-01-01T00:00:00.0000000+00:00";
+    REQUIRE(catalog.Refresh(Distribution({std::move(equivalentExpiry)})));
+    const auto before = catalog.Snapshot();
+    REQUIRE(before);
+    REQUIRE(before->AvailableEditors.size() == 1U);
+
+    auto differentExpiry = Catalog("stable", {editor});
+    differentExpiry.Status.ExpiresAt = "2035-01-01T00:00:01+00:00";
+    const auto rejected = catalog.Refresh(Distribution({std::move(differentExpiry)}));
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.Error().Code == HubErrorCode::CatalogIdentityMismatch);
+    CHECK(catalog.Snapshot() == before);
+}
+
 TEST_CASE("Editor install previews produce deterministic dependency closure with provenance")
 {
     KeireHubTests::TemporaryDirectory temporary;

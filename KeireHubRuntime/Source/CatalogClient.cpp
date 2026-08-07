@@ -144,14 +144,16 @@ namespace KeireHub
         }
 
         [[nodiscard]] HubResult<VerifiedCatalogDocument> MakeCachedResult(const CatalogEndpoint& endpoint,
-                                                                          const CachedCatalogDocument& cached)
+                                                                          const CachedCatalogDocument& cached,
+                                                                          const bool networkValidated = false)
         {
             return HubResult<VerifiedCatalogDocument>::Success(
                 {.Endpoint = endpoint,
                  .ExactBytes = std::make_shared<const std::vector<std::byte>>(cached.ExactBytes),
                  .Signature = cached.Signature,
                  .ETag = cached.ETag,
-                 .FromCache = true});
+                 .FromCache = true,
+                 .NetworkValidated = networkValidated});
         }
 
         [[nodiscard]] bool SameSignature(const CatalogSignatureMetadata& left,
@@ -316,7 +318,7 @@ namespace KeireHub
             {
                 return HubResult<VerifiedCatalogDocument>::Failure(status.Error());
             }
-            return MakeCachedResult(endpoint, *cached);
+            return MakeCachedResult(endpoint, *cached, true);
         }
 
         if (response.Body.empty() || metadata.Value().ETag != Detail::MakeDistributionETag(response.Body))
@@ -351,7 +353,8 @@ namespace KeireHub
              .ExactBytes = std::make_shared<const std::vector<std::byte>>(std::move(response.Body)),
              .Signature = std::move(metadata).Value().Signature,
              .ETag = accepted.ETag,
-             .FromCache = false});
+             .FromCache = false,
+             .NetworkValidated = true});
     }
 
     CatalogClient::CatalogClient(CatalogClientOptions options, CatalogTrustStore trustStore, CatalogTransport transport)
