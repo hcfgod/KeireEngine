@@ -1,6 +1,7 @@
 #include "Keire/Core.h"
 
 #include "KeireHub/HubApplicationFactory.h"
+#include "KeireHub/HubPathMigration.h"
 
 #include "KeireInternal/FileSystem.h"
 #include "KeireProjectModules/SourceModulePack.h"
@@ -41,6 +42,9 @@ namespace Keire
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
     {
         const auto executable = Detail::PathFromUtf8(arguments.Executable());
+        const auto preferenceRoot = GetPreferenceDirectory();
+        if (const auto status = KeireHub::MigrateLegacyHubPreferenceRoot(preferenceRoot); !status)
+            throw std::runtime_error(status.Error().Message + " " + status.Error().TechnicalDetails);
         bool smoke = false;
         std::vector<std::string_view> activationArguments;
         for (std::size_t index = 1; index < arguments.Size(); ++index)
@@ -68,7 +72,7 @@ namespace Keire
         specification.MainWindow.MinimumWidth = 960;
         specification.MainWindow.MinimumHeight = 640;
         specification.MainWindow.Decoration = WindowDecoration::Custom;
-        specification.Logging.LogDirectory = (GetPreferenceDirectory() / "Hub" / "Logs").string();
+        specification.Logging.LogDirectory = (preferenceRoot / "Hub" / "Logs").string();
         specification.Ui.Mode = UiMode::Rendered;
         specification.Ui.EnableDocking = false;
         auto fontRoot = executable.parent_path().parent_path() / "content" / "Fonts";

@@ -364,7 +364,7 @@ namespace KeireHub
                     ui.TableNextRow();
                 (void)ui.TableNextColumn();
                 auto id = ui.PushId(project.Id.ToString());
-                if (auto card = ui.BeginChild("ProjectCard", {0.0F, 150.0F}, true); card)
+                if (auto card = ui.BeginChild("ProjectCard", {0.0F, 178.0F}, true); card)
                 {
                     const float cardWidth = std::max(ui.ContentAvailable().Width, 1.0F);
                     const auto thumbnail = ResolveThumbnail(ui, project.Id.ToString());

@@ -1,5 +1,7 @@
 #include "KeireHub/HubProductUi.h"
 
+#include "KeireHub/HubModalUi.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -61,6 +63,57 @@ namespace KeireHub
             }
             stream << ' ' << suffixes[suffix];
             return stream.str();
+        }
+
+        void DrawTaskActivityCard(Keire::UiFrame& ui, const HubDesignTokens& tokens, const HubTaskUiRecord& task,
+                                  HubUiCommand& command)
+        {
+            const float height = task.Active || task.Retryable ? 146.0F : 112.0F;
+            [[maybe_unused]] const auto cardBackground =
+                ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
+            if (auto card = ui.BeginChild("TaskActivityCard", {0.0F, height}, true); card)
+            {
+                ui.TextColored(task.Active ? tokens.Accent : tokens.PrimaryText, task.Title);
+                ui.TextColored(tokens.SecondaryText, task.Phase.empty() ? "Queued" : task.Phase);
+                ui.ProgressBar(std::clamp(task.Progress, 0.0F, 1.0F), {0.0F, 8.0F});
+                std::string details;
+                if (task.TotalBytes != 0)
+                {
+                    details = HumanBytes(task.BytesTransferred) + " / " + HumanBytes(task.TotalBytes);
+                    if (task.BytesPerSecond != 0)
+                        details += "  •  " + HumanBytes(task.BytesPerSecond) + "/s";
+                }
+                if (!task.CurrentPackage.empty())
+                {
+                    if (!details.empty())
+                        details += "  •  ";
+                    details += task.CurrentPackage;
+                }
+                if (task.RemainingComponents != 0)
+                    details += "  •  " + std::to_string(task.RemainingComponents) + " remaining";
+                if (!details.empty())
+                    ui.TextColoredWrapped(tokens.MutedText, details);
+                else if (!task.Message.empty())
+                    ui.TextColoredWrapped(tokens.MutedText, task.Message);
+
+                if (task.Pausable && HubSecondaryButton(ui, tokens, task.Paused ? "Resume" : "Pause", {82.0F, 30.0F}))
+                {
+                    command = {.Type = task.Paused ? HubUiCommandType::ResumeTask : HubUiCommandType::PauseTask,
+                               .ItemId = task.Id};
+                }
+                if (task.Cancellable)
+                {
+                    ui.SameLine();
+                    if (HubSecondaryButton(ui, tokens, "Cancel", {82.0F, 30.0F}))
+                        command = {.Type = HubUiCommandType::CancelTask, .ItemId = task.Id};
+                }
+                if (task.Retryable)
+                {
+                    ui.SameLine();
+                    if (HubPrimaryButton(ui, tokens, "Retry", {82.0F, 30.0F}))
+                        command = {.Type = HubUiCommandType::RetryTask, .ItemId = task.Id};
+                }
+            }
         }
 
         void PageHeader(Keire::UiFrame& ui, const HubDesignTokens& tokens, const std::string_view title,
@@ -202,7 +255,7 @@ namespace KeireHub
 #endif
         const float controlsX = bounds.Maximum.X - controlsWidth - 4.0F;
         const float controlsY = bounds.Minimum.Y + 1.0F;
-        ui.SetCursorScreenPosition({controlsX - 382.0F, controlsY});
+        ui.SetCursorScreenPosition({controlsX - 432.0F, controlsY});
         const auto accountLabel = snapshot.AccountSignedIn
                                       ? (snapshot.AccountDisplayName.empty() ? "Account" : snapshot.AccountDisplayName)
                                       : "Sign in";
@@ -240,8 +293,8 @@ namespace KeireHub
             m_NotificationCenterOpen = false;
         }
         ui.SameLine();
-        if (ui.Button("Alerts " + std::to_string(snapshot.UnreadNotifications) + "##HubNotifications",
-                      {84.0F, buttonHeight}))
+        if (ui.Button("Notifications " + std::to_string(snapshot.UnreadNotifications) + "##HubNotifications",
+                      {126.0F, buttonHeight}))
         {
             m_NotificationCenterOpen = !m_NotificationCenterOpen;
             m_TaskCenterOpen = false;
@@ -685,12 +738,19 @@ namespace KeireHub
 
         if (std::exchange(m_RequestEditorRemoval, false))
             ui.OpenPopup("Remove Editor?");
-        if (auto confirmation = ui.BeginPopupModal("Remove Editor?"); confirmation)
+        PrepareHubModal(ui, {600.0F, 390.0F});
+        HubModalStyleScope removalStyle(ui, m_Tokens);
+        if (auto confirmation = ui.BeginPopupModal("Remove Editor?", nullptr, HubModalWindowOptions(), false);
+            confirmation)
         {
             const auto version = m_PendingEditorRemoval ? m_PendingEditorRemoval->Version : std::string("selected");
             const bool managed = m_PendingEditorRemoval && m_PendingEditorRemoval->Managed;
-            ui.TextColored(m_Tokens.PrimaryText, managed ? "Uninstall Kéire Editor " + version + "?"
-                                                         : "Remove Kéire Editor " + version + " from the Hub?");
+            DrawHubModalHeader(ui, m_Tokens,
+                               managed ? "Uninstall Kéire Editor " + version + "?"
+                                       : "Remove Kéire Editor " + version + "?",
+                               managed ? "Review the managed files that will be permanently removed."
+                                       : "The editor files stay on disk; only this Hub registration is removed.",
+                               managed ? "DESTRUCTIVE ACTION" : "EXTERNAL EDITOR");
             if (managed)
             {
                 ui.TextColoredWrapped(
@@ -722,7 +782,8 @@ namespace KeireHub
                                  (managed && (!m_PendingEditorRemoval->Healthy || !m_ConfirmManagedEditorRemoval));
             if (auto disabled = ui.BeginDisabled(blocked); disabled)
             {
-                if (ui.Button(managed ? "Uninstall editor" : "Remove from Hub", {132.0F, 32.0F}))
+                if ((managed ? HubDangerButton(ui, m_Tokens, "Uninstall editor", {142.0F, 38.0F})
+                             : HubPrimaryButton(ui, m_Tokens, "Remove from Hub", {142.0F, 38.0F})))
                 {
                     command = {.Type = managed ? HubUiCommandType::RemoveManagedEditor
                                                : HubUiCommandType::RemoveExternalEditor,
@@ -734,7 +795,7 @@ namespace KeireHub
                 }
             }
             ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
+            if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 38.0F}))
             {
                 m_PendingEditorRemoval.reset();
                 m_ConfirmManagedEditorRemoval = false;
@@ -827,7 +888,7 @@ namespace KeireHub
                 {
                     const auto& item = snapshot.Templates[index];
                     auto id = ui.PushId(item.Id);
-                    if (auto card = ui.BeginChild("TemplateCard", {0.0F, 214.0F}, true); card)
+                    if (auto card = ui.BeginChild("TemplateCard", {0.0F, 246.0F}, true); card)
                     {
                         DrawTemplateArtwork(ui, m_Tokens, item.Name, item.Thumbnail.Available,
                                             ResolveTemplateArtwork(ui, item.Thumbnail),
@@ -975,7 +1036,7 @@ namespace KeireHub
                 continue;
             ++shown;
             auto id = ui.PushId(item.Id);
-            if (auto card = ui.BeginChild("LearnItem", {0.0F, 108.0F}, true); card)
+            if (auto card = ui.BeginChild("LearnItem", {0.0F, 140.0F}, true); card)
             {
                 ui.TextColored(m_Tokens.Accent,
                                item.Category + (item.Difficulty.empty() ? "" : "  •  " + item.Difficulty));
@@ -1211,38 +1272,55 @@ namespace KeireHub
 
         if (std::exchange(m_RequestClearCache, false))
             ui.OpenPopup("Clear verified cache?");
-        if (auto confirmation = ui.BeginPopupModal("Clear verified cache?"); confirmation)
         {
-            ui.TextColoredWrapped(m_Tokens.SecondaryText,
-                                  "Downloaded packages will be removed. Installed editors, projects, settings, and "
-                                  "signed catalog metadata are preserved.");
-            if (auto disabled = ui.BeginDisabled(snapshot.VerifiedCacheClearRunning); disabled)
+            PrepareHubModal(ui, {540.0F, 280.0F});
+            HubModalStyleScope clearCacheStyle(ui, m_Tokens);
+            if (auto confirmation =
+                    ui.BeginPopupModal("Clear verified cache?", nullptr, HubModalWindowOptions(), false);
+                confirmation)
             {
-                if (ui.Button(snapshot.VerifiedCacheClearRunning ? "Clearing..." : "Clear cache", {104.0F, 32.0F}))
+                DrawHubModalHeader(ui, m_Tokens, "Clear verified package cache?",
+                                   "Free disk space without changing installed products.", "STORAGE");
+                ui.TextColoredWrapped(m_Tokens.SecondaryText,
+                                      "Downloaded packages will be removed. Installed editors, projects, settings, "
+                                      "and signed catalog metadata are preserved.");
+                if (auto disabled = ui.BeginDisabled(snapshot.VerifiedCacheClearRunning); disabled)
                 {
-                    command.Type = HubUiCommandType::ClearVerifiedCache;
-                    ui.CloseCurrentPopup();
+                    if (HubDangerButton(ui, m_Tokens,
+                                        snapshot.VerifiedCacheClearRunning ? "Clearing..." : "Clear cache",
+                                        {118.0F, 38.0F}))
+                    {
+                        command.Type = HubUiCommandType::ClearVerifiedCache;
+                        ui.CloseCurrentPopup();
+                    }
                 }
+                ui.SameLine();
+                if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 38.0F}))
+                    ui.CloseCurrentPopup();
             }
-            ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
-                ui.CloseCurrentPopup();
         }
         if (std::exchange(m_RequestResetSettings, false))
             ui.OpenPopup("Reset Hub settings?");
-        if (auto confirmation = ui.BeginPopupModal("Reset Hub settings?"); confirmation)
         {
-            ui.TextColoredWrapped(m_Tokens.SecondaryText,
-                                  "Hub preferences will return to defaults and first-run setup will appear again. "
-                                  "Projects and editor installations are not removed.");
-            if (ui.Button("Reset settings", {116.0F, 32.0F}))
+            PrepareHubModal(ui, {540.0F, 280.0F});
+            HubModalStyleScope resetStyle(ui, m_Tokens);
+            if (auto confirmation = ui.BeginPopupModal("Reset Hub settings?", nullptr, HubModalWindowOptions(), false);
+                confirmation)
             {
-                command.Type = HubUiCommandType::ResetSettings;
-                ui.CloseCurrentPopup();
+                DrawHubModalHeader(ui, m_Tokens, "Reset Hub settings?",
+                                   "Return the Hub to its first-run configuration.", "SETTINGS");
+                ui.TextColoredWrapped(m_Tokens.SecondaryText,
+                                      "Hub preferences will return to defaults and first-run setup will appear "
+                                      "again. Projects and editor installations are not removed.");
+                if (HubDangerButton(ui, m_Tokens, "Reset settings", {132.0F, 38.0F}))
+                {
+                    command.Type = HubUiCommandType::ResetSettings;
+                    ui.CloseCurrentPopup();
+                }
+                ui.SameLine();
+                if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 38.0F}))
+                    ui.CloseCurrentPopup();
             }
-            ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
-                ui.CloseCurrentPopup();
         }
     }
 
@@ -1250,9 +1328,15 @@ namespace KeireHub
     {
         if (!m_TaskCenterOpen)
             return;
-        if (auto center = ui.BeginChild("HubTaskCenter", {0.0F, 210.0F}, true); center)
+        [[maybe_unused]] const auto centerBackground =
+            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Surface);
+        if (auto center = ui.BeginChild("HubTaskCenter", {0.0F, 360.0F}, true); center)
         {
-            ui.TextColored(m_Tokens.PrimaryText, "Tasks and downloads");
+            {
+                const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
+                ui.TextColored(m_Tokens.PrimaryText, "Tasks and downloads");
+            }
+            ui.TextColored(m_Tokens.SecondaryText, "Downloads, verification, installation, and recent results.");
             ui.SameLine();
             if (ui.Button("Close##TaskCenter", {64.0F, 26.0F}))
                 m_TaskCenterOpen = false;
@@ -1264,43 +1348,8 @@ namespace KeireHub
             for (const auto& task : snapshot.Tasks)
             {
                 auto id = ui.PushId(task.Id);
-                ui.TextColored(task.Active ? m_Tokens.Accent : m_Tokens.SecondaryText,
-                               task.Title + "  •  " + task.Phase);
-                ui.ProgressBar(std::clamp(task.Progress, 0.0F, 1.0F), {0.0F, 12.0F}, task.Message);
-                if (task.TotalBytes != 0 || !task.CurrentPackage.empty())
-                {
-                    std::string details;
-                    if (task.TotalBytes != 0)
-                    {
-                        details = HumanBytes(task.BytesTransferred) + " / " + HumanBytes(task.TotalBytes);
-                        if (task.BytesPerSecond != 0)
-                            details += "  •  " + HumanBytes(task.BytesPerSecond) + "/s";
-                    }
-                    if (!task.CurrentPackage.empty())
-                    {
-                        if (!details.empty())
-                            details += "  •  ";
-                        details += task.CurrentPackage;
-                    }
-                    if (task.RemainingComponents != 0)
-                        details += "  •  " + std::to_string(task.RemainingComponents) + " remaining";
-                    ui.TextColored(m_Tokens.MutedText, details);
-                }
-                if (task.Pausable && ui.Button(task.Paused ? "Resume" : "Pause", {76.0F, 26.0F}))
-                    command = {.Type = task.Paused ? HubUiCommandType::ResumeTask : HubUiCommandType::PauseTask,
-                               .ItemId = task.Id};
-                if (task.Cancellable)
-                {
-                    ui.SameLine();
-                    if (ui.Button("Cancel", {76.0F, 26.0F}))
-                        command = {.Type = HubUiCommandType::CancelTask, .ItemId = task.Id};
-                }
-                if (task.Retryable)
-                {
-                    ui.SameLine();
-                    if (ui.Button("Retry", {76.0F, 26.0F}))
-                        command = {.Type = HubUiCommandType::RetryTask, .ItemId = task.Id};
-                }
+                DrawTaskActivityCard(ui, m_Tokens, task, command);
+                ui.Spacing();
             }
         }
     }
@@ -1310,20 +1359,43 @@ namespace KeireHub
     {
         if (!m_NotificationCenterOpen)
             return;
-        if (auto center = ui.BeginChild("HubNotificationCenter", {0.0F, 210.0F}, true); center)
+        [[maybe_unused]] const auto centerBackground =
+            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Surface);
+        if (auto center = ui.BeginChild("HubNotificationCenter", {0.0F, 420.0F}, true); center)
         {
-            ui.TextColored(m_Tokens.PrimaryText, "Notifications");
+            {
+                const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
+                ui.TextColored(m_Tokens.PrimaryText, "Activity and notifications");
+            }
+            ui.TextColored(m_Tokens.SecondaryText, "Install progress, completed work, warnings, and recovery actions.");
             ui.SameLine();
             if (!snapshot.Notifications.empty() && ui.Button("Clear history##Notifications", {104.0F, 26.0F}))
                 command.Type = HubUiCommandType::ClearNotifications;
             ui.SameLine();
             if (ui.Button("Close##Notifications", {64.0F, 26.0F}))
                 m_NotificationCenterOpen = false;
-            if (snapshot.Notifications.empty())
+            const auto activeTasks = std::ranges::count_if(snapshot.Tasks, &HubTaskUiRecord::Active);
+            if (activeTasks != 0)
             {
-                ui.TextColored(m_Tokens.SecondaryText, "No notifications yet.");
+                ui.Spacing();
+                ui.TextColored(m_Tokens.PrimaryText, "Active installs and downloads");
+                for (const auto& task : snapshot.Tasks)
+                {
+                    if (!task.Active)
+                        continue;
+                    auto id = ui.PushId("notification-" + task.Id);
+                    DrawTaskActivityCard(ui, m_Tokens, task, command);
+                    ui.Spacing();
+                }
+                ui.Separator();
+            }
+            if (snapshot.Notifications.empty() && activeTasks == 0)
+            {
+                ui.TextColored(m_Tokens.SecondaryText, "No current activity or notifications.");
                 return;
             }
+            if (!snapshot.Notifications.empty())
+                ui.TextColored(m_Tokens.PrimaryText, "Notification history");
             for (const auto& notification : snapshot.Notifications)
             {
                 auto id = ui.PushId(notification.Id);
@@ -1331,12 +1403,17 @@ namespace KeireHub
                                    : notification.Severity == "Warning" ? m_Tokens.Warning
                                    : notification.Severity == "Success" ? m_Tokens.Success
                                                                         : m_Tokens.Accent;
-                ui.TextColored(color,
-                               (notification.Read ? "" : "• ") + notification.Severity + "  " + notification.Title);
-                ui.TextColoredWrapped(m_Tokens.SecondaryText, notification.Message);
-                if (!notification.Read && ui.Button("Mark read", {80.0F, 26.0F}))
-                    command = {.Type = HubUiCommandType::MarkNotificationRead, .ItemId = notification.Id};
-                ui.Separator();
+                [[maybe_unused]] const auto cardBackground =
+                    ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Elevated);
+                if (auto card = ui.BeginChild("NotificationCard", {0.0F, 104.0F}, true); card)
+                {
+                    ui.TextColored(color,
+                                   (notification.Read ? "" : "• ") + notification.Severity + "  " + notification.Title);
+                    ui.TextColoredWrapped(m_Tokens.SecondaryText, notification.Message);
+                    if (!notification.Read && HubSecondaryButton(ui, m_Tokens, "Mark read", {92.0F, 28.0F}))
+                        command = {.Type = HubUiCommandType::MarkNotificationRead, .ItemId = notification.Id};
+                }
+                ui.Spacing();
             }
         }
     }
@@ -1345,17 +1422,21 @@ namespace KeireHub
     {
         if (snapshot.Settings.FirstRunCompleted)
             return;
+        constexpr std::array titles{"Welcome",         "Choose locations",  "Detect existing editors",
+                                    "Import projects", "Review components", "Ready"};
         SynchronizeSettings(snapshot.Settings);
         auto& settings = *m_EditedSettings;
         ui.OpenPopup("Welcome to Kéire Hub");
-        if (auto dialog = ui.BeginPopupModal("Welcome to Kéire Hub"); dialog)
+        PrepareHubModal(ui, {720.0F, 520.0F});
+        HubModalStyleScope modalStyle(ui, m_Tokens);
+        if (auto dialog = ui.BeginPopupModal("Welcome to Kéire Hub", nullptr, HubModalWindowOptions(), false); dialog)
         {
-            constexpr std::array titles{"Welcome",         "Choose locations",  "Detect existing editors",
-                                        "Import projects", "Review components", "Ready"};
-            ui.TextColored(m_Tokens.Accent,
-                           "FIRST RUN  " + std::to_string(m_FirstRunStep + 1) + " / " + std::to_string(titles.size()));
-            ui.TextColored(m_Tokens.PrimaryText, titles[m_FirstRunStep]);
-            ui.Separator();
+            DrawHubModalHeader(ui, m_Tokens, titles[m_FirstRunStep],
+                               "Set up the Hub once. Every choice can be changed later in Settings.",
+                               "WELCOME  •  STEP " + std::to_string(m_FirstRunStep + 1) + " OF " +
+                                   std::to_string(titles.size()));
+            ui.ProgressBar(static_cast<float>(m_FirstRunStep + 1) / static_cast<float>(titles.size()), {0.0F, 6.0F});
+            ui.Spacing();
             if (m_FirstRunStep == 0)
             {
                 ui.TextColoredWrapped(m_Tokens.SecondaryText,
@@ -1435,14 +1516,17 @@ namespace KeireHub
             else if (!snapshot.FirstRunDiscoveryMessage.empty())
                 ui.TextColored(snapshot.FirstRunDiscoveryComplete ? m_Tokens.Success : m_Tokens.Warning,
                                snapshot.FirstRunDiscoveryMessage);
-            if (m_FirstRunStep > 0 && ui.Button("Back", {76.0F, 32.0F}))
+            ui.Spacing();
+            ui.Separator();
+            if (m_FirstRunStep > 0 && HubSecondaryButton(ui, m_Tokens, "Back", {88.0F, 38.0F}))
                 --m_FirstRunStep;
             if (m_FirstRunStep > 0)
                 ui.SameLine();
             const bool discoveryBlocksNext = snapshot.FirstRunDiscoveryRunning && m_FirstRunStep >= 2;
             if (auto disabled = ui.BeginDisabled(discoveryBlocksNext); disabled)
             {
-                if (ui.Button(m_FirstRunStep + 1 == titles.size() ? "Finish" : "Continue", {92.0F, 32.0F}))
+                if (HubPrimaryButton(ui, m_Tokens, m_FirstRunStep + 1 == titles.size() ? "Finish" : "Continue",
+                                     {108.0F, 38.0F}))
                 {
                     const auto previousStep = m_FirstRunStep;
                     if (++m_FirstRunStep == titles.size())
@@ -1459,7 +1543,7 @@ namespace KeireHub
                 }
             }
             ui.SameLine();
-            if (ui.Button("Skip optional discovery", {152.0F, 32.0F}))
+            if (HubSecondaryButton(ui, m_Tokens, "Skip optional discovery", {176.0F, 38.0F}))
             {
                 settings.FirstRunCompleted = true;
                 command = {.Type = HubUiCommandType::SaveSettings, .ItemId = "skip-discovery", .Settings = settings};

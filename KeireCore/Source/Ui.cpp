@@ -539,11 +539,15 @@ namespace Keire
         return UiComboScope(*this, visible);
     }
 
-    UiPopupScope UiFrame::BeginPopupModal(std::string_view id, bool* open)
+    UiPopupScope UiFrame::BeginPopupModal(const std::string_view id, bool* open, const UiWindowOptions options,
+                                          const bool autoResize)
     {
         m_Impl->RequireActive("BeginPopupModal");
         const std::string safeId(id);
-        const bool visible = ImGui::BeginPopupModal(safeId.c_str(), open, ImGuiWindowFlags_AlwaysAutoResize);
+        auto flags = ToImGuiWindowFlags(options);
+        if (autoResize)
+            flags |= ImGuiWindowFlags_AlwaysAutoResize;
+        const bool visible = ImGui::BeginPopupModal(safeId.c_str(), open, flags);
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::Popup);
         return UiPopupScope(*this, visible);

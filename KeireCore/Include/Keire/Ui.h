@@ -530,7 +530,8 @@ namespace Keire
         [[nodiscard]] UiWindowScope BeginMainToolbar(std::string_view id = "Main Toolbar", float height = 34.0F);
         [[nodiscard]] UiWindowScope BeginMainStatusBar(std::string_view id = "Main Status Bar", float height = 24.0F);
         [[nodiscard]] UiComboScope BeginCombo(std::string_view label, std::string_view preview);
-        [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr);
+        [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr,
+                                                   UiWindowOptions options = {}, bool autoResize = true);
         [[nodiscard]] UiPopupScope BeginPopup(std::string_view id);
         [[nodiscard]] UiPopupScope BeginItemContextMenu(std::string_view id = {});
         [[nodiscard]] UiPopupScope BeginWindowContextMenu(std::string_view id = {});

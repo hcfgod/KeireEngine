@@ -1,5 +1,6 @@
 #include "KeireHub/HubProductUi.h"
 
+#include "KeireHub/HubModalUi.h"
 #include "KeireHubRuntime/PackageResolver.h"
 
 #include <algorithm>
@@ -140,7 +141,7 @@ namespace KeireHub
         }
         m_PendingEditorInstall = *candidate;
         m_EditorInstallDestination =
-            Utf8Path(snapshot.Settings.DefaultEditorRoot / ("Kéire Editor " + candidate->Version));
+            Utf8Path(snapshot.Settings.DefaultEditorRoot / PathFromUtf8("Kéire Editor " + candidate->Version));
         m_EditorComponentSearch.clear();
         m_SelectedEditorComponents.clear();
         m_LastEditorInstallRequest.reset();
@@ -173,7 +174,7 @@ namespace KeireHub
                 if (editor.Channel != channel)
                     continue;
                 auto id = ui.PushId(editor.PackageId + "@" + editor.Version);
-                if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 142.0F}, true); card)
+                if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 166.0F}, true); card)
                 {
                     ui.TextColored(m_Tokens.PrimaryText,
                                    editor.DisplayName.empty() ? "Kéire Editor " + editor.Version : editor.DisplayName);
@@ -201,25 +202,50 @@ namespace KeireHub
     {
         if (std::exchange(m_RequestEditorInstall, false))
             ui.OpenPopup("Install Editor");
-        if (auto installation = ui.BeginPopupModal("Install Editor"); !installation)
+        PrepareHubModal(ui, {760.0F, 600.0F});
+        HubModalStyleScope modalStyle(ui, m_Tokens);
+        auto installation = ui.BeginPopupModal("Install Editor", nullptr, HubModalWindowOptions(), false);
+        if (!installation)
             return;
         if (!m_PendingEditorInstall)
         {
-            ui.TextColored(m_Tokens.Warning, "The selected editor version is no longer available.");
-            if (ui.Button("Close", {76.0F, 32.0F}))
+            DrawHubModalHeader(ui, m_Tokens, "Editor version unavailable",
+                               "The verified catalog changed before this install could be reviewed.", "INSTALLS");
+            ui.TextColoredWrapped(m_Tokens.Warning,
+                                  "Refresh Installs and choose an editor version that is currently available.");
+            if (HubSecondaryButton(ui, m_Tokens, "Close", {88.0F, 36.0F}))
                 ui.CloseCurrentPopup();
             return;
         }
 
         const auto& editor = *m_PendingEditorInstall;
         const auto editorName = editor.DisplayName.empty() ? std::string("Kéire Editor") : editor.DisplayName;
-        ui.TextColored(m_Tokens.PrimaryText, "Install " + editorName + " " + editor.Version);
-        ui.TextColored(m_Tokens.SecondaryText, editor.Platform + " / " + editor.Architecture);
-        (void)ui.InputText("Destination", m_EditorInstallDestination);
+        auto request = BuildRequest(editor, m_EditorInstallDestination, m_SelectedEditorComponents);
+        bool previewMatches = snapshot.EditorInstallPreview && snapshot.EditorInstallPreview->Request == request;
+        DrawHubModalHeader(ui, m_Tokens, previewMatches ? "Review editor installation" : "Configure editor install",
+                           "Choose a managed location and the compatible components you need.",
+                           previewMatches ? "INSTALLS  •  REVIEW" : "INSTALLS  •  CONFIGURE");
+        {
+            [[maybe_unused]] const auto summaryBackground =
+                ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, m_Tokens.Elevated);
+            if (auto summary = ui.BeginChild("EditorInstallSummary", {0.0F, 84.0F}, true); summary)
+            {
+                ui.TextColored(m_Tokens.PrimaryText, editorName + " " + editor.Version);
+                ui.TextColored(m_Tokens.SecondaryText, std::string(ChannelLabel(editor.Channel)) + "  •  " +
+                                                           editor.Platform + " / " + editor.Architecture);
+                ui.TextColored(m_Tokens.MutedText, "Download " + HumanBytes(editor.DownloadBytes) + "  •  Installed " +
+                                                       HumanBytes(editor.InstalledBytes));
+            }
+        }
+        ui.Spacing();
+        ui.TextColored(m_Tokens.SecondaryText, "Install location");
+        ui.SetNextItemWidth(ui.ContentAvailable().Width);
+        (void)ui.InputText("##EditorInstallDestination", m_EditorInstallDestination);
         if (!editor.Components.empty())
         {
             ui.Spacing();
             ui.TextColored(m_Tokens.PrimaryText, "Compatible components");
+            ui.SetNextItemWidth(ui.ContentAvailable().Width);
             (void)ui.InputTextWithHint("##EditorComponentSearch", "Filter components", m_EditorComponentSearch);
             constexpr std::size_t MaximumVisibleComponents = 24;
             constexpr std::size_t MaximumSelectedComponents = 64;
@@ -265,16 +291,15 @@ namespace KeireHub
                 ui.TextColored(m_Tokens.Warning, "The maximum of 64 optional components is selected.");
         }
 
-        auto request = BuildRequest(editor, m_EditorInstallDestination, m_SelectedEditorComponents);
-        const bool previewMatches = snapshot.EditorInstallPreview && snapshot.EditorInstallPreview->Request == request;
+        request = BuildRequest(editor, m_EditorInstallDestination, m_SelectedEditorComponents);
+        previewMatches = snapshot.EditorInstallPreview && snapshot.EditorInstallPreview->Request == request;
         if (previewMatches)
         {
             const auto& preview = *snapshot.EditorInstallPreview;
             ui.Spacing();
-            ui.Separator();
-            ui.TextColored(m_Tokens.PrimaryText, "Install plan");
-            ui.Text("Download: " + HumanBytes(preview.DownloadBytes) +
-                    "  ·  Disk required: " + HumanBytes(preview.RequiredDiskBytes));
+            ui.TextColored(m_Tokens.PrimaryText, "Verified install plan");
+            ui.TextColored(m_Tokens.Accent, HumanBytes(preview.DownloadBytes) + " download  •  " +
+                                                HumanBytes(preview.RequiredDiskBytes) + " disk required");
             const auto shownSteps = std::min<std::size_t>(preview.Steps.size(), 12);
             for (std::size_t index = 0; index < shownSteps; ++index)
             {
@@ -297,7 +322,7 @@ namespace KeireHub
             ui.TextColored(m_Tokens.Warning, "Wait for the active editor installation check to finish.");
         if (auto disabled = ui.BeginDisabled(destinationMissing || snapshot.EditorManagementBusy); disabled)
         {
-            if (ui.Button(previewMatches ? "Install" : "Review install", {116.0F, 32.0F}))
+            if (HubPrimaryButton(ui, m_Tokens, previewMatches ? "Install editor" : "Review install", {132.0F, 38.0F}))
             {
                 m_LastEditorInstallRequest = request;
                 command = {.Type = previewMatches ? HubUiCommandType::InstallEditor
@@ -314,7 +339,7 @@ namespace KeireHub
             }
         }
         ui.SameLine();
-        if (ui.Button("Cancel", {76.0F, 32.0F}))
+        if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 38.0F}))
         {
             m_PendingEditorInstall.reset();
             m_LastEditorInstallRequest.reset();

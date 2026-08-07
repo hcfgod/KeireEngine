@@ -14,7 +14,9 @@
 #include "KeireHub/HubInstance.h"
 #include "KeireHub/HubLocalContent.h"
 #include "KeireHub/HubMaintenanceIntegration.h"
+#include "KeireHub/HubModalUi.h"
 #include "KeireHub/HubPackageTaskWorkflow.h"
+#include "KeireHub/HubPathMigration.h"
 #include "KeireHub/HubProductUi.h"
 #include "KeireHub/HubProjectCreationUi.h"
 #include "KeireHub/HubProjectMetadataWorkflow.h"
@@ -33,6 +35,7 @@
 
 #include "KeireHubRuntime/EditorProcessTracker.h"
 #include "KeireHubRuntime/HubUpdateManager.h"
+#include "KeireHubRuntime/TaskNotificationTracker.h"
 
 #include "KeireHub/HubLayerFactory.h"
 
@@ -158,6 +161,8 @@ namespace
                         .PreferenceRoot = preferenceRoot, .LegacySettingsPath = preferenceRoot / "HubUi.settings"});
                     if (const auto status = m_Controller->Load(KeireHub::HubNowUnixSeconds()); !status)
                         throw std::runtime_error(status.Error().Message);
+                    if (const auto status = KeireHub::RepairLegacyHubStorageRoots(m_Controller->Settings()); !status)
+                        throw std::runtime_error(status.Error().Message + " " + status.Error().TechnicalDetails);
                     if (m_Controller->Installations().Snapshot()->empty())
                     {
                         const auto packagedEditor = KeireHub::RegisterPackagedEditorIfPresent(
@@ -511,6 +516,17 @@ namespace
             }
             if (m_BuildSupport)
                 m_BuildSupport->Poll();
+            if (m_Controller)
+            {
+                const auto tasks = m_Controller->Tasks().Snapshot();
+                if (const auto status = m_TaskNotifications.Observe(*tasks, m_Controller->Notifications(),
+                                                                    KeireHub::HubNowUnixSeconds());
+                    !status)
+                {
+                    KEIRE_CLIENT_WARN("[Project Hub] Task notification could not be persisted: {}",
+                                      status.Error().Message);
+                }
+            }
         }
 
         void OnUi(Keire::UiFrame& ui) override
@@ -614,33 +630,48 @@ namespace
                 if (auto titleBar = ui.BeginChild("HubTitleBar", {0.0F, 40.0F}, false); titleBar)
                     m_ProductUi.DrawTitleBar(ui, *Owner().MainWindow(), m_Page, m_ProductSnapshot, command);
                 const bool compact = size.Width < 1080;
-                if (auto sidebar = ui.BeginChild("HubSidebar", {compact ? 72.0F : 224.0F, 0.0F}, true); sidebar)
-                    m_ProductUi.DrawSidebar(ui, m_Page, compact, m_ProductSnapshot);
-                ui.SameLine();
-                if (auto workspace = ui.BeginChild("HubWorkspace", {}, false); workspace)
                 {
-                    m_ProductUi.DrawNotificationCenter(ui, m_ProductSnapshot, command);
-                    m_ProductUi.DrawTaskCenter(ui, m_ProductSnapshot, command);
-                    m_ProductUi.DrawAccountDialog(ui, m_ProductSnapshot, command);
-                    DrawNotice(ui, tokens);
-                    if (m_Page == KeireHub::HubPage::Home)
-                        m_ProductUi.DrawHome(ui, m_Page, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Installs)
-                        m_ProductUi.DrawInstalls(ui, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Templates)
-                        m_ProductUi.DrawTemplates(ui, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Learn)
-                        m_ProductUi.DrawLearn(ui, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Resources)
-                        m_ProductUi.DrawResources(ui, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Licenses)
-                        m_ProductUi.DrawLicenses(ui, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Settings)
-                        m_ProductUi.DrawSettings(ui, m_ProductSnapshot, command);
-                    else if (m_Page == KeireHub::HubPage::Projects)
-                        ExecuteProjectCommand(m_ProjectsUi.Draw(ui, projectEntries, m_ProductSnapshot.Editors, {},
-                                                                false, m_ProductSnapshot.Settings.ConfirmProjectRemoval,
-                                                                static_cast<bool>(m_FolderDialog)));
+                    [[maybe_unused]] const auto sidebarPadding =
+                        ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding,
+                                             compact ? Keire::UiSize{8.0F, 12.0F} : Keire::UiSize{14.0F, 12.0F});
+                    [[maybe_unused]] const auto sidebarBackground =
+                        ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Surface);
+                    if (auto sidebar = ui.BeginChild("HubSidebar", {compact ? 72.0F : 224.0F, 0.0F}, true); sidebar)
+                        m_ProductUi.DrawSidebar(ui, m_Page, compact, m_ProductSnapshot);
+                }
+                ui.SameLine();
+                {
+                    [[maybe_unused]] const auto workspacePadding =
+                        ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding, Keire::UiSize{20.0F, 16.0F});
+                    [[maybe_unused]] const auto childPadding =
+                        ui.PushStyleVariable(Keire::UiStyleVariable::FramePadding, Keire::UiSize{10.0F, 7.0F});
+                    [[maybe_unused]] const auto workspaceBackground =
+                        ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Canvas);
+                    if (auto workspace = ui.BeginChild("HubWorkspace", {}, false); workspace)
+                    {
+                        m_ProductUi.DrawNotificationCenter(ui, m_ProductSnapshot, command);
+                        m_ProductUi.DrawTaskCenter(ui, m_ProductSnapshot, command);
+                        m_ProductUi.DrawAccountDialog(ui, m_ProductSnapshot, command);
+                        DrawNotice(ui, tokens);
+                        if (m_Page == KeireHub::HubPage::Home)
+                            m_ProductUi.DrawHome(ui, m_Page, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Installs)
+                            m_ProductUi.DrawInstalls(ui, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Templates)
+                            m_ProductUi.DrawTemplates(ui, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Learn)
+                            m_ProductUi.DrawLearn(ui, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Resources)
+                            m_ProductUi.DrawResources(ui, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Licenses)
+                            m_ProductUi.DrawLicenses(ui, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Settings)
+                            m_ProductUi.DrawSettings(ui, m_ProductSnapshot, command);
+                        else if (m_Page == KeireHub::HubPage::Projects)
+                            ExecuteProjectCommand(m_ProjectsUi.Draw(
+                                ui, projectEntries, m_ProductSnapshot.Editors, {}, false,
+                                m_ProductSnapshot.Settings.ConfirmProjectRemoval, static_cast<bool>(m_FolderDialog)));
+                    }
                 }
                 if (m_BuildSupport)
                     m_BuildSupport->Draw(ui, *Owner().Windows(), Owner().MainWindow()->Id(),
@@ -1402,22 +1433,33 @@ namespace
 
         void DrawOpenDialog(Keire::UiFrame& ui)
         {
-            if (auto dialog = ui.BeginPopupModal("Open Project"); dialog)
+            const auto tokens =
+                KeireHub::HubDesignTokens::For(m_ProductSnapshot.Settings.Appearance, KeireHub::HubSystemPrefersDark());
+            KeireHub::PrepareHubModal(ui, {620.0F, 300.0F});
+            KeireHub::HubModalStyleScope modalStyle(ui, tokens);
+            if (auto dialog = ui.BeginPopupModal("Open Project", nullptr, KeireHub::HubModalWindowOptions(), false);
+                dialog)
             {
-                (void)ui.InputText("Project Folder", m_OpenPath);
+                KeireHub::DrawHubModalHeader(ui, tokens, "Open an existing project",
+                                             "Select a Kéire project folder to validate and add to the Hub.",
+                                             "PROJECTS");
+                ui.TextColored(tokens.SecondaryText, "Project folder");
+                ui.SetNextItemWidth(std::max(1.0F, ui.ContentAvailable().Width - 104.0F));
+                (void)ui.InputText("##OpenProjectFolder", m_OpenPath);
                 ui.SameLine();
                 if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_FolderDialog)); disabled)
                 {
-                    if (ui.Button("Browse..."))
+                    if (KeireHub::HubSecondaryButton(ui, tokens, "Browse...", {96.0F, 38.0F}))
                         BrowseForFolder(FolderTarget::OpenProject, Keire::Detail::PathFromUtf8(m_OpenPath));
                 }
-                if (ui.Button("Open"))
+                ui.Spacing();
+                if (KeireHub::HubPrimaryButton(ui, tokens, "Open project", {124.0F, 38.0F}))
                 {
                     ui.CloseCurrentPopup();
                     Open(Keire::Detail::PathFromUtf8(m_OpenPath));
                 }
                 ui.SameLine();
-                if (ui.Button("Cancel"))
+                if (KeireHub::HubSecondaryButton(ui, tokens, "Cancel", {88.0F, 38.0F}))
                     ui.CloseCurrentPopup();
             }
         }
@@ -1445,6 +1487,7 @@ namespace
         KeireHub::EditorProcessTracker m_EditorProcesses{Keire::Detail::IsProcessAlive};
         KeireHub::HubUpdateHandoffWorkflow m_HubUpdateHandoff;
         KeireHub::HubMaintenanceWorkflow m_Maintenance;
+        KeireHub::TaskNotificationTracker m_TaskNotifications;
         KeireHub::HubProductSnapshot m_ProductSnapshot;
         std::optional<PendingStartupActivation> m_PendingStartupActivation;
         std::shared_ptr<KeireHub::HubInstanceCoordinator> m_Instance;

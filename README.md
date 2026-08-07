@@ -136,6 +136,12 @@ catalog/package staging layout consumed by the offline Ed25519 publisher and rea
 the deployed HTTPS service URL and its trusted release public key; without both, online discovery remains intentionally
 disabled while installed editors and cached content continue to work.
 
+Editor installs are reviewed in a version-aware Hub dialog before they enter the persistent task queue. The title-bar
+Tasks and Notifications controls show the same live download, verification, extraction, and installation progress,
+including pause, resume, cancel, and retry actions. On Windows, Hub-owned paths and worker command lines remain UTF-8
+safe; installations created by earlier builds beneath a `KÃ©ire` storage component are migrated to `Kéire` on startup
+with their cached catalogs and operation journals preserved.
+
 `package-hub` also always uses Dist, but builds and stages only the Hub lifecycle, its private `KeireHubWorker` task
 process, runtime files, branding,
 licensed fonts, packaged documentation, sample content, the validated template catalog/payloads, and licenses. It does

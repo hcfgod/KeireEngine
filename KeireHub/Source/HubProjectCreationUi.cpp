@@ -1,5 +1,6 @@
 #include "KeireHub/HubProjectCreationUi.h"
 
+#include "KeireHub/HubModalUi.h"
 #include "KeireHub/HubProjectUiSupport.h"
 
 #include "KeireHubRuntime/TemplateManager.h"
@@ -18,9 +19,15 @@ namespace KeireHub
                                                        bool& openAfterCreation, const bool folderDialogPending)
     {
         HubCreateProjectRequest request;
-        ui.SetNextWindowSize({800.0F, 500.0F}, false);
-        if (auto dialog = ui.BeginPopupModal("Create Project"); !dialog)
+        const auto tokens = HubDesignTokens::For(snapshot.Settings.Appearance, HubSystemPrefersDark());
+        PrepareHubModal(ui, {820.0F, 560.0F});
+        HubModalStyleScope modalStyle(ui, tokens);
+        auto dialog = ui.BeginPopupModal("Create Project", nullptr, HubModalWindowOptions(), false);
+        if (!dialog)
             return request;
+
+        DrawHubModalHeader(ui, tokens, "Create a new project",
+                           "Choose a verified template and a compatible installed editor.", "NEW PROJECT");
 
         const auto editorAvailable = [](const HubEditorUiRecord& editor)
         { return editor.Healthy && !editor.Entrypoint.empty() && !editor.AssetToolEntrypoint.empty(); };
@@ -113,8 +120,12 @@ namespace KeireHub
                                                                 selectedTemplate->CompatibleEditors + "  ·  Schema " +
                                                                 std::to_string(selectedTemplate->ProjectSchema));
             }
-            (void)ui.InputTextWithHint("Name", "My Project", projectName);
-            (void)ui.InputTextWithHint("Location", "Parent folder", projectLocation);
+            ui.TextColored(tokens.SecondaryText, "Project name");
+            ui.SetNextItemWidth(ui.ContentAvailable().Width);
+            (void)ui.InputTextWithHint("##ProjectName", "My Project", projectName);
+            ui.TextColored(tokens.SecondaryText, "Location");
+            ui.SetNextItemWidth(std::max(1.0F, ui.ContentAvailable().Width - 96.0F));
+            (void)ui.InputTextWithHint("##ProjectLocation", "Parent folder", projectLocation);
             ui.SameLine();
             if (auto disabled = ui.BeginDisabled(folderDialogPending || snapshot.ProjectCreationBusy); disabled)
                 if (ui.Button("Browse..."))
@@ -151,7 +162,7 @@ namespace KeireHub
             const bool canCreate = validName && !error && parentAvailable && !conflict && templateAvailable &&
                                    !snapshot.ProjectCreationBusy;
             if (auto disabled = ui.BeginDisabled(!canCreate); disabled)
-                if (ui.Button("Create Project", {132.0F, 34.0F}))
+                if (HubPrimaryButton(ui, tokens, "Create project", {142.0F, 38.0F}))
                 {
                     request = {.Action = HubCreateProjectAction::Create,
                                .TemplateId = templateId,
@@ -163,7 +174,7 @@ namespace KeireHub
                 }
         }
         ui.SameLine();
-        if (ui.Button("Cancel"))
+        if (HubSecondaryButton(ui, tokens, "Cancel", {88.0F, 38.0F}))
             ui.CloseCurrentPopup();
         return request;
     }

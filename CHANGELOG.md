@@ -1,5 +1,7 @@
 # Changelog
 
+- Fixed editor-install, project-creation, and project-upgrade dialogs ending their popup scope before drawing their
+  contents, which left the Hub dimmed while rendering the dialog controls as ordinary page content.
 - Added a packaged Windows distribution-host supervisor for limited-user Task Scheduler deployments. It validates a
   bounded settings file, launches Kestrel and Caddy invisibly, prevents duplicate supervisors, checks local and public
   readiness, and restarts either process when its listening port disappears.
@@ -17,6 +19,15 @@ version tags.
 
 ## Unreleased
 
+- Fixed Windows Hub-managed editor installs failing before the worker status journal was created when a preference or
+  install path contained `Kéire`. SDL UTF-8 directories now cross the native filesystem boundary losslessly, the worker
+  consumes wide command-line paths, and existing `KÃ©ire` preference/cache/task roots migrate without discarding their
+  operation journals. The account, editor-install, first-run, project, and confirmation dialogs now use a shared padded
+  Hub modal system; page cards have consistent content insets; and live install progress plus durable start/completion
+  events appear in the activity and notification centers.
+- Fixed newly queued editor installs failing when their managed Editors root did not exist, prevented UTF-8 editor
+  display names from being reinterpreted through the Windows narrow filesystem encoding, and preserved a worker's real
+  terminal failure when it finishes before the coordinator's first journal poll.
 - Added optional Supabase email identity and owner-scoped profiles to the Hub. The desktop client accepts only an HTTPS
   project URL and modern publishable key, runs sign-up/sign-in/rotation/profile work off the UI thread, encrypts Windows
   refresh tokens with DPAPI, preserves signed-in state across retryable failures with bounded refresh backoff, and keeps

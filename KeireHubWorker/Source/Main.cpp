@@ -239,6 +239,35 @@ namespace
         std::optional<KeireHub::HubError> m_Failure;
     };
 
+#if defined(_WIN32)
+    [[nodiscard]] CommandLine Parse(const int argc, wchar_t* const* argv)
+    {
+        CommandLine result;
+        for (int index = 1; index < argc; ++index)
+        {
+            const std::wstring_view option = argv[index];
+            const auto requirePath = [&]()
+            {
+                if (++index >= argc)
+                    throw std::invalid_argument("A Hub worker option requires a path.");
+                return std::filesystem::path(argv[index]);
+            };
+            if (option == L"--request")
+                result.Request = requirePath();
+            else if (option == L"--status")
+                result.Status = requirePath();
+            else if (option == L"--result")
+                result.Result = requirePath();
+            else if (option == L"--control")
+                result.Control = requirePath();
+            else
+                throw std::invalid_argument("Unknown Hub worker option.");
+        }
+        if (result.Request.empty() || result.Status.empty() || result.Result.empty() || result.Control.empty())
+            throw std::invalid_argument("Hub worker requires request, status, result, and control paths.");
+        return result;
+    }
+#else
     [[nodiscard]] CommandLine Parse(const int argc, char* const* argv)
     {
         CommandLine result;
@@ -267,6 +296,7 @@ namespace
             throw std::invalid_argument("Hub worker requires request, status, result, and control paths.");
         return result;
     }
+#endif
 
     [[nodiscard]] bool ShareOperationRoot(const CommandLine& commandLine)
     {
@@ -1129,6 +1159,25 @@ namespace
     }
 } // namespace
 
+#if defined(_WIN32)
+int wmain(const int argc, wchar_t* const* argv)
+{
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--help")
+    {
+        std::cout << "KeireHubWorker --request <path> --status <path> --result <path> --control <path>\n";
+        return 0;
+    }
+    try
+    {
+        return Run(Parse(argc, argv));
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "Kéire Hub worker failed: " << error.what() << '\n';
+        return 2;
+    }
+}
+#else
 int main(const int argc, char* const* argv)
 {
     if (argc == 2 && std::string_view(argv[1]) == "--help")
@@ -1146,3 +1195,4 @@ int main(const int argc, char* const* argv)
         return 2;
     }
 }
+#endif

@@ -99,6 +99,14 @@ only after exact size and SHA-256 verification. Retry delays use bounded determi
 worker control. The initial concrete worker transport handles offline `file://` imports; authenticated HTTPS package
 streaming is supplied through the same interface rather than changing cache or task semantics.
 
+Windows launches that worker with `CreateProcessW`, and the worker consumes `wmain` arguments directly so operation
+roots containing non-ASCII characters never pass through the active ANSI code page. SDL-provided user directories are
+decoded as UTF-8 before becoming `std::filesystem::path` values. Startup migrates the exact legacy `KÃ©ire` component
+produced by older builds, moving Hub-owned preference, cache, temporary, and task-journal trees without merging
+unrelated non-empty roots. The task-to-notification tracker observes state transitions on the owner thread: first
+observation is silent, new/retried work emits one start event, and successful or cancelled terminal transitions emit
+durable activity history while progress remains an immutable task snapshot.
+
 Local Build Support inventory enumeration and verification use a separate owner-thread coordinator whose worker
 publishes immutable component snapshots. Verified-cache clearing likewise runs through an exclusive maintenance
 coordinator: it validates that no package task is active, stops the idle package workflow before deletion, projects its

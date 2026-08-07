@@ -328,6 +328,51 @@ namespace
         }
     };
 
+    class ModalScopeUiLayer final : public Keire::Layer
+    {
+      public:
+        explicit ModalScopeUiLayer(bool& bodyInsideModal)
+            : Layer("ModalScopeUiLayer"), m_BodyInsideModal(bodyInsideModal)
+        {
+        }
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            auto host = ui.BeginWindow("Modal Host");
+            if (host)
+            {
+                ui.OpenPopup("Lifetime Modal");
+                Keire::UiWindowOptions options;
+                options.NoTitleBar = true;
+                auto dialog = ui.BeginPopupModal("Lifetime Modal", nullptr, options, false);
+                if (dialog)
+                {
+                    const auto* current = ImGui::GetCurrentWindowRead();
+                    m_BodyInsideModal = current != nullptr &&
+                                        (current->Flags & ImGuiWindowFlags_Modal) == ImGuiWindowFlags_Modal &&
+                                        (current->Flags & ImGuiWindowFlags_NoTitleBar) == ImGuiWindowFlags_NoTitleBar &&
+                                        (current->Flags & ImGuiWindowFlags_AlwaysAutoResize) == 0;
+                    ui.Text("Modal body");
+                }
+            }
+            Owner().RequestExit();
+        }
+
+      private:
+        bool& m_BodyInsideModal;
+    };
+
+    class ModalScopeUiApplication final : public Keire::Application
+    {
+      public:
+        explicit ModalScopeUiApplication(bool& bodyInsideModal)
+            : Application(UiSpecification("ui-modal-scope", Keire::UiMode::Headless))
+        {
+            (void)PushLayer(std::make_unique<ModalScopeUiLayer>(bodyInsideModal));
+        }
+    };
+
     class AddedUiLayer final : public Keire::Layer
     {
       public:
@@ -664,6 +709,16 @@ TEST_CASE("UI scope cleanup preserves callback exceptions and permits a later ru
     int calls = 0;
     DisabledUiApplication replacement(calls);
     CHECK(replacement.Run() == 0);
+}
+
+TEST_CASE("UI popup scopes keep modal bodies inside the popup window")
+{
+    UseDummyVideoDriver();
+    bool bodyInsideModal = false;
+    ModalScopeUiApplication application(bodyInsideModal);
+
+    CHECK(application.Run() == 0);
+    CHECK(bodyInsideModal);
 }
 
 TEST_CASE("Layer mutations requested during UI traversal remain deferred")

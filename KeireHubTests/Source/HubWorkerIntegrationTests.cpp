@@ -473,10 +473,12 @@ namespace
 TEST_CASE("Hub worker installs and recognizes a receipt-bound multi-package editor")
 {
     KeireHubTests::TemporaryDirectory temporary;
-    const auto editor = WriteEditorArchive(temporary.Path());
-    const auto component = WriteComponentArchive(temporary.Path());
-    const auto cache = temporary.Path() / "Cache";
-    const auto installs = temporary.Path() / "Editors";
+    const auto unicodeRoot = temporary.Path() / std::filesystem::path(u8"Kéire Hub worker");
+    std::filesystem::create_directories(unicodeRoot);
+    const auto editor = WriteEditorArchive(unicodeRoot);
+    const auto component = WriteComponentArchive(unicodeRoot);
+    const auto cache = unicodeRoot / "Cache";
+    const auto installs = unicodeRoot / "Editors";
     const auto destination = installs / "1.2.3";
     std::filesystem::create_directories(installs);
 
@@ -499,7 +501,7 @@ TEST_CASE("Hub worker installs and recognizes a receipt-bound multi-package edit
                                        .HostArchitecture = KEIRE_BUILD_ARCHITECTURE,
                                        .VerifiedUnixSeconds = 100}};
 
-    const auto result = RunWorker(temporary.Path() / "operation-first", request);
+    const auto result = RunWorker(unicodeRoot / "operation-first", request);
     CHECK(result.TaskId == request.TaskId);
     CHECK(result.Outcome == DownloadOutcome::Completed);
     CHECK(result.CachePath == DownloadManager::CachePath(editorDownload));

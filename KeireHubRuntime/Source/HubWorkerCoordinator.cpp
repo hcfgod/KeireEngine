@@ -204,6 +204,55 @@ namespace KeireHub
             }
         }
 
+        [[nodiscard]] HubStatus PrepareManagedEditorRoot(const std::filesystem::path& root, const std::string& taskId)
+        {
+            std::error_code error;
+            auto status = std::filesystem::symlink_status(root, error);
+            if (error && error.default_error_condition() != std::errc::no_such_file_or_directory)
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::IoRead,
+                                           .Message = "The editor installation root could not be inspected.",
+                                           .Retryable = true,
+                                           .AffectedItem = taskId,
+                                           .TechnicalDetails = error.message()});
+            }
+            if (!error && status.type() != std::filesystem::file_type::not_found)
+            {
+                if (std::filesystem::is_directory(status) && !std::filesystem::is_symlink(status))
+                    return HubStatus::Success();
+                return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                           .Message = "The editor installation root is occupied by an unsafe object.",
+                                           .AffectedItem = taskId});
+            }
+
+            error.clear();
+            const auto parentStatus = std::filesystem::symlink_status(root.parent_path(), error);
+            if (error || !std::filesystem::is_directory(parentStatus) || std::filesystem::is_symlink(parentStatus))
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                           .Message = "The editor installation root parent is unavailable or unsafe.",
+                                           .AffectedItem = taskId,
+                                           .TechnicalDetails = error ? error.message() : std::string{}});
+            }
+            if (!std::filesystem::create_directory(root, error) && error)
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
+                                           .Message = "The editor installation root could not be created.",
+                                           .Retryable = true,
+                                           .AffectedItem = taskId,
+                                           .TechnicalDetails = error.message()});
+            }
+            status = std::filesystem::symlink_status(root, error);
+            if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                           .Message = "The created editor installation root is unsafe.",
+                                           .AffectedItem = taskId,
+                                           .TechnicalDetails = error ? error.message() : std::string{}});
+            }
+            return HubStatus::Success();
+        }
+
         [[nodiscard]] HubStatus PrepareOperationDirectory(const std::filesystem::path& root,
                                                           const OperationPaths& paths)
         {
@@ -649,6 +698,14 @@ namespace KeireHub
                                            .Message = "A task with this identity already exists.",
                                            .AffectedItem = request.TaskId});
             }
+            if (command.EditorInstall && command.EditorInstall->Mode == HubWorkerEditorInstallMode::Install)
+            {
+                if (auto status = PrepareManagedEditorRoot(command.EditorInstall->AllowedInstallRoot, request.TaskId);
+                    !status)
+                {
+                    return status;
+                }
+            }
             const auto paths = PathsFor(m_Specification.OperationRoot, request.TaskId);
             if (auto status = PrepareOperationDirectory(m_Specification.OperationRoot, paths); !status)
                 return status;
@@ -851,6 +908,8 @@ namespace KeireHub
 
             if (task->State == HubTaskState::Queued)
             {
+                if (IsTerminal(status.State))
+                    return HubStatus::Success();
                 const auto ready = manager.Dispatchable();
                 const auto expected = std::ranges::find(ready, task->Id, &HubTaskDispatch::TaskId);
                 if (expected == ready.end() || expected->InitialState != status.State)
@@ -978,7 +1037,8 @@ namespace KeireHub
                                     ProtocolFailure(task->Id, "Worker result has no matching status journal."), paths);
                 const auto ready = manager.Dispatchable();
                 const auto expected = std::ranges::find(ready, task->Id, &HubTaskDispatch::TaskId);
-                if (expected == ready.end() || expected->InitialState != workerStatus->State)
+                if (expected == ready.end() ||
+                    (expected->InitialState != workerStatus->State && !IsTerminal(workerStatus->State)))
                 {
                     return FailTask(store, manager, task->Id,
                                     ProtocolFailure(task->Id, "Worker result started in an unexpected task phase."),

@@ -6,17 +6,24 @@
 
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace Keire
 {
     namespace
     {
+        [[nodiscard]] std::filesystem::path PathFromUtf8(const std::string_view value)
+        {
+            const auto* first = reinterpret_cast<const char8_t*>(value.data());
+            return std::filesystem::path(std::u8string(first, first + value.size()));
+        }
+
         [[nodiscard]] std::filesystem::path UserFolder(const SDL_Folder folder)
         {
             const char* value = SDL_GetUserFolder(folder);
             if (!value || *value == '\0')
                 throw std::runtime_error("Cannot resolve the requested per-user directory.");
-            std::filesystem::path result(value);
+            const auto result = PathFromUtf8(value);
             if (!result.is_absolute())
                 throw std::runtime_error("The platform returned a non-absolute per-user directory.");
             return result;
@@ -29,7 +36,7 @@ namespace Keire
         char* preference = SDL_GetPrefPath(productName.c_str(), productName.c_str());
         if (!preference)
             throw std::runtime_error("Cannot resolve the per-user preference directory.");
-        const std::filesystem::path result(preference);
+        const auto result = PathFromUtf8(preference);
         SDL_free(preference);
         return result;
     }
@@ -38,7 +45,7 @@ namespace Keire
     {
         if (const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS); documents && *documents != '\0')
         {
-            std::filesystem::path result(documents);
+            const auto result = PathFromUtf8(documents);
             if (result.is_absolute())
                 return result;
         }

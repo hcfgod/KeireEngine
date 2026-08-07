@@ -254,6 +254,18 @@ namespace
         return PublishResult(launch, DownloadOutcome::Completed);
     }
 
+    [[nodiscard]] HubStatus PublishFailed(const HubWorkerLaunch& launch, const std::uint64_t processId,
+                                          HubError failure)
+    {
+        if (auto status = PublishStatus(launch, processId, HubTaskState::Failed,
+                                        {.CurrentPackage = "test.package", .Phase = "Failed"});
+            !status)
+        {
+            return status;
+        }
+        return PublishResult(launch, DownloadOutcome::Failed, std::move(failure));
+    }
+
     [[nodiscard]] HubStatus PublishRemovalCompleted(const HubWorkerLaunch& launch, const std::uint64_t processId)
     {
         auto request = ReadHubWorkerRequest(ArgumentPath(launch, "--request"));
@@ -450,6 +462,35 @@ TEST_CASE("Worker coordinator preserves Hub update task identity through complet
     REQUIRE(recovered->Snapshot()->VerifiedDownloads->size() == 1);
 }
 
+TEST_CASE("Worker coordinator preserves a worker failure that completes before its first poll")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    auto host = std::make_unique<FakeProcessHost>();
+    auto* fake = host.get();
+    fake->SetBehavior(
+        [fake](const HubWorkerLaunch& launch, const std::uint64_t processId, const std::size_t)
+        {
+            const auto status = PublishFailed(launch, processId,
+                                              {.Code = HubErrorCode::UnsafeInstallRoot,
+                                               .Message = "The selected editor root is unavailable.",
+                                               .AffectedItem = "test.package"});
+            fake->SetAlive(processId, false);
+            return status;
+        });
+
+    auto created = HubWorkerCoordinator::Create(Specification(temporary.Path()), std::move(host));
+    REQUIRE(created);
+    auto coordinator = std::move(created).Value();
+    REQUIRE(coordinator->QueuePackageDownload(Download(temporary.Path(), "immediate-worker-failure")));
+    REQUIRE(WaitUntil([&] { return HasState(*coordinator, "immediate-worker-failure", HubTaskState::Failed); }));
+
+    const auto task = FindTask(*coordinator, "immediate-worker-failure");
+    REQUIRE(task);
+    REQUIRE(task->Failure);
+    CHECK(task->Failure->Code == HubErrorCode::UnsafeInstallRoot);
+    CHECK(task->Failure->Message == "The selected editor root is unavailable.");
+}
+
 TEST_CASE("Worker coordinator rejects non-installer packages as Hub updates")
 {
     KeireHubTests::TemporaryDirectory temporary;
@@ -479,8 +520,10 @@ TEST_CASE("Worker coordinator preserves catalog-bound editor installs through co
     REQUIRE(created);
     auto coordinator = std::move(created).Value();
     const auto install = EditorInstall(temporary.Path());
+    CHECK_FALSE(std::filesystem::exists(install.AllowedInstallRoot));
     REQUIRE(coordinator->QueueEditorInstall(install));
     REQUIRE(WaitUntil([&] { return HasState(*coordinator, "install-editor", HubTaskState::Completed); }));
+    CHECK(std::filesystem::is_directory(install.AllowedInstallRoot));
 
     const auto completed = coordinator->Snapshot();
     REQUIRE(completed->Tasks);

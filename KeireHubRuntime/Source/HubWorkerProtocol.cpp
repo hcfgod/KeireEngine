@@ -17,6 +17,17 @@ namespace KeireHub
     {
         constexpr std::size_t MaximumProtocolBytes = 32U * 1024U * 1024U;
 
+        [[nodiscard]] std::filesystem::path DecodeHubOwnedPath(const std::string_view value)
+        {
+            const auto path = Detail::PathFromUtf8(value);
+            const std::filesystem::path legacy(std::u8string(u8"KÃ©ire"));
+            const std::filesystem::path canonical(std::u8string(u8"Kéire"));
+            std::filesystem::path repaired;
+            for (const auto& component : path)
+                repaired /= component == legacy ? canonical : component;
+            return repaired;
+        }
+
         [[nodiscard]] HubError ProtocolError(const std::filesystem::path& path, const std::string_view details)
         {
             return {.Code = HubErrorCode::WorkerProtocolInvalid,
@@ -167,7 +178,7 @@ namespace KeireHub
                 .Url = value.at("url").get<std::string>(),
                 .Sha256 = value.at("sha256").get<std::string>(),
                 .SizeBytes = value.at("sizeBytes").get<std::uint64_t>(),
-                .CacheRoot = Detail::PathFromUtf8(value.at("cacheRoot").get<std::string>()),
+                .CacheRoot = DecodeHubOwnedPath(value.at("cacheRoot").get<std::string>()),
                 .Retry = {.MaximumAttempts = retry.at("maximumAttempts").get<std::uint32_t>(),
                           .BaseDelay = std::chrono::milliseconds(retry.at("baseDelayMs").get<std::int64_t>()),
                           .MaximumDelay = std::chrono::milliseconds(retry.at("maximumDelayMs").get<std::int64_t>()),
@@ -413,16 +424,16 @@ namespace KeireHub
                 auto package = ParsePackageManifest(install.at("package").dump());
                 if (!package)
                     throw std::invalid_argument(package.Error().Message);
-                result.EditorInstall = {
-                    .Package = std::move(package).Value(),
-                    .Mode = HubWorkerEditorInstallMode::Install,
-                    .AllowedInstallRoot = Detail::PathFromUtf8(install.at("allowedInstallRoot").get<std::string>()),
-                    .Destination = Detail::PathFromUtf8(install.at("destination").get<std::string>()),
-                    .InstallationId = install.at("installationId").get<std::string>(),
-                    .MarkerNonce = install.at("markerNonce").get<std::string>(),
-                    .HostPlatform = install.at("hostPlatform").get<std::string>(),
-                    .HostArchitecture = install.at("hostArchitecture").get<std::string>(),
-                    .VerifiedUnixSeconds = install.at("verifiedUnixSeconds").get<std::uint64_t>()};
+                result.EditorInstall = {.Package = std::move(package).Value(),
+                                        .Mode = HubWorkerEditorInstallMode::Install,
+                                        .AllowedInstallRoot =
+                                            DecodeHubOwnedPath(install.at("allowedInstallRoot").get<std::string>()),
+                                        .Destination = DecodeHubOwnedPath(install.at("destination").get<std::string>()),
+                                        .InstallationId = install.at("installationId").get<std::string>(),
+                                        .MarkerNonce = install.at("markerNonce").get<std::string>(),
+                                        .HostPlatform = install.at("hostPlatform").get<std::string>(),
+                                        .HostArchitecture = install.at("hostArchitecture").get<std::string>(),
+                                        .VerifiedUnixSeconds = install.at("verifiedUnixSeconds").get<std::uint64_t>()};
                 if (install.contains("mode"))
                 {
                     const auto mode = ParseEditorInstallMode(install.at("mode").get<std::string>());
@@ -467,8 +478,8 @@ namespace KeireHub
             {
                 const auto& removal = value.at("editorRemoval");
                 result.EditorRemoval = {.AllowedInstallRoot =
-                                            Detail::PathFromUtf8(removal.at("allowedInstallRoot").get<std::string>()),
-                                        .Root = Detail::PathFromUtf8(removal.at("root").get<std::string>()),
+                                            DecodeHubOwnedPath(removal.at("allowedInstallRoot").get<std::string>()),
+                                        .Root = DecodeHubOwnedPath(removal.at("root").get<std::string>()),
                                         .InstallationId = removal.at("installationId").get<std::string>(),
                                         .ManifestFingerprint = removal.at("manifestFingerprint").get<std::string>(),
                                         .PackageTreeIdentity = removal.at("packageTreeIdentity").get<std::string>(),
@@ -617,11 +628,11 @@ namespace KeireHub
                 throw std::invalid_argument("Unsupported result schema or outcome.");
             HubWorkerResult result{.TaskId = value.at("taskId").get<std::string>(), .Outcome = *outcome};
             if (value.contains("cachePath"))
-                result.CachePath = Detail::PathFromUtf8(value.at("cachePath").get<std::string>());
+                result.CachePath = DecodeHubOwnedPath(value.at("cachePath").get<std::string>());
             if (value.contains("installedRoot"))
-                result.InstalledRoot = Detail::PathFromUtf8(value.at("installedRoot").get<std::string>());
+                result.InstalledRoot = DecodeHubOwnedPath(value.at("installedRoot").get<std::string>());
             if (value.contains("removedRoot"))
-                result.RemovedRoot = Detail::PathFromUtf8(value.at("removedRoot").get<std::string>());
+                result.RemovedRoot = DecodeHubOwnedPath(value.at("removedRoot").get<std::string>());
             if (value.contains("installationId"))
                 result.InstallationId = value.at("installationId").get<std::string>();
             if (value.contains("failure"))

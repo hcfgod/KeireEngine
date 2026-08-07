@@ -2,6 +2,7 @@
 
 #include "Keire/Log.h"
 
+#include "KeireHub/HubModalUi.h"
 #include "KeireHub/HubProjectUiSupport.h"
 
 #include <string>
@@ -37,9 +38,15 @@ namespace KeireHub
     HubProjectUpgradeUiResult HubProjectUpgradeUi::Draw(Keire::UiFrame& ui)
     {
         HubProjectUpgradeUiResult result;
-        ui.SetNextWindowSize({680.0F, 440.0F}, false);
-        if (auto dialog = ui.BeginPopupModal("Project Upgrade"); !dialog)
+        const auto tokens = HubDesignTokens::For(HubAppearance::System, HubSystemPrefersDark());
+        PrepareHubModal(ui, {680.0F, 460.0F});
+        HubModalStyleScope modalStyle(ui, tokens);
+        auto dialog = ui.BeginPopupModal("Project Upgrade", nullptr, HubModalWindowOptions(), false);
+        if (!dialog)
             return result;
+
+        DrawHubModalHeader(ui, tokens, "Project upgrade", "Review and apply the versioned upgrade transaction safely.",
+                           "PROJECT RECOVERY");
 
         const auto snapshot = m_Workflow.Snapshot();
         if (snapshot->State == HubProjectUpgradeWorkflowState::Completed)
