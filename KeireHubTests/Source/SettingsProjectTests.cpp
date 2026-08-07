@@ -32,6 +32,22 @@ TEST_CASE("Hub settings migrate legacy view and sort atomically")
     CHECK(reloaded.Snapshot()->ProjectsView == ProjectView::Cards);
 }
 
+TEST_CASE("Hub settings migrate the legacy last-opened spelling written by the shipped Hub")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto settingsPath = temporary.Path() / "settings.json";
+    const auto legacyPath = temporary.Path() / "HubUi.settings";
+    KeireHubTests::WriteText(legacyPath, "view=list\nsort=last-opened\n");
+
+    HubSettingsStore store(settingsPath, legacyPath);
+    REQUIRE(store.Load());
+    CHECK(store.MigratedLegacySettings());
+    CHECK(store.Snapshot()->ProjectsView == ProjectView::Table);
+    CHECK(store.Snapshot()->ProjectsSort == ProjectSort::LastOpened);
+    CHECK(std::filesystem::exists(settingsPath));
+    CHECK(std::filesystem::exists(legacyPath));
+}
+
 TEST_CASE("Invalid Hub settings do not replace the committed snapshot")
 {
     KeireHubTests::TemporaryDirectory temporary;

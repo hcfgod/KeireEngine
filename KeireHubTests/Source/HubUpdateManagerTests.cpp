@@ -87,6 +87,22 @@ TEST_CASE("Hub update reconciliation accepts a newer installed semantic version"
     CHECK_FALSE(std::filesystem::exists(manager.ResumeTokenPath()));
 }
 
+TEST_CASE("Hub update reconciliation treats an absent resume token as no pending update")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    for (const auto& token : {temporary.Path() / "MissingPreferences" / "hub-update.json",
+                              temporary.Path() / "Preferences" / "hub-update.json"})
+    {
+        if (token.parent_path().filename() == "Preferences")
+            std::filesystem::create_directories(token.parent_path());
+        KeireHub::HubUpdateManager manager(token);
+        const auto recovery = manager.Reconcile("0.1.0");
+        REQUIRE(recovery);
+        CHECK(recovery.Value().State == KeireHub::HubUpdateResumeState::None);
+        CHECK_FALSE(std::filesystem::exists(token));
+    }
+}
+
 TEST_CASE("Hub update handoff rejects unverified payloads and removes records after launch failure")
 {
     KeireHubTests::TemporaryDirectory temporary;

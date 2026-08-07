@@ -5,6 +5,9 @@ version tags.
 
 ## Unreleased
 
+- Fixed standalone Hub startup when migrating the exact `sort=last-opened` preference written by earlier Hub builds;
+  the legacy file is preserved while schema-versioned JSON settings are created atomically. A missing update-resume
+  token is also treated as the normal no-pending-update state instead of producing a false recovery warning on Windows.
 - Fixed Windows cross-publishing of the Linux distribution service package. Its deterministic archive now preserves
   executable modes only for directories, the service/publisher entrypoints, and shell wrappers instead of inheriting
   unusable NTFS modes, with a fast regression fixture covering inventory order, metadata, and reproducible bytes.

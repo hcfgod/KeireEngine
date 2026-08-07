@@ -183,7 +183,8 @@ namespace KeireHub
     {
         std::error_code error;
         const auto tokenStatus = std::filesystem::symlink_status(m_ResumeTokenPath, error);
-        if (!error && tokenStatus.type() == std::filesystem::file_type::not_found)
+        if (tokenStatus.type() == std::filesystem::file_type::not_found ||
+            error == std::make_error_code(std::errc::no_such_file_or_directory))
             return HubResult<HubUpdateResumeResult>::Success({});
         if (error || !std::filesystem::is_regular_file(tokenStatus) || std::filesystem::is_symlink(tokenStatus))
         {

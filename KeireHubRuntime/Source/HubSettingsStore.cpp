@@ -333,7 +333,7 @@ namespace KeireHub
                             result.ProjectsSort = ProjectSort::Name;
                         else if (value == "status")
                             result.ProjectsSort = ProjectSort::Status;
-                        else if (value == "last_opened" || value == "lastOpened")
+                        else if (value == "last-opened" || value == "last_opened" || value == "lastOpened")
                             result.ProjectsSort = ProjectSort::LastOpened;
                         else
                             return HubResult<HubSettings>::Failure(
