@@ -1,10 +1,10 @@
 #include "KeireInternal/Build/PlayerSupport.h"
 
 #include "Keire/BuildInfo.h"
+#include "Keire/PlatformDirectories.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
-#include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -151,16 +151,7 @@ namespace Keire::Detail
         }
     } // namespace
 
-    std::filesystem::path PlayerSupportStorageRoot()
-    {
-        const auto name = std::string(GetBuildInfo().ProjectName);
-        char* preference = SDL_GetPrefPath(name.c_str(), name.c_str());
-        if (!preference)
-            throw std::runtime_error("Cannot resolve the per-user player support directory.");
-        const auto result = std::filesystem::path(preference) / "BuildSupport";
-        SDL_free(preference);
-        return result;
-    }
+    std::filesystem::path PlayerSupportStorageRoot() { return GetPreferenceDirectory() / "BuildSupport"; }
 
     PlayerSupportManifest LoadPlayerSupportManifest(const std::filesystem::path& path)
     {

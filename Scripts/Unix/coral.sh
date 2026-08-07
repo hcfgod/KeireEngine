@@ -15,6 +15,7 @@ force="${3:-0}"
 
 coral_url="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_URL)"
 coral_commit="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_COMMIT)"
+macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
 patch_root="$ROOT/Patches/Coral"
 patches=()
 while IFS= read -r patch; do
@@ -81,8 +82,11 @@ if [[ "$build" == 1 ]]; then
   if [[ "$force" == 1 && -e "$native_build" ]]; then
     case "$native_build" in "$patched"/Build/*) rm -rf "$native_build" ;; *) exit 1 ;; esac
   fi
-  cmake -S "$patched/cmake" -B "$native_build" -G Ninja -DCMAKE_BUILD_TYPE="$configuration" \
-    -DCORAL_TESTING=OFF -DCORAL_EXAMPLE=OFF
+  cmake_options=(-DCMAKE_BUILD_TYPE="$configuration" -DCORAL_TESTING=OFF -DCORAL_EXAMPLE=OFF)
+  if [[ "$(uname -s)" == Darwin ]]; then
+    cmake_options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
+  fi
+  cmake -S "$patched/cmake" -B "$native_build" -G Ninja "${cmake_options[@]}"
   cmake --build "$native_build" --target Coral.Native --parallel
   [[ -f "$native_build/Coral.Managed.dll" ]] || {
     printf 'Patched Coral build did not produce Coral.Managed.dll.\n' >&2

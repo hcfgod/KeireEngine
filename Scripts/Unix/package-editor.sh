@@ -18,6 +18,7 @@ ALLOW_DIRTY=0
 parse_build_arguments "$@"
 load_project_config "$ROOT"
 TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"
+macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
 os_name=linux
 [[ "$PLATFORM" == Mac ]] && os_name=macos
 
@@ -27,6 +28,8 @@ common=(--generator "$GENERATOR" --configuration Dist --architecture "$ARCHITECT
 [[ $FORCE -eq 1 ]] && common+=(--force)
 [[ $ALLOW_DIRTY -eq 1 ]] && common+=(--allow-dirty)
 bash "$ROOT/Scripts/Unix/package.sh" "$PLATFORM" "${common[@]}" --stage-only
+hub_worker="${PROJECT_NAMESPACE}HubWorker"
+bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$hub_worker"
 
 sdk_name="$ARTIFACT_PREFIX-$os_name-$ARCHITECTURE-Dist"
 sdk_stage="$ROOT/Artifacts/$sdk_name"
@@ -44,13 +47,27 @@ validation_root="$ROOT/Artifacts/$name-validation"
 rm -rf "$stage" "$legacy_stage" "$validation_root"
 rm -f "$archive" "$archive.sha256"
 mkdir -p "$distribution_root"
-mkdir -p "$stage/Config/Branding" "$stage/third-party"
+mkdir -p "$stage/Config/Branding" "$stage/content" "$stage/third-party"
 cp -R "$sdk_stage/bin" "$sdk_stage/samples" "$sdk_stage/docs" "$stage/"
+# The standalone Hub package owns the Hub executable and every native Hub launcher.
+rm -f "$stage/bin/$HUB_TARGET"
+system=linux
+[[ "$PLATFORM" == Mac ]] && system=macosx
+output_arch="$(architecture_output_name "$ARCHITECTURE")"
+hub_worker_source="$ROOT/Build/Bin/Dist-$system-$output_arch/$hub_worker/$hub_worker"
+[[ -x "$hub_worker_source" ]] || {
+  printf 'The Hub package worker build output is missing or not executable: %s\n' "$hub_worker_source" >&2
+  exit 1
+}
+cp "$hub_worker_source" "$stage/bin/"
+cp -R "$ROOT/KeireHubContent/." "$stage/content/"
 cp "$sdk_stage/Config/Client.json" "$stage/Config/"
+cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
 cp -R "$sdk_stage/third-party/licenses" "$stage/third-party/"
 cp "$sdk_stage/README.md" "$sdk_stage/LICENSE.txt" "$sdk_stage/THIRD_PARTY_NOTICES.md" \
   "$sdk_stage/build-manifest.json" "$stage/"
+cp "$ROOT/CHANGELOG.md" "$stage/"
 
 dotnet_source="$ROOT/Build/Dependencies/dotnet-sdk"
 dotnet_destination="$stage/bin/Managed/Dotnet"
@@ -67,43 +84,69 @@ dotnet_sdk="$(find "$dotnet_destination/sdk" -mindepth 1 -maxdepth 1 -type d -na
   sort | tail -n 1)"
 [[ -n "$dotnet_sdk" ]] || { printf 'The bundled editor runtime does not contain the .NET 10 SDK.\n' >&2; exit 1; }
 dotnet_sdk="$(basename "$dotnet_sdk")"
-read -r dirty development_artifact < <(package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI")
-commit="$(git -C "$ROOT" rev-parse --verify HEAD)"
-platform_name=Linux
-[[ "$PLATFORM" == Mac ]] && platform_name=macOS
-printf '{\n  "schemaVersion": 1,\n  "artifact": "editor",\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "developmentArtifact": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "Dist",\n  "launcher": "launch-editor.sh",\n  "bundledDotnetSdk": "%s",\n  "buildManifest": "build-manifest.json"\n}\n' \
-  "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" \
-  "$dirty" "$development_artifact" "$platform_name" "$(architecture_output_name "$ARCHITECTURE")" \
-  "$(json_escape "$dotnet_sdk")" > "$stage/editor-package.json"
 
 printf '%s\n' '#!/usr/bin/env sh' 'set -eu' \
   'script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"' \
-  "exec \"\$script_dir/bin/$HUB_TARGET\" \"\$@\"" > "$stage/launch-editor.sh"
+  "exec \"\$script_dir/bin/$CLIENT_TARGET\" \"\$@\"" > "$stage/launch-editor.sh"
 chmod +x "$stage/launch-editor.sh"
 
 if [[ "$PLATFORM" == Mac ]]; then
-  app_root="$stage/${HUB_TARGET}.app/Contents"
+  app_root="$stage/${CLIENT_TARGET}.app/Contents"
   mkdir -p "$app_root/MacOS"
   printf '%s\n' '#!/usr/bin/env sh' 'set -eu' \
     'macos_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"' \
-    "exec \"\$macos_dir/../../../bin/$HUB_TARGET\" \"\$@\"" > "$app_root/MacOS/${HUB_TARGET}Launcher"
-  chmod +x "$app_root/MacOS/${HUB_TARGET}Launcher"
+    "exec \"\$macos_dir/../../../bin/$CLIENT_TARGET\" \"\$@\"" > "$app_root/MacOS/${CLIENT_TARGET}Launcher"
+  chmod +x "$app_root/MacOS/${CLIENT_TARGET}Launcher"
   bundle_identifier="$(printf '%s' "$ARTIFACT_PREFIX" | tr '[:upper:]' '[:lower:]')"
   printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
     '<plist version="1.0">' '<dict>' '  <key>CFBundleExecutable</key>' \
-    "  <string>${HUB_TARGET}Launcher</string>" '  <key>CFBundleIdentifier</key>' \
-    "  <string>org.keire.${bundle_identifier}.hub</string>" '  <key>CFBundleName</key>' \
-    "  <string>${PROJECT_IDENTIFIER} Project Hub</string>" '  <key>CFBundlePackageType</key>' \
+    "  <string>${CLIENT_TARGET}Launcher</string>" '  <key>CFBundleIdentifier</key>' \
+    "  <string>org.keire.${bundle_identifier}.editor</string>" '  <key>CFBundleName</key>' \
+    "  <string>${PROJECT_IDENTIFIER} Editor</string>" '  <key>CFBundlePackageType</key>' \
     '  <string>APPL</string>' '  <key>CFBundleShortVersionString</key>' \
-    "  <string>${PROJECT_VERSION}</string>" '  <key>NSHighResolutionCapable</key>' '<true/>' '</dict>' \
+    "  <string>${PROJECT_VERSION}</string>" '  <key>LSMinimumSystemVersion</key>' \
+    "  <string>${macos_deployment_target}</string>" '  <key>NSHighResolutionCapable</key>' '<true/>' '</dict>' \
     '</plist>' > "$app_root/Info.plist"
 fi
 
+read -r dirty development_artifact < <(package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI")
+commit="$(git -C "$ROOT" rev-parse --verify HEAD)"
+platform_name=Linux
+[[ "$PLATFORM" == Mac ]] && platform_name=macOS
+command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required to generate package manifests.\n' >&2; exit 1; }
+manifest_writer="$ROOT/Scripts/Packaging/write-package-manifest.py"
+manifest_arguments=(
+  "$manifest_writer" write --stage "$stage" --output editor-package.json
+  --artifact editor --package-prefix "$ARTIFACT_PREFIX" --project "$PROJECT_IDENTIFIER"
+  --version "$PROJECT_VERSION" --channel Stable --commit "$commit" --dirty "$dirty"
+  --development-artifact "$development_artifact" --platform "$platform_name"
+  --architecture "$(architecture_output_name "$ARCHITECTURE")" --configuration Dist
+  --launcher launch-editor.sh --build-manifest build-manifest.json --bundled-dotnet-sdk "$dotnet_sdk"
+  --module-definition Config/SourceModules.premake.lua --project-schema-minimum 1 --project-schema-maximum 3
+  --entrypoint "editor=bin/$CLIENT_TARGET" --entrypoint "worker=bin/$hub_worker"
+  --entrypoint "assetTool=bin/${PROJECT_NAMESPACE}AssetTool"
+  --entrypoint "assetWorker=bin/${PROJECT_NAMESPACE}AssetWorker"
+  --entrypoint "runtime=bin/${PROJECT_NAMESPACE}Runtime" --entrypoint shaderCompiler=bin/KeireShaderCompiler
+  --template-catalog content/Templates/catalog.json
+  --toolchain "dotnet-sdk|$dotnet_sdk|bin/Managed/Dotnet" --release-notes CHANGELOG.md
+)
+python3 "${manifest_arguments[@]}"
+
 validate_editor_package_stage "$stage" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" "$PROJECT_NAMESPACE" \
   "$PLATFORM"
-hub_version="$("$stage/bin/$HUB_TARGET" --version)"
-[[ "$hub_version" == *"$PROJECT_VERSION"* ]] || { printf 'Packaged Project Hub version validation failed.\n' >&2; exit 1; }
+if [[ "$PLATFORM" == Mac ]]; then
+  validate_macos_macho_minimum "$stage" "$macos_deployment_target" "$dotnet_destination"
+fi
+editor_version="$("$stage/bin/$CLIENT_TARGET" --version)"
+[[ "$editor_version" == *"$PROJECT_VERSION"* ]] || {
+  printf 'Packaged editor version validation failed.\n' >&2
+  exit 1
+}
+"$stage/bin/$hub_worker" --help | grep -Fq -- '--request' || {
+  printf 'Packaged Hub worker validation failed.\n' >&2
+  exit 1
+}
 "$dotnet_destination/dotnet" --list-sdks | grep -Fq "$dotnet_sdk" || {
   printf 'Packaged .NET SDK validation failed.\n' >&2
   exit 1
@@ -122,11 +165,20 @@ mkdir -p "$validation_root"
 tar -C "$validation_root" -xzf "$archive"
 validate_editor_package_stage "$validation_root" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" \
   "$PROJECT_NAMESPACE" "$PLATFORM"
+if [[ "$PLATFORM" == Mac ]]; then
+  validate_macos_macho_minimum "$validation_root" "$macos_deployment_target" \
+    "$validation_root/bin/Managed/Dotnet"
+fi
+python3 "$manifest_writer" validate --stage "$validation_root" --manifest editor-package.json --artifact editor
 "$validation_root/bin/Managed/Dotnet/dotnet" --list-sdks | grep -Fq "$dotnet_sdk" || {
   printf 'Extracted editor package .NET SDK validation failed.\n' >&2
   exit 1
 }
+"$validation_root/bin/$hub_worker" --help | grep -Fq -- '--request' || {
+  printf 'Extracted editor package Hub worker validation failed.\n' >&2
+  exit 1
+}
 rm -rf "$validation_root" "$sdk_stage"
 printf '==> Ready-to-run editor distribution: %s\n' "$stage"
-printf '==> Launch with: %s\n' "$stage/launch-editor.sh"
+printf '==> Launch with: %s --project <path>\n' "$stage/launch-editor.sh"
 printf '==> Editor package archive created: %s\n' "$archive"

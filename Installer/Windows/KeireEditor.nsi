@@ -18,8 +18,8 @@ Unicode True
 !ifndef PRODUCT_ARCHITECTURE
     !error "PRODUCT_ARCHITECTURE is required."
 !endif
-!ifndef HUB_TARGET
-    !error "HUB_TARGET is required."
+!ifndef CLIENT_TARGET
+    !error "CLIENT_TARGET is required."
 !endif
 !ifndef SOURCE_DIRECTORY
     !error "SOURCE_DIRECTORY is required."
@@ -62,8 +62,8 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "${PRODUCT_VERSION}"
 
 !define MUI_ABORTWARNING
 !define MUI_COMPONENTSPAGE_SMALLDESC
-!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\${HUB_TARGET}.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Launch ${PRODUCT_DISPLAY_NAME} Hub"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\${CLIENT_TARGET}.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch ${PRODUCT_DISPLAY_NAME} Editor"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${LICENSE_PATH}"
@@ -92,7 +92,7 @@ Section "${PRODUCT_NAME} (required)" MainSection
     WriteRegStr HKCU "Software\${PRODUCT_IDENTIFIER}\Editor" "InstallDirectory" "$INSTDIR"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${PRODUCT_NAME}"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
-    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\bin\${HUB_TARGET}.exe"
+    WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\bin\${CLIENT_TARGET}.exe"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "${PRODUCT_DISPLAY_NAME}"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
     WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
@@ -103,22 +103,22 @@ SectionEnd
 Section "Start Menu shortcuts" StartMenuSection
     SetShellVarContext current
     CreateDirectory "$SMPROGRAMS\${PRODUCT_DISPLAY_NAME} Editor"
-    CreateShortcut "$SMPROGRAMS\${PRODUCT_DISPLAY_NAME} Editor\${PRODUCT_DISPLAY_NAME} Hub.lnk" \
-        "$INSTDIR\bin\${HUB_TARGET}.exe" "" "$INSTDIR\bin\${HUB_TARGET}.exe" 0 SW_SHOWNORMAL "" \
-        "Open ${PRODUCT_DISPLAY_NAME} Hub"
+    CreateShortcut "$SMPROGRAMS\${PRODUCT_DISPLAY_NAME} Editor\${PRODUCT_DISPLAY_NAME} Editor.lnk" \
+        "$INSTDIR\bin\${CLIENT_TARGET}.exe" "" "$INSTDIR\bin\${CLIENT_TARGET}.exe" 0 SW_SHOWNORMAL "" \
+        "Open ${PRODUCT_DISPLAY_NAME} Editor"
     CreateShortcut "$SMPROGRAMS\${PRODUCT_DISPLAY_NAME} Editor\Uninstall ${PRODUCT_DISPLAY_NAME} Editor.lnk" \
         "$INSTDIR\Uninstall.exe"
 SectionEnd
 
 Section /o "Desktop shortcut" DesktopSection
     SetShellVarContext current
-    CreateShortcut "$DESKTOP\${PRODUCT_DISPLAY_NAME} Hub.lnk" "$INSTDIR\bin\${HUB_TARGET}.exe" "" \
-        "$INSTDIR\bin\${HUB_TARGET}.exe" 0 SW_SHOWNORMAL "" "Open ${PRODUCT_DISPLAY_NAME} Hub"
+    CreateShortcut "$DESKTOP\${PRODUCT_DISPLAY_NAME} Editor.lnk" "$INSTDIR\bin\${CLIENT_TARGET}.exe" "" \
+        "$INSTDIR\bin\${CLIENT_TARGET}.exe" 0 SW_SHOWNORMAL "" "Open ${PRODUCT_DISPLAY_NAME} Editor"
 SectionEnd
 
-LangString DESC_MainSection ${LANG_ENGLISH} "Installs the Hub, editor, build tools, samples, and bundled managed SDK."
+LangString DESC_MainSection ${LANG_ENGLISH} "Installs the editor, build tools, samples, and bundled managed SDK."
 LangString DESC_StartMenuSection ${LANG_ENGLISH} "Creates shortcuts in the current user's Start Menu."
-LangString DESC_DesktopSection ${LANG_ENGLISH} "Creates a shortcut to the Hub on the current user's desktop."
+LangString DESC_DesktopSection ${LANG_ENGLISH} "Creates an editor shortcut on the current user's desktop."
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
     !insertmacro MUI_DESCRIPTION_TEXT ${MainSection} $(DESC_MainSection)
@@ -134,7 +134,7 @@ Section "Uninstall"
     ${GetFileName} "$INSTDIR" $1
     StrCmp $1 "${INSTALL_FOLDER_NAME}" 0 UnsafeUninstall
 
-    Delete "$DESKTOP\${PRODUCT_DISPLAY_NAME} Hub.lnk"
+    Delete "$DESKTOP\${PRODUCT_DISPLAY_NAME} Editor.lnk"
     RMDir /r "$SMPROGRAMS\${PRODUCT_DISPLAY_NAME} Editor"
     DeleteRegKey HKCU "${UNINSTALL_KEY}"
     DeleteRegKey HKCU "Software\${PRODUCT_IDENTIFIER}\Editor"

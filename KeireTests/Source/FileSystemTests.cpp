@@ -21,6 +21,26 @@ TEST_CASE("filesystem UTF-8 conversion preserves non-ASCII project paths")
     CHECK(path.filename() == Keire::Detail::PathFromUtf8("Créature.png"));
 }
 
+TEST_CASE("filesystem UTF-8 conversion composes and creates a non-ASCII Hub project destination")
+{
+    const auto suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto root = std::filesystem::temp_directory_path() / ("KeireHubUtf8-" + suffix);
+    const std::string parentText = "Kéire Projects";
+    const std::string projectText = "Créature Demo";
+    const auto parent = root / Keire::Detail::PathFromUtf8(parentText);
+
+    const auto parentInput = Keire::Detail::PathToUtf8(parent);
+    const auto destination = Keire::Detail::PathFromUtf8(parentInput) / Keire::Detail::PathFromUtf8(projectText);
+    std::filesystem::create_directories(destination);
+
+    CHECK(std::filesystem::is_directory(destination));
+    CHECK(Keire::Detail::PathToUtf8(destination.parent_path().filename()) == parentText);
+    CHECK(Keire::Detail::PathToUtf8(destination.filename()) == projectText);
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
+}
+
 TEST_CASE("filesystem rename retries only transient failures with bounded backoff")
 {
     std::size_t attempts = 0;

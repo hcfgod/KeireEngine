@@ -37,6 +37,7 @@ namespace Keire::Detail
         std::string Phase;
         float Progress = 0.0F;
         std::string Message;
+        std::string ErrorCode;
         std::filesystem::path Output;
         std::filesystem::path Executable;
     };
@@ -51,5 +52,6 @@ namespace Keire::Detail
     void PublishPlayerPackage(const std::filesystem::path& stagingRoot, const std::filesystem::path& destination);
     [[nodiscard]] std::optional<PackagedPlayerConfiguration>
     LoadPackagedPlayerConfiguration(const std::filesystem::path& executable);
+    void WritePlayerBuildStatusDocument(const std::filesystem::path& path, const PlayerBuildStatusDocument& document);
     [[nodiscard]] PlayerBuildStatusDocument ReadPlayerBuildStatusDocument(const std::filesystem::path& path);
 } // namespace Keire::Detail

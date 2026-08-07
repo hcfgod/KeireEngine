@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "licenses": [
+    {
+      "id": "hub.keire-mit",
+      "displayName": "Kéire MIT License",
+      "scope": "hub",
+      "sourcePath": "LICENSE.txt"
+    },
+    {
+      "id": "hub.third-party-notices",
+      "displayName": "Third-party notices",
+      "scope": "hub",
+      "sourcePath": "THIRD_PARTY_NOTICES.md"
+    },
+    {
+      "id": "hub.inter-license",
+      "displayName": "Inter typography license",
+      "scope": "hub",
+      "packageId": "hub.inter",
+      "sourcePath": "content/Fonts/Inter-OFL.txt"
+    },
+    {
+      "id": "hub.material-symbols-license",
+      "displayName": "Material Symbols license",
+      "scope": "hub",
+      "packageId": "hub.material-symbols",
+      "sourcePath": "content/Fonts/Material-Symbols-Apache-2.0.txt"
+    }
+  ]
+}

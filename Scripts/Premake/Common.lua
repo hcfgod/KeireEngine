@@ -84,6 +84,23 @@ function LinkKeireCore()
     end
 end
 
+function LinkKeireHubNativeHttp()
+    filter "system:windows"
+        links { "winhttp" }
+
+    filter "system:linux"
+        links { "curl" }
+
+    filter "system:macosx"
+        links
+        {
+            "CFNetwork.framework",
+            "Foundation.framework"
+        }
+
+    filter {}
+end
+
 function LinkKeireSourceModules()
     includedirs { "../SourceModules/Include" }
     links { ProjectConfig.PROJECT_NAMESPACE .. "SourceModules" }

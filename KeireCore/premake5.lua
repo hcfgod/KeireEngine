@@ -56,7 +56,10 @@ project(ProjectConfig.CORE_TARGET)
         }
 
     filter "system:macosx"
-        files { "Source/Build/PlayerSupportDownloadMac.mm" }
+        files { "Source/Build/PlayerSupportDownloadMac.mm", "Source/WindowChromeMac.mm" }
+
+    filter { "system:macosx", "files:**WindowChromeMac.mm" }
+        buildoptions { "-fobjc-arc" }
 
     filter {}
 

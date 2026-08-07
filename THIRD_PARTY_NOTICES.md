@@ -1,5 +1,11 @@
 # Third-Party Notices
 
+## Hub typography and symbols
+
+The standalone Hub packages the Inter variable font under the SIL Open Font License 1.1 and a subset of Google
+Material Symbols Rounded under the Apache License 2.0. The corresponding license files and pinned source metadata are
+included under `KeireHubContent/Fonts` in source distributions and under `content/Fonts` in standalone Hub packages.
+
 This project uses the following third-party dependencies:
 
 - spdlog is a private logging backend, copyright Gabi Melman and contributors, under the MIT License. See `Vendor/spdlog/LICENSE`.
@@ -21,6 +27,7 @@ This project uses the following third-party dependencies:
 - Jolt Physics 5.6.0 is the private rigid-body and collision backend, copyright Jorrit Rouwe and contributors, under the MIT License.
 - Recast Navigation 1.6.0 is the private navigation-mesh backend, copyright Mikko Mononen and contributors, under the zlib License.
 - miniaudio 0.11.25 is the private audio engine and DSP backend, copyright David Reid, under the MIT-0 or public-domain terms in its license.
+- libsodium 1.0.22 provides the Hub's privately loaded Ed25519 catalog verifier, copyright Frank Denis, under the ISC License.
 - Coral commit d53b268 is the patched private native/.NET hosting bridge, copyright Studio Cherno contributors, under the Apache License 2.0.
 - .NET 10 hostfxr and CoreCLR runtime files are redistributed under the MIT License with Microsoft's bundled third-party notices.
 

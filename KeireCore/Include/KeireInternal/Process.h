@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -45,6 +46,7 @@ namespace Keire::Detail
                                                 const std::filesystem::path& workingDirectory);
         [[nodiscard]] bool Poll();
         [[nodiscard]] bool Running() const noexcept;
+        [[nodiscard]] std::uint64_t ProcessId() const noexcept;
         [[nodiscard]] std::optional<int> ExitCode() const noexcept;
         [[nodiscard]] std::string TakeOutput();
         [[nodiscard]] bool WaitFor(std::chrono::milliseconds timeout);
@@ -68,8 +70,9 @@ namespace Keire::Detail
                                            std::chrono::milliseconds timeout);
     [[nodiscard]] bool LaunchDetachedProcess(const std::filesystem::path& executable,
                                              std::span<const std::string> arguments,
-                                             const std::filesystem::path& workingDirectory,
-                                             std::string& diagnostic) noexcept;
+                                             const std::filesystem::path& workingDirectory, std::string& diagnostic,
+                                             std::uint64_t* processId = nullptr) noexcept;
+    [[nodiscard]] bool IsProcessAlive(std::uint64_t processId) noexcept;
     [[nodiscard]] std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,
                                                                    std::string_view companionTarget);
     [[nodiscard]] bool OpenInExternalEditor(const std::filesystem::path& path,

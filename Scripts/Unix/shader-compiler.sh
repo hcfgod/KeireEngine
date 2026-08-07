@@ -21,7 +21,8 @@ published_compiler="$published_root/KeireShaderCompiler"
 stamp="$cache_root/keire-shader-compiler.stamp"
 configure_stamp="$cache_root/keire-shader-compiler.configure"
 lock="$ROOT/Config/Dependencies.lock"
-key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|$architecture|$toolset|$($CXX --version | head -n 1)"
+macos_deployment_target="$(config_value "$lock" MACOS_DEPLOYMENT_TARGET)"
+key="$(config_value "$lock" SDL_SHADERCROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_DXC_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_CROSS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT)|$(config_value "$lock" SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT)|$(config_value "$lock" SDL_COMMIT)|$macos_deployment_target|$architecture|$toolset|$($CXX --version | head -n 1)"
 if [[ "$force" != 1 && -x "$published_compiler" && -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key" ]]; then
   printf '==> KeireShaderCompiler cache is current\n'
   exit 0
@@ -41,7 +42,8 @@ options=(-DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$install_root" -DCMA
   -DSDLSHADERCROSS_INSTALL_RUNTIME=ON)
 if [[ "$platform" == Mac ]]; then
   cmake_architecture=x86_64; [[ "$architecture" == ARM64 ]] && cmake_architecture=arm64
-  options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture")
+  options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture"
+    "-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
 printf '==> Configuring the pinned host shader compiler\n'
 cmake -S "$ROOT/Vendor/SDL_shadercross" -B "$cache_root" -G Ninja "${options[@]}"

@@ -11,22 +11,34 @@ project(ProjectConfig.HUB_TARGET)
         "Source/**.c",
         "Source/**.cc",
         "Source/**.cpp",
-        "Source/**.cxx"
+        "Source/**.cxx",
+        "Source/**.h"
     }
     AddKeireApplicationIcon()
 
     includedirs
     {
         "Include",
+        "../KeireHubRuntime/Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
+    }
+
+    externalincludedirs
+    {
+        VendorIncludeDirs.json
     }
 
     defines
     {
-        "KEIRE_EDITOR_TARGET=\"" .. ProjectConfig.CLIENT_TARGET .. "\""
+        "KEIRE_EDITOR_TARGET=\"" .. ProjectConfig.CLIENT_TARGET .. "\"",
+        "KEIRE_HUB_WORKER_TARGET=\"" .. HubWorkerTarget .. "\""
     }
 
-    dependson { ProjectConfig.CLIENT_TARGET }
+    dependson { HubWorkerTarget }
+
+    links { HubRuntimeTarget }
+
+    LinkKeireHubNativeHttp()
 
     LinkKeireSourceModules()
     LinkKeireCore()
@@ -34,6 +46,7 @@ project(ProjectConfig.HUB_TARGET)
     LinkSDL3()
 
     filter "system:windows"
+        links { "Bcrypt", "Wintrust" }
         linkoptions { "/STACK:8388608" }
 
     filter { "system:windows", "configurations:Dist" }

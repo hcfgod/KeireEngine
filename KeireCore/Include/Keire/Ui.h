@@ -34,6 +34,51 @@ namespace Keire
         Immediate
     };
 
+    enum class UiFontRole : std::uint8_t
+    {
+        Body,
+        Heading,
+        Monospace,
+        Icons
+    };
+
+    enum class UiStyleColorRole : std::uint8_t
+    {
+        Text,
+        WindowBackground,
+        ChildBackground,
+        PopupBackground,
+        Border,
+        FrameBackground,
+        FrameBackgroundHovered,
+        FrameBackgroundActive,
+        Button,
+        ButtonHovered,
+        ButtonActive,
+        Header,
+        HeaderHovered,
+        HeaderActive
+    };
+
+    enum class UiStyleVariable : std::uint8_t
+    {
+        WindowPadding,
+        WindowRounding,
+        WindowBorderSize,
+        ChildRounding,
+        ChildBorderSize,
+        FramePadding,
+        FrameRounding,
+        ItemSpacing
+    };
+
+    struct UiFontSpecification
+    {
+        UiFontRole Role = UiFontRole::Body;
+        std::filesystem::path Path;
+        float SizePixels = 16.0F;
+    };
+
     struct UiSpecification
     {
         UiMode Mode = UiMode::Disabled;
@@ -45,6 +90,7 @@ namespace Keire
         bool EnableDocking = true;
         bool EnableKeyboardNavigation = true;
         bool EnableGpuValidation = false;
+        std::vector<UiFontSpecification> Fonts;
     };
 
     struct UiCaptureState
@@ -171,7 +217,28 @@ namespace Keire
         List,
         Grid,
         Warning,
-        Information
+        Information,
+        Close,
+        Minimize,
+        Maximize,
+        Restore,
+        Home,
+        Documentation,
+        LightMode,
+        DarkMode,
+        Notifications,
+        Download,
+        More,
+        OpenExternal,
+        Favorite,
+        License,
+        Learn,
+        Build,
+        Package,
+        Bug,
+        Link,
+        Copy,
+        Description
     };
 
     struct UiOverlayIconButtonSpecification
@@ -187,6 +254,13 @@ namespace Keire
     {
         Proportional,
         Equal
+    };
+
+    enum class UiTableColumnSizing : std::uint8_t
+    {
+        Automatic,
+        Fixed,
+        Stretch
     };
 
     struct UiTableOptions
@@ -268,7 +342,10 @@ namespace Keire
             Table,
             DragSource,
             DragTarget,
-            Clip
+            Clip,
+            Font,
+            StyleColor,
+            StyleVariable
         };
 
         UiScope(UiFrame& frame, Kind kind, bool visible, bool closeRequired) noexcept;
@@ -399,6 +476,27 @@ namespace Keire
         UiClipScope(UiFrame& frame) noexcept : UiScope(frame, Kind::Clip, true, true) {}
     };
 
+    class KEIRE_API UiFontScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        UiFontScope(UiFrame& frame, bool available) noexcept : UiScope(frame, Kind::Font, available, available) {}
+    };
+
+    class KEIRE_API UiStyleColorScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        explicit UiStyleColorScope(UiFrame& frame) noexcept : UiScope(frame, Kind::StyleColor, true, true) {}
+    };
+
+    class KEIRE_API UiStyleVariableScope final : public UiScope
+    {
+      private:
+        friend class UiFrame;
+        explicit UiStyleVariableScope(UiFrame& frame) noexcept : UiScope(frame, Kind::StyleVariable, true, true) {}
+    };
+
     class KEIRE_API UiPanelScope final : public UiScope
     {
       private:
@@ -441,16 +539,25 @@ namespace Keire
         [[nodiscard]] UiDragTargetScope BeginDragTarget();
         [[nodiscard]] UiDragTargetScope BeginDragTarget(UiItemRect area, std::string_view id);
         [[nodiscard]] UiClipScope PushClipRect(UiItemRect rectangle);
+        [[nodiscard]] UiFontScope PushFont(UiFontRole role);
+        [[nodiscard]] UiStyleColorScope PushStyleColor(UiStyleColorRole role, UiColor color);
+        [[nodiscard]] UiStyleVariableScope PushStyleVariable(UiStyleVariable variable, float value);
+        [[nodiscard]] UiStyleVariableScope PushStyleVariable(UiStyleVariable variable, UiSize value);
         [[nodiscard]] UiPanelScope BeginPanel(UiPanelRegistration& panel, UiWindowOptions options = {});
         void OpenPopup(std::string_view id);
         void CloseCurrentPopup();
         void TableNextRow();
         [[nodiscard]] bool TableNextColumn();
+        void TableSetupColumn(std::string_view label, UiTableColumnSizing sizing = UiTableColumnSizing::Automatic,
+                              float widthOrWeight = 0.0F);
+        void TableHeaderRow();
         void SetDragPayload(std::string_view type, std::span<const std::byte> bytes);
         [[nodiscard]] bool AcceptDragPayload(std::string_view type, std::vector<std::byte>& bytes);
 
         void Text(std::string_view text);
         void TextColored(UiColor color, std::string_view text);
+        void TextWrapped(std::string_view text);
+        void TextColoredWrapped(UiColor color, std::string_view text);
         void Separator();
         void SameLine();
         void Spacing();
@@ -500,8 +607,11 @@ namespace Keire
         [[nodiscard]] UiSize MeasureText(std::string_view text, float fontSize = 0.0F) const;
         void DrawOverlayText(UiPosition position, UiColor color, std::string_view text, float fontSize = 0.0F,
                              std::optional<UiItemRect> clip = {});
+        void DrawOverlayIcon(UiIcon icon, UiPosition position, UiColor color);
         [[nodiscard]] UiItemRect ContentRect() const;
         [[nodiscard]] UiSize ContentAvailable() const;
+        [[nodiscard]] UiPosition CursorPosition() const;
+        [[nodiscard]] UiPosition CursorScreenPosition() const;
         [[nodiscard]] bool WindowFocused() const;
         [[nodiscard]] UiPointerState PointerState() const;
         [[nodiscard]] bool KeyDown(UiKey key) const;
@@ -512,6 +622,10 @@ namespace Keire
         void SetTooltip(std::string_view text, UiTooltipOptions options);
         void SetNextWindowSize(UiSize size, bool firstUseOnly = true);
         void SetNextWindowPosition(UiPosition position, bool firstUseOnly = true);
+        void SetCursorPosition(UiPosition position);
+        void SetCursorScreenPosition(UiPosition position);
+        void SetNextItemWidth(float width);
+        void RequestKeyboardFocus();
         void AlignNextItemGroup(float alignment, float width);
 
       private:
@@ -520,6 +634,7 @@ namespace Keire
         class Impl;
 
         UiFrame();
+        void OpenScope(UiScope::Kind kind);
         void CloseScope(UiScope::Kind kind, std::uint64_t generation) noexcept;
         [[nodiscard]] std::weak_ptr<void> Lifetime() const noexcept;
         [[nodiscard]] std::uint64_t Generation() const noexcept;

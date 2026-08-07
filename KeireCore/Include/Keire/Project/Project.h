@@ -9,13 +9,14 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace Keire
 {
-    inline constexpr std::uint32_t CurrentProjectSchemaVersion = 2;
+    inline constexpr std::uint32_t CurrentProjectSchemaVersion = 3;
 
     enum class ProjectTemplate : std::uint8_t
     {
@@ -49,7 +50,8 @@ namespace Keire
         Missing,
         Invalid,
         RequiresNewerEngine,
-        InUse
+        InUse,
+        UnsupportedSchema
     };
 
     struct RequiredSourceModule
@@ -83,9 +85,19 @@ namespace Keire
         std::string Name;
         std::string CreatedWithEngineVersion;
         std::string MinimumEngineVersion;
+        struct TemplateProvenance
+        {
+            std::string Id;
+            std::string Version;
+
+            [[nodiscard]] bool operator==(const TemplateProvenance&) const = default;
+        };
         AssetId StartupScene;
         AssetId DefaultInput;
         std::vector<RequiredSourceModule> RequiredModules;
+        std::string CreatedAt;
+        std::string LastSavedWithEngineVersion;
+        std::optional<TemplateProvenance> Template;
     };
 
     struct ProjectCreateSpecification
@@ -103,6 +115,38 @@ namespace Keire
         std::uint64_t LastOpenedUnixSeconds = 0;
         ProjectStatus Status = ProjectStatus::Ready;
         bool Pinned = false;
+        std::uint64_t AddedUnixSeconds = 0;
+        std::uint64_t CreatedUnixSeconds = 0;
+        std::uint64_t ModifiedUnixSeconds = 0;
+        std::optional<std::uint64_t> SizeBytes;
+        std::string CreatedWithEngineVersion;
+        std::string LastSavedWithEngineVersion;
+        std::string MinimumEngineVersion;
+        std::uint32_t ProjectSchemaVersion = 0;
+        std::string PreferredEditorInstallation;
+    };
+
+    enum class ProjectRegistryLoadMode : std::uint8_t
+    {
+        RefreshMetadata,
+        CachedMetadata
+    };
+
+    struct ProjectInspectionResult
+    {
+        std::filesystem::path Root;
+        ProjectStatus Status = ProjectStatus::Invalid;
+        std::uint32_t SchemaVersion = 0;
+        ProjectId Id;
+        std::string Name;
+        std::string CreatedWithEngineVersion;
+        std::string MinimumEngineVersion;
+        std::string CreatedAt;
+        std::string LastSavedWithEngineVersion;
+        std::optional<ProjectDescriptor::TemplateProvenance> Template;
+        std::string Diagnostic;
+
+        [[nodiscard]] bool HasIdentity() const noexcept { return static_cast<bool>(Id) && !Name.empty(); }
     };
 
     class KEIRE_API Project final : public RefCounted
@@ -118,6 +162,7 @@ namespace Keire
         [[nodiscard]] static Ref<Project> Open(const std::filesystem::path& path,
                                                ProjectOpenMode mode = ProjectOpenMode::ReadOnly);
         [[nodiscard]] static ProjectStatus Inspect(const std::filesystem::path& path) noexcept;
+        [[nodiscard]] static ProjectInspectionResult InspectMetadata(const std::filesystem::path& path) noexcept;
         [[nodiscard]] static bool IsLocked(const std::filesystem::path& path) noexcept;
 
         [[nodiscard]] const ProjectDescriptor& Descriptor() const noexcept;
@@ -139,14 +184,15 @@ namespace Keire
     class KEIRE_API ProjectRegistry final : public RefCounted
     {
       public:
-        explicit ProjectRegistry(std::filesystem::path path = {});
+        explicit ProjectRegistry(std::filesystem::path path = {},
+                                 ProjectRegistryLoadMode loadMode = ProjectRegistryLoadMode::RefreshMetadata);
         ~ProjectRegistry() override;
 
         ProjectRegistry(const ProjectRegistry&) = delete;
         ProjectRegistry& operator=(const ProjectRegistry&) = delete;
 
         [[nodiscard]] std::vector<RecentProject> Entries() const;
-        void RecordOpened(const Project& project);
+        void RecordOpened(const Project& project, std::string_view preferredEditorInstallation = {});
         [[nodiscard]] bool SetPinned(ProjectId id, bool pinned);
         [[nodiscard]] bool Remove(ProjectId id);
         void Refresh();

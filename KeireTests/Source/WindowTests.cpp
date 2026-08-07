@@ -1,6 +1,7 @@
 #include "Keire/Window.h"
 
 #include "KeireInternal/TrayIconInternal.h"
+#include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -26,6 +28,7 @@ namespace
     static_assert(!noexcept(std::declval<const Keire::Window&>().Mode()));
     static_assert(!noexcept(std::declval<const Keire::Window&>().CloseRequested()));
     static_assert(!noexcept(std::declval<const Keire::Window&>().IsOpen()));
+    static_assert(std::is_trivially_copyable_v<Keire::WindowChromeLayout>);
 
     void UseDummyVideoDriver()
     {
@@ -71,6 +74,35 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Window chrome layouts are bounded and later regions override earlier regions")
+{
+    Keire::WindowChromeLayout layout;
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Drag, {0, 0, 800, 40}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::ResizeTop, {0, 0, 800, 6}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::SystemMenu, {0, 0, 40, 40}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Minimize, {656, 0, 48, 40}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::MaximizeRestore, {704, 0, 48, 40}}));
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Close, {752, 0, 48, 40}}));
+
+    const auto hit = [&layout](const Keire::WindowPosition position)
+    { return Keire::WindowSystemInternalAccess::HitTestChromeLayout(layout, position); };
+    CHECK(hit({100, 20}) == Keire::WindowChromeRole::Drag);
+    CHECK(hit({100, 2}) == Keire::WindowChromeRole::ResizeTop);
+    CHECK(hit({5, 20}) == Keire::WindowChromeRole::SystemMenu);
+    CHECK(hit({680, 20}) == Keire::WindowChromeRole::Minimize);
+    CHECK(hit({720, 20}) == Keire::WindowChromeRole::MaximizeRestore);
+    CHECK(hit({780, 20}) == Keire::WindowChromeRole::Close);
+    CHECK(hit({100, 40}) == Keire::WindowChromeRole::Client);
+    CHECK(hit({800, 20}) == Keire::WindowChromeRole::Client);
+    CHECK_FALSE(layout.Add({Keire::WindowChromeRole::Drag, {0, 0, 0, 40}}));
+    CHECK_FALSE(layout.Add({static_cast<Keire::WindowChromeRole>(255), {0, 0, 1, 1}}));
+
+    Keire::WindowChromeLayout full;
+    for (std::size_t index = 0; index < Keire::WindowChromeLayout::MaximumRegions; ++index)
+        REQUIRE(full.Add({Keire::WindowChromeRole::Client, {static_cast<std::int32_t>(index), 0, 1, 1}}));
+    CHECK_FALSE(full.Add({Keire::WindowChromeRole::Client, {0, 0, 1, 1}}));
+}
+
 TEST_CASE("WindowSystem initialization failures retain SDL diagnostics")
 {
 #if defined(_WIN32)
@@ -103,6 +135,8 @@ TEST_CASE("WindowSystem enforces one active instance and supports reinitializati
     first.Reset();
 
     auto second = Keire::CreateRef<Keire::WindowSystem>();
+    CHECK(Keire::GetSystemColorScheme() >= Keire::SystemColorScheme::Unknown);
+    CHECK(Keire::GetSystemColorScheme() <= Keire::SystemColorScheme::Dark);
     CHECK(second->IsActive());
     second->Shutdown();
 }
@@ -142,6 +176,83 @@ TEST_CASE("WindowSystem creates and routes multiple opaque window identities")
     second->Close();
     first.Reset();
     second.Reset();
+    system->Shutdown();
+}
+
+TEST_CASE("WindowSystem enforces logical minimums and safely falls back from unsupported custom chrome")
+{
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto specification = HiddenSpecification("custom chrome fallback");
+    specification.Width = 800;
+    specification.Height = 600;
+    specification.MinimumWidth = 640;
+    specification.MinimumHeight = 360;
+    specification.Decoration = Keire::WindowDecoration::Custom;
+
+    auto invalid = specification;
+    invalid.MinimumWidth = invalid.Width + 1;
+    CHECK_THROWS_AS((void)system->CreateWindow(invalid), std::invalid_argument);
+    invalid = specification;
+    invalid.MinimumHeight = 0;
+    CHECK_THROWS_AS((void)system->CreateWindow(invalid), std::invalid_argument);
+    invalid = specification;
+    invalid.Decoration = static_cast<Keire::WindowDecoration>(255);
+    CHECK_THROWS_AS((void)system->CreateWindow(invalid), std::invalid_argument);
+
+    auto window = system->CreateWindow(specification);
+
+    const auto effective = window->Specification();
+    CHECK(effective.Decoration == Keire::WindowDecoration::Native);
+    CHECK(effective.MinimumWidth == 640);
+    CHECK(effective.MinimumHeight == 360);
+    int minimumWidth = 0;
+    int minimumHeight = 0;
+    SDL_Window* native = Keire::WindowSystemInternalAccess::NativeWindow(*system, window->Id());
+    REQUIRE(native != nullptr);
+    CHECK(SDL_GetWindowMinimumSize(native, &minimumWidth, &minimumHeight));
+    CHECK(minimumWidth == 640);
+    CHECK(minimumHeight == 360);
+
+    const auto original = window->LogicalSize();
+    CHECK_THROWS_AS(window->SetSize({639, 360}), std::invalid_argument);
+    CHECK(window->LogicalSize() == original);
+    Keire::WindowChromeLayout layout;
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Drag, {0, 0, 800, 40}}));
+    CHECK_NOTHROW(window->SetChromeLayout(layout));
+    CHECK(window->Specification().Decoration == Keire::WindowDecoration::Native);
+
+    window->Close();
+    window.Reset();
+    system->Shutdown();
+}
+
+TEST_CASE("WindowSystem rejects custom chrome updates from worker threads without changing state")
+{
+    UseDummyVideoDriver();
+    auto system = Keire::CreateRef<Keire::WindowSystem>();
+    auto window = system->CreateWindow(HiddenSpecification("chrome threading"));
+    Keire::WindowChromeLayout layout;
+    REQUIRE(layout.Add({Keire::WindowChromeRole::Drag, {0, 0, 100, 40}}));
+    std::atomic<bool> rejected = false;
+    std::thread worker(
+        [&window, &layout, &rejected]
+        {
+            try
+            {
+                window->SetChromeLayout(layout);
+            }
+            catch (const std::logic_error&)
+            {
+                rejected.store(true, std::memory_order_release);
+            }
+        });
+    worker.join();
+    CHECK(rejected.load(std::memory_order_acquire));
+    CHECK(window->Specification().Decoration == Keire::WindowDecoration::Native);
+
+    window->Close();
+    window.Reset();
     system->Shutdown();
 }
 

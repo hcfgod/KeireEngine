@@ -3,11 +3,10 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/WindowInternal.h"
 
-#include "Keire/BuildInfo.h"
+#include "Keire/PlatformDirectories.h"
 #include "Keire/Ui.h"
 
 #include <SDL3/SDL_dialog.h>
-#include <SDL3/SDL_filesystem.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
@@ -637,13 +636,7 @@ namespace Keire
         {
             if (!Specification.DirectoryOverride.empty())
                 return Specification.DirectoryOverride;
-            const auto name = std::string(GetBuildInfo().ProjectName);
-            char* preference = SDL_GetPrefPath(name.c_str(), name.c_str());
-            if (!preference)
-                throw UiError("SDL_GetPrefPath", "SDL could not resolve the per-user preference directory");
-            std::filesystem::path result = Utf8Path(preference) / "Editor" / "Workspace";
-            SDL_free(preference);
-            return result;
+            return GetPreferenceDirectory() / "Editor" / "Workspace";
         }
 
         [[nodiscard]] LayoutRecord& RequireLayout(const UiLayoutId id)

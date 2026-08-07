@@ -55,6 +55,16 @@ if [[ "$MODE" == test ]]; then
     [[ -x "$editor_tests" ]] || { printf 'Editor tests executable not found: %s\n' "$editor_tests" >&2; exit 1; }
     (cd "$ROOT" && "$editor_tests")
 
+    hub_tests_target="${PROJECT_NAMESPACE}HubTests"
+    hub_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$hub_tests_target")
+    [[ $CI -eq 1 ]] && hub_args+=(--ci)
+    [[ $UPDATE -eq 1 ]] && hub_args+=(--update)
+    [[ $FORCE -eq 1 ]] && hub_args+=(--force)
+    bash "$ROOT/Scripts/$PLATFORM/build.sh" "${hub_args[@]}"
+    hub_tests="$ROOT/Build/Bin/$CONFIGURATION-$system-$(architecture_output_name "$ARCHITECTURE")/$hub_tests_target/$hub_tests_target"
+    [[ -x "$hub_tests" ]] || { printf 'Hub tests executable not found: %s\n' "$hub_tests" >&2; exit 1; }
+    (cd "$ROOT" && "$hub_tests")
+
     printf '==> Building complete client compile gate\n'
     client_build_args=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture "$ARCHITECTURE" --toolset "$TOOLSET" --target "$CLIENT_TARGET")
     [[ $CI -eq 1 ]] && client_build_args+=(--ci)

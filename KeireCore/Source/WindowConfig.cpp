@@ -157,7 +157,8 @@ namespace Keire
         }
         const auto& window = *windowIterator;
         RejectUnknownKeys(window,
-                          {"title", "width", "height", "resizable", "highPixelDensity", "visible", "maximized", "mode"},
+                          {"title", "width", "height", "minimumWidth", "minimumHeight", "resizable", "highPixelDensity",
+                           "visible", "maximized", "mode", "decoration"},
                           path, "/window");
 
         WindowSpecification specification;
@@ -175,6 +176,8 @@ namespace Keire
         }
         specification.Width = ReadDimension(window, "width", specification.Width, path);
         specification.Height = ReadDimension(window, "height", specification.Height, path);
+        specification.MinimumWidth = ReadDimension(window, "minimumWidth", specification.MinimumWidth, path);
+        specification.MinimumHeight = ReadDimension(window, "minimumHeight", specification.MinimumHeight, path);
         specification.Resizable = ReadBoolean(window, "resizable", specification.Resizable, path);
         specification.HighPixelDensity = ReadBoolean(window, "highPixelDensity", specification.HighPixelDensity, path);
         specification.Visible = ReadBoolean(window, "visible", specification.Visible, path);
@@ -199,6 +202,30 @@ namespace Keire
             {
                 Fail(path, "/window/mode", "unsupported mode; expected 'windowed' or 'borderlessFullscreen'");
             }
+        }
+        if (const auto decoration = window.find("decoration"); decoration != window.end())
+        {
+            if (!decoration->is_string())
+            {
+                Fail(path, "/window/decoration", "expected a string");
+            }
+            const auto value = decoration->get<std::string>();
+            if (value == "native")
+            {
+                specification.Decoration = WindowDecoration::Native;
+            }
+            else if (value == "custom")
+            {
+                specification.Decoration = WindowDecoration::Custom;
+            }
+            else
+            {
+                Fail(path, "/window/decoration", "unsupported decoration; expected 'native' or 'custom'");
+            }
+        }
+        if (specification.MinimumWidth > specification.Width || specification.MinimumHeight > specification.Height)
+        {
+            Fail(path, "/window", "minimum dimensions cannot exceed initial dimensions");
         }
         if (specification.Maximized && specification.Mode == WindowMode::BorderlessFullscreen)
         {

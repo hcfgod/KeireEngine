@@ -13,11 +13,40 @@
 #include <string>
 #include <thread>
 
+#if defined(_WIN32)
+#include <Windows.h>
+#else
+#include <unistd.h>
+#endif
+
+TEST_CASE("detached process launch reports a trackable process identity")
+{
+#if defined(_WIN32)
+    const auto currentProcessId = static_cast<std::uint64_t>(GetCurrentProcessId());
+#else
+    const auto currentProcessId = static_cast<std::uint64_t>(getpid());
+#endif
+    CHECK(Keire::Detail::IsProcessAlive(currentProcessId));
+    CHECK_FALSE(Keire::Detail::IsProcessAlive(0));
+
+    const std::array arguments{std::string("--child-process-probe")};
+    std::string diagnostic;
+    std::uint64_t processId = 0;
+    REQUIRE(Keire::Detail::LaunchDetachedProcess(KeireTests::TestExecutable, arguments,
+                                                 KeireTests::TestExecutable.parent_path(), diagnostic, &processId));
+    CHECK(processId != 0);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (Keire::Detail::IsProcessAlive(processId) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK_FALSE(Keire::Detail::IsProcessAlive(processId));
+}
+
 TEST_CASE("Child process captures output and preserves a nonzero exit code")
 {
     const std::array arguments{std::string("--child-process-probe")};
     auto process = Keire::Detail::ChildProcess::Start(KeireTests::TestExecutable, arguments,
                                                       KeireTests::TestExecutable.parent_path());
+    CHECK(process.ProcessId() != 0);
     REQUIRE(process.WaitFor(std::chrono::seconds(5)));
     REQUIRE(process.ExitCode());
     CHECK(*process.ExitCode() == 23);

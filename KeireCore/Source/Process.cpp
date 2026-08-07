@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <limits>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
@@ -13,6 +14,8 @@
 #include <vector>
 
 #if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
 #include <shellapi.h>
 
@@ -265,6 +268,7 @@ namespace Keire::Detail
         pid_t m_Process = -1;
         int m_ReadDescriptor = -1;
 #endif
+        std::uint64_t m_ProcessId = 0;
         bool m_Running = true;
         std::optional<int> m_ExitCode;
         std::string m_Output;
@@ -320,6 +324,7 @@ namespace Keire::Detail
         CloseHandle(writePipe);
         implementation->m_Process = process.hProcess;
         implementation->m_Thread = process.hThread;
+        implementation->m_ProcessId = static_cast<std::uint64_t>(process.dwProcessId);
 #else
         int descriptors[2]{};
         if (pipe(descriptors) != 0)
@@ -356,12 +361,14 @@ namespace Keire::Detail
         (void)fcntl(descriptors[0], F_SETFL, fcntl(descriptors[0], F_GETFL) | O_NONBLOCK);
         implementation->m_Process = child;
         implementation->m_ReadDescriptor = descriptors[0];
+        implementation->m_ProcessId = static_cast<std::uint64_t>(child);
 #endif
         return ChildProcess(std::move(implementation));
     }
 
     bool ChildProcess::Poll() { return m_Impl->Poll(); }
     bool ChildProcess::Running() const noexcept { return m_Impl && m_Impl->m_Running; }
+    std::uint64_t ChildProcess::ProcessId() const noexcept { return m_Impl ? m_Impl->m_ProcessId : 0; }
     std::optional<int> ChildProcess::ExitCode() const noexcept { return m_Impl ? m_Impl->m_ExitCode : std::nullopt; }
     std::string ChildProcess::TakeOutput() { return std::exchange(m_Impl->m_Output, {}); }
     bool ChildProcess::WaitFor(const std::chrono::milliseconds timeout)
@@ -562,10 +569,13 @@ namespace Keire::Detail
     }
 
     bool LaunchDetachedProcess(const std::filesystem::path& executable, const std::span<const std::string> arguments,
-                               const std::filesystem::path& workingDirectory, std::string& diagnostic) noexcept
+                               const std::filesystem::path& workingDirectory, std::string& diagnostic,
+                               std::uint64_t* processId) noexcept
     {
         try
         {
+            if (processId)
+                *processId = 0;
             if (!std::filesystem::is_regular_file(executable) || !std::filesystem::is_directory(workingDirectory))
             {
                 diagnostic = "Executable or working directory does not exist.";
@@ -588,23 +598,40 @@ namespace Keire::Detail
                 diagnostic = std::error_code(static_cast<int>(GetLastError()), std::system_category()).message();
                 return false;
             }
+            if (processId)
+                *processId = static_cast<std::uint64_t>(process.dwProcessId);
             CloseHandle(process.hThread);
             CloseHandle(process.hProcess);
             return true;
 #else
-            const auto child = fork();
-            if (child < 0)
+            int processPipe[2]{};
+            if (pipe(processPipe) != 0)
             {
                 diagnostic = std::strerror(errno);
                 return false;
             }
+            const auto child = fork();
+            if (child < 0)
+            {
+                diagnostic = std::strerror(errno);
+                close(processPipe[0]);
+                close(processPipe[1]);
+                return false;
+            }
             if (child == 0)
             {
+                close(processPipe[0]);
                 const auto detached = fork();
                 if (detached < 0)
                     _exit(126);
                 if (detached > 0)
+                {
+                    const auto value = static_cast<std::uint64_t>(detached);
+                    const auto ignored = write(processPipe[1], &value, sizeof(value));
+                    (void)ignored;
                     _exit(0);
+                }
+                close(processPipe[1]);
                 (void)setsid();
                 if (chdir(workingDirectory.c_str()) != 0)
                     _exit(126);
@@ -620,12 +647,19 @@ namespace Keire::Detail
                 execv(executable.c_str(), values.data());
                 _exit(127);
             }
+            close(processPipe[1]);
+            std::uint64_t detachedProcessId = 0;
+            const auto processBytes = read(processPipe[0], &detachedProcessId, sizeof(detachedProcessId));
+            close(processPipe[0]);
             int status = 0;
-            if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
+                processBytes != static_cast<ssize_t>(sizeof(detachedProcessId)) || detachedProcessId == 0)
             {
                 diagnostic = "Detached process bootstrap failed.";
                 return false;
             }
+            if (processId)
+                *processId = detachedProcessId;
             return true;
 #endif
         }
@@ -634,6 +668,26 @@ namespace Keire::Detail
             diagnostic = error.what();
             return false;
         }
+    }
+
+    bool IsProcessAlive(const std::uint64_t processId) noexcept
+    {
+        if (processId == 0)
+            return false;
+#if defined(_WIN32)
+        if (processId > static_cast<std::uint64_t>(std::numeric_limits<DWORD>::max()))
+            return false;
+        const auto process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(processId));
+        if (!process)
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        const auto state = WaitForSingleObject(process, 0);
+        CloseHandle(process);
+        return state == WAIT_TIMEOUT;
+#else
+        if (processId > static_cast<std::uint64_t>(std::numeric_limits<pid_t>::max()))
+            return false;
+        return kill(static_cast<pid_t>(processId), 0) == 0 || errno == EPERM;
+#endif
     }
 
     std::filesystem::path ResolveCompanionExecutable(const std::filesystem::path& executable,

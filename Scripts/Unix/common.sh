@@ -43,7 +43,8 @@ project_generation_fingerprint() {
     local root="$1" source_root
     {
         for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" \
-          AssetTool KeireAssetWorker KeireRuntime KeireManaged Scripts/Premake; do
+          AssetTool KeireAssetWorker KeireEditorTests KeireHubRuntime KeireHubTests KeireHubWorker \
+          KeireRenderTests KeireRuntime KeireManaged KeireManaged.Tests SourceModules Scripts/Premake; do
             [[ -d "$root/$source_root" ]] || continue
             find "$root/$source_root" -type f \( \
               -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \
@@ -159,17 +160,39 @@ validate_package_stage() {
     assert_package_generated_data_free "$stage"
 }
 
-editor_package_required_paths() {
-    local client="$1" hub="$2" namespace="$4"
+hub_content_required_paths() {
     local required=(
-      "bin/$client" "bin/$hub" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker"
-      "bin/${namespace}Runtime" "bin/KeireShaderCompiler" "bin/Managed/Coral.Managed.dll"
+      "content/Content/en-US.json" "content/Licenses/catalog.json"
+      "content/Fonts/Inter-OFL.txt" "content/Fonts/Inter-Variable.ttf"
+      "content/Fonts/Material-Symbols-Apache-2.0.txt" "content/Fonts/MaterialSymbolsRounded-Subset.ttf"
+      "content/Fonts/SOURCES.md"
+      "content/Templates/catalog.json" "content/Templates/Payloads/Empty/README.md"
+      "content/Templates/Payloads/Starter3D/README.md"
+      "content/Templates/Payloads/Starter3D/Assets/Shaders/StarterUnlit.hlsl"
+      "content/Templates/Payloads/Starter3D/ProjectSettings/Rendering.keiresettings"
+      "content/Templates/Payloads/Sandbox/README.md"
+      "content/Templates/Payloads/Sandbox/Assets/Scripts/Sandbox.keireasm"
+      "content/Templates/Payloads/Sandbox/Assets/Scripts/Runtime/SandboxWelcome.cs"
+      "content/Templates/Payloads/Sandbox/ProjectSettings/Scripting.keiresettings"
+      "content/Templates/Thumbnails/empty.png" "content/Templates/Thumbnails/starter-3d.png"
+      "content/Templates/Thumbnails/sandbox.png"
+    )
+    printf '%s\n' "${required[@]}"
+}
+
+editor_package_required_paths() {
+    local client="$1" namespace="$4"
+    local required=(
+      "bin/$client" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker"
+      "bin/${namespace}HubWorker" "bin/${namespace}Runtime" "bin/KeireShaderCompiler"
+      "bin/Managed/Coral.Managed.dll"
       "bin/Managed/Coral.Managed.deps.json" "bin/Managed/Coral.Managed.runtimeconfig.json"
       "bin/Managed/Keire.Managed.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
       "Config/Branding/Keire.png"
       "samples/KeireSandbox/ProjectSettings/Project.keireproject"
       "samples/KeireSandbox/Assets/Scenes/SampleScene.keirescene" "docs/PlayerBuilds.md" "README.md"
-      "LICENSE.txt" "THIRD_PARTY_NOTICES.md" "build-manifest.json" "editor-package.json" "launch-editor.sh"
+      "CHANGELOG.md" "LICENSE.txt" "THIRD_PARTY_NOTICES.md" "build-manifest.json"
+      "Config/SourceModules.premake.lua" "editor-package.json" "launch-editor.sh"
       "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst"
       "third-party/licenses/doctest-LICENSE.txt" "third-party/licenses/nlohmann-json-LICENSE.MIT.txt"
       "third-party/licenses/dear-imgui-LICENSE.txt" "third-party/licenses/zstandard-LICENSE.txt"
@@ -185,6 +208,7 @@ editor_package_required_paths() {
       "third-party/licenses/dotnet-LICENSE.txt" "third-party/licenses/dotnet-ThirdPartyNotices.txt"
     )
     printf '%s\n' "${required[@]}"
+    hub_content_required_paths
 }
 
 validate_editor_package_stage() {
@@ -195,8 +219,9 @@ validate_editor_package_stage() {
             return 1
         }
     done < <(editor_package_required_paths "$client" "$hub" "$core" "$namespace")
-    for path in "bin/$client" "bin/$hub" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker" \
-      "bin/${namespace}Runtime" "bin/KeireShaderCompiler" "bin/Managed/Dotnet/dotnet" "launch-editor.sh"; do
+    for path in "bin/$client" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker" \
+      "bin/${namespace}HubWorker" "bin/${namespace}Runtime" "bin/KeireShaderCompiler" \
+      "bin/Managed/Dotnet/dotnet" "launch-editor.sh"; do
         [[ -x "$stage/$path" ]] || {
             printf 'Editor package entry is not executable: %s\n' "$path" >&2
             return 1
@@ -216,14 +241,292 @@ validate_editor_package_stage() {
             return 1
         }
     done
+    for path in "bin/$hub" "${hub}.app"; do
+        [[ ! -e "$stage/$path" ]] || {
+            printf 'Editor package contains standalone Hub-owned content: %s\n' "$path" >&2
+            return 1
+        }
+    done
     if [[ "$platform" == Mac ]]; then
-        [[ -x "$stage/${hub}.app/Contents/MacOS/${hub}Launcher" &&
-           -f "$stage/${hub}.app/Contents/Info.plist" ]] || {
+        [[ -x "$stage/${client}.app/Contents/MacOS/${client}Launcher" &&
+           -f "$stage/${client}.app/Contents/Info.plist" ]] || {
             printf 'macOS editor package is missing its application bundle launcher.\n' >&2
             return 1
         }
     fi
     assert_package_generated_data_free "$stage"
+}
+
+hub_package_required_paths() {
+    local hub="$1" namespace="$2"
+    local required=(
+      "bin/$hub" "bin/${namespace}HubWorker" "Config/Branding/Keire.png"
+      "Config/SourceModules.premake.lua" "Config/Distribution.json" "docs/ProjectHub.md"
+      "Samples/KeireSandbox/ProjectSettings/Project.keireproject" "README.md" "CHANGELOG.md" "LICENSE.txt"
+      "THIRD_PARTY_NOTICES.md" "hub-package.json" "launch-hub.sh"
+      "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst"
+      "third-party/licenses/nlohmann-json-LICENSE.MIT.txt" "third-party/licenses/dear-imgui-LICENSE.txt"
+      "third-party/licenses/zstandard-LICENSE.txt" "third-party/licenses/entt-LICENSE.txt"
+      "third-party/licenses/glm-COPYING.txt" "third-party/licenses/SDL3-LICENSE.txt"
+    )
+    printf '%s\n' "${required[@]}"
+    hub_content_required_paths
+}
+
+validate_hub_package_stage() {
+    local stage="$1" hub="$2" client="$3" namespace="$4" platform="$5" path
+    while IFS= read -r path; do
+        [[ -f "$stage/$path" ]] || {
+            printf 'Hub package is missing required content: %s\n' "$path" >&2
+            return 1
+        }
+    done < <(hub_package_required_paths "$hub" "$namespace")
+    for path in "bin/$hub" "bin/${namespace}HubWorker" launch-hub.sh; do
+        [[ -x "$stage/$path" ]] || {
+            printf 'Hub package entry is not executable: %s\n' "$path" >&2
+            return 1
+        }
+    done
+    local sodium_runtime=bin/libsodium.so
+    [[ "$platform" == Mac ]] && sodium_runtime=bin/libsodium.dylib
+    [[ -f "$stage/$sodium_runtime" &&
+       -f "$stage/third-party/licenses/libsodium-LICENSE.txt" ]] || {
+        printf 'Hub package is missing its pinned libsodium runtime or license.\n' >&2
+        return 1
+    }
+    for path in "bin/$client" "bin/${namespace}AssetTool" "bin/${namespace}AssetWorker" \
+      "bin/${namespace}Runtime" bin/KeireShaderCompiler bin/Managed/Dotnet/sdk; do
+        [[ ! -e "$stage/$path" ]] || {
+            printf 'Hub package contains editor-only content: %s\n' "$path" >&2
+            return 1
+        }
+    done
+    for path in include lib examples; do
+        [[ ! -e "$stage/$path" ]] || {
+            printf 'Hub package contains SDK-only content: %s\n' "$path" >&2
+            return 1
+        }
+    done
+    if [[ "$platform" == Mac ]]; then
+        [[ -x "$stage/${hub}.app/Contents/MacOS/${hub}Launcher" &&
+           -f "$stage/${hub}.app/Contents/Info.plist" ]] || {
+            printf 'macOS Hub package is missing its application bundle launcher.\n' >&2
+            return 1
+        }
+    fi
+    assert_package_generated_data_free "$stage"
+}
+
+is_macos_macho_file() {
+    local candidate="$1"
+    file -b "$candidate" 2>/dev/null | grep -q 'Mach-O'
+}
+
+macos_macho_minimum_versions() {
+    local candidate="$1" output versions
+    if command -v vtool >/dev/null 2>&1; then
+        output="$(vtool -show-build "$candidate" 2>/dev/null || true)"
+        versions="$(printf '%s\n' "$output" | awk '$1 == "minos" { print $2 }')"
+        if [[ -n "$versions" ]]; then
+            printf '%s\n' "$versions"
+            return 0
+        fi
+    fi
+
+    if command -v otool >/dev/null 2>&1; then
+        output="$(otool -l "$candidate" 2>/dev/null || true)"
+        versions="$(printf '%s\n' "$output" | awk '
+          $1 == "cmd" { legacy = ($2 == "LC_VERSION_MIN_MACOSX"); next }
+          $1 == "minos" { print $2; next }
+          legacy && $1 == "version" { print $2; legacy = 0 }
+        ')"
+        if [[ -n "$versions" ]]; then
+            printf '%s\n' "$versions"
+            return 0
+        fi
+    fi
+
+    printf 'Could not read a macOS minimum version from Mach-O file: %s\n' "$candidate" >&2
+    return 1
+}
+
+validate_macos_macho_minimum() {
+    local root="$1" expected="$2" excluded_root="${3:-}" candidate version versions
+    local found=0
+    [[ -d "$root" ]] || { printf 'Mach-O validation root does not exist: %s\n' "$root" >&2; return 1; }
+    [[ "$expected" =~ ^[0-9]+\.[0-9]+$ ]] || {
+        printf 'Expected macOS deployment target must be major.minor: %s\n' "$expected" >&2
+        return 1
+    }
+    command -v file >/dev/null 2>&1 || { printf 'file is required for Mach-O validation.\n' >&2; return 1; }
+    if ! command -v vtool >/dev/null 2>&1 && ! command -v otool >/dev/null 2>&1; then
+        printf 'vtool or otool is required for Mach-O deployment-target validation.\n' >&2
+        return 1
+    fi
+
+    while IFS= read -r -d '' candidate; do
+        if [[ -n "$excluded_root" ]]; then
+            case "$candidate" in "$excluded_root"|"$excluded_root"/*) continue ;; esac
+        fi
+        is_macos_macho_file "$candidate" || continue
+        found=1
+        versions="$(macos_macho_minimum_versions "$candidate")" || return 1
+        while IFS= read -r version; do
+            [[ "$version" =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]] || {
+                printf 'Invalid Mach-O minimum version %s in %s.\n' "$version" "$candidate" >&2
+                return 1
+            }
+            if [[ "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}" != "$expected" ]]; then
+                printf 'Mach-O deployment target mismatch in %s: expected %s, found %s.\n' \
+                  "$candidate" "$expected" "$version" >&2
+                return 1
+            fi
+        done <<< "$versions"
+    done < <(find "$root" -type f -print0)
+
+    [[ "$found" == 1 ]] || {
+        printf 'Mach-O deployment-target validation found no binaries beneath %s.\n' "$root" >&2
+        return 1
+    }
+}
+
+write_sha256_tree_manifest() {
+    local root="$1" output="$2"
+    command -v shasum >/dev/null 2>&1 || {
+        printf 'shasum is required to preserve bundled runtime signatures.\n' >&2
+        return 1
+    }
+    (
+        cd "$root"
+        find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort > "$output"
+    )
+}
+
+verify_macos_signed_macho_tree() {
+    local root="$1" description="$2" candidate
+    local found=0
+    while IFS= read -r -d '' candidate; do
+        is_macos_macho_file "$candidate" || continue
+        found=1
+        codesign --verify --strict --verbose=2 "$candidate" || {
+            printf '%s contains an invalid or missing native signature: %s\n' "$description" "$candidate" >&2
+            return 1
+        }
+    done < <(find "$root" -type f -print0)
+    [[ "$found" == 1 ]] || {
+        printf '%s contains no Mach-O files to verify: %s\n' "$description" "$root" >&2
+        return 1
+    }
+}
+
+validate_macos_managed_host_entitlements() {
+    local managed_host="$1" output="$2" key value
+    codesign -d --entitlements :- "$managed_host" > "$output" 2>/dev/null || {
+        printf 'Could not read managed-host entitlements from %s.\n' "$managed_host" >&2
+        return 1
+    }
+    plutil -lint "$output" >/dev/null
+    for key in com.apple.security.cs.allow-jit \
+      com.apple.security.cs.allow-unsigned-executable-memory \
+      com.apple.security.cs.allow-dyld-environment-variables \
+      com.apple.security.cs.disable-library-validation; do
+        value="$(/usr/libexec/PlistBuddy -c "Print :$key" "$output" 2>/dev/null || true)"
+        [[ "$value" == true ]] || {
+            printf 'Managed host is missing required entitlement %s.\n' "$key" >&2
+            return 1
+        }
+    done
+    if /usr/libexec/PlistBuddy -c 'Print :com.apple.security.get-task-allow' "$output" >/dev/null 2>&1; then
+        printf 'Managed host must not contain the debug get-task-allow entitlement.\n' >&2
+        return 1
+    fi
+}
+
+sign_macos_app_inside_out() {
+    local app="$1" payload="$2" identity="$3" managed_host="$4" entitlements="$5" work_root="$6"
+    local dotnet_root="$payload/bin/Managed/Dotnet" candidate bundle before after actual_entitlements
+    local managed_host_signed=0
+    [[ -d "$app" && -d "$payload" ]] || {
+        printf 'macOS signing requires an application bundle and payload directory.\n' >&2
+        return 1
+    }
+    [[ -n "$identity" ]] || { printf 'macOS signing identity is empty.\n' >&2; return 1; }
+    command -v codesign >/dev/null 2>&1 || { printf 'codesign is required for macOS signing.\n' >&2; return 1; }
+    command -v plutil >/dev/null 2>&1 || { printf 'plutil is required for entitlement validation.\n' >&2; return 1; }
+
+    if [[ -n "$managed_host" ]]; then
+        [[ -f "$managed_host" && -f "$entitlements" ]] || {
+            printf 'Managed-host signing inputs are missing.\n' >&2
+            return 1
+        }
+        plutil -lint "$entitlements" >/dev/null
+    fi
+
+    if [[ -d "$dotnet_root" ]]; then
+        before="$work_root/dotnet-before.sha256"
+        after="$work_root/dotnet-after.sha256"
+        write_sha256_tree_manifest "$dotnet_root" "$before"
+        verify_macos_signed_macho_tree "$dotnet_root" 'Bundled Microsoft .NET runtime before signing'
+    fi
+
+    while IFS= read -r -d '' candidate; do
+        if [[ -d "$dotnet_root" ]]; then
+            case "$candidate" in "$dotnet_root"|"$dotnet_root"/*) continue ;; esac
+        fi
+        is_macos_macho_file "$candidate" || continue
+        if [[ -n "$managed_host" && "$candidate" == "$managed_host" ]]; then
+            codesign --force --options runtime --timestamp --entitlements "$entitlements" \
+              --sign "$identity" "$candidate"
+            managed_host_signed=1
+        else
+            codesign --force --options runtime --timestamp --sign "$identity" "$candidate"
+        fi
+    done < <(find "$payload" -type f -print0)
+
+    if [[ -n "$managed_host" && "$managed_host_signed" != 1 ]]; then
+        printf 'The declared managed editor host is not a Mach-O file: %s\n' "$managed_host" >&2
+        return 1
+    fi
+
+    while IFS= read -r -d '' bundle; do
+        if [[ -d "$dotnet_root" ]]; then
+            case "$bundle" in "$dotnet_root"|"$dotnet_root"/*) continue ;; esac
+        fi
+        codesign --force --options runtime --timestamp --sign "$identity" "$bundle"
+    done < <(find "$payload" -depth -type d \( -name '*.framework' -o -name '*.xpc' -o \
+      -name '*.appex' -o -name '*.app' \) -print0)
+
+    codesign --force --options runtime --timestamp --sign "$identity" "$app"
+
+    while IFS= read -r -d '' candidate; do
+        if [[ -d "$dotnet_root" ]]; then
+            case "$candidate" in "$dotnet_root"|"$dotnet_root"/*) continue ;; esac
+        fi
+        is_macos_macho_file "$candidate" || continue
+        codesign --verify --strict --verbose=2 "$candidate"
+    done < <(find "$payload" -type f -print0)
+    while IFS= read -r -d '' bundle; do
+        if [[ -d "$dotnet_root" ]]; then
+            case "$bundle" in "$dotnet_root"|"$dotnet_root"/*) continue ;; esac
+        fi
+        codesign --verify --strict --verbose=2 "$bundle"
+    done < <(find "$payload" -depth -type d \( -name '*.framework' -o -name '*.xpc' -o \
+      -name '*.appex' -o -name '*.app' \) -print0)
+    codesign --verify --strict --verbose=2 "$app"
+
+    if [[ -d "$dotnet_root" ]]; then
+        write_sha256_tree_manifest "$dotnet_root" "$after"
+        cmp "$before" "$after" >/dev/null || {
+            printf 'macOS signing modified the bundled Microsoft .NET runtime.\n' >&2
+            return 1
+        }
+        verify_macos_signed_macho_tree "$dotnet_root" 'Bundled Microsoft .NET runtime after signing'
+    fi
+
+    if [[ -n "$managed_host" ]]; then
+        actual_entitlements="$work_root/managed-host.entitlements.plist"
+        validate_macos_managed_host_entitlements "$managed_host" "$actual_entitlements"
+    fi
 }
 
 resolve_unix_toolset() {

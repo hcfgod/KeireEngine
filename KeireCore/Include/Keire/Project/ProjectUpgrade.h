@@ -74,6 +74,7 @@ namespace Keire
         [[nodiscard]] const std::filesystem::path& Root() const noexcept;
 
         [[nodiscard]] static ProjectUpgradeStep CreateVersion1To2Step();
+        [[nodiscard]] static ProjectUpgradeStep CreateVersion2To3Step();
 
       private:
         class Impl;

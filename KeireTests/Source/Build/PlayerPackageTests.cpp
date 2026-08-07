@@ -187,6 +187,33 @@ fi
     }
 } // namespace
 
+TEST_CASE("Player build status documents preserve bounded typed failure codes")
+{
+    TemporaryDirectory directory;
+    const auto status = directory.Path / "status.json";
+    Keire::Detail::WritePlayerBuildStatusDocument(
+        status, {.State = "failed",
+                 .Phase = "failed",
+                 .Progress = 1.0F,
+                 .Message = "Build Support could not be installed. Verify the package and try again.",
+                 .ErrorCode = "build_support.install_failed"});
+
+    const auto decoded = Keire::Detail::ReadPlayerBuildStatusDocument(status);
+    CHECK(decoded.State == "failed");
+    CHECK(decoded.ErrorCode == "build_support.install_failed");
+    CHECK(decoded.Message == "Build Support could not be installed. Verify the package and try again.");
+
+    CHECK_THROWS(Keire::Detail::WritePlayerBuildStatusDocument(
+        status, {.State = "running", .Phase = "install", .ErrorCode = "C:/private/status.json"}));
+    CHECK_THROWS(Keire::Detail::WritePlayerBuildStatusDocument(
+        status, {.State = "failed", .Phase = "failed", .ErrorCode = std::string(129, 'x')}));
+
+    Write(
+        status,
+        R"({"schemaVersion":1,"state":"failed","phase":"failed","progress":1.0,"message":"safe","errorCode":"C:/private/status.json","output":"","executable":""})");
+    CHECK_THROWS((void)Keire::Detail::ReadPlayerBuildStatusDocument(status));
+}
+
 TEST_CASE("Windows player packages rename the executable and self-describe their runtime layout")
 {
     TemporaryDirectory directory;

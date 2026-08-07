@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "SandboxGameplay",
+  "rootNamespace": "KeireSandbox",
+  "classification": "runtime",
+  "sourceRoots": [
+    "Assets/Scripts/Runtime"
+  ],
+  "references": []
+}

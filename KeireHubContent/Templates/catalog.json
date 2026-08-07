@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "templates": [
+    {
+      "id": "keire.empty",
+      "version": "1.0.0",
+      "displayName": "Empty",
+      "description": "A clean Kéire project with no starter assets.",
+      "category": "core",
+      "tags": [
+        "Empty",
+        "Core"
+      ],
+      "thumbnail": "Thumbnails/empty.png",
+      "screenshots": [],
+      "compatibleEditors": ">=0.1.0 <2.0.0",
+      "projectSchema": 3,
+      "platformTarget": "desktop",
+      "estimatedSizeBytes": 108,
+      "payloadRoot": "Payloads/Empty",
+      "payloadFiles": [
+        {
+          "path": "README.md",
+          "sizeBytes": 108,
+          "sha256": "4701378bc565ad29b4aebdde588f4bee9ee3b1ebc2372b892fd7a423d7c04e29"
+        }
+      ],
+      "defaultProjectConfiguration": {},
+      "starterContent": [],
+      "requiredPackages": [],
+      "recommendedPackages": [],
+      "licenses": [],
+      "featured": false
+    },
+    {
+      "id": "keire.3d-starter",
+      "version": "1.0.0",
+      "displayName": "3D Starter",
+      "description": "A compact 3D starting point with forward-renderer settings and an unlit shader.",
+      "category": "core",
+      "tags": [
+        "3D",
+        "Starter",
+        "Core"
+      ],
+      "thumbnail": "Thumbnails/starter-3d.png",
+      "screenshots": [],
+      "compatibleEditors": ">=0.1.0 <2.0.0",
+      "projectSchema": 3,
+      "platformTarget": "desktop",
+      "estimatedSizeBytes": 408,
+      "payloadRoot": "Payloads/Starter3D",
+      "payloadFiles": [
+        {
+          "path": "Assets/Shaders/StarterUnlit.hlsl",
+          "sizeBytes": 154,
+          "sha256": "58b67763118c5d71fee9385edc179ffce6a40b1598bc83bcb45441b7521209e5"
+        },
+        {
+          "path": "ProjectSettings/Rendering.keiresettings",
+          "sizeBytes": 135,
+          "sha256": "67dc11958b4667e3733a1642609bc4f37146f28dcb6257e1fb0b3da3ffb5b352"
+        },
+        {
+          "path": "README.md",
+          "sizeBytes": 119,
+          "sha256": "20fd83c8ddd221fe5ab6c76685e96f12ecbfec335cf9a2f8a1bb154f1ac74abd"
+        }
+      ],
+      "defaultProjectConfiguration": {},
+      "starterContent": [
+        "Assets/Shaders/StarterUnlit.hlsl"
+      ],
+      "requiredPackages": [],
+      "recommendedPackages": [],
+      "licenses": [],
+      "featured": true
+    },
+    {
+      "id": "keire.sandbox",
+      "version": "1.0.0",
+      "displayName": "Kéire Sandbox",
+      "description": "A clean learning sample with a runtime assembly and an introductory behavior.",
+      "category": "learning",
+      "tags": [
+        "Sample",
+        "Learning",
+        "Scripting"
+      ],
+      "thumbnail": "Thumbnails/sandbox.png",
+      "screenshots": [],
+      "compatibleEditors": ">=0.1.0 <2.0.0",
+      "projectSchema": 3,
+      "platformTarget": "desktop",
+      "estimatedSizeBytes": 967,
+      "payloadRoot": "Payloads/Sandbox",
+      "payloadFiles": [
+        {
+          "path": "Assets/Scripts/Runtime/SandboxWelcome.cs",
+          "sizeBytes": 260,
+          "sha256": "7d8099551c94a968dad14dddf8b0d04c7b15266da05dcbf9ff6829d880bd9692"
+        },
+        {
+          "path": "Assets/Scripts/Sandbox.keireasm",
+          "sizeBytes": 193,
+          "sha256": "dd125866fc4e1777e1756729d06cb39b01e82b5c9765d4a2e254cd7ba9e2cb3b"
+        },
+        {
+          "path": "ProjectSettings/Scripting.keiresettings",
+          "sizeBytes": 298,
+          "sha256": "6b1be999c13895d9ecc3a3f62dfe363502c8708580f4058af65903f21f255c08"
+        },
+        {
+          "path": "README.md",
+          "sizeBytes": 216,
+          "sha256": "b36d648d28bfde767685c5b7fbc23463ef4201b867e0b8113341b1e975162383"
+        }
+      ],
+      "defaultProjectConfiguration": {},
+      "starterContent": [
+        "Assets/Scripts/Runtime/SandboxWelcome.cs"
+      ],
+      "requiredPackages": [],
+      "recommendedPackages": [],
+      "licenses": [],
+      "featured": true
+    }
+  ]
+}

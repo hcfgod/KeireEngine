@@ -1,23 +1,13 @@
 #pragma once
 
+#include "KeireHubRuntime/HubActivation.h"
+
 #include <filesystem>
 #include <memory>
 #include <optional>
-#include <string>
 
 namespace KeireHub
 {
-    struct HubActivationRequest final
-    {
-        std::optional<std::string> Platform;
-        std::optional<std::string> Architecture;
-
-        [[nodiscard]] bool RequestsBuildSupport() const noexcept
-        {
-            return Platform.has_value() && Architecture.has_value();
-        }
-    };
-
     class HubInstanceCoordinator final
     {
       public:

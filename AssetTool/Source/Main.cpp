@@ -60,6 +60,8 @@ namespace
         std::string StagingId;
         std::string PackId;
         std::string EngineVersion;
+        std::string ExpectedPlatform;
+        std::string ExpectedArchitecture;
         std::string Url;
         std::string Sha256;
         std::uint64_t ExpectedSize = 0;
@@ -69,6 +71,7 @@ namespace
         bool ApplyUpgrade = false;
         bool RecoverUpgrade = false;
         bool RollbackUpgrade = false;
+        bool ProjectSpecified = false;
     };
 
     [[nodiscard]] std::uint64_t ParseUnsigned(const std::string_view value, const char* option)
@@ -111,7 +114,10 @@ namespace
                 return argv[index];
             };
             if (option == "--project")
+            {
                 result.Project = Keire::Detail::PathFromUtf8(requireValue());
+                result.ProjectSpecified = true;
+            }
             else if (option == "--output")
                 result.Output = Keire::Detail::PathFromUtf8(requireValue());
             else if (option == "--catalog")
@@ -126,6 +132,10 @@ namespace
                 result.PackId = requireValue();
             else if (option == "--engine-version")
                 result.EngineVersion = requireValue();
+            else if (option == "--expected-platform")
+                result.ExpectedPlatform = requireValue();
+            else if (option == "--expected-architecture")
+                result.ExpectedArchitecture = requireValue();
             else if (option == "--url")
                 result.Url = requireValue();
             else if (option == "--sha256")
@@ -195,6 +205,8 @@ namespace
                      "  KeireAssetTool pack-player-support --catalog <manifest.json> --input <payload>\n"
                      "                                     --output <module.keireplayersupport>\n"
                      "  KeireAssetTool install-player-support --input <module.keireplayersupport>\n"
+                     "                                        [--pack-id <id>] [--expected-platform <platform>]\n"
+                     "                                        [--expected-architecture <architecture>]\n"
                      "                                        [--status <path>] [--cancel <path>]\n"
                      "  KeireAssetTool fetch-player-support-catalog --output <catalog.json>\n"
                      "                                               [--status <path>] [--cancel <path>]\n"
@@ -205,6 +217,7 @@ namespace
                      "  KeireAssetTool list-player-support\n"
                      "  KeireAssetTool remove-player-support --engine-version <version> --pack-id <id>\n"
                      "  KeireAssetTool describe-player-support-host\n"
+                     "  KeireAssetTool validate-project --project <path>\n"
                      "  KeireAssetTool upgrade-project [--project <path>] [--apply|--recover|--rollback]\n"
                      "  KeireAssetTool validate --catalog <path>\n";
         std::cout << "  KeireAssetTool bake-lighting [--project <path>] [--input <scene.keirescene>] [--force]\n";
@@ -516,18 +529,29 @@ namespace
 
     void WritePlayerBuildStatus(const std::filesystem::path& requestedPath, const std::string_view state,
                                 const std::string_view phase, const float progress, const std::string_view message,
-                                const std::filesystem::path& output = {}, const std::filesystem::path& executable = {})
+                                const std::filesystem::path& output = {}, const std::filesystem::path& executable = {},
+                                const std::string_view errorCode = {})
     {
         if (requestedPath.empty())
             return;
-        const nlohmann::json document{{"schemaVersion", 1},
-                                      {"state", state},
-                                      {"phase", phase},
-                                      {"progress", std::clamp(progress, 0.0F, 1.0F)},
-                                      {"message", message},
-                                      {"output", Keire::Detail::PathToUtf8(output)},
-                                      {"executable", Keire::Detail::PathToUtf8(executable)}};
-        Keire::Detail::WriteTextFileAtomically(requestedPath, document.dump(2) + '\n');
+        Keire::Detail::WritePlayerBuildStatusDocument(requestedPath, {.State = std::string(state),
+                                                                      .Phase = std::string(phase),
+                                                                      .Progress = progress,
+                                                                      .Message = std::string(message),
+                                                                      .ErrorCode = std::string(errorCode),
+                                                                      .Output = output,
+                                                                      .Executable = executable});
+    }
+
+    void LogBuildSupportFailure(const std::string_view context, const std::exception& error) noexcept
+    {
+        try
+        {
+            KEIRE_CORE_ERROR("{}: {}", context, error.what());
+        }
+        catch (...)
+        {
+        }
     }
 
     [[nodiscard]] const Keire::PlayerBuildProfile& SelectPlayerProfile(const Keire::PlayerBuildProfiles& profiles,
@@ -593,6 +617,23 @@ namespace
             {
                 if (commandLine.Input.empty())
                     throw std::invalid_argument("install-player-support requires --input <module.keireplayersupport>.");
+                if (commandLine.ExpectedPlatform.empty() != commandLine.ExpectedArchitecture.empty())
+                {
+                    throw std::invalid_argument("Build Support target validation requires both --expected-platform and "
+                                                "--expected-architecture.");
+                }
+                if (!commandLine.PackId.empty() || !commandLine.ExpectedPlatform.empty())
+                {
+                    const auto manifest = Keire::Detail::ReadPlayerSupportPackageManifest(commandLine.Input);
+                    if (!commandLine.PackId.empty() && manifest.Id != commandLine.PackId)
+                        throw std::invalid_argument("The Build Support package does not match the requested pack ID.");
+                    if (!commandLine.ExpectedPlatform.empty() &&
+                        (Keire::ToString(manifest.Platform) != commandLine.ExpectedPlatform ||
+                         Keire::ToString(manifest.Architecture) != commandLine.ExpectedArchitecture))
+                    {
+                        throw std::invalid_argument("The Build Support package does not match the requested target.");
+                    }
+                }
                 auto statusPath = commandLine.Status;
                 if (!statusPath.empty())
                     statusPath = std::filesystem::absolute(statusPath).lexically_normal();
@@ -628,9 +669,13 @@ namespace
                 }
                 catch (const std::exception& error)
                 {
+                    LogBuildSupportFailure("Build Support installation failed", error);
+                    const auto failure = Keire::Detail::DescribePlayerSupportFailure(
+                        Keire::Detail::PlayerSupportFailureKind::InstallationFailed);
                     try
                     {
-                        WritePlayerBuildStatus(statusPath, "failed", "failed", 1.0F, error.what());
+                        WritePlayerBuildStatus(statusPath, "failed", "failed", 1.0F, failure.Message, {}, {},
+                                               failure.Code);
                     }
                     catch (...)
                     {
@@ -660,9 +705,13 @@ namespace
                 }
                 catch (const std::exception& error)
                 {
+                    LogBuildSupportFailure("Build Support catalog download failed", error);
+                    const auto failure = Keire::Detail::DescribePlayerSupportFailure(
+                        Keire::Detail::PlayerSupportFailureKind::CatalogUnavailable);
                     try
                     {
-                        WritePlayerBuildStatus(commandLine.Status, "failed", "failed", 1.0F, error.what());
+                        WritePlayerBuildStatus(commandLine.Status, "failed", "failed", 1.0F, failure.Message, {}, {},
+                                               failure.Code);
                     }
                     catch (...)
                     {
@@ -710,11 +759,15 @@ namespace
                 }
                 catch (const std::exception& error)
                 {
+                    LogBuildSupportFailure("Build Support download/install failed", error);
+                    const auto failure = Keire::Detail::DescribePlayerSupportFailure(
+                        Keire::Detail::PlayerSupportFailureKind::DownloadAndInstallationFailed);
                     std::error_code ignored;
                     std::filesystem::remove(commandLine.Output, ignored);
                     try
                     {
-                        WritePlayerBuildStatus(commandLine.Status, "failed", "failed", 1.0F, error.what());
+                        WritePlayerBuildStatus(commandLine.Status, "failed", "failed", 1.0F, failure.Message, {}, {},
+                                               failure.Code);
                     }
                     catch (...)
                     {
@@ -788,6 +841,9 @@ namespace
                 if (commandLine.EngineVersion.empty() || commandLine.PackId.empty())
                     throw std::invalid_argument(
                         "remove-player-support requires --engine-version <version> and --pack-id <id>.");
+                if (commandLine.EngineVersion != Keire::GetBuildInfo().Version)
+                    throw std::invalid_argument("The selected Asset Tool cannot remove another editor version's "
+                                                "Build Support.");
                 Keire::Detail::RemovePlayerSupport(commandLine.EngineVersion, commandLine.PackId);
                 std::cout << "Removed " << commandLine.PackId << '\n';
                 return 0;
@@ -883,10 +939,18 @@ namespace
                 return 0;
             }
 
+            if (commandLine.Command == "validate-project" && !commandLine.ProjectSpecified)
+                throw std::invalid_argument("validate-project requires --project <path>.");
             auto modules = Keire::CreateRef<Keire::ModuleRegistry>(
                 Keire::ModuleRegistrySpecification{KeireProjectModules::CreateSourceModules()});
-            const auto project = Keire::Project::Open(commandLine.Project);
+            const auto project = Keire::Project::Open(commandLine.Project, Keire::ProjectOpenMode::ReadOnly);
             modules->ValidateRequired(project->Descriptor().RequiredModules);
+            if (commandLine.Command == "validate-project")
+            {
+                std::cout << "Validated project " << project->Root().string() << " with Kéire "
+                          << Keire::GetBuildInfo().Version << ".\n";
+                return 0;
+            }
             const auto executable = std::filesystem::absolute(Keire::Detail::PathFromUtf8(argv[0])).lexically_normal();
             Keire::AssetDatabaseSpecification databaseSpecification{.ProjectRoot = project->Root()};
             databaseSpecification.Jobs = Keire::CreateRef<Keire::JobSystem>();

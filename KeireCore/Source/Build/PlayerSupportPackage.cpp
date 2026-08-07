@@ -1,6 +1,7 @@
 #include "KeireInternal/Build/PlayerSupportPackage.h"
 
 #include "Keire/BuildInfo.h"
+#include "Keire/Log.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -11,12 +12,14 @@
 #include <array>
 #include <cctype>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <memory>
 #include <ranges>
 #include <set>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <system_error>
 
 namespace Keire::Detail
@@ -32,6 +35,8 @@ namespace Keire::Detail
         constexpr std::uint64_t MaximumPackageBytes = 32ULL * 1024ULL * 1024ULL * 1024ULL;
         constexpr std::size_t MaximumFiles = 32768;
         constexpr std::size_t BufferBytes = 256U * 1024U;
+        constexpr std::size_t MaximumRemovalJournalBytes = 16U * 1024U;
+        constexpr std::size_t MaximumRemovalJournals = 128;
 
         struct ContextDeleter final
         {
@@ -272,14 +277,9 @@ namespace Keire::Detail
             return DecodePlayerSupportManifest(reader.ReadText(static_cast<std::size_t>(size)));
         }
 
-        void ValidatePackageManifest(const PlayerSupportManifest& manifest,
-                                     const std::string_view expectedModuleFingerprint)
+        void ValidatePackageManifestStructure(const PlayerSupportManifest& manifest)
         {
             ValidatePlayerSupportManifest(manifest);
-            if (manifest.EngineVersion != GetBuildInfo().Version || manifest.PlayerAbi != PlayerBuildAbiVersion)
-                throw std::runtime_error("Player support package targets a different engine or player ABI.");
-            if (!expectedModuleFingerprint.empty() && manifest.ModuleFingerprint != expectedModuleFingerprint)
-                throw std::runtime_error("Player support package source-module catalog is incompatible.");
             if (manifest.Files.empty() || manifest.Files.size() > MaximumFiles)
                 throw std::runtime_error("Player support package file catalog is empty or oversized.");
             std::uint64_t total = 0;
@@ -292,6 +292,16 @@ namespace Keire::Detail
                 total += file.Size;
                 (void)ParseDigest(file.Sha256);
             }
+        }
+
+        void ValidatePackageManifest(const PlayerSupportManifest& manifest,
+                                     const std::string_view expectedModuleFingerprint)
+        {
+            ValidatePackageManifestStructure(manifest);
+            if (manifest.EngineVersion != GetBuildInfo().Version || manifest.PlayerAbi != PlayerBuildAbiVersion)
+                throw std::runtime_error("Player support package targets a different engine or player ABI.");
+            if (!expectedModuleFingerprint.empty() && manifest.ModuleFingerprint != expectedModuleFingerprint)
+                throw std::runtime_error("Player support package source-module catalog is incompatible.");
         }
 
         void WriteRegistry(const std::filesystem::path& versionRoot)
@@ -336,7 +346,123 @@ namespace Keire::Detail
             return requested.empty() ? PlayerSupportStorageRoot()
                                      : std::filesystem::absolute(requested).lexically_normal();
         }
+
+        [[nodiscard]] bool IsSafeRemovalComponent(const std::string_view value) noexcept
+        {
+            return !value.empty() && value != "." && value != ".." && value.size() <= 128 &&
+                   std::ranges::none_of(
+                       value, [](const unsigned char character)
+                       { return character < 0x20U || character == 0x7fU || character == '/' || character == '\\'; });
+        }
+
+        void ValidateInstalledFiles(const std::filesystem::path& installation, const PlayerSupportManifest& manifest)
+        {
+            for (const auto& file : manifest.Files)
+            {
+                const auto path = installation / file.Path;
+                const auto nativePath = NativeIoPath(path);
+                if (!std::filesystem::is_regular_file(nativePath) ||
+                    std::filesystem::file_size(nativePath) != file.Size ||
+                    DigestToString(Sha256File(nativePath, MaximumFileBytes)) != file.Sha256)
+                {
+                    throw std::runtime_error("Installed Build Support contains a missing or corrupt file: " +
+                                             PathToUtf8(file.Path));
+                }
+            }
+        }
+
+        void RecoverInterruptedRemovals(const std::filesystem::path& storageRoot)
+        {
+            std::error_code error;
+            if (!std::filesystem::is_directory(storageRoot, error) || error)
+                return;
+            for (const auto& version : std::filesystem::directory_iterator(storageRoot))
+            {
+                const auto versionStatus = version.symlink_status();
+                if (!std::filesystem::is_directory(versionStatus) || std::filesystem::is_symlink(versionStatus))
+                    continue;
+                std::vector<std::filesystem::path> journals;
+                for (const auto& entry : std::filesystem::directory_iterator(version.path()))
+                {
+                    const auto filename = PathToUtf8(entry.path().filename());
+                    const auto entryStatus = entry.symlink_status();
+                    if (std::filesystem::is_regular_file(entryStatus) && filename.starts_with(".remove-") &&
+                        filename.ends_with(".json"))
+                    {
+                        if (journals.size() >= MaximumRemovalJournals)
+                            throw std::runtime_error("Build Support removal recovery exceeds its journal limit.");
+                        journals.push_back(entry.path());
+                    }
+                }
+                std::ranges::sort(journals);
+                for (const auto& journal : journals)
+                {
+                    const auto document = Json::parse(ReadTextFile(journal, MaximumRemovalJournalBytes));
+                    if (!document.is_object() || document.value("schemaVersion", 0U) != 1U)
+                        throw std::runtime_error("Build Support removal journal schema is invalid.");
+                    const auto engineVersion = document.at("engineVersion").get<std::string>();
+                    const auto packId = document.at("packId").get<std::string>();
+                    const auto tombstoneName = document.at("tombstone").get<std::string>();
+                    if (!IsSafeRemovalComponent(engineVersion) || !IsSafeRemovalComponent(packId) ||
+                        !IsSafeRemovalComponent(tombstoneName) || !tombstoneName.starts_with(".remove-") ||
+                        version.path().filename() != PathFromUtf8(engineVersion))
+                    {
+                        throw std::runtime_error("Build Support removal journal identity is invalid.");
+                    }
+                    const auto tombstone = version.path() / PathFromUtf8(tombstoneName);
+                    const auto tombstoneStatus = std::filesystem::symlink_status(tombstone, error);
+                    const bool tombstoneExists =
+                        !error && tombstoneStatus.type() != std::filesystem::file_type::not_found;
+                    if (error && error.default_error_condition() != std::errc::no_such_file_or_directory)
+                    {
+                        throw std::filesystem::filesystem_error("Could not inspect Build Support removal tombstone.",
+                                                                tombstone, error);
+                    }
+                    error.clear();
+                    if (tombstoneExists && (!std::filesystem::is_directory(tombstoneStatus) ||
+                                            std::filesystem::is_symlink(tombstoneStatus)))
+                    {
+                        throw std::runtime_error("Build Support removal tombstone is not a directory.");
+                    }
+
+                    WriteRegistry(version.path());
+                    if (tombstoneExists)
+                    {
+                        std::filesystem::remove_all(tombstone, error);
+                        if (error)
+                            throw std::filesystem::filesystem_error(
+                                "Could not finish interrupted Build Support removal.", tombstone, error);
+                    }
+                    std::filesystem::remove(journal, error);
+                    if (error)
+                        throw std::filesystem::filesystem_error("Could not clear Build Support removal journal.",
+                                                                journal, error);
+                }
+            }
+        }
     } // namespace
+
+    PlayerSupportFailureDescription DescribePlayerSupportFailure(const PlayerSupportFailureKind kind) noexcept
+    {
+        switch (kind)
+        {
+        case PlayerSupportFailureKind::InstalledInventoryInvalid:
+            return {.Code = "build_support.inventory_invalid",
+                    .Message = "Installed Build Support files are missing or corrupt."};
+        case PlayerSupportFailureKind::InstallationFailed:
+            return {.Code = "build_support.install_failed",
+                    .Message = "Build Support could not be installed. Verify the package and try again."};
+        case PlayerSupportFailureKind::CatalogUnavailable:
+            return {.Code = "build_support.catalog_unavailable",
+                    .Message = "The Build Support catalog could not be downloaded. Check the network connection and "
+                               "try again."};
+        case PlayerSupportFailureKind::DownloadAndInstallationFailed:
+            return {.Code = "build_support.download_install_failed",
+                    .Message = "Build Support could not be downloaded and installed. Check the connection and package, "
+                               "then try again."};
+        }
+        return {.Code = "build_support.operation_failed", .Message = "The Build Support operation failed."};
+    }
 
     PlayerSupportPackageResult CreatePlayerSupportPackage(PlayerSupportManifest manifest,
                                                           const std::filesystem::path& payloadRoot,
@@ -536,22 +662,48 @@ namespace Keire::Detail
         {
             const auto manifest = LoadPlayerSupportManifest(installation / "manifest.json");
             ValidatePackageManifest(manifest, {});
-            for (const auto& file : manifest.Files)
-            {
-                const auto path = installation / file.Path;
-                const auto nativePath = NativeIoPath(path);
-                if (!std::filesystem::is_regular_file(nativePath) ||
-                    std::filesystem::file_size(nativePath) != file.Size ||
-                    DigestToString(Sha256File(nativePath, MaximumFileBytes)) != file.Sha256)
-                    throw std::runtime_error("Installed Build Support contains a missing or corrupt file: " +
-                                             PathToUtf8(file.Path));
-            }
+            ValidateInstalledFiles(installation, manifest);
             diagnostic.clear();
             return true;
         }
         catch (const std::exception& error)
         {
-            diagnostic = error.what();
+            try
+            {
+                KEIRE_CORE_ERROR("Installed Build Support validation failed: {}", error.what());
+            }
+            catch (...)
+            {
+            }
+            diagnostic = DescribePlayerSupportFailure(PlayerSupportFailureKind::InstalledInventoryInvalid).Message;
+            return false;
+        }
+    }
+
+    bool ValidateInstalledPlayerSupportInventory(const std::filesystem::path& installation,
+                                                 const std::string_view expectedEngineVersion,
+                                                 std::string& diagnostic) noexcept
+    {
+        try
+        {
+            const auto manifest = LoadPlayerSupportManifest(installation / "manifest.json");
+            ValidatePackageManifestStructure(manifest);
+            if (expectedEngineVersion.empty() || manifest.EngineVersion != expectedEngineVersion)
+                throw std::runtime_error("Installed Build Support is stored under the wrong editor version.");
+            ValidateInstalledFiles(installation, manifest);
+            diagnostic.clear();
+            return true;
+        }
+        catch (const std::exception& error)
+        {
+            try
+            {
+                KEIRE_CORE_ERROR("Installed Build Support inventory validation failed: {}", error.what());
+            }
+            catch (...)
+            {
+            }
+            diagnostic = DescribePlayerSupportFailure(PlayerSupportFailureKind::InstalledInventoryInvalid).Message;
             return false;
         }
     }
@@ -560,6 +712,7 @@ namespace Keire::Detail
     {
         std::vector<PlayerSupportPackageResult> result;
         const auto root = ResolveStorageRoot(storageRoot);
+        RecoverInterruptedRemovals(root);
         std::error_code error;
         if (!std::filesystem::is_directory(root, error) || error)
             return result;
@@ -589,13 +742,28 @@ namespace Keire::Detail
     void RemovePlayerSupport(const std::string_view engineVersion, const std::string_view packId,
                              const std::filesystem::path& storageRoot)
     {
-        if (engineVersion.empty() || packId.empty() || packId.find_first_of("/\\") != std::string_view::npos)
+        if (!IsSafeRemovalComponent(engineVersion) || !IsSafeRemovalComponent(packId))
             throw std::invalid_argument("Build Support removal requires safe engine-version and pack identifiers.");
-        const auto versionRoot = ResolveStorageRoot(storageRoot) / PathFromUtf8(engineVersion);
+        const auto root = ResolveStorageRoot(storageRoot);
+        RecoverInterruptedRemovals(root);
+        const auto versionRoot = root / PathFromUtf8(engineVersion);
         const auto installation = versionRoot / PathFromUtf8(packId);
-        if (!std::filesystem::is_directory(installation))
+        const auto versionStatus = std::filesystem::symlink_status(versionRoot);
+        const auto installationStatus = std::filesystem::symlink_status(installation);
+        if (!std::filesystem::is_directory(versionStatus) || std::filesystem::is_symlink(versionStatus) ||
+            !std::filesystem::is_directory(installationStatus) || std::filesystem::is_symlink(installationStatus))
+        {
             throw std::runtime_error("The requested Build Support module is not installed.");
-        const auto removed = versionRoot / (".remove-" + AssetId::Generate().ToString());
+        }
+        const auto operationId = ".remove-" + AssetId::Generate().ToString();
+        const auto removed = versionRoot / operationId;
+        const auto journal = versionRoot / (operationId + ".json");
+        WriteTextFileAtomically(journal, Json{{"schemaVersion", 1},
+                                              {"engineVersion", std::string(engineVersion)},
+                                              {"packId", std::string(packId)},
+                                              {"tombstone", operationId}}
+                                                 .dump(2) +
+                                             '\n');
         std::filesystem::rename(installation, removed);
         try
         {
@@ -603,12 +771,22 @@ namespace Keire::Detail
         }
         catch (...)
         {
-            std::filesystem::rename(removed, installation);
-            throw;
+            const auto original = std::current_exception();
+            std::error_code rollbackError;
+            std::filesystem::rename(removed, installation, rollbackError);
+            if (!rollbackError)
+            {
+                std::error_code ignored;
+                std::filesystem::remove(journal, ignored);
+            }
+            std::rethrow_exception(original);
         }
         std::error_code error;
         std::filesystem::remove_all(removed, error);
         if (error)
             throw std::filesystem::filesystem_error("Could not remove Build Support payload.", removed, error);
+        std::filesystem::remove(journal, error);
+        if (error)
+            throw std::filesystem::filesystem_error("Could not clear Build Support removal journal.", journal, error);
     }
 } // namespace Keire::Detail

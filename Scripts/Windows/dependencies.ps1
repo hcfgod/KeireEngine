@@ -62,6 +62,7 @@ function Get-LockedDependencySource {
 $joltSource = Get-LockedDependencySource "jolt" $Lock.JOLT_URL $Lock.JOLT_COMMIT
 $recastSource = Get-LockedDependencySource "recast" $Lock.RECAST_URL $Lock.RECAST_COMMIT
 $miniaudioSource = Get-LockedDependencySource "miniaudio" $Lock.MINIAUDIO_URL $Lock.MINIAUDIO_COMMIT
+$sodiumSource = Get-LockedDependencySource "libsodium" $Lock.LIBSODIUM_URL $Lock.LIBSODIUM_COMMIT
 $assimpSource = Join-Path $Root "Vendor\assimp"
 $assimpSourceLink = Join-Path $env:LOCALAPPDATA "KeireDependencySources\assimp-$($Lock.ASSIMP_COMMIT)"
 if (Test-Path -LiteralPath $assimpSourceLink) {
@@ -108,9 +109,54 @@ $options = @(
     "-DMINIAUDIO_NO_LIBOPUS=ON", "-DMINIAUDIO_INSTALL=ON"
 )
 $key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Lock.JOLT_COMMIT, $Lock.RECAST_COMMIT,
-    $Lock.MINIAUDIO_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
+    $Lock.MINIAUDIO_COMMIT, $Lock.LIBSODIUM_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
     ($options -join ";")) -join "|"
 $base = Join-Path $Root "Build\Dependencies\windows-$OutputArchitecture-$Toolset"
+
+$sodiumBuild = Join-Path $base "libsodium"
+$sodiumOutput = Join-Path $sodiumBuild "out\libsodium.dll"
+$sodiumStamp = Join-Path $sodiumBuild "keire-libsodium.stamp"
+$sodiumKey = "$($Lock.LIBSODIUM_COMMIT)|$Architecture|$env:VCToolsVersion"
+$sodiumCurrent = -not $Force -and (Test-Path -LiteralPath $sodiumOutput -PathType Leaf) -and
+    (Test-Path -LiteralPath $sodiumStamp -PathType Leaf) -and
+    ((Get-Content -LiteralPath $sodiumStamp -Raw).Trim() -eq $sodiumKey)
+if (-not $sodiumCurrent) {
+    if (Test-Path -LiteralPath $sodiumBuild) {
+        $resolvedSodiumBuild = [IO.Path]::GetFullPath($sodiumBuild)
+        $resolvedBase = [IO.Path]::GetFullPath($base) + [IO.Path]::DirectorySeparatorChar
+        if (-not $resolvedSodiumBuild.StartsWith($resolvedBase, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to replace the libsodium build outside $base."
+        }
+        Remove-Item -LiteralPath $resolvedSodiumBuild -Recurse -Force
+    }
+    $sodiumOutputDirectory = Split-Path $sodiumOutput
+    $sodiumIntermediate = Join-Path $sodiumBuild "obj"
+    New-Item -ItemType Directory -Force -Path $sodiumOutputDirectory, $sodiumIntermediate | Out-Null
+    $sodiumVisualStudio = if ($Generator -in @("vs2019", "vs2022", "vs2026")) { $Generator } else { "vs2022" }
+    $sodiumVisualStudioMajor = Get-VisualStudioMajorVersion $sodiumVisualStudio
+    $sodiumEnvironment = Get-VSBuildEnvironment $sodiumVisualStudioMajor
+    $sodiumProject = Join-Path $sodiumSource "builds\msvc\$sodiumVisualStudio\libsodium\libsodium.vcxproj"
+    $sodiumPlatform = Get-MSBuildPlatform $Architecture
+    Write-Host "==> Building pinned libsodium 1.0.22 runtime"
+    & $sodiumEnvironment.MSBuild $sodiumProject "/m" "/t:Build" "/p:Configuration=ReleaseDLL" `
+        "/p:Platform=$sodiumPlatform" "/p:OutDir=$sodiumOutputDirectory\" `
+        "/p:IntDir=$sodiumIntermediate\" "/p:VCTargetsPath=$($sodiumEnvironment.VCTargetsPath)"
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $sodiumOutput -PathType Leaf)) {
+        throw "Pinned libsodium runtime build failed."
+    }
+    [IO.File]::WriteAllText($sodiumStamp, "$sodiumKey`n", [Text.UTF8Encoding]::new($false))
+}
+
+function Install-SodiumRuntime {
+    param([string]$Install)
+
+    $runtimeDirectory = Join-Path $Install "bin"
+    $licenseDirectory = Join-Path $Install "share\licenses\libsodium"
+    New-Item -ItemType Directory -Force -Path $runtimeDirectory, $licenseDirectory | Out-Null
+    Copy-Item -LiteralPath $sodiumOutput -Destination (Join-Path $runtimeDirectory "libsodium.dll") -Force
+    Copy-Item -LiteralPath (Join-Path $sodiumSource "LICENSE") `
+        -Destination (Join-Path $licenseDirectory "LICENSE") -Force
+}
 
 foreach ($configuration in @("Debug", "Release")) {
     $build = Join-Path $base $configuration
@@ -126,11 +172,13 @@ foreach ($configuration in @("Debug", "Release")) {
     $miniaudioLibrary = Join-Path $install "lib\miniaudio.lib"
     $zlibName = if ($configuration -eq "Debug") { "lib\zlibstaticd.lib" } else { "lib\zlibstatic.lib" }
     $zlibLibrary = Join-Path $install $zlibName
+    $sodiumRuntime = Join-Path $install "bin\libsodium.dll"
+    $sodiumLicense = Join-Path $install "share\licenses\libsodium\LICENSE"
     $stamp = Join-Path $build "keire-dependency.stamp"
     $valid = -not $Force -and (Test-Path $library) -and (Test-Path $assimpLibrary) -and
         (Test-Path $joltLibrary) -and (Test-Path $recastLibrary) -and (Test-Path $detourLibrary) -and
         (Test-Path $detourCrowdLibrary) -and (Test-Path $detourTileCacheLibrary) -and
-        (Test-Path $miniaudioLibrary) -and
+        (Test-Path $miniaudioLibrary) -and (Test-Path $sodiumRuntime) -and (Test-Path $sodiumLicense) -and
         (Test-Path $zlibLibrary) -and (Test-Path $stamp) -and
         ((Get-Content $stamp -Raw).Trim() -eq "$key|$configuration")
     if ($valid) { Write-Host "==> Native $configuration dependency cache is current"; continue }
@@ -154,11 +202,13 @@ foreach ($configuration in @("Debug", "Release")) {
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency configuration failed." }
     & cmake --build $build --target install --parallel
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency build failed." }
+    Install-SodiumRuntime $install
     if (-not (Test-Path -LiteralPath $library) -or -not (Test-Path -LiteralPath $assimpLibrary) -or
         -not (Test-Path -LiteralPath $joltLibrary) -or -not (Test-Path -LiteralPath $recastLibrary) -or
         -not (Test-Path -LiteralPath $detourLibrary) -or -not (Test-Path -LiteralPath $detourCrowdLibrary) -or
         -not (Test-Path -LiteralPath $detourTileCacheLibrary) -or -not (Test-Path -LiteralPath $miniaudioLibrary) -or
-        -not (Test-Path -LiteralPath $zlibLibrary) -or
+        -not (Test-Path -LiteralPath $zlibLibrary) -or -not (Test-Path -LiteralPath $sodiumRuntime) -or
+        -not (Test-Path -LiteralPath $sodiumLicense) -or
         -not (Test-Path -LiteralPath (Join-Path $install "include\assimp\Importer.hpp")) -or
         -not (Test-Path -LiteralPath (Join-Path $install "include\SDL3\SDL.h")) -or
         -not (Test-Path -LiteralPath (Join-Path $install "cmake\SDL3Config.cmake"))) {
@@ -220,12 +270,14 @@ $debugInstall = "../Build/Dependencies/windows-$OutputArchitecture-$Toolset/Debu
 $releaseInstall = "../Build/Dependencies/windows-$OutputArchitecture-$Toolset/Release/install"
 $manifest = @"
 DependencyManifest = {
+    MacOSDeploymentTarget = "$($Lock.MACOS_DEPLOYMENT_TARGET)",
     SDLCommit = "$($Lock.SDL_COMMIT)",
     JSONCommit = "$($Lock.JSON_COMMIT)",
     AssimpCommit = "$($Lock.ASSIMP_COMMIT)",
     JoltCommit = "$($Lock.JOLT_COMMIT)",
     RecastCommit = "$($Lock.RECAST_COMMIT)",
     MiniaudioCommit = "$($Lock.MINIAUDIO_COMMIT)",
+    SodiumCommit = "$($Lock.LIBSODIUM_COMMIT)",
     CoralCommit = "$($coralDebug.Commit)",
     CoralPatchDigest = "$($coralDebug.PatchDigest)",
     CoralSource = "../Build/Dependencies/coral-patched",
@@ -253,6 +305,9 @@ DependencyManifest = {
     MiniaudioInclude = "$debugInstall/include/miniaudio",
     MiniaudioDebugLibrary = "$debugInstall/lib/miniaudio.lib",
     MiniaudioReleaseLibrary = "$releaseInstall/lib/miniaudio.lib",
+    SodiumDebugRuntime = "$debugInstall/bin/libsodium.dll",
+    SodiumReleaseRuntime = "$releaseInstall/bin/libsodium.dll",
+    SodiumLicense = "$releaseInstall/share/licenses/libsodium/LICENSE",
     SDL3PlatformLinks = { "kernel32", "user32", "gdi32", "winmm", "imm32", "setupapi", "version", "ole32", "oleaut32", "shell32", "advapi32", "uuid" }
 }
 "@

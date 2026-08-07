@@ -67,7 +67,9 @@ Run `Scripts/project.bat` on Windows or `Scripts/project.sh` on Unix without a c
 | `coverage` | Run Clang source coverage and enforce 80% line coverage |
 | `package` | Test, smoke-run, and create runtime/SDK archives and checksums |
 | `package-editor` | Build, validate, and archive the native Dist editor distribution |
+| `package-hub` | Build, validate, and archive the standalone Dist Hub distribution |
 | `package-installer` | Build the Dist editor and create the native Windows, macOS, or Linux installer |
+| `package-hub-installer` | Build the standalone Dist Hub and create its native installer |
 | `doctor` | Report detected tools, versions, identity, and environment |
 | `clean` | Remove build, generated, or all disposable outputs |
 | `vendor-update` | Intentionally update one dependency lock and working tree |
@@ -82,7 +84,9 @@ Common examples:
 ./Scripts/project.ps1 clean -CleanScope generated
 ./Scripts/project.ps1 package -Generator vs2022 -Configuration Dist
 ./Scripts/project.ps1 package-editor -Generator vs2022
+./Scripts/project.ps1 package-hub -Generator vs2022
 ./Scripts/project.ps1 package-installer -Generator vs2022 -Toolset msc
+./Scripts/project.ps1 package-hub-installer -Generator vs2022 -Toolset msc
 #Local diagnostics only; rejected in CI and marked as a development artifact.
 ./Scripts/project.ps1 package -Generator ninja -Configuration Release -AllowDirty
 ```
@@ -93,7 +97,9 @@ bash Scripts/project.sh clean
 bash Scripts/project.sh clean --clean-scope generated
 bash Scripts/project.sh package --generator ninja --configuration Dist --toolset clang
 bash Scripts/project.sh package-editor --generator ninja --toolset clang
+bash Scripts/project.sh package-hub --generator ninja --toolset clang
 bash Scripts/project.sh package-installer --generator ninja --toolset clang
+bash Scripts/project.sh package-hub-installer --generator ninja --toolset clang
 #Local diagnostics only; rejected in CI and marked as a development artifact.
 bash Scripts/project.sh package --generator ninja --configuration Release --allow-dirty
 ```
@@ -107,17 +113,49 @@ intentional.
 `package-editor` always uses Dist. It leaves an unpacked, ready-to-run editor under `Build/Distributions/` and writes
 the host-native archive plus SHA-256 file under `Artifacts/`. Run it on Windows, macOS, and Linux to produce the three
 distributable builds; native executables, SDKs, and system frameworks must be packaged on their target OS. Each
-distribution contains the Project Hub, editor and companion tools, the complete bundled .NET 10 SDK, sample project,
-notices, and a platform launcher. macOS packages also include a Project Hub `.app`.
+distribution contains the editor and editor-specific companion tools, the complete bundled .NET 10 SDK, sample
+project, notices, and a platform launcher. Editor packages do not contain the Hub executable, its private HubWorker,
+or Hub-owned fonts, catalogs, templates, learning content, launchers, or desktop integration. macOS packages include an
+Editor `.app`, while Linux packages expose `keire-editor`.
+The Unix editor launcher accepts `--project <path>`; normal project selection and editor-version dispatch remain in the
+separately installed Hub.
+Its `editor-package.json` uses schema 2 and records stable channel/host identity, typed entrypoints, the supported
+project schema range, source-module and canonical manifest fingerprints, optional packaged templates, bundled
+toolchains, license and release-note references, a SHA-256 file inventory, and total installed size. The schema-1
+top-level identity, launcher, bundled .NET SDK, and build-manifest fields remain present for existing installer and
+discovery consumers.
+Editor manifests expose only the editor and editor-specific tool entrypoints; Hub and worker entrypoints belong to
+`hub-package.json`.
+
+`package-hub` also always uses Dist, but builds and stages only the Hub lifecycle, its private `KeireHubWorker` task
+process, runtime files, branding,
+licensed fonts, packaged documentation, sample content, the validated template catalog/payloads, and licenses. It does
+not copy the versioned editor, editor-specific Asset Tool or Asset Worker, SDK
+headers, static libraries, or consumer examples. The unpacked product remains under `Build/Distributions/`; a native
+archive, checksum, and schema-2 `hub-package.json` are written under `Artifacts/`. Run this command independently on
+Windows, macOS, and Linux; macOS output includes a native `.app` launcher.
 Test and package launchers run repository-dependent executables from the repository root, regardless of the directory
 from which the launcher was invoked.
 
-`package-installer` builds on that validated distribution. Windows uses NSIS 3 to create a per-user setup wizard with
-selectable installation directory, Start Menu shortcuts, an optional desktop shortcut, launch-on-finish, upgrade
-registration, and a guarded uninstaller. Install NSIS with `winget install NSIS.NSIS`. macOS creates a self-contained
-Hub `.app` in a drag-to-Applications `.dmg` using the system `hdiutil`, `sips`, and `iconutil` tools. Linux creates a
-desktop-integrated `.deb` using `dpkg-deb`; the `.tar.gz` from `package-editor` remains the distribution for other Linux
-families. Installers and SHA-256 files are written under `Artifacts/` and must be produced on their target OS.
+`package-hub-installer` builds only the validated standalone Hub stage. Windows uses a Hub-only NSIS 3 template;
+macOS creates a self-contained Hub `.app` in a drag-to-Applications `.dmg`; and Linux creates a `keire-hub` `.deb`
+under `/opt` with an explicit `/usr/bin` Hub wrapper and desktop entry. Updates and uninstall remove only the verified
+application payload;
+per-user preferences, caches, project metadata, and managed or external editor roots are preserved by default.
+
+`package-installer` builds on the validated editor distribution. Windows uses NSIS 3 to create a per-user setup wizard
+with selectable installation directory, Start Menu shortcuts, an optional desktop shortcut, launch-on-finish, upgrade
+registration, and a guarded uninstaller. Its icons, finish action, and shortcuts launch the editor executable; it does
+not install or claim Hub files or shortcuts. Install NSIS with `winget install NSIS.NSIS`. macOS creates a
+self-contained Editor `.app` in a drag-to-Applications `.dmg` using the system `hdiutil`, `sips`, and `iconutil` tools.
+Linux creates a desktop-integrated `keire-editor` `.deb` using `dpkg-deb`; the `.tar.gz` from `package-editor` remains
+the distribution for other Linux families. Installers and SHA-256 files are written under `Artifacts/` and must be
+produced on their target OS. The Hub and editor DEBs use regular `/usr/bin` wrappers that execute their explicit
+`/opt/.../bin` target; the editor package also declares the baseline native runtime and curl dependencies.
+macOS first-party and source-built native dependencies share the `12.0` deployment target pinned in
+`Config/Dependencies.lock`; packaging confirms Mach-O load commands with `vtool` or `otool`. Signing proceeds
+inside-out without `--deep`, preserves and verifies bundled Microsoft .NET signatures byte-for-byte, and applies the
+reviewed managed-runtime entitlements only to the editor host. The native Hub receives no managed-host entitlements.
 
 ## Architecture workflows
 
@@ -531,14 +569,31 @@ clean shutdown.
 Windows editor, Hub, and runtime executables carry the repository Kéire icon in both Visual Studio and Ninja builds.
 Desktop player icon settings remain optional: packaging uses the selected Texture2D when present and otherwise
 generates the built-in Kéire artwork for the Windows executable/ICO, Linux desktop entry, or macOS application bundle.
-The Hub is single-instance per installed executable. Repeated editor or Build Support launches activate the existing
-tray-owned Hub, and one **Show Hub** action restores and focuses it; shutdown closes the tray handle before SDL exits.
+The Hub is single-instance per installed executable. Its secondary-activation protocol accepts requests to show the
+existing window, navigate to a product page, open a project, import a located package, request an editor version, or
+select Build Support. Use
+`--show`, `--navigate <page>`, `--open-project <absolute-path>`, `--import-package <absolute-path>` (or its
+`--locate-package` alias), `--install-version <id>`, and `--build-support <platform> <architecture>`. Activation uses a
+strictly validated, versioned, length-prefixed 512-byte protocol. Show, navigation, and compatible project opening use
+their normal owner-thread workflows. Local Build Support imports run only when the required editor Asset Tool exists;
+unsupported package types and unavailable editor catalog IDs produce notifications without creating placeholder tasks.
+Build Support import, repair, and removal tasks are journaled before the Asset Tool starts, remain visible after a Hub
+restart, and reconcile from the tool's atomic status or a fresh installed-component scan. A restarted Hub observes a
+surviving Asset Tool without taking ownership of or terminating it; non-removal tasks retain their confined cancel
+action.
+Shutdown closes the tray handle before SDL exits.
 
 ## Application, Layers, Events, And Time
 
 `Keire::Application` owns logging, a standalone `EventBus`, `Time`, `WindowSystem`, the primary window, and a dedicated `LayerStack`. KeireCore supplies `main`, handles dependency-free help/version commands, owns the top-level exception boundary and application lifetime, and calls `Run()`. A managed client supplies a static command-line description plus `CreateApplication(const ApplicationCommandLineArguments&)`; custom help remains client-owned without initializing engine services. The stack owns layer lifetimes, overlay partitioning, attachment, detachment, deferred structural changes, and traversal. Access it through `Application::Layers()`; the `PushLayer`, `PushOverlay`, and `RemoveLayer` application helpers remain as convenient delegates. The application construction thread owns `Run` and all layer mutations, while `RequestExit` remains safe from workers. Layers update bottom-to-top, receive events top-to-bottom, and may safely request structural changes during nested callbacks; those changes apply at the next frame boundary. Automatic layer subscriptions cannot be created during `OnDetach` and never survive detachment.
 
-`Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to `UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi` runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, and ID scopes are move-only RAII values, so callback exceptions cannot leave the backend stack unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; opaque ref-counted RGBA images are supported, while detachable native viewports, renderer handles, raw textures, and custom draw lists remain intentionally unavailable.
+`Keire::UiFrame` is a first-party, frame-scoped immediate UI facade. Set `ApplicationSpecification::Ui.Mode` to
+`UiMode::Rendered` for SDL_GPU output or `UiMode::Headless` for deterministic tests and SDK validation. `Layer::OnUi`
+runs after variable update, bottom-to-top with overlays last. Window, menu, tab, tree, disabled, child, ID, font, color,
+and scalar/vector style scopes are move-only RAII values, so callback exceptions cannot leave the backend stack
+unbalanced. Calls outside `OnUi` or from another thread are rejected. Docking is enabled by default; opaque ref-counted
+RGBA images are supported, while detachable native viewports, renderer handles, raw textures, and custom draw lists
+remain intentionally unavailable.
 
 Enable `ApplicationSpecification::Ui.Workspace` for the editor-grade layout system. `Application::GetUiWorkspace()` provides named layouts, immutable Default reset, registered panels, Kéire Dark/Light/Classic themes, editable semantic theme tokens, and portable `.keirelayout`/`.keiretheme` import and export. Live layout changes autosave atomically to SDL's per-user preference directory; `DirectoryOverride` supports deterministic tools and tests, while `Ephemeral` keeps smoke runs off disk. A backend-independent `BuildFactoryLayout` callback declares the default dock recipe using stable panel IDs. The legacy single-file `LayoutPath` remains available for simple clients, but it is mutually exclusive with the workspace.
 
@@ -726,7 +781,14 @@ a live main-camera preview in the lower-right corner without intercepting input 
 transactional Empty or Starter roots; `Project::Open` validates schema/version and the editor holds an OS-exclusive lock
 for its lifetime. Assets, import caches, input profiles, workspace state, recovery, logs, and cooked output are rebased
 under that root. The Project Hub manages a per-user recent registry without deleting projects and launches each editor as
-an independent process.
+an independent process. Its Home, Projects, Installs, Templates, Learn, Resources, Licenses, and Settings areas show
+only live local or signed-catalog data. Project dispatch uses each registered editor manifest's schema range together
+with the project's minimum and last-saved engine versions; an unavailable editor routes to the real install/locate
+workflow, and the Hub never invents an installation from a nearby executable.
+The integrated title bar and responsive navigation rail use the packaged icon set while retaining native drag, resize,
+Snap/maximize, and close behavior. Installation refresh, verification, and managed repair/uninstall preparation run in
+the task center without blocking the Hub window; stale results are discarded if the editor registration, process state,
+or active tasks change.
 
 `.keirescene` is the first scene asset. `SceneSystem` loads it asynchronously and commits single/additive activation only
 at application frame boundaries; failures preserve the last-good scene set. Mutable `Scene` instances support stable

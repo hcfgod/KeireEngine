@@ -24,6 +24,94 @@ never self-joins, and overflow from each job's fixed scratch arena uses the conf
 Stable-handle slot creation is transactional for both new and reused indices, so a throwing value constructor cannot
 strand an unreachable slot or consume configured capacity.
 
+## Hub product runtime and package workers
+
+`KeireHubRuntime` is a private, engine-independent product library. Its owner-thread stores publish immutable settings,
+project, installation, task, and notification snapshots through atomic JSON replacements. `HubTaskManager` derives a
+deterministic dispatch set from those snapshots: downloads are bounded by the configured concurrency (two by default),
+tasks that overlap a package are not dispatched together, and mutations sharing an installation ID are serialized.
+Claiming a task records its worker PID and first phase in one store commit. Restart reconciliation preserves queued and
+paused work, requeues resumable downloads, and turns interrupted mutation phases into retryable typed failures.
+
+`EditorInstallationManager` verifies schema-2 editor manifests, their canonical fingerprints, host identity, complete
+declared file inventory, and confined entrypoints outside the UI layer, then publishes immutable health snapshots.
+Managed repair and removal remain two-phase: the manager checks the exact registered root and unforgeable marker,
+rejects running editors and installations with active tasks, and emits a typed plan that must be revalidated immediately
+before a worker mutation. Running state combines Hub-tracked processes with a bounded native executable-path probe on
+Windows, Linux, and macOS. An operating-system query failure for a process with the relevant executable name fails
+closed, so an editor launched outside the current Hub session cannot be verified, repaired, or removed concurrently.
+Native process handles remain confined to the private probe. The manager never deletes an installation itself. External
+removal deletes only the atomic Hub registry entry and leaves every editor file untouched. A changed marker, health
+result, or repair inventory invalidates a prepared plan instead of widening its authority.
+
+The Hub's editor-management coordinator captures value-owned registrations and activity before sending manifest,
+receipt, and file-inventory work to a bounded background operation. Its owner-thread poll rejects results after any
+registry-generation, security-identity, root, tracked-process, or targeted-task change. Only that poll persists verified
+health or hands a still-current repair/removal plan to the package task system; UI components consume immutable busy,
+result, and failure snapshots and never hash an editor installation inside a frame.
+
+Managed-editor repair is a distinct persistent task kind and worker protocol mode. Catalog planning requires every
+signed package manifest to reproduce the exact receipt-bound editor/component versions, artifact digests, dependency
+metadata, and file inventory already registered for that installation. The worker permits an existing destination
+only in repair mode, rechecks its marker and executable activity before mutation and again at the atomic publication
+boundary, and requires the newly staged receipt and ownership marker to reproduce the authorized aggregate identity.
+New installs publish with an explicit no-clobber policy even if a destination appears after preparation. Repair
+publication and recovery reauthorize both the registered destination and its same-parent backup under the publication
+lock before proceeding; persisted worker mode must agree with task kind, and the completion snapshot retains the exact
+fingerprint, tree identity, receipt digest, and nonce needed for non-mutating reconciliation.
+This permits recovery of a missing or malformed on-disk receipt without treating an ordinary install as repair, while
+leaving the old tree intact on cancellation, authorization drift, or package mismatch. Completion reuses the normal
+managed-package registration path, preserving installation identity and refreshing its verified health snapshot.
+
+`ProjectWorkflowManager` owns Hub-only project mutations while `Project` and the editor lock remain authoritative. A
+duplicate is copied into a same-parent staging directory with generated output omitted, bounded file and byte counts,
+portable case-collision checks, no symbolic links, a fresh schema-3 identity, and optional selected-editor validation;
+only a fully re-inspected tree is atomically published and registered. Duplicate preparation captures an owner-thread
+plan, bounded recursive copy and validation run in one cancellable background operation, and owner-thread commit
+rechecks the catalog, source lock, staging identity, and destination immediately before publication. The coordinator
+publishes immutable operation-ID snapshots and joins and discards unpublished staging during shutdown. Locate verifies
+the descriptor's original project identity before replacing the catalog path. Display-name changes require a closed,
+supported-schema project and update the descriptor and catalog transactionally. Removing a project affects only the Hub
+catalog and never project files. The Hub routes pinning and last-opened updates through that same catalog, making it the
+sole `projects.json` writer. Its legacy Core `ProjectRegistry` projection is reconstructed as a read-only presentation
+snapshot after each mutation, so refreshing visible lock/status data cannot strip the runtime catalog's cached metadata.
+Metadata scanning performs bounded lock and interrupted-upgrade probes on its worker before publishing status. The
+owner thread validates the complete result set and persists every cached-metadata replacement with one atomic registry
+write; a missing, duplicate, or invalid result leaves all prior metadata intact. The UI then overlays live
+tracked-process state and derives missing-editor state through the same semantic editor selector used for launch. That
+selector rejects unhealthy or entrypoint-less installations, out-of-range project schemas, versions
+below the project minimum, and versions older than the last save; preferred-installation metadata is only a preference
+inside that compatible set. Launch uses version-neutral descriptor inspection so the Hub can safely dispatch a newer
+project to a validated newer editor without attempting to open it through the Hub build itself.
+
+Package transfer runs in `KeireHubWorker`, not in UI components. The Hub creates one confined operation directory with
+atomic request, status, result, and control documents; the worker rejects aliased or escaping protocol paths. The
+runtime's transport interface streams bounded chunks into a SHA-256-addressed cache. A sibling `.partial` file and
+atomic metadata document bind resumable bytes to package ID, URL, expected size and digest, and ETag; an If-Range
+mismatch discards stale bytes before restart. Pause and cancellation leave valid partial data, while publication occurs
+only after exact size and SHA-256 verification. Retry delays use bounded deterministic jitter and remain responsive to
+worker control. The initial concrete worker transport handles offline `file://` imports; authenticated HTTPS package
+streaming is supplied through the same interface rather than changing cache or task semantics.
+
+Local Build Support inventory enumeration and verification use a separate owner-thread coordinator whose worker
+publishes immutable component snapshots. Verified-cache clearing likewise runs through an exclusive maintenance
+coordinator: it validates that no package task is active, stops the idle package workflow before deletion, projects its
+state into the task center, and recreates package coordination only after completion. Neither operation performs
+filesystem traversal or hashing in a UI frame.
+
+Legacy Build Support Asset Tool processes use a separate schema-1 `BuildSupportOperationStore`, preserving schema-1
+`.keireplayersupport` package compatibility without pretending those operations use the generic package worker. A
+launching record is atomically committed before spawn and immediately amended with the child PID; failure to persist
+that PID terminates the still-owned child. Restart recovery validates the exact target installation, Asset Tool,
+operation root, status path, and cancel path. It combines PID liveness with the bounded exact-executable probe, but takes
+no destructive ownership of a surviving child. Import/repair terminal state comes only from the atomic Asset Tool status;
+removal terminal state comes from a fresh background inventory pass plus a bounded schema-1 root-journal inspection.
+An indeterminate process probe stays conservatively busy. A crash in the narrow interval between spawn and PID commit is
+recovered through the exact executable path; PID reuse can delay reconciliation but cannot authorize mutation or
+termination. Recent terminal history is bounded and task-center visibility is reconstructed from the durable records.
+Inventory refresh requests made while a scan is active coalesce into one owner-thread-scheduled follow-up worker, so a
+pre-install scan cannot become the final snapshot after a successful import or repair.
+
 `MemorySystem` exposes hierarchical domains, tracked PMR resources, immutable current/peak/allocation/external-byte
 snapshots, an owner-thread frame arena, per-job scratch arenas, and fence-owned renderer upload storage. It does not
 replace global allocation. The editor Architecture dashboard reports scheduler queues, memory domains, streaming
@@ -92,12 +180,15 @@ decoding, restore, verification, and finalization faults transition the session 
 
 ## Project upgrades and source modules
 
-Project descriptors are schema 2 and include a sorted required source-module catalog. Schema-1 projects inspect as
-`UpgradeAvailable`; they are not treated as corrupt. `ProjectUpgradeService` produces a pure ordered plan, applies under
-the project lock through path-confined staging and before-images, durably journals publication, validates each step and
-the staged project, can recover or roll back an interrupted transaction, and retains the three newest successful
-backups under `Library/ProjectUpgrades`. Hub application requires plan confirmation. `upgrade-project` is dry-run unless
-`--apply` is explicit and also exposes recovery and rollback.
+Project descriptors are schema 3 and include creation time, created-with and last-saved editor versions, optional
+template provenance, and a sorted required source-module catalog. Schema-1 and schema-2 projects inspect as
+`UpgradeAvailable`; they are not treated as corrupt, while version-neutral inspection can still dispatch a newer
+schema to a compatible installed editor. `ProjectUpgradeService` produces a pure ordered plan, applies under the
+project lock through path-confined staging and before-images, durably journals publication, validates each step and the
+staged project, can recover or roll back an interrupted transaction, and retains the three newest successful backups
+under `Library/ProjectUpgrades`. The Hub's upgrade coordinator performs inspection, apply, recovery, and rollback on a
+worker and publishes immutable state; the owner thread only renders confirmation and consumes the terminal action.
+`upgrade-project` is dry-run unless `--apply` is explicit and also exposes recovery and rollback.
 
 Upgrade journals are written before snapshot work begins and use explicit initializing, snapshotted, prepared, ready,
 publishing, and completed phases. Recovery rebuilds staging from the immutable before-image before rerunning a step,
@@ -136,6 +227,12 @@ project discovery/creation and editor process launch, `KeireAssetTool` owns head
 grouped under `Dependencies`; its reviewed definition lives in `Scripts/Premake/DearImGui.lua`, while generated project
 metadata lives below ignored `Build/Projects/DearImGui`. First-party targets retain local `premake5.lua` files, and
 the root file defines workspace identity, dependency grouping, and project load order.
+
+First-run discovery and import preparation are bounded Hub worker-thread operations. The worker re-inspects every
+discovered project descriptor and editor manifest, then publishes immutable prepared project/editor records. The owner
+thread only preflights and commits those records through the runtime's batched stores. Both store plans are validated
+before persistence; if the editor-registry write fails after the project-registry write, the controller restores the
+exact prior project snapshot and durable file contents before returning the typed failure.
 
 `Config/Project.conf` defines names and folders. `Config/Dependencies.lock` defines immutable external inputs. Premake and launchers read these files so renaming and dependency verification have one source of truth.
 
@@ -317,10 +414,17 @@ assets or the exclusive lock. Each detached KeireClient process revalidates and 
 `samples/KeireSandbox` is a complete project and is validated through the same asset tool contract as user projects.
 KeireClient keeps native window placement below project-local `Library/UserSettings`: normal bounds remain separate from
 maximized/fullscreen state, restore occurs before the window becomes visible, and minimized state is never persisted.
-The Hub coordinates one primary process per canonical executable identity. Secondary launches send a bounded Show or
-Build Support activation request and exit without creating a window or tray handle. The primary polls activation on its
-owner thread. `WindowSystem` tracks weak tray ownership and closes every surviving native tray before SDL shutdown, so
-layer teardown, explicit Quit, and exceptional application shutdown converge on the same idempotent cleanup path.
+The Hub coordinates one primary process per canonical executable identity. Secondary launches send one typed Show,
+Navigate, Open Project, Import Package, Install Version, or Build Support action and exit without creating a window or
+tray handle. The binary activation frame has an explicit magic value, protocol version, total length, action, field
+count, and length-prefixed UTF-8 fields, with a 512-byte limit chosen to preserve atomic FIFO writes on Unix. Windows
+shares the explicit frame length under the existing named-mutex channel. Decoding rejects unknown versions/actions,
+truncation, trailing bytes, invalid UTF-8/control text, relative or traversing paths, invalid identifiers, and surplus
+fields. The primary polls validated actions on its owner thread. `WindowSystem` tracks weak tray ownership and closes
+every surviving native tray before SDL shutdown. Activation dispatch reuses normal page navigation, project opening,
+and compatible Build Support import paths. An unavailable editor catalog ID, unsupported offline package type, or
+missing version-specific Asset Tool records a warning notification and queues nothing. Layer teardown, explicit Quit,
+and exceptional application shutdown therefore converge on the same idempotent cleanup path.
 
 ## Scene Ownership
 
@@ -476,7 +580,9 @@ Raw SDL events are forwarded through an implementation-only sink inside `WindowS
 After fixed and variable updates, `Application` begins one UI frame, creates the root dockspace, and delegates
 bottom-to-top UI traversal to `LayerStack`; overlays execute last and structural changes remain deferred. `UiFrame`
 validates owner thread and active generation. Its RAII scopes balance backend begin/end calls during normal returns and
-exception unwinding. Scene/Game declarations and UI draw data are recorded into one coordinated RenderSystem frame.
+exception unwinding. Typed color and scalar/vector style scopes map semantic public roles to private backend slots and
+restore them through the same generation-safe stack, so product UI code never owns a Dear ImGui style stack. Scene/Game
+declarations and UI draw data are recorded into one coordinated RenderSystem frame.
 
 `SceneTransitionCoordinator` is the editor-only serialization point for Open, New, Close, and Exit. UI, shortcuts,
 Project actions, internal drops, and post-import external drops enqueue requests; the next update preflights the target
@@ -727,11 +833,29 @@ intentionally stripped. Export annotations describe same-toolchain shared-librar
 compiler-independent C++ ABI.
 
 The separate editor distribution is a Dist-only, host-native projection of that validated release stage. It retains
-the Hub, editor, runtime/asset/shader companions, media libraries, sample, manifests, and notices; replaces the
+the editor, runtime/asset/shader companions, media libraries, sample, manifests, and notices; replaces the
 runtime-only managed payload with the complete .NET 10 SDK; and removes SDK headers, archives, CMake metadata, and
-consumer sources. Windows, macOS, and Linux packages are produced on their respective hosts. All keep sibling native
-executables under `bin` so the existing companion resolution remains authoritative; the macOS `.app` and top-level
-launch scripts delegate into that same layout.
+consumer sources. Editor artifacts also remove the Hub executable, its private HubWorker, Hub content catalogs,
+templates, fonts, launchers, and desktop integration; those belong to the standalone Hub artifact. Windows, macOS, and
+Linux packages are produced on their respective hosts. Editor companions remain sibling native executables under
+`bin`; the macOS Editor `.app` and top-level launch scripts delegate into that same layout.
+
+The standalone Hub is a separate Dist artifact boundary. It contains the Hub executable, the private `KeireHubWorker`
+task process, and private load-time runtime,
+branding, licensed fonts, documentation/learning content, the validated `KeireHubContent/Templates` catalog and
+declared payloads, and license material; it rejects the editor-specific AssetTool/AssetWorker/runtime/shader
+companions, the
+full .NET SDK, and SDK development trees. Editor and Hub schema-2 manifests share project-schema compatibility, module
+and canonical metadata fingerprints, optional packaged-template/toolchain/license references, SHA-256 file inventories,
+and exact installed sizes while exposing product-owned entrypoints only. Editor manifests preserve their schema-1
+top-level fields so existing combined installers and discovery code can migrate without an atomic format cutover.
+
+macOS release binaries share the deployment target pinned by `MACOS_DEPLOYMENT_TARGET` in the dependency lock. The
+package boundary verifies each non-.NET Mach-O load command against that target before publication. Native installers
+sign individual Mach-O files and nested code bundles from the inside out, then seal the outer application. The bundled
+Microsoft .NET tree remains an independently signed third-party boundary whose signatures and bytes are verified but
+never rewritten. Only the managed editor host receives the reviewed JIT/runtime entitlements; the standalone Hub does
+not.
 
 A KeireCore prebuild step refreshes version and source-control identity under `Build/Generated` immediately before compilation, including tracked and untracked dirty state. The generator C-escapes configured strings and only rewrites the header when its content changes. The compiler supplies configuration, compiler, platform, and architecture identity. Packaging regenerates identity and verifies the staged binary's commit prefix and dirty marker against its manifest. The resulting `Keire::BuildInfo` describes the binary itself rather than the machine inspecting it.
 

@@ -181,17 +181,19 @@ TEST_CASE("Project schema upgrades are dry-run first and publish transactionally
     CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::UpgradeAvailable);
     Keire::ProjectUpgradeService upgrades(root);
     const auto plan = upgrades.Plan();
-    REQUIRE(plan.Steps.size() == 1);
+    REQUIRE(plan.Steps.size() == 2);
     CHECK(plan.CurrentSchema == 1);
-    CHECK(plan.TargetSchema == 2);
+    CHECK(plan.TargetSchema == 3);
     CHECK(plan.EstimatedBackupBytes == original.size());
     CHECK(Keire::Detail::ReadTextFile(descriptor, std::size_t{1024} * 1024U) == original);
 
     upgrades.Apply(plan);
     CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::Ready);
     const auto opened = Keire::Project::Open(root);
-    CHECK(opened->Descriptor().SchemaVersion == 2);
+    CHECK(opened->Descriptor().SchemaVersion == 3);
     CHECK(opened->Descriptor().RequiredModules.empty());
+    CHECK_FALSE(opened->Descriptor().CreatedAt.empty());
+    CHECK(opened->Descriptor().LastSavedWithEngineVersion == opened->Descriptor().CreatedWithEngineVersion);
     const auto backups = root / "Library" / "ProjectUpgrades" / "Backups";
     std::size_t backupCount = 0;
     for (const auto& entry : std::filesystem::directory_iterator(backups))
@@ -239,7 +241,7 @@ TEST_CASE("Project upgrade recovery resumes initialization from the unchanged pr
     Keire::ProjectUpgradeService upgrades(root);
     CHECK_NOTHROW(upgrades.Recover());
     CHECK(upgrades.State() == Keire::ProjectUpgradeTransactionState::Clean);
-    CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::Ready);
+    CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::UpgradeAvailable);
 }
 
 TEST_CASE("Project upgrade recovery rebuilds partial staging from its durable snapshot")
@@ -260,7 +262,7 @@ TEST_CASE("Project upgrade recovery rebuilds partial staging from its durable sn
     Keire::ProjectUpgradeService upgrades(root);
     CHECK_NOTHROW(upgrades.Recover());
     CHECK(upgrades.State() == Keire::ProjectUpgradeTransactionState::Clean);
-    CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::Ready);
+    CHECK(Keire::Project::Inspect(root) == Keire::ProjectStatus::UpgradeAvailable);
 }
 
 TEST_CASE("Project upgrade recovery rejects unsafe persisted transaction identifiers")

@@ -2,6 +2,7 @@
 
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/UiFontInternal.h"
 #include "KeireInternal/UiInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
@@ -15,6 +16,7 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -162,11 +164,6 @@ namespace Keire
             return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
         }
 
-        [[nodiscard]] std::string BuildUiErrorMessage(const std::string& operation, const std::string& diagnostic)
-        {
-            return "UI operation '" + operation + "' failed: " + diagnostic;
-        }
-
         [[nodiscard]] bool ValidColor(const UiColor color) noexcept
         {
             const auto valid = [](const float component)
@@ -296,12 +293,6 @@ namespace Keire
         }
     } // namespace
 
-    UiError::UiError(std::string operation, std::string diagnostic)
-        : std::runtime_error(BuildUiErrorMessage(operation, diagnostic)), m_Operation(std::move(operation)),
-          m_Diagnostic(std::move(diagnostic))
-    {
-    }
-
     class UiFrame::Impl final
     {
       public:
@@ -386,6 +377,15 @@ namespace Keire
             case UiScope::Kind::Clip:
                 ImGui::GetWindowDrawList()->PopClipRect();
                 break;
+            case UiScope::Kind::Font:
+                ImGui::PopFont();
+                break;
+            case UiScope::Kind::StyleColor:
+                ImGui::PopStyleColor();
+                break;
+            case UiScope::Kind::StyleVariable:
+                ImGui::PopStyleVar();
+                break;
             }
             Scopes.pop_back();
         }
@@ -400,42 +400,6 @@ namespace Keire
         std::shared_ptr<UiImageOwner> Images;
     };
 
-    UiScope::UiScope(UiFrame& frame, const Kind kind, const bool visible, const bool closeRequired) noexcept
-        : m_Frame(&frame), m_Lifetime(frame.Lifetime()), m_Generation(frame.Generation()), m_Kind(kind),
-          m_Visible(visible), m_CloseRequired(closeRequired)
-    {
-    }
-
-    UiScope::UiScope(UiScope&& other) noexcept
-        : m_Frame(std::exchange(other.m_Frame, nullptr)), m_Lifetime(std::move(other.m_Lifetime)),
-          m_Generation(other.m_Generation), m_Kind(other.m_Kind), m_Visible(other.m_Visible),
-          m_CloseRequired(std::exchange(other.m_CloseRequired, false))
-    {
-    }
-
-    UiScope& UiScope::operator=(UiScope&& other) noexcept
-    {
-        if (this != &other)
-        {
-            Reset();
-            m_Frame = std::exchange(other.m_Frame, nullptr);
-            m_Lifetime = std::move(other.m_Lifetime);
-            m_Generation = other.m_Generation;
-            m_Kind = other.m_Kind;
-            m_Visible = other.m_Visible;
-            m_CloseRequired = std::exchange(other.m_CloseRequired, false);
-        }
-        return *this;
-    }
-
-    UiScope::~UiScope() { Reset(); }
-    void UiScope::Reset() noexcept
-    {
-        if (m_Frame && m_CloseRequired && !m_Lifetime.expired())
-            m_Frame->CloseScope(m_Kind, m_Generation);
-        m_Frame = nullptr;
-        m_CloseRequired = false;
-    }
     UiFrame::UiFrame() : m_Impl(std::make_unique<Impl>()) {}
     UiFrame::~UiFrame() = default;
     UiWindowScope UiFrame::BeginWindow(std::string_view title, bool* open, const UiWindowOptions options)
@@ -692,6 +656,23 @@ namespace Keire
         return UiClipScope(*this);
     }
 
+    UiFontScope UiFrame::PushFont(const UiFontRole role)
+    {
+        m_Impl->RequireActive("PushFont");
+        if (role < UiFontRole::Body || role > UiFontRole::Icons)
+            throw std::invalid_argument("The UI font role is invalid.");
+        const auto name =
+            std::string("Keire.") + std::array{"Body", "Heading", "Monospace", "Icons"}[static_cast<std::size_t>(role)];
+        const auto& fonts = ImGui::GetIO().Fonts->Fonts;
+        const auto found =
+            std::find_if(fonts.begin(), fonts.end(), [&](const ImFont* font) { return name == font->GetDebugName(); });
+        if (found == fonts.end())
+            return UiFontScope(*this, false);
+        ImGui::PushFont(*found, (*found)->LegacySize);
+        m_Impl->OpenScope(UiScope::Kind::Font);
+        return UiFontScope(*this, true);
+    }
+
     UiPanelScope UiFrame::BeginPanel(UiPanelRegistration& panel, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginPanel");
@@ -777,22 +758,6 @@ namespace Keire
         const auto* begin = static_cast<const std::byte*>(payload->Data);
         bytes.assign(begin, begin + payload->DataSize);
         return true;
-    }
-
-    void UiFrame::Text(std::string_view text)
-    {
-        m_Impl->RequireActive("Text");
-        ImGui::TextUnformatted(text.data(), text.data() + text.size());
-    }
-
-    void UiFrame::TextColored(const UiColor color, std::string_view text)
-    {
-        m_Impl->RequireActive("TextColored");
-        if (!ValidColor(color))
-            throw std::invalid_argument("UI color components must be finite values in the range 0..1.");
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(color.Red, color.Green, color.Blue, color.Alpha));
-        ImGui::TextUnformatted(text.data(), text.data() + text.size());
-        ImGui::PopStyleColor();
     }
 
     void UiFrame::Separator()
@@ -973,139 +938,6 @@ namespace Keire
         m_Impl->RequireActive("Button");
         const std::string safeLabel(label);
         return ImGui::Button(safeLabel.c_str(), {size.Width, size.Height});
-    }
-
-    namespace
-    {
-        [[nodiscard]] const char* UiIconLabel(const UiIcon icon) noexcept
-        {
-            switch (icon)
-            {
-            case UiIcon::Play:
-                return ">";
-            case UiIcon::Stop:
-                return "[]";
-            case UiIcon::Pause:
-                return "||";
-            case UiIcon::Step:
-                return ">|";
-            case UiIcon::View:
-                return "Q";
-            case UiIcon::Translate:
-                return "W";
-            case UiIcon::Rotate:
-                return "E";
-            case UiIcon::Scale:
-                return "R";
-            case UiIcon::Local:
-                return "L";
-            case UiIcon::Global:
-                return "G";
-            case UiIcon::Snap:
-                return "S";
-            case UiIcon::Settings:
-                return "...";
-            case UiIcon::Camera:
-                return "C";
-            case UiIcon::Perspective:
-                return "P";
-            case UiIcon::Orthographic:
-                return "O";
-            case UiIcon::AxisX:
-                return "X";
-            case UiIcon::AxisY:
-                return "Y";
-            case UiIcon::AxisZ:
-                return "Z";
-            case UiIcon::Create:
-                return "+";
-            case UiIcon::Search:
-                return "?";
-            case UiIcon::Filter:
-                return "F";
-            case UiIcon::Lock:
-                return "L";
-            case UiIcon::Folder:
-                return "D";
-            case UiIcon::Refresh:
-                return "R";
-            case UiIcon::List:
-                return "=";
-            case UiIcon::Grid:
-                return "#";
-            case UiIcon::Warning:
-                return "!";
-            case UiIcon::Information:
-                return "i";
-            }
-            return "?";
-        }
-    } // namespace
-
-    bool UiFrame::IconButton(const std::string_view id, const UiIcon icon, const bool selected, const UiSize size)
-    {
-        m_Impl->RequireActive("IconButton");
-        if (id.empty())
-            throw std::invalid_argument("IconButton requires a stable identifier.");
-        const std::string label = std::string(UiIconLabel(icon)) + "##" + std::string(id);
-        if (selected)
-        {
-            const auto accent = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-            ImGui::PushStyleColor(ImGuiCol_Button, accent);
-        }
-        const bool activated = ImGui::Button(label.c_str(), {size.Width, size.Height});
-        if (selected)
-            ImGui::PopStyleColor();
-        return activated;
-    }
-
-    bool UiFrame::OverlayIconButton(const std::string_view id, const UiIcon icon,
-                                    const UiOverlayIconButtonSpecification specification)
-    {
-        m_Impl->RequireActive("OverlayIconButton");
-        if (id.empty() || specification.Size.Width <= 0.0F || specification.Size.Height <= 0.0F)
-            throw std::invalid_argument("OverlayIconButton requires an identifier and positive size.");
-
-        ImGuiWindow* window = ImGui::GetCurrentWindow();
-        if (window->SkipItems)
-            return false;
-
-        const ImRect bounds{{specification.Position.X, specification.Position.Y},
-                            {specification.Position.X + specification.Size.Width,
-                             specification.Position.Y + specification.Size.Height}};
-        const ImGuiID itemId = ImGui::GetID(id.data(), id.data() + id.size());
-
-        ImGui::BeginDisabled(!specification.Enabled);
-        bool activated = false;
-        bool hovered = false;
-        bool held = false;
-        if (ImGui::ItemAdd(bounds, itemId))
-        {
-            activated = ImGui::ButtonBehavior(bounds, itemId, &hovered, &held);
-
-            const ImGuiCol background = specification.Selected || held ? ImGuiCol_ButtonActive
-                                        : hovered                      ? ImGuiCol_ButtonHovered
-                                                                       : ImGuiCol_Button;
-            const ImGuiStyle& style = ImGui::GetStyle();
-            window->DrawList->AddRectFilled(bounds.Min, bounds.Max, ImGui::GetColorU32(background),
-                                            style.FrameRounding);
-            if (style.FrameBorderSize > 0.0F)
-            {
-                window->DrawList->AddRect(bounds.Min, bounds.Max, ImGui::GetColorU32(ImGuiCol_Border),
-                                          style.FrameRounding, 0, style.FrameBorderSize);
-            }
-
-            const char* glyph = UiIconLabel(icon);
-            const ImVec2 textSize = ImGui::CalcTextSize(glyph);
-            const ImVec2 textPosition{bounds.Min.x + (bounds.GetWidth() - textSize.x) * 0.5F,
-                                      bounds.Min.y + (bounds.GetHeight() - textSize.y) * 0.5F};
-            window->DrawList->AddText(textPosition, ImGui::GetColorU32(ImGuiCol_Text), glyph);
-
-            if (!specification.Tooltip.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                ImGui::SetTooltip("%.*s", static_cast<int>(specification.Tooltip.size()), specification.Tooltip.data());
-        }
-        ImGui::EndDisabled();
-        return activated;
     }
 
     bool UiFrame::Checkbox(std::string_view label, bool& value)
@@ -1605,6 +1437,12 @@ namespace Keire
         ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), target));
     }
 
+    void UiFrame::OpenScope(const UiScope::Kind kind)
+    {
+        m_Impl->RequireActive("OpenScope");
+        m_Impl->OpenScope(kind);
+    }
+
     void UiFrame::CloseScope(const UiScope::Kind kind, const std::uint64_t generation) noexcept
     {
         m_Impl->CloseScope(kind, generation);
@@ -1665,6 +1503,7 @@ namespace Keire
                 io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
             io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
             io.ConfigDpiScaleFonts = true;
+            Detail::ConfigureUiFonts(Specification);
             ApplyTheme(Specification.Theme);
             if (Specification.Mode == UiMode::Headless)
             {
@@ -1675,6 +1514,15 @@ namespace Keire
                 if (!pixels || width <= 0 || height <= 0)
                     throw UiError("BuildHeadlessFontAtlas", "Dear ImGui did not produce font atlas pixels");
             }
+        }
+
+        void SetTheme(const UiTheme theme)
+        {
+            if (std::this_thread::get_id() != OwnerThread)
+                throw std::logic_error("UI theme changes must run on the application owner thread.");
+            ImGui::SetCurrentContext(Context);
+            ApplyTheme(theme);
+            Specification.Theme = theme;
         }
 
         void InitializeRenderer(WindowSystem& windows, RenderSystem& renderer)
@@ -1892,6 +1740,8 @@ namespace Keire
     UiFrame& UiSystem::Frame() noexcept { return *m_Impl->Frame; }
     UiWorkspace* UiSystem::Workspace() noexcept { return m_Impl->Workspace.get(); }
     const UiWorkspace* UiSystem::Workspace() const noexcept { return m_Impl->Workspace.get(); }
+    void UiSystem::SetTheme(const UiTheme theme) { m_Impl->SetTheme(theme); }
+    UiTheme UiSystem::Theme() const noexcept { return m_Impl->Specification.Theme; }
     void UiSystem::EndFrame() { m_Impl->EndFrame(); }
     void UiSystem::Shutdown() noexcept { m_Impl->Shutdown(); }
     UiCaptureState UiSystem::Capture() const noexcept { return m_Impl->CaptureState; }

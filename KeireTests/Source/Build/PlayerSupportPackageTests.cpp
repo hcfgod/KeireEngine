@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 namespace
 {
@@ -77,12 +78,37 @@ TEST_CASE("Player support packages stream, install, verify, repair, and remove t
 
     Write(installation / "Development/Player.exe", "corrupt");
     CHECK_FALSE(Keire::Detail::ValidateInstalledPlayerSupport(installation, diagnostic));
+    CHECK(diagnostic == "Installed Build Support files are missing or corrupt.");
+    CHECK(diagnostic.find(Keire::Detail::PathToUtf8(directory.Path)) == std::string::npos);
+    CHECK_FALSE(Keire::Detail::ValidateInstalledPlayerSupportInventory(installation, "0.0.0", diagnostic));
+    CHECK(diagnostic == "Installed Build Support files are missing or corrupt.");
     (void)Keire::Detail::InstallPlayerSupportPackage(package, "test-modules", {}, storage);
     CHECK(Keire::Detail::ValidateInstalledPlayerSupport(installation, diagnostic));
 
     Keire::Detail::RemovePlayerSupport(installed.Manifest.EngineVersion, installed.Manifest.Id, storage);
     CHECK_FALSE(std::filesystem::exists(installation));
     CHECK(Keire::Detail::InstalledPlayerSupport(storage).empty());
+}
+
+TEST_CASE("Player support failures expose stable status codes and user-facing messages")
+{
+    const auto inventory =
+        Keire::Detail::DescribePlayerSupportFailure(Keire::Detail::PlayerSupportFailureKind::InstalledInventoryInvalid);
+    CHECK(inventory.Code == "build_support.inventory_invalid");
+    CHECK(inventory.Message == "Installed Build Support files are missing or corrupt.");
+
+    const auto installation =
+        Keire::Detail::DescribePlayerSupportFailure(Keire::Detail::PlayerSupportFailureKind::InstallationFailed);
+    CHECK(installation.Code == "build_support.install_failed");
+    CHECK(installation.Message.find("exception") == std::string_view::npos);
+
+    const auto catalog =
+        Keire::Detail::DescribePlayerSupportFailure(Keire::Detail::PlayerSupportFailureKind::CatalogUnavailable);
+    CHECK(catalog.Code == "build_support.catalog_unavailable");
+
+    const auto download = Keire::Detail::DescribePlayerSupportFailure(
+        Keire::Detail::PlayerSupportFailureKind::DownloadAndInstallationFailed);
+    CHECK(download.Code == "build_support.download_install_failed");
 }
 
 TEST_CASE("Player support installation cancellation removes staging and preserves no partial module")
@@ -109,6 +135,43 @@ TEST_CASE("Player support installation cancellation removes staging and preserve
         for (const auto& entry : std::filesystem::directory_iterator(storage / created.Manifest.EngineVersion))
             CHECK_FALSE(entry.path().filename().string().starts_with(".install-"));
     }
+}
+
+TEST_CASE("Player support inventory completes or rolls back bounded removal journals after interruption")
+{
+    TemporaryDirectory directory;
+    const auto payload = directory.Path / "payload";
+    Write(payload / "Development/Player.exe", "player-template");
+    const auto package = directory.Path / "recovery.keireplayersupport";
+    (void)Keire::Detail::CreatePlayerSupportPackage(Manifest(), payload, package, 1);
+    const auto storage = directory.Path / "installed";
+    const auto installed = Keire::Detail::InstallPlayerSupportPackage(package, "test-modules", {}, storage);
+    const auto versionRoot = storage / installed.Manifest.EngineVersion;
+    const auto installation = versionRoot / installed.Manifest.Id;
+
+    const auto tombstoneName = std::string(".remove-interrupted");
+    const auto tombstone = versionRoot / tombstoneName;
+    const auto journal = versionRoot / (tombstoneName + ".json");
+    Write(journal, "{\"schemaVersion\":1,\"engineVersion\":\"" + installed.Manifest.EngineVersion + "\",\"packId\":\"" +
+                       installed.Manifest.Id + "\",\"tombstone\":\"" + tombstoneName + "\"}\n");
+    std::filesystem::rename(installation, tombstone);
+
+    CHECK(Keire::Detail::InstalledPlayerSupport(storage).empty());
+    CHECK_FALSE(std::filesystem::exists(tombstone));
+    CHECK_FALSE(std::filesystem::exists(journal));
+    CHECK(Keire::Detail::ReadTextFile(versionRoot / "registry.json", 64U * 1024U).find(installed.Manifest.Id) ==
+          std::string::npos);
+
+    (void)Keire::Detail::InstallPlayerSupportPackage(package, "test-modules", {}, storage);
+    const auto preRenameName = std::string(".remove-before-rename");
+    const auto preRenameJournal = versionRoot / (preRenameName + ".json");
+    Write(preRenameJournal, "{\"schemaVersion\":1,\"engineVersion\":\"" + installed.Manifest.EngineVersion +
+                                "\",\"packId\":\"" + installed.Manifest.Id + "\",\"tombstone\":\"" + preRenameName +
+                                "\"}\n");
+
+    REQUIRE(Keire::Detail::InstalledPlayerSupport(storage).size() == 1);
+    CHECK(std::filesystem::is_directory(installation));
+    CHECK_FALSE(std::filesystem::exists(preRenameJournal));
 }
 
 #if defined(_WIN32)

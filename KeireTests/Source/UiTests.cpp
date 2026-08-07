@@ -32,6 +32,16 @@ namespace
         return specification;
     }
 
+    Keire::ApplicationSpecification FontUiSpecification()
+    {
+        auto specification = UiSpecification("ui-headless", Keire::UiMode::Headless);
+        const auto root = std::filesystem::current_path() / "KeireHubContent" / "Fonts";
+        specification.Ui.Fonts = {{Keire::UiFontRole::Body, root / "Inter-Variable.ttf", 15.0F},
+                                  {Keire::UiFontRole::Heading, root / "Inter-Variable.ttf", 20.0F},
+                                  {Keire::UiFontRole::Icons, root / "MaterialSymbolsRounded-Subset.ttf", 20.0F}};
+        return specification;
+    }
+
     class DisabledUiLayer final : public Keire::Layer
     {
       public:
@@ -84,6 +94,12 @@ namespace
         {
             m_Order.emplace_back("ui");
             CHECK(Owner().UiEnabled());
+            if (m_UiFrames == 0)
+            {
+                CHECK(Owner().CurrentUiTheme() == Keire::UiTheme::Dark);
+                Owner().SetUiTheme(Keire::UiTheme::Light);
+                CHECK(Owner().CurrentUiTheme() == Keire::UiTheme::Light);
+            }
 
             {
                 auto menuBar = ui.BeginMainMenuBar();
@@ -102,6 +118,10 @@ namespace
                     ui.SameLine();
                     ui.AlignNextItemGroup(0.5F, 98.0F);
                     (void)ui.IconButton("TestPlay", Keire::UiIcon::Play, false, {28.0F, 24.0F});
+                    ui.SameLine();
+                    (void)ui.IconButton("TestTranslateFallback", Keire::UiIcon::Translate, false, {28.0F, 24.0F});
+                    ui.SameLine();
+                    (void)ui.IconButton("TestCloseSymbol", Keire::UiIcon::Close, false, {28.0F, 24.0F});
                     const auto button = ui.LastItemRect();
                     const auto* mainMenu = ImGui::FindWindowByName("##MainMenuBar");
                     REQUIRE(mainMenu != nullptr);
@@ -120,7 +140,45 @@ namespace
             ui.SetNextWindowSize({320.0F, 200.0F});
             if (auto window = ui.BeginWindow("Headless UI"); window)
             {
+                {
+                    const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
+                    CHECK(heading);
+                    ui.Text("Font roles stay behind the public UI facade");
+                }
+                const auto originalButton = ImGui::GetStyleColorVec4(ImGuiCol_Button);
+                {
+                    const auto color = ui.PushStyleColor(Keire::UiStyleColorRole::Button, {0.1F, 0.2F, 0.3F, 0.4F});
+                    CHECK(color);
+                    CHECK(ImGui::GetStyleColorVec4(ImGuiCol_Button).x == doctest::Approx(0.1F));
+                    CHECK(ImGui::GetStyleColorVec4(ImGuiCol_Button).w == doctest::Approx(0.4F));
+                }
+                CHECK(ImGui::GetStyleColorVec4(ImGuiCol_Button).x == doctest::Approx(originalButton.x));
+                const auto originalPadding = ImGui::GetStyle().WindowPadding;
+                {
+                    const auto padding =
+                        ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding, Keire::UiSize{3.0F, 4.0F});
+                    CHECK(padding);
+                    CHECK(ImGui::GetStyle().WindowPadding.x == doctest::Approx(3.0F));
+                    CHECK(ImGui::GetStyle().WindowPadding.y == doctest::Approx(4.0F));
+                }
+                CHECK(ImGui::GetStyle().WindowPadding.x == doctest::Approx(originalPadding.x));
+                CHECK_THROWS_AS((void)ui.PushStyleColor(static_cast<Keire::UiStyleColorRole>(255), {}),
+                                std::invalid_argument);
+                CHECK_THROWS_AS((void)ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding, 1.0F),
+                                std::invalid_argument);
+                CHECK_THROWS_AS(
+                    (void)ui.PushStyleVariable(Keire::UiStyleVariable::WindowRounding, Keire::UiSize{1.0F, 1.0F}),
+                    std::invalid_argument);
+                CHECK_FALSE(ui.PushFont(Keire::UiFontRole::Monospace));
+                CHECK_THROWS_AS((void)ui.PushFont(static_cast<Keire::UiFontRole>(255)), std::invalid_argument);
                 ui.Text("Public Kéire UI facade");
+                ui.TextWrapped("Wrapped public UI text remains inside the available content region.");
+                ui.TextColoredWrapped({0.8F, 0.9F, 1.0F, 1.0F}, "Colored wrapped text");
+                const auto cursor = ui.CursorPosition();
+                const auto screenCursor = ui.CursorScreenPosition();
+                ui.SetCursorPosition(cursor);
+                ui.SetCursorScreenPosition(screenCursor);
+                ui.SetNextItemWidth(160.0F);
                 ui.DrawLine({10.0F, 10.0F}, {30.0F, 30.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, 2.0F);
                 ui.DrawCircle({40.0F, 40.0F}, 8.0F, {0.0F, 1.0F, 0.0F, 1.0F});
                 ui.DrawFilledCircle({60.0F, 40.0F}, 6.0F, {0.0F, 0.0F, 1.0F, 0.5F});
@@ -164,6 +222,9 @@ namespace
                 ui.ProgressBar(0.5F, {120.0F, 4.0F}, "50%");
                 if (auto table = ui.BeginTable("ActionBindings", 2); table)
                 {
+                    ui.TableSetupColumn("Action", Keire::UiTableColumnSizing::Stretch, 1.0F);
+                    ui.TableSetupColumn("Binding", Keire::UiTableColumnSizing::Fixed, 100.0F);
+                    ui.TableHeaderRow();
                     ui.TableNextRow();
                     CHECK(ui.TableNextColumn());
                     ui.Text("Action");
@@ -202,6 +263,8 @@ namespace
                                             .Size = {28.0F, 28.0F},
                                             .Tooltip = "Overlay without layout mutation",
                                             .Selected = true});
+                ui.DrawOverlayIcon(Keire::UiIcon::Notifications, {anchor.Maximum.X - 24.0F, anchor.Minimum.Y + 4.0F},
+                                   {0.35F, 0.65F, 1.0F, 1.0F});
             }
 
             std::thread worker(
@@ -235,7 +298,7 @@ namespace
     {
       public:
         HeadlessUiApplication(std::vector<std::string>& order, bool& staleRejected, std::atomic<bool>& threadRejected)
-            : Application(UiSpecification("ui-headless", Keire::UiMode::Headless))
+            : Application(FontUiSpecification())
         {
             (void)PushLayer(std::make_unique<HeadlessUiLayer>(order, staleRejected, threadRejected));
         }

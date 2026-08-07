@@ -51,6 +51,7 @@
 #include "Keire/Modules/EngineModule.h"
 #include "Keire/Navigation/NavigationSystem.h"
 #include "Keire/Physics/PhysicsSystem.h"
+#include "Keire/PlatformDirectories.h"
 #include "Keire/Project/Project.h"
 #include "Keire/Project/ProjectAuthoringSettings.h"
 #include "Keire/Project/ProjectUpgrade.h"

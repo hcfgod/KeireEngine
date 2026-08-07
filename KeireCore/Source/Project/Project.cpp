@@ -7,6 +7,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/BuildInfo.h"
+#include "Keire/PlatformDirectories.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
@@ -14,15 +15,17 @@
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
-#include <SDL3/SDL.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <ctime>
+#include <iomanip>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <system_error>
 #include <tuple>
@@ -78,6 +81,47 @@ namespace Keire
                 begin = end == std::string_view::npos ? value.size() : end + 1;
             }
             return result;
+        }
+
+        [[nodiscard]] std::string FormatUtc(const std::chrono::system_clock::time_point value)
+        {
+            const auto time = std::chrono::system_clock::to_time_t(value);
+            std::tm utc{};
+#if defined(_WIN32)
+            if (gmtime_s(&utc, &time) != 0)
+                throw std::runtime_error("Cannot format the project timestamp.");
+#else
+            if (!gmtime_r(&time, &utc))
+                throw std::runtime_error("Cannot format the project timestamp.");
+#endif
+            std::ostringstream stream;
+            stream << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+            return stream.str();
+        }
+
+        [[nodiscard]] std::string NowUtc() { return FormatUtc(std::chrono::system_clock::now()); }
+
+        [[nodiscard]] std::string FileTimestampUtc(const std::filesystem::path& path)
+        {
+            const auto fileNow = std::filesystem::file_time_type::clock::now();
+            const auto systemNow = std::chrono::system_clock::now();
+            const auto fileTime = std::filesystem::last_write_time(path);
+            return FormatUtc(systemNow +
+                             std::chrono::duration_cast<std::chrono::system_clock::duration>(fileTime - fileNow));
+        }
+
+        void ValidateTimestamp(const std::string_view value, const std::string_view field)
+        {
+            if (value.size() != 20 || value[4] != '-' || value[7] != '-' || value[10] != 'T' || value[13] != ':' ||
+                value[16] != ':' || value[19] != 'Z')
+                throw std::invalid_argument("Project " + std::string(field) + " must be a UTC ISO-8601 timestamp.");
+            for (std::size_t index = 0; index < value.size(); ++index)
+            {
+                if (index == 4 || index == 7 || index == 10 || index == 13 || index == 16 || index == 19)
+                    continue;
+                if (!std::isdigit(static_cast<unsigned char>(value[index])))
+                    throw std::invalid_argument("Project " + std::string(field) + " must be a UTC ISO-8601 timestamp.");
+            }
         }
 
         void ValidateName(const std::string_view name)
@@ -142,12 +186,33 @@ namespace Keire
                         descriptor.RequiredModules.end())
                     throw std::runtime_error("Project required source modules must be unique and sorted by ID.");
             }
+            if (descriptor.SchemaVersion >= 3)
+            {
+                descriptor.CreatedAt = document.at("createdAt").get<std::string>();
+                descriptor.LastSavedWithEngineVersion = document.at("lastSavedWithEngineVersion").get<std::string>();
+                if (document.contains("template") && !document.at("template").is_null())
+                {
+                    const auto& value = document.at("template");
+                    ProjectDescriptor::TemplateProvenance provenance;
+                    provenance.Id = value.at("id").get<std::string>();
+                    provenance.Version = value.at("version").get<std::string>();
+                    if (provenance.Id.empty() || provenance.Id.size() > 128 || provenance.Version.empty() ||
+                        provenance.Version.size() > 128)
+                        throw std::runtime_error("Project contains invalid template provenance.");
+                    descriptor.Template = std::move(provenance);
+                }
+            }
             if (descriptor.SchemaVersion == 0 || descriptor.SchemaVersion > CurrentProjectSchemaVersion ||
                 !descriptor.Id)
                 throw std::runtime_error("Project descriptor uses an unsupported schema or has no identity.");
             ValidateName(descriptor.Name);
             (void)ParseVersion(descriptor.CreatedWithEngineVersion);
             (void)ParseVersion(descriptor.MinimumEngineVersion);
+            if (descriptor.SchemaVersion >= 3)
+            {
+                ValidateTimestamp(descriptor.CreatedAt, "createdAt");
+                (void)ParseVersion(descriptor.LastSavedWithEngineVersion);
+            }
             return descriptor;
         }
 
@@ -158,11 +223,24 @@ namespace Keire
             ValidateName(descriptor.Name);
             (void)ParseVersion(descriptor.CreatedWithEngineVersion);
             (void)ParseVersion(descriptor.MinimumEngineVersion);
+            ValidateTimestamp(descriptor.CreatedAt, "createdAt");
+            (void)ParseVersion(descriptor.LastSavedWithEngineVersion);
             Json document{{"schemaVersion", descriptor.SchemaVersion},
                           {"id", descriptor.Id.ToString()},
                           {"name", descriptor.Name},
                           {"createdWithEngineVersion", descriptor.CreatedWithEngineVersion},
-                          {"minimumEngineVersion", descriptor.MinimumEngineVersion}};
+                          {"minimumEngineVersion", descriptor.MinimumEngineVersion},
+                          {"createdAt", descriptor.CreatedAt},
+                          {"lastSavedWithEngineVersion", descriptor.LastSavedWithEngineVersion}};
+            if (descriptor.Template)
+            {
+                if (descriptor.Template->Id.empty() || descriptor.Template->Id.size() > 128 ||
+                    descriptor.Template->Version.empty() || descriptor.Template->Version.size() > 128)
+                    throw std::invalid_argument("Template provenance requires bounded ID and version values.");
+                document["template"] = {{"id", descriptor.Template->Id}, {"version", descriptor.Template->Version}};
+            }
+            else
+                document["template"] = nullptr;
             document["startupScene"] =
                 descriptor.StartupScene ? Json(descriptor.StartupScene.ToString()) : Json(nullptr);
             document["defaultInput"] =
@@ -188,13 +266,7 @@ namespace Keire
 
         [[nodiscard]] std::filesystem::path DefaultRegistryPath()
         {
-            const auto name = std::string(GetBuildInfo().ProjectName);
-            char* preference = SDL_GetPrefPath(name.c_str(), name.c_str());
-            if (!preference)
-                throw std::runtime_error("Cannot resolve the per-user project registry directory.");
-            std::filesystem::path result = std::filesystem::path(preference) / "Hub" / "projects.json";
-            SDL_free(preference);
-            return result;
+            return GetPreferenceDirectory() / "Hub" / "projects.json";
         }
 
         [[nodiscard]] std::uint64_t NowUnixSeconds()
@@ -202,6 +274,51 @@ namespace Keire
             return static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch())
                     .count());
+        }
+
+        [[nodiscard]] std::string_view RecentStatusName(const ProjectStatus status) noexcept
+        {
+            switch (status)
+            {
+            case ProjectStatus::Ready:
+                return "ready";
+            case ProjectStatus::UpgradeAvailable:
+                return "upgradeAvailable";
+            case ProjectStatus::RecoveryRequired:
+                return "recoveryRequired";
+            case ProjectStatus::Missing:
+                return "missing";
+            case ProjectStatus::Invalid:
+                return "invalid";
+            case ProjectStatus::RequiresNewerEngine:
+                return "missingEditor";
+            case ProjectStatus::InUse:
+                return "locked";
+            case ProjectStatus::UnsupportedSchema:
+                return "unsupportedSchema";
+            }
+            return "unknown";
+        }
+
+        [[nodiscard]] ProjectStatus ParseRecentStatus(const std::string_view status) noexcept
+        {
+            if (status == "ready")
+                return ProjectStatus::Ready;
+            if (status == "upgradeAvailable")
+                return ProjectStatus::UpgradeAvailable;
+            if (status == "recoveryRequired")
+                return ProjectStatus::RecoveryRequired;
+            if (status == "missing")
+                return ProjectStatus::Missing;
+            if (status == "invalid")
+                return ProjectStatus::Invalid;
+            if (status == "missingEditor")
+                return ProjectStatus::RequiresNewerEngine;
+            if (status == "locked")
+                return ProjectStatus::InUse;
+            if (status == "unsupportedSchema")
+                return ProjectStatus::UnsupportedSchema;
+            return ProjectStatus::Invalid;
         }
     } // namespace
 
@@ -300,6 +417,10 @@ namespace Keire
             descriptor.Name = specification.Name;
             descriptor.CreatedWithEngineVersion = std::string(GetBuildInfo().Version);
             descriptor.MinimumEngineVersion = descriptor.CreatedWithEngineVersion;
+            descriptor.CreatedAt = NowUtc();
+            descriptor.LastSavedWithEngineVersion = descriptor.CreatedWithEngineVersion;
+            descriptor.Template = ProjectDescriptor::TemplateProvenance{
+                specification.Template == ProjectTemplate::Empty ? "keire.empty" : "keire.3d-starter", "1.0.0"};
             if (specification.Template == ProjectTemplate::Starter)
             {
                 AssetDatabaseSpecification databaseSpecification{.ProjectRoot = root};
@@ -442,27 +563,81 @@ float4 PSMain(VertexOutput input) : SV_Target0
         return CreateRef<Project>(std::make_unique<Impl>(root, std::move(descriptor), mode));
     }
 
-    ProjectStatus Project::Inspect(const std::filesystem::path& path) noexcept
+    ProjectInspectionResult Project::InspectMetadata(const std::filesystem::path& path) noexcept
     {
+        ProjectInspectionResult result;
         try
         {
             if (!std::filesystem::exists(path))
-                return ProjectStatus::Missing;
+            {
+                result.Status = ProjectStatus::Missing;
+                result.Diagnostic = "Project path does not exist.";
+                return result;
+            }
             const auto root = ResolveRoot(path);
+            result.Root = root;
             if (std::filesystem::is_regular_file(root / "Library" / "ProjectUpgrades" / "Active" / "journal.json"))
-                return ProjectStatus::RecoveryRequired;
-            const auto descriptor = ParseDescriptor(root);
-            if (descriptor.SchemaVersion < CurrentProjectSchemaVersion)
-                return ProjectStatus::UpgradeAvailable;
-            if (RequiresNewerEngine(descriptor))
-                return ProjectStatus::RequiresNewerEngine;
-            return ProjectStatus::Ready;
+                result.Status = ProjectStatus::RecoveryRequired;
+
+            const auto document = Json::parse(Detail::ReadTextFile(MarkerPath(root), MaximumProjectFileBytes));
+            if (!document.is_object())
+                throw std::runtime_error("Project descriptor root must be an object.");
+            result.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+            result.Id = ProjectId::Parse(document.at("id").get<std::string>());
+            result.Name = document.at("name").get<std::string>();
+            result.CreatedWithEngineVersion = document.at("createdWithEngineVersion").get<std::string>();
+            result.MinimumEngineVersion = document.at("minimumEngineVersion").get<std::string>();
+            ValidateName(result.Name);
+            (void)ParseVersion(result.CreatedWithEngineVersion);
+            (void)ParseVersion(result.MinimumEngineVersion);
+            if (document.contains("createdAt") && document.at("createdAt").is_string())
+                result.CreatedAt = document.at("createdAt").get<std::string>();
+            else
+                result.CreatedAt = FileTimestampUtc(MarkerPath(root));
+            if (document.contains("lastSavedWithEngineVersion") &&
+                document.at("lastSavedWithEngineVersion").is_string())
+                result.LastSavedWithEngineVersion = document.at("lastSavedWithEngineVersion").get<std::string>();
+            else
+                result.LastSavedWithEngineVersion = result.CreatedWithEngineVersion;
+            if (document.contains("template") && document.at("template").is_object())
+            {
+                ProjectDescriptor::TemplateProvenance provenance;
+                provenance.Id = document.at("template").at("id").get<std::string>();
+                provenance.Version = document.at("template").at("version").get<std::string>();
+                if (!provenance.Id.empty() && provenance.Id.size() <= 128 && !provenance.Version.empty() &&
+                    provenance.Version.size() <= 128)
+                    result.Template = std::move(provenance);
+            }
+            if (result.SchemaVersion > CurrentProjectSchemaVersion)
+            {
+                result.Status = ProjectStatus::UnsupportedSchema;
+                result.Diagnostic = "Project metadata was read, but this Hub does not support its project schema.";
+                return result;
+            }
+            if (result.Status == ProjectStatus::RecoveryRequired)
+                return result;
+            if (result.SchemaVersion < CurrentProjectSchemaVersion)
+            {
+                result.Status = ProjectStatus::UpgradeAvailable;
+                return result;
+            }
+            if (ParseVersion(result.MinimumEngineVersion) > ParseVersion(GetBuildInfo().Version))
+            {
+                result.Status = ProjectStatus::RequiresNewerEngine;
+                return result;
+            }
+            result.Status = ProjectStatus::Ready;
+            return result;
         }
-        catch (...)
+        catch (const std::exception& error)
         {
-            return ProjectStatus::Invalid;
+            result.Status = ProjectStatus::Invalid;
+            result.Diagnostic = error.what();
+            return result;
         }
     }
+
+    ProjectStatus Project::Inspect(const std::filesystem::path& path) noexcept { return InspectMetadata(path).Status; }
 
     bool Project::IsLocked(const std::filesystem::path& path) noexcept
     {
@@ -530,6 +705,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
             throw std::logic_error("Read-only projects cannot save project settings.");
         if (descriptor.Id != m_Impl->Description.Id || descriptor.SchemaVersion != m_Impl->Description.SchemaVersion)
             throw std::invalid_argument("Project identity and schema version are immutable.");
+        descriptor.LastSavedWithEngineVersion = std::string(GetBuildInfo().Version);
         WriteDescriptor(m_Impl->RootPath, descriptor);
         m_Impl->Description = std::move(descriptor);
     }
@@ -537,7 +713,11 @@ float4 PSMain(VertexOutput input) : SV_Target0
     class ProjectRegistry::Impl final
     {
       public:
-        explicit Impl(std::filesystem::path value) : RegistryPath(std::move(value)) { Load(); }
+        Impl(std::filesystem::path value, const ProjectRegistryLoadMode loadMode)
+            : RegistryPath(std::move(value)), LoadMode(loadMode)
+        {
+            Load();
+        }
 
         void Load()
         {
@@ -546,7 +726,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
             try
             {
                 const auto document = Json::parse(Detail::ReadTextFile(RegistryPath, MaximumRegistryBytes));
-                if (document.at("schemaVersion").get<std::uint32_t>() != 1 || !document.at("projects").is_array())
+                const auto schema = document.at("schemaVersion").get<std::uint32_t>();
+                if ((schema != 1 && schema != 2) || !document.at("projects").is_array())
                     throw std::runtime_error("Unsupported project registry schema.");
                 for (const auto& value : document.at("projects"))
                 {
@@ -555,7 +736,26 @@ float4 PSMain(VertexOutput input) : SV_Target0
                     entry.Root = Detail::PathFromUtf8(value.at("root").get<std::string>());
                     entry.Name = value.at("name").get<std::string>();
                     entry.LastOpenedUnixSeconds = value.value("lastOpened", 0ULL);
+                    entry.AddedUnixSeconds = value.value("added", entry.LastOpenedUnixSeconds);
+                    entry.CreatedUnixSeconds = value.value("created", 0ULL);
+                    entry.LastSavedWithEngineVersion = value.value("lastSavedWithEngineVersion", std::string{});
+                    entry.PreferredEditorInstallation = value.value(
+                        "preferredEditorInstallation", value.value("preferredEditorInstallationId", std::string{}));
                     entry.Pinned = value.value("pinned", false);
+                    if (value.contains("cachedMetadata") && value.at("cachedMetadata").is_object())
+                    {
+                        const auto& cached = value.at("cachedMetadata");
+                        entry.Status = ParseRecentStatus(cached.value("status", std::string("invalid")));
+                        entry.CreatedUnixSeconds = cached.value("created", entry.CreatedUnixSeconds);
+                        entry.ModifiedUnixSeconds = cached.value("modified", 0ULL);
+                        if (cached.contains("sizeBytes"))
+                            entry.SizeBytes = cached.at("sizeBytes").get<std::uint64_t>();
+                        entry.CreatedWithEngineVersion = cached.value("createdWithEngineVersion", std::string{});
+                        entry.LastSavedWithEngineVersion =
+                            cached.value("lastSavedWithEngineVersion", entry.LastSavedWithEngineVersion);
+                        entry.MinimumEngineVersion = cached.value("minimumEngineVersion", std::string{});
+                        entry.ProjectSchemaVersion = cached.value("projectSchemaVersion", 0U);
+                    }
                     Projects.push_back(std::move(entry));
                 }
             }
@@ -567,29 +767,83 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 std::filesystem::rename(RegistryPath, corrupt, ignored);
                 Projects.clear();
             }
-            RefreshEntries();
+            if (LoadMode == ProjectRegistryLoadMode::RefreshMetadata)
+                RefreshEntries();
         }
 
         void Save() const
         {
             Json projects = Json::array();
             for (const auto& entry : Projects)
+            {
+                Json cached{{"status", RecentStatusName(entry.Status)},
+                            {"created", entry.CreatedUnixSeconds},
+                            {"modified", entry.ModifiedUnixSeconds},
+                            {"createdWithEngineVersion", entry.CreatedWithEngineVersion},
+                            {"lastSavedWithEngineVersion", entry.LastSavedWithEngineVersion},
+                            {"minimumEngineVersion", entry.MinimumEngineVersion},
+                            {"projectSchemaVersion", entry.ProjectSchemaVersion}};
+                if (entry.SizeBytes)
+                    cached["sizeBytes"] = *entry.SizeBytes;
                 projects.push_back({{"id", entry.Id.ToString()},
                                     {"root", Detail::PathToUtf8(entry.Root)},
                                     {"name", entry.Name},
+                                    {"added", entry.AddedUnixSeconds},
                                     {"lastOpened", entry.LastOpenedUnixSeconds},
-                                    {"pinned", entry.Pinned}});
+                                    {"created", entry.CreatedUnixSeconds},
+                                    {"lastSavedWithEngineVersion", entry.LastSavedWithEngineVersion},
+                                    {"preferredEditorInstallation", entry.PreferredEditorInstallation},
+                                    {"preferredEditorInstallationId", entry.PreferredEditorInstallation},
+                                    {"pinned", entry.Pinned},
+                                    {"cachedMetadata", std::move(cached)}});
+            }
             Detail::WriteTextFileAtomically(
-                RegistryPath, Json{{"schemaVersion", 1}, {"projects", std::move(projects)}}.dump(2) + '\n');
+                RegistryPath, Json{{"schemaVersion", 2}, {"projects", std::move(projects)}}.dump(2) + '\n');
         }
 
         void RefreshEntries()
         {
             for (auto& entry : Projects)
             {
-                entry.Status = Project::Inspect(entry.Root);
+                const auto inspection = Project::InspectMetadata(entry.Root);
+                entry.Status = inspection.Status;
                 if (entry.Status == ProjectStatus::Ready && Project::IsLocked(entry.Root))
                     entry.Status = ProjectStatus::InUse;
+                if (inspection.HasIdentity())
+                {
+                    entry.Id = inspection.Id;
+                    entry.Name = inspection.Name;
+                    entry.Root = inspection.Root;
+                    entry.LastSavedWithEngineVersion = inspection.LastSavedWithEngineVersion;
+                    entry.CreatedWithEngineVersion = inspection.CreatedWithEngineVersion;
+                    entry.MinimumEngineVersion = inspection.MinimumEngineVersion;
+                    entry.ProjectSchemaVersion = inspection.SchemaVersion;
+                    if (entry.CreatedUnixSeconds == 0)
+                    {
+                        std::error_code timestampError;
+                        const auto timestamp = std::filesystem::last_write_time(MarkerPath(entry.Root), timestampError);
+                        if (!timestampError)
+                        {
+                            const auto fileNow = std::filesystem::file_time_type::clock::now();
+                            const auto systemNow = std::chrono::system_clock::now();
+                            const auto created =
+                                systemNow +
+                                std::chrono::duration_cast<std::chrono::system_clock::duration>(timestamp - fileNow);
+                            entry.CreatedUnixSeconds = static_cast<std::uint64_t>(
+                                std::chrono::duration_cast<std::chrono::seconds>(created.time_since_epoch()).count());
+                        }
+                    }
+                    std::error_code modifiedError;
+                    const auto timestamp = std::filesystem::last_write_time(MarkerPath(entry.Root), modifiedError);
+                    if (!modifiedError)
+                    {
+                        const auto modified = std::chrono::system_clock::now() +
+                                              std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                                                  timestamp - std::filesystem::file_time_type::clock::now());
+                        entry.ModifiedUnixSeconds = static_cast<std::uint64_t>(
+                            std::chrono::duration_cast<std::chrono::seconds>(modified.time_since_epoch()).count());
+                    }
+                }
                 if (entry.Status == ProjectStatus::Ready || entry.Status == ProjectStatus::InUse)
                 {
                     try
@@ -622,10 +876,11 @@ float4 PSMain(VertexOutput input) : SV_Target0
 
         std::filesystem::path RegistryPath;
         std::vector<RecentProject> Projects;
+        ProjectRegistryLoadMode LoadMode = ProjectRegistryLoadMode::RefreshMetadata;
     };
 
-    ProjectRegistry::ProjectRegistry(std::filesystem::path path)
-        : m_Impl(std::make_unique<Impl>(path.empty() ? DefaultRegistryPath() : std::move(path)))
+    ProjectRegistry::ProjectRegistry(std::filesystem::path path, const ProjectRegistryLoadMode loadMode)
+        : m_Impl(std::make_unique<Impl>(path.empty() ? DefaultRegistryPath() : std::move(path), loadMode))
     {
     }
 
@@ -633,20 +888,35 @@ float4 PSMain(VertexOutput input) : SV_Target0
 
     std::vector<RecentProject> ProjectRegistry::Entries() const { return m_Impl->Projects; }
 
-    void ProjectRegistry::RecordOpened(const Project& project)
+    void ProjectRegistry::RecordOpened(const Project& project, const std::string_view preferredEditorInstallation)
     {
         const auto id = project.Descriptor().Id;
         auto found = std::ranges::find(m_Impl->Projects, id, &RecentProject::Id);
         if (found == m_Impl->Projects.end())
         {
-            m_Impl->Projects.push_back(
-                {id, project.Root(), project.Descriptor().Name, NowUnixSeconds(), ProjectStatus::Ready, false});
+            RecentProject entry;
+            entry.Id = id;
+            entry.Root = project.Root();
+            entry.Name = project.Descriptor().Name;
+            entry.LastOpenedUnixSeconds = NowUnixSeconds();
+            entry.AddedUnixSeconds = entry.LastOpenedUnixSeconds;
+            entry.CreatedUnixSeconds = entry.LastOpenedUnixSeconds;
+            entry.CreatedWithEngineVersion = project.Descriptor().CreatedWithEngineVersion;
+            entry.LastSavedWithEngineVersion = project.Descriptor().LastSavedWithEngineVersion;
+            entry.MinimumEngineVersion = project.Descriptor().MinimumEngineVersion;
+            entry.ProjectSchemaVersion = project.Descriptor().SchemaVersion;
+            entry.PreferredEditorInstallation = preferredEditorInstallation;
+            entry.Status = ProjectStatus::Ready;
+            m_Impl->Projects.push_back(std::move(entry));
         }
         else
         {
             found->Root = project.Root();
             found->Name = project.Descriptor().Name;
             found->LastOpenedUnixSeconds = NowUnixSeconds();
+            found->LastSavedWithEngineVersion = project.Descriptor().LastSavedWithEngineVersion;
+            if (!preferredEditorInstallation.empty())
+                found->PreferredEditorInstallation = preferredEditorInstallation;
             found->Status = ProjectStatus::Ready;
         }
         m_Impl->RefreshEntries();
@@ -660,7 +930,6 @@ float4 PSMain(VertexOutput input) : SV_Target0
         if (found == m_Impl->Projects.end())
             return false;
         found->Pinned = pinned;
-        m_Impl->RefreshEntries();
         m_Impl->Save();
         return true;
     }

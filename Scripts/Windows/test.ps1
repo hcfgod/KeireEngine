@@ -82,6 +82,28 @@ if ($exitCode -eq 0) {
 }
 
 if ($exitCode -eq 0) {
+    $hubTestsTarget = "$($Project.PROJECT_NAMESPACE)HubTests"
+    $hubTestsExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$hubTestsTarget\$hubTestsTarget.exe"
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -Target $hubTestsTarget -CI:$CI -Update:$Update -Generate:$Generate
+    if (-not (Test-Path $hubTestsExe)) { throw "Hub tests executable was not found: $hubTestsExe" }
+    $hubOriginalPath = $env:PATH
+    Push-Location $Root
+    try {
+        if ($Configuration -eq "DebugASan" -and $usesMSVC) {
+            $env:PATH = "$runtimeDirectory;$env:PATH"
+        }
+        Write-Host "==> Running Hub runtime and product integration tests"
+        & $hubTestsExe
+        if ($LASTEXITCODE -ne 0) { throw "Hub tests failed with exit code $LASTEXITCODE." }
+    }
+    finally {
+        $env:PATH = $hubOriginalPath
+        Pop-Location
+    }
+}
+
+if ($exitCode -eq 0) {
     Write-Host "==> Building complete client compile gate"
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
         -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI -Update:$Update `

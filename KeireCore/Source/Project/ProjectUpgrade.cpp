@@ -9,11 +9,14 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <ctime>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <ranges>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <system_error>
 #include <tuple>
@@ -88,6 +91,27 @@ namespace Keire
             return document.at("schemaVersion").get<std::uint32_t>();
         }
 
+        [[nodiscard]] std::string FileTimestampUtc(const std::filesystem::path& path)
+        {
+            const auto fileNow = std::filesystem::file_time_type::clock::now();
+            const auto systemNow = std::chrono::system_clock::now();
+            const auto fileTime = std::filesystem::last_write_time(path);
+            const auto converted =
+                systemNow + std::chrono::duration_cast<std::chrono::system_clock::duration>(fileTime - fileNow);
+            const auto time = std::chrono::system_clock::to_time_t(converted);
+            std::tm utc{};
+#if defined(_WIN32)
+            if (gmtime_s(&utc, &time) != 0)
+                throw std::runtime_error("Cannot format the project descriptor timestamp.");
+#else
+            if (!gmtime_r(&time, &utc))
+                throw std::runtime_error("Cannot format the project descriptor timestamp.");
+#endif
+            std::ostringstream stream;
+            stream << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+            return stream.str();
+        }
+
         void ValidateStagedProject(const std::filesystem::path& projectRoot, const std::filesystem::path& stagingRoot,
                                    const std::uint32_t expectedSchema)
         {
@@ -101,6 +125,9 @@ namespace Keire
                 throw std::runtime_error("Staged project descriptor failed validation.");
             if (expectedSchema >= 2 && !document.at("requiredModules").is_array())
                 throw std::runtime_error("Staged project descriptor has no required source-module catalog.");
+            if (expectedSchema >= 3 &&
+                (!document.at("createdAt").is_string() || !document.at("lastSavedWithEngineVersion").is_string()))
+                throw std::runtime_error("Staged project descriptor has no creation or last-saved metadata.");
         }
 
         [[nodiscard]] std::string TransactionId()
@@ -264,6 +291,7 @@ namespace Keire
               Active(ConfinedPath(Root, std::filesystem::path("Library") / "ProjectUpgrades" / "Active"))
         {
             Steps.push_back(ProjectUpgradeService::CreateVersion1To2Step());
+            Steps.push_back(ProjectUpgradeService::CreateVersion2To3Step());
             for (auto& step : additional)
                 Steps.push_back(std::move(step));
             std::ranges::sort(Steps,
@@ -668,6 +696,34 @@ namespace Keire
         {
             if (ReadSchema(MarkerPath(context.StagingRoot)) != 2)
                 throw std::runtime_error("v1 to v2 project upgrade did not produce schema 2.");
+        };
+        return step;
+    }
+
+    ProjectUpgradeStep ProjectUpgradeService::CreateVersion2To3Step()
+    {
+        ProjectUpgradeStep step;
+        step.Id = "keire.project.v2-to-v3-hub-metadata";
+        step.FromSchema = 2;
+        step.ToSchema = 3;
+        step.AffectedPaths = {"ProjectSettings/Project.keireproject"};
+        step.Apply = [](const ProjectUpgradeStepContext& context)
+        {
+            const auto path = MarkerPath(context.StagingRoot);
+            auto document = Json::parse(Detail::ReadTextFile(path, MaximumDescriptorBytes));
+            document["schemaVersion"] = 3;
+            document["createdAt"] = FileTimestampUtc(MarkerPath(context.ProjectRoot));
+            document["lastSavedWithEngineVersion"] = document.at("createdWithEngineVersion");
+            document["template"] = nullptr;
+            Detail::WriteTextFileAtomically(path, document.dump(2) + '\n');
+        };
+        step.Validate = [](const ProjectUpgradeStepContext& context)
+        {
+            const auto document =
+                Json::parse(Detail::ReadTextFile(MarkerPath(context.StagingRoot), MaximumDescriptorBytes));
+            if (document.at("schemaVersion").get<std::uint32_t>() != 3 || !document.at("createdAt").is_string() ||
+                !document.at("lastSavedWithEngineVersion").is_string())
+                throw std::runtime_error("v2 to v3 project upgrade did not produce Hub metadata.");
         };
         return step;
     }

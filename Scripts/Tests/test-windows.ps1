@@ -23,19 +23,37 @@ if ($runFast) {
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
 & (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
+& (Join-Path $PSScriptRoot "test-hub-package-windows.ps1")
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
+& (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
+& (Join-Path $PSScriptRoot "test-distribution-service-package-windows.ps1")
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
+$windowsCommon = Get-Content (Join-Path $Windows "common.ps1") -Raw
+Assert-True ($windowsCommon.Contains('"KeireHubRuntime"') -and $windowsCommon.Contains('"KeireHubTests"') -and
+             $windowsCommon.Contains('"KeireHubWorker"')) "Hub target source-inventory project regeneration"
 $bootstrapScript = Get-Content (Join-Path $Windows "bootstrap.ps1") -Raw
 Assert-True ($bootstrapScript.Contains('GetTempPath') -and $bootstrapScript.Contains('$PremakeExe --version')) "Unicode-safe Premake version validation"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Process.cpp") -Raw
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
-Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('$Configuration = "Dist"')) "Dist editor package launcher command"
+Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('"package-hub"') -and
+             $menuScript.Contains('$Configuration = "Dist"')) "Dist product package launcher commands"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
 Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
+Assert-True ($testScript.Contains('$hubTestsTarget = "$($Project.PROJECT_NAMESPACE)HubTests"') -and
+             $testScript.Contains('& $hubTestsExe')) "Private Hub test suite execution"
+$editorTestsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireEditorTests\premake5.lua") -Raw
+$hubTestsPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHubTests\premake5.lua") -Raw
+$editorTestsMain = Get-Content (Join-Path (Get-RepositoryRoot) "KeireEditorTests\Source\Main.cpp") -Raw
+$hubTestsMain = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHubTests\Source\Main.cpp") -Raw
+Assert-True (-not $editorTestsPremake.Contains('HubInstance.cpp') -and
+             -not $editorTestsPremake.Contains('HubRuntimeTarget') -and
+             -not $editorTestsMain.Contains('--hub-instance-secondary') -and
+             $hubTestsPremake.Contains('HubInstance.cpp') -and
+             $hubTestsMain.Contains('--hub-instance-secondary')) "Hub instance tests remain inside the private Hub suite"
 $editorTestWorkingDirectory = '(?s)\$editorOriginalPath = \$env:PATH\s+Push-Location \$Root\s+try \{.*?' +
     '& \$editorTestsExe.*?finally \{.*?Pop-Location'
 Assert-True ($testScript -match $editorTestWorkingDirectory) "Editor tests use the repository working directory"
@@ -144,6 +162,7 @@ Assert-Equal $lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT "ad9184e76a66b1001c29db9
 Assert-Equal $lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT "0539c81f69a3daeb706fd3477dca61435b475156" "SPIRV-Tools recursive lock"
 Assert-Equal $lock.ASSIMP_COMMIT "392a658f9c271be965271f45e7521a1b80ea4392" "Assimp lock"
 Assert-Equal $lock.STB_COMMIT "31c1ad37456438565541f4919958214b6e762fb4" "stb lock"
+Assert-Equal $lock.LIBSODIUM_COMMIT "77e1ce5d6dee871c49ef211222ba18ef0c486bda" "libsodium lock"
 $vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
 $vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
 Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
@@ -161,6 +180,9 @@ Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScri
 Assert-True ($dependencyScript.Contains('"Debug", "Release"') -and $dependencyScript.Contains('SDL_DUMMYVIDEO=ON') -and $dependencyScript.Contains('SDL_OFFSCREEN=ON')) "SDL variants and headless drivers"
 Assert-True ($dependencyScript.Contains('SDL_GPU=ON') -and $dependencyScript.Contains('SDL_RENDER=OFF')) "SDL GPU renderer policy"
 Assert-True ($dependencyScript.Contains('shader-compiler.ps1')) "Host shader compiler bootstrap"
+Assert-True ($dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT') -and
+             $dependencyScript.Contains('ReleaseDLL') -and
+             $dependencyScript.Contains('libsodium.dll')) "Pinned private catalog verifier bootstrap"
 $coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
 $coralBootstrapPatch = Get-Content (Join-Path $coralRoot "0004-keire-apply-host-settings-before-discovery.patch") -Raw
 Assert-True ($coralBootstrapPatch.IndexOf('m_Settings = std::move(InSettings);') -lt
@@ -203,7 +225,9 @@ $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
 Assert-True ($corePremake.Contains('links { DearImGuiProject, ZstdProject }') -and -not $corePremake.Contains('imgui.cpp') -and -not $premakePolicy.Contains('AddDearImGuiSources')) "Private dependency project ownership"
 Assert-True ($corePremake.Contains('VendorIncludeDirs.entt') -and $corePremake.Contains('VendorIncludeDirs.glm') -and $corePremake.Contains('dependson { EnTTProject, GLMProject }')) "Private ECS and math build wiring"
-Assert-True ($hubPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET }')) "Hub rebuilds its editor runtime dependency"
+Assert-True ($hubPremake.Contains('links { HubRuntimeTarget }') -and
+             -not $hubPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET }')) `
+    "Standalone Hub links its private runtime without depending on an editor build"
 Assert-True ($assetToolPremake.Contains('dependson { AssetWorkerTarget }')) "AssetTool builds its private importer worker"
 Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
              $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
@@ -430,6 +454,10 @@ Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPa
     $editorPackageScript.Contains('Build\Distributions') -and
     $editorPackageScript.Contains('Assert-WindowsEditorPackageStage') -and
     $editorPackageScript.Contains('editor-package.json')) "Windows Dist editor distribution packaging"
+Assert-True ($editorPackageScript.Contains('editor=bin/$($Project.CLIENT_TARGET).exe') -and
+    -not $editorPackageScript.Contains('"--entrypoint", "hub=') -and
+    -not $editorPackageScript.Contains('"--entrypoint", "worker=') -and
+    -not $editorPackageScript.Contains('KeireHubContent')) "Windows editor package excludes Hub ownership"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw
 Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and
     $packageConfig.Contains('@PROJECT_NAMESPACE@Zstd.a') -and

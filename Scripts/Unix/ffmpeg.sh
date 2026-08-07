@@ -11,11 +11,12 @@ CONFIGURATION="${1:-Release}"
 source "$ROOT/Scripts/Unix/common.sh"
 LOCK="$ROOT/Config/Dependencies.lock"
 COMMIT="$(config_value "$LOCK" FFMPEG_COMMIT)"
+MACOS_DEPLOYMENT_TARGET="$(config_value "$LOCK" MACOS_DEPLOYMENT_TARGET)"
 SOURCE="$ROOT/Vendor/ffmpeg"
 OUTPUT="$ROOT/Build/Dependencies/ffmpeg/$CONFIGURATION"
 INSTALL="$OUTPUT/install"
 STAMP="$OUTPUT/keire-ffmpeg.stamp"
-EXPECTED="$COMMIT|$CONFIGURATION|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
+EXPECTED="$COMMIT|$CONFIGURATION|$MACOS_DEPLOYMENT_TARGET|shared-lgpl-avformat-avcodec-swresample-avutil-v2"
 
 [[ -x "$SOURCE/configure" ]] || {
   printf 'Vendor/ffmpeg is unavailable. Initialize the locked submodule first.\n' >&2
@@ -43,7 +44,9 @@ if [[ "$CONFIGURATION" == Debug ]]; then
 fi
 platform_options=()
 if [[ "$(uname -s)" == Darwin ]]; then
-  platform_options=(--install-name-dir=@rpath)
+  platform_options=(--install-name-dir=@rpath
+    --extra-cflags="-mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET"
+    --extra-ldflags="-mmacosx-version-min=$MACOS_DEPLOYMENT_TARGET")
 fi
 (
   cd "$OUTPUT"

@@ -46,8 +46,15 @@ function Get-ProjectGenerationFingerprint {
         $project.TESTS_DIRECTORY,
         "AssetTool",
         "KeireAssetWorker",
+        "KeireEditorTests",
+        "KeireHubRuntime",
+        "KeireHubTests",
+        "KeireHubWorker",
+        "KeireRenderTests",
         "KeireRuntime",
         "KeireManaged",
+        "KeireManaged.Tests",
+        "SourceModules",
         "Scripts\Premake"
     )
     $inventory = foreach ($sourceRoot in $sourceRoots) {
@@ -59,13 +66,16 @@ function Get-ProjectGenerationFingerprint {
             $_.FullName.Substring($Root.ToString().Length).TrimStart("\", "/").Replace("\", "/")
         }
     }
+    $premakeSearchRoots = Get-ChildItem -LiteralPath $Root -Directory | Where-Object {
+        $_.Name -notin @(".git", "Build", "Vendor", "Tools")
+    }
     $premakeInputs = @(
         (Join-Path $Root "premake5.lua"),
         (Join-Path $Root "Config\Project.conf"),
         (Join-Path $Root "Config\Dependencies.lock")
-    ) + @(Get-ChildItem -LiteralPath $Root -Recurse -Filter "premake5.lua" -File | Where-Object {
-        $_.FullName -notmatch '[\\/](Build|Vendor|Tools)[\\/]'
-    } | ForEach-Object FullName)
+    ) + @($premakeSearchRoots | ForEach-Object {
+        Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "premake5.lua" -File | ForEach-Object FullName
+    })
 
     $lines = @($inventory | Sort-Object -Unique)
     foreach ($path in $premakeInputs | Sort-Object -Unique) {
@@ -366,22 +376,41 @@ function Assert-WindowsPackageStage {
     Assert-WindowsPackageGeneratedDataFree $Stage
 }
 
+function Get-WindowsRequiredHubContentPaths {
+    @(
+        "content\Content\en-US.json", "content\Licenses\catalog.json",
+        "content\Fonts\Inter-OFL.txt", "content\Fonts\Inter-Variable.ttf",
+        "content\Fonts\Material-Symbols-Apache-2.0.txt",
+        "content\Fonts\MaterialSymbolsRounded-Subset.ttf", "content\Fonts\SOURCES.md",
+        "content\Templates\catalog.json", "content\Templates\Payloads\Empty\README.md",
+        "content\Templates\Payloads\Starter3D\README.md",
+        "content\Templates\Payloads\Starter3D\Assets\Shaders\StarterUnlit.hlsl",
+        "content\Templates\Payloads\Starter3D\ProjectSettings\Rendering.keiresettings",
+        "content\Templates\Payloads\Sandbox\README.md",
+        "content\Templates\Payloads\Sandbox\Assets\Scripts\Sandbox.keireasm",
+        "content\Templates\Payloads\Sandbox\Assets\Scripts\Runtime\SandboxWelcome.cs",
+        "content\Templates\Payloads\Sandbox\ProjectSettings\Scripting.keiresettings",
+        "content\Templates\Thumbnails\empty.png", "content\Templates\Thumbnails\starter-3d.png",
+        "content\Templates\Thumbnails\sandbox.png"
+    )
+}
+
 function Get-WindowsRequiredEditorPackagePaths {
     param([string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
 
     $licenses = Get-WindowsRequiredPackagePaths $ClientTarget $HubTarget $CoreTarget $Namespace |
         Where-Object { $_.StartsWith("third-party\licenses\", [StringComparison]::OrdinalIgnoreCase) }
     @(
-        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe",
-        "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe",
+        "bin\$ClientTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe",
+        "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe",
         "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll",
         "bin\Managed\Coral.Managed.deps.json", "bin\Managed\Coral.Managed.runtimeconfig.json",
         "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
         "Config\Branding\Keire.png",
         "samples\KeireSandbox\ProjectSettings\Project.keireproject",
         "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "docs\PlayerBuilds.md", "README.md",
-        "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json", "editor-package.json",
-        "Launch-KeireEditor.cmd"
+        "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json",
+        "Config\SourceModules.premake.lua", "editor-package.json", "Launch-KeireEditor.cmd"
     ) + @($licenses)
 }
 
@@ -393,15 +422,46 @@ function Assert-WindowsEditorPackageStage {
             throw "Editor package is missing required content: $path"
         }
     }
-    foreach ($target in @($ClientTarget, $HubTarget)) {
-        $executable = Join-Path $Stage "bin\$target.exe"
-        if ((Get-WindowsExecutableSubsystem $executable) -ne 2) {
-            throw "Editor package executable must use the Windows GUI subsystem: bin\$target.exe"
+    $editorExecutable = Join-Path $Stage "bin\$ClientTarget.exe"
+    if ((Get-WindowsExecutableSubsystem $editorExecutable) -ne 2) {
+        throw "Editor package executable must use the Windows GUI subsystem: bin\$ClientTarget.exe"
+    }
+    foreach ($hubPath in @(
+            "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "content", "Launch-KeireHub.cmd",
+            "hub-package.json", "Config\Distribution.json", "docs\ProjectHub.md")) {
+        if (Test-Path -LiteralPath (Join-Path $Stage $hubPath)) {
+            throw "Editor package contains Hub-only content: $hubPath"
         }
     }
+    $launcher = Get-Content -LiteralPath (Join-Path $Stage "Launch-KeireEditor.cmd") -Raw
+    if ($launcher.IndexOf("bin\$ClientTarget.exe", [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+        $launcher.IndexOf("bin\$HubTarget.exe", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Editor package launcher must target only bin\$ClientTarget.exe."
+    }
+    $manifest = Get-Content -LiteralPath (Join-Path $Stage "editor-package.json") -Raw | ConvertFrom-Json
+    $manifestPropertyNames = @($manifest.PSObject.Properties.Name)
+    $entrypointNames = @($manifest.entrypoints.PSObject.Properties.Name)
+    $legacyFields = @($manifest.compatibility.legacyTopLevelFields)
+    $requiredLegacyFields = @(
+        "artifact", "project", "version", "commit", "dirty", "developmentArtifact", "platform",
+        "architecture", "configuration", "launcher", "bundledDotnetSdk", "buildManifest"
+    )
+    $missingLegacyFields = @($requiredLegacyFields | Where-Object { $legacyFields -notcontains $_ })
+    if ($manifest.schemaVersion -ne 2 -or $manifest.artifact -ne "editor" -or
+        $manifest.compatibility.legacySchemaVersion -ne 1 -or
+        $missingLegacyFields.Count -ne 0 -or $manifest.launcher -ne "Launch-KeireEditor.cmd" -or
+        -not $manifest.bundledDotnetSdk -or $manifest.buildManifest -ne "build-manifest.json" -or
+        $manifest.entrypoints.editor -ne "bin/$ClientTarget.exe" -or $entrypointNames -contains "hub" -or
+        $entrypointNames -contains "worker" -or $manifestPropertyNames -notcontains "packagedTemplates" -or
+        @($manifest.packagedTemplates).Count -ne 0 -or $manifestPropertyNames -contains "templateCatalog") {
+        throw "Editor package manifest must preserve schema compatibility without Hub-owned content or entrypoints."
+    }
     $dotnetSdk = Get-ChildItem -LiteralPath (Join-Path $Stage "bin\Managed\Dotnet\sdk") -Directory `
-        -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^10\.' } | Select-Object -First 1
-    if (-not $dotnetSdk) { throw "Editor package does not contain the .NET 10 SDK." }
+        -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^10\.' } |
+        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+    if (-not $dotnetSdk -or $manifest.bundledDotnetSdk -ne $dotnetSdk.Name) {
+        throw "Editor package does not contain its declared .NET 10 SDK."
+    }
     foreach ($pattern in @("avcodec-*.dll", "avformat-*.dll", "avutil-*.dll", "swresample-*.dll")) {
         if (-not (Get-ChildItem -LiteralPath (Join-Path $Stage "bin") -Filter $pattern -File |
             Select-Object -First 1)) {
@@ -411,6 +471,51 @@ function Assert-WindowsEditorPackageStage {
     foreach ($developmentDirectory in @("include", "lib", "examples")) {
         if (Test-Path -LiteralPath (Join-Path $Stage $developmentDirectory)) {
             throw "Editor package contains SDK-only content: $developmentDirectory"
+        }
+    }
+    Assert-WindowsPackageGeneratedDataFree $Stage
+}
+
+function Get-WindowsRequiredHubPackagePaths {
+    param([string]$HubTarget, [string]$Namespace)
+
+    @(
+        "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "Config\Branding\Keire.png",
+        "Config\SourceModules.premake.lua", "Config\Distribution.json",
+        "docs\ProjectHub.md", "Samples\KeireSandbox\ProjectSettings\Project.keireproject", "README.md",
+        "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "hub-package.json", "Launch-KeireHub.cmd",
+        "bin\libsodium.dll", "third-party\licenses\libsodium-LICENSE.txt",
+        "third-party\licenses\spdlog-LICENSE.txt", "third-party\licenses\fmt-LICENSE.rst",
+        "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt",
+        "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt",
+        "third-party\licenses\glm-COPYING.txt", "third-party\licenses\SDL3-LICENSE.txt"
+    ) + @(Get-WindowsRequiredHubContentPaths)
+}
+
+function Assert-WindowsHubPackageStage {
+    param([string]$Stage, [string]$HubTarget, [string]$ClientTarget, [string]$Namespace)
+
+    foreach ($path in (Get-WindowsRequiredHubPackagePaths $HubTarget $Namespace)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Stage $path) -PathType Leaf)) {
+            throw "Hub package is missing required content: $path"
+        }
+    }
+    if ((Get-WindowsExecutableSubsystem (Join-Path $Stage "bin\$HubTarget.exe")) -ne 2) {
+        throw "Hub package executable must use the Windows GUI subsystem: bin\$HubTarget.exe"
+    }
+    if ((Get-WindowsExecutableSubsystem (Join-Path $Stage "bin\$($Namespace)HubWorker.exe")) -ne 3) {
+        throw "Hub package worker must use the Windows console subsystem: bin\$($Namespace)HubWorker.exe"
+    }
+    foreach ($editorPath in @(
+            "bin\$ClientTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe",
+            "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\Managed\Dotnet\sdk")) {
+        if (Test-Path -LiteralPath (Join-Path $Stage $editorPath)) {
+            throw "Hub package contains editor-only content: $editorPath"
+        }
+    }
+    foreach ($developmentDirectory in @("include", "lib", "examples")) {
+        if (Test-Path -LiteralPath (Join-Path $Stage $developmentDirectory)) {
+            throw "Hub package contains SDK-only content: $developmentDirectory"
         }
     }
     Assert-WindowsPackageGeneratedDataFree $Stage

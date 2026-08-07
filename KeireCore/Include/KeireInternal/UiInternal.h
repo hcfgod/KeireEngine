@@ -25,6 +25,8 @@ namespace Keire
         [[nodiscard]] UiFrame& Frame() noexcept;
         [[nodiscard]] UiWorkspace* Workspace() noexcept;
         [[nodiscard]] const UiWorkspace* Workspace() const noexcept;
+        void SetTheme(UiTheme theme);
+        [[nodiscard]] UiTheme Theme() const noexcept;
         void EndFrame();
         void Shutdown() noexcept;
         [[nodiscard]] UiCaptureState Capture() const noexcept;

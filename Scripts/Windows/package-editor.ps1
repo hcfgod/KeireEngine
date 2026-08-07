@@ -43,8 +43,11 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 foreach ($directory in @("bin", "samples", "docs")) {
     Copy-Item -LiteralPath (Join-Path $sdkStage $directory) -Destination $stage -Recurse
 }
+Remove-Item -LiteralPath (Join-Path $stage "bin\$($Project.HUB_TARGET).exe"), `
+    (Join-Path $stage "bin\$($Project.PROJECT_NAMESPACE)HubWorker.exe") -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force (Join-Path $stage "Config"), (Join-Path $stage "third-party") | Out-Null
 Copy-Item -LiteralPath (Join-Path $sdkStage "Config\Client.json") -Destination (Join-Path $stage "Config")
+Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") -Destination (Join-Path $stage "Config")
 New-Item -ItemType Directory -Force (Join-Path $stage "Config\Branding") | Out-Null
 Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
@@ -53,6 +56,7 @@ Copy-Item -LiteralPath (Join-Path $sdkStage "third-party\licenses") `
 foreach ($file in @("README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
     Copy-Item -LiteralPath (Join-Path $sdkStage $file) -Destination $stage
 }
+Copy-Item -LiteralPath (Join-Path $Root "CHANGELOG.md") -Destination $stage
 
 $dotnetSource = Join-Path $Root "Build\Dependencies\dotnet-sdk"
 $dotnetDestination = Join-Path $stage "bin\Managed\Dotnet"
@@ -70,34 +74,38 @@ if ($sdkManifest.configuration -ne "Dist" -or $sdkManifest.platform -ne "Windows
 $dotnetSdk = Get-ChildItem -LiteralPath (Join-Path $dotnetDestination "sdk") -Directory |
     Where-Object { $_.Name -match '^10\.' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $dotnetSdk) { throw "The bundled editor runtime does not contain the .NET 10 SDK." }
-$editorManifest = [ordered]@{
-    schemaVersion = 1
-    artifact = "editor"
-    project = $Project.PROJECT_IDENTIFIER
-    version = $Project.PROJECT_VERSION
-    commit = $sdkManifest.commit
-    dirty = [bool]$sdkManifest.dirty
-    developmentArtifact = [bool]$sdkManifest.developmentArtifact
-    platform = "Windows"
-    architecture = $sdkManifest.architecture
-    configuration = "Dist"
-    launcher = "Launch-KeireEditor.cmd"
-    bundledDotnetSdk = $dotnetSdk.Name
-    buildManifest = "build-manifest.json"
-}
-$editorManifestJson = $editorManifest | ConvertTo-Json
-[IO.File]::WriteAllText((Join-Path $stage "editor-package.json"), $editorManifestJson + "`n",
-    [Text.UTF8Encoding]::new($false))
-$launcher = "@echo off`r`nstart `"`" `"%~dp0bin\$($Project.HUB_TARGET).exe`"`r`n"
+$launcher = "@echo off`r`nstart `"`" `"%~dp0bin\$($Project.CLIENT_TARGET).exe`" %*`r`n"
 [IO.File]::WriteAllText((Join-Path $stage "Launch-KeireEditor.cmd"), $launcher,
     [Text.ASCIIEncoding]::new())
+$python = (Get-Command python -ErrorAction Stop).Source
+$manifestWriter = Join-Path $Root "Scripts\Packaging\write-package-manifest.py"
+$manifestArguments = @(
+    $manifestWriter, "write", "--stage", $stage, "--output", "editor-package.json",
+    "--artifact", "editor", "--package-prefix", $Project.ARTIFACT_PREFIX,
+    "--project", $Project.PROJECT_IDENTIFIER, "--version", $Project.PROJECT_VERSION,
+    "--channel", "Stable", "--commit", [string]$sdkManifest.commit,
+    "--dirty", ([bool]$sdkManifest.dirty).ToString().ToLowerInvariant(),
+    "--development-artifact", ([bool]$sdkManifest.developmentArtifact).ToString().ToLowerInvariant(),
+    "--platform", "Windows", "--architecture", [string]$sdkManifest.architecture,
+    "--configuration", "Dist", "--launcher", "Launch-KeireEditor.cmd",
+    "--build-manifest", "build-manifest.json", "--bundled-dotnet-sdk", $dotnetSdk.Name,
+    "--module-definition", "Config/SourceModules.premake.lua", "--project-schema-minimum", "1",
+    "--project-schema-maximum", "3", "--entrypoint", "editor=bin/$($Project.CLIENT_TARGET).exe",
+    "--entrypoint", "assetTool=bin/$($Project.PROJECT_NAMESPACE)AssetTool.exe",
+    "--entrypoint", "assetWorker=bin/$($Project.PROJECT_NAMESPACE)AssetWorker.exe",
+    "--entrypoint", "runtime=bin/$($Project.PROJECT_NAMESPACE)Runtime.exe",
+    "--entrypoint", "shaderCompiler=bin/KeireShaderCompiler.exe",
+    "--toolchain", "dotnet-sdk|$($dotnetSdk.Name)|bin/Managed/Dotnet",
+    "--release-notes", "CHANGELOG.md"
+)
+Invoke-CheckedWindowsCommand { & $python @manifestArguments } "Editor package manifest generation"
 
 Assert-WindowsEditorPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET `
     $Project.PROJECT_NAMESPACE
-$hubVersion = Invoke-WindowsExecutableCapture `
-    (Join-Path $stage "bin\$($Project.HUB_TARGET).exe") @("--version")
-if ($hubVersion.ExitCode -ne 0 -or -not $hubVersion.StandardOutput.Contains($Project.PROJECT_VERSION)) {
-    throw "Packaged Project Hub version validation failed."
+$editorVersion = Invoke-WindowsExecutableCapture `
+    (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") @("--version")
+if ($editorVersion.ExitCode -ne 0 -or -not $editorVersion.StandardOutput.Contains($Project.PROJECT_VERSION)) {
+    throw "Packaged editor version validation failed."
 }
 $sdkList = (& (Join-Path $dotnetDestination "dotnet.exe") --list-sdks) -join "`n"
 if ($LASTEXITCODE -ne 0 -or -not $sdkList.Contains($dotnetSdk.Name)) {
@@ -115,9 +123,19 @@ try {
     Expand-Archive -LiteralPath $archive -DestinationPath $validationRoot -Force
     Assert-WindowsEditorPackageStage $validationRoot $Project.CLIENT_TARGET $Project.HUB_TARGET `
         $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
+    Invoke-CheckedWindowsCommand {
+        & $python $manifestWriter validate --stage $validationRoot --manifest editor-package.json `
+            --artifact editor
+    } "Extracted editor package manifest validation"
     $extractedSdkList = (& (Join-Path $validationRoot "bin\Managed\Dotnet\dotnet.exe") --list-sdks) -join "`n"
     if ($LASTEXITCODE -ne 0 -or -not $extractedSdkList.Contains($dotnetSdk.Name)) {
         throw "Extracted editor package .NET SDK validation failed."
+    }
+    $extractedEditorVersion = Invoke-WindowsExecutableCapture `
+        (Join-Path $validationRoot "bin\$($Project.CLIENT_TARGET).exe") @("--version")
+    if ($extractedEditorVersion.ExitCode -ne 0 -or
+        -not $extractedEditorVersion.StandardOutput.Contains($Project.PROJECT_VERSION)) {
+        throw "Extracted editor package version validation failed."
     }
 }
 finally {

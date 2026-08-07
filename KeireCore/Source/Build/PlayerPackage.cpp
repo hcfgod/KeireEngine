@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -36,6 +37,26 @@ namespace Keire::Detail
         constexpr std::size_t MaximumDescriptorBytes = 64U * 1024U;
         constexpr std::size_t MaximumIconSourceBytes = 64U * 1024U * 1024U;
         constexpr std::size_t MaximumEncodedIconBytes = 32U * 1024U * 1024U;
+
+        void ValidatePlayerBuildStatusDocument(const PlayerBuildStatusDocument& document)
+        {
+            if (document.State != "running" && document.State != "succeeded" && document.State != "failed")
+                throw std::runtime_error("Player builder status document has an unknown state.");
+            if (!std::isfinite(document.Progress) || document.ErrorCode.size() > 128)
+                throw std::runtime_error("Player builder status document fields exceed their limits.");
+            if (!document.ErrorCode.empty() && (!std::ranges::all_of(document.ErrorCode,
+                                                                     [](const unsigned char value)
+                                                                     {
+                                                                         return (value >= 'a' && value <= 'z') ||
+                                                                                (value >= '0' && value <= '9') ||
+                                                                                value == '_' || value == '-' ||
+                                                                                value == '.';
+                                                                     }) ||
+                                                document.State != "failed"))
+            {
+                throw std::runtime_error("Player builder status document error code is invalid.");
+            }
+        }
 
         struct BrandingImage final
         {
@@ -899,6 +920,23 @@ namespace Keire::Detail
         return result;
     }
 
+    void WritePlayerBuildStatusDocument(const std::filesystem::path& path, const PlayerBuildStatusDocument& document)
+    {
+        ValidatePlayerBuildStatusDocument(document);
+        const Json encoded{{"schemaVersion", 1},
+                           {"state", document.State},
+                           {"phase", document.Phase},
+                           {"progress", std::clamp(document.Progress, 0.0F, 1.0F)},
+                           {"message", document.Message},
+                           {"errorCode", document.ErrorCode},
+                           {"output", PathToUtf8(document.Output)},
+                           {"executable", PathToUtf8(document.Executable)}};
+        const auto text = encoded.dump(2) + '\n';
+        if (text.size() > MaximumDescriptorBytes)
+            throw std::runtime_error("Player builder status document exceeds its size limit.");
+        WriteTextFileAtomically(path, text);
+    }
+
     PlayerBuildStatusDocument ReadPlayerBuildStatusDocument(const std::filesystem::path& path)
     {
         const auto document = Json::parse(ReadTextFile(path, MaximumDescriptorBytes));
@@ -906,13 +944,14 @@ namespace Keire::Detail
             throw std::runtime_error("Player builder status document is incompatible.");
         PlayerBuildStatusDocument result;
         result.State = document.at("state").get<std::string>();
-        if (result.State != "running" && result.State != "succeeded" && result.State != "failed")
-            throw std::runtime_error("Player builder status document has an unknown state.");
         result.Phase = document.value("phase", std::string{});
-        result.Progress = std::clamp(document.value("progress", 0.0F), 0.0F, 1.0F);
+        result.Progress = document.value("progress", 0.0F);
         result.Message = document.value("message", std::string{});
+        result.ErrorCode = document.value("errorCode", std::string{});
         result.Output = PathFromUtf8(document.value("output", std::string{}));
         result.Executable = PathFromUtf8(document.value("executable", std::string{}));
+        ValidatePlayerBuildStatusDocument(result);
+        result.Progress = std::clamp(result.Progress, 0.0F, 1.0F);
         return result;
     }
 } // namespace Keire::Detail

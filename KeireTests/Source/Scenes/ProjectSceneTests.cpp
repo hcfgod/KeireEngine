@@ -1,5 +1,7 @@
 #include "KeireTests/TestSupport.h"
 
+#include "KeireInternal/FileSystem.h"
+
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
@@ -177,6 +179,11 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     const auto created = Keire::Project::Create({directory.Path, "Game", Keire::ProjectTemplate::Starter});
     REQUIRE(created);
     CHECK(created->Descriptor().Name == "Game");
+    CHECK(created->Descriptor().SchemaVersion == 3);
+    CHECK_FALSE(created->Descriptor().CreatedAt.empty());
+    CHECK(created->Descriptor().LastSavedWithEngineVersion == created->Descriptor().CreatedWithEngineVersion);
+    REQUIRE(created->Descriptor().Template);
+    CHECK(created->Descriptor().Template->Id == "keire.3d-starter");
     CHECK(created->Descriptor().DefaultInput);
     CHECK(created->Descriptor().StartupScene);
     CHECK(std::filesystem::exists(created->Root() / "Assets/Input/DefaultInput.keireinput"));
@@ -240,12 +247,14 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
 
     const auto registryPath = directory.Path / "Registry/projects.json";
     auto registry = Keire::CreateRef<Keire::ProjectRegistry>(registryPath);
-    registry->RecordOpened(*exclusive);
+    registry->RecordOpened(*exclusive, "editor-stable-1");
     REQUIRE(registry->Entries().size() == 1);
     CHECK(registry->Entries().front().Status == Keire::ProjectStatus::InUse);
+    CHECK(registry->Entries().front().PreferredEditorInstallation == "editor-stable-1");
     exclusive.Reset();
     registry->Refresh();
     CHECK(registry->Entries().front().Status == Keire::ProjectStatus::Ready);
+    CHECK(registry->Entries().front().PreferredEditorInstallation == "editor-stable-1");
     CHECK(registry->SetPinned(descriptor.Id, true));
     CHECK(registry->Entries().front().Pinned);
     CHECK(registry->Remove(descriptor.Id));
@@ -266,7 +275,7 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
 TEST_CASE("Project registry preserves UTF-8 paths across save and reload")
 {
     TemporaryDirectory directory("ProjectUtf8Tests");
-    const auto unicodeParent = directory.Path / std::filesystem::path(u8"Kéire Projects");
+    const auto unicodeParent = directory.Path / Keire::Detail::PathFromUtf8("Kéire Projects");
     std::filesystem::create_directories(unicodeParent);
     const auto project = Keire::Project::Create({unicodeParent, "Sandbox", Keire::ProjectTemplate::Empty});
     const auto registryPath = directory.Path / "Registry/projects.json";
@@ -280,6 +289,95 @@ TEST_CASE("Project registry preserves UTF-8 paths across save and reload")
     REQUIRE(reloaded->Entries().size() == 1);
     CHECK(reloaded->Entries().front().Root == project->Root());
     CHECK(reloaded->Entries().front().Status == Keire::ProjectStatus::Ready);
+    CHECK_FALSE(reloaded->Entries().front().LastSavedWithEngineVersion.empty());
+    const auto persisted = KeireTests::ReadFile(registryPath);
+    CHECK(persisted.find(R"("schemaVersion": 2)") != std::string::npos);
+    CHECK(persisted.find(R"("cachedMetadata")") != std::string::npos);
+    CHECK(persisted.find(R"("projectSchemaVersion": 3)") != std::string::npos);
+    CHECK(persisted.find(R"("added":)") != std::string::npos);
+}
+
+TEST_CASE("Project registry can load cached metadata without touching project folders")
+{
+    TemporaryDirectory directory("ProjectCachedRegistryTests");
+    auto project = Keire::Project::Create({directory.Path, "Cached", Keire::ProjectTemplate::Empty});
+    const auto root = project->Root();
+    const auto registryPath = directory.Path / "Registry/projects.json";
+    {
+        const auto registry = Keire::CreateRef<Keire::ProjectRegistry>(registryPath);
+        registry->RecordOpened(*project);
+    }
+    project.Reset();
+    std::filesystem::remove_all(root);
+
+    const auto cached =
+        Keire::CreateRef<Keire::ProjectRegistry>(registryPath, Keire::ProjectRegistryLoadMode::CachedMetadata);
+    REQUIRE(cached->Entries().size() == 1);
+    CHECK(cached->Entries().front().Status == Keire::ProjectStatus::Ready);
+
+    const auto refreshed = Keire::CreateRef<Keire::ProjectRegistry>(registryPath);
+    REQUIRE(refreshed->Entries().size() == 1);
+    CHECK(refreshed->Entries().front().Status == Keire::ProjectStatus::Missing);
+}
+
+TEST_CASE("Project registry preserves cached upgrade availability")
+{
+    TemporaryDirectory directory("ProjectCachedUpgradeTests");
+    const auto project = Keire::Project::Create({directory.Path, "Upgradeable", Keire::ProjectTemplate::Empty});
+    const auto registryPath = directory.Path / "Registry/projects.json";
+    {
+        const auto registry = Keire::CreateRef<Keire::ProjectRegistry>(registryPath);
+        registry->RecordOpened(*project);
+    }
+
+    auto source = KeireTests::ReadFile(registryPath);
+    const auto ready = source.find(R"("status": "ready")");
+    REQUIRE(ready != std::string::npos);
+    source.replace(ready, std::string_view(R"("status": "ready")").size(), R"("status": "upgradeAvailable")");
+    {
+        std::ofstream output(registryPath, std::ios::binary | std::ios::trunc);
+        REQUIRE(output);
+        output << source;
+    }
+
+    const auto cached =
+        Keire::CreateRef<Keire::ProjectRegistry>(registryPath, Keire::ProjectRegistryLoadMode::CachedMetadata);
+    REQUIRE(cached->Entries().size() == 1);
+    CHECK(cached->Entries().front().Status == Keire::ProjectStatus::UpgradeAvailable);
+    REQUIRE(cached->SetPinned(project->Descriptor().Id, true));
+
+    const auto reloaded =
+        Keire::CreateRef<Keire::ProjectRegistry>(registryPath, Keire::ProjectRegistryLoadMode::CachedMetadata);
+    REQUIRE(reloaded->Entries().size() == 1);
+    CHECK(reloaded->Entries().front().Status == Keire::ProjectStatus::UpgradeAvailable);
+}
+
+TEST_CASE("Version-neutral project inspection preserves common metadata from newer schemas")
+{
+    TemporaryDirectory directory("ProjectFutureSchemaTests");
+    auto project = Keire::Project::Create({directory.Path, "Future", Keire::ProjectTemplate::Empty});
+    const auto id = project->Descriptor().Id;
+    const auto root = project->Root();
+    project.Reset();
+
+    const auto marker = root / "ProjectSettings/Project.keireproject";
+    auto source = KeireTests::ReadFile(marker);
+    const auto schema = source.find(R"("schemaVersion": 3)");
+    REQUIRE(schema != std::string::npos);
+    source.replace(schema, std::string_view(R"("schemaVersion": 3)").size(), R"("schemaVersion": 99)");
+    {
+        std::ofstream output(marker, std::ios::binary | std::ios::trunc);
+        REQUIRE(output);
+        output << source;
+    }
+
+    const auto inspection = Keire::Project::InspectMetadata(root);
+    CHECK(inspection.Status == Keire::ProjectStatus::UnsupportedSchema);
+    CHECK(inspection.SchemaVersion == 99);
+    CHECK(inspection.Id == id);
+    CHECK(inspection.Name == "Future");
+    CHECK_FALSE(inspection.LastSavedWithEngineVersion.empty());
+    CHECK_THROWS_AS((void)Keire::Project::Open(root), std::runtime_error);
 }
 
 TEST_CASE("Scene assets and mutable scenes preserve validated hierarchy ordering")

@@ -42,9 +42,12 @@ TEST_CASE("Window configuration accepts complete, partial, and Unicode documents
     CHECK(specification.Resizable);
 
     TemporaryConfiguration complete(
-        R"({"window":{"title":"Client","width":1920,"height":1080,"resizable":false,"highPixelDensity":false,"visible":false,"maximized":false,"mode":"borderlessFullscreen"}})");
+        R"({"window":{"title":"Client","width":1920,"height":1080,"minimumWidth":960,"minimumHeight":640,"resizable":false,"highPixelDensity":false,"visible":false,"maximized":false,"mode":"borderlessFullscreen","decoration":"custom"}})");
     const auto fullscreen = Keire::LoadWindowSpecification(complete.Path());
     CHECK(fullscreen.Mode == Keire::WindowMode::BorderlessFullscreen);
+    CHECK(fullscreen.Decoration == Keire::WindowDecoration::Custom);
+    CHECK(fullscreen.MinimumWidth == 960);
+    CHECK(fullscreen.MinimumHeight == 640);
     CHECK_FALSE(fullscreen.Visible);
 }
 
@@ -62,6 +65,8 @@ TEST_CASE("Window configuration rejects structural and semantic errors")
     reject(R"({"window":{"width":"wide"}})");
     reject(R"({"window":{"width":0}})");
     reject(R"({"window":{"height":16385}})");
+    reject(R"({"window":{"width":800,"minimumWidth":801}})");
+    reject(R"({"window":{"decoration":"frameless"}})");
     reject(R"({"window":{"title":""}})");
     reject(R"({"window":{"mode":"exclusive"}})");
     reject(R"({"window":{"mode":"borderlessFullscreen","maximized":true}})");

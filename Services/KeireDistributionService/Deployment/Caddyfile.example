@@ -1,0 +1,23 @@
+{$KEIRE_DISTRIBUTION_HOST:distribution.example.invalid} {
+  encode zstd gzip
+
+  @unsupported_method not method GET HEAD
+  respond @unsupported_method 405
+
+  reverse_proxy 127.0.0.1:5088
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    -Server
+  }
+
+  log {
+    output file {$KEIRE_CADDY_LOG:logs/distribution-access.json} {
+      roll_size 100MiB
+      roll_keep 10
+      roll_keep_for 720h
+    }
+    format json
+  }
+}

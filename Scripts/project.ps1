@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "package", "package-editor", "package-installer", "doctor", "rename", "vendor-update", "help")]
+    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
     [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
@@ -43,7 +43,9 @@ $Project = Get-ProjectConfig
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 if ($Command -eq "package" -and -not $ConfigurationWasProvided) { $Configuration = "Release" }
-if ($Command -in @("package-editor", "package-installer")) { $Configuration = "Dist" }
+if ($Command -in @("package-editor", "package-hub", "package-installer", "package-hub-installer")) {
+    $Configuration = "Dist"
+}
 
 function Invoke-CheckedCommand {
     param(
@@ -119,12 +121,26 @@ function Invoke-ProjectCommand {
                     -AllowDirty:$AllowDirty
             } "Editor package"
         }
+        "package-hub" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "package-hub.ps1") -Generator $Generator `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
+                    -AllowDirty:$AllowDirty
+            } "Standalone Hub package"
+        }
         "package-installer" {
             Invoke-CheckedCommand {
                 & (Join-Path $WindowsScripts "package-installer.ps1") -Generator $Generator `
                     -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
                     -AllowDirty:$AllowDirty
             } "Editor installer"
+        }
+        "package-hub-installer" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "package-hub-installer.ps1") -Generator $Generator `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
+                    -AllowDirty:$AllowDirty
+            } "Standalone Hub installer"
         }
         "doctor" {
             Invoke-CheckedCommand {
@@ -154,7 +170,8 @@ function Show-Help {
 Usage: Scripts\project.ps1 <command> [options]
 
 Commands: bootstrap, generate, build, test, run, clean, coverage, package,
-          package-editor, package-installer, doctor, rename, vendor-update, help
+          package-editor, package-hub, package-installer, package-hub-installer,
+          doctor, rename, vendor-update, help
 
 Common options:
   -Generator <vs2026|vs2022|vs2019|ninja|gmake|compilecommands>
@@ -165,7 +182,9 @@ Common options:
   -Editor -ProjectPath <path> (open the editor directly instead of the project hub)
   -CleanScope <full|build|generated> (clean only; full removes the complete Build directory)
   package-editor writes a ready-to-run Dist editor under Build\Distributions and an archive under Artifacts
-  package-installer builds that distribution and creates the native OS installer under Artifacts
+  package-hub writes a standalone Dist Hub under Build\Distributions and an archive under Artifacts
+  package-installer builds the editor distribution and creates its native OS installer under Artifacts
+  package-hub-installer builds the standalone Hub distribution and its native installer under Artifacts
 "@
 }
 
@@ -199,12 +218,14 @@ function Show-Menu {
         Write-Host "6. Coverage report"
         Write-Host "7. Package SDK"
         Write-Host "8. Package Editor (Dist)"
-        Write-Host "9. Package Editor Installer"
-        Write-Host "10. Doctor"
-        Write-Host "11. Clean"
-        Write-Host "12. Vendor update"
-        Write-Host "13. Rename template"
-        Write-Host "14. Exit"
+        Write-Host "9. Package Hub (Dist)"
+        Write-Host "10. Package Editor Installer"
+        Write-Host "11. Package Standalone Hub Installer"
+        Write-Host "12. Doctor"
+        Write-Host "13. Clean"
+        Write-Host "14. Vendor update"
+        Write-Host "15. Rename template"
+        Write-Host "16. Exit"
         Write-Host ""
         $choice = Read-Host "Choose an option"
         try {
@@ -217,11 +238,13 @@ function Show-Menu {
                 "6" { Read-BuildSettings $false; Invoke-ProjectCommand coverage }
                 "7" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
                 "8" { Read-BuildSettings $false; Invoke-ProjectCommand package-editor }
-                "9" { Read-BuildSettings $false; Invoke-ProjectCommand package-installer }
-                "10" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
-                "11" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
-                "12" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest, SDL, json, imgui)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
-                "13" {
+                "9" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub }
+                "10" { Read-BuildSettings $false; Invoke-ProjectCommand package-installer }
+                "11" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub-installer }
+                "12" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
+                "13" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
+                "14" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest, SDL, json, imgui)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
+                "15" {
                     # Keep proposed values local so a failed rename cannot poison
                     # the defaults shown by the next menu attempt.
                     $proposedName = Read-Setting "PascalCase identifier" $Project.PROJECT_IDENTIFIER
@@ -236,7 +259,7 @@ function Show-Menu {
                         $script:Target = $Project.CLIENT_TARGET
                     }
                 }
-                "14" { return }
+                "16" { return }
                 default { Write-Warning "Invalid menu choice '$choice'." }
             }
         }

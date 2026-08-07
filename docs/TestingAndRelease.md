@@ -100,8 +100,10 @@ behavior or concurrency. A missing host capability must be reported; it is not e
 
 ## Focused Tests
 
-KeireTests uses doctest and remains independent of KeireClient. Tests should cover the successful contract, invalid
-input, failure rollback, lifecycle edges, and retained-object behavior where relevant.
+KeireTests uses doctest and remains independent of KeireClient. `KeireEditorTests` owns editor document and worker
+coverage, while `KeireHubTests` owns the private Hub runtime and Hub-product integration boundary, including
+secondary-process activation. The normal test launcher builds and runs all three suites. Tests should cover the
+successful contract, invalid input, failure rollback, lifecycle edges, and retained-object behavior where relevant.
 
 Window and application tests use SDL's dummy video driver, drain events, and shut services down explicitly. UI tests
 use `UiMode::Headless` unless renderer integration is the subject under test. Temporary layout and theme directories
@@ -263,25 +265,102 @@ bash Scripts/project.sh package-editor --generator ninja --toolset clang
 ```
 
 Run the command on each release OS. Windows produces a `.zip`, while Linux and macOS produce `.tar.gz` archives;
-macOS also receives a Project Hub `.app` launcher. Native editor binaries and platform SDK/framework dependencies are
-not cross-packaged from a different host.
+macOS also receives an Editor `.app` launcher. Editor artifacts contain no Hub executable, HubWorker, Hub content,
+Hub-owned native launcher, desktop file, or icon; those belong exclusively to the standalone Hub package. Native editor
+binaries and platform SDK/framework dependencies are not cross-packaged from a different host.
 
 The command first runs the normal Dist test, editor smoke, asset-cook, runtime-smoke, manifest, and license staging
-gate. It then publishes an end-user layout containing the Hub, editor, AssetTool, private AssetWorker, runtime, shader
+gate. It then publishes an end-user layout containing the editor, AssetTool, private AssetWorker, runtime, shader
 compiler, FFmpeg runtime, managed host, complete .NET 10 SDK, tracked sandbox, documentation, and third-party notices.
-SDK-only headers, static libraries, CMake metadata, and consumer examples are deliberately omitted. Validation checks
+Hub-owned templates, content catalogs, fonts, and their license records are deliberately omitted. SDK-only headers,
+static libraries, CMake metadata, and consumer examples are also omitted. Validation checks
 the stage, the compressed archive, and an extracted copy; it also executes the staged and extracted .NET SDK. The
 archive has a separate `editor-package.json` referencing the locked `build-manifest.json`, and its checksum is written
 beside it under `Artifacts/`. The validated, unpacked distribution remains available under `Build/Distributions/` for
-immediate local use through its platform launcher.
+immediate local use through `launch-editor.sh --project <path>` on Unix or its platform launcher.
 
-Windows Dist packages link the Hub and editor as GUI-subsystem executables with `mainCRTStartup`. Normal packaged
-launches therefore create no terminal window; native Core and Client records remain visible through the editor Console
-and rotating log files. Development configurations retain their terminal sink, and dependency-free help/version
-commands preserve command-line output for validation and diagnostics.
+`editor-package.json` is schema 2. Its machine-readable contract includes `entrypoints.editor` plus editor-specific
+companion-tool entrypoints, `projectSchema.minimum`/`maximum`, `moduleFingerprint`, `manifestFingerprint`, optional
+`packagedTemplates`, `bundledToolchains`, `licenseReferences`, `releaseNotes`, `files`, and `installedSizeBytes`. Every
+inventory entry has a normalized relative path, byte count, and SHA-256 digest. The canonical manifest fingerprint
+covers metadata and the file inventory without introducing a self-hash cycle; installed size includes the manifest
+itself. Packaging validates the staged and extracted bytes against that inventory. Schema-1 consumers remain
+supported because the original
+top-level identity, worktree, platform, launcher, `bundledDotnetSdk`, and `buildManifest` fields are retained and
+declared by `compatibility.legacyTopLevelFields`.
+
+Windows Dist editor packages stage the editor as a GUI-subsystem executable with `mainCRTStartup`; the independently
+packaged Hub remains outside the editor artifact. Normal packaged launches therefore create no terminal window; native
+Core and Client records remain visible through the editor Console and rotating log files. Development configurations
+retain their terminal sink, and dependency-free help/version commands preserve command-line output for validation and
+diagnostics.
 
 The same clean-worktree policy as SDK packaging applies. `-AllowDirty` or `--allow-dirty` remains a local diagnostic
 escape hatch, is rejected in CI, and is recorded in both manifests.
+
+## Standalone Hub Distribution Package
+
+The Hub lifecycle can be built and published independently of every versioned editor:
+
+```powershell
+./Scripts/project.ps1 package-hub -Generator vs2022 -Toolset msc
+```
+
+```sh
+bash Scripts/project.sh package-hub --generator ninja --toolset clang
+```
+
+This command always builds Dist and copies only the Hub executable, its private HubWorker task process and load-time
+runtime, branding,
+licensed Hub fonts, tracked documentation and sandbox learning content, validated template catalog/payloads, notices,
+and licenses. It deliberately rejects a staged editor or editor-specific AssetWorker
+executable and SDK-only `include`, `lib`, or `examples` trees. It does not invoke the SDK or editor packager. Windows
+publishes a `.zip`; Linux and macOS publish `.tar.gz` files, with a native Hub `.app` launcher included on macOS. The
+unpacked stage remains in `Build/Distributions/` and the archive plus SHA-256 file is written to `Artifacts/`.
+
+`hub-package.json` uses the same schema-2 identity, fingerprints, exact file inventory, installed-size, license, and
+release-note contracts as editor packages. Hub packages have `hub` and private `worker` entrypoints and no editor
+entrypoint. A bundled
+.NET runtime is represented as a read-only `bundledToolchains` entry only when it exists in the built Hub output. The
+stage and an extracted archive copy are both validated before publication. The native editor installer consumes the
+backward-compatible but editor-only package; the standalone Hub installer consumes only this independent Hub stage.
+
+## Standalone Hub Native Installers
+
+Create a native installer without bundling an editor:
+
+```powershell
+winget install NSIS.NSIS
+./Scripts/project.ps1 package-hub-installer -Generator vs2022 -Toolset msc
+```
+
+```sh
+bash Scripts/project.sh package-hub-installer --generator ninja --toolset clang
+```
+
+Windows compiles `Installer/Windows/KeireHub.nsi` into a per-user Hub setup executable. macOS wraps the exact Hub stage
+inside a self-contained Hub `.app` and drag-to-Applications DMG. Linux installs that stage beneath `/opt/keire-hub`
+with a `keire-hub` command, desktop entry, and icon. Its `/usr/bin` wrapper executes the explicit `/opt` Hub binary so
+the package-relative launcher cannot resolve beside `/usr/bin`. All three update or remove only the application
+payload; Hub preferences, package caches, project metadata, and managed or externally located editor roots remain
+untouched by default.
+
+Set `KEIRE_WINDOWS_SIGNING_CERT_SHA1` to the Authenticode certificate thumbprint on Windows;
+`KEIRE_WINDOWS_TIMESTAMP_URL` optionally overrides the RFC 3161 timestamp service. On macOS,
+`KEIRE_MACOS_SIGNING_IDENTITY` enables hardened-runtime signing and `KEIRE_MACOS_NOTARY_PROFILE` names the
+`xcrun notarytool` keychain profile used for submission and stapling. A notarization profile requires a signing
+identity. Hub code is signed explicitly from inner Mach-O files and nested bundles outward; the packager never uses
+blanket `--deep` signing and gives the native Hub no managed-runtime entitlements. These values are release secrets
+and must not be committed.
+
+Only publish a Hub installer catalog record when its package key, channel, platform, and architecture exactly match the
+catalog endpoint. Windows automatic update handoff requires Authenticode. The macOS drag-to-Applications DMG remains a
+manual install: the Hub reveals the verified artifact and does not exit as though mounting it had replaced the app. The
+in-Hub flow downloads through the persistent task worker, verifies the catalog size and SHA-256, and waits for a second
+explicit install action only where a transactional native handoff exists. The Windows NSIS update mode accepts only the
+Hub-generated install root, resume token, and process-wait arguments, waits for that process to close, and verifies the
+registered root and ownership marker before changing files. Run `Scripts/Tests/test-hub-installer-windows.ps1` after
+modifying this contract.
 
 ## Native Editor Installers
 
@@ -300,18 +379,33 @@ Run it on every release OS; installers are never cross-produced. Windows compile
 `Installer/Windows/KeireEditor.nsi` with NSIS 3 and emits a per-user setup executable. Its wizard presents the license,
 optional shortcuts, an editable destination, and launch-on-finish. The stable uninstall registration supports upgrades,
 and removal requires both Kéire's registry ownership and installation marker before recursively deleting the dedicated
-installation directory. Set `KEIRE_WINDOWS_SIGNING_CERT_SHA1` to an Authenticode certificate thumbprint to sign and
+installation directory. The finish action, uninstall-registration icon, Start Menu shortcut, and optional desktop
+shortcut all target the editor executable; the installer contains and owns no Hub files or shortcuts. Set
+`KEIRE_WINDOWS_SIGNING_CERT_SHA1` to an Authenticode certificate thumbprint to sign and
 verify the final setup executable. `KEIRE_WINDOWS_TIMESTAMP_URL` overrides the default RFC 3161 timestamp service.
 
-macOS uses the platform `hdiutil`, `sips`, and `iconutil` tools to create a self-contained Hub application in a
+macOS uses the platform `hdiutil`, `sips`, and `iconutil` tools to create a self-contained Editor application in a
 drag-to-Applications DMG. Set `KEIRE_MACOS_SIGNING_IDENTITY` to Developer ID Application identity text to enable hardened
 runtime signing. Set `KEIRE_MACOS_NOTARY_PROFILE` to an `xcrun notarytool` keychain profile to submit, wait for, and
-staple notarization. Production macOS publication requires both signing and notarization.
+staple notarization. Production macOS publication requires both signing and notarization. The reviewed
+`Config/Signing/KeireManagedHost.entitlements` follows Microsoft's
+[macOS notarization guidance](https://learn.microsoft.com/en-us/dotnet/core/install/macos-notarization-issues) and is
+applied only to the native managed editor host. It enables JIT, unsigned executable memory, dyld environment variables,
+and disabled library validation; it never enables `get-task-allow`. The signer works inside-out, verifies the existing
+Microsoft .NET Mach-O signatures before and after signing, and rejects any byte change beneath the bundled .NET tree.
 
-Linux uses `dpkg-deb` to create a Debian/Ubuntu package under `/opt`, with a `/usr/bin` launcher, freedesktop desktop
-entry, and hicolor application icon. Other distributions continue using the validated `.tar.gz` editor distribution;
-RPM and repository metadata are separate publication work. Every installer receives a neighboring SHA-256 file under
-`Artifacts/`. Signing and publication credentials remain external release secrets and are never stored in the tree.
+`Config/Dependencies.lock` pins `MACOS_DEPLOYMENT_TARGET=12.0`. Premake, CMake dependency/bootstrap builds, FFmpeg,
+libsodium, Coral, shader compiler builds, and packaged SDK consumer validation all consume that value. macOS package
+gates inspect every non-.NET Mach-O slice with `vtool` or `otool` and reject a minimum-version value other than the
+pinned target. The `.app` launchers publish the same value as `LSMinimumSystemVersion`.
+
+Linux uses `dpkg-deb` to create a Debian/Ubuntu package under `/opt`, with a `keire-editor` `/usr/bin` launcher,
+freedesktop desktop entry, and hicolor application icon. It does not own `keire-hub` or any Hub desktop integration.
+The regular-file launcher executes the explicit editor binary below `/opt`, and the package declares its baseline C,
+C++, compiler-runtime, and curl dependencies. Other distributions continue using the validated `.tar.gz` editor
+distribution; RPM and repository metadata are separate publication work. Every installer receives a neighboring
+SHA-256 file under `Artifacts/`. Signing and publication credentials remain external release secrets and are never
+stored in the tree.
 
 ## Final Handoff
 

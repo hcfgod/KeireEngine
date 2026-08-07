@@ -3,11 +3,14 @@
 #include "Keire/Api.h"
 #include "Keire/Ref.h"
 
+#include <array>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -31,6 +34,40 @@ namespace Keire
         BorderlessFullscreen
     };
 
+    enum class WindowDecoration : std::uint8_t
+    {
+        Native,
+        Custom
+    };
+
+    enum class SystemColorScheme : std::uint8_t
+    {
+        Unknown,
+        Light,
+        Dark
+    };
+
+    // Query from the application owner thread while the window system is active.
+    [[nodiscard]] KEIRE_API SystemColorScheme GetSystemColorScheme() noexcept;
+
+    enum class WindowChromeRole : std::uint8_t
+    {
+        Client,
+        Drag,
+        ResizeTop,
+        ResizeBottom,
+        ResizeLeft,
+        ResizeRight,
+        ResizeTopLeft,
+        ResizeTopRight,
+        ResizeBottomLeft,
+        ResizeBottomRight,
+        SystemMenu,
+        Minimize,
+        MaximizeRestore,
+        Close
+    };
+
     enum class CursorMode : std::uint8_t
     {
         Normal,
@@ -49,6 +86,9 @@ namespace Keire
         bool Visible = true;
         bool Maximized = false;
         WindowMode Mode = WindowMode::Windowed;
+        WindowDecoration Decoration = WindowDecoration::Native;
+        std::uint32_t MinimumWidth = 1;
+        std::uint32_t MinimumHeight = 1;
     };
 
     struct WindowSystemSpecification
@@ -91,6 +131,60 @@ namespace Keire
         std::int32_t X = 0;
         std::int32_t Y = 0;
         auto operator<=>(const WindowPosition&) const noexcept = default;
+    };
+
+    struct WindowChromeRectangle
+    {
+        std::int32_t X = 0;
+        std::int32_t Y = 0;
+        std::uint32_t Width = 0;
+        std::uint32_t Height = 0;
+
+        [[nodiscard]] constexpr bool Contains(const WindowPosition point) const noexcept
+        {
+            const auto right = static_cast<std::int64_t>(X) + Width;
+            const auto bottom = static_cast<std::int64_t>(Y) + Height;
+            return point.X >= X && point.Y >= Y && static_cast<std::int64_t>(point.X) < right &&
+                   static_cast<std::int64_t>(point.Y) < bottom;
+        }
+
+        auto operator<=>(const WindowChromeRectangle&) const noexcept = default;
+    };
+
+    struct WindowChromeRegion
+    {
+        WindowChromeRole Role = WindowChromeRole::Client;
+        WindowChromeRectangle Bounds;
+        auto operator<=>(const WindowChromeRegion&) const noexcept = default;
+    };
+
+    class WindowChromeLayout final
+    {
+      public:
+        static constexpr std::size_t MaximumRegions = 64;
+
+        // Later regions take precedence so controls can exclude areas from a broader drag region.
+        [[nodiscard]] constexpr bool Add(const WindowChromeRegion region) noexcept
+        {
+            if (m_Count >= m_Regions.size() || region.Bounds.Width == 0 || region.Bounds.Height == 0 ||
+                region.Role > WindowChromeRole::Close)
+            {
+                return false;
+            }
+            m_Regions[m_Count++] = region;
+            return true;
+        }
+
+        constexpr void Clear() noexcept { m_Count = 0; }
+
+        [[nodiscard]] constexpr std::span<const WindowChromeRegion> Regions() const noexcept
+        {
+            return {m_Regions.data(), m_Count};
+        }
+
+      private:
+        std::array<WindowChromeRegion, MaximumRegions> m_Regions{};
+        std::size_t m_Count = 0;
     };
 
     struct DisplayBounds
@@ -260,6 +354,10 @@ namespace Keire
         virtual void Restore() = 0;
         virtual void Raise() = 0;
         virtual void SetMode(WindowMode mode) = 0;
+        virtual void SetChromeLayout(const WindowChromeLayout&)
+        {
+            throw std::logic_error("This Window implementation does not support custom chrome.");
+        }
         virtual void Close() = 0;
     };
 

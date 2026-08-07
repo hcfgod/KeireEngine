@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-BINARY_SUFFIXES = {".exe", ".fbx", ".gz", ".ico", ".obj", ".png", ".res", ".wav", ".zip"}
+BINARY_SUFFIXES = {".exe", ".fbx", ".gz", ".ico", ".obj", ".png", ".res", ".ttf", ".wav", ".zip"}
 EXCLUDED_PREFIXES = ("Build/", "Vendor/", "Tools/")
 SUSPICIOUS_SEQUENCES = ("\u00c3", "\u00c2", "\u00e2\u20ac", "\ufffd")
 

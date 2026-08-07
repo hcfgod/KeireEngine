@@ -1,22 +1,49 @@
 #include "Keire/Core.h"
 
+#include "KeireHub/HubActivationWorkflow.h"
+#include "KeireHub/HubBuildSupportIntegration.h"
+#include "KeireHub/HubDiagnostics.h"
+#include "KeireHub/HubDistributionWorkflow.h"
+#include "KeireHub/HubEditorDiscovery.h"
+#include "KeireHub/HubEditorInstallWorkflow.h"
+#include "KeireHub/HubEditorLaunch.h"
+#include "KeireHub/HubEditorManagementIntegration.h"
+#include "KeireHub/HubEditorManagementWorkflow.h"
+#include "KeireHub/HubFirstRunIntegration.h"
 #include "KeireHub/HubInstance.h"
+#include "KeireHub/HubLocalContent.h"
+#include "KeireHub/HubMaintenanceIntegration.h"
+#include "KeireHub/HubPackageTaskWorkflow.h"
+#include "KeireHub/HubProductUi.h"
+#include "KeireHub/HubProjectCreationUi.h"
+#include "KeireHub/HubProjectMetadataWorkflow.h"
+#include "KeireHub/HubProjectMutationIntegration.h"
+#include "KeireHub/HubProjectUiSupport.h"
+#include "KeireHub/HubProjectUpgradeUi.h"
+#include "KeireHub/HubProjectWorkflow.h"
+#include "KeireHub/HubProjectsUi.h"
+#include "KeireHub/HubRuntimeUiBridge.h"
+#include "KeireHub/HubSettingsWorkflow.h"
+#include "KeireHub/HubStartupWorkflow.h"
+#include "KeireHub/HubTemplateWorkflow.h"
+#include "KeireHub/HubUpdateHandoffWorkflow.h"
+#include "KeireHub/HubUpdateIntegration.h"
+#include "KeireHub/HubWorkflowError.h"
 
-#include "KeireInternal/Build/PlayerPackage.h"
-#include "KeireInternal/Build/PlayerSupportCatalog.h"
-#include "KeireInternal/Build/PlayerSupportPackage.h"
+#include "KeireHubRuntime/EditorProcessTracker.h"
+#include "KeireHubRuntime/HubUpdateManager.h"
+
+#include "KeireHub/HubLayerFactory.h"
+
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
-#include "KeireProjectModules/SourceModulePack.h"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <ctime>
 #include <filesystem>
-#include <iomanip>
 #include <memory>
 #include <optional>
 #include <string>
@@ -24,117 +51,40 @@
 #include <utility>
 #include <vector>
 
-#ifndef KEIRE_EDITOR_TARGET
-#define KEIRE_EDITOR_TARGET "KeireClient"
-#endif
-
 namespace
 {
-    constexpr std::array HubOptions{
-        Keire::ApplicationCommandLineOption{"--smoke-ui", "Render several project hub frames and exit."},
-        Keire::ApplicationCommandLineOption{"--build-support <platform> <architecture>",
-                                            "Open Build Support focused on the requested player target."},
-    };
+    using PendingStartupActivation = KeireHub::HubActivationRequest;
+    using KeireHub::RequireWorkflowSuccess;
+    using KeireHub::Utf8Path;
 
-    using RequestedBuildSupport = KeireHub::HubActivationRequest;
-
-    [[nodiscard]] std::string Utf8Path(const std::filesystem::path& path)
-    {
-        const auto value = path.generic_u8string();
-        return {reinterpret_cast<const char*>(value.data()), value.size()};
-    }
-
-    [[nodiscard]] std::string Lower(std::string value)
-    {
-        std::ranges::transform(value, value.begin(), [](const char character)
-                               { return static_cast<char>(std::tolower(static_cast<unsigned char>(character))); });
-        return value;
-    }
-
-    [[nodiscard]] const char* StatusLabel(const Keire::ProjectStatus status) noexcept
-    {
-        switch (status)
-        {
-        case Keire::ProjectStatus::Ready:
-            return "Ready";
-        case Keire::ProjectStatus::UpgradeAvailable:
-            return "Upgrade available";
-        case Keire::ProjectStatus::RecoveryRequired:
-            return "Recovery required";
-        case Keire::ProjectStatus::Missing:
-            return "Missing";
-        case Keire::ProjectStatus::Invalid:
-            return "Invalid";
-        case Keire::ProjectStatus::RequiresNewerEngine:
-            return "Requires newer engine";
-        case Keire::ProjectStatus::InUse:
-            return "Open in another editor";
-        }
-        return "Unknown";
-    }
-
-    [[nodiscard]] Keire::UiColor StatusColor(const Keire::ProjectStatus status) noexcept
-    {
-        switch (status)
-        {
-        case Keire::ProjectStatus::Ready:
-            return {0.32F, 0.84F, 0.58F, 1.0F};
-        case Keire::ProjectStatus::InUse:
-        case Keire::ProjectStatus::UpgradeAvailable:
-            return {0.96F, 0.72F, 0.28F, 1.0F};
-        case Keire::ProjectStatus::RecoveryRequired:
-            return {0.96F, 0.50F, 0.25F, 1.0F};
-        case Keire::ProjectStatus::Missing:
-        case Keire::ProjectStatus::Invalid:
-        case Keire::ProjectStatus::RequiresNewerEngine:
-            return {0.96F, 0.38F, 0.42F, 1.0F};
-        }
-        return {0.62F, 0.66F, 0.74F, 1.0F};
-    }
-
-    [[nodiscard]] bool CanOpenOrUpgrade(const Keire::ProjectStatus status) noexcept
-    {
-        return status == Keire::ProjectStatus::Ready || status == Keire::ProjectStatus::UpgradeAvailable ||
-               status == Keire::ProjectStatus::RecoveryRequired;
-    }
-
-    [[nodiscard]] std::string FormatLastOpened(const std::int64_t seconds)
-    {
-        if (seconds <= 0)
-            return "Never";
-        const std::time_t time = static_cast<std::time_t>(seconds);
-        std::tm local{};
-#if defined(_WIN32)
-        if (localtime_s(&local, &time) != 0)
-            return "Unknown";
-#else
-        if (!localtime_r(&time, &local))
-            return "Unknown";
-#endif
-        std::ostringstream stream;
-        stream << std::put_time(&local, "%b %d, %Y");
-        return stream.str();
-    }
-
-    class HubLayer final : public Keire::Layer
+    class HubLayer final : public Keire::Layer, private KeireHub::HubActivationCallbacks
     {
       public:
         HubLayer(std::filesystem::path executable, const bool smoke,
-                 std::optional<RequestedBuildSupport> requestedSupport,
+                 std::optional<PendingStartupActivation> pendingStartupActivation,
                  std::shared_ptr<KeireHub::HubInstanceCoordinator> instance)
             : Keire::Layer("ProjectHub"), m_Executable(std::move(executable)), m_Smoke(smoke),
-              m_CreateLocation(Utf8Path(std::filesystem::current_path())),
-              m_RequestedSupport(std::move(requestedSupport)), m_Instance(std::move(instance))
+              m_PendingStartupActivation(std::move(pendingStartupActivation)), m_Instance(std::move(instance)),
+              m_CreateLocation(Keire::Detail::PathToUtf8(std::filesystem::current_path()))
         {
-            if (m_RequestedSupport)
-                m_Page = HubPage::BuildSupport;
         }
 
       protected:
         void OnAttach() override
         {
+            const auto localContent = KeireHub::PopulateLocalHubContent(m_Executable, m_ProductSnapshot);
+            for (const auto& failure : localContent.Failures)
+            {
+                KEIRE_CLIENT_ERROR("[Project Hub] Local catalog load failed [{}]: {}", KeireHub::ToString(failure.Code),
+                                   failure.TechnicalDetails);
+            }
             if (!m_Smoke)
             {
+                m_Templates = std::make_unique<KeireHub::HubTemplateWorkflow>(m_Executable);
+                if (const auto status = m_Templates->Load(); status)
+                    m_ProductSnapshot.Templates = m_Templates->UiSnapshot();
+                else
+                    SetError("Templates unavailable: " + status.Error().Message);
                 try
                 {
                     Keire::SystemTraySpecification tray;
@@ -145,19 +95,54 @@ namespace
                     tray.Actions = {{"Show Hub", [this] { ShowHub(); }}, {"Quit", [this] { Owner().RequestExit(); }}};
                     m_Tray = Owner().Windows()->CreateSystemTray(std::move(tray));
                     if (!m_Tray->IsAvailable())
-                        m_Notice = "System tray unavailable; the Hub will minimize after launching an editor: " +
-                                   m_Tray->Diagnostic();
+                    {
+                        KEIRE_CLIENT_WARN("[Project Hub] System tray unavailable: {}", m_Tray->Diagnostic());
+                        m_Notice = "System tray unavailable; the Hub will remain recoverable from the taskbar.";
+                    }
                 }
                 catch (const std::exception& error)
                 {
-                    SetError(std::string("System tray unavailable: ") + error.what());
+                    ReportUnexpected("The system tray is unavailable.", error);
                 }
                 Listen<Keire::WindowMinimizedEvent>(
                     [this](const auto& event)
                     {
-                        if (event.Header.Window != Owner().MainWindow()->Id() || !TrayAvailable())
+                        if (m_RuntimeStartupFailure || event.Header.Window != Owner().MainWindow()->Id() ||
+                            !TrayAvailable() || !m_ProductSnapshot.Settings.CloseToTray)
                             return Keire::EventFlow::Continue;
                         Owner().MainWindow()->SetVisible(false);
+                        return Keire::EventFlow::Handled;
+                    });
+                Listen<Keire::WindowCloseRequestedEvent>(
+                    [this](const auto& event)
+                    {
+                        if (m_RuntimeStartupFailure || event.Header.Window != Owner().MainWindow()->Id() ||
+                            !TrayAvailable() || !m_ProductSnapshot.Settings.CloseToTray)
+                            return Keire::EventFlow::Continue;
+                        HideHub();
+                        return Keire::EventFlow::Handled;
+                    });
+                Listen<Keire::WindowFileDropEvent>(
+                    [this](const auto& event)
+                    {
+                        if (m_RuntimeStartupFailure || event.Header.Window != Owner().MainWindow()->Id() ||
+                            !m_ProjectWorkflow)
+                            return Keire::EventFlow::Continue;
+                        try
+                        {
+                            if (event.Paths.empty() || event.Paths.size() > 32)
+                                throw std::runtime_error("Drop between one and 32 project folders at a time.");
+                            for (const auto& path : event.Paths)
+                                RequireWorkflowSuccess(m_ProjectWorkflow->Add(path, KeireHub::HubNowUnixSeconds()));
+                            KeireHub::ReloadProjectRegistry(m_Registry);
+                            m_Page = KeireHub::HubPage::Projects;
+                            m_Notice = std::to_string(event.Paths.size()) + " project folder(s) added to the Hub.";
+                            m_NoticeError = false;
+                        }
+                        catch (const std::exception& error)
+                        {
+                            ReportUnexpected("The dropped project could not be added.", error);
+                        }
                         return Keire::EventFlow::Handled;
                     });
             }
@@ -165,37 +150,111 @@ namespace
             {
                 try
                 {
-                    m_Registry = Keire::CreateRef<Keire::ProjectRegistry>();
-                    LoadPreferences();
-                    RefreshBuildSupport();
-                    if (m_RequestedSupport)
+                    m_Registry = Keire::CreateRef<Keire::ProjectRegistry>(
+                        std::filesystem::path{}, Keire::ProjectRegistryLoadMode::CachedMetadata);
+                    const auto preferenceRoot = m_Registry->Path().parent_path();
+                    m_Controller = std::make_unique<KeireHub::HubController>(KeireHub::HubRuntimePaths{
+                        .PreferenceRoot = preferenceRoot, .LegacySettingsPath = preferenceRoot / "HubUi.settings"});
+                    if (const auto status = m_Controller->Load(KeireHub::HubNowUnixSeconds()); !status)
+                        throw std::runtime_error(status.Error().Message);
+                    if (m_Controller->Installations().Snapshot()->empty())
                     {
-                        m_Notice = "Build Support requested for " + *m_RequestedSupport->Platform + " / " +
-                                   *m_RequestedSupport->Architecture + ".";
+                        const auto packagedEditor = KeireHub::RegisterPackagedEditorIfPresent(
+                            *m_Controller, m_Executable.parent_path().parent_path());
+                        if (!packagedEditor)
+                        {
+                            KEIRE_CLIENT_WARN("[Project Hub] Packaged editor registration was rejected: {}",
+                                              packagedEditor.Error().TechnicalDetails);
+                            SetError("The packaged editor could not be registered because its manifest is invalid. "
+                                     "Locate a verified editor from Installs.");
+                        }
                     }
+                    for (const auto& failure : localContent.Failures)
+                        SetError(failure.Message);
+                    m_ProjectWorkflow = std::make_unique<KeireHub::HubProjectWorkflow>(*m_Controller);
+                    m_ProjectMutations = std::make_unique<KeireHub::HubProjectMutationWorkflow>(
+                        KeireHub::CreateHubProjectMutationServices(*m_ProjectWorkflow));
+                    m_ProjectMetadata = std::make_unique<KeireHub::HubProjectMetadataWorkflow>();
+                    RequireWorkflowSuccess(m_ProjectMetadata->Start(*m_Controller));
+                    m_FirstRun = std::make_unique<KeireHub::HubFirstRunWorkflow>();
+                    m_EditorManagement = std::make_unique<KeireHub::HubEditorManagementWorkflow>(
+                        *m_Controller,
+                        KeireHub::HubEditorManagementSpecification{
+                            .HostPlatform = std::string(Keire::GetBuildInfo().Platform),
+                            .HostArchitecture = std::string(Keire::GetBuildInfo().Architecture),
+                            .ProbeRunning = [this](const KeireHub::EditorInstallation& installation)
+                            { return m_EditorProcesses.IsInstallationRunning(installation.Id); }});
+                    RequireWorkflowSuccess(m_EditorManagement->Refresh());
+                    m_EditorInstalls = std::make_unique<KeireHub::HubEditorInstallWorkflow>(
+                        m_Controller->Installations(), std::string(KeireHub::HubUpdateManager::HostPlatformIdentity()),
+                        std::string(KeireHub::HubUpdateManager::HostArchitectureIdentity()));
+                    m_BuildSupport = std::make_unique<KeireHub::HubBuildSupportIntegration>();
+                    if (const auto status = m_BuildSupport->Refresh(); !status)
+                        SetError(status.Error().Message);
+                    KeireHub::ApplyRuntimeSnapshot(m_Controller->Snapshot(), m_ProductSnapshot);
+                    if (m_ProductSnapshot.Settings.DefaultProjectLocation.empty())
+                        m_ProductSnapshot.Settings.DefaultProjectLocation = KeireHub::DefaultHubProjectLocation();
+                    if (m_ProductSnapshot.Settings.DefaultEditorRoot.empty())
+                        m_ProductSnapshot.Settings.DefaultEditorRoot = preferenceRoot / "Editors";
+                    if (m_ProductSnapshot.Settings.CacheRoot.empty())
+                        m_ProductSnapshot.Settings.CacheRoot = preferenceRoot / "Cache";
+                    if (m_ProductSnapshot.Settings.TemporaryRoot.empty())
+                        m_ProductSnapshot.Settings.TemporaryRoot = preferenceRoot / "Temporary";
+                    if (const auto status = m_Controller->Settings().Save(m_ProductSnapshot.Settings); !status)
+                        throw std::runtime_error(status.Error().Message);
+                    m_CreateLocation = Keire::Detail::PathToUtf8(m_ProductSnapshot.Settings.DefaultProjectLocation);
+                    auto packageTasks = KeireHub::HubPackageTaskWorkflow::Create(*m_Controller, m_Executable,
+                                                                                 m_ProductSnapshot.Settings);
+                    if (packageTasks)
+                    {
+                        m_PackageTasks = std::move(packageTasks).Value();
+                        RememberPackageTaskSettings();
+                    }
+                    else
+                        SetError("Package task center unavailable: " + packageTasks.Error().Message);
+                    m_Distribution = std::make_unique<KeireHub::HubDistributionWorkflow>();
+                    RequireWorkflowSuccess(
+                        m_Distribution->Start(m_Executable.parent_path().parent_path() / "Config" / "Distribution.json",
+                                              m_ProductSnapshot.Settings, m_Executable));
+                    if (const auto status = KeireHub::PrepareHubStartupRuntime(
+                            *m_Controller, Keire::GetBuildInfo().Version, m_ProductSnapshot.Settings.LogLevel,
+                            KeireHub::HubNowUnixSeconds());
+                        !status)
+                        SetError("Hub update recovery failed: " + status.Error().Message);
+                    Owner().SetUiTheme(KeireHub::ResolveHubUiTheme(m_ProductSnapshot.Settings.Appearance));
+                    const auto projectView = m_ProductSnapshot.Settings.ProjectsView == KeireHub::ProjectView::Cards
+                                                 ? KeireHub::HubProjectsView::Cards
+                                                 : KeireHub::HubProjectsView::List;
+                    const auto projectSort = static_cast<KeireHub::HubProjectsSort>(
+                        static_cast<std::uint8_t>(m_ProductSnapshot.Settings.ProjectsSort));
+                    m_ProjectsUi.SetPreferences(projectView, projectSort);
+                    if (!m_PendingStartupActivation)
+                        m_Page = m_ProductSnapshot.Settings.StartupPage;
                 }
                 catch (const std::exception& error)
                 {
-                    SetError(std::string("Project registry unavailable: ") + error.what());
+                    KEIRE_CLIENT_ERROR("[Project Hub] Hub runtime startup failed: {}", error.what());
+                    m_RuntimeStartupFailure =
+                        "The Hub runtime could not initialize its local stores and services. Restart the Hub. If the "
+                        "problem continues, review the Hub logs or copy a redacted diagnostic report.";
                 }
             }
         }
 
         void OnDetach() noexcept override
         {
-            CancelBuildSupportInstall();
-            if (m_SupportProcess)
-            {
-                try
-                {
-                    if (!m_SupportProcess->WaitFor(std::chrono::milliseconds(500)))
-                        m_SupportProcess->Terminate();
-                }
-                catch (...)
-                {
-                }
-                m_SupportProcess.reset();
-            }
+            m_HubUpdateHandoff.Stop();
+            if (m_PackageTasks)
+                m_PackageTasks->Stop();
+            if (m_Distribution)
+                m_Distribution->Stop();
+            if (m_FirstRun)
+                m_FirstRun->Cancel();
+            m_ProjectMutations.reset();
+            if (m_ProjectMetadata)
+                m_ProjectMetadata->Cancel();
+            if (m_BuildSupport)
+                m_BuildSupport->Stop();
             if (m_Tray)
                 m_Tray->Close();
             m_Tray.Reset();
@@ -203,78 +262,338 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            const auto desiredTheme = KeireHub::ResolveHubUiTheme(m_ProductSnapshot.Settings.Appearance);
+            if (Owner().CurrentUiTheme() != desiredTheme)
+                Owner().SetUiTheme(desiredTheme);
+            if (m_RuntimeStartupFailure)
+                return;
+            if (auto handoff = m_HubUpdateHandoff.TakeCompletion())
+            {
+                if (handoff->Failure)
+                    SetError(handoff->Failure->Message);
+                else
+                    Owner().RequestExit();
+            }
+            if (m_EditorProcesses.Refresh() && m_EditorManagement)
+                m_EditorManagement->ReloadRegistrations();
+            if (m_EditorManagement)
+                KeireHub::PollHubEditorManagement(*m_EditorManagement, m_EditorInstalls.get(), m_PackageTasks.get(),
+                                                  m_Notice, m_NoticeError);
+            if (m_ProjectMutations)
+            {
+                const auto polled = m_ProjectMutations->Poll();
+                const auto mutation = m_ProjectMutations->Snapshot();
+                if (!polled && !mutation->IsTerminal())
+                    SetError(polled.Error().Message);
+                if (mutation->IsTerminal() && mutation->OperationId != m_HandledProjectMutation)
+                {
+                    m_HandledProjectMutation = mutation->OperationId;
+                    if (mutation->Failure)
+                    {
+                        if (!mutation->Failure->TechnicalDetails.empty())
+                        {
+                            KEIRE_CLIENT_ERROR("[Project Hub] Project duplication failed [{}]: {}",
+                                               KeireHub::ToString(mutation->Failure->Code),
+                                               mutation->Failure->TechnicalDetails);
+                        }
+                        SetError(mutation->Failure->Message);
+                    }
+                    else if (mutation->Result)
+                    {
+                        KeireHub::ReloadProjectRegistry(m_Registry);
+                        m_Notice = "Duplicated project at " + Utf8Path(mutation->Result->Root) + ".";
+                        m_NoticeError = false;
+                    }
+                    else if (mutation->State == KeireHub::HubProjectMutationState::Cancelled)
+                    {
+                        m_Notice = "Project duplication cancelled.";
+                        m_NoticeError = false;
+                    }
+                    else
+                        SetError("Project duplication ended without a result.");
+                }
+            }
+            KeireHub::PollHubMaintenance(m_Maintenance, m_PackageTaskRefreshPending, m_Notice, m_NoticeError);
+            if (m_PackageTaskRefreshPending && m_Controller && !m_Maintenance.Snapshot()->IsRunning())
+            {
+                if (m_PackageTasks)
+                    m_PackageTasks->Stop();
+                auto packageTasks =
+                    KeireHub::HubPackageTaskWorkflow::Create(*m_Controller, m_Executable, m_ProductSnapshot.Settings);
+                m_PackageTaskRefreshPending = false;
+                if (packageTasks)
+                {
+                    m_PackageTasks = std::move(packageTasks).Value();
+                    RememberPackageTaskSettings();
+                }
+                else
+                {
+                    m_PackageTasks.reset();
+                    SetError("Package task center unavailable: " + packageTasks.Error().Message);
+                }
+            }
+            if (m_PackageTasks)
+            {
+                auto registered = m_PackageTasks->ReconcileCompletedEditorInstalls();
+                if (!registered)
+                    SetError("Editor task reconciliation failed: " + registered.Error().Message);
+                else if (registered.Value())
+                {
+                    if (m_EditorManagement)
+                        m_EditorManagement->ReloadRegistrations();
+                    if (m_EditorInstalls)
+                        m_EditorInstalls->ReloadRegistrations();
+                }
+                const auto tasks = m_PackageTasks->Snapshot();
+                if (tasks->LastFailure && tasks->Revision != m_HandledPackageTaskFailureRevision)
+                {
+                    m_HandledPackageTaskFailureRevision = tasks->Revision;
+                    SetError(tasks->LastFailure->Message);
+                }
+            }
+            if (m_Templates)
+            {
+                const auto creation = m_Templates->CreationSnapshot();
+                const bool terminal = creation->State == KeireHub::HubTemplateCreationState::Completed ||
+                                      creation->State == KeireHub::HubTemplateCreationState::Failed;
+                if (terminal && creation->OperationId != m_HandledTemplateCreation)
+                {
+                    m_HandledTemplateCreation = creation->OperationId;
+                    if (creation->Failure)
+                    {
+                        if (!creation->Failure->TechnicalDetails.empty())
+                            KEIRE_CLIENT_ERROR("[Project Hub] Project creation failed [{}]: {}",
+                                               KeireHub::ToString(creation->Failure->Code),
+                                               creation->Failure->TechnicalDetails);
+                        SetError(creation->Failure->Message);
+                    }
+                    else if (creation->Result)
+                    {
+                        if (!m_ProjectWorkflow)
+                        {
+                            SetError("The project was created, but the Hub project catalog is unavailable. Add the "
+                                     "project folder manually.");
+                        }
+                        else if (const auto status =
+                                     m_ProjectWorkflow->Add(creation->Result->Root, KeireHub::HubNowUnixSeconds());
+                                 !status)
+                        {
+                            SetError("The project was created, but it could not be added to the Hub: " +
+                                     status.Error().Message);
+                        }
+                        else
+                        {
+                            KeireHub::ReloadProjectRegistry(m_Registry);
+                            m_Notice = "Project created at " + Utf8Path(creation->Result->Root) + ".";
+                            m_NoticeError = false;
+                            if (m_ActiveCreationOpenAfter)
+                                Launch(Keire::Project::InspectMetadata(creation->Result->Root), creation->EditorId,
+                                       true);
+                        }
+                    }
+                }
+            }
+            if (m_ProjectMetadata && m_Controller)
+            {
+                const auto updated = m_ProjectMetadata->Poll(*m_Controller);
+                if (!updated)
+                    SetError(updated.Error().Message);
+                else if (updated.Value())
+                {
+                    if (m_ProductSnapshot.Settings.RemoveMissingProjectsAutomatically)
+                    {
+                        const auto cleanup = m_Controller->Projects().RemoveMissing();
+                        if (!cleanup)
+                            SetError(cleanup.Error().Message);
+                    }
+                    KeireHub::ReloadProjectRegistry(m_Registry);
+                }
+            }
+            if (m_SettingsDiscoveryPending && m_FirstRun)
+            {
+                const auto discovery = m_FirstRun->Snapshot();
+                if (discovery->State == KeireHub::HubFirstRunWorkflowState::Completed)
+                {
+                    m_SettingsDiscoveryPending = false;
+                    if (!m_Controller)
+                        SetError("Discovery results could not be imported because the Hub runtime is unavailable.");
+                    else if (const auto status = KeireHub::ImportHubFirstRunSnapshot(*discovery, *m_Controller);
+                             !status)
+                    {
+                        SetError(status.Error().Message);
+                    }
+                    else
+                    {
+                        if (m_EditorManagement)
+                            m_EditorManagement->ReloadRegistrations();
+                        if (m_EditorInstalls)
+                            m_EditorInstalls->ReloadRegistrations();
+                        KeireHub::ReloadProjectRegistry(m_Registry);
+                        m_Notice = "Discovery imported " + std::to_string(discovery->ProjectsFound) +
+                                   " project(s) and " + std::to_string(discovery->EditorsFound) + " editor(s).";
+                        m_NoticeError = false;
+                    }
+                }
+                else if (discovery->State == KeireHub::HubFirstRunWorkflowState::Failed ||
+                         discovery->State == KeireHub::HubFirstRunWorkflowState::Cancelled)
+                {
+                    m_SettingsDiscoveryPending = false;
+                    if (discovery->State == KeireHub::HubFirstRunWorkflowState::Failed)
+                        SetError(discovery->Message);
+                }
+            }
+            if (m_DistributionRefreshPending && m_Distribution && !m_Distribution->Snapshot()->Refreshing)
+            {
+                const auto status =
+                    m_Distribution->Start(m_Executable.parent_path().parent_path() / "Config" / "Distribution.json",
+                                          m_ProductSnapshot.Settings, m_Executable);
+                m_DistributionRefreshPending = false;
+                if (!status)
+                    SetError("Distribution settings could not be applied: " + status.Error().Message);
+            }
             if (m_Instance)
             {
                 if (auto activation = m_Instance->PollActivation())
-                {
-                    if (activation->RequestsBuildSupport())
-                    {
-                        m_RequestedSupport = std::move(*activation);
-                        m_Page = HubPage::BuildSupport;
-                        m_Notice = "Build Support requested for " + *m_RequestedSupport->Platform + " / " +
-                                   *m_RequestedSupport->Architecture + ".";
-                        m_NoticeError = false;
-                    }
-                    ShowHub();
-                }
+                    KeireHub::HubActivationWorkflow::Dispatch(std::move(*activation), m_Executable, m_Controller.get(),
+                                                              m_ProductSnapshot.Editors, m_Page, m_Notice,
+                                                              m_NoticeError, *this);
             }
-            if (m_Smoke && ++m_Frames >= 8)
+        if (m_Smoke && ++m_Frames >= 8)
                 Owner().RequestExit();
             if (m_FolderDialog)
             {
                 const auto status = m_FolderDialog->Status();
                 if (status == Keire::FolderDialogStatus::Selected)
                 {
-                    if (m_FolderTarget == FolderTarget::CreateLocation)
-                        m_CreateLocation = Utf8Path(m_FolderDialog->SelectedPath());
-                    else
-                        m_OpenPath = Utf8Path(m_FolderDialog->SelectedPath());
+                    try
+                    {
+                        if (m_FolderTarget == FolderTarget::CreateLocation)
+                            m_CreateLocation = Keire::Detail::PathToUtf8(m_FolderDialog->SelectedPath());
+                        else if (m_FolderTarget == FolderTarget::OpenProject)
+                            m_OpenPath = Keire::Detail::PathToUtf8(m_FolderDialog->SelectedPath());
+                        else if (m_FolderTarget == FolderTarget::LocateEditor)
+                            LocateEditor(m_FolderDialog->SelectedPath());
+                        else if (m_FolderTarget == FolderTarget::DuplicateProject)
+                            m_ProjectsUi.SetDuplicateParent(m_FolderDialog->SelectedPath());
+                        else if (m_FolderTarget == FolderTarget::LocateProject)
+                            LocateProject(m_FolderDialog->SelectedPath());
+                    }
+                    catch (const std::exception& error)
+                    {
+                        ReportUnexpected("The selected folder could not be processed.", error);
+                    }
                     m_FolderDialog.Reset();
                     m_FolderTarget = FolderTarget::None;
                 }
                 else if (status == Keire::FolderDialogStatus::Failed)
                 {
-                    SetError("Folder dialog failed: " + m_FolderDialog->Diagnostic());
+                    KEIRE_CLIENT_ERROR("[Project Hub] Folder dialog failed: {}", m_FolderDialog->Diagnostic());
+                    SetError("The folder picker failed. See Hub logs for details.");
+                    if (m_FolderTarget == FolderTarget::LocateProject)
+                        m_PendingLocateProjectId.clear();
                     m_FolderDialog.Reset();
                     m_FolderTarget = FolderTarget::None;
                 }
                 else if (status == Keire::FolderDialogStatus::Cancelled)
                 {
+                    if (m_FolderTarget == FolderTarget::LocateProject)
+                        m_PendingLocateProjectId.clear();
                     m_FolderDialog.Reset();
                     m_FolderTarget = FolderTarget::None;
                 }
             }
-            if (m_SupportFileDialog)
-            {
-                const auto status = m_SupportFileDialog->Status();
-                if (status == Keire::OpenFileDialogStatus::Selected)
-                {
-                    try
-                    {
-                        StartBuildSupportInstall(m_SupportFileDialog->SelectedPath());
-                    }
-                    catch (const std::exception& error)
-                    {
-                        SetError(error.what());
-                    }
-                    m_SupportFileDialog.Reset();
-                }
-                else if (status == Keire::OpenFileDialogStatus::Failed)
-                {
-                    SetError("Build Support package dialog failed: " + m_SupportFileDialog->Diagnostic());
-                    m_SupportFileDialog.Reset();
-                }
-                else if (status == Keire::OpenFileDialogStatus::Cancelled)
-                    m_SupportFileDialog.Reset();
-            }
-            UpdateBuildSupportInstall();
+            if (m_BuildSupport)
+                m_BuildSupport->Poll();
         }
 
         void OnUi(Keire::UiFrame& ui) override
         {
+            if (m_RuntimeStartupFailure)
+            {
+                DrawRuntimeStartupFailure(ui);
+                return;
+            }
+            if (m_Controller)
+                KeireHub::ApplyRuntimeSnapshot(m_Controller->Snapshot(), m_ProductSnapshot);
+            if (m_EditorManagement)
+                m_EditorManagement->ApplySnapshot(m_ProductSnapshot);
+            if (m_PackageTasks)
+                m_PackageTasks->ApplySnapshot(m_ProductSnapshot);
+            if (m_ProjectMetadata)
+            {
+                const auto metadata = m_ProjectMetadata->Snapshot();
+                KeireHub::ApplyHubProjectMetadataSnapshot(*metadata, m_ProductSnapshot);
+                m_ProjectsUi.SetThumbnails(metadata->Thumbnails);
+            }
+            if (m_FirstRun)
+                KeireHub::ApplyHubFirstRunSnapshot(*m_FirstRun->Snapshot(), m_ProductSnapshot);
+            if (m_Distribution)
+                KeireHub::ApplyHubDistributionSnapshot(*m_Distribution->Snapshot(), m_ProductSnapshot);
+            if (m_Distribution && m_PackageTasks)
+                KeireHub::ApplyHubUpdateIntegrationSnapshot(*m_Distribution->Snapshot(), *m_PackageTasks->Snapshot(),
+                                                            m_ProductSnapshot, m_HubUpdateHandoff.Snapshot()->State);
+            if (m_EditorInstalls && m_Distribution)
+            {
+                const auto distribution = m_Distribution->Snapshot();
+                const auto refreshed = m_EditorInstalls->Refresh(*distribution, m_ProductSnapshot.Settings);
+                if (!refreshed && !refreshed.Error().TechnicalDetails.empty())
+                    KEIRE_CLIENT_ERROR("[Project Hub] Editor catalog refresh failed: {}",
+                                       refreshed.Error().TechnicalDetails);
+                m_EditorInstalls->ApplySnapshot(m_ProductSnapshot);
+            }
+            if (m_Templates)
+                m_Templates->ApplyCreationSnapshot(m_ProductSnapshot);
+            const bool systemPrefersDark = KeireHub::HubSystemPrefersDark();
+            m_ProductUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, systemPrefersDark);
+            m_ProjectsUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, systemPrefersDark);
             const auto size = Owner().MainWindow()->LogicalSize();
+            KeireHub::UpdateHubChromeLayout(*Owner().MainWindow(), size);
+            auto projectEntries = m_Registry ? m_Registry->Entries() : std::vector<Keire::RecentProject>{};
+            for (auto& project : projectEntries)
+            {
+                if (m_EditorProcesses.IsProjectRunning(project.Id.ToString()))
+                    project.Status = Keire::ProjectStatus::InUse;
+            }
+            m_ProductSnapshot.RecentProjects = projectEntries.size();
+            m_ProductSnapshot.PinnedProjects = std::ranges::count_if(projectEntries, &Keire::RecentProject::Pinned);
+            if (m_BuildSupport)
+                m_BuildSupport->SynchronizeEditors(m_ProductSnapshot);
+            if (m_EditorManagement)
+                m_EditorManagement->ApplyOperationSnapshot(m_ProductSnapshot);
+            KeireHub::ApplyHubMaintenanceSnapshot(*m_Maintenance.Snapshot(), m_ProductSnapshot);
+            if (m_PendingStartupActivation)
+            {
+                auto activation = std::exchange(m_PendingStartupActivation, std::nullopt);
+                KeireHub::HubActivationWorkflow::Dispatch(std::move(*activation), m_Executable, m_Controller.get(),
+                                                          m_ProductSnapshot.Editors, m_Page, m_Notice, m_NoticeError,
+                                                          *this);
+            }
+            if (!m_PendingEditorInstallVersion.empty() && !m_ProductSnapshot.EditorCatalogRefreshing)
+            {
+                if (m_ProductUi.RequestEditorInstall(m_PendingEditorInstallVersion, m_ProductSnapshot))
+                {
+                    m_Notice = "Review the verified editor package and compatible components before installation.";
+                    m_NoticeError = false;
+                }
+                else
+                {
+                    SetError("No verified editor catalog entry is available for " + m_PendingEditorInstallVersion +
+                             ". No install task was queued.");
+                }
+                m_PendingEditorInstallVersion.clear();
+            }
             ui.SetNextWindowPosition({0.0F, 0.0F}, false);
             ui.SetNextWindowSize({static_cast<float>(size.Width), static_cast<float>(size.Height)}, false);
+            const auto tokens =
+                KeireHub::HubDesignTokens::For(m_ProductSnapshot.Settings.Appearance, systemPrefersDark);
+            [[maybe_unused]] const auto windowPadding =
+                ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding, Keire::UiSize{});
+            [[maybe_unused]] const auto windowRounding =
+                ui.PushStyleVariable(Keire::UiStyleVariable::WindowRounding, 0.0F);
+            [[maybe_unused]] const auto windowBorder =
+                ui.PushStyleVariable(Keire::UiStyleVariable::WindowBorderSize, 0.0F);
+            [[maybe_unused]] const auto windowBackground =
+                ui.PushStyleColor(Keire::UiStyleColorRole::WindowBackground, tokens.Canvas);
             Keire::UiWindowOptions options;
             options.NoTitleBar = true;
             options.NoResize = true;
@@ -283,71 +602,42 @@ namespace
             options.NoSavedSettings = true;
             if (auto window = ui.BeginWindow("Kéire Project Hub", nullptr, options); window)
             {
-                if (auto sidebar = ui.BeginChild("HubSidebar", {264.0F, 0.0F}, true); sidebar)
-                    DrawSidebar(ui);
+                KeireHub::HubUiCommand command;
+                if (auto titleBar = ui.BeginChild("HubTitleBar", {0.0F, 40.0F}, false); titleBar)
+                    m_ProductUi.DrawTitleBar(ui, *Owner().MainWindow(), m_Page, m_ProductSnapshot, command);
+                const bool compact = size.Width < 1080;
+                if (auto sidebar = ui.BeginChild("HubSidebar", {compact ? 72.0F : 224.0F, 0.0F}, true); sidebar)
+                    m_ProductUi.DrawSidebar(ui, m_Page, compact, m_ProductSnapshot);
                 ui.SameLine();
                 if (auto workspace = ui.BeginChild("HubWorkspace", {}, false); workspace)
                 {
-                    if (m_Page == HubPage::BuildSupport)
-                    {
-                        DrawBuildSupport(ui);
-                    }
-                    else
-                    {
-                        ui.TextColored({0.95F, 0.97F, 1.0F, 1.0F}, "Welcome back");
-                        ui.TextColored({0.53F, 0.58F, 0.68F, 1.0F},
-                                       "Open a recent workspace or create your next project.");
-                        ui.Spacing();
-                        if (ui.Button("+  New Project", {142.0F, 40.0F}))
-                            m_RequestCreatePopup = true;
-                        ui.SameLine();
-                        if (ui.Button("Open Folder", {126.0F, 40.0F}))
-                            m_RequestOpenPopup = true;
-                        ui.SameLine();
-                        if (ui.Button("Refresh", {88.0F, 40.0F}) && m_Registry)
-                            Refresh();
-                        ui.Spacing();
-                        (void)ui.InputTextWithHint("##HubProjectSearch", "Search projects", m_Search);
-                        ui.SameLine();
-                        if (ui.IconButton("HubListView", Keire::UiIcon::List, m_View == ProjectView::List,
-                                          {32.0F, 28.0F}))
-                        {
-                            m_View = ProjectView::List;
-                            SavePreferences();
-                        }
-                        ui.SameLine();
-                        if (ui.IconButton("HubCardView", Keire::UiIcon::Grid, m_View == ProjectView::Cards,
-                                          {32.0F, 28.0F}))
-                        {
-                            m_View = ProjectView::Cards;
-                            SavePreferences();
-                        }
-                        ui.SameLine();
-                        constexpr std::array sortLabels{std::string_view("Last Opened"), std::string_view("Name"),
-                                                        std::string_view("Status")};
-                        if (auto sort = ui.BeginCombo("Sort", sortLabels[static_cast<std::size_t>(m_Sort)]); sort)
-                        {
-                            for (std::size_t index = 0; index < sortLabels.size(); ++index)
-                            {
-                                if (ui.Selectable(sortLabels[index], static_cast<std::size_t>(m_Sort) == index))
-                                {
-                                    m_Sort = static_cast<ProjectSort>(index);
-                                    SavePreferences();
-                                }
-                            }
-                        }
-
-                        if (!m_Notice.empty())
-                        {
-                            ui.Spacing();
-                            ui.TextColored(m_NoticeError ? Keire::UiColor{0.96F, 0.32F, 0.36F, 1.0F}
-                                                         : Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F},
-                                           m_Notice);
-                        }
-                        ui.Spacing();
-                        DrawProjects(ui);
-                    }
+                    m_ProductUi.DrawNotificationCenter(ui, m_ProductSnapshot, command);
+                    m_ProductUi.DrawTaskCenter(ui, m_ProductSnapshot, command);
+                    DrawNotice(ui, tokens);
+                    if (m_Page == KeireHub::HubPage::Home)
+                        m_ProductUi.DrawHome(ui, m_Page, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Installs)
+                        m_ProductUi.DrawInstalls(ui, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Templates)
+                        m_ProductUi.DrawTemplates(ui, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Learn)
+                        m_ProductUi.DrawLearn(ui, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Resources)
+                        m_ProductUi.DrawResources(ui, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Licenses)
+                        m_ProductUi.DrawLicenses(ui, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Settings)
+                        m_ProductUi.DrawSettings(ui, m_ProductSnapshot, command);
+                    else if (m_Page == KeireHub::HubPage::Projects)
+                        ExecuteProjectCommand(m_ProjectsUi.Draw(ui, projectEntries, m_ProductSnapshot.Editors, {},
+                                                                false, m_ProductSnapshot.Settings.ConfirmProjectRemoval,
+                                                                static_cast<bool>(m_FolderDialog)));
                 }
+                if (m_BuildSupport)
+                    m_BuildSupport->Draw(ui, *Owner().Windows(), Owner().MainWindow()->Id(),
+                                         m_ProductSnapshot.Settings.OfflineMode);
+                m_ProductUi.DrawFirstRun(ui, m_ProductSnapshot, command);
+                ExecuteProductCommand(command);
                 if (std::exchange(m_RequestCreatePopup, false))
                     ui.OpenPopup("Create Project");
                 if (std::exchange(m_RequestOpenPopup, false))
@@ -356,7 +646,15 @@ namespace
                     ui.OpenPopup("Project Upgrade");
                 DrawCreateDialog(ui);
                 DrawOpenDialog(ui);
-                DrawUpgradeDialog(ui);
+                const auto upgrade = m_ProjectUpgradeUi.Draw(ui);
+                if (upgrade.Failure)
+                    SetError(upgrade.Failure->Message);
+                else if (upgrade.Action != KeireHub::HubProjectUpgradeAction::None)
+                {
+                    Refresh();
+                    if (upgrade.Action == KeireHub::HubProjectUpgradeAction::Reopen)
+                        Open(upgrade.Root);
+                }
             }
         }
 
@@ -365,130 +663,435 @@ namespace
         {
             None,
             CreateLocation,
-            OpenProject
+            OpenProject,
+            LocateEditor,
+            DuplicateProject,
+            LocateProject
         };
 
-        enum class HubPage : std::uint8_t
+        void DrawRuntimeStartupFailure(Keire::UiFrame& ui)
         {
-            Projects,
-            BuildSupport
-        };
+            m_ProductUi.SetAppearance(m_ProductSnapshot.Settings.Appearance, KeireHub::HubSystemPrefersDark());
+            const auto size = Owner().MainWindow()->LogicalSize();
+            KeireHub::UpdateHubChromeLayout(*Owner().MainWindow(), size, false);
+            const auto preferenceRoot = Keire::GetPreferenceDirectory();
+            const auto action =
+                m_ProductUi.DrawFatalRecoveryWindow(ui, *Owner().MainWindow(),
+                                                    {.Message = *m_RuntimeStartupFailure,
+                                                     .ActionMessage = m_FatalActionMessage,
+                                                     .LogsAvailable = KeireHub::HubLogsAvailable(preferenceRoot)});
+            const auto outcome =
+                KeireHub::HandleHubFatalRecoveryAction(action, m_ProductSnapshot, *Owner().Windows(), preferenceRoot);
+            if (!outcome.TechnicalDetails.empty())
+                KEIRE_CLIENT_ERROR("[Project Hub] Fatal recovery action failed: {}", outcome.TechnicalDetails);
+            if (!outcome.Message.empty())
+                m_FatalActionMessage = outcome.Message;
+            if (outcome.CloseRequested)
+                Owner().RequestExit();
+        }
 
-        enum class SupportOperationKind : std::uint8_t
+        void DrawNotice(Keire::UiFrame& ui, const KeireHub::HubDesignTokens& tokens)
         {
-            None,
-            LocalInstall,
-            Catalog,
-            OnlineInstall
-        };
-
-        struct BuildSupportEntry final
-        {
-            Keire::Detail::PlayerSupportPackageResult Package;
-            bool Healthy = false;
-            bool Compatible = false;
-            std::string Diagnostic;
-        };
-
-        enum class ProjectView : std::uint8_t
-        {
-            List,
-            Cards
-        };
-
-        enum class ProjectSort : std::uint8_t
-        {
-            LastOpened,
-            Name,
-            Status
-        };
-
-        void LoadPreferences()
-        {
-            if (!m_Registry)
+            const auto now = std::chrono::steady_clock::now();
+            if (m_ObservedNotice != m_Notice)
+            {
+                m_ObservedNotice = m_Notice;
+                m_NoticeStarted = now;
+            }
+            if (!m_NoticeError && !m_Notice.empty() && now - m_NoticeStarted >= std::chrono::seconds(5))
+            {
+                m_Notice.clear();
+                m_ObservedNotice.clear();
+            }
+            if (m_Notice.empty())
                 return;
-            m_PreferencesPath = m_Registry->Path().parent_path() / "HubUi.settings";
-            if (!std::filesystem::is_regular_file(m_PreferencesPath))
+
+            [[maybe_unused]] const auto bannerBackground =
+                ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
+            if (auto banner = ui.BeginChild("HubGlobalNotice", {0.0F, 48.0F}, true); banner)
+            {
+                Keire::UiTableOptions layout;
+                layout.Borders = false;
+                layout.Resizable = false;
+                layout.RowBackground = false;
+                layout.PersistSettings = false;
+                if (auto table = ui.BeginTable("HubGlobalNoticeLayout", 2, layout); table)
+                {
+                    ui.TableSetupColumn("Message", Keire::UiTableColumnSizing::Stretch, 1.0F);
+                    ui.TableSetupColumn("Action", Keire::UiTableColumnSizing::Fixed, 76.0F);
+                    ui.TableNextRow();
+                    (void)ui.TableNextColumn();
+                    ui.TextColoredWrapped(m_NoticeError ? tokens.Danger : tokens.Success, m_Notice);
+                    (void)ui.TableNextColumn();
+                    if (ui.Button("Dismiss##HubNotice", {68.0F, 28.0F}))
+                    {
+                        m_Notice.clear();
+                        m_ObservedNotice.clear();
+                    }
+                }
+            }
+            ui.Spacing();
+        }
+
+        void SavePreferences()
+        {
+            if (!m_Controller)
+                return;
+            const auto status = KeireHub::SaveHubProjectPreferences(
+                *m_Controller, m_ProjectsUi.View() == KeireHub::HubProjectsView::Cards,
+                static_cast<std::uint8_t>(m_ProjectsUi.Sort()));
+            if (!status)
+                SetError(status.Error().Message);
+        }
+
+        void LocateProject(const std::filesystem::path& selected)
+        {
+            if (!m_ProjectWorkflow || m_PendingLocateProjectId.empty())
+                throw std::logic_error("The moved-project workflow is unavailable.");
+            auto projectId = std::move(m_PendingLocateProjectId);
+            m_PendingLocateProjectId.clear();
+            RequireWorkflowSuccess(m_ProjectWorkflow->LocateMovedProject(projectId, selected));
+            KeireHub::ReloadProjectRegistry(m_Registry);
+            m_Notice = "Moved project located.";
+            m_NoticeError = false;
+        }
+
+        void ExecuteProjectCommand(const KeireHub::HubProjectUiCommand& command)
+        {
+            if (!command)
                 return;
             try
             {
-                const auto settings = Keire::Detail::ReadTextFile(m_PreferencesPath, 4096);
-                m_View = settings.find("view=cards") != std::string::npos ? ProjectView::Cards : ProjectView::List;
-                if (settings.find("sort=name") != std::string::npos)
-                    m_Sort = ProjectSort::Name;
-                else if (settings.find("sort=status") != std::string::npos)
-                    m_Sort = ProjectSort::Status;
-                else
-                    m_Sort = ProjectSort::LastOpened;
+                switch (command.Type)
+                {
+                case KeireHub::HubProjectUiCommandType::NewProject:
+                    m_RequestCreatePopup = true;
+                    break;
+                case KeireHub::HubProjectUiCommandType::AddProject:
+                    m_RequestOpenPopup = true;
+                    break;
+                case KeireHub::HubProjectUiCommandType::Refresh:
+                    Refresh();
+                    break;
+                case KeireHub::HubProjectUiCommandType::PreferencesChanged:
+                    SavePreferences();
+                    break;
+                case KeireHub::HubProjectUiCommandType::Open:
+                    Open(command.Path);
+                    break;
+                case KeireHub::HubProjectUiCommandType::OpenWithEditor:
+                    Launch(Keire::Project::InspectMetadata(command.Path), command.EditorId, true);
+                    break;
+                case KeireHub::HubProjectUiCommandType::FindCompatibleEditor:
+                    m_Page = KeireHub::HubPage::Installs;
+                    if (!command.EditorVersion.empty())
+                        m_PendingEditorInstallVersion = command.EditorVersion;
+                    m_Notice =
+                        command.EditorVersion.empty()
+                            ? "Install or locate a compatible editor to open this project."
+                            : "Install or locate editor " + command.EditorVersion + " or a compatible newer version.";
+                    m_NoticeError = false;
+                    break;
+                case KeireHub::HubProjectUiCommandType::Reveal:
+                    Reveal(command.Path);
+                    break;
+                case KeireHub::HubProjectUiCommandType::CopyPath:
+                    Owner().Windows()->SetClipboardText(Utf8Path(command.Path));
+                    m_Notice = "Project path copied to the clipboard.";
+                    m_NoticeError = false;
+                    break;
+                case KeireHub::HubProjectUiCommandType::BrowseDuplicateLocation:
+                    BrowseForFolder(FolderTarget::DuplicateProject, command.Path);
+                    break;
+                case KeireHub::HubProjectUiCommandType::BrowseLocateProject:
+                    m_PendingLocateProjectId = command.ProjectId;
+                    BrowseForFolder(FolderTarget::LocateProject, command.Path);
+                    if (!m_FolderDialog)
+                        m_PendingLocateProjectId.clear();
+                    break;
+                default:
+                    if (!m_ProjectWorkflow)
+                        throw std::logic_error("Project workflows are unavailable.");
+                    if (command.Type == KeireHub::HubProjectUiCommandType::SetPinned)
+                    {
+                        RequireWorkflowSuccess(m_ProjectWorkflow->SetPinned(command.ProjectId, command.Pinned));
+                        m_Notice = command.Pinned ? "Project pinned." : "Project unpinned.";
+                    }
+                    else if (command.Type == KeireHub::HubProjectUiCommandType::Rename)
+                    {
+                        RequireWorkflowSuccess(
+                            m_ProjectWorkflow->RenameDisplayName(command.ProjectId, command.DisplayName));
+                        m_Notice = "Project display name changed to " + command.DisplayName + ".";
+                    }
+                    else if (command.Type == KeireHub::HubProjectUiCommandType::RemoveFromHub)
+                    {
+                        RequireWorkflowSuccess(m_ProjectWorkflow->RemoveFromHub(command.ProjectId));
+                        m_Notice = command.DisplayName + " was removed from the Hub. Project files were not deleted.";
+                    }
+                    else if (command.Type == KeireHub::HubProjectUiCommandType::Duplicate)
+                    {
+                        if (!m_ProjectMutations)
+                            throw std::logic_error("Asynchronous project mutations are unavailable.");
+                        auto started =
+                            m_ProjectMutations->StartDuplicate(command.ProjectId, command.Path, command.DisplayName);
+                        if (!started)
+                            RequireWorkflowSuccess(KeireHub::HubStatus::Failure(started.Error()));
+                        m_Notice = "Duplicating " + command.DisplayName + " in the background...";
+                    }
+                    else
+                        throw std::logic_error("The project command is unsupported.");
+                    KeireHub::ReloadProjectRegistry(m_Registry);
+                    m_NoticeError = false;
+                    break;
+                }
             }
             catch (const std::exception& error)
             {
-                KEIRE_CLIENT_WARN("[Project Hub] Could not read UI preferences: {}", error.what());
+                ReportUnexpected("The project action could not be completed.", error);
             }
         }
 
-        void SavePreferences() noexcept
+        void ExecuteProductCommand(const KeireHub::HubUiCommand& command)
         {
-            if (m_PreferencesPath.empty())
+            if (!command)
                 return;
             try
             {
-                const std::string view = m_View == ProjectView::Cards ? "cards" : "list";
-                const std::string sort = m_Sort == ProjectSort::Name     ? "name"
-                                         : m_Sort == ProjectSort::Status ? "status"
-                                                                         : "last-opened";
-                Keire::Detail::WriteTextFileAtomically(m_PreferencesPath, "view=" + view + "\nsort=" + sort + "\n");
+                switch (command.Type)
+                {
+                case KeireHub::HubUiCommandType::CreateProjectFromTemplate:
+                    m_CreateTemplateId = command.ItemId;
+                    if (!command.Text.empty())
+                        m_CreateEditorId = command.Text;
+                    m_RequestCreatePopup = true;
+                    break;
+                case KeireHub::HubUiCommandType::AddProject:
+                    m_RequestOpenPopup = true;
+                    break;
+                case KeireHub::HubUiCommandType::RefreshProjects:
+                    Refresh();
+                    break;
+                case KeireHub::HubUiCommandType::LocateEditor:
+                    BrowseForFolder(FolderTarget::LocateEditor, m_Executable.parent_path().parent_path());
+                    break;
+                case KeireHub::HubUiCommandType::PreviewEditorInstall:
+                case KeireHub::HubUiCommandType::InstallEditor:
+                {
+                    if (!m_EditorInstalls)
+                        throw std::logic_error("Editor installation planning is unavailable.");
+                    auto result =
+                        KeireHub::ExecuteHubEditorInstallCommand(command, *m_EditorInstalls, m_PackageTasks.get());
+                    if (!result)
+                        RequireWorkflowSuccess(KeireHub::HubStatus::Failure(result.Error()));
+                    m_EditorInstalls->ApplySnapshot(m_ProductSnapshot);
+                    m_Notice = std::move(result).Value();
+                    m_NoticeError = false;
+                    break;
+                }
+                case KeireHub::HubUiCommandType::ManageBuildSupport:
+                    if (!m_BuildSupport)
+                        throw std::logic_error("Build Support management is unavailable.");
+                    RequireWorkflowSuccess(m_BuildSupport->ManageEditor(command.ItemId));
+                    break;
+                case KeireHub::HubUiCommandType::RepairManagedEditor:
+                case KeireHub::HubUiCommandType::VerifyEditor:
+                case KeireHub::HubUiCommandType::RemoveExternalEditor:
+                case KeireHub::HubUiCommandType::RemoveManagedEditor:
+                    if (!m_EditorManagement)
+                        throw std::logic_error("Editor management is unavailable.");
+                    RequireWorkflowSuccess(KeireHub::BeginHubEditorManagementCommand(
+                        *m_EditorManagement, m_EditorInstalls.get(), m_PackageTasks.get(), command, m_Notice,
+                        m_NoticeError));
+                    break;
+                case KeireHub::HubUiCommandType::RevealPath:
+                    Reveal(command.Path);
+                    break;
+                case KeireHub::HubUiCommandType::OpenUrl:
+                    Owner().Windows()->OpenUrl(command.Url);
+                    break;
+                case KeireHub::HubUiCommandType::OpenLocalContent:
+                {
+                    std::string diagnostic;
+                    if (!Keire::Detail::OpenInExternalEditor(command.Path, {}, command.Path.parent_path(), diagnostic))
+                        throw std::runtime_error("Could not open content: " + diagnostic);
+                    break;
+                }
+                case KeireHub::HubUiCommandType::CopyText:
+                    Owner().Windows()->SetClipboardText(command.Text);
+                    m_Notice = "License text copied to the clipboard.";
+                    m_NoticeError = false;
+                    break;
+                case KeireHub::HubUiCommandType::BeginFirstRunDiscovery:
+                    if (!m_FirstRun || !command.Settings)
+                        throw std::logic_error("First-run discovery is unavailable.");
+                    RequireWorkflowSuccess(m_FirstRun->Start(
+                        KeireHub::BuildHubFirstRunDiscoveryRequest(*command.Settings, m_Executable,
+                                                                   std::string(Keire::GetBuildInfo().Platform),
+                                                                   std::string(Keire::GetBuildInfo().Architecture)),
+                        KeireHub::HubNowUnixSeconds()));
+                    m_SettingsDiscoveryPending = command.ItemId == "settings-discovery";
+                    break;
+                case KeireHub::HubUiCommandType::SaveSettings:
+                {
+                    if (!m_Controller || !command.Settings)
+                        throw std::logic_error("Hub settings are unavailable.");
+                    const bool packageTaskSettingsChanged =
+                        (!m_PackageTasks && !m_Maintenance.Snapshot()->IsRunning()) ||
+                        command.Settings->TemporaryRoot != m_PackageTaskTemporaryRoot ||
+                        command.Settings->ConcurrentDownloads != m_PackageTaskConcurrentDownloads;
+                    if (packageTaskSettingsChanged && !PackageTaskReconfigurationSafe())
+                    {
+                        throw std::runtime_error(
+                            "Finish or cancel active package tasks before changing task storage or concurrency.");
+                    }
+                    if (command.Settings->FirstRunCompleted && !m_ProductSnapshot.Settings.FirstRunCompleted &&
+                        m_FirstRun)
+                    {
+                        if (command.ItemId == "skip-discovery")
+                            m_FirstRun->Cancel();
+                        else
+                            RequireWorkflowSuccess(
+                                KeireHub::ImportHubFirstRunSnapshot(*m_FirstRun->Snapshot(), *m_Controller));
+                        if (m_EditorManagement)
+                            m_EditorManagement->ReloadRegistrations();
+                        KeireHub::ReloadProjectRegistry(m_Registry);
+                    }
+                    if (const auto status = m_Controller->Settings().Save(*command.Settings); !status)
+                        throw std::runtime_error(status.Error().Message);
+                    m_ProductSnapshot.Settings = *command.Settings;
+                    m_CreateLocation = Keire::Detail::PathToUtf8(command.Settings->DefaultProjectLocation);
+                    if (m_Distribution)
+                        m_DistributionRefreshPending = true;
+                    m_PackageTaskRefreshPending = packageTaskSettingsChanged;
+                    m_ProductUi.ResetSettingsEditor();
+                    Owner().SetUiTheme(KeireHub::ResolveHubUiTheme(command.Settings->Appearance));
+                    m_Notice = "Settings saved.";
+                    m_NoticeError = false;
+                    break;
+                }
+                case KeireHub::HubUiCommandType::CopyDiagnostics:
+                    Owner().Windows()->SetClipboardText(KeireHub::BuildHubDiagnosticReport(
+                        m_ProductSnapshot, Keire::GetBuildInfo(), Keire::GetPreferenceDirectory()));
+                    m_Notice = "Diagnostics copied to the clipboard.";
+                    m_NoticeError = false;
+                    break;
+                case KeireHub::HubUiCommandType::OpenLogs:
+                {
+                    const auto logs = Keire::GetPreferenceDirectory() / "Hub" / "Logs";
+                    std::error_code error;
+                    std::filesystem::create_directories(logs, error);
+                    if (error)
+                        throw std::runtime_error("The Hub log directory could not be opened.");
+                    Reveal(logs);
+                    break;
+                }
+                case KeireHub::HubUiCommandType::ResetSettings:
+                {
+                    if (!m_Controller)
+                        throw std::logic_error("Hub settings are unavailable.");
+                    if (!PackageTaskReconfigurationSafe())
+                        throw std::runtime_error("Finish or cancel active package tasks before resetting settings.");
+                    auto settings = KeireHub::ResetHubSettings(*m_Controller);
+                    if (!settings)
+                        throw std::runtime_error(settings.Error().Message);
+                    m_ProductSnapshot.Settings = std::move(settings).Value();
+                    m_CreateLocation = Keire::Detail::PathToUtf8(m_ProductSnapshot.Settings.DefaultProjectLocation);
+                    if (m_FirstRun)
+                        m_FirstRun->Cancel();
+                    m_SettingsDiscoveryPending = false;
+                    m_PackageTaskRefreshPending = true;
+                    m_ProductUi.ResetSettingsEditor();
+                    Owner().SetUiTheme(KeireHub::ResolveHubUiTheme(m_ProductSnapshot.Settings.Appearance));
+                    m_Page = KeireHub::HubPage::Home;
+                    m_Notice = "Hub settings reset.";
+                    m_NoticeError = false;
+                    break;
+                }
+                case KeireHub::HubUiCommandType::ClearVerifiedCache:
+                {
+                    if (!m_Controller)
+                        throw std::logic_error("Hub settings are unavailable.");
+                    RequireWorkflowSuccess(KeireHub::BeginHubVerifiedCacheClear(
+                        m_Maintenance, *m_Controller, m_PackageTasks, m_PackageTaskRefreshPending));
+                    break;
+                }
+                case KeireHub::HubUiCommandType::DownloadHubUpdate:
+                {
+                    if (!m_Distribution || !m_PackageTasks)
+                        throw std::logic_error("The Hub update task system is unavailable.");
+                    auto queued = KeireHub::QueueAvailableHubUpdate(*m_Distribution->Snapshot(),
+                                                                    m_ProductSnapshot.HubVersion, *m_PackageTasks);
+                    if (!queued)
+                        RequireWorkflowSuccess(KeireHub::HubStatus::Failure(queued.Error()));
+                    m_Notice = "Hub update download added to the task center.";
+                    m_NoticeError = false;
+                    break;
+                }
+                case KeireHub::HubUiCommandType::InstallHubUpdate:
+                    if (!m_Distribution || !m_PackageTasks || !m_Controller)
+                        throw std::logic_error("The Hub update handoff is unavailable.");
+                    RequireWorkflowSuccess(KeireHub::StartAvailableHubUpdateHandoff(
+                        *m_Distribution->Snapshot(), m_ProductSnapshot.HubVersion, *m_PackageTasks->Snapshot(),
+                        m_Controller->Updates(), m_HubUpdateHandoff, m_Executable, m_ProductSnapshot.Settings,
+                        KeireHub::HubNowUnixSeconds()));
+                    break;
+                case KeireHub::HubUiCommandType::None:
+                    break;
+                case KeireHub::HubUiCommandType::PauseTask:
+                case KeireHub::HubUiCommandType::ResumeTask:
+                case KeireHub::HubUiCommandType::CancelTask:
+                case KeireHub::HubUiCommandType::RetryTask:
+                    if (m_BuildSupport && m_BuildSupport->OwnsTask(command.ItemId))
+                    {
+                        RequireWorkflowSuccess(m_BuildSupport->ExecuteTaskCommand(command));
+                    }
+                    else
+                    {
+                        if (!m_PackageTasks)
+                            throw std::logic_error("The package task center is unavailable.");
+                        RequireWorkflowSuccess(m_PackageTasks->Execute(command));
+                    }
+                    break;
+                case KeireHub::HubUiCommandType::MarkNotificationRead:
+                case KeireHub::HubUiCommandType::ClearNotifications:
+                    if (!m_Controller)
+                        throw std::logic_error("The Hub runtime is unavailable.");
+                    if (const auto status =
+                            KeireHub::ExecuteRuntimeUiCommand(*m_Controller, command, KeireHub::HubNowUnixSeconds());
+                        !status)
+                        throw std::runtime_error(status.Error().Message);
+                    break;
+                }
             }
             catch (const std::exception& error)
             {
-                KEIRE_CLIENT_WARN("[Project Hub] Could not save UI preferences: {}", error.what());
+                ReportUnexpected("The Hub action could not be completed.", error);
             }
-        }
-
-        void DrawSidebar(Keire::UiFrame& ui)
-        {
-            ui.Spacing();
-            ui.TextColored({0.37F, 0.66F, 1.0F, 1.0F}, "KÉIRE");
-            ui.TextColored({0.55F, 0.61F, 0.72F, 1.0F}, "CREATE  •  BUILD  •  SHIP");
-            ui.Spacing();
-            ui.Separator();
-            ui.Spacing();
-            const auto width = std::max(ui.ContentAvailable().Width, 1.0F);
-            if (ui.Button("Projects", {width, 42.0F}))
-                m_Page = HubPage::Projects;
-            if (ui.Button("Build Support", {width, 42.0F}))
-                m_Page = HubPage::BuildSupport;
-            if (ui.Button("New Project", {width, 42.0F}))
-            {
-                m_Page = HubPage::Projects;
-                m_RequestCreatePopup = true;
-            }
-            if (ui.Button("Open Project", {width, 42.0F}))
-            {
-                m_Page = HubPage::Projects;
-                m_RequestOpenPopup = true;
-            }
-            ui.Spacing();
-            ui.Separator();
-            ui.Spacing();
-            ui.TextColored({0.58F, 0.63F, 0.72F, 1.0F}, "QUICK START");
-            if (const auto sample = SampleProject())
-                if (ui.Button("Kéire Sandbox", {width, 38.0F}))
-                    Open(*sample);
-            ui.Spacing();
-            ui.TextColored({0.46F, 0.50F, 0.58F, 1.0F}, "Engine " + std::string(Keire::GetBuildInfo().Version));
-        }
-
-        [[nodiscard]] std::optional<std::filesystem::path> SampleProject() const
-        {
-            const std::array samples{std::filesystem::current_path() / "Samples" / "KeireSandbox",
-                                     m_Executable.parent_path().parent_path() / "samples" / "KeireSandbox"};
-            const auto sample = std::ranges::find_if(
-                samples, [](const auto& path) { return Keire::Project::Inspect(path) == Keire::ProjectStatus::Ready; });
-            return sample == samples.end() ? std::nullopt : std::optional<std::filesystem::path>(*sample);
         }
 
         [[nodiscard]] bool TrayAvailable() const noexcept { return m_Tray && m_Tray->IsAvailable(); }
+
+        void ReportUnexpected(const std::string_view userMessage, const std::exception& error) noexcept
+        {
+            KEIRE_CLIENT_ERROR("[Project Hub] {} {}", userMessage, error.what());
+            SetError(std::string(userMessage) + " See Hub logs for details.");
+        }
+
+        [[nodiscard]] bool PackageTaskReconfigurationSafe() const noexcept
+        {
+            if (!m_PackageTasks)
+                return !m_Maintenance.Snapshot()->IsRunning();
+            const auto snapshot = m_PackageTasks->Snapshot();
+            return snapshot->State == KeireHub::HubWorkerCoordinatorState::Ready && snapshot->Tasks &&
+                   std::ranges::none_of(*snapshot->Tasks, [](const KeireHub::HubTask& task)
+                                        { return !KeireHub::IsTerminal(task.State); });
+        }
+
+        void RememberPackageTaskSettings()
+        {
+            m_PackageTaskTemporaryRoot = m_ProductSnapshot.Settings.TemporaryRoot;
+            m_PackageTaskConcurrentDownloads = m_ProductSnapshot.Settings.ConcurrentDownloads;
+        }
 
         void SetError(std::string message) noexcept
         {
@@ -499,6 +1102,26 @@ namespace
             }
             catch (...)
             {
+            }
+            if (m_Controller && message != m_LastPersistedError)
+            {
+                try
+                {
+                    const auto status =
+                        m_Controller->Notifications().Add({.Id = "hub-error-" + Keire::AssetId::Generate().ToString(),
+                                                           .Severity = KeireHub::NotificationSeverity::Error,
+                                                           .Title = "Hub action needs attention",
+                                                           .Message = message,
+                                                           .CreatedUnixSeconds = KeireHub::HubNowUnixSeconds()});
+                    if (status)
+                        m_LastPersistedError = message;
+                    else
+                        KEIRE_CLIENT_WARN("[Project Hub] Error notification could not be persisted: {}",
+                                          status.Error().Message);
+                }
+                catch (...)
+                {
+                }
             }
             try
             {
@@ -525,17 +1148,17 @@ namespace
             }
         }
 
-        void ShowHub()
+        void ShowHub() override
         {
             if (m_Registry)
             {
                 try
                 {
-                    m_Registry->Refresh();
+                    KeireHub::ReloadProjectRegistry(m_Registry);
                 }
                 catch (const std::exception& error)
                 {
-                    SetError(error.what());
+                    ReportUnexpected("The Hub could not refresh its project state.", error);
                 }
             }
             const auto window = Owner().MainWindow();
@@ -544,395 +1167,100 @@ namespace
             window->Raise();
         }
 
+        void RequestEditorInstall(const std::string_view packageOrVersion) override
+        {
+            m_PendingEditorInstallVersion = packageOrVersion;
+        }
+
+        [[nodiscard]] KeireHub::HubStatus FocusBuildSupport(const std::string_view platform,
+                                                            const std::string_view architecture) override
+        {
+            if (!m_BuildSupport)
+            {
+                return KeireHub::HubStatus::Failure(
+                    {.Code = KeireHub::HubErrorCode::InvalidTransition,
+                     .Message = "Build Support management is unavailable until the Hub runtime starts.",
+                     .AffectedItem = "build-support"});
+            }
+            return m_BuildSupport->FocusTarget(platform, architecture);
+        }
+
         void Refresh()
         {
             try
             {
-                m_Registry->Refresh();
-                m_Notice = "Project list refreshed.";
+                KeireHub::ReloadProjectRegistry(m_Registry);
+                if (m_ProjectMetadata && m_Controller)
+                    RequireWorkflowSuccess(m_ProjectMetadata->Start(*m_Controller));
+                m_Notice = "Project metadata is refreshing in the background.";
                 m_NoticeError = false;
             }
             catch (const std::exception& error)
             {
-                SetError(error.what());
+                ReportUnexpected("Project metadata refresh could not start.", error);
             }
         }
 
-        [[nodiscard]] std::filesystem::path EditorExecutable() const
+        void LocateEditor(const std::filesystem::path& selected)
         {
-            return Keire::Detail::ResolveCompanionExecutable(m_Executable, KEIRE_EDITOR_TARGET);
-        }
-
-        [[nodiscard]] std::filesystem::path AssetToolExecutable() const
-        {
-            return Keire::Detail::ResolveCompanionExecutable(m_Executable, "KeireAssetTool");
-        }
-
-        void RefreshBuildSupport()
-        {
-            try
-            {
-                m_BuildSupport.clear();
-                for (auto& package : Keire::Detail::InstalledPlayerSupport())
-                {
-                    BuildSupportEntry entry{.Package = std::move(package)};
-                    const auto root = Keire::Detail::PlayerSupportStorageRoot() / entry.Package.Manifest.EngineVersion /
-                                      Keire::Detail::PathFromUtf8(entry.Package.Manifest.Id);
-                    entry.Healthy = Keire::Detail::ValidateInstalledPlayerSupport(root, entry.Diagnostic);
-                    const auto modules = Owner().Modules();
-                    entry.Compatible = entry.Healthy &&
-                                       entry.Package.Manifest.EngineVersion == Keire::GetBuildInfo().Version &&
-                                       modules && entry.Package.Manifest.ModuleFingerprint == modules->Fingerprint();
-                    if (entry.Healthy && !entry.Compatible)
-                        entry.Diagnostic = "Module identity does not match this Hub/editor build.";
-                    m_BuildSupport.push_back(std::move(entry));
-                }
-            }
-            catch (const std::exception& error)
-            {
-                SetError(std::string("Could not refresh Build Support: ") + error.what());
-            }
-        }
-
-        void BrowseForBuildSupportPackage()
-        {
-            if (m_SupportFileDialog || m_SupportProcess)
-                return;
-            try
-            {
-                m_SupportFileDialog = Owner().Windows()->ShowOpenFileDialog(
-                    Owner().MainWindow()->Id(), {.Title = "Import Keire Build Support",
-                                                 .DefaultLocation = std::filesystem::current_path(),
-                                                 .FilterName = "Keire Player Support",
-                                                 .Extension = "keireplayersupport"});
-            }
-            catch (const std::exception& error)
-            {
-                SetError(error.what());
-            }
-        }
-
-        void StartBuildSupportInstall(const std::filesystem::path& package)
-        {
-            if (m_SupportProcess)
-                throw std::logic_error("A Build Support installation is already running.");
-            if (package.extension() != ".keireplayersupport" || !std::filesystem::is_regular_file(package))
-                throw std::invalid_argument("Select a regular .keireplayersupport package.");
-            const auto operationId = Keire::AssetId::Generate().ToString();
-            m_SupportOperation =
-                Keire::Detail::PlayerSupportStorageRoot().parent_path() / "BuildSupportOperations" / operationId;
-            m_SupportStatusPath = m_SupportOperation / "status.json";
-            m_SupportCancelPath = m_SupportOperation / "cancel";
-            std::filesystem::create_directories(m_SupportOperation);
-            const std::vector<std::string> arguments{"install-player-support",
-                                                     "--input",
-                                                     Keire::Detail::PathToUtf8(package),
-                                                     "--status",
-                                                     Keire::Detail::PathToUtf8(m_SupportStatusPath),
-                                                     "--cancel",
-                                                     Keire::Detail::PathToUtf8(m_SupportCancelPath)};
-            m_SupportProcess.emplace(
-                Keire::Detail::ChildProcess::Start(AssetToolExecutable(), arguments, package.parent_path()));
-            m_SupportOperationKind = SupportOperationKind::LocalInstall;
-            m_SupportStatus = {.State = "running",
-                               .Phase = "start",
-                               .Progress = 0.0F,
-                               .Message = "Starting Build Support installation."};
-            m_SupportCancelRequested = false;
-            m_Notice = "Verifying and installing " + package.filename().string() + ".";
+            if (!m_Controller)
+                throw std::logic_error("The Hub runtime is unavailable.");
+            auto inspected = KeireHub::RegisterExternalEditor(*m_Controller, selected,
+                                                              "external-" + Keire::ProjectId::Generate().ToString());
+            if (!inspected)
+                throw std::runtime_error(inspected.Error().Message);
+            const auto editor = std::move(inspected).Value();
+            if (m_EditorManagement)
+                m_EditorManagement->ReloadRegistrations();
+            m_Notice = "Located editor " + editor.Version + ". Verify it before use.";
             m_NoticeError = false;
         }
 
-        void StartBuildSupportCatalogRefresh()
+        void StartBuildSupportInstall(const std::filesystem::path& package) override
         {
-            if (m_SupportProcess)
-                throw std::logic_error("A Build Support operation is already running.");
-            const auto operationId = Keire::AssetId::Generate().ToString();
-            m_SupportOperation =
-                Keire::Detail::PlayerSupportStorageRoot().parent_path() / "BuildSupportOperations" / operationId;
-            m_SupportStatusPath = m_SupportOperation / "status.json";
-            m_SupportCancelPath = m_SupportOperation / "cancel";
-            m_SupportCatalogPath = m_SupportOperation / "catalog.json";
-            std::filesystem::create_directories(m_SupportOperation);
-            const std::vector<std::string> arguments{"fetch-player-support-catalog",
-                                                     "--output",
-                                                     Keire::Detail::PathToUtf8(m_SupportCatalogPath),
-                                                     "--status",
-                                                     Keire::Detail::PathToUtf8(m_SupportStatusPath),
-                                                     "--cancel",
-                                                     Keire::Detail::PathToUtf8(m_SupportCancelPath)};
-            m_SupportProcess.emplace(
-                Keire::Detail::ChildProcess::Start(AssetToolExecutable(), arguments, m_SupportOperation));
-            m_SupportOperationKind = SupportOperationKind::Catalog;
-            m_SupportStatus = {.State = "running",
-                               .Phase = "start",
-                               .Progress = 0.0F,
-                               .Message = "Checking the Build Support release catalog."};
-            m_SupportCancelRequested = false;
-            m_Notice.clear();
+            if (!m_BuildSupport)
+                throw std::logic_error("Build Support management is unavailable.");
+            RequireWorkflowSuccess(m_BuildSupport->ImportPackage(package));
         }
 
-        void StartOnlineBuildSupportInstall(const Keire::Detail::PlayerSupportCatalogEntry& entry)
+        void Launch(const Keire::ProjectInspectionResult& inspection, std::string preferredEditorId = {},
+                    const bool requirePreferred = false)
         {
-            if (m_SupportProcess)
-                throw std::logic_error("A Build Support operation is already running.");
-            const auto operationId = Keire::AssetId::Generate().ToString();
-            m_SupportOperation =
-                Keire::Detail::PlayerSupportStorageRoot().parent_path() / "BuildSupportOperations" / operationId;
-            m_SupportStatusPath = m_SupportOperation / "status.json";
-            m_SupportCancelPath = m_SupportOperation / "cancel";
-            const auto package = m_SupportOperation / Keire::Detail::PathFromUtf8(entry.File);
-            std::filesystem::create_directories(m_SupportOperation);
-            const std::vector<std::string> arguments{"download-install-player-support",
-                                                     "--url",
-                                                     entry.Url,
-                                                     "--size",
-                                                     std::to_string(entry.Size),
-                                                     "--sha256",
-                                                     entry.Sha256,
-                                                     "--output",
-                                                     Keire::Detail::PathToUtf8(package),
-                                                     "--status",
-                                                     Keire::Detail::PathToUtf8(m_SupportStatusPath),
-                                                     "--cancel",
-                                                     Keire::Detail::PathToUtf8(m_SupportCancelPath)};
-            m_SupportProcess.emplace(
-                Keire::Detail::ChildProcess::Start(AssetToolExecutable(), arguments, m_SupportOperation));
-            m_SupportOperationKind = SupportOperationKind::OnlineInstall;
-            m_SupportStatus = {.State = "running",
-                               .Phase = "start",
-                               .Progress = 0.0F,
-                               .Message = "Downloading Build Support " + entry.Id + "."};
-            m_SupportCancelRequested = false;
-            m_Notice.clear();
-        }
-
-        void CancelBuildSupportInstall() noexcept
-        {
-            if (!m_SupportProcess || m_SupportCancelRequested)
-                return;
             try
             {
-                Keire::Detail::WriteTextFileAtomically(m_SupportCancelPath, "cancel\n");
-                m_SupportCancelRequested = true;
-            }
-            catch (...)
-            {
-            }
-        }
-
-        void UpdateBuildSupportInstall()
-        {
-            if (!m_SupportProcess)
-                return;
-            try
-            {
-                if (std::filesystem::is_regular_file(m_SupportStatusPath))
-                    m_SupportStatus = Keire::Detail::ReadPlayerBuildStatusDocument(m_SupportStatusPath);
-            }
-            catch (const std::exception&)
-            {
-                // The installer replaces status documents atomically; the final document is required below.
-            }
-            if (!m_SupportProcess->Poll())
-                return;
-            auto process = std::move(*m_SupportProcess);
-            m_SupportProcess.reset();
-            const auto output = process.TakeOutput();
-            const auto exitCode = process.ExitCode().value_or(127);
-            try
-            {
-                Keire::Detail::WriteTextFileAtomically(m_SupportOperation / "installer.log", output);
-                m_SupportStatus = Keire::Detail::ReadPlayerBuildStatusDocument(m_SupportStatusPath);
-                if (exitCode == 0 && m_SupportStatus.State == "succeeded")
+                if (preferredEditorId.empty() && m_Registry)
                 {
-                    m_Notice = m_SupportStatus.Message;
-                    m_NoticeError = false;
-                    if (m_SupportOperationKind == SupportOperationKind::Catalog)
-                    {
-                        const auto url = Keire::Detail::DefaultPlayerSupportCatalogUrl(
-                            Keire::GetBuildInfo().RepositorySlug, Keire::GetBuildInfo().Version);
-                        m_AvailableSupport = Keire::Detail::LoadPlayerSupportCatalog(m_SupportCatalogPath, url,
-                                                                                     Keire::GetBuildInfo().Version);
-                    }
-                    else
-                        RefreshBuildSupport();
+                    const auto entries = m_Registry->Entries();
+                    const auto recent = std::ranges::find(entries, inspection.Id, &Keire::RecentProject::Id);
+                    if (recent != entries.end())
+                        preferredEditorId = recent->PreferredEditorInstallation;
                 }
-                else if (m_SupportCancelRequested)
+                auto launched =
+                    KeireHub::LaunchProjectEditor(m_ProductSnapshot.Editors, m_EditorProcesses, inspection,
+                                                  preferredEditorId, requirePreferred, KeireHub::HubNowUnixSeconds());
+                if (!launched)
                 {
-                    m_Notice = "Build Support installation cancelled.";
-                    m_NoticeError = false;
+                    if (!launched.Error().TechnicalDetails.empty())
+                        KEIRE_CLIENT_ERROR("[Project Hub] Editor launch failed: {}", launched.Error().TechnicalDetails);
+                    throw std::runtime_error(launched.Error().Message);
                 }
-                else
-                    SetError(m_SupportStatus.Message.empty() ? "Build Support installation failed."
-                                                             : m_SupportStatus.Message);
-            }
-            catch (const std::exception& error)
-            {
-                SetError(std::string("Build Support installer failed: ") + error.what());
-            }
-            m_SupportCancelRequested = false;
-            m_SupportOperationKind = SupportOperationKind::None;
-        }
-
-        void RemoveBuildSupport(const BuildSupportEntry& entry)
-        {
-            try
-            {
-                Keire::Detail::RemovePlayerSupport(entry.Package.Manifest.EngineVersion, entry.Package.Manifest.Id);
-                m_Notice = "Removed Build Support " + entry.Package.Manifest.Id + ".";
+                const auto& result = launched.Value();
+                if (result.TrackingFailure)
+                    KEIRE_CLIENT_WARN("[Project Hub] Editor process {} launched but could not be tracked: {}",
+                                      result.ProcessId, result.TrackingFailure->Message);
+                if (m_EditorManagement)
+                    m_EditorManagement->ReloadRegistrations();
+                m_Notice = "Opened " + result.Descriptor.Name + ".";
                 m_NoticeError = false;
-                RefreshBuildSupport();
-            }
-            catch (const std::exception& error)
-            {
-                SetError(error.what());
-            }
-        }
-
-        void DrawBuildSupport(Keire::UiFrame& ui)
-        {
-            ui.TextColored({0.95F, 0.97F, 1.0F, 1.0F}, "Build Support");
-            ui.TextColored({0.53F, 0.58F, 0.68F, 1.0F},
-                           "Install immutable desktop player templates for this engine version.");
-            ui.Spacing();
-            if (auto disabled =
-                    ui.BeginDisabled(static_cast<bool>(m_SupportProcess) || static_cast<bool>(m_SupportFileDialog));
-                disabled)
-            {
-                if (ui.Button("Import Local Package", {164.0F, 38.0F}))
-                    BrowseForBuildSupportPackage();
-            }
-            ui.SameLine();
-            if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_SupportProcess)); disabled)
-            {
-                if (ui.Button("Check Online", {120.0F, 38.0F}))
+                if (m_ProjectWorkflow)
                 {
                     try
                     {
-                        StartBuildSupportCatalogRefresh();
-                    }
-                    catch (const std::exception& error)
-                    {
-                        SetError(error.what());
-                    }
-                }
-            }
-            ui.SameLine();
-            if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_SupportProcess)); disabled)
-            {
-                if (ui.Button("Refresh Installed", {136.0F, 38.0F}))
-                    RefreshBuildSupport();
-            }
-            if (m_SupportProcess)
-            {
-                ui.Spacing();
-                const auto overlay = m_SupportStatus.Phase + ": " + m_SupportStatus.Message;
-                ui.ProgressBar(m_SupportStatus.Progress, {0.0F, 18.0F}, overlay);
-                if (auto disabled = ui.BeginDisabled(m_SupportCancelRequested); disabled)
-                    if (ui.Button(m_SupportCancelRequested ? "Cancelling..." : "Cancel"))
-                        CancelBuildSupportInstall();
-            }
-            if (!m_Notice.empty())
-            {
-                ui.Spacing();
-                ui.TextColored(m_NoticeError ? Keire::UiColor{0.96F, 0.32F, 0.36F, 1.0F}
-                                             : Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F},
-                               m_Notice);
-            }
-            ui.Spacing();
-            ui.Separator();
-            ui.TextColored({0.82F, 0.85F, 0.91F, 1.0F}, "INSTALLED MODULES");
-            if (m_BuildSupport.empty())
-            {
-                ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F}, "No Build Support modules are installed for this user.");
-            }
-            for (std::size_t index = 0; index < m_BuildSupport.size(); ++index)
-            {
-                const auto& entry = m_BuildSupport[index];
-                auto id = ui.PushId(entry.Package.Manifest.Id);
-                ui.Spacing();
-                ui.Text(entry.Package.Manifest.Id);
-                ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F},
-                               std::string(Keire::ToString(entry.Package.Manifest.Platform)) + " / " +
-                                   std::string(Keire::ToString(entry.Package.Manifest.Architecture)) + " / " +
-                                   std::to_string(entry.Package.ArchiveSize / (1024ULL * 1024ULL)) + " MiB");
-                ui.TextColored(entry.Compatible ? Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F}
-                                                : Keire::UiColor{0.96F, 0.50F, 0.25F, 1.0F},
-                               entry.Compatible ? "Installed, verified, and compatible"
-                               : entry.Healthy  ? "Installed but incompatible: " + entry.Diagnostic
-                                                : "Repair required: " + entry.Diagnostic);
-                if (!entry.Healthy && !m_SupportProcess && ui.Button("Repair from Package..."))
-                    BrowseForBuildSupportPackage();
-                if (!entry.Healthy)
-                    ui.SameLine();
-                if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_SupportProcess)); disabled)
-                    if (ui.Button("Remove"))
-                    {
-                        RemoveBuildSupport(entry);
-                        break;
-                    }
-                if (index + 1 != m_BuildSupport.size())
-                    ui.Separator();
-            }
-            if (!m_AvailableSupport.Packages.empty())
-            {
-                ui.Spacing();
-                ui.Separator();
-                ui.TextColored({0.82F, 0.85F, 0.91F, 1.0F}, "AVAILABLE MODULES");
-                for (const auto& available : m_AvailableSupport.Packages)
-                {
-                    auto id = ui.PushId("available-" + available.Id);
-                    ui.Spacing();
-                    ui.Text(available.Id);
-                    ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F},
-                                   std::string(Keire::ToString(available.Platform)) + " / " +
-                                       std::string(Keire::ToString(available.Architecture)) + " / " +
-                                       std::to_string(available.Size / (1024ULL * 1024ULL)) + " MiB");
-                    const auto installed =
-                        std::ranges::find_if(m_BuildSupport, [&](const BuildSupportEntry& entry)
-                                             { return entry.Package.Manifest.Id == available.Id && entry.Compatible; });
-                    if (installed != m_BuildSupport.end())
-                        ui.TextColored({0.27F, 0.78F, 0.50F, 1.0F}, "Current version installed");
-                    else if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_SupportProcess)); disabled)
-                    {
-                        if (ui.Button("Download & Install"))
-                        {
-                            try
-                            {
-                                StartOnlineBuildSupportInstall(available);
-                            }
-                            catch (const std::exception& error)
-                            {
-                                SetError(error.what());
-                            }
-                        }
-                    }
-                }
-            }
-            ui.Spacing();
-            ui.TextColored({0.46F, 0.50F, 0.58F, 1.0F},
-                           "Offline packages remain available when the release catalog cannot be reached.");
-        }
-
-        void Launch(const Keire::Ref<Keire::Project>& project)
-        {
-            if (!project)
-                return;
-            try
-            {
-                const std::array arguments{std::string("--project"), Utf8Path(project->Root())};
-                std::string diagnostic;
-                if (!Keire::Detail::LaunchDetachedProcess(EditorExecutable(), arguments, project->Root(), diagnostic))
-                    throw std::runtime_error("Could not launch editor: " + diagnostic);
-                m_Notice = "Opened " + project->Descriptor().Name + ".";
-                m_NoticeError = false;
-                HideHub();
-                if (m_Registry)
-                {
-                    try
-                    {
-                        m_Registry->RecordOpened(*project);
+                        const auto status = m_ProjectWorkflow->RecordOpened(
+                            inspection.Root, result.Descriptor, result.InstallationId, KeireHub::HubNowUnixSeconds());
+                        if (!status)
+                            throw std::runtime_error(status.Error().Message);
+                        KeireHub::ReloadProjectRegistry(m_Registry);
                     }
                     catch (const std::exception& error)
                     {
@@ -941,10 +1269,14 @@ namespace
                                           error.what());
                     }
                 }
+                if (m_ProductSnapshot.Settings.KeepRunningAfterEditorLaunch)
+                    HideHub();
+                else
+                    Owner().RequestExit();
             }
             catch (const std::exception& error)
             {
-                SetError(error.what());
+                ReportUnexpected("The editor could not be launched.", error);
             }
         }
 
@@ -957,7 +1289,7 @@ namespace
             }
             catch (const std::exception& error)
             {
-                SetError(error.what());
+                ReportUnexpected("The folder picker could not be opened.", error);
             }
         }
 
@@ -965,281 +1297,88 @@ namespace
         {
             std::string diagnostic;
             if (!Keire::Detail::RevealInFileManager(path, diagnostic))
-                SetError("Could not reveal project: " + diagnostic);
+            {
+                KEIRE_CLIENT_ERROR("[Project Hub] File reveal failed: {}", diagnostic);
+                SetError("The selected item could not be revealed. See Hub logs for details.");
+            }
         }
 
-        void Open(const std::filesystem::path& path)
+        void Open(const std::filesystem::path& path) override
         {
             try
             {
-                if (Keire::Project::IsLocked(path))
+                const auto inspection = Keire::Project::InspectMetadata(path);
+                if (!m_ProjectWorkflow)
+                    throw std::logic_error("Project workflows are unavailable.");
+                RequireWorkflowSuccess(m_ProjectWorkflow->Add(inspection, KeireHub::HubNowUnixSeconds()));
+                KeireHub::ReloadProjectRegistry(m_Registry);
+                if (Keire::Project::IsLocked(inspection.Root))
                     throw std::runtime_error("Project is already open in another editor.");
-                const auto status = Keire::Project::Inspect(path);
-                if (status == Keire::ProjectStatus::UpgradeAvailable ||
-                    status == Keire::ProjectStatus::RecoveryRequired)
+                if (inspection.Status == Keire::ProjectStatus::UpgradeAvailable ||
+                    inspection.Status == Keire::ProjectStatus::RecoveryRequired)
                 {
-                    m_UpgradeService = std::make_unique<Keire::ProjectUpgradeService>(
-                        path, Owner().Modules() ? Owner().Modules()->ProjectUpgrades()
-                                                : std::vector<Keire::ProjectUpgradeStep>{});
-                    m_UpgradeInterrupted =
-                        m_UpgradeService->State() == Keire::ProjectUpgradeTransactionState::Interrupted;
-                    m_UpgradePlan = m_UpgradeInterrupted ? std::nullopt : std::optional(m_UpgradeService->Plan());
+                    const auto upgrades = Owner().Modules() ? Owner().Modules()->ProjectUpgrades()
+                                                            : std::vector<Keire::ProjectUpgradeStep>{};
+                    m_ProjectUpgradeUi.Begin(inspection.Root, upgrades);
                     m_RequestUpgradePopup = true;
                     return;
                 }
-                Launch(Keire::Project::Open(path));
+                if (inspection.Status != Keire::ProjectStatus::Ready &&
+                    inspection.Status != Keire::ProjectStatus::RequiresNewerEngine)
+                {
+                    throw std::runtime_error("The project is not in a state that an installed editor can open.");
+                }
+                Launch(inspection);
             }
             catch (const std::exception& error)
             {
-                SetError(error.what());
+                ReportUnexpected("The project could not be opened.", error);
             }
-        }
-
-        void DrawProjects(Keire::UiFrame& ui)
-        {
-            ui.TextColored({0.82F, 0.85F, 0.91F, 1.0F}, "RECENT PROJECTS");
-            if (!m_Registry)
-            {
-                ui.Text("No project registry is available.");
-                return;
-            }
-            const auto search = Lower(m_Search);
-            const auto entries = m_Registry->Entries();
-            std::vector<const Keire::RecentProject*> visible;
-            visible.reserve(entries.size());
-            for (const auto& entry : entries)
-            {
-                if (!search.empty() && Lower(entry.Name).find(search) == std::string::npos &&
-                    Lower(Utf8Path(entry.Root)).find(search) == std::string::npos)
-                    continue;
-                visible.push_back(&entry);
-            }
-            std::ranges::stable_sort(visible,
-                                     [this](const auto* left, const auto* right)
-                                     {
-                                         if (left->Pinned != right->Pinned)
-                                             return left->Pinned > right->Pinned;
-                                         if (m_Sort == ProjectSort::Name)
-                                             return Lower(left->Name) < Lower(right->Name);
-                                         if (m_Sort == ProjectSort::Status)
-                                             return std::tie(left->Status, left->Name) <
-                                                    std::tie(right->Status, right->Name);
-                                         return left->LastOpenedUnixSeconds > right->LastOpenedUnixSeconds;
-                                     });
-            if (visible.empty())
-            {
-                ui.Spacing();
-                ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F},
-                               entries.empty() ? "No recent projects yet. Create or add one to get started."
-                                               : "No recent projects match this search.");
-                return;
-            }
-
-            ui.Spacing();
-            if (m_View == ProjectView::List)
-            {
-                Keire::UiTableOptions options;
-                options.Sizing = Keire::UiTableSizing::Proportional;
-                options.Borders = true;
-                options.Resizable = true;
-                options.RowBackground = true;
-                if (auto table = ui.BeginTable("RecentProjectList", 4, options); table)
-                {
-                    ui.TableNextRow();
-                    (void)ui.TableNextColumn();
-                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "PROJECT");
-                    (void)ui.TableNextColumn();
-                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "STATUS");
-                    (void)ui.TableNextColumn();
-                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "LAST OPENED");
-                    (void)ui.TableNextColumn();
-                    ui.TextColored({0.64F, 0.68F, 0.76F, 1.0F}, "PATH");
-                    for (const auto* value : visible)
-                    {
-                        const auto& entry = *value;
-                        ui.TableNextRow();
-                        (void)ui.TableNextColumn();
-                        auto id = ui.PushId(entry.Id.ToString());
-                        const bool selected = m_SelectedProject == entry.Id;
-                        if (ui.Selectable((entry.Pinned ? "*  " : "") + entry.Name, selected))
-                            m_SelectedProject = entry.Id;
-                        const auto state = ui.LastItemState();
-                        if (state.DoubleClicked && CanOpenOrUpgrade(entry.Status))
-                            Open(entry.Root);
-                        if (auto context = ui.BeginItemContextMenu("ProjectActions"); context)
-                        {
-                            if (ui.MenuItem(entry.Status == Keire::ProjectStatus::Ready ? "Open" : "Review upgrade",
-                                            false, CanOpenOrUpgrade(entry.Status)))
-                                Open(entry.Root);
-                            if (ui.MenuItem("Reveal"))
-                                Reveal(entry.Root);
-                            if (ui.MenuItem(entry.Pinned ? "Unpin" : "Pin"))
-                                (void)m_Registry->SetPinned(entry.Id, !entry.Pinned);
-                            if (ui.MenuItem("Remove"))
-                                (void)m_Registry->Remove(entry.Id);
-                        }
-                        (void)ui.TableNextColumn();
-                        ui.TextColored(StatusColor(entry.Status), StatusLabel(entry.Status));
-                        (void)ui.TableNextColumn();
-                        ui.Text(FormatLastOpened(entry.LastOpenedUnixSeconds));
-                        (void)ui.TableNextColumn();
-                        ui.TextColored({0.52F, 0.57F, 0.66F, 1.0F}, Utf8Path(entry.Root));
-                    }
-                }
-                if (!visible.empty() &&
-                    (ui.Shortcut({.Key = Keire::UiKey::Down}) || ui.Shortcut({.Key = Keire::UiKey::Up})))
-                {
-                    const auto selected = std::ranges::find_if(visible, [this](const auto* entry)
-                                                               { return entry->Id == m_SelectedProject; });
-                    const auto current = selected == visible.end()
-                                             ? std::size_t{0}
-                                             : static_cast<std::size_t>(selected - visible.begin());
-                    const bool moveUp = ui.KeyDown(Keire::UiKey::Up);
-                    const std::size_t next =
-                        moveUp ? (current == 0 ? visible.size() - 1 : current - 1) : (current + 1) % visible.size();
-                    m_SelectedProject = visible[next]->Id;
-                }
-                if (m_SelectedProject && ui.Shortcut({.Key = Keire::UiKey::Enter}))
-                {
-                    const auto selected = std::ranges::find_if(visible, [this](const auto* entry)
-                                                               { return entry->Id == m_SelectedProject; });
-                    if (selected != visible.end() && CanOpenOrUpgrade((*selected)->Status))
-                        Open((*selected)->Root);
-                }
-                return;
-            }
-            const float contentWidth = ui.ContentAvailable().Width;
-            const std::size_t columns = contentWidth >= 1120.0F ? 3 : contentWidth >= 700.0F ? 2 : 1;
-            Keire::UiTableOptions tableOptions;
-            tableOptions.Sizing = Keire::UiTableSizing::Equal;
-            tableOptions.Borders = false;
-            tableOptions.Resizable = false;
-            tableOptions.RowBackground = false;
-            tableOptions.PersistSettings = false;
-            if (auto grid = ui.BeginTable("RecentProjectCards", columns, tableOptions); grid)
-                for (std::size_t index = 0; index < visible.size(); ++index)
-                {
-                    const auto& entry = *visible[index];
-                    if (index % columns == 0)
-                        ui.TableNextRow();
-                    (void)ui.TableNextColumn();
-                    auto id = ui.PushId(entry.Id.ToString());
-                    if (auto card = ui.BeginChild("ProjectCard", {0.0F, 150.0F}, true); card)
-                    {
-                        const float cardWidth = std::max(ui.ContentAvailable().Width, 1.0F);
-                        const bool openCard = ui.InvisibleButton("OpenProjectCard", {cardWidth, 54.0F});
-                        const auto header = ui.LastItemRect();
-                        ui.DrawFilledRectangle(header, {0.115F, 0.145F, 0.205F, 1.0F}, 6.0F);
-                        const Keire::UiItemRect badge{{header.Minimum.X + 9.0F, header.Minimum.Y + 8.0F},
-                                                      {header.Minimum.X + 47.0F, header.Maximum.Y - 8.0F}};
-                        ui.DrawFilledRectangle(badge, {0.24F, 0.48F, 0.88F, 1.0F}, 7.0F);
-                        const std::string initial = entry.Name.empty() ? "K" : entry.Name.substr(0, 1);
-                        ui.DrawOverlayText({badge.Minimum.X + 14.0F, badge.Minimum.Y + 9.0F},
-                                           {0.97F, 0.98F, 1.0F, 1.0F}, initial);
-                        ui.DrawOverlayText({header.Minimum.X + 58.0F, header.Minimum.Y + 9.0F},
-                                           {0.92F, 0.95F, 1.0F, 1.0F}, entry.Name);
-                        ui.DrawFilledCircle({header.Minimum.X + 63.0F, header.Minimum.Y + 37.0F}, 3.0F,
-                                            StatusColor(entry.Status));
-                        ui.DrawOverlayText({header.Minimum.X + 72.0F, header.Minimum.Y + 30.0F},
-                                           {0.61F, 0.66F, 0.75F, 1.0F}, StatusLabel(entry.Status));
-                        if (entry.Pinned)
-                            ui.DrawOverlayText({header.Maximum.X - 54.0F, header.Minimum.Y + 9.0F},
-                                               {0.98F, 0.75F, 0.30F, 1.0F}, "PINNED");
-                        if (openCard && CanOpenOrUpgrade(entry.Status))
-                            Open(entry.Root);
-                        ui.TextColored({0.52F, 0.57F, 0.66F, 1.0F}, Utf8Path(entry.Root));
-                        ui.Spacing();
-                        if (auto disabled = ui.BeginDisabled(!CanOpenOrUpgrade(entry.Status)); disabled)
-                            if (ui.Button(entry.Status == Keire::ProjectStatus::Ready ? "Open" : "Upgrade",
-                                          {74.0F, 30.0F}))
-                                Open(entry.Root);
-                        ui.SameLine();
-                        if (ui.Button("Reveal", {74.0F, 30.0F}))
-                            Reveal(entry.Root);
-                        ui.SameLine();
-                        if (ui.Button(entry.Pinned ? "Unpin" : "Pin", {64.0F, 30.0F}))
-                        {
-                            try
-                            {
-                                (void)m_Registry->SetPinned(entry.Id, !entry.Pinned);
-                            }
-                            catch (const std::exception& error)
-                            {
-                                SetError(error.what());
-                            }
-                        }
-                        ui.SameLine();
-                        if (ui.Button("Remove", {74.0F, 30.0F}))
-                        {
-                            try
-                            {
-                                (void)m_Registry->Remove(entry.Id);
-                            }
-                            catch (const std::exception& error)
-                            {
-                                SetError(error.what());
-                            }
-                        }
-                    }
-                }
         }
 
         void DrawCreateDialog(Keire::UiFrame& ui)
         {
-            ui.SetNextWindowSize({760.0F, 430.0F}, false);
-            if (auto dialog = ui.BeginPopupModal("Create Project"); dialog)
+            const auto request = KeireHub::DrawHubCreateProjectDialog(
+                ui, m_ProductSnapshot, m_CreateTemplateId, m_CreateEditorId, m_CreateName, m_CreateLocation,
+                m_CreateOpenAfterCreation, static_cast<bool>(m_FolderDialog));
+            if (request.Action == KeireHub::HubCreateProjectAction::Browse)
             {
-                Keire::UiTableOptions layoutOptions;
-                layoutOptions.Borders = false;
-                layoutOptions.Resizable = false;
-                if (auto layout = ui.BeginTable("CreateProjectLayout", 2, layoutOptions); layout)
+                BrowseForFolder(FolderTarget::CreateLocation, Keire::Detail::PathFromUtf8(m_CreateLocation));
+                return;
+            }
+            if (request.Action != KeireHub::HubCreateProjectAction::Create)
+                return;
+            try
+            {
+                if (!m_Templates)
+                    throw std::runtime_error("The verified template catalog is unavailable.");
+                const auto editor =
+                    std::ranges::find(m_ProductSnapshot.Editors, request.EditorId, &KeireHub::HubEditorUiRecord::Id);
+                if (editor == m_ProductSnapshot.Editors.end())
+                    throw std::runtime_error("The selected editor is no longer installed.");
+                std::error_code directoryError;
+                std::filesystem::create_directories(request.ParentDirectory, directoryError);
+                if (directoryError || !std::filesystem::is_directory(request.ParentDirectory, directoryError) ||
+                    directoryError)
                 {
-                    ui.TableNextRow();
-                    (void)ui.TableNextColumn();
-                    ui.TextColored({0.58F, 0.68F, 0.88F, 1.0F}, "TEMPLATES");
-                    if (ui.Selectable("Starter\nCamera, light, sample scene", m_Starter))
-                        m_Starter = true;
-                    if (ui.Selectable("Empty\nMinimal project structure", !m_Starter))
-                        m_Starter = false;
-                    (void)ui.TableNextColumn();
-                    ui.TextColored({0.58F, 0.68F, 0.88F, 1.0F}, "PROJECT DETAILS");
-                    (void)ui.InputTextWithHint("Name", "My Project", m_CreateName);
-                    (void)ui.InputTextWithHint("Location", "Parent folder", m_CreateLocation);
-                    ui.SameLine();
-                    if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_FolderDialog)); disabled)
-                        if (ui.Button("Browse..."))
-                            BrowseForFolder(FolderTarget::CreateLocation, m_CreateLocation);
-                    const auto destination = std::filesystem::path(m_CreateLocation) / m_CreateName;
-                    ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F}, "Destination: " + Utf8Path(destination));
-                    const bool validName =
-                        !m_CreateName.empty() && m_CreateName.find_first_of("<>:\"/\\|?*") == std::string::npos;
-                    const bool conflict = validName && std::filesystem::exists(destination);
-                    if (!validName)
-                        ui.TextColored({0.96F, 0.38F, 0.42F, 1.0F}, "Enter a valid project name.");
-                    else if (conflict)
-                        ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "The destination already exists.");
-                    else
-                        ui.TextColored({0.32F, 0.84F, 0.58F, 1.0F}, "Ready to create.");
-                    if (auto disabled = ui.BeginDisabled(!validName || conflict || m_CreateLocation.empty()); disabled)
-                        if (ui.Button("Create Project", {132.0F, 34.0F}))
-                        {
-                            try
-                            {
-                                const auto project = Keire::Project::Create(
-                                    {m_CreateLocation, m_CreateName,
-                                     m_Starter ? Keire::ProjectTemplate::Starter : Keire::ProjectTemplate::Empty});
-                                ui.CloseCurrentPopup();
-                                Launch(project);
-                            }
-                            catch (const std::exception& error)
-                            {
-                                SetError(error.what());
-                            }
-                        }
+                    throw std::runtime_error("The selected project location could not be created or opened.");
                 }
-                ui.SameLine();
-                if (ui.Button("Cancel"))
-                    ui.CloseCurrentPopup();
+                const auto status = m_Templates->StartCreate({.TemplateId = request.TemplateId,
+                                                              .ProjectName = request.Name,
+                                                              .ParentDirectory = request.ParentDirectory,
+                                                              .EditorId = editor->Id,
+                                                              .EditorVersion = editor->Version,
+                                                              .EditorAssetToolEntrypoint = editor->AssetToolEntrypoint,
+                                                              .HostPlatform = editor->Platform,
+                                                              .HostArchitecture = editor->Architecture,
+                                                              .MinimumProjectSchema = editor->MinimumProjectSchema,
+                                                              .MaximumProjectSchema = editor->MaximumProjectSchema});
+                RequireWorkflowSuccess(status);
+                m_ActiveCreationOpenAfter = request.OpenAfterCreation;
+            }
+            catch (const std::exception& error)
+            {
+                ReportUnexpected("The project could not be created.", error);
             }
         }
 
@@ -1252,235 +1391,84 @@ namespace
                 if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_FolderDialog)); disabled)
                 {
                     if (ui.Button("Browse..."))
-                        BrowseForFolder(FolderTarget::OpenProject, m_OpenPath);
+                        BrowseForFolder(FolderTarget::OpenProject, Keire::Detail::PathFromUtf8(m_OpenPath));
                 }
                 if (ui.Button("Open"))
                 {
                     ui.CloseCurrentPopup();
-                    Open(m_OpenPath);
+                    Open(Keire::Detail::PathFromUtf8(m_OpenPath));
                 }
                 ui.SameLine();
                 if (ui.Button("Cancel"))
                     ui.CloseCurrentPopup();
-            }
-        }
-
-        void DrawUpgradeDialog(Keire::UiFrame& ui)
-        {
-            ui.SetNextWindowSize({680.0F, 440.0F}, false);
-            if (auto dialog = ui.BeginPopupModal("Project Upgrade"); dialog)
-            {
-                if (!m_UpgradeService)
-                {
-                    ui.Text("No project upgrade is pending.");
-                }
-                else if (m_UpgradeInterrupted)
-                {
-                    ui.TextColored({0.96F, 0.50F, 0.25F, 1.0F}, "An interrupted project upgrade was detected.");
-                    ui.Text("Recover continues publication from the durable journal. Rollback restores before-images.");
-                    if (ui.Button("Recover", {112.0F, 34.0F}))
-                    {
-                        try
-                        {
-                            const auto root = m_UpgradeService->Root();
-                            m_UpgradeService->Recover();
-                            m_UpgradeService.reset();
-                            m_UpgradeInterrupted = false;
-                            ui.CloseCurrentPopup();
-                            Refresh();
-                            Open(root);
-                        }
-                        catch (const std::exception& error)
-                        {
-                            SetError(error.what());
-                        }
-                    }
-                    ui.SameLine();
-                    if (ui.Button("Rollback", {112.0F, 34.0F}))
-                    {
-                        try
-                        {
-                            m_UpgradeService->Rollback();
-                            m_UpgradeService.reset();
-                            m_UpgradeInterrupted = false;
-                            ui.CloseCurrentPopup();
-                            Refresh();
-                        }
-                        catch (const std::exception& error)
-                        {
-                            SetError(error.what());
-                        }
-                    }
-                }
-                else if (m_UpgradePlan)
-                {
-                    const auto& plan = *m_UpgradePlan;
-                    ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "Project schema " + std::to_string(plan.CurrentSchema) +
-                                                                    " -> " + std::to_string(plan.TargetSchema));
-                    ui.Text("Backup estimate: " + std::to_string(plan.EstimatedBackupBytes) + " bytes");
-                    ui.Separator();
-                    for (const auto& step : plan.Steps)
-                    {
-                        ui.Text(step.Id);
-                        for (const auto& path : step.AffectedPaths)
-                            ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F}, "  " + Utf8Path(path));
-                        if (!step.Warning.empty())
-                            ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, step.Warning);
-                    }
-                    ui.Separator();
-                    ui.Text("The project is locked while staged files are validated and atomically published.");
-                    if (ui.Button("Apply Upgrade", {136.0F, 34.0F}))
-                    {
-                        try
-                        {
-                            const auto root = plan.ProjectRoot;
-                            m_UpgradeService->Apply(plan);
-                            m_UpgradeService.reset();
-                            m_UpgradePlan.reset();
-                            ui.CloseCurrentPopup();
-                            Refresh();
-                            Open(root);
-                        }
-                        catch (const std::exception& error)
-                        {
-                            SetError(error.what());
-                        }
-                    }
-                }
-                ui.SameLine();
-                if (ui.Button("Cancel"))
-                {
-                    m_UpgradeService.reset();
-                    m_UpgradePlan.reset();
-                    m_UpgradeInterrupted = false;
-                    ui.CloseCurrentPopup();
-                }
             }
         }
 
         std::filesystem::path m_Executable;
-        std::filesystem::path m_PreferencesPath;
+        bool m_Smoke = false;
         Keire::Ref<Keire::ProjectRegistry> m_Registry;
+        std::unique_ptr<KeireHub::HubController> m_Controller;
+        std::unique_ptr<KeireHub::HubProjectWorkflow> m_ProjectWorkflow;
+        std::unique_ptr<KeireHub::HubProjectMutationWorkflow> m_ProjectMutations;
+        std::unique_ptr<KeireHub::HubProjectMetadataWorkflow> m_ProjectMetadata;
+        std::unique_ptr<KeireHub::HubEditorManagementWorkflow> m_EditorManagement;
+        std::unique_ptr<KeireHub::HubEditorInstallWorkflow> m_EditorInstalls;
+        std::unique_ptr<KeireHub::HubFirstRunWorkflow> m_FirstRun;
+        std::unique_ptr<KeireHub::HubDistributionWorkflow> m_Distribution;
+        std::unique_ptr<KeireHub::HubPackageTaskWorkflow> m_PackageTasks;
+        std::unique_ptr<KeireHub::HubTemplateWorkflow> m_Templates;
+        std::unique_ptr<KeireHub::HubBuildSupportIntegration> m_BuildSupport;
         Keire::Ref<Keire::SystemTray> m_Tray;
         Keire::Ref<Keire::FolderDialogOperation> m_FolderDialog;
-        Keire::Ref<Keire::OpenFileDialogOperation> m_SupportFileDialog;
-        std::unique_ptr<Keire::ProjectUpgradeService> m_UpgradeService;
-        std::optional<Keire::Detail::ChildProcess> m_SupportProcess;
-        std::optional<Keire::ProjectUpgradePlan> m_UpgradePlan;
-        Keire::Detail::PlayerBuildStatusDocument m_SupportStatus;
-        Keire::Detail::PlayerSupportCatalog m_AvailableSupport;
-        std::vector<BuildSupportEntry> m_BuildSupport;
-        std::filesystem::path m_SupportOperation;
-        std::filesystem::path m_SupportStatusPath;
-        std::filesystem::path m_SupportCancelPath;
-        std::filesystem::path m_SupportCatalogPath;
-        std::optional<RequestedBuildSupport> m_RequestedSupport;
+        KeireHub::HubProductUi m_ProductUi;
+        KeireHub::HubProjectsUi m_ProjectsUi;
+        KeireHub::HubProjectUpgradeUi m_ProjectUpgradeUi;
+        KeireHub::EditorProcessTracker m_EditorProcesses{Keire::Detail::IsProcessAlive};
+        KeireHub::HubUpdateHandoffWorkflow m_HubUpdateHandoff;
+        KeireHub::HubMaintenanceWorkflow m_Maintenance;
+        KeireHub::HubProductSnapshot m_ProductSnapshot;
+        std::optional<PendingStartupActivation> m_PendingStartupActivation;
         std::shared_ptr<KeireHub::HubInstanceCoordinator> m_Instance;
+        bool m_DistributionRefreshPending = false;
+        bool m_PackageTaskRefreshPending = false;
         FolderTarget m_FolderTarget = FolderTarget::None;
-        HubPage m_Page = HubPage::Projects;
-        std::string m_Search;
+        KeireHub::HubPage m_Page = KeireHub::HubPage::Home;
         std::string m_CreateName = "NewProject";
         std::string m_CreateLocation;
         std::string m_OpenPath;
         std::string m_Notice;
+        std::optional<std::string> m_RuntimeStartupFailure;
+        std::string m_FatalActionMessage;
+        std::string m_ObservedNotice;
+        std::string m_LastPersistedError;
+        std::string m_PendingEditorInstallVersion;
+        std::string m_PendingLocateProjectId;
+        std::filesystem::path m_PackageTaskTemporaryRoot;
         std::uint32_t m_Frames = 0;
-        Keire::ProjectId m_SelectedProject;
-        ProjectView m_View = ProjectView::List;
-        ProjectSort m_Sort = ProjectSort::LastOpened;
-        bool m_Starter = true;
+        std::uint32_t m_PackageTaskConcurrentDownloads = 0;
+        std::uint64_t m_HandledTemplateCreation = 0;
+        std::uint64_t m_HandledProjectMutation = 0;
+        std::uint64_t m_HandledPackageTaskFailureRevision = 0;
+        std::chrono::steady_clock::time_point m_NoticeStarted = std::chrono::steady_clock::now();
+        std::string m_CreateTemplateId = "keire.3d-starter";
+        std::string m_CreateEditorId;
         bool m_NoticeError = false;
         bool m_RequestCreatePopup = false;
         bool m_RequestOpenPopup = false;
         bool m_RequestUpgradePopup = false;
-        bool m_UpgradeInterrupted = false;
-        bool m_SupportCancelRequested = false;
-        SupportOperationKind m_SupportOperationKind = SupportOperationKind::None;
-        bool m_Smoke = false;
-    };
-
-    class HubApplication final : public Keire::Application
-    {
-      public:
-        HubApplication(Keire::ApplicationSpecification specification, std::filesystem::path executable,
-                       const bool smoke, std::optional<RequestedBuildSupport> requestedSupport,
-                       std::shared_ptr<KeireHub::HubInstanceCoordinator> instance)
-            : Keire::Application(std::move(specification)), m_Executable(std::move(executable)), m_Smoke(smoke),
-              m_RequestedSupport(std::move(requestedSupport)), m_Instance(std::move(instance))
-        {
-        }
-
-      protected:
-        void OnInitialize() override
-        {
-            if (!m_Instance->IsPrimary())
-            {
-                RequestExit();
-                return;
-            }
-            (void)PushOverlay(
-                std::make_unique<HubLayer>(m_Executable, m_Smoke, std::move(m_RequestedSupport), m_Instance));
-        }
-
-      private:
-        std::filesystem::path m_Executable;
-        bool m_Smoke = false;
-        std::optional<RequestedBuildSupport> m_RequestedSupport;
-        std::shared_ptr<KeireHub::HubInstanceCoordinator> m_Instance;
+        bool m_SettingsDiscoveryPending = false;
+        bool m_CreateOpenAfterCreation = true;
+        bool m_ActiveCreationOpenAfter = true;
     };
 } // namespace
 
-namespace Keire
+namespace KeireHub::Detail
 {
-    ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
+    std::unique_ptr<Keire::Layer> CreateHubLayer(std::filesystem::path executable, const bool smoke,
+                                                 std::optional<HubActivationRequest> pendingStartupActivation,
+                                                 std::shared_ptr<HubInstanceCoordinator> instance)
     {
-        return {"[--smoke-ui] [--build-support <platform> <architecture>]", HubOptions};
+        return std::make_unique<HubLayer>(std::move(executable), smoke, std::move(pendingStartupActivation),
+                                          std::move(instance));
     }
-
-    std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
-    {
-        bool smoke = false;
-        std::optional<RequestedBuildSupport> requestedSupport;
-        for (std::size_t index = 1; index < arguments.Size(); ++index)
-        {
-            if (arguments[index] == "--smoke-ui")
-                smoke = true;
-            else if (arguments[index] == "--build-support")
-            {
-                if (index + 2 >= arguments.Size())
-                    throw CommandLineError("--build-support requires a platform and architecture.");
-                const auto platform = std::string(arguments[++index]);
-                const auto architecture = std::string(arguments[++index]);
-                if (platform != "windows" && platform != "linux" && platform != "macos")
-                    throw CommandLineError("--build-support platform must be windows, linux, or macos.");
-                if (architecture != "x86_64" && architecture != "arm64")
-                    throw CommandLineError("--build-support architecture must be x86_64 or arm64.");
-                requestedSupport = RequestedBuildSupport{.Platform = platform, .Architecture = architecture};
-            }
-            else
-                throw CommandLineError("Unknown project hub option: " + std::string(arguments[index]));
-        }
-        ApplicationSpecification specification;
-        specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
-#if defined(_WIN32) && defined(KEIRE_DISTRIBUTION)
-        specification.Logging.EnableConsole = false;
-#endif
-        specification.MainWindow.Title = "Kéire Project Hub";
-        specification.MainWindow.Width = 1120;
-        specification.MainWindow.Height = 720;
-        specification.Ui.Mode = UiMode::Rendered;
-        specification.Ui.EnableDocking = false;
-        specification.TargetFrameRate = smoke ? 240 : 30;
-        const auto executable = Detail::PathFromUtf8(arguments.Executable());
-        auto instance = std::make_shared<KeireHub::HubInstanceCoordinator>(
-            executable, requestedSupport.value_or(RequestedBuildSupport{}), !smoke);
-        if (!instance->IsPrimary())
-        {
-            specification.MainWindow.Visible = false;
-            specification.Ui.Mode = UiMode::Disabled;
-            specification.Render.Mode = RenderMode::Disabled;
-        }
-        return std::make_unique<HubApplication>(std::move(specification), executable, smoke,
-                                                std::move(requestedSupport), std::move(instance));
-    }
-} // namespace Keire
-#include <sstream>
+} // namespace KeireHub::Detail

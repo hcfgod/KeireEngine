@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "locale": "en-US",
+  "learn": [
+    {
+      "id": "getting-started",
+      "title": "Getting Started",
+      "summary": "Install prerequisites, build Kéire, create a project, and run the editor.",
+      "difficulty": "beginner",
+      "category": "Fundamentals",
+      "type": "guide",
+      "localPath": "docs/GettingStarted.md",
+      "tags": ["setup", "projects"],
+      "featured": true
+    },
+    {
+      "id": "project-editor-fundamentals",
+      "title": "Project and editor fundamentals",
+      "summary": "Understand project identity, locking, upgrades, and the editor lifecycle.",
+      "difficulty": "beginner",
+      "category": "Fundamentals",
+      "type": "guide",
+      "localPath": "docs/ProjectSystem.md",
+      "tags": ["projects", "editor"]
+    },
+    {
+      "id": "assets-scenes",
+      "title": "Assets and scenes",
+      "summary": "Learn the asset pipeline, scene authoring, and project-safe workflows.",
+      "difficulty": "beginner",
+      "category": "Authoring",
+      "type": "guide",
+      "localPath": "docs/AssetPipeline.md",
+      "tags": ["assets", "scenes"]
+    },
+    {
+      "id": "rendering",
+      "title": "Rendering",
+      "summary": "Configure shaders, materials, lighting, and renderer settings.",
+      "difficulty": "intermediate",
+      "category": "Graphics",
+      "type": "guide",
+      "localPath": "docs/Rendering.md",
+      "tags": ["graphics", "shaders", "lighting"]
+    },
+    {
+      "id": "physics",
+      "title": "Physics",
+      "summary": "Author collision and rigid-body gameplay using the engine's current foundations.",
+      "difficulty": "intermediate",
+      "category": "Gameplay",
+      "type": "guide",
+      "localPath": "docs/GameplayFoundations.md",
+      "tags": ["physics", "gameplay"]
+    },
+    {
+      "id": "audio",
+      "title": "Audio",
+      "summary": "Understand audio graphs, clips, runtime voices, and headless-safe output.",
+      "difficulty": "intermediate",
+      "category": "Authoring",
+      "type": "guide",
+      "localPath": "docs/GameplayFoundations.md",
+      "tags": ["audio", "gameplay"]
+    },
+    {
+      "id": "managed-scripting",
+      "title": "Managed scripting",
+      "summary": "Build gameplay behavior with the bundled .NET SDK.",
+      "difficulty": "intermediate",
+      "category": "Scripting",
+      "type": "guide",
+      "localPath": "docs/ManagedScripting.md",
+      "tags": ["scripting", "dotnet"]
+    },
+    {
+      "id": "ui",
+      "title": "UI",
+      "summary": "Build runtime and editor user interfaces with the current UI workspace.",
+      "difficulty": "intermediate",
+      "category": "Authoring",
+      "type": "guide",
+      "localPath": "docs/UiWorkspace.md",
+      "tags": ["ui", "authoring"]
+    },
+    {
+      "id": "vfx",
+      "title": "VFX",
+      "summary": "Author and validate Kéire visual effects.",
+      "difficulty": "advanced",
+      "category": "Graphics",
+      "type": "guide",
+      "localPath": "docs/Vfx.md",
+      "tags": ["vfx", "graphics"]
+    },
+    {
+      "id": "player-builds",
+      "title": "Player builds",
+      "summary": "Package deterministic desktop players with verified Build Support.",
+      "difficulty": "intermediate",
+      "category": "Build",
+      "type": "guide",
+      "localPath": "docs/PlayerBuilds.md",
+      "tags": ["build", "desktop"]
+    },
+    {
+      "id": "keire-sandbox",
+      "title": "Kéire Sandbox",
+      "summary": "Explore a complete project using the engine's current systems.",
+      "difficulty": "intermediate",
+      "category": "Sample",
+      "type": "sample",
+      "localPath": "Samples/KeireSandbox/README.md",
+      "tags": ["sample", "sandbox"]
+    }
+  ],
+  "resources": [
+    {
+      "id": "documentation",
+      "title": "Documentation",
+      "summary": "Browse the packaged Kéire documentation index.",
+      "difficulty": "reference",
+      "category": "Documentation",
+      "type": "documentation",
+      "localPath": "docs/README.md",
+      "tags": ["documentation", "reference"]
+    },
+    {
+      "id": "api-index",
+      "title": "Scripting API index",
+      "summary": "Open the packaged managed scripting reference.",
+      "difficulty": "reference",
+      "category": "Reference",
+      "type": "documentation",
+      "localPath": "docs/Scripting/ApiIndex.md",
+      "tags": ["api", "scripting"]
+    },
+    {
+      "id": "release-notes",
+      "title": "Changelog and release notes",
+      "summary": "Review shipped engine and Hub changes.",
+      "difficulty": "reference",
+      "category": "Release notes",
+      "type": "releaseNotes",
+      "localPath": "CHANGELOG.md",
+      "tags": ["changelog", "releases"]
+    },
+    {
+      "id": "repository",
+      "title": "Source repository",
+      "summary": "Browse Kéire source and release history.",
+      "difficulty": "reference",
+      "category": "Project",
+      "type": "repository",
+      "url": "https://github.com/hcfgod/KeireEngine",
+      "tags": ["source", "repository"]
+    },
+    {
+      "id": "issues",
+      "title": "Issue tracker",
+      "summary": "Report a reproducible engine or Hub issue.",
+      "difficulty": "reference",
+      "category": "Project",
+      "type": "issueTracker",
+      "url": "https://github.com/hcfgod/KeireEngine/issues",
+      "tags": ["issues", "support"]
+    }
+  ]
+}

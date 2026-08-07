@@ -19,6 +19,13 @@ recast_url="$(config_value "$ROOT/Config/Dependencies.lock" RECAST_URL)"
 recast_commit="$(config_value "$ROOT/Config/Dependencies.lock" RECAST_COMMIT)"
 miniaudio_url="$(config_value "$ROOT/Config/Dependencies.lock" MINIAUDIO_URL)"
 miniaudio_commit="$(config_value "$ROOT/Config/Dependencies.lock" MINIAUDIO_COMMIT)"
+libsodium_url="$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_URL)"
+libsodium_commit="$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)"
+macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
+[[ "$macos_deployment_target" =~ ^[0-9]+\.[0-9]+$ ]] || {
+  printf 'MACOS_DEPLOYMENT_TARGET must be a pinned major.minor version.\n' >&2
+  exit 1
+}
 
 locked_source() {
   local name="${1:?dependency name is required}"
@@ -58,6 +65,7 @@ locked_source() {
 jolt_source="$(locked_source jolt "$jolt_url" "$jolt_commit")"
 recast_source="$(locked_source recast "$recast_url" "$recast_commit")"
 miniaudio_source="$(locked_source miniaudio "$miniaudio_url" "$miniaudio_commit")"
+libsodium_source="$(locked_source libsodium "$libsodium_url" "$libsodium_commit")"
 if [[ "$toolset" == clang ]]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
 compiler="$($CXX --version | head -n 1)"
 bridge="$ROOT/Scripts/Dependencies/CMakeLists.txt"
@@ -86,13 +94,16 @@ options=(-DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF
   -DMINIAUDIO_NO_LIBOPUS=ON -DMINIAUDIO_INSTALL=ON)
 if [[ "$platform" == Mac ]]; then
   cmake_architecture=x86_64; [[ "$architecture" == ARM64 ]] && cmake_architecture=arm64
-  options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture")
+  options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture"
+    "-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
-key="$sdl_commit|$assimp_commit|$jolt_commit|$recast_commit|$miniaudio_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
+key="$sdl_commit|$assimp_commit|$jolt_commit|$recast_commit|$miniaudio_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
 base="$ROOT/Build/Dependencies/$system-$output_arch-$toolset"
 
 for configuration in Debug Release; do
   build="$base/$configuration"; install="$build/install"; library="$install/lib/libSDL3.a"; assimp_library="$install/lib/libassimp.a"; zlib_library="$install/lib/libzlibstatic.a"; jolt_library="$install/lib/libJolt.a"; miniaudio_library="$install/lib/libminiaudio.a"; stamp="$build/keire-dependency.stamp"
+  sodium_runtime="$install/lib/libsodium.so"; [[ "$platform" == Mac ]] && sodium_runtime="$install/lib/libsodium.dylib"
+  sodium_license="$install/share/licenses/libsodium/LICENSE"
   recast_suffix=""; [[ "$configuration" == Debug ]] && recast_suffix="-d"
   recast_library="$install/lib/libRecast$recast_suffix.a"
   detour_library="$install/lib/libDetour$recast_suffix.a"
@@ -101,6 +112,7 @@ for configuration in Debug Release; do
   if [[ "$force" != 1 && -f "$library" && -f "$assimp_library" && -f "$zlib_library" &&
         -f "$jolt_library" && -f "$recast_library" && -f "$detour_library" &&
         -f "$crowd_library" && -f "$tile_cache_library" && -f "$miniaudio_library" &&
+        -f "$sodium_runtime" && -f "$sodium_license" &&
         -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key|$configuration" ]]; then
     printf '==> Native %s dependency cache is current\n' "$configuration"
     continue
@@ -110,9 +122,29 @@ for configuration in Debug Release; do
   mkdir -p "$build"
   cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$ROOT/Vendor/assimp" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
   cmake --build "$build" --target install --parallel
+  sodium_build="$build/libsodium"
+  mkdir -p "$sodium_build"
+  sodium_cflags="-O2"
+  [[ "$configuration" == Debug ]] && sodium_cflags="-O0 -g"
+  sodium_ldflags=""
+  if [[ "$platform" == Mac ]]; then
+    sodium_cflags="$sodium_cflags -arch $cmake_architecture -mmacosx-version-min=$macos_deployment_target"
+    sodium_ldflags="-arch $cmake_architecture -mmacosx-version-min=$macos_deployment_target"
+  fi
+  (
+    cd "$sodium_build"
+    CC="$CC" CFLAGS="$sodium_cflags" LDFLAGS="$sodium_ldflags" \
+      "$libsodium_source/configure" --prefix="$install" --disable-static --enable-shared \
+      --disable-dependency-tracking
+  )
+  make -C "$sodium_build" -j2
+  make -C "$sodium_build" install
+  mkdir -p "$(dirname "$sodium_license")"
+  cp "$libsodium_source/LICENSE" "$sodium_license"
   [[ -f "$library" && -f "$assimp_library" && -f "$zlib_library" && -f "$jolt_library" &&
      -f "$recast_library" && -f "$detour_library" && -f "$crowd_library" &&
-     -f "$tile_cache_library" && -f "$miniaudio_library" &&
+     -f "$tile_cache_library" && -f "$miniaudio_library" && -f "$sodium_runtime" &&
+     -f "$sodium_license" &&
      -f "$install/include/assimp/Importer.hpp" && -f "$install/include/SDL3/SDL.h" &&
      -f "$install/cmake/SDL3Config.cmake" ]] || { printf 'Native %s install is incomplete.\n' "$configuration" >&2; exit 1; }
   printf '%s\n' "$key|$configuration" > "$stamp"
@@ -154,18 +186,22 @@ mkdir -p "$managed_output"
 mkdir -p "$ROOT/Build/Generated"
 debug_install="../Build/Dependencies/$system-$output_arch-$toolset/Debug/install"
 release_install="../Build/Dependencies/$system-$output_arch-$toolset/Release/install"
+sodium_extension=so
+[[ "$platform" == Mac ]] && sodium_extension=dylib
 platform_links='{ "dl", "m", "pthread" }'
 if [[ "$platform" == Mac ]]; then
   platform_links='{ "Cocoa.framework", "CoreVideo.framework", "IOKit.framework", "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework", "ForceFeedback.framework", "Carbon.framework", "Metal.framework", "QuartzCore.framework", "UniformTypeIdentifiers.framework" }'
 fi
 cat > "$ROOT/Build/Generated/Dependencies.lua" <<EOF
 DependencyManifest = {
+    MacOSDeploymentTarget = "$macos_deployment_target",
     SDLCommit = "$sdl_commit",
     JSONCommit = "$json_commit",
     AssimpCommit = "$assimp_commit",
     JoltCommit = "$jolt_commit",
     RecastCommit = "$recast_commit",
     MiniaudioCommit = "$miniaudio_commit",
+    SodiumCommit = "$libsodium_commit",
     CoralCommit = "$coral_commit",
     CoralPatchDigest = "$coral_patch_digest",
     CoralSource = "../Build/Dependencies/coral-patched",
@@ -192,6 +228,9 @@ DependencyManifest = {
     MiniaudioInclude = "$debug_install/include/miniaudio",
     MiniaudioDebugLibrary = "$debug_install/lib/libminiaudio.a",
     MiniaudioReleaseLibrary = "$release_install/lib/libminiaudio.a",
+    SodiumDebugRuntime = "$debug_install/lib/libsodium.$sodium_extension",
+    SodiumReleaseRuntime = "$release_install/lib/libsodium.$sodium_extension",
+    SodiumLicense = "$release_install/share/licenses/libsodium/LICENSE",
     SDL3PlatformLinks = $platform_links
 }
 EOF

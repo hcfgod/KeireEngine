@@ -69,10 +69,12 @@ Build Support is installed independently of projects beneath Kéire's per-user p
 BuildSupport/<engine-version>/<pack-id>/
 ```
 
-Open the Hub's **Build Support** page to import a `.keireplayersupport` file, monitor or cancel installation, verify and
-repair an installed module, inspect its size/status, or remove it. Selecting a missing target in the editor opens this
-page focused on that platform and architecture. Offline packages are supported directly through the filtered file
-picker.
+Open **Installs**, choose a healthy editor, and select **Manage Components** to import a `.keireplayersupport` file,
+monitor or cancel installation, repair an installed module from a matching package, inspect its size/status, or remove
+it with confirmation. Counts and actions are scoped to that editor's exact engine version and typed Asset Tool;
+selecting a missing target in the editor opens the same modal filtered to that platform and architecture. Offline
+packages remain available through the filtered file picker. Generic `.keirepackage` import is not exposed through this
+legacy workflow.
 
 **Check Online** fetches `player-support-catalog.json` from the versioned GitHub release derived from the binary's
 repository slug and engine version. Redirects remain HTTPS-only. Before installation, the downloaded archive must match
@@ -83,7 +85,8 @@ Packages are zstd-compressed streaming archives containing regular files only. T
 versions, player ABI, platform, architecture, source-module catalog, configuration variants, paths, sizes, SHA-256
 digests, executable modes, and bounded branding slots. Installation rejects traversal, symlinks, duplicate or
 case-colliding paths, oversized entries, corruption, incompatible ABIs, and mismatched source modules. Extraction,
-registry update, repair, and removal are transactional.
+registry update and repair are transactional. Removal uses a bounded atomic journal around its tombstone publish, and
+inventory startup completes or rolls back an interrupted removal before reporting installed modules.
 
 Release maintainers produce native modules on the target OS/toolchain:
 

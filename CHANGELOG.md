@@ -5,6 +5,139 @@ version tags.
 
 ## Unreleased
 
+- Fixed Windows cross-publishing of the Linux distribution service package. Its deterministic archive now preserves
+  executable modes only for directories, the service/publisher entrypoints, and shell wrappers instead of inheriting
+  unusable NTFS modes, with a fast regression fixture covering inventory order, metadata, and reproducible bytes.
+- Moved editor discovery, inventory verification, and managed repair/removal authorization onto a single-flight
+  background coordinator. Immutable results are accepted only when the registry generation, security identity, root,
+  tracked process state, and targeted task activity still match; health persistence and task/notice publication remain
+  owner-thread operations, and external removal no longer triggers a synchronous full-install scan.
+- Hardened editor publication and restart reconciliation against replacement races. New installs use an atomic
+  no-clobber policy, repair recovery reauthorizes the exact marker, receipt, package identity, and native executable
+  activity before every mutation (including the same-parent backup), persisted worker mode must match task kind, and a
+  completed repair is registered only from its retained identity proof without rewriting the ownership marker.
+- Activated the packaged Material Symbols subset through Kéire's UI facade with ASCII fallback for consumers that do
+  not configure an icon font. Hub navigation, documentation, appearance, project-view, and native caption controls now
+  use the shared icon primitives, including compact-rail tooltips, maximize/restore state, and a destructive close
+  hover treatment.
+- Moved first-run project and editor import preparation off the Hub owner thread. Completed discovery now publishes an
+  immutable, revalidated import snapshot; batched registries preserve existing paths, identities, pinning, and editor
+  preferences, reject duplicate identities/roots before writing, and roll back the project registry if the paired editor
+  registry commit fails.
+- Collapsed project metadata refresh publication into one bounded atomic catalog update. The owner thread now validates
+  every scanner result before one registry write, so missing, duplicate, or invalid results cannot leave a partially
+  refreshed project list or thumbnail snapshot.
+- Moved installed Build Support discovery and health verification onto a background inventory workflow with immutable
+  snapshots and explicit loading/failure states, so startup and component refresh no longer scan packages on the UI
+  frame.
+- Added asynchronous verified-package-cache maintenance as an exclusive task-center operation. Cache clearing now
+  refuses active package work, suspends the idle package coordinator while files are removed, and restores it only
+  after the maintenance result is published.
+- Moved Hub project-upgrade inspection, apply, interrupted recovery, and rollback behind an owner-thread-affine
+  asynchronous coordinator. The confirmation modal now renders immutable state while all project filesystem and
+  transactional validation work runs outside the UI frame.
+- Added managed-editor **Repair** to Installs as a distinct persistent worker task. Repair requires an inactive,
+  receipt-bound managed registration and the exact signed editor/component dependency closure, preserves installation
+  identity and ownership nonce, reauthorizes the marker and executable immediately before atomic replacement, and
+  reconciles the repaired tree through normal package registration. Ordinary installs remain unable to replace an
+  existing damaged destination.
+- Hardened project dispatch in the standalone Hub. Background metadata refresh now probes active editor locks and
+  interrupted-upgrade journals, tracked editor processes override stale cached status, and editor selection enforces
+  project schema, minimum engine, and last-saved version together. A stale preferred installation can no longer select
+  an older editor, while an unavailable exact version recommends the least disruptive verified newer package.
+- Removed the fabricated sibling-editor fallback and the partially interactive shell shown after runtime composition
+  failures. Only manifest-validated registered editors appear in Installs, and an unrecoverable startup failure now
+  presents a bounded recovery screen with logs, diagnostics, and exit actions. Manual project paths and names
+  also cross the Windows filesystem boundary as UTF-8 without lossy narrow-path construction.
+- Hardened macOS Hub/editor publication around one pinned 12.0 deployment target, package-time Mach-O load-command
+  validation, explicit inside-out signing, preserved Microsoft .NET signatures, and managed-runtime entitlements scoped
+  only to the editor host.
+- Split standalone editor ownership from the Hub on Windows. Editor archives and NSIS installers now contain and launch
+  only the editor and editor-specific tools, reject Hub/HubWorker/content payloads, and give the editor its own finish
+  action, icon, Start Menu entry, and desktop shortcut. Schema-2 editor manifests retain their schema-1 compatibility
+  fields while omitting Hub and worker entrypoints.
+- Added signed, streaming `.keirepackage` archives and crash-recoverable atomic publication for Editor, Build Support,
+  Template, Learning Content, and Toolchain payloads. Multi-package editor installs now persist a receipt-bound complete
+  file inventory, dependency and license attribution, aggregate identity, and managed ownership marker so Components,
+  verification, repair, and safe recovery remain truthful after restart. The License browser asynchronously resolves
+  editor, Build Support, template, content, and toolchain notices only from receipt-bound files whose size and digest
+  still match the installed package inventory.
+- Added signed Hub-installer selection across online and last-known-good package catalogs. Exact semantic-version
+  ordering prefers stable packages for equal releases, rejects unverified catalog snapshots, and enforces the signed
+  `minimumSupportedHubVersion` policy instead of presenting an unusable or downgraded update.
+- Completed the explicit Hub-update handoff: exact key/channel/platform/architecture installer identity, dedicated
+  resumable task-center downloads, cache and digest revalidation, Windows Authenticode, guarded native installer launch,
+  and atomic next-start recovery tokens. Windows NSIS now waits for the originating Hub and revalidates its registered
+  owned root; macOS reveals the verified drag-to-Applications DMG for manual installation, and other unsupported native
+  handoff environments likewise expose only the verified file.
+- Added signed editor acquisition to Hub Installs: populated release-channel sections, compatible component selection,
+  destination validation, and an exact dependency/disk review now hand a provenance-preserving install plan to the
+  persistent package worker instead of exposing placeholder catalog or Components actions.
+- Integrated legacy Build Support into each editor's **Manage Components** flow with exact-version inventory counts,
+  explicit typed Asset Tool selection, target-filtered import/repair, confirmed out-of-process removal, authoritative
+  final status, and bounded journal recovery for interruptions around the removal tombstone. Generic package import
+  remains hidden.
+- Persisted legacy Build Support operation/task history across Hub crashes with atomic bounded records for operation and
+  installation identity, confined status/cancel paths, and child PID. Restart recovery observes surviving exact Asset
+  Tool processes without taking ownership, restores cancellation and task-center visibility, and derives terminal
+  import/repair or removal state only from authoritative status, inventory, and schema-1 removal-journal evidence.
+  Successful imports and repairs now coalesce a fresh follow-up inventory scan when an older scan is still active.
+- Sanitized Build Support inventory and Asset Tool status failures behind stable typed codes and user-facing messages;
+  filesystem, JSON, operating-system, and exception details now remain confined to logs and explicit diagnostics.
+- Added private Hub editor-installation verification with immutable health snapshots, schema-2 manifest fingerprint and
+  file-inventory checks, host and entrypoint validation, registry-only external removal, and revalidatable managed
+  repair/removal plans that refuse running editors, active tasks, unexpected roots, and marker mismatches. Running state
+  now combines Hub-tracked launches with bounded exact-path process probes on Windows, Linux, and macOS, failing closed
+  for relevant-name query failures so externally launched editors cannot be verified or mutated concurrently.
+- Added guarded managed-editor uninstall from Installs through the persistent worker. Removal requires an exact healthy
+  receipt-bound tree, rejects undeclared or changed files and unsafe roots, commits through a same-parent tombstone,
+  resumes interrupted purges from a durable journal, and reconciles the registry only from an exact completion proof.
+- Replaced the Hub's ad-hoc Show/Build Support activation text with a bounded versioned protocol and typed Show,
+  Navigate, Open Project, Import Package, Install Version, and Build Support actions, including strict command/path
+  validation and malformed-frame rejection. Owner-thread dispatch reuses functional project and Build Support flows and
+  reports unavailable package/catalog actions without queuing mock work. Secondary-process coordination coverage now
+  lives in the private Hub test target, and normal Windows and Unix test launchers run that target without coupling the
+  editor test executable to Hub runtime code.
+- Added private Hub project workflows for clean staged duplication with new project identities, identity-verified moved
+  project location, closed-project display-name changes, and catalog-only removal. Duplicate publication rejects path
+  escapes, symbolic links, portable case collisions, locked projects, bounded-size violations, and stale destinations.
+  Recursive duplicate staging now runs as one cancellable background operation with immutable operation-ID progress,
+  owner-thread commit, authoritative pre-publish revalidation, and shutdown cleanup. These actions are available from
+  project context menus with native folder selection and removal confirmation; all Hub project mutations now use the
+  runtime catalog as the sole registry writer so cached metadata survives UI refreshes.
+- Added real project-card thumbnails from confined `ProjectSettings/HubThumbnail.png` files. The metadata worker now
+  validates, decodes, center-crops, and bounds PNG pixels before immutable publication; the UI uploads visible images
+  through a 64-entry texture LRU and retains the deterministic monogram fallback for missing or invalid thumbnails.
+- Expanded Templates into a searchable, category-filtered browser for the three verified packaged templates, with
+  featured ordering, manifest-backed detail, packaged PNG artwork, and per-installation editor/schema
+  compatibility. Project creation now offers only compatible template/editor pairs, lets the user choose whether to
+  open the result, and cancels Asset Tool validation promptly during shutdown; remote download/update actions remain
+  hidden.
+- Fixed moved-project location being available for live registrations, Build Support activity not blocking editor
+  removal, and packaged content/license failures appearing as ordinary empty states. The Hub now revalidates the
+  original project root, conservatively guards editor removal during component work, and surfaces typed catalog errors.
+- Fixed Windows managed-editor uninstall and restart recovery misclassifying protected marker/receipt files when native
+  directory iteration returned extended-length paths. Logical child paths now remain anchored beneath the validated
+  parent while extended prefixes are confined to I/O calls.
+- Added typed, scope-bound UI color and spacing overrides so product components can style surfaces without exposing
+  Dear ImGui ownership. Template project creation now also rejects destinations beneath the installed Hub tree, keeping
+  projects outside application directories that native updates are allowed to replace.
+- Added the persistent Hub package task foundation: content-addressed verified caches, atomic resumable partial-download
+  metadata with ETag/If-Range identity, bounded retry jitter, pause/cancel preservation, deterministic concurrent task
+  scheduling, per-install and per-package serialization, worker-PID recovery, and a focused out-of-process Hub worker
+  protocol with typed status, result, and control journals.
+- Added an exact-byte Ed25519 trust boundary for signed Hub package and content catalogs, with pinned trusted-key
+  identities, endpoint and expiry validation, replay protection, atomic last-known-good caching, and HTTPS-only remote
+  discovery. The standalone Hub now packages its private, commit-pinned libsodium verifier and license.
+- Added independently runnable `package-hub` workflows for Windows, macOS, and Linux. Standalone Hub archives exclude
+  versioned editor and SDK payloads, include the private Hub task worker, and continue to reject editor-specific Asset
+  Worker binaries. Editor and Hub packages now use validated schema-2 manifests with typed
+  entrypoints, compatibility ranges, fingerprints, templates/toolchains/licenses, exact file inventories, and installed
+  sizes. Editor manifests retain their schema-1 top-level compatibility fields for existing consumers.
+- Added a separate `package-hub-installer` workflow. Windows produces a guarded per-user Hub-only NSIS installer,
+  macOS produces a signed/notarizable drag-to-Applications Hub DMG, and Linux produces a desktop-integrated `keire-hub`
+  Debian package with explicit C/C++ runtime and libcurl dependencies. Updates and uninstall preserve Hub preferences,
+  caches, project metadata, and editor roots by default.
 - Fixed the installed Project Hub using a blank system-tray icon, reporting structurally valid but incompatible Build
   Support as ready, and failing to immediately restore the existing Hub window when its shortcut was launched again.
 - Fixed Windows installer creation selecting only the drive letter when NSIS was discovered in its standard install
@@ -30,8 +163,9 @@ version tags.
   stale content under `Build`. A full clean now removes the complete disposable build tree on Windows, macOS, and Linux,
   while the narrower build and generated scopes retain only their documented complementary state.
 - Added a cross-platform `package-editor` launcher command and interactive-menu option. It always runs the Dist release
-  gate and produces a native Windows, macOS, or Linux editor archive with the Hub, companion tools, complete bundled
-  .NET 10 SDK, sample project, manifests, checksums, notices, and platform launchers; macOS also includes a Hub `.app`.
+  gate and produces a native Windows, macOS, or Linux editor archive with editor-specific companion tools, the complete
+  bundled .NET 10 SDK, sample project, manifests, checksums, notices, and platform launchers; macOS also includes an
+  Editor `.app`.
 - Fixed Windows Ninja client builds failing during managed-host staging because Premake's escaped post-build stamp
   command was interpreted as a path by `cmd.exe`; repository Ninja launchers now perform their existing staging step
   only after the native target succeeds.

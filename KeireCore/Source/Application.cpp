@@ -894,6 +894,20 @@ namespace Keire
 
     bool Application::UiEnabled() const noexcept { return m_Impl->UserInterface != nullptr; }
 
+    void Application::SetUiTheme(const UiTheme theme)
+    {
+        RequireOwnerThread("SetUiTheme");
+        if (!m_Impl->UserInterface)
+            throw std::logic_error("The UI is not enabled for this application.");
+        m_Impl->UserInterface->SetTheme(theme);
+        m_Impl->Specification.Ui.Theme = theme;
+    }
+
+    UiTheme Application::CurrentUiTheme() const noexcept
+    {
+        return m_Impl->UserInterface ? m_Impl->UserInterface->Theme() : m_Impl->Specification.Ui.Theme;
+    }
+
     UiCaptureState Application::UiCapture() const noexcept
     {
         return m_Impl->UserInterface ? m_Impl->UserInterface->Capture() : UiCaptureState{};

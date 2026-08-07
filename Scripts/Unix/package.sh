@@ -10,6 +10,7 @@ done
 GENERATOR=ninja; CONFIGURATION=Release; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0; ALLOW_DIRTY=0
 parse_build_arguments "${filtered_arguments[@]}"; [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] || { printf 'Package requires Release or Dist.\n' >&2; exit 1; }
 load_project_config "$ROOT"; TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"; system=linux; os_name=linux; [[ "$PLATFORM" == Mac ]] && { system=macosx; os_name=macos; }
+macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
 read -r dirty development_artifact < <(package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI")
 bash "$ROOT/Scripts/Unix/build-info.sh"
 command -v cmake >/dev/null 2>&1 || { printf 'CMake 3.20 or newer is required for SDK package validation.\n' >&2; exit 1; }
@@ -89,6 +90,9 @@ platform_name=Linux; [[ "$PLATFORM" == Mac ]] && platform_name=macOS
 if [[ "$TOOLSET" == clang ]]; then compiler="Clang $(clang++ -dumpversion)"; else compiler="GCC $(g++ -dumpfullversion -dumpversion)"; fi
 printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "developmentArtifact": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s",\n  "zstd": "%s",\n  "entt": "%s",\n  "glm": "%s",\n  "sdlShadercross": "%s",\n  "dxc": "%s",\n  "spirvCross": "%s",\n  "spirvHeaders": "%s",\n  "spirvTools": "%s",\n  "assimp": "%s",\n  "stb": "%s",\n  "jolt": "%s",\n  "recast": "%s",\n  "miniaudio": "%s",\n  "coral": "%s",\n  "dotnetRuntime": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$development_artifact" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" "$(json_escape "$zstd")" "$(json_escape "$entt")" "$(json_escape "$glm")" "$(json_escape "$shadercross")" "$(json_escape "$dxc")" "$(json_escape "$spirv_cross")" "$(json_escape "$spirv_headers")" "$(json_escape "$spirv_tools")" "$(json_escape "$assimp")" "$(json_escape "$stb")" "$(json_escape "$jolt")" "$(json_escape "$recast")" "$(json_escape "$miniaudio")" "$(json_escape "$coral")" "$(json_escape "$dotnet_runtime")" > "$stage/build-manifest.json"
 validate_package_stage "$stage" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" "$PROJECT_NAMESPACE"
+if [[ "$PLATFORM" == Mac ]]; then
+  validate_macos_macho_minimum "$stage" "$macos_deployment_target" "$stage/bin/Managed/Dotnet"
+fi
 grep -Fq "\"commit\": \"$commit\"" "$stage/build-manifest.json" || { printf 'Package manifest commit does not match the packaging worktree HEAD.\n' >&2; exit 1; }
 [[ "$commit" == "$(git -C "$ROOT" rev-parse HEAD)" ]] || { printf 'Packaging worktree HEAD changed while staging.\n' >&2; exit 1; }
 grep -Fq "\"dirty\": $dirty" "$stage/build-manifest.json" || { printf 'Package manifest dirty flag is invalid.\n' >&2; exit 1; }
@@ -163,29 +167,35 @@ fi
 validation_root="$ROOT/Artifacts/$name-validation"; rm -rf "$validation_root"; mkdir -p "$validation_root/sdk"
 tar -C "$validation_root/sdk" -xzf "$archive"
 assert_package_generated_data_free "$validation_root/sdk"
+if [[ "$PLATFORM" == Mac ]]; then
+  validate_macos_macho_minimum "$validation_root/sdk" "$macos_deployment_target" \
+    "$validation_root/sdk/bin/Managed/Dotnet"
+fi
 cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
 gameplay_libraries=("$validation_root/sdk/lib/libJolt.a" "$validation_root/sdk/lib/libRecast.a" "$validation_root/sdk/lib/libDetour.a" "$validation_root/sdk/lib/libDetourCrowd.a" "$validation_root/sdk/lib/libDetourTileCache.a" "$validation_root/sdk/lib/libminiaudio.a" "$validation_root/sdk/lib/libCoral.Native.a" "$validation_root/sdk/lib/libnethost.a")
 consumer_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/consumer/Main.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/consumer")
 [[ "$CONFIGURATION" == Dist ]] && consumer_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && consumer_compile+=(-pthread -ldl -lm)
-[[ "$PLATFORM" == Mac ]] && consumer_compile+=(-framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
+[[ "$PLATFORM" == Mac ]] && consumer_compile+=("-mmacosx-version-min=$macos_deployment_target" -framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
 "${consumer_compile[@]}"
 (cd "$validation_root" && ./consumer "$validation_root/sdk/examples/consumer/Client.json")
 managed_compile=("$cxx" -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$validation_root/sdk/include" "$validation_root/sdk/examples/managed-consumer/ClientApplication.cpp" "$validation_root/sdk/lib/lib$CORE_TARGET.a" "$validation_root/sdk/lib/lib$imgui_library.a" "$validation_root/sdk/lib/lib$zstd_library.a" "$validation_root/sdk/lib/libassimp.a" "$validation_root/sdk/lib/libzlibstatic.a" "${gameplay_libraries[@]}" "$validation_root/sdk/third-party/SDL3/lib/libSDL3.a" -o "$validation_root/managed-consumer")
 [[ "$CONFIGURATION" == Dist ]] && managed_compile+=(-flto)
 [[ "$PLATFORM" == Linux ]] && managed_compile+=(-pthread -ldl -lm)
-[[ "$PLATFORM" == Mac ]] && managed_compile+=(-framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
+[[ "$PLATFORM" == Mac ]] && managed_compile+=("-mmacosx-version-min=$macos_deployment_target" -framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework Carbon -framework Metal -framework QuartzCore -framework UniformTypeIdentifiers)
 "${managed_compile[@]}"
 managed_help="$($validation_root/managed-consumer --help)"
 [[ "$managed_help" == *--managed-smoke* ]] || { printf 'Managed SDK consumer help validation failed.\n' >&2; exit 1; }
 (cd "$validation_root" && ./managed-consumer --managed-smoke)
-cmake -S "$validation_root/sdk/examples/consumer" -B "$validation_root/cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release
+cmake_platform_options=()
+[[ "$PLATFORM" == Mac ]] && cmake_platform_options+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
+cmake -S "$validation_root/sdk/examples/consumer" -B "$validation_root/cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release "${cmake_platform_options[@]}"
 cmake --build "$validation_root/cmake-build" --config Release
 (cd "$validation_root" && "$validation_root/cmake-build/SdkConsumer" "$validation_root/sdk/examples/consumer/Client.json")
-cmake -S "$validation_root/sdk/examples/managed-consumer" -B "$validation_root/managed-cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release
+cmake -S "$validation_root/sdk/examples/managed-consumer" -B "$validation_root/managed-cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release "${cmake_platform_options[@]}"
 cmake --build "$validation_root/managed-cmake-build" --config Release
 (cd "$validation_root" && "$validation_root/managed-cmake-build/ManagedSdkConsumer" --managed-smoke)
-cmake -S "$validation_root/sdk/examples/source-module" -B "$validation_root/module-cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release
+cmake -S "$validation_root/sdk/examples/source-module" -B "$validation_root/module-cmake-build" -DCMAKE_PREFIX_PATH="$validation_root/sdk" -DCMAKE_BUILD_TYPE=Release "${cmake_platform_options[@]}"
 cmake --build "$validation_root/module-cmake-build" --config Release
 (cd "$validation_root" && "$validation_root/module-cmake-build/SourceModuleConsumer" --module-smoke)
 rm -rf "$validation_root"

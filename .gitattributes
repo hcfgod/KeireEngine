@@ -14,8 +14,11 @@
 *.h text eol=lf
 *.hpp text eol=lf
 
+KeireHubContent/Templates/** text eol=lf
+
 *.exe binary
 *.ico binary
 *.res binary
+*.ttf binary
 *.zip binary
 *.gz binary

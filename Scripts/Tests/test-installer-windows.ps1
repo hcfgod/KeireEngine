@@ -10,7 +10,7 @@ if (-not ($launcher.Contains('"package-installer"') -and
 
 $packager = Get-Content -LiteralPath (Join-Path $Windows "package-installer.ps1") -Raw
 foreach ($contract in @("package-editor.ps1", "Assert-WindowsEditorPackageStage", "makensis.exe", "NSIS.NSIS",
-        '@($candidates)[0]', "KEIRE_WINDOWS_SIGNING_CERT_SHA1", "Get-FileHash")) {
+        '@($candidates)[0]', "KEIRE_WINDOWS_SIGNING_CERT_SHA1", "Get-FileHash", "/DCLIENT_TARGET=")) {
     if (-not $packager.Contains($contract)) { throw "The Windows installer packager is missing '$contract'." }
 }
 
@@ -18,8 +18,16 @@ $templatePath = Join-Path $Root "Installer\Windows\KeireEditor.nsi"
 $template = Get-Content -LiteralPath $templatePath -Raw
 foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_PAGE_COMPONENTS',
         'MUI_PAGE_DIRECTORY', 'Desktop shortcut', 'Start Menu shortcuts', 'WriteUninstaller',
-        'INSTALL_MARKER', 'UnsafeUninstall', 'MUI_FINISHPAGE_RUN')) {
+        'INSTALL_MARKER', 'UnsafeUninstall',
+        'MUI_FINISHPAGE_RUN "$INSTDIR\bin\${CLIENT_TARGET}.exe"',
+        'DisplayIcon" "$INSTDIR\bin\${CLIENT_TARGET}.exe"',
+        'CreateShortcut "$DESKTOP\${PRODUCT_DISPLAY_NAME} Editor.lnk" "$INSTDIR\bin\${CLIENT_TARGET}.exe"',
+        '${PRODUCT_DISPLAY_NAME} Editor.lnk', 'Launch ${PRODUCT_DISPLAY_NAME} Editor')) {
     if (-not $template.Contains($contract)) { throw "The NSIS installer is missing '$contract'." }
+}
+if ($template.Contains('HUB_TARGET') -or $template.Contains(' Hub.lnk') -or
+    $template.Contains('Launch ${PRODUCT_DISPLAY_NAME} Hub')) {
+    throw "The editor NSIS template must not own or launch Hub artifacts."
 }
 if ($template.IndexOf('INSTALL_MARKER', [StringComparison]::Ordinal) -gt
     $template.IndexOf('RMDir /r "$INSTDIR"', [StringComparison]::Ordinal)) {
@@ -36,7 +44,7 @@ if ($makensisPath) {
     $fixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-nsis-test-" + [guid]::NewGuid().ToString("N"))
     try {
         New-Item -ItemType Directory -Force (Join-Path $fixture "source\bin") | Out-Null
-        New-Item -ItemType File -Force (Join-Path $fixture "source\bin\Hub.exe") | Out-Null
+        New-Item -ItemType File -Force (Join-Path $fixture "source\bin\Client.exe") | Out-Null
         $output = Join-Path $fixture "Setup.exe"
         $arguments = @(
             "/DPRODUCT_IDENTIFIER=Fixture",
@@ -44,7 +52,7 @@ if ($makensisPath) {
             "/DPRODUCT_VERSION=1.2.3",
             "/DPRODUCT_FILE_VERSION=1.2.3.0",
             "/DPRODUCT_ARCHITECTURE=x86_64",
-            "/DHUB_TARGET=Hub",
+            "/DCLIENT_TARGET=Client",
             "/DSOURCE_DIRECTORY=$(Join-Path $fixture 'source')",
             "/DOUTPUT_PATH=$output",
             "/DLICENSE_PATH=$(Join-Path $Root 'LICENSE.txt')",
