@@ -111,6 +111,26 @@ TEST_CASE("Player support installation cancellation removes staging and preserve
     }
 }
 
+#if defined(_WIN32)
+TEST_CASE("Player support installation supports Windows payload paths beyond the legacy limit")
+{
+    TemporaryDirectory directory;
+    const auto payload = directory.Path / "payload";
+    const auto nested = std::filesystem::path(std::string(45, 'p')) / std::string(45, 'q') / "runtime.dll";
+    Write(payload / "Development/Player.exe", "player-template");
+    Write(payload / "Development" / nested, "managed-runtime");
+    const auto package = directory.Path / "windows-long-path.keireplayersupport";
+    (void)Keire::Detail::CreatePlayerSupportPackage(Manifest(), payload, package, 1);
+
+    const auto storage = directory.Path / std::string(40, 's');
+    const auto installed = Keire::Detail::InstallPlayerSupportPackage(package, "test-modules", {}, storage);
+    const auto installation = storage / installed.Manifest.EngineVersion / installed.Manifest.Id;
+    CHECK((installation / "Development" / nested).wstring().size() > 260);
+    std::string diagnostic;
+    CHECK(Keire::Detail::ValidateInstalledPlayerSupport(installation, diagnostic));
+}
+#endif
+
 TEST_CASE("Player support manifests reject case collisions oversized entries and escaping identities")
 {
     auto manifest = Manifest();

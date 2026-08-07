@@ -377,6 +377,7 @@ function Get-WindowsRequiredEditorPackagePaths {
         "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll",
         "bin\Managed\Coral.Managed.deps.json", "bin\Managed\Coral.Managed.runtimeconfig.json",
         "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
+        "Config\Branding\Keire.png",
         "samples\KeireSandbox\ProjectSettings\Project.keireproject",
         "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "docs\PlayerBuilds.md", "README.md",
         "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json", "editor-package.json",

@@ -5,6 +5,13 @@ version tags.
 
 ## Unreleased
 
+- Fixed the installed Project Hub using a blank system-tray icon, reporting structurally valid but incompatible Build
+  Support as ready, and failing to immediately restore the existing Hub window when its shortcut was launched again.
+- Fixed Windows installer creation selecting only the drive letter when NSIS was discovered in its standard install
+  directory but was not available on `PATH`.
+- Fixed Build Support package creation failing when the engine has no source modules, and fixed Windows verification
+  and installation failing for bundled payloads beyond the legacy path-length limit. Empty module catalogs now have a
+  stable non-empty identity shared by the editor, runtime, and packaging tools.
 - Added a cross-platform `package-installer` workflow. Windows now produces an NSIS setup wizard with selectable
   destination, optional desktop and Start Menu shortcuts, launch-on-finish, upgrade registration, and guarded uninstall;
   macOS produces a self-contained drag-to-Applications DMG with optional signing/notarization; and Linux produces a

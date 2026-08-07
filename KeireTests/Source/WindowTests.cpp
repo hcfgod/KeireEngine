@@ -1,5 +1,7 @@
 #include "Keire/Window.h"
 
+#include "KeireInternal/TrayIconInternal.h"
+
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
@@ -376,8 +378,11 @@ TEST_CASE("Shutdown makes surviving window handles inert")
 TEST_CASE("Window system shutdown closes surviving system tray handles")
 {
     UseDummyVideoDriver();
+    CHECK(Keire::Detail::LoadTrayIcon(std::filesystem::current_path() / "Config/Branding/Keire.png"));
     auto system = Keire::CreateRef<Keire::WindowSystem>();
-    auto tray = system->CreateSystemTray({.Tooltip = "Kéire tray shutdown test", .Actions = {{"Close", [] {}}}});
+    auto tray = system->CreateSystemTray({.Icon = std::filesystem::current_path() / "Config/Branding/Keire.png",
+                                          .Tooltip = "Kéire tray shutdown test",
+                                          .Actions = {{"Close", [] {}}}});
     system->Shutdown();
     CHECK_NOTHROW(tray->Close());
     CHECK_FALSE(tray->IsAvailable());

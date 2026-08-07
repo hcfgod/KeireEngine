@@ -319,7 +319,8 @@ namespace Keire
         std::ostringstream result;
         for (const auto& module : m_Impl->OrderedDescriptors)
             result << module.Id << '@' << module.Version.ToString() << '\n';
-        return result.str();
+        auto fingerprint = result.str();
+        return fingerprint.empty() ? "empty\n" : std::move(fingerprint);
     }
 
     void ModuleRegistry::ValidateRequired(const std::span<const RequiredSourceModule> required) const

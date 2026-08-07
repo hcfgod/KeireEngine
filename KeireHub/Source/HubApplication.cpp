@@ -139,6 +139,9 @@ namespace
                 {
                     Keire::SystemTraySpecification tray;
                     tray.Tooltip = "Kéire Project Hub";
+                    tray.Icon = m_Executable.parent_path().parent_path() / "Config" / "Branding" / "Keire.png";
+                    if (!std::filesystem::is_regular_file(tray.Icon))
+                        tray.Icon = std::filesystem::current_path() / "Config" / "Branding" / "Keire.png";
                     tray.Actions = {{"Show Hub", [this] { ShowHub(); }}, {"Quit", [this] { Owner().RequestExit(); }}};
                     m_Tray = Owner().Windows()->CreateSystemTray(std::move(tray));
                     if (!m_Tray->IsAvailable())
@@ -383,6 +386,7 @@ namespace
         {
             Keire::Detail::PlayerSupportPackageResult Package;
             bool Healthy = false;
+            bool Compatible = false;
             std::string Diagnostic;
         };
 
@@ -575,6 +579,12 @@ namespace
                     const auto root = Keire::Detail::PlayerSupportStorageRoot() / entry.Package.Manifest.EngineVersion /
                                       Keire::Detail::PathFromUtf8(entry.Package.Manifest.Id);
                     entry.Healthy = Keire::Detail::ValidateInstalledPlayerSupport(root, entry.Diagnostic);
+                    const auto modules = Owner().Modules();
+                    entry.Compatible = entry.Healthy &&
+                                       entry.Package.Manifest.EngineVersion == Keire::GetBuildInfo().Version &&
+                                       modules && entry.Package.Manifest.ModuleFingerprint == modules->Fingerprint();
+                    if (entry.Healthy && !entry.Compatible)
+                        entry.Diagnostic = "Module identity does not match this Hub/editor build.";
                     m_BuildSupport.push_back(std::move(entry));
                 }
             }
@@ -847,9 +857,11 @@ namespace
                                std::string(Keire::ToString(entry.Package.Manifest.Platform)) + " / " +
                                    std::string(Keire::ToString(entry.Package.Manifest.Architecture)) + " / " +
                                    std::to_string(entry.Package.ArchiveSize / (1024ULL * 1024ULL)) + " MiB");
-                ui.TextColored(entry.Healthy ? Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F}
-                                             : Keire::UiColor{0.96F, 0.50F, 0.25F, 1.0F},
-                               entry.Healthy ? "Installed and verified" : "Repair required: " + entry.Diagnostic);
+                ui.TextColored(entry.Compatible ? Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F}
+                                                : Keire::UiColor{0.96F, 0.50F, 0.25F, 1.0F},
+                               entry.Compatible ? "Installed, verified, and compatible"
+                               : entry.Healthy  ? "Installed but incompatible: " + entry.Diagnostic
+                                                : "Repair required: " + entry.Diagnostic);
                 if (!entry.Healthy && !m_SupportProcess && ui.Button("Repair from Package..."))
                     BrowseForBuildSupportPackage();
                 if (!entry.Healthy)
@@ -879,7 +891,7 @@ namespace
                                        std::to_string(available.Size / (1024ULL * 1024ULL)) + " MiB");
                     const auto installed =
                         std::ranges::find_if(m_BuildSupport, [&](const BuildSupportEntry& entry)
-                                             { return entry.Package.Manifest.Id == available.Id && entry.Healthy; });
+                                             { return entry.Package.Manifest.Id == available.Id && entry.Compatible; });
                     if (installed != m_BuildSupport.end())
                         ui.TextColored({0.27F, 0.78F, 0.50F, 1.0F}, "Current version installed");
                     else if (auto disabled = ui.BeginDisabled(static_cast<bool>(m_SupportProcess)); disabled)

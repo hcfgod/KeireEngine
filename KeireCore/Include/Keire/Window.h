@@ -358,6 +358,7 @@ namespace Keire
 
     struct SystemTraySpecification
     {
+        std::filesystem::path Icon;
         std::string Tooltip = "Kéire";
         std::vector<SystemTrayAction> Actions;
     };

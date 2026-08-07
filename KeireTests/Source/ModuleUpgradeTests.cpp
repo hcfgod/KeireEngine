@@ -121,6 +121,16 @@ TEST_CASE("Source modules resolve dependencies deterministically and stop in rev
                                                 "stop:sample.base"});
 }
 
+TEST_CASE("An empty source module catalog has a stable package-compatible fingerprint")
+{
+    const auto first = Keire::CreateRef<Keire::ModuleRegistry>();
+    const auto second = Keire::CreateRef<Keire::ModuleRegistry>();
+
+    CHECK(first->OrderedCatalog().empty());
+    CHECK_FALSE(first->Fingerprint().empty());
+    CHECK(first->Fingerprint() == second->Fingerprint());
+}
+
 TEST_CASE("Source modules reject cycles and discard failed registration")
 {
     Keire::ModuleDescriptor left{.Id = "cycle.left", .DisplayName = "Left", .Version = {1, 0, 0}};

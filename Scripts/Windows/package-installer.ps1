@@ -33,7 +33,7 @@ if (-not $makensisPath) {
         (Join-Path ${env:ProgramFiles(x86)} "NSIS\makensis.exe"),
         (Join-Path $env:ProgramFiles "NSIS\makensis.exe")
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-    if ($candidates) { $makensisPath = $candidates[0] }
+    if ($candidates) { $makensisPath = @($candidates)[0] }
 }
 if (-not $makensisPath) {
     throw "NSIS 3 was not found. Install it with 'winget install NSIS.NSIS', then rerun package-installer."

@@ -2,6 +2,7 @@
 
 #include "Keire/BuildInfo.h"
 
+#include "KeireInternal/TrayIconInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
@@ -51,7 +52,6 @@ namespace Keire
     namespace
     {
         std::atomic<bool> HasActiveSystem = false;
-
         class TrayDispatchState final
         {
           public:
@@ -322,7 +322,8 @@ namespace Keire
         Impl(SystemTraySpecification specification, std::shared_ptr<TrayDispatchState> dispatch)
             : OwnerThread(std::this_thread::get_id()), Dispatch(std::move(dispatch))
         {
-            Tray = SDL_CreateTray(nullptr, specification.Tooltip.empty() ? nullptr : specification.Tooltip.c_str());
+            const auto icon = Detail::LoadTrayIcon(specification.Icon);
+            Tray = SDL_CreateTray(icon.get(), specification.Tooltip.empty() ? nullptr : specification.Tooltip.c_str());
             if (!Tray)
             {
                 Error = LastSdlError();
@@ -363,12 +364,13 @@ namespace Keire
 
         void Close() noexcept
         {
-            if (!Tray)
-                return;
             if (std::this_thread::get_id() != OwnerThread)
                 return;
-            SDL_DestroyTray(Tray);
-            Tray = nullptr;
+            if (Tray)
+            {
+                SDL_DestroyTray(Tray);
+                Tray = nullptr;
+            }
             Dispatch->Close();
             Actions.clear();
         }

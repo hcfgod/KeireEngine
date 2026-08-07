@@ -45,6 +45,9 @@ foreach ($directory in @("bin", "samples", "docs")) {
 }
 New-Item -ItemType Directory -Force (Join-Path $stage "Config"), (Join-Path $stage "third-party") | Out-Null
 Copy-Item -LiteralPath (Join-Path $sdkStage "Config\Client.json") -Destination (Join-Path $stage "Config")
+New-Item -ItemType Directory -Force (Join-Path $stage "Config\Branding") | Out-Null
+Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
+    -Destination (Join-Path $stage "Config\Branding")
 Copy-Item -LiteralPath (Join-Path $sdkStage "third-party\licenses") `
     -Destination (Join-Path $stage "third-party") -Recurse
 foreach ($file in @("README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {

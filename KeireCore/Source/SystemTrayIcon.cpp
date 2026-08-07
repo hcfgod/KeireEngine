@@ -1,0 +1,44 @@
+#include "KeireInternal/TrayIconInternal.h"
+
+#include <stb_image.h>
+
+#include <cstring>
+#include <fstream>
+#include <vector>
+
+namespace Keire::Detail
+{
+    TrayIcon LoadTrayIcon(const std::filesystem::path& path)
+    {
+        if (path.empty())
+            return {nullptr, SDL_DestroySurface};
+        std::ifstream input(path, std::ios::binary | std::ios::ate);
+        if (!input)
+            return {nullptr, SDL_DestroySurface};
+        const auto size = input.tellg();
+        if (size <= 0 || size > 16 * 1024 * 1024)
+            return {nullptr, SDL_DestroySurface};
+        std::vector<std::byte> encoded(static_cast<std::size_t>(size));
+        input.seekg(0);
+        input.read(reinterpret_cast<char*>(encoded.data()), size);
+        if (!input)
+            return {nullptr, SDL_DestroySurface};
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        auto* decoded = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(encoded.data()),
+                                              static_cast<int>(encoded.size()), &width, &height, &channels, 4);
+        if (!decoded || width <= 0 || height <= 0)
+        {
+            stbi_image_free(decoded);
+            return {nullptr, SDL_DestroySurface};
+        }
+        TrayIcon result(SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32), SDL_DestroySurface);
+        if (result)
+            for (int row = 0; row < height; ++row)
+                std::memcpy(static_cast<std::byte*>(result->pixels) + row * result->pitch, decoded + row * width * 4,
+                            static_cast<std::size_t>(width * 4));
+        stbi_image_free(decoded);
+        return result;
+    }
+} // namespace Keire::Detail

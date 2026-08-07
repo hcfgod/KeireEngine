@@ -55,6 +55,20 @@ namespace Keire::Detail
             return value;
         }
 
+        [[nodiscard]] std::filesystem::path NativeIoPath(const std::filesystem::path& path)
+        {
+#if defined(_WIN32)
+            auto value = std::filesystem::absolute(path).lexically_normal().native();
+            if (value.starts_with(LR"(\\?\)"))
+                return value;
+            if (value.starts_with(LR"(\\)"))
+                return LR"(\\?\UNC\)" + value.substr(2);
+            return LR"(\\?\)" + value;
+#else
+            return path;
+#endif
+        }
+
         void ThrowIfCancelled(const PlayerSupportInstallCallbacks& callbacks)
         {
             if (callbacks.Cancelled && callbacks.Cancelled())
@@ -441,8 +455,9 @@ namespace Keire::Detail
             {
                 ThrowIfCancelled(callbacks);
                 const auto target = staging / file.Path;
-                std::filesystem::create_directories(target.parent_path());
-                std::ofstream output(target, std::ios::binary | std::ios::trunc);
+                std::filesystem::create_directories(NativeIoPath(target.parent_path()));
+                const auto nativeTarget = NativeIoPath(target);
+                std::ofstream output(nativeTarget, std::ios::binary | std::ios::trunc);
                 if (!output)
                     throw std::runtime_error("Could not create a Build Support payload file.");
                 std::uint64_t remaining = file.Size;
@@ -462,7 +477,7 @@ namespace Keire::Detail
                            "Extracting Build Support");
                 }
                 output.close();
-                if (DigestToString(Sha256File(target, MaximumFileBytes)) != file.Sha256)
+                if (DigestToString(Sha256File(nativeTarget, MaximumFileBytes)) != file.Sha256)
                     throw std::runtime_error("Build Support payload hash verification failed.");
 #if !defined(_WIN32)
                 std::filesystem::permissions(
@@ -524,8 +539,10 @@ namespace Keire::Detail
             for (const auto& file : manifest.Files)
             {
                 const auto path = installation / file.Path;
-                if (!std::filesystem::is_regular_file(path) || std::filesystem::file_size(path) != file.Size ||
-                    DigestToString(Sha256File(path, MaximumFileBytes)) != file.Sha256)
+                const auto nativePath = NativeIoPath(path);
+                if (!std::filesystem::is_regular_file(nativePath) ||
+                    std::filesystem::file_size(nativePath) != file.Size ||
+                    DigestToString(Sha256File(nativePath, MaximumFileBytes)) != file.Sha256)
                     throw std::runtime_error("Installed Build Support contains a missing or corrupt file: " +
                                              PathToUtf8(file.Path));
             }

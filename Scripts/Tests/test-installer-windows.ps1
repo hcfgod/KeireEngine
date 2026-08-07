@@ -10,7 +10,7 @@ if (-not ($launcher.Contains('"package-installer"') -and
 
 $packager = Get-Content -LiteralPath (Join-Path $Windows "package-installer.ps1") -Raw
 foreach ($contract in @("package-editor.ps1", "Assert-WindowsEditorPackageStage", "makensis.exe", "NSIS.NSIS",
-        "KEIRE_WINDOWS_SIGNING_CERT_SHA1", "Get-FileHash")) {
+        '@($candidates)[0]', "KEIRE_WINDOWS_SIGNING_CERT_SHA1", "Get-FileHash")) {
     if (-not $packager.Contains($contract)) { throw "The Windows installer packager is missing '$contract'." }
 }
 

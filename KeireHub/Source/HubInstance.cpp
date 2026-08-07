@@ -87,6 +87,55 @@ namespace KeireHub
                 result[result.size() - index - 1] = digits[(value >> (index * 4U)) & 0x0fU];
             return result;
         }
+
+#if defined(_WIN32)
+        struct ExistingHubWindow final
+        {
+            std::wstring Executable;
+            HWND Window = nullptr;
+            DWORD Process = 0;
+        };
+
+        BOOL CALLBACK FindExistingHubWindow(HWND window, LPARAM contextValue)
+        {
+            auto& context = *reinterpret_cast<ExistingHubWindow*>(contextValue);
+            DWORD processId = 0;
+            (void)GetWindowThreadProcessId(window, &processId);
+            if (processId == 0)
+                return TRUE;
+            const auto process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+            if (!process)
+                return TRUE;
+            std::array<wchar_t, 32768> path{};
+            DWORD pathLength = static_cast<DWORD>(path.size());
+            const bool matches = QueryFullProcessImageNameW(process, 0, path.data(), &pathLength) &&
+                                 CompareStringOrdinal(context.Executable.c_str(), -1, path.data(),
+                                                      static_cast<int>(pathLength), TRUE) == CSTR_EQUAL;
+            CloseHandle(process);
+            if (!matches)
+                return TRUE;
+            context.Window = window;
+            context.Process = processId;
+            return FALSE;
+        }
+
+        void ActivateExistingHubWindow(const std::filesystem::path& executable) noexcept
+        {
+            try
+            {
+                ExistingHubWindow context{std::filesystem::weakly_canonical(executable).native()};
+                (void)EnumWindows(&FindExistingHubWindow, reinterpret_cast<LPARAM>(&context));
+                if (!context.Window)
+                    return;
+                (void)AllowSetForegroundWindow(context.Process);
+                (void)ShowWindowAsync(context.Window, SW_RESTORE);
+                (void)SetForegroundWindow(context.Window);
+            }
+            catch (...)
+            {
+            }
+        }
+#endif
     } // namespace
 
     class HubInstanceCoordinator::Impl final
@@ -100,7 +149,7 @@ namespace KeireHub
                     return;
                 const auto identity = HexHash(ExecutableHash(executable));
 #if defined(_WIN32)
-                InitializeWindows(identity, activation);
+                InitializeWindows(identity, executable, activation);
 #else
                 InitializeUnix(identity, activation);
 #endif
@@ -197,7 +246,8 @@ namespace KeireHub
             return L"Local\\KeireHub-" + std::wstring(identity.begin(), identity.end()) + std::wstring(suffix);
         }
 
-        void InitializeWindows(const std::string& identity, const HubActivationRequest& activation)
+        void InitializeWindows(const std::string& identity, const std::filesystem::path& executable,
+                               const HubActivationRequest& activation)
         {
             const auto instanceName = ObjectName(identity, L"-instance");
             m_Instance = CreateMutexW(nullptr, TRUE, instanceName.c_str());
@@ -263,6 +313,7 @@ namespace KeireHub
             (void)ReleaseMutex(m_ActivationGuard);
             if (!SetEvent(m_ActivationEvent))
                 throw std::runtime_error("Could not notify the active Hub.");
+            ActivateExistingHubWindow(executable);
         }
 
         HANDLE m_Instance = nullptr;
