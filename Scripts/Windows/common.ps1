@@ -281,6 +281,66 @@ function Get-WindowsRequiredPackagePaths {
     )
 }
 
+function Get-WindowsExecutableSubsystem {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    $reader = [IO.BinaryReader]::new($stream)
+    try {
+        if ($stream.Length -lt 160 -or $reader.ReadUInt16() -ne 0x5A4D) {
+            throw "Executable does not contain a valid DOS header: $Path"
+        }
+        $stream.Position = 0x3C
+        $peOffset = $reader.ReadInt32()
+        if ($peOffset -lt 0 -or $peOffset -gt $stream.Length - 96) {
+            throw "Executable contains an invalid PE header offset: $Path"
+        }
+        $stream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) {
+            throw "Executable does not contain a valid PE signature: $Path"
+        }
+        $optionalHeader = $peOffset + 24
+        $stream.Position = $optionalHeader
+        $magic = $reader.ReadUInt16()
+        if ($magic -notin @(0x010B, 0x020B)) {
+            throw "Executable contains an unsupported PE optional header: $Path"
+        }
+        $stream.Position = $optionalHeader + 68
+        return $reader.ReadUInt16()
+    }
+    finally {
+        $reader.Dispose()
+        $stream.Dispose()
+    }
+}
+
+function Invoke-WindowsExecutableCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$Arguments = @()
+    )
+
+    $standardOutput = [IO.Path]::GetTempFileName()
+    $standardError = [IO.Path]::GetTempFileName()
+    $process = $null
+    try {
+        $process = Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru `
+            -RedirectStandardOutput $standardOutput -RedirectStandardError $standardError
+        $exitCode = $process.ExitCode
+        $process.Dispose()
+        $process = $null
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            StandardOutput = [IO.File]::ReadAllText($standardOutput)
+            StandardError = [IO.File]::ReadAllText($standardError)
+        }
+    }
+    finally {
+        if ($process) { $process.Dispose() }
+        Remove-Item -LiteralPath $standardOutput, $standardError -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Assert-WindowsPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
     $required = Get-WindowsRequiredPackagePaths $ClientTarget $HubTarget $CoreTarget $Namespace
@@ -330,6 +390,12 @@ function Assert-WindowsEditorPackageStage {
     foreach ($path in (Get-WindowsRequiredEditorPackagePaths $ClientTarget $HubTarget $CoreTarget $Namespace)) {
         if (-not (Test-Path -LiteralPath (Join-Path $Stage $path) -PathType Leaf)) {
             throw "Editor package is missing required content: $path"
+        }
+    }
+    foreach ($target in @($ClientTarget, $HubTarget)) {
+        $executable = Join-Path $Stage "bin\$target.exe"
+        if ((Get-WindowsExecutableSubsystem $executable) -ne 2) {
+            throw "Editor package executable must use the Windows GUI subsystem: bin\$target.exe"
         }
     }
     $dotnetSdk = Get-ChildItem -LiteralPath (Join-Path $Stage "bin\Managed\Dotnet\sdk") -Directory `

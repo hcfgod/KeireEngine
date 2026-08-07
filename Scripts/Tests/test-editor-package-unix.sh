@@ -11,6 +11,7 @@ grep -q 'package-editor' "$ROOT/Scripts/project.sh"
 grep -q -- '--configuration Dist' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q -- '--stage-only' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q 'Build/Dependencies/dotnet-sdk' "$ROOT/Scripts/Unix/package-editor.sh"
+grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 
 stage="$(mktemp -d)"

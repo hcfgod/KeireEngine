@@ -1,6 +1,7 @@
 #include "doctest/doctest.h"
 
 #include "Keire/Core.h"
+#include "KeireInternal/LogInternal.h"
 #include "KeireTests/TestSupport.h"
 
 #include <atomic>
@@ -83,6 +84,37 @@ TEST_CASE("Console output can be suppressed without disabling file logging")
     REQUIRE(logger);
     CHECK(logger.SinkCount() == 1);
     KEIRE_CORE_INFO("file-only message");
+}
+
+TEST_CASE("Logger retains filtered structured records for the editor console")
+{
+    LogFixture fixture("editor-console-records");
+    Keire::Log::Initialize(fixture.Config);
+
+    const auto initialRecords = Keire::Detail::LogInternalAccess::ReadRecordsSince(0);
+    REQUIRE(initialRecords.size() == 1);
+    CHECK(initialRecords.front().Channel == Keire::Detail::LogChannel::Core);
+    CHECK(initialRecords.front().Level == Keire::LogLevel::Info);
+    CHECK(initialRecords.front().Message == "Core logger initialized");
+
+    const auto initialSequence = initialRecords.back().Sequence;
+    KEIRE_CORE_WARN("retained core warning");
+    KEIRE_CLIENT_ERROR("[Managed] retained client failure");
+    const auto retained = Keire::Detail::LogInternalAccess::ReadRecordsSince(initialSequence);
+    REQUIRE(retained.size() == 2);
+    CHECK(retained[0].Channel == Keire::Detail::LogChannel::Core);
+    CHECK(retained[0].Level == Keire::LogLevel::Warn);
+    CHECK(retained[0].Message == "retained core warning");
+    CHECK(retained[1].Channel == Keire::Detail::LogChannel::Client);
+    CHECK(retained[1].Level == Keire::LogLevel::Error);
+    CHECK(retained[1].Message == "[Managed] retained client failure");
+
+    Keire::Log::SetLevel(Keire::LogLevel::Error);
+    KEIRE_CORE_INFO("filtered editor console message");
+    KEIRE_CORE_ERROR("visible editor console message");
+    const auto filtered = Keire::Detail::LogInternalAccess::ReadRecordsSince(retained.back().Sequence);
+    REQUIRE(filtered.size() == 1);
+    CHECK(filtered.front().Message == "visible editor console message");
 }
 
 TEST_CASE("Logger handles provide copyable lifecycle-safe operations")

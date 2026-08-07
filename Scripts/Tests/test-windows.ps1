@@ -23,6 +23,7 @@ if ($runFast) {
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
 & (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
+& (Join-Path $PSScriptRoot "test-installer-windows.ps1")
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
 Assert-True ($generateScript.Contains('--file=premake5.lua')) "Unicode-safe relative Premake script path"
 Assert-True ($generateScript.Contains('Get-ProjectGenerationFingerprint')) "Source-inventory project regeneration"
@@ -35,6 +36,9 @@ Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "P
 Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('$Configuration = "Dist"')) "Dist editor package launcher command"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
 Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
+$editorTestWorkingDirectory = '(?s)\$editorOriginalPath = \$env:PATH\s+Push-Location \$Root\s+try \{.*?' +
+    '& \$editorTestsExe.*?finally \{.*?Pop-Location'
+Assert-True ($testScript -match $editorTestWorkingDirectory) "Editor tests use the repository working directory"
 $launcherFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-launcher-exit-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force (Join-Path $launcherFixture "Scripts\Windows") | Out-Null
@@ -423,6 +427,7 @@ Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Con
 $editorPackageScript = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPackageScript.Contains('-StageOnly') -and
     $editorPackageScript.Contains('Build\Dependencies\dotnet-sdk') -and
+    $editorPackageScript.Contains('Build\Distributions') -and
     $editorPackageScript.Contains('Assert-WindowsEditorPackageStage') -and
     $editorPackageScript.Contains('editor-package.json')) "Windows Dist editor distribution packaging"
 $packageConfig = Get-Content (Join-Path (Get-RepositoryRoot) "Config\PackageConfig.cmake.in") -Raw

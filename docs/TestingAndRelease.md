@@ -272,10 +272,46 @@ compiler, FFmpeg runtime, managed host, complete .NET 10 SDK, tracked sandbox, d
 SDK-only headers, static libraries, CMake metadata, and consumer examples are deliberately omitted. Validation checks
 the stage, the compressed archive, and an extracted copy; it also executes the staged and extracted .NET SDK. The
 archive has a separate `editor-package.json` referencing the locked `build-manifest.json`, and its checksum is written
-beside it under `Artifacts/`.
+beside it under `Artifacts/`. The validated, unpacked distribution remains available under `Build/Distributions/` for
+immediate local use through its platform launcher.
+
+Windows Dist packages link the Hub and editor as GUI-subsystem executables with `mainCRTStartup`. Normal packaged
+launches therefore create no terminal window; native Core and Client records remain visible through the editor Console
+and rotating log files. Development configurations retain their terminal sink, and dependency-free help/version
+commands preserve command-line output for validation and diagnostics.
 
 The same clean-worktree policy as SDK packaging applies. `-AllowDirty` or `--allow-dirty` remains a local diagnostic
 escape hatch, is rejected in CI, and is recorded in both manifests.
+
+## Native Editor Installers
+
+The native installer command always runs the complete editor-distribution gate first:
+
+```powershell
+winget install NSIS.NSIS
+./Scripts/project.ps1 package-installer -Generator vs2022 -Toolset msc
+```
+
+```sh
+bash Scripts/project.sh package-installer --generator ninja --toolset clang
+```
+
+Run it on every release OS; installers are never cross-produced. Windows compiles
+`Installer/Windows/KeireEditor.nsi` with NSIS 3 and emits a per-user setup executable. Its wizard presents the license,
+optional shortcuts, an editable destination, and launch-on-finish. The stable uninstall registration supports upgrades,
+and removal requires both Kéire's registry ownership and installation marker before recursively deleting the dedicated
+installation directory. Set `KEIRE_WINDOWS_SIGNING_CERT_SHA1` to an Authenticode certificate thumbprint to sign and
+verify the final setup executable. `KEIRE_WINDOWS_TIMESTAMP_URL` overrides the default RFC 3161 timestamp service.
+
+macOS uses the platform `hdiutil`, `sips`, and `iconutil` tools to create a self-contained Hub application in a
+drag-to-Applications DMG. Set `KEIRE_MACOS_SIGNING_IDENTITY` to Developer ID Application identity text to enable hardened
+runtime signing. Set `KEIRE_MACOS_NOTARY_PROFILE` to an `xcrun notarytool` keychain profile to submit, wait for, and
+staple notarization. Production macOS publication requires both signing and notarization.
+
+Linux uses `dpkg-deb` to create a Debian/Ubuntu package under `/opt`, with a `/usr/bin` launcher, freedesktop desktop
+entry, and hicolor application icon. Other distributions continue using the validated `.tar.gz` editor distribution;
+RPM and repository metadata are separate publication work. Every installer receives a neighboring SHA-256 file under
+`Artifacts/`. Signing and publication credentials remain external release secrets and are never stored in the tree.
 
 ## Final Handoff
 

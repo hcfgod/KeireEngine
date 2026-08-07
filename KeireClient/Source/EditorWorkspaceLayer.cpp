@@ -41,7 +41,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
-#include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -806,6 +805,7 @@ void EditorWorkspaceLayer::OnAttach()
     }
     m_SceneViewportPanel->Initialize(Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{});
     LoadTheme(workspace, workspace.ActiveTheme());
+    m_ConsolePanel->CaptureEngineLogs(Owner().GetTime().FrameCount(), m_Theme);
     if (!m_Smoke || m_InitializeProject)
     {
         try
@@ -1066,6 +1066,7 @@ void EditorWorkspaceLayer::OnFixedUpdate(const Keire::Time& time)
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
+    m_ConsolePanel->CaptureEngineLogs(time.FrameCount(), m_Theme);
     {
         Keire::ProfileScope transitions(Owner().GetProfiler(), Keire::ProfileCategory::Application, "Transitions");
         ProcessSceneTransition();
@@ -1451,23 +1452,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
 void EditorWorkspaceLayer::AddConsoleMessage(std::string category, std::string message, const Keire::UiColor color,
                                              const Keire::LogLevel level) noexcept
 {
-    try
-    {
-        const auto logger = Keire::Log::GetClientLogger();
-        logger.Write(level, '[' + category + "] " + message);
-    }
-    catch (...)
-    {
-        std::fprintf(stderr, "[%s] %s\n", category.c_str(), message.c_str());
-    }
-    try
-    {
-        m_ConsolePanel->Add(std::move(category), std::move(message), color, Owner().GetTime().FrameCount(), level);
-    }
-    catch (...)
-    {
-        std::fputs("Editor Console could not retain a log entry.\n", stderr);
-    }
+    m_ConsolePanel->LogAndCapture(std::move(category), std::move(message), color, Owner().GetTime().FrameCount(),
+                                  m_Theme, level);
 }
 
 void EditorWorkspaceLayer::ReportError(std::string category, std::string message) noexcept

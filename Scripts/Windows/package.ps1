@@ -181,8 +181,12 @@ if (-not (Test-Path (Join-Path $runtimeContent "catalog.json")) -or
 }
 & (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --frames 12
 if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke failed with exit code $LASTEXITCODE." }
-$versionOutput = (& (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") --version) -join "`n"
-if ($LASTEXITCODE -ne 0) { throw "Packaged client version query failed with exit code $LASTEXITCODE." }
+$versionResult = Invoke-WindowsExecutableCapture `
+    (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") @("--version")
+if ($versionResult.ExitCode -ne 0) {
+    throw "Packaged client version query failed with exit code $($versionResult.ExitCode)."
+}
+$versionOutput = $versionResult.StandardOutput
 $commitPrefix = $commit.Substring(0, [Math]::Min(12, $commit.Length))
 $expectedIdentity = if ($dirty) { "$commitPrefix-dirty" } else { $commitPrefix }
 if (-not $versionOutput.Contains($expectedIdentity) -or (-not $dirty -and $versionOutput.Contains("$commitPrefix-dirty"))) {

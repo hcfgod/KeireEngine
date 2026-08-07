@@ -29,11 +29,15 @@ if (-not (Test-Path -LiteralPath $sdkStage -PathType Container)) {
 }
 
 $name = "$($Project.ARTIFACT_PREFIX)-editor-windows-$Architecture-Dist"
-$stage = Join-Path $Root "Artifacts\$name"
+$distributionRoot = Join-Path $Root "Build\Distributions"
+$stage = Join-Path $distributionRoot $name
+$legacyStage = Join-Path $Root "Artifacts\$name"
 $archive = Join-Path $Root "Artifacts\$name.zip"
 $validationRoot = Join-Path $Root "Artifacts\$name-validation"
 Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $legacyStage -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $distributionRoot | Out-Null
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 foreach ($directory in @("bin", "samples", "docs")) {
@@ -87,8 +91,9 @@ $launcher = "@echo off`r`nstart `"`" `"%~dp0bin\$($Project.HUB_TARGET).exe`"`r`n
 
 Assert-WindowsEditorPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET `
     $Project.PROJECT_NAMESPACE
-$hubVersion = (& (Join-Path $stage "bin\$($Project.HUB_TARGET).exe") --version) -join "`n"
-if ($LASTEXITCODE -ne 0 -or -not $hubVersion.Contains($Project.PROJECT_VERSION)) {
+$hubVersion = Invoke-WindowsExecutableCapture `
+    (Join-Path $stage "bin\$($Project.HUB_TARGET).exe") @("--version")
+if ($hubVersion.ExitCode -ne 0 -or -not $hubVersion.StandardOutput.Contains($Project.PROJECT_VERSION)) {
     throw "Packaged Project Hub version validation failed."
 }
 $sdkList = (& (Join-Path $dotnetDestination "dotnet.exe") --list-sdks) -join "`n"
@@ -117,4 +122,6 @@ finally {
 }
 
 Remove-Item -LiteralPath $sdkStage -Recurse -Force
-Write-Host "==> Editor package created: $archive"
+Write-Host "==> Ready-to-run editor distribution: $stage"
+Write-Host "==> Launch with: $(Join-Path $stage 'Launch-KeireEditor.cmd')"
+Write-Host "==> Editor package archive created: $archive"

@@ -340,6 +340,9 @@ namespace Keire
         const auto commandLine = ParseCommandLine(arguments);
         ApplicationSpecification specification;
         specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
+#if defined(_WIN32) && defined(KEIRE_DISTRIBUTION)
+        specification.Logging.EnableConsole = false;
+#endif
 
         if (std::filesystem::exists(commandLine.ConfigurationPath))
             specification.MainWindow = LoadWindowSpecification(commandLine.ConfigurationPath);

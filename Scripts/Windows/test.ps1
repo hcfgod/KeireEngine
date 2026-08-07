@@ -66,6 +66,7 @@ if ($exitCode -eq 0) {
         -Architecture $Architecture -Toolset $Toolset -Target $editorTestsTarget -CI:$CI -Update:$Update -Generate:$Generate
     if (-not (Test-Path $editorTestsExe)) { throw "Editor tests executable was not found: $editorTestsExe" }
     $editorOriginalPath = $env:PATH
+    Push-Location $Root
     try {
         if ($Configuration -eq "DebugASan" -and $usesMSVC) {
             $env:PATH = "$runtimeDirectory;$env:PATH"
@@ -76,6 +77,7 @@ if ($exitCode -eq 0) {
     }
     finally {
         $env:PATH = $editorOriginalPath
+        Pop-Location
     }
 }
 
@@ -95,6 +97,7 @@ if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
 
     $previousVideoDriver = $env:SDL_VIDEODRIVER
     $previousGpuBackend = $env:KEIRE_GPU_TEST_BACKEND
+    Push-Location $Root
     try {
         Remove-Item Env:SDL_VIDEODRIVER -ErrorAction SilentlyContinue
         foreach ($backend in @("direct3d12", "vulkan")) {
@@ -124,6 +127,7 @@ if ($exitCode -eq 0 -and $Configuration -in @("Debug", "Release")) {
     finally {
         $env:SDL_VIDEODRIVER = $previousVideoDriver
         $env:KEIRE_GPU_TEST_BACKEND = $previousGpuBackend
+        Pop-Location
     }
 }
 exit $exitCode

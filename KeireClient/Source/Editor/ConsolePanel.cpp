@@ -1,10 +1,41 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 
+#include "KeireInternal/LogInternal.h"
+
 #include <algorithm>
+#include <cstdio>
 #include <utility>
 
 namespace KeireEditor
 {
+    namespace
+    {
+        [[nodiscard]] Keire::UiColor LogColor(const Keire::LogLevel level,
+                                              const Keire::UiThemeDefinition& theme) noexcept
+        {
+            if (level >= Keire::LogLevel::Error)
+                return theme.Error;
+            if (level == Keire::LogLevel::Warn)
+                return theme.Warning;
+            if (level == Keire::LogLevel::Trace || level == Keire::LogLevel::Debug)
+                return theme.MutedText;
+            return theme.Text;
+        }
+
+        void SplitCategory(const Keire::Detail::RetainedLogRecord& record, std::string& category, std::string& message)
+        {
+            category = record.Channel == Keire::Detail::LogChannel::Core ? "Core" : "Client";
+            message = record.Message;
+            if (!message.starts_with('['))
+                return;
+            const auto close = message.find("] ");
+            if (close == std::string::npos || close <= 1 || close > 64)
+                return;
+            category = message.substr(1, close - 1);
+            message.erase(0, close + 2);
+        }
+    } // namespace
+
     void ConsolePanel::Attach(Keire::UiWorkspace& workspace)
     {
         m_Registration = workspace.RegisterPanel({"editor.console", "Console"});
@@ -17,6 +48,57 @@ namespace KeireEditor
         m_Messages.push_back({std::move(category), std::move(message), color, frame, level, m_NextSerial++});
         while (m_Messages.size() > maximumMessages)
             m_Messages.pop_front();
+    }
+
+    void ConsolePanel::LogAndCapture(std::string category, std::string message, const Keire::UiColor color,
+                                     const std::uint64_t frame, const Keire::UiThemeDefinition& theme,
+                                     const Keire::LogLevel level) noexcept
+    {
+        try
+        {
+            Keire::Log::GetClientLogger().Write(level, '[' + category + "] " + message);
+            CaptureEngineLogs(frame, theme);
+            return;
+        }
+        catch (...)
+        {
+            std::fprintf(stderr, "[%s] %s\n", category.c_str(), message.c_str());
+        }
+        try
+        {
+            Add(std::move(category), std::move(message), color, frame, level);
+        }
+        catch (...)
+        {
+            std::fputs("Editor Console could not retain a log entry.\n", stderr);
+        }
+    }
+
+    void ConsolePanel::CaptureEngineLogs(const std::uint64_t frame, const Keire::UiThemeDefinition& theme) noexcept
+    {
+        std::vector<Keire::Detail::RetainedLogRecord> records;
+        try
+        {
+            records = Keire::Detail::LogInternalAccess::ReadRecordsSince(m_LogSequence);
+        }
+        catch (...)
+        {
+            return;
+        }
+        for (const auto& record : records)
+        {
+            m_LogSequence = record.Sequence;
+            try
+            {
+                std::string category;
+                std::string message;
+                SplitCategory(record, category, message);
+                Add(std::move(category), std::move(message), LogColor(record.Level, theme), frame, record.Level);
+            }
+            catch (...)
+            {
+            }
+        }
     }
 
     void ConsolePanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)

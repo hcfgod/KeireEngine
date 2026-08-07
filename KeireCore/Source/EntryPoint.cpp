@@ -19,11 +19,30 @@
 
 namespace
 {
-    void ConfigureConsoleEncoding() noexcept
+    void ConfigureConsoleEncoding(const Keire::ApplicationCommandLineArguments& arguments) noexcept
     {
 #if defined(_WIN32)
-        SetConsoleOutputCP(CP_UTF8);
-        SetConsoleCP(CP_UTF8);
+        const bool informational = arguments.Size() == 2 && (arguments[1] == "--help" || arguments[1] == "-h" ||
+                                                             arguments[1] == "--version" || arguments[1] == "-v");
+        const auto validHandle = [](const DWORD kind)
+        {
+            const auto handle = GetStdHandle(kind);
+            return handle != nullptr && handle != INVALID_HANDLE_VALUE;
+        };
+        if (GetConsoleCP() == 0 && informational && !validHandle(STD_OUTPUT_HANDLE) &&
+            AttachConsole(ATTACH_PARENT_PROCESS))
+        {
+            FILE* stream = nullptr;
+            (void)freopen_s(&stream, "CONOUT$", "w", stdout);
+            (void)freopen_s(&stream, "CONOUT$", "w", stderr);
+        }
+        if (GetConsoleCP() != 0)
+        {
+            SetConsoleOutputCP(CP_UTF8);
+            SetConsoleCP(CP_UTF8);
+        }
+#else
+        (void)arguments;
 #endif
     }
 
@@ -102,8 +121,8 @@ namespace
 
     int RunClient(const int argc, char* const* argv)
     {
-        ConfigureConsoleEncoding();
         const Keire::ApplicationCommandLineArguments arguments(argc, argv);
+        ConfigureConsoleEncoding(arguments);
 
         try
         {

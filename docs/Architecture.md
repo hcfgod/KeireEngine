@@ -405,6 +405,10 @@ levels are part of the SDK contract. The implementation does not register global
 shut down unrelated state. Handles keep the state storage valid but take operation locks only while making calls.
 Shutdown detaches the global state, takes its exclusive operation lock, flushes pending work, and closes it. It may wait
 for an active call but not for a handle's lifetime; detached handles observe the closed state and become safe no-ops.
+Accepted Core and Client writes also enter a bounded structured record history under a separate short lock. The editor
+polls that history from its owner thread and advances an opaque sequence, so startup and worker messages reach the
+Console panel without invoking UI from logging threads or exposing spdlog across the boundary. Coral's host callback is
+adapted to the Core channel instead of writing around this path.
 
 File paths are intentionally relative to the process working directory. Scripts and generated IDE targets set that directory to the repository root, producing consistent `Logs/Core.log` and `Logs/Client.log` paths.
 

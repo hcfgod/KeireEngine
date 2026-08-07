@@ -29,3 +29,9 @@ project(ProjectConfig.CLIENT_TARGET)
     AddKeireManagedHostStaging()
 
     LinkSDL3()
+
+    filter { "system:windows", "configurations:Dist" }
+        kind "WindowedApp"
+        entrypoint "mainCRTStartup"
+
+    filter {}

@@ -174,6 +174,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
         defines
         {
             "NDEBUG",
+            "KEIRE_DISTRIBUTION",
             "KEIRE_COMPILED_LOG_LEVEL=2"
         }
 

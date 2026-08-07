@@ -67,6 +67,7 @@ Run `Scripts/project.bat` on Windows or `Scripts/project.sh` on Unix without a c
 | `coverage` | Run Clang source coverage and enforce 80% line coverage |
 | `package` | Test, smoke-run, and create runtime/SDK archives and checksums |
 | `package-editor` | Build, validate, and archive the native Dist editor distribution |
+| `package-installer` | Build the Dist editor and create the native Windows, macOS, or Linux installer |
 | `doctor` | Report detected tools, versions, identity, and environment |
 | `clean` | Remove build, generated, or all disposable outputs |
 | `vendor-update` | Intentionally update one dependency lock and working tree |
@@ -81,6 +82,7 @@ Common examples:
 ./Scripts/project.ps1 clean -CleanScope generated
 ./Scripts/project.ps1 package -Generator vs2022 -Configuration Dist
 ./Scripts/project.ps1 package-editor -Generator vs2022
+./Scripts/project.ps1 package-installer -Generator vs2022 -Toolset msc
 #Local diagnostics only; rejected in CI and marked as a development artifact.
 ./Scripts/project.ps1 package -Generator ninja -Configuration Release -AllowDirty
 ```
@@ -91,6 +93,7 @@ bash Scripts/project.sh clean
 bash Scripts/project.sh clean --clean-scope generated
 bash Scripts/project.sh package --generator ninja --configuration Dist --toolset clang
 bash Scripts/project.sh package-editor --generator ninja --toolset clang
+bash Scripts/project.sh package-installer --generator ninja --toolset clang
 #Local diagnostics only; rejected in CI and marked as a development artifact.
 bash Scripts/project.sh package --generator ninja --configuration Release --allow-dirty
 ```
@@ -101,10 +104,20 @@ bash Scripts/project.sh package --generator ninja --configuration Release --allo
 generated project files. Use the narrower `build` or `generated` scope only when retaining the other group's state is
 intentional.
 
-`package-editor` always uses Dist and writes a host-native editor archive plus SHA-256 file under `Artifacts/`. Run it
-on Windows, macOS, and Linux to produce the three distributable builds; native executables, SDKs, and system frameworks
-must be packaged on their target OS. Each archive contains the Project Hub, editor and companion tools, the complete
-bundled .NET 10 SDK, sample project, notices, and a platform launcher. macOS packages also include a Project Hub `.app`.
+`package-editor` always uses Dist. It leaves an unpacked, ready-to-run editor under `Build/Distributions/` and writes
+the host-native archive plus SHA-256 file under `Artifacts/`. Run it on Windows, macOS, and Linux to produce the three
+distributable builds; native executables, SDKs, and system frameworks must be packaged on their target OS. Each
+distribution contains the Project Hub, editor and companion tools, the complete bundled .NET 10 SDK, sample project,
+notices, and a platform launcher. macOS packages also include a Project Hub `.app`.
+Test and package launchers run repository-dependent executables from the repository root, regardless of the directory
+from which the launcher was invoked.
+
+`package-installer` builds on that validated distribution. Windows uses NSIS 3 to create a per-user setup wizard with
+selectable installation directory, Start Menu shortcuts, an optional desktop shortcut, launch-on-finish, upgrade
+registration, and a guarded uninstaller. Install NSIS with `winget install NSIS.NSIS`. macOS creates a self-contained
+Hub `.app` in a drag-to-Applications `.dmg` using the system `hdiutil`, `sips`, and `iconutil` tools. Linux creates a
+desktop-integrated `.deb` using `dpkg-deb`; the `.tar.gz` from `package-editor` remains the distribution for other Linux
+families. Installers and SHA-256 files are written under `Artifacts/` and must be produced on their target OS.
 
 ## Architecture workflows
 
@@ -588,10 +601,14 @@ and `Logs/Client.log`.
 
 Logs default to `Logs` relative to the process working directory. IDE debug directories and scripts use the repository root. Initialization is idempotent only for identical configuration; conflicting configuration throws. `LoggerHandle` is a copyable value backed by `Ref`; each call takes a short operation lock. Shutdown may wait for an active write, but never for a handle's lifetime, and old handles safely become inert. Disabled macro levels evaluate neither logger acquisition nor message arguments.
 
-Editor Console entries are mirrored to the Client terminal/file sinks. Asset import and runtime-load failures are also
-written to the Core terminal/file sinks with stable asset ID, importer/type, source path, line/column when available,
-and the original diagnostic. Selecting a failed shader shows the same compiler diagnostics in Inspector; successful
-hot-reload data remains active until a corrected import completes.
+The editor drains a bounded, structured feed of native Core and Client records into its Console panel, including early
+startup, worker-thread, and Coral managed-host messages. Editor-authored Console entries still flow through the Client
+logger and rotating
+file sink. Windows Dist Hub/editor executables use the GUI subsystem and disable the terminal sink, so packaged launches
+do not open a second console window; `Logs/Core.log` and `Logs/Client.log` remain available. Asset import and runtime-load
+failures include stable asset ID, importer/type, source path, line/column when available, and the original diagnostic.
+Selecting a failed shader shows the same compiler diagnostics in Inspector; successful hot-reload data remains active
+until a corrected import completes.
 
 ## References
 

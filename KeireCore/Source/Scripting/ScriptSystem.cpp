@@ -12,6 +12,7 @@
 #include "Keire/Vfx/VfxSystem.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireInternal/Scripting/CoralLog.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #if defined(_MSC_VER)
@@ -20,7 +21,6 @@
 #endif
 #include <Coral/Assembly.hpp>
 #include <Coral/Attribute.hpp>
-#include <Coral/HostInstance.hpp>
 #include <Coral/ManagedObject.hpp>
 #if defined(_MSC_VER)
 #pragma warning(pop)
@@ -1310,8 +1310,7 @@ namespace Keire
             const auto directory = std::filesystem::absolute(Specification.RuntimeHostDirectory).lexically_normal();
             if (!std::filesystem::is_directory(directory))
                 throw std::invalid_argument("The managed runtime host directory does not exist.");
-            Coral::HostSettings settings;
-            settings.CoralDirectory = PathText(directory);
+            auto settings = Detail::CreateCoralHostSettings(PathText(directory));
             if (!Specification.RuntimeRootDirectory.empty())
             {
                 const auto runtimeRoot =

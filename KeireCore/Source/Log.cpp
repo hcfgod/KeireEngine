@@ -1,11 +1,14 @@
 #include "Keire/Log.h"
 
+#include "KeireInternal/LogInternal.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cctype>
 #include <charconv>
 #include <cstdio>
+#include <deque>
 #include <filesystem>
 #include <iomanip>
 #include <limits>
@@ -355,6 +358,7 @@ namespace Keire
                 m_ClientLogger = std::move(clientLogger);
                 m_ThreadPool = std::move(threadPool);
                 m_Open.store(true, std::memory_order_release);
+                Retain(LogChannel::Core, LogLevel::Info, "Core logger initialized");
             }
 
             ~LogState() override { Close(); }
@@ -428,9 +432,29 @@ namespace Keire
                 {
                     return;
                 }
+                const auto spdlogLevel = ToSpdlogLevel(level);
+                if (!logger->should_log(spdlogLevel))
+                {
+                    return;
+                }
                 const spdlog::source_loc source{location.file_name(), static_cast<int>(location.line()),
                                                 location.function_name()};
-                logger->log(source, ToSpdlogLevel(level), spdlog::string_view_t(message.data(), message.size()));
+                logger->log(source, spdlogLevel, spdlog::string_view_t(message.data(), message.size()));
+                Retain(channel, level, message);
+            }
+
+            [[nodiscard]] std::vector<RetainedLogRecord> ReadRecordsSince(const std::uint64_t sequence) const
+            {
+                std::shared_lock operationLock(m_OperationMutex);
+                if (!m_Open.load(std::memory_order_relaxed))
+                {
+                    return {};
+                }
+                std::lock_guard recordLock(m_RecordMutex);
+                const auto first = std::upper_bound(m_Records.begin(), m_Records.end(), sequence,
+                                                    [](const std::uint64_t value, const RetainedLogRecord& record)
+                                                    { return value < record.Sequence; });
+                return {first, m_Records.end()};
             }
 
             void Close() noexcept
@@ -462,6 +486,23 @@ namespace Keire
             }
 
           private:
+            void Retain(const LogChannel channel, const LogLevel level, const std::string_view message) const noexcept
+            {
+                try
+                {
+                    constexpr std::size_t maximumRetainedRecords = 2048;
+                    std::lock_guard lock(m_RecordMutex);
+                    m_Records.push_back({m_NextRecordSequence++, channel, level, std::string(message)});
+                    while (m_Records.size() > maximumRetainedRecords)
+                    {
+                        m_Records.pop_front();
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+
             const std::shared_ptr<spdlog::logger>& SelectLogger(const LogChannel channel) const noexcept
             {
                 return channel == LogChannel::Core ? m_CoreLogger : m_ClientLogger;
@@ -473,6 +514,9 @@ namespace Keire
             std::shared_ptr<spdlog::logger> m_CoreLogger;
             std::shared_ptr<spdlog::logger> m_ClientLogger;
             std::shared_ptr<spdlog::details::thread_pool> m_ThreadPool;
+            mutable std::mutex m_RecordMutex;
+            mutable std::deque<RetainedLogRecord> m_Records;
+            mutable std::uint64_t m_NextRecordSequence = 1;
         };
     } // namespace Detail
 
@@ -581,4 +625,10 @@ namespace Keire
     LoggerHandle Log::GetCoreLogger() { return LoggerHandle(GetOrCreateState(), Detail::LogChannel::Core); }
 
     LoggerHandle Log::GetClientLogger() { return LoggerHandle(GetOrCreateState(), Detail::LogChannel::Client); }
+
+    std::vector<Detail::RetainedLogRecord> Detail::LogInternalAccess::ReadRecordsSince(const std::uint64_t sequence)
+    {
+        const auto state = GetCurrentState();
+        return state ? state->ReadRecordsSince(sequence) : std::vector<RetainedLogRecord>{};
+    }
 } // namespace Keire

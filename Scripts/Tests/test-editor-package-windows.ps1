@@ -7,13 +7,26 @@ function Assert-Throws([scriptblock]$Action, [string]$Message) {
     throw "$Message did not throw."
 }
 
+function Write-TestPeExecutable([string]$Path, [uint16]$Subsystem) {
+    [byte[]]$bytes = [byte[]]::new(256)
+    $bytes[0] = 0x4D
+    $bytes[1] = 0x5A
+    [BitConverter]::GetBytes([int]128).CopyTo($bytes, 0x3C)
+    $bytes[128] = 0x50
+    $bytes[129] = 0x45
+    $bytes[152] = 0x0B
+    $bytes[153] = 0x02
+    [BitConverter]::GetBytes($Subsystem).CopyTo($bytes, 220)
+    [IO.File]::WriteAllBytes($Path, $bytes)
+}
+
 $launcher = Get-Content (Join-Path $PSScriptRoot "..\project.ps1") -Raw
 if (-not ($launcher.Contains('"package-editor"') -and $launcher.Contains('$Configuration = "Dist"'))) {
     throw "The Windows launcher does not expose the Dist editor package command."
 }
 $packager = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 foreach ($contract in @("-Configuration Dist", "-StageOnly", "Build\Dependencies\dotnet-sdk",
-        "Assert-WindowsEditorPackageStage", "editor-package.json")) {
+        "Build\Distributions", "Assert-WindowsEditorPackageStage", "editor-package.json")) {
     if (-not $packager.Contains($contract)) { throw "The Windows editor packager is missing '$contract'." }
 }
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
@@ -32,6 +45,8 @@ try {
     foreach ($fileName in @("avcodec-62.dll", "avformat-62.dll", "avutil-60.dll", "swresample-6.dll")) {
         New-Item -ItemType File -Force (Join-Path $stage "bin\$fileName") | Out-Null
     }
+    Write-TestPeExecutable (Join-Path $stage "bin\Client.exe") 2
+    Write-TestPeExecutable (Join-Path $stage "bin\Hub.exe") 2
     $dotnetSdkBuild = Join-Path $stage "bin\Managed\Dotnet\sdk\10.0.100\Sdks\Fixture\build"
     New-Item -ItemType Directory -Force $dotnetSdkBuild | Out-Null
     New-Item -ItemType File -Force (Join-Path $dotnetSdkBuild "Fixture.targets") | Out-Null
@@ -39,6 +54,11 @@ try {
     Assert-WindowsEditorPackageStage $stage Client Hub Core Core
     Compress-WindowsArchive (Join-Path $stage "*") $archive
     Assert-WindowsPackageArchiveGeneratedDataFree $archive
+
+    Write-TestPeExecutable (Join-Path $stage "bin\Client.exe") 3
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Console-subsystem editor executable rejection"
+    Write-TestPeExecutable (Join-Path $stage "bin\Client.exe") 2
 
     Remove-Item (Join-Path $stage "bin\Managed\Dotnet\dotnet.exe")
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `

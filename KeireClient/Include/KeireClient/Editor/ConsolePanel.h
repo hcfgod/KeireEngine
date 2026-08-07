@@ -4,6 +4,7 @@
 #include "Keire/Ui.h"
 #include "Keire/UiWorkspace.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -23,8 +24,12 @@ namespace KeireEditor
         void Attach(Keire::UiWorkspace& workspace);
         void Add(std::string category, std::string message, Keire::UiColor color, std::uint64_t frame,
                  Keire::LogLevel level = Keire::LogLevel::Info);
+        void LogAndCapture(std::string category, std::string message, Keire::UiColor color, std::uint64_t frame,
+                           const Keire::UiThemeDefinition& theme, Keire::LogLevel level) noexcept;
+        void CaptureEngineLogs(std::uint64_t frame, const Keire::UiThemeDefinition& theme) noexcept;
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
+        [[nodiscard]] std::size_t MessageCount() const noexcept { return m_Messages.size(); }
 
       private:
         struct Message
@@ -42,6 +47,7 @@ namespace KeireEditor
         std::deque<Message> m_Messages;
         std::vector<Message> m_PausedSnapshot;
         std::string m_Search;
+        std::uint64_t m_LogSequence = 0;
         std::uint64_t m_NextSerial = 1;
         std::uint64_t m_SelectedSerial = 0;
         bool m_Paused = false;

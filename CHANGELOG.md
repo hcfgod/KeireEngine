@@ -5,6 +5,17 @@ version tags.
 
 ## Unreleased
 
+- Added a cross-platform `package-installer` workflow. Windows now produces an NSIS setup wizard with selectable
+  destination, optional desktop and Start Menu shortcuts, launch-on-finish, upgrade registration, and guarded uninstall;
+  macOS produces a self-contained drag-to-Applications DMG with optional signing/notarization; and Linux produces a
+  desktop-integrated Debian package. All installer artifacts receive SHA-256 files.
+- Windows Dist editor packages no longer open companion terminal windows. The Hub and editor use the GUI subsystem,
+  disable their terminal log sinks, and retain file logging, while the editor Console now receives bounded structured
+  Core and Client records from startup and worker threads, Coral managed-host diagnostics, and editor-authored messages.
+- Editor packaging now leaves its validated, ready-to-run distribution under `Build/Distributions/` while retaining
+  the compressed archive and checksum under `Artifacts/` for publication.
+- Fixed Windows editor packaging failing three material-graph tests when the project launcher was started outside the
+  repository root. Editor and GPU test processes now use the same explicit repository working directory as core tests.
 - Fixed clean Visual Studio builds producing a `KeireHub.exe` that could not start because `nethost.dll` was absent.
   Every generated Windows executable now stages its load-time .NET host dependency after linking, while direct editor
   builds and repository launchers share one complete managed-host staging implementation.

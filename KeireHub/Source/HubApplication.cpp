@@ -1449,6 +1449,9 @@ namespace Keire
         }
         ApplicationSpecification specification;
         specification.Modules.Modules = KeireProjectModules::CreateSourceModules();
+#if defined(_WIN32) && defined(KEIRE_DISTRIBUTION)
+        specification.Logging.EnableConsole = false;
+#endif
         specification.MainWindow.Title = "Kéire Project Hub";
         specification.MainWindow.Width = 1120;
         specification.MainWindow.Height = 720;

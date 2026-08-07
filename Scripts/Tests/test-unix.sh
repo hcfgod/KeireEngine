@@ -29,6 +29,7 @@ load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
 bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
+bash "$ROOT/Scripts/Tests/test-installer-unix.sh"
 assert_true test -n "$PROJECT_IDENTIFIER"
 managed_fixture="$(mktemp -d)"
 trap 'rm -rf "$managed_fixture"' EXIT
@@ -409,6 +410,7 @@ assert_true grep -q -- '-Configuration Dist' "$ROOT/Scripts/Windows/package-edit
 assert_true grep -q -- '--configuration Dist' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q -- '--stage-only' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'Build/Dependencies/dotnet-sdk' "$ROOT/Scripts/Unix/package-editor.sh"
+assert_true grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"
 assert_true grep -q '"${_assimp_sdk_library}" "${_assimp_zlib_sdk_library}"' "$ROOT/Config/PackageConfig.cmake.in"

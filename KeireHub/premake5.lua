@@ -36,4 +36,8 @@ project(ProjectConfig.HUB_TARGET)
     filter "system:windows"
         linkoptions { "/STACK:8388608" }
 
+    filter { "system:windows", "configurations:Dist" }
+        kind "WindowedApp"
+        entrypoint "mainCRTStartup"
+
     filter {}
