@@ -74,8 +74,17 @@ namespace KeireHub
             if (auto card = ui.BeginChild("TaskActivityCard", {0.0F, height}, true); card)
             {
                 ui.TextColored(task.Active ? tokens.Accent : tokens.PrimaryText, task.Title);
+                const float progress = std::clamp(task.Progress, 0.0F, 1.0F);
+                const auto progressRow = ui.CursorPosition();
+                const float progressRowWidth = ui.ContentAvailable().Width;
                 ui.TextColored(tokens.SecondaryText, task.Phase.empty() ? "Queued" : task.Phase);
-                ui.ProgressBar(std::clamp(task.Progress, 0.0F, 1.0F), {0.0F, 8.0F});
+                const auto percentage = std::to_string(static_cast<unsigned>(std::round(progress * 100.0F))) + '%';
+                const float percentageWidth = ui.MeasureText(percentage).Width;
+                ui.SameLine();
+                ui.SetCursorPosition(
+                    {progressRow.X + std::max(progressRowWidth - percentageWidth, 0.0F), progressRow.Y});
+                ui.TextColored(tokens.PrimaryText, percentage);
+                ui.ProgressBar(progress, {0.0F, 8.0F}, " ");
                 std::string details;
                 if (task.TotalBytes != 0)
                 {

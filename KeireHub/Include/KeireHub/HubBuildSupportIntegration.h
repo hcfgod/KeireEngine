@@ -31,7 +31,8 @@ namespace KeireHub
         [[nodiscard]] bool OwnsTask(std::string_view taskId) const noexcept;
         [[nodiscard]] HubStatus ExecuteTaskCommand(const HubUiCommand& command);
         void Poll();
-        void Draw(Keire::UiFrame& ui, Keire::WindowSystem& windows, Keire::WindowId window, bool offlineMode = false);
+        void Draw(Keire::UiFrame& ui, Keire::WindowSystem& windows, Keire::WindowId window,
+                  const HubDesignTokens& tokens, bool offlineMode = false);
         void Stop() noexcept;
 
       private:

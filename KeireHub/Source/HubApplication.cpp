@@ -674,7 +674,7 @@ namespace
                     }
                 }
                 if (m_BuildSupport)
-                    m_BuildSupport->Draw(ui, *Owner().Windows(), Owner().MainWindow()->Id(),
+                    m_BuildSupport->Draw(ui, *Owner().Windows(), Owner().MainWindow()->Id(), tokens,
                                          m_ProductSnapshot.Settings.OfflineMode);
                 m_ProductUi.DrawFirstRun(ui, m_ProductSnapshot, command);
                 ExecuteProductCommand(command);

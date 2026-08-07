@@ -730,8 +730,9 @@ namespace Keire::Detail
                     const auto bytes = InstalledBytes(manifest);
                     result.push_back({.Manifest = std::move(manifest), .ArchiveSize = bytes});
                 }
-                catch (const std::exception&)
+                catch (const std::exception& exception)
                 {
+                    KEIRE_CORE_ERROR("Installed Build Support entry could not be inspected: {}", exception.what());
                 }
             }
         }

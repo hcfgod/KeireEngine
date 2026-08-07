@@ -19,6 +19,11 @@ version tags.
 
 ## Unreleased
 
+- Restyled Build Support management and removal as full Hub design-system modals with editor/component cards, semantic
+  status colors, consistent spacing, and accessible actions. Task percentages now render beside their phase instead of
+  clipping inside thin progress bars. Asset Tool host diagnostics expose their resolved Build Support root, and invalid
+  installed entries are logged instead of disappearing silently; editor packages rebuilt from the UTF-8 directory fix
+  now resolve the same canonical `Kéire` module inventory as the Hub.
 - Fixed Windows Hub-managed editor installs failing before the worker status journal was created when a preference or
   install path contained `Kéire`. SDL UTF-8 directories now cross the native filesystem boundary losslessly, the worker
   consumes wide command-line paths, and existing `KÃ©ire` preference/cache/task roots migrate without discarding their

@@ -3,6 +3,7 @@
 #include "Keire/Core.h"
 
 #include "KeireHub/HubBuildSupportInventoryWorkflow.h"
+#include "KeireHub/HubModalUi.h"
 
 #include "KeireHubRuntime/BuildSupportOperationStore.h"
 #include "KeireHubRuntime/EditorInstallationManager.h"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <future>
 #include <optional>
@@ -371,21 +373,40 @@ namespace KeireHub
         }
 
         void Draw(Keire::UiFrame& ui, Keire::WindowSystem& windows, const Keire::WindowId window,
-                  const bool offlineMode)
+                  const HubDesignTokens& tokens, const bool offlineMode)
         {
             if (std::exchange(m_RequestOpen, false))
                 ui.OpenPopup("Manage Build Support");
-            if (auto modal = ui.BeginPopupModal("Manage Build Support"); modal)
             {
-                DrawPanel(ui, windows, window, offlineMode);
-                if (ui.Button("Close##BuildSupport", {76.0F, 32.0F}))
-                    ui.CloseCurrentPopup();
+                PrepareHubModal(ui, {760.0F, 600.0F});
+                HubModalStyleScope modalStyle(ui, tokens);
+                if (auto modal = ui.BeginPopupModal("Manage Build Support", nullptr, HubModalWindowOptions(), false);
+                    modal)
+                {
+                    const auto subtitle =
+                        m_Selection ? "Install, verify, repair, or remove platform modules for Kéire Editor " +
+                                          m_Selection->Editor.EngineVersion + '.'
+                                    : "Select a healthy editor installation before managing platform modules.";
+                    DrawHubModalHeader(ui, tokens, "Manage Build Support", subtitle, "EDITOR COMPONENTS");
+                    DrawPanel(ui, windows, window, tokens, offlineMode);
+                    ui.Spacing();
+                    ui.Separator();
+                    ui.Spacing();
+                    if (HubSecondaryButton(ui, tokens, "Close##BuildSupport", {96.0F, 36.0F}))
+                        ui.CloseCurrentPopup();
+                }
             }
             if (std::exchange(m_RequestRemoveConfirmation, false))
                 ui.OpenPopup("Remove Build Support?");
-            if (auto confirmation = ui.BeginPopupModal("Remove Build Support?"); confirmation)
             {
-                DrawRemovalConfirmation(ui);
+                PrepareHubModal(ui, {580.0F, 330.0F});
+                HubModalStyleScope confirmationStyle(ui, tokens);
+                if (auto confirmation =
+                        ui.BeginPopupModal("Remove Build Support?", nullptr, HubModalWindowOptions(), false);
+                    confirmation)
+                {
+                    DrawRemovalConfirmation(ui, tokens);
+                }
             }
         }
 
@@ -1161,31 +1182,39 @@ namespace KeireHub
         }
 
         void DrawPanel(Keire::UiFrame& ui, Keire::WindowSystem& windows, const Keire::WindowId window,
-                       const bool offlineMode)
+                       const HubDesignTokens& tokens, const bool offlineMode)
         {
             const bool inventoryLoading = m_InventoryWorkflow.Snapshot()->IsLoading();
             const auto active = ActiveOperation(m_OperationStore);
             const bool mutationBlocked =
                 !m_OperationStoreAvailable || active.has_value() || static_cast<bool>(m_FileDialog) || inventoryLoading;
-            ui.TextColored({0.95F, 0.97F, 1.0F, 1.0F}, "Build Support components");
             if (!m_Selection)
             {
-                ui.TextColoredWrapped({0.96F, 0.50F, 0.25F, 1.0F}, m_Message);
-                ui.TextColoredWrapped({0.61F, 0.65F, 0.72F, 1.0F},
+                ui.TextColoredWrapped(tokens.Warning, m_Message);
+                ui.TextColoredWrapped(tokens.SecondaryText,
                                       "Select Manage Components on a healthy editor with a typed Asset Tool.");
                 return;
             }
-            ui.TextColored({0.82F, 0.85F, 0.91F, 1.0F}, "Kéire Editor " + m_Selection->Editor.EngineVersion + "  •  " +
-                                                            m_Selection->Editor.InstallationId);
-            ui.TextColoredWrapped({0.53F, 0.58F, 0.68F, 1.0F},
-                                  "All actions run through this editor's typed Asset Tool entrypoint.");
+
+            {
+                [[maybe_unused]] const auto background =
+                    ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
+                if (auto summary = ui.BeginChild("BuildSupportEditorSummary", {0.0F, 86.0F}, true); summary)
+                {
+                    ui.TextColored(tokens.PrimaryText, "Kéire Editor " + m_Selection->Editor.EngineVersion);
+                    ui.TextColoredWrapped(tokens.SecondaryText, m_Selection->Editor.InstallationId);
+                    ui.TextColoredWrapped(tokens.MutedText,
+                                          "Verified actions run through this editor's typed Asset Tool.");
+                }
+            }
+
             if (m_Selection->Filter.Platform && m_Selection->Filter.Architecture)
             {
-                ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "Target filter: " + *m_Selection->Filter.Platform + " / " +
-                                                                *m_Selection->Filter.Architecture);
+                ui.TextColored(tokens.Warning, "Target filter  •  " + *m_Selection->Filter.Platform + " / " +
+                                                   *m_Selection->Filter.Architecture);
                 if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
                 {
-                    if (ui.Button("Clear target filter", {126.0F, 28.0F}))
+                    if (HubSecondaryButton(ui, tokens, "Clear filter", {112.0F, 32.0F}))
                     {
                         auto selected = SelectBuildSupportEditor(m_Editors, m_Selection->Editor.InstallationId);
                         if (selected)
@@ -1197,95 +1226,117 @@ namespace KeireHub
                 }
             }
             if (offlineMode)
-                ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F},
-                               "Offline mode: local .keireplayersupport Build Support imports remain available.");
+            {
+                ui.TextColoredWrapped(
+                    tokens.Warning, "Offline mode: local .keireplayersupport Build Support imports remain available.");
+            }
             if (inventoryLoading)
-                ui.TextColored({0.61F, 0.65F, 0.72F, 1.0F}, "Refreshing installed component health...");
+                ui.TextColored(tokens.MutedText, "Refreshing installed component health...");
+
+            ui.Spacing();
             if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
             {
-                if (ui.Button("Import Build Support...", {176.0F, 34.0F}))
+                if (HubPrimaryButton(ui, tokens, "Import package...", {154.0F, 36.0F}))
                     BrowseForPackage(windows, window);
             }
             ui.SameLine();
             if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
             {
-                if (ui.Button("Refresh Build Support", {154.0F, 34.0F}))
+                if (HubSecondaryButton(ui, tokens, "Refresh", {112.0F, 36.0F}))
                     (void)Refresh();
             }
+
             if (active)
             {
                 ui.Spacing();
-                ui.ProgressBar(active->Progress, {0.0F, 18.0F}, active->Message);
+                ui.TextColoredWrapped(tokens.SecondaryText, active->Message);
+                const auto percentage = std::to_string(static_cast<unsigned>(
+                                            std::round(std::clamp(active->Progress, 0.0F, 1.0F) * 100.0F))) +
+                                        '%';
+                ui.TextColored(tokens.PrimaryText, percentage);
+                ui.ProgressBar(active->Progress, {0.0F, 8.0F}, " ");
                 if (active->Kind != BuildSupportOperationKind::Remove)
                 {
                     const bool cancelling = active->State == BuildSupportOperationState::Cancelling;
                     if (auto disabled = ui.BeginDisabled(cancelling); disabled)
-                        if (ui.Button(cancelling ? "Cancelling..." : "Cancel", {102.0F, 28.0F}))
+                    {
+                        if (HubSecondaryButton(ui, tokens, cancelling ? "Cancelling..." : "Cancel", {112.0F, 32.0F}))
                             (void)CancelOperation(*active);
+                    }
                 }
             }
             if (!m_Message.empty())
             {
                 ui.Spacing();
-                ui.TextColoredWrapped(m_Error ? Keire::UiColor{0.96F, 0.32F, 0.36F, 1.0F}
-                                              : Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F},
-                                      m_Message);
+                ui.TextColoredWrapped(m_Error ? tokens.Danger : tokens.Success, m_Message);
             }
+
+            ui.Spacing();
             ui.Separator();
+            ui.Spacing();
+            ui.TextColored(tokens.PrimaryText, "Installed components");
             if (m_Filtered.empty())
             {
-                ui.TextColoredWrapped({0.61F, 0.65F, 0.72F, 1.0F},
+                ui.TextColoredWrapped(tokens.SecondaryText,
                                       "No installed Build Support matches this editor version and target filter.");
                 return;
             }
             for (const auto& component : m_Filtered)
             {
                 auto id = ui.PushId(component.Id);
-                ui.Text(component.Id);
-                ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F}, component.Platform + " / " + component.Architecture +
-                                                                "  •  " + HumanBytes(component.ArchiveSizeBytes));
-                ui.TextColored(component.Healthy ? Keire::UiColor{0.27F, 0.78F, 0.50F, 1.0F}
-                                                 : Keire::UiColor{0.96F, 0.50F, 0.25F, 1.0F},
-                               component.Healthy ? "Installed and verified"
-                                                 : "Repair required: " + component.Diagnostic);
-                if (!component.Healthy)
+                [[maybe_unused]] const auto background =
+                    ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
+                if (auto card =
+                        ui.BeginChild("BuildSupportComponent", {0.0F, component.Healthy ? 132.0F : 168.0F}, true);
+                    card)
                 {
-                    if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
-                        if (ui.Button("Repair from Build Support package...", {236.0F, 28.0F}))
-                            BrowseForPackage(windows, window, component.Id);
-                    ui.SameLine();
-                }
-                if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
-                {
-                    if (ui.Button("Remove Build Support...", {176.0F, 28.0F}))
+                    ui.TextColored(tokens.PrimaryText, component.Id);
+                    ui.TextColored(tokens.SecondaryText, component.Platform + " / " + component.Architecture + "  •  " +
+                                                             HumanBytes(component.ArchiveSizeBytes));
+                    ui.TextColoredWrapped(component.Healthy ? tokens.Success : tokens.Warning,
+                                          component.Healthy ? "Installed and verified"
+                                                            : "Repair required: " + component.Diagnostic);
+                    if (!component.Healthy)
                     {
-                        m_PendingRemoval = component;
-                        m_RequestRemoveConfirmation = true;
+                        if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
+                        {
+                            if (HubPrimaryButton(ui, tokens, "Repair from package...", {176.0F, 32.0F}))
+                                BrowseForPackage(windows, window, component.Id);
+                        }
+                        ui.SameLine();
+                    }
+                    if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
+                    {
+                        if (HubSecondaryButton(ui, tokens, "Remove", {96.0F, 32.0F}))
+                        {
+                            m_PendingRemoval = component;
+                            m_RequestRemoveConfirmation = true;
+                        }
                     }
                 }
-                ui.Separator();
+                ui.Spacing();
             }
         }
 
-        void DrawRemovalConfirmation(Keire::UiFrame& ui)
+        void DrawRemovalConfirmation(Keire::UiFrame& ui, const HubDesignTokens& tokens)
         {
             if (!m_PendingRemoval || !m_Selection)
             {
-                ui.Text("The Build Support selection is no longer available.");
-                if (ui.Button("Close"))
+                DrawHubModalHeader(ui, tokens, "Component unavailable",
+                                   "The Build Support selection is no longer available.", "EDITOR COMPONENTS");
+                if (HubSecondaryButton(ui, tokens, "Close", {96.0F, 36.0F}))
                     ui.CloseCurrentPopup();
                 return;
             }
-            ui.TextColored({0.95F, 0.97F, 1.0F, 1.0F}, "Remove Build Support " + m_PendingRemoval->Id + "?");
-            ui.TextColoredWrapped({0.61F, 0.65F, 0.72F, 1.0F},
-                                  "The selected editor Asset Tool will remove this " + m_PendingRemoval->Platform +
-                                      " / " + m_PendingRemoval->Architecture + " component for editor version " +
-                                      m_Selection->Editor.EngineVersion +
-                                      ". Projects and editor files are not removed.");
+            DrawHubModalHeader(ui, tokens, "Remove " + m_PendingRemoval->Id + '?',
+                               "This removes the " + m_PendingRemoval->Platform + " / " +
+                                   m_PendingRemoval->Architecture + " component from Kéire Editor " +
+                                   m_Selection->Editor.EngineVersion + ". Projects and editor files are not removed.",
+                               "CONFIRM COMPONENT REMOVAL");
             const bool removalBlocked = !m_OperationStoreAvailable || ActiveOperation(m_OperationStore).has_value();
             if (auto disabled = ui.BeginDisabled(removalBlocked); disabled)
             {
-                if (ui.Button("Remove Build Support", {166.0F, 32.0F}))
+                if (HubDangerButton(ui, tokens, "Remove component", {164.0F, 36.0F}))
                 {
                     const auto component = std::exchange(m_PendingRemoval, std::nullopt);
                     ui.CloseCurrentPopup();
@@ -1293,7 +1344,7 @@ namespace KeireHub
                 }
             }
             ui.SameLine();
-            if (ui.Button("Cancel", {76.0F, 32.0F}))
+            if (HubSecondaryButton(ui, tokens, "Cancel", {96.0F, 36.0F}))
             {
                 m_PendingRemoval.reset();
                 ui.CloseCurrentPopup();
@@ -1360,9 +1411,10 @@ namespace KeireHub
     }
     void HubBuildSupportIntegration::Poll() { m_Impl->Poll(); }
     void HubBuildSupportIntegration::Draw(Keire::UiFrame& ui, Keire::WindowSystem& windows,
-                                          const Keire::WindowId window, const bool offlineMode)
+                                          const Keire::WindowId window, const HubDesignTokens& tokens,
+                                          const bool offlineMode)
     {
-        m_Impl->Draw(ui, windows, window, offlineMode);
+        m_Impl->Draw(ui, windows, window, tokens, offlineMode);
     }
     void HubBuildSupportIntegration::Stop() noexcept { m_Impl->Stop(); }
 } // namespace KeireHub

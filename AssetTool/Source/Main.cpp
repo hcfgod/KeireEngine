@@ -830,6 +830,8 @@ namespace
                                             {"playerAbi", Keire::Detail::PlayerBuildAbiVersion},
                                             {"platform", Keire::ToString(Keire::HostPlayerPlatform())},
                                             {"architecture", Keire::ToString(Keire::HostPlayerArchitecture())},
+                                            {"storageRoot",
+                                             Keire::Detail::PathToUtf8(Keire::Detail::PlayerSupportStorageRoot())},
                                             {"moduleFingerprint", modules->Fingerprint()},
                                             {"sourceModules", std::move(sourceModules)}}
                                  .dump()
