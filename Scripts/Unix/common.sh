@@ -261,7 +261,7 @@ hub_package_required_paths() {
     local hub="$1" namespace="$2"
     local required=(
       "bin/$hub" "bin/${namespace}HubWorker" "Config/Branding/Keire.png"
-      "Config/SourceModules.premake.lua" "Config/Distribution.json" "docs/ProjectHub.md"
+      "Config/SourceModules.premake.lua" "Config/Distribution.json" "Config/Supabase.json" "docs/ProjectHub.md"
       "Samples/KeireSandbox/ProjectSettings/Project.keireproject" "README.md" "CHANGELOG.md" "LICENSE.txt"
       "THIRD_PARTY_NOTICES.md" "hub-package.json" "launch-hub.sh"
       "third-party/licenses/spdlog-LICENSE.txt" "third-party/licenses/fmt-LICENSE.rst"

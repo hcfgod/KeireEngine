@@ -71,6 +71,14 @@ Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
 Copy-Item -LiteralPath (Join-Path $Root "Config\SourceModules.premake.lua") `
     -Destination (Join-Path $stage "Config")
+$python = (Get-Command python -ErrorAction Stop).Source
+$supabaseConfiguration = Join-Path $Root "Config\Supabase.json"
+Invoke-CheckedWindowsCommand {
+    & $python (Join-Path $Root "Scripts\Packaging\validate-supabase-config.py") `
+        --config $supabaseConfiguration
+} "Supabase desktop configuration validation"
+Copy-Item -LiteralPath (Join-Path $Root "Config\Supabase.json") `
+    -Destination (Join-Path $stage "Config")
 foreach ($file in @("README.md", "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md")) {
     Copy-Item -LiteralPath (Join-Path $Root $file) -Destination $stage
 }
@@ -124,7 +132,6 @@ if (Test-Path -LiteralPath (Join-Path $dotnetLicenseRoot "LICENSE.txt") -PathTyp
 $launcher = "@echo off`r`nstart `"`" `"%~dp0bin\$($Project.HUB_TARGET).exe`" %*`r`n"
 [IO.File]::WriteAllText((Join-Path $stage "Launch-KeireHub.cmd"), $launcher, [Text.ASCIIEncoding]::new())
 $commit = Get-GitHeadCommit $Root "unknown"
-$python = (Get-Command python -ErrorAction Stop).Source
 $distributionWriter = Join-Path $Root "Scripts\Packaging\write-distribution-config.py"
 $distributionArguments = @(
     $distributionWriter, "--output", (Join-Path $stage "Config\Distribution.json")

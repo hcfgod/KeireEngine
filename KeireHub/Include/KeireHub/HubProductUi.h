@@ -227,6 +227,14 @@ namespace KeireHub
         std::string ProjectCreationEditorId;
         std::string ProjectCreationMessage;
         bool VerifiedCacheClearRunning = false;
+        bool AccountConfigured = false;
+        bool AccountBusy = false;
+        bool AccountSignedIn = false;
+        bool AccountPersistentSessionAvailable = false;
+        bool AccountConfirmationRequired = false;
+        std::string AccountEmail;
+        std::string AccountDisplayName;
+        std::string AccountMessage;
         HubSettings Settings;
     };
 
@@ -260,6 +268,10 @@ namespace KeireHub
         RetryTask,
         DownloadHubUpdate,
         InstallHubUpdate,
+        AccountSignIn,
+        AccountSignUp,
+        AccountSignOut,
+        SaveAccountProfile,
         MarkNotificationRead,
         ClearNotifications
     };
@@ -271,6 +283,9 @@ namespace KeireHub
         std::filesystem::path Path;
         std::string Url;
         std::string Text;
+        std::string AccountEmail;
+        std::string AccountPassword;
+        std::string AccountDisplayName;
         std::optional<HubSettings> Settings;
         std::optional<HubEditorInstallUiRequest> EditorInstall;
 
@@ -317,6 +332,7 @@ namespace KeireHub
         void DrawSettings(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command);
         void DrawTaskCenter(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command);
         void DrawNotificationCenter(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command);
+        void DrawAccountDialog(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command);
         void DrawFirstRun(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, HubUiCommand& command);
 
         [[nodiscard]] bool TaskCenterOpen() const noexcept { return m_TaskCenterOpen; }
@@ -347,10 +363,15 @@ namespace KeireHub
         std::optional<HubEditorInstallUiRequest> m_LastEditorInstallRequest;
         std::string m_EditorInstallDestination;
         std::string m_EditorComponentSearch;
+        std::string m_AccountEmail;
+        std::string m_AccountPassword;
+        std::string m_AccountDisplayName;
         std::vector<HubEditorComponentSelectionUiRecord> m_SelectedEditorComponents;
         std::vector<TemplateArtworkTexture> m_TemplateArtworkTextures;
         bool m_TaskCenterOpen = false;
         bool m_NotificationCenterOpen = false;
+        bool m_RequestAccountDialog = false;
+        bool m_AccountProfileSynchronized = false;
         bool m_RequestEditorRemoval = false;
         bool m_ConfirmManagedEditorRemoval = false;
         bool m_RequestEditorInstall = false;

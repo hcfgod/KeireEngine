@@ -26,6 +26,8 @@ namespace KeireHub::Detail
     namespace
     {
         constexpr std::size_t MaximumCatalogBytes = 32U * 1024U * 1024U;
+        constexpr std::size_t MaximumRequestBodyBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumResponseBodyBytes = 4U * 1024U * 1024U;
 
         struct HttpHandleCloser final
         {
@@ -192,12 +194,15 @@ namespace KeireHub::Detail
 
         [[nodiscard]] bool ValidOutboundHeader(const std::string_view value) noexcept
         {
-            return value.size() <= 512U && std::ranges::all_of(value, [](const unsigned char character)
-                                                               { return character >= 0x20U && character <= 0x7eU; });
+            return value.size() <= 8U * 1024U &&
+                   std::ranges::all_of(value, [](const unsigned char character)
+                                       { return character >= 0x20U && character <= 0x7eU; });
         }
 
         [[nodiscard]] HubResult<WindowsResponse> ExecuteOnce(const NativeHttpTransportOptions& options, std::string url,
-                                                             const std::vector<CatalogHttpHeader>& requestHeaders)
+                                                             const std::vector<CatalogHttpHeader>& requestHeaders,
+                                                             const std::wstring_view method,
+                                                             const std::span<const std::byte> requestBody)
         {
             auto parsed = ParseHttpUrl(url, options.AllowInsecureLoopbackDevelopment);
             if (!parsed)
@@ -231,9 +236,9 @@ namespace KeireHub::Detail
             HttpHandle connection(WinHttpConnect(session.Value().get(), wideHost.Value().c_str(), port, 0));
             if (!connection)
                 return HubResult<WindowsResponse>::Failure(HttpCatalogError(WindowsFailure("Connecting")));
-            HttpHandle request(WinHttpOpenRequest(connection.get(), L"GET", wideTarget.Value().c_str(), nullptr,
-                                                  WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
-                                                  parsed.Value().Secure ? WINHTTP_FLAG_SECURE : 0));
+            HttpHandle request(WinHttpOpenRequest(
+                connection.get(), std::wstring(method).c_str(), wideTarget.Value().c_str(), nullptr, WINHTTP_NO_REFERER,
+                WINHTTP_DEFAULT_ACCEPT_TYPES, parsed.Value().Secure ? WINHTTP_FLAG_SECURE : 0));
             if (!request)
                 return HubResult<WindowsResponse>::Failure(HttpCatalogError(WindowsFailure("Opening request")));
             DWORD disabled = WINHTTP_DISABLE_REDIRECTS;
@@ -260,8 +265,16 @@ namespace KeireHub::Detail
                         HttpCatalogError(WindowsFailure("Adding request header")));
                 }
             }
-            if (!WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0,
-                                    0) ||
+            if (requestBody.size() > std::numeric_limits<DWORD>::max())
+            {
+                return HubResult<WindowsResponse>::Failure(
+                    HttpCatalogError("The request body exceeds the Windows transport limit.", false));
+            }
+            auto* requestData =
+                requestBody.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<std::byte*>(requestBody.data());
+            const auto requestBytes = static_cast<DWORD>(requestBody.size());
+            if (!WinHttpSendRequest(request.get(), WINHTTP_NO_ADDITIONAL_HEADERS, 0, requestData, requestBytes,
+                                    requestBytes, 0) ||
                 !WinHttpReceiveResponse(request.get(), nullptr))
             {
                 return HubResult<WindowsResponse>::Failure(HttpCatalogError(WindowsFailure("Sending request")));
@@ -291,7 +304,7 @@ namespace KeireHub::Detail
         {
             for (std::uint32_t redirects = 0;; ++redirects)
             {
-                auto response = ExecuteOnce(options, url, requestHeaders);
+                auto response = ExecuteOnce(options, url, requestHeaders, L"GET", {});
                 if (!response || !IsHttpRedirectStatus(response.Value().StatusCode))
                     return response;
                 if (redirects >= options.MaximumRedirects)
@@ -408,6 +421,46 @@ namespace KeireHub::Detail
                                                         .EffectiveUrl = std::move(response.Value().EffectiveUrl),
                                                         .Headers = std::move(response.Value().Headers),
                                                         .Body = std::move(body)});
+    }
+
+    HubResult<NativeHttpResponse> SendRequestNative(const NativeHttpTransportOptions& options,
+                                                    const NativeHttpRequest& request)
+    {
+        if (request.Url.empty() || request.Body.size() > MaximumRequestBodyBytes ||
+            request.MaximumResponseBytes == 0U || request.MaximumResponseBytes > MaximumResponseBodyBytes ||
+            request.Headers.size() > 32U)
+        {
+            return HubResult<NativeHttpResponse>::Failure(
+                HttpCatalogError("The HTTP request violates the transport limits.", false));
+        }
+        if (auto parsed = ParseHttpUrl(request.Url, options.AllowInsecureLoopbackDevelopment); !parsed)
+            return HubResult<NativeHttpResponse>::Failure(parsed.Error());
+        std::vector<CatalogHttpHeader> headers{{"Accept-Encoding", "identity"}};
+        headers.insert(headers.end(), request.Headers.begin(), request.Headers.end());
+        if (auto status = ValidateHttpHeaders(headers, options.MaximumHeaderBytes); !status)
+            return HubResult<NativeHttpResponse>::Failure(status.Error());
+
+        const auto method = request.Method == NativeHttpMethod::Get     ? L"GET"
+                            : request.Method == NativeHttpMethod::Post  ? L"POST"
+                            : request.Method == NativeHttpMethod::Patch ? L"PATCH"
+                                                                        : L"DELETE";
+        auto response = ExecuteOnce(options, request.Url, headers, method, request.Body);
+        if (!response)
+            return HubResult<NativeHttpResponse>::Failure(response.Error());
+        if (IsHttpRedirectStatus(response.Value().StatusCode))
+        {
+            return HubResult<NativeHttpResponse>::Failure(
+                HttpCatalogError("Authenticated HTTP requests may not redirect.", false));
+        }
+        if (auto status = ValidateIdentityHttpEncoding(response.Value().Headers); !status)
+            return HubResult<NativeHttpResponse>::Failure(status.Error());
+        auto body = ReadBoundedBody(response.Value().Request.get(), request.MaximumResponseBytes);
+        if (!body)
+            return HubResult<NativeHttpResponse>::Failure(body.Error());
+        return HubResult<NativeHttpResponse>::Success({.StatusCode = response.Value().StatusCode,
+                                                       .EffectiveUrl = std::move(response.Value().EffectiveUrl),
+                                                       .Headers = std::move(response.Value().Headers),
+                                                       .Body = std::move(body).Value()});
     }
 
     HubResult<DownloadTransportResponse> OpenDownloadNative(const NativeHttpTransportOptions& options,

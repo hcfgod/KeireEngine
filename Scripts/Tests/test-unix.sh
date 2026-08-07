@@ -30,6 +30,8 @@ if [[ $run_fast -eq 1 ]]; then
 bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-package-unix.sh"
+python3 "$ROOT/Scripts/Tests/test-prepare-distribution-snapshot.py"
+python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
 bash "$ROOT/Scripts/Tests/test-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-macos-packaging-unix.sh"

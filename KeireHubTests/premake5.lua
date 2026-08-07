@@ -10,6 +10,7 @@ project(HubTestsTarget)
     {
         "Source/**.cpp",
         "../KeireHub/Source/HubBuildSupportInventoryWorkflow.cpp",
+        "../KeireHub/Source/HubAccountWorkflow.cpp",
         "../KeireHub/Source/HubEditorDiscovery.cpp",
         "../KeireHub/Source/HubInstance.cpp",
         "../KeireHub/Source/HubEditorInstallWorkflow.cpp",

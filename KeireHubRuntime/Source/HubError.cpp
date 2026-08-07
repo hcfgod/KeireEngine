@@ -72,6 +72,16 @@ namespace KeireHub
             return "hub.project_validation_failed";
         case HubErrorCode::ProcessLaunchFailed:
             return "hub.process_launch_failed";
+        case HubErrorCode::AccountConfigurationInvalid:
+            return "hub.account_configuration_invalid";
+        case HubErrorCode::AccountTransportFailed:
+            return "hub.account_transport_failed";
+        case HubErrorCode::AccountAuthenticationFailed:
+            return "hub.account_authentication_failed";
+        case HubErrorCode::AccountSessionInvalid:
+            return "hub.account_session_invalid";
+        case HubErrorCode::AccountProfileInvalid:
+            return "hub.account_profile_invalid";
         case HubErrorCode::DistributionConfigurationInvalid:
             return "hub.distribution_configuration_invalid";
         case HubErrorCode::CatalogTransportFailed:
@@ -127,6 +137,11 @@ namespace KeireHub
                                         HubErrorCode::DestinationConflict,
                                         HubErrorCode::ProjectValidationFailed,
                                         HubErrorCode::ProcessLaunchFailed,
+                                        HubErrorCode::AccountConfigurationInvalid,
+                                        HubErrorCode::AccountTransportFailed,
+                                        HubErrorCode::AccountAuthenticationFailed,
+                                        HubErrorCode::AccountSessionInvalid,
+                                        HubErrorCode::AccountProfileInvalid,
                                         HubErrorCode::DistributionConfigurationInvalid,
                                         HubErrorCode::CatalogTransportFailed,
                                         HubErrorCode::CatalogSignatureInvalid,

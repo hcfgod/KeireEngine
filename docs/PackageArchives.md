@@ -19,6 +19,29 @@ installation requires an embedded Ed25519 signature over the exact canonical emb
 CatalogTrustStore::VerifyDetached verifies that signature with the same pinned public keys used by catalog
 verification.
 
+## Publishing an editor archive
+
+First produce the host-native schema-2 editor distribution with `package-editor`. Build
+`KeireHubPackagePublisher`, then convert that unpacked payload into a generic archive and canonical catalog manifest:
+
+```text
+KeireHubPackagePublisher create-editor \
+  --payload-root <editor-distribution> \
+  --output <editor.keirepackage> \
+  --manifest-output <editor.manifest.json> \
+  --signature-key-id <ed25519-key-id>
+```
+
+The publisher accepts Unicode paths, rehashes every file declared by `editor-package.json`, verifies size and digest,
+adds the product manifest to the inventory, and refuses existing outputs. It writes the archive transactionally and
+removes it if the final catalog-manifest publication fails. The returned archive length and SHA-256 are the online
+artifact identity.
+
+`Scripts/Packaging/prepare-distribution-snapshot.py` accepts that manifest and archive, verifies the artifact identity
+again, and creates `catalogs/<channel>/<platform>/<architecture>.json` plus `packages/<sha256>` in a new staging root.
+The catalog is then signed, verified, and immutably published with `KeireDistributionPublisher`; the private Ed25519 key
+must remain outside the repository, staging root, and online service.
+
 ## Worker integration
 
 The worker installs a verified online archive as follows:

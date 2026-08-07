@@ -19,11 +19,16 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 $project = Get-ProjectConfig
+$python = (Get-Command python -ErrorAction Stop).Source
 if ($runFast) {
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
 & (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-package-windows.ps1")
+& $python (Join-Path $PSScriptRoot "test-prepare-distribution-snapshot.py")
+if ($LASTEXITCODE -ne 0) { throw "Distribution snapshot preparation checks failed." }
+& $python (Join-Path $PSScriptRoot "test-supabase-config.py")
+if ($LASTEXITCODE -ne 0) { throw "Supabase desktop configuration checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-distribution-service-package-windows.ps1")

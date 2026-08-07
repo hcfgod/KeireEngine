@@ -202,7 +202,14 @@ namespace KeireHub
 #endif
         const float controlsX = bounds.Maximum.X - controlsWidth - 4.0F;
         const float controlsY = bounds.Minimum.Y + 1.0F;
-        ui.SetCursorScreenPosition({controlsX - 286.0F, controlsY});
+        ui.SetCursorScreenPosition({controlsX - 382.0F, controlsY});
+        const auto accountLabel = snapshot.AccountSignedIn
+                                      ? (snapshot.AccountDisplayName.empty() ? "Account" : snapshot.AccountDisplayName)
+                                      : "Sign in";
+        if (ui.Button(accountLabel + "##HubAccount", {92.0F, buttonHeight}))
+            m_RequestAccountDialog = true;
+        ui.SetTooltip(snapshot.AccountSignedIn ? snapshot.AccountEmail : "Kéire account", {.Delayed = true});
+        ui.SameLine();
         if (ui.IconButton("HubDocs", Keire::UiIcon::Documentation, false, {44.0F, buttonHeight}))
         {
             command = {.Type = HubUiCommandType::OpenUrl,

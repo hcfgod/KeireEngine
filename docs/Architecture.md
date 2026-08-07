@@ -33,6 +33,12 @@ tasks that overlap a package are not dispatched together, and mutations sharing 
 Claiming a task records its worker PID and first phase in one store commit. Restart reconciliation preserves queued and
 paused work, requeues resumable downloads, and turns interrupted mutation phases into retryable typed failures.
 
+Optional Hub identity is a separate adapter boundary. `SupabaseAccountClient` owns bounded Auth/PostgREST request and
+response contracts over the private native HTTP transport; `HubAccountWorkflow` owns asynchronous session rotation and
+publishes immutable account snapshots. Only publishable desktop configuration enters packages. Refresh-token
+persistence is delegated to a platform secure store (DPAPI on Windows, session-only fallback elsewhere), and no account
+state participates in package trust, editor ownership, task authorization, or project locking.
+
 `EditorInstallationManager` verifies schema-2 editor manifests, their canonical fingerprints, host identity, complete
 declared file inventory, and confined entrypoints outside the UI layer, then publishes immutable health snapshots.
 Managed repair and removal remain two-phase: the manager checks the exact registered root and unforgeable marker,

@@ -53,7 +53,7 @@ function LinkKeireCore()
         links { DependencyManifest.CoralNetHostLibrary }
 
     filter "system:windows"
-        links { "winhttp" }
+        links { "crypt32", "winhttp" }
 
     filter "system:linux"
         links { "curl" }

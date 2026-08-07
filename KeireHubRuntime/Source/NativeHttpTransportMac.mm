@@ -219,6 +219,8 @@ namespace KeireHub::Detail
     namespace
     {
         constexpr std::size_t MaximumCatalogBytes = 32U * 1024U * 1024U;
+        constexpr std::size_t MaximumRequestBodyBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumResponseBodyBytes = 4U * 1024U * 1024U;
 
         struct MacTransfer final
         {
@@ -248,7 +250,8 @@ namespace KeireHub::Detail
 
         [[nodiscard]] HubResult<std::shared_ptr<MacTransfer>>
         StartTransfer(const NativeHttpTransportOptions& options, const std::string& url,
-                      const std::vector<CatalogHttpHeader>& headers)
+                      const std::vector<CatalogHttpHeader>& headers, const std::string_view method = "GET",
+                      const std::span<const std::byte> requestBody = {}, const bool allowRedirects = true)
         {
             auto parsed = ParseHttpUrl(url, options.AllowInsecureLoopbackDevelopment);
             if (!parsed)
@@ -259,7 +262,7 @@ namespace KeireHub::Detail
                 state->CurrentUrl = url;
                 state->BufferLimit = options.DownloadBufferBytes;
                 state->MaximumHeaderBytes = options.MaximumHeaderBytes;
-                state->MaximumRedirects = options.MaximumRedirects;
+                state->MaximumRedirects = allowRedirects ? options.MaximumRedirects : 0U;
                 state->AllowInsecureLoopback = options.AllowInsecureLoopbackDevelopment;
                 auto transfer = std::make_shared<MacTransfer>();
                 transfer->State = state;
@@ -309,7 +312,13 @@ namespace KeireHub::Detail
                     [NSMutableURLRequest requestWithURL:nativeUrl
                                             cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                         timeoutInterval:std::chrono::duration<double>(options.IdleTimeout).count()];
-                request.HTTPMethod = @"GET";
+                NSString* methodText = String(std::string(method));
+                if (!methodText)
+                    return HubResult<std::shared_ptr<MacTransfer>>::Failure(
+                        HttpCatalogError("The HTTP method is not valid UTF-8.", false));
+                request.HTTPMethod = methodText;
+                if (!requestBody.empty())
+                    request.HTTPBody = [NSData dataWithBytes:requestBody.data() length:requestBody.size()];
                 for (const auto& header : headers)
                 {
                     NSString* name = String(header.Name);
@@ -501,6 +510,71 @@ namespace KeireHub::Detail
         }
         StopTransfer(transfer.Value(), options.IdleTimeout);
         return HubResult<CatalogHttpResponse>::Success(std::move(result));
+    }
+
+    HubResult<NativeHttpResponse> SendRequestNative(const NativeHttpTransportOptions& options,
+                                                    const NativeHttpRequest& request)
+    {
+        if (request.Url.empty() || request.Body.size() > MaximumRequestBodyBytes ||
+            request.MaximumResponseBytes == 0U || request.MaximumResponseBytes > MaximumResponseBodyBytes ||
+            request.Headers.size() > 32U)
+        {
+            return HubResult<NativeHttpResponse>::Failure(
+                HttpCatalogError("The HTTP request violates the transport limits.", false));
+        }
+        if (auto parsed = ParseHttpUrl(request.Url, options.AllowInsecureLoopbackDevelopment); !parsed)
+            return HubResult<NativeHttpResponse>::Failure(parsed.Error());
+        std::vector<CatalogHttpHeader> headers{{"Accept-Encoding", "identity"}};
+        headers.insert(headers.end(), request.Headers.begin(), request.Headers.end());
+        if (auto status = ValidateHttpHeaders(headers, options.MaximumHeaderBytes); !status)
+            return HubResult<NativeHttpResponse>::Failure(status.Error());
+        const auto method = request.Method == NativeHttpMethod::Get     ? std::string_view("GET")
+                            : request.Method == NativeHttpMethod::Post  ? std::string_view("POST")
+                            : request.Method == NativeHttpMethod::Patch ? std::string_view("PATCH")
+                                                                        : std::string_view("DELETE");
+        auto transfer = StartTransfer(options, request.Url, headers, method, request.Body, false);
+        if (!transfer)
+            return HubResult<NativeHttpResponse>::Failure(transfer.Error());
+        NativeHttpResponse result;
+        {
+            std::scoped_lock lock(transfer.Value()->State->Mutex);
+            result.StatusCode = transfer.Value()->State->StatusCode;
+            result.EffectiveUrl = transfer.Value()->State->EffectiveUrl;
+            result.Headers = transfer.Value()->State->Headers;
+        }
+        if (auto status = ValidateHttpHeaders(result.Headers, options.MaximumHeaderBytes); !status)
+        {
+            StopTransfer(transfer.Value(), options.IdleTimeout);
+            return HubResult<NativeHttpResponse>::Failure(status.Error());
+        }
+        if (auto status = ValidateIdentityHttpEncoding(result.Headers); !status)
+        {
+            StopTransfer(transfer.Value(), options.IdleTimeout);
+            return HubResult<NativeHttpResponse>::Failure(status.Error());
+        }
+        std::vector<std::byte> buffer(std::min<std::size_t>(options.DownloadBufferBytes, 64U * 1024U));
+        for (;;)
+        {
+            auto read = ReadTransfer(transfer.Value(), buffer);
+            if (!read)
+            {
+                StopTransfer(transfer.Value(), options.IdleTimeout);
+                return HubResult<NativeHttpResponse>::Failure(read.Error());
+            }
+            if (read.Value() == 0U)
+                break;
+            if (read.Value() >
+                request.MaximumResponseBytes - std::min(result.Body.size(), request.MaximumResponseBytes))
+            {
+                StopTransfer(transfer.Value(), options.IdleTimeout);
+                return HubResult<NativeHttpResponse>::Failure(
+                    HttpCatalogError("The HTTP response exceeds its size limit.", false));
+            }
+            result.Body.insert(result.Body.end(), buffer.begin(),
+                               buffer.begin() + static_cast<std::ptrdiff_t>(read.Value()));
+        }
+        StopTransfer(transfer.Value(), options.IdleTimeout);
+        return HubResult<NativeHttpResponse>::Success(std::move(result));
     }
 
     HubResult<DownloadTransportResponse> OpenDownloadNative(const NativeHttpTransportOptions& options,

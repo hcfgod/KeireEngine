@@ -157,6 +157,7 @@ include "SourceModules/premake5.lua"
 include(ProjectConfig.CLIENT_DIRECTORY .. "/premake5.lua")
 include "KeireHubRuntime/premake5.lua"
 include "KeireHubWorker/premake5.lua"
+include "KeireHubPackagePublisher/premake5.lua"
 include(ProjectConfig.HUB_DIRECTORY .. "/premake5.lua")
 include "AssetTool/premake5.lua"
 include "KeireAssetWorker/premake5.lua"

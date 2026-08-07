@@ -1035,7 +1035,6 @@ namespace Keire
         const std::string safeLabel(label);
         return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, 0.0F, 0.0F, "%.3f");
     }
-
     bool UiFrame::DragQuaternion(const std::string_view label, Quaternion& value, const float speed)
     {
         m_Impl->RequireActive("DragQuaternion");
@@ -1044,7 +1043,6 @@ namespace Keire
         const std::string safeLabel(label);
         return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, -1.0F, 1.0F, "%.4f");
     }
-
     bool UiFrame::SliderFloat(std::string_view label, float& value, const float minimum, const float maximum)
     {
         m_Impl->RequireActive("SliderFloat");
@@ -1053,7 +1051,6 @@ namespace Keire
         const std::string safeLabel(label);
         return ImGui::SliderFloat(safeLabel.c_str(), &value, minimum, maximum);
     }
-
     bool UiFrame::SliderInt(std::string_view label, int& value, const int minimum, const int maximum)
     {
         m_Impl->RequireActive("SliderInt");
@@ -1062,14 +1059,18 @@ namespace Keire
         const std::string safeLabel(label);
         return ImGui::SliderInt(safeLabel.c_str(), &value, minimum, maximum);
     }
-
     bool UiFrame::InputText(std::string_view label, std::string& value)
     {
         m_Impl->RequireActive("InputText");
         const std::string safeLabel(label);
         return ImGui::InputText(safeLabel.c_str(), &value);
     }
-
+    bool UiFrame::InputPassword(std::string_view label, std::string& value)
+    {
+        m_Impl->RequireActive("InputPassword");
+        const std::string safeLabel(label);
+        return ImGui::InputText(safeLabel.c_str(), &value, ImGuiInputTextFlags_Password);
+    }
     bool UiFrame::InputTextWithHint(const std::string_view label, const std::string_view hint, std::string& value)
     {
         m_Impl->RequireActive("InputTextWithHint");
@@ -1077,7 +1078,6 @@ namespace Keire
         const std::string safeHint(hint);
         return ImGui::InputTextWithHint(safeLabel.c_str(), safeHint.c_str(), &value);
     }
-
     bool UiFrame::Selectable(std::string_view label, const bool selected)
     {
         m_Impl->RequireActive("Selectable");

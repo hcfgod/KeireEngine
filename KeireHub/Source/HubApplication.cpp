@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include "KeireHub/HubAccountIntegration.h"
 #include "KeireHub/HubActivationWorkflow.h"
 #include "KeireHub/HubBuildSupportIntegration.h"
 #include "KeireHub/HubDiagnostics.h"
@@ -216,6 +217,9 @@ namespace
                     RequireWorkflowSuccess(
                         m_Distribution->Start(m_Executable.parent_path().parent_path() / "Config" / "Distribution.json",
                                               m_ProductSnapshot.Settings, m_Executable));
+                    RequireWorkflowSuccess(
+                        m_Account.Start(m_Executable.parent_path().parent_path() / "Config" / "Supabase.json",
+                                        preferenceRoot / "Account" / "session.dat", m_ProductSnapshot.Settings));
                     if (const auto status = KeireHub::PrepareHubStartupRuntime(
                             *m_Controller, Keire::GetBuildInfo().Version, m_ProductSnapshot.Settings.LogLevel,
                             KeireHub::HubNowUnixSeconds());
@@ -244,6 +248,7 @@ namespace
         void OnDetach() noexcept override
         {
             m_HubUpdateHandoff.Stop();
+            m_Account.Stop();
             if (m_PackageTasks)
                 m_PackageTasks->Stop();
             if (m_Distribution)
@@ -451,6 +456,8 @@ namespace
                 if (!status)
                     SetError("Distribution settings could not be applied: " + status.Error().Message);
             }
+            if (const auto status = m_Account.Tick(m_ProductSnapshot.Settings, KeireHub::HubNowUnixSeconds()); !status)
+                SetError("Account settings could not be applied: " + status.Error().Message);
             if (m_Instance)
             {
                 if (auto activation = m_Instance->PollActivation())
@@ -458,7 +465,7 @@ namespace
                                                               m_ProductSnapshot.Editors, m_Page, m_Notice,
                                                               m_NoticeError, *this);
             }
-        if (m_Smoke && ++m_Frames >= 8)
+            if (m_Smoke && ++m_Frames >= 8)
                 Owner().RequestExit();
             if (m_FolderDialog)
             {
@@ -529,6 +536,7 @@ namespace
                 KeireHub::ApplyHubFirstRunSnapshot(*m_FirstRun->Snapshot(), m_ProductSnapshot);
             if (m_Distribution)
                 KeireHub::ApplyHubDistributionSnapshot(*m_Distribution->Snapshot(), m_ProductSnapshot);
+            m_Account.ApplySnapshot(m_ProductSnapshot);
             if (m_Distribution && m_PackageTasks)
                 KeireHub::ApplyHubUpdateIntegrationSnapshot(*m_Distribution->Snapshot(), *m_PackageTasks->Snapshot(),
                                                             m_ProductSnapshot, m_HubUpdateHandoff.Snapshot()->State);
@@ -613,6 +621,7 @@ namespace
                 {
                     m_ProductUi.DrawNotificationCenter(ui, m_ProductSnapshot, command);
                     m_ProductUi.DrawTaskCenter(ui, m_ProductSnapshot, command);
+                    m_ProductUi.DrawAccountDialog(ui, m_ProductSnapshot, command);
                     DrawNotice(ui, tokens);
                     if (m_Page == KeireHub::HubPage::Home)
                         m_ProductUi.DrawHome(ui, m_Page, m_ProductSnapshot, command);
@@ -962,6 +971,7 @@ namespace
                     m_CreateLocation = Keire::Detail::PathToUtf8(command.Settings->DefaultProjectLocation);
                     if (m_Distribution)
                         m_DistributionRefreshPending = true;
+                    m_Account.RequestRefresh();
                     m_PackageTaskRefreshPending = packageTaskSettingsChanged;
                     m_ProductUi.ResetSettingsEditor();
                     Owner().SetUiTheme(KeireHub::ResolveHubUiTheme(command.Settings->Appearance));
@@ -1000,6 +1010,8 @@ namespace
                         m_FirstRun->Cancel();
                     m_SettingsDiscoveryPending = false;
                     m_PackageTaskRefreshPending = true;
+                    m_DistributionRefreshPending = true;
+                    m_Account.RequestRefresh();
                     m_ProductUi.ResetSettingsEditor();
                     Owner().SetUiTheme(KeireHub::ResolveHubUiTheme(m_ProductSnapshot.Settings.Appearance));
                     m_Page = KeireHub::HubPage::Home;
@@ -1034,6 +1046,12 @@ namespace
                         *m_Distribution->Snapshot(), m_ProductSnapshot.HubVersion, *m_PackageTasks->Snapshot(),
                         m_Controller->Updates(), m_HubUpdateHandoff, m_Executable, m_ProductSnapshot.Settings,
                         KeireHub::HubNowUnixSeconds()));
+                    break;
+                case KeireHub::HubUiCommandType::AccountSignIn:
+                case KeireHub::HubUiCommandType::AccountSignUp:
+                case KeireHub::HubUiCommandType::AccountSignOut:
+                case KeireHub::HubUiCommandType::SaveAccountProfile:
+                    RequireWorkflowSuccess(m_Account.Execute(command));
                     break;
                 case KeireHub::HubUiCommandType::None:
                     break;
@@ -1415,6 +1433,7 @@ namespace
         std::unique_ptr<KeireHub::HubEditorInstallWorkflow> m_EditorInstalls;
         std::unique_ptr<KeireHub::HubFirstRunWorkflow> m_FirstRun;
         std::unique_ptr<KeireHub::HubDistributionWorkflow> m_Distribution;
+        KeireHub::HubAccountIntegration m_Account;
         std::unique_ptr<KeireHub::HubPackageTaskWorkflow> m_PackageTasks;
         std::unique_ptr<KeireHub::HubTemplateWorkflow> m_Templates;
         std::unique_ptr<KeireHub::HubBuildSupportIntegration> m_BuildSupport;

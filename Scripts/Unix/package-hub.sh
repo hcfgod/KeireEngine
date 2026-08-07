@@ -76,6 +76,9 @@ copy_tracked_tree "$ROOT" docs "$stage/docs"
 copy_tracked_tree "$ROOT" Samples/KeireSandbox "$stage/Samples/KeireSandbox"
 cp "$ROOT/Config/Branding/Keire.png" "$stage/Config/Branding/"
 cp "$ROOT/Config/SourceModules.premake.lua" "$stage/Config/"
+command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required to generate package manifests.\n' >&2; exit 1; }
+python3 "$ROOT/Scripts/Packaging/validate-supabase-config.py" --config "$ROOT/Config/Supabase.json"
+cp "$ROOT/Config/Supabase.json" "$stage/Config/"
 cp "$ROOT/README.md" "$ROOT/CHANGELOG.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
 
 dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
@@ -151,7 +154,6 @@ if [[ "$PLATFORM" == Mac ]]; then
     '</plist>' > "$app_root/Info.plist"
 fi
 
-command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required to generate package manifests.\n' >&2; exit 1; }
 distribution_arguments=(
   "$ROOT/Scripts/Packaging/write-distribution-config.py"
   --output "$stage/Config/Distribution.json"

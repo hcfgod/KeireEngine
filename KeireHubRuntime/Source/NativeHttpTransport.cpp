@@ -82,6 +82,19 @@ namespace KeireHub
         }
     }
 
+    HubResult<NativeHttpResponse> NativeHttpTransport::Send(const NativeHttpRequest& request) const
+    {
+        try
+        {
+            return Detail::SendRequestNative(m_Impl->Options, request);
+        }
+        catch (...)
+        {
+            return HubResult<NativeHttpResponse>::Failure(
+                Detail::HttpCatalogError("The native HTTP request failed unexpectedly."));
+        }
+    }
+
     HubResult<DownloadTransportResponse> NativeHttpTransport::Open(const DownloadTransportRequest& request)
     {
         try

@@ -70,7 +70,7 @@ Publisher input uses the same `catalogs/`, `content/`, and `packages/` layout pl
       "keyId": "ed25519-0123456789abcdef0123456789abcdef",
       "signature": "<base64-encoded-64-byte-offline-signature>",
       "sequence": 42,
-      "expiresAt": "2026-09-01T00:00:00Z"
+      "expiresAt": "<future-UTC-expiry>"
     }
   ]
 }
@@ -80,6 +80,30 @@ Every catalog/content file needs exactly one signature entry; packages must be n
 not appear in `signatures.json`. The publisher preserves document and package bytes without normalization.
 
 ## Offline signing workflow
+
+For an editor release, first create a schema-2 host package and convert it into the generic package format. The
+signature key ID is public metadata from the trusted release-key document; the private key is not used by either of
+these steps.
+
+```powershell
+$futureUtcExpiry = (Get-Date).ToUniversalTime().AddDays(30).ToString("o")
+./Scripts/project.ps1 package-editor -Generator ninja -Toolset msc -AllowDirty
+./Scripts/project.ps1 build -Generator ninja -Configuration Release -Toolset msc `
+    -Target KeireHubPackagePublisher
+./Build/Bin/Release-windows-x86_64/KeireHubPackagePublisher/KeireHubPackagePublisher.exe create-editor `
+    --payload-root Build/Distributions/keire-editor-windows-x86_64-Dist `
+    --output C:/release/editor.keirepackage --manifest-output C:/release/editor.manifest.json `
+    --signature-key-id ed25519-0123456789abcdef0123456789abcdef
+python Scripts/Packaging/prepare-distribution-snapshot.py `
+    --package-manifest C:/release/editor.manifest.json --package C:/release/editor.keirepackage `
+    --output C:/release/prepared --key-id ed25519-0123456789abcdef0123456789abcdef `
+    --sequence 42 --expires-at $futureUtcExpiry
+```
+
+Use a future expiry appropriate to the release rather than copying the example date. The preparer refuses an existing
+output, draft manifest fields, unsafe input files, key mismatches, expired metadata, and archive size or SHA-256
+mismatches. Adding a newly prepared catalog to an existing release snapshot is an offline composition step; never edit
+already signed or published snapshot bytes.
 
 Generate a release key once on an offline machine. Keep the private PEM outside the repository, prepared snapshot, and
 distribution root. The command refuses existing outputs and writes a PKCS#8 PEM protected as owner-only on Unix or as

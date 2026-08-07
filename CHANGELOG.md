@@ -5,6 +5,15 @@ version tags.
 
 ## Unreleased
 
+- Added optional Supabase email identity and owner-scoped profiles to the Hub. The desktop client accepts only an HTTPS
+  project URL and modern publishable key, runs sign-up/sign-in/rotation/profile work off the UI thread, encrypts Windows
+  refresh tokens with DPAPI, preserves signed-in state across retryable failures with bounded refresh backoff, and keeps
+  account identity separate from signed package authorization. The profiles migration uses explicit authenticated-only
+  grants and `auth.uid() = user_id` row-level security policies.
+- Added the Unicode-safe `KeireHubPackagePublisher create-editor` tool and exact distribution-snapshot preparer. The
+  workflow rehashes schema-2 editor payloads, writes generic `.keirepackage` archives and canonical catalog manifests,
+  verifies content-addressed package bytes before offline Ed25519 signing, and has cross-platform tamper/overwrite
+  regression coverage.
 - Fixed standalone Hub startup when migrating the exact `sort=last-opened` preference written by earlier Hub builds;
   the legacy file is preserved while schema-versioned JSON settings are created atomically. A missing update-resume
   token is also treated as the normal no-pending-update state instead of producing a false recovery warning on Windows.

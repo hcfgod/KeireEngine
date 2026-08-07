@@ -25,6 +25,8 @@ namespace KeireHub::Detail
     namespace
     {
         constexpr std::size_t MaximumCatalogBytes = 32U * 1024U * 1024U;
+        constexpr std::size_t MaximumRequestBodyBytes = 1024U * 1024U;
+        constexpr std::size_t MaximumResponseBodyBytes = 4U * 1024U * 1024U;
 
         struct CurlHandleCloser final
         {
@@ -246,10 +248,10 @@ namespace KeireHub::Detail
             std::vector<std::byte> Body;
         };
 
-        [[nodiscard]] HubResult<CatalogAttempt> FetchCatalogOnce(const NativeHttpTransportOptions& options,
-                                                                 const std::string& url,
-                                                                 const std::vector<CatalogHttpHeader>& headers,
-                                                                 const std::size_t maximumBodyBytes)
+        [[nodiscard]] HubResult<CatalogAttempt>
+        FetchCatalogOnce(const NativeHttpTransportOptions& options, const std::string& url,
+                         const std::vector<CatalogHttpHeader>& headers, const std::size_t maximumBodyBytes,
+                         const std::string_view method = "GET", const std::span<const std::byte> requestBody = {})
         {
             auto parsed = ParseHttpUrl(url, options.AllowInsecureLoopbackDevelopment);
             if (!parsed)
@@ -262,6 +264,17 @@ namespace KeireHub::Detail
                 return HubResult<CatalogAttempt>::Failure(HttpCatalogError("libcurl allocation failed."));
             if (auto status = ConfigureCurl(curl.get(), options, url, parsed.Value(), requestHeaders.get()); !status)
                 return HubResult<CatalogAttempt>::Failure(status.Error());
+            if (method != "GET" &&
+                (curl_easy_setopt(curl.get(), CURLOPT_CUSTOMREQUEST, method.data()) != CURLE_OK ||
+                 curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS,
+                                  requestBody.empty() ? "" : static_cast<const void*>(requestBody.data())) !=
+                     CURLE_OK ||
+                 curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE_LARGE,
+                                  static_cast<curl_off_t>(requestBody.size())) != CURLE_OK))
+            {
+                return HubResult<CatalogAttempt>::Failure(
+                    HttpCatalogError("libcurl request body configuration failed.", false));
+            }
             CatalogContext context{.MaximumHeaderBytes = options.MaximumHeaderBytes,
                                    .MaximumBodyBytes = maximumBodyBytes};
             if (curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION, CatalogHeader) != CURLE_OK ||
@@ -697,6 +710,41 @@ namespace KeireHub::Detail
                 return HubResult<CatalogHttpResponse>::Failure(redirect.Error());
             url = std::move(redirect).Value();
         }
+    }
+
+    HubResult<NativeHttpResponse> SendRequestNative(const NativeHttpTransportOptions& options,
+                                                    const NativeHttpRequest& request)
+    {
+        if (request.Url.empty() || request.Body.size() > MaximumRequestBodyBytes ||
+            request.MaximumResponseBytes == 0U || request.MaximumResponseBytes > MaximumResponseBodyBytes ||
+            request.Headers.size() > 32U)
+        {
+            return HubResult<NativeHttpResponse>::Failure(
+                HttpCatalogError("The HTTP request violates the transport limits.", false));
+        }
+        if (auto parsed = ParseHttpUrl(request.Url, options.AllowInsecureLoopbackDevelopment); !parsed)
+            return HubResult<NativeHttpResponse>::Failure(parsed.Error());
+        std::vector<CatalogHttpHeader> headers{{"Accept-Encoding", "identity"}};
+        headers.insert(headers.end(), request.Headers.begin(), request.Headers.end());
+        if (auto status = ValidateHttpHeaders(headers, options.MaximumHeaderBytes); !status)
+            return HubResult<NativeHttpResponse>::Failure(status.Error());
+        const auto method = request.Method == NativeHttpMethod::Get     ? std::string_view("GET")
+                            : request.Method == NativeHttpMethod::Post  ? std::string_view("POST")
+                            : request.Method == NativeHttpMethod::Patch ? std::string_view("PATCH")
+                                                                        : std::string_view("DELETE");
+        auto response =
+            FetchCatalogOnce(options, request.Url, headers, request.MaximumResponseBytes, method, request.Body);
+        if (!response)
+            return HubResult<NativeHttpResponse>::Failure(response.Error());
+        if (IsHttpRedirectStatus(response.Value().StatusCode))
+        {
+            return HubResult<NativeHttpResponse>::Failure(
+                HttpCatalogError("Authenticated HTTP requests may not redirect.", false));
+        }
+        return HubResult<NativeHttpResponse>::Success({.StatusCode = response.Value().StatusCode,
+                                                       .EffectiveUrl = request.Url,
+                                                       .Headers = std::move(response.Value().Headers),
+                                                       .Body = std::move(response.Value().Body)});
     }
 
     HubResult<DownloadTransportResponse> OpenDownloadNative(const NativeHttpTransportOptions& options,

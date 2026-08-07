@@ -127,6 +127,15 @@ discovery consumers.
 Editor manifests expose only the editor and editor-specific tool entrypoints; Hub and worker entrypoints belong to
 `hub-package.json`.
 
+For Hub-managed online installs, build the `KeireHubPackagePublisher` target and run its `create-editor` command against
+the unpacked schema-2 editor distribution. It rehashes the complete payload and writes a `.keirepackage` plus canonical
+catalog manifest. `Scripts/Packaging/prepare-distribution-snapshot.py` verifies that pair and creates the immutable
+catalog/package staging layout consumed by the offline Ed25519 publisher and read-only distribution service. See
+[Generic Package Archives](docs/PackageArchives.md) and the
+[Distribution Service guide](Services/KeireDistributionService/README.md). A public Hub package must be generated with
+the deployed HTTPS service URL and its trusted release public key; without both, online discovery remains intentionally
+disabled while installed editors and cached content continue to work.
+
 `package-hub` also always uses Dist, but builds and stages only the Hub lifecycle, its private `KeireHubWorker` task
 process, runtime files, branding,
 licensed fonts, packaged documentation, sample content, the validated template catalog/payloads, and licenses. It does
@@ -136,6 +145,11 @@ archive, checksum, and schema-2 `hub-package.json` are written under `Artifacts/
 Windows, macOS, and Linux; macOS output includes a native `.app` launcher.
 Test and package launchers run repository-dependent executables from the repository root, regardless of the directory
 from which the launcher was invoked.
+
+The Hub optionally uses Supabase Auth for email accounts and the owner-scoped profile display name. Only the public
+desktop project URL and `sb_publishable_...` key are packaged; software downloads remain authorized solely by signed
+distribution catalogs and are available without signing in. Windows stores a rotated refresh token through DPAPI;
+platforms without an implemented native secure store use session-only authentication.
 
 `package-hub-installer` builds only the validated standalone Hub stage. Windows uses a Hub-only NSIS 3 template;
 macOS creates a self-contained Hub `.app` in a drag-to-Applications `.dmg`; and Linux creates a `keire-hub` `.deb`

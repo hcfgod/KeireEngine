@@ -26,8 +26,8 @@ if (-not ($launcher.Contains('"package-hub"') -and $launcher.Contains('$Configur
 }
 $packager = Get-Content (Join-Path $Windows "package-hub.ps1") -Raw
 foreach ($contract in @("Standalone Hub build", "Build\Distributions", "Assert-WindowsHubPackageStage",
-        "write-package-manifest.py", "write-distribution-config.py", "hub-package.json", "libsodium.dll",
-        "libsodium-LICENSE.txt")) {
+        "write-package-manifest.py", "write-distribution-config.py", "validate-supabase-config.py",
+        "hub-package.json", "libsodium.dll", "libsodium-LICENSE.txt")) {
     if (-not $packager.Contains($contract)) { throw "The Windows Hub packager is missing '$contract'." }
 }
 if ($packager.Contains('package-editor.ps1') -or $packager.Contains('package.ps1')) {
@@ -62,6 +62,8 @@ try {
         (Join-Path $stage "third-party\licenses\libsodium-LICENSE.txt") | Out-Null
 
     $python = (Get-Command python -ErrorAction Stop).Source
+    Copy-Item -LiteralPath (Join-Path (Get-RepositoryRoot) "Config\Supabase.json") `
+        -Destination (Join-Path $stage "Config\Supabase.json") -Force
     $distributionWriter = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\write-distribution-config.py"
     Invoke-CheckedWindowsCommand {
         & $python $distributionWriter --output (Join-Path $stage "Config\Distribution.json")
@@ -86,6 +88,7 @@ try {
         $manifest.files.path -notcontains "content/Content/en-US.json" -or
         $manifest.files.path -notcontains "content/Licenses/catalog.json" -or
         $manifest.files.path -notcontains "Config/Distribution.json" -or
+        $manifest.files.path -notcontains "Config/Supabase.json" -or
         $manifest.licenseReferences -notcontains "content/Fonts/Inter-OFL.txt" -or
         $manifest.files.Count -lt 1) {
         throw "The standalone Windows Hub schema-2 fixture is incomplete."

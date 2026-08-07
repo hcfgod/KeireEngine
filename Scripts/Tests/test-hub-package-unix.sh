@@ -15,6 +15,7 @@ grep -Fq 'validate_macos_macho_minimum "$stage" "$macos_deployment_target"' \
 grep -Fq '<key>LSMinimumSystemVersion</key>' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'write-package-manifest.py' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'write-distribution-config.py' "$ROOT/Scripts/Unix/package-hub.sh"
+grep -q 'validate-supabase-config.py' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'libsodium' "$ROOT/Scripts/Unix/package-hub.sh"
 if grep -Eq 'Scripts/Unix/package-editor\.sh|Scripts/Unix/package\.sh' "$ROOT/Scripts/Unix/package-hub.sh"; then
   printf 'The standalone Unix Hub package must not stage through the editor or SDK package.\n' >&2
@@ -41,6 +42,7 @@ printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "$stage/bin/CoreHubWorker"
 touch "$stage/bin/libsodium.so" "$stage/third-party/licenses/libsodium-LICENSE.txt"
 printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "$stage/launch-hub.sh"
 chmod +x "$stage/bin/Hub" "$stage/bin/CoreHubWorker" "$stage/launch-hub.sh"
+cp "$ROOT/Config/Supabase.json" "$stage/Config/Supabase.json"
 
 manifest_writer="$ROOT/Scripts/Packaging/write-package-manifest.py"
 python3 "$ROOT/Scripts/Packaging/write-distribution-config.py" \
@@ -68,6 +70,7 @@ assert len(manifest["packagedTemplates"]) == 3
 assert "content/Content/en-US.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Licenses/catalog.json" in {entry["path"] for entry in manifest["files"]}
 assert "Config/Distribution.json" in {entry["path"] for entry in manifest["files"]}
+assert "Config/Supabase.json" in {entry["path"] for entry in manifest["files"]}
 assert "content/Fonts/Inter-OFL.txt" in manifest["licenseReferences"]
 assert manifest["files"]
 PY

@@ -190,7 +190,7 @@ internal static class PublisherProgram
             activate      --root <directory> --snapshot <id>
             validate      --root <directory>
 
-            The source must contain catalogs/, content/, packages/, and signatures.json.
+            The source contains one or more catalog/content documents, any referenced packages, and signatures.json.
             Private key values are accepted only through a protected external file or an explicitly named
             process environment variable. The online distribution service never receives a private key.
             """);

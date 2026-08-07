@@ -428,7 +428,7 @@ function Assert-WindowsEditorPackageStage {
     }
     foreach ($hubPath in @(
             "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "content", "Launch-KeireHub.cmd",
-            "hub-package.json", "Config\Distribution.json", "docs\ProjectHub.md")) {
+            "hub-package.json", "Config\Distribution.json", "Config\Supabase.json", "docs\ProjectHub.md")) {
         if (Test-Path -LiteralPath (Join-Path $Stage $hubPath)) {
             throw "Editor package contains Hub-only content: $hubPath"
         }
@@ -481,7 +481,7 @@ function Get-WindowsRequiredHubPackagePaths {
 
     @(
         "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "Config\Branding\Keire.png",
-        "Config\SourceModules.premake.lua", "Config\Distribution.json",
+        "Config\SourceModules.premake.lua", "Config\Distribution.json", "Config\Supabase.json",
         "docs\ProjectHub.md", "Samples\KeireSandbox\ProjectSettings\Project.keireproject", "README.md",
         "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "hub-package.json", "Launch-KeireHub.cmd",
         "bin\libsodium.dll", "third-party\licenses\libsodium-LICENSE.txt",

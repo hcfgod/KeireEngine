@@ -25,8 +25,9 @@ default logical size is 1280x800, the minimum is 960x640, and the 224-pixel navi
 ## Product areas
 
 The production navigation contains Home, Projects, Installs, Templates, Learn, Resources, Licenses, and Settings. The
-title bar exposes appearance, tasks/downloads, notifications, documentation, and native window controls. There are no
-account, entitlement, marketplace, or cloud controls.
+title bar exposes an optional account/profile menu, appearance, tasks/downloads, notifications, documentation, and
+native window controls. Accounts never gate projects, editor downloads, or local Hub use. There are no entitlement,
+marketplace, organization, billing, or cloud-project controls.
 
 Home is a live summary of registered projects, installed editors, component health, active tasks, updates, and verified
 featured content. Empty catalog sections stay hidden or show an intentional offline/empty state.
@@ -173,6 +174,24 @@ Hub logs live beneath the per-user preference directory. **Copy diagnostics** cr
 platform, configured roots, catalog state, task state, and recent failures. Proxy credentials, signing material, tokens,
 and sensitive user-path segments are excluded.
 
+## Accounts and identity
+
+`Config/Supabase.json` enables optional email/password identity with a project HTTPS URL and modern
+`sb_publishable_...` key. The Hub never accepts or packages a Supabase secret/service-role key. Sign-up correctly
+represents email-confirmation-required responses without inventing a session; sign-in, refresh-token rotation, local
+sign-out, and profile display-name updates run on the account worker rather than the UI thread. Retryable refresh and
+profile failures preserve the authenticated UI snapshot and refresh attempts use bounded backoff.
+
+The only application table is `public.profiles`. It is protected by row-level security and explicit authenticated-only
+`SELECT`, `INSERT`, and `UPDATE` grants; every policy requires `auth.uid() = user_id`. Anonymous clients have no table
+grant. Windows refresh tokens are encrypted at rest with DPAPI and written atomically. Platforms without an implemented
+native secure store keep the session in memory only instead of writing plaintext credentials. Account tokens, proxy
+credentials, signing material, and unredacted user paths never enter diagnostics.
+
+Identity and software distribution are separate trust domains. A Supabase session is not an editor-package
+entitlement, cannot authorize an install or uninstall, and is never used to bypass Ed25519 catalog signatures,
+SHA-256 package identity, managed-install ownership markers, or editor project locks.
+
 ## Distribution and trust
 
 `Config/Distribution.json` in a Hub package contains the initial service URL and trusted Ed25519 public-key documents.
@@ -211,7 +230,10 @@ and are the only offline package type currently exposed by the Hub UI and activa
 The companion `KeireDistributionService` is a stateless .NET 10 service behind Caddy. It serves exact signed catalog and
 content bytes, immutable packages with conditional and range requests, and liveness/readiness endpoints. The publisher
 signs offline, validates a complete staging snapshot, and atomically advances `current`; an invalid replacement does not
-displace the last valid snapshot.
+displace the last valid snapshot. `KeireHubPackagePublisher create-editor` converts a validated schema-2 editor
+distribution into the generic archive/catalog manifest, and `prepare-distribution-snapshot.py` rechecks the archive
+length and digest before creating exact catalog bytes for offline signing. A production Hub enables online Installs only
+after its package is generated with the real HTTPS service URL and trusted release public key.
 
 ## Launch and activation
 
