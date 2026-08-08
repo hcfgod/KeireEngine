@@ -12,11 +12,20 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+from typing import NamedTuple
 
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 KEY_ID = re.compile(r"^ed25519-[0-9a-f]{32}$")
 IDENTITY = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+
+class PackageInput(NamedTuple):
+    manifest: dict[str, object]
+    package: Path
+    channel: str
+    platform: str
+    architecture: str
 
 
 def read_json(path: Path, maximum: int) -> dict[str, object]:
@@ -60,17 +69,8 @@ def write_atomic(path: Path, value: dict[str, object]) -> None:
         raise
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--package-manifest", required=True, type=Path)
-    parser.add_argument("--package", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--key-id", required=True)
-    parser.add_argument("--sequence", required=True, type=int)
-    parser.add_argument("--expires-at", required=True, type=parse_expiry)
-    args = parser.parse_args()
-
-    manifest = read_json(args.package_manifest, 8 * 1024 * 1024)
+def validate_package(manifest_path: Path, package: Path, key_id: str) -> PackageInput:
+    manifest = read_json(manifest_path, 8 * 1024 * 1024)
     required = {
         "schemaVersion",
         "packageId",
@@ -91,7 +91,7 @@ def main() -> int:
         not required.issubset(manifest)
         or not set(manifest).issubset(required | optional)
         or manifest["schemaVersion"] != 1
-        or manifest["type"] != "editor"
+        or manifest["type"] not in {"editor", "hubInstaller"}
         or not isinstance(artifact, dict)
         or set(artifact) != {"sizeBytes", "sha256"}
         or not isinstance(manifest["files"], list)
@@ -100,30 +100,72 @@ def main() -> int:
         or isinstance(manifest["installedSizeBytes"], bool)
         or manifest["installedSizeBytes"] < 1
     ):
-        raise ValueError("Package manifest is not a complete schema-1 editor manifest.")
-    if args.sequence < 1 or args.sequence > 2**63 - 1:
-        raise ValueError("Catalog sequence must be between 1 and 2^63-1.")
-    if not KEY_ID.fullmatch(args.key_id) or manifest["signatureKeyId"] != args.key_id:
-        raise ValueError("Catalog key ID does not match the package manifest signing key ID.")
-    channel = str(manifest["channel"])
-    platform = str(manifest["platform"])
-    architecture = str(manifest["architecture"])
+        raise ValueError(f"Package manifest is not a complete supported schema-1 manifest: {manifest_path}")
+    if manifest["signatureKeyId"] != key_id:
+        raise ValueError("Catalog key ID does not match a package manifest signing key ID.")
+    channel = manifest["channel"]
+    platform = manifest["platform"]
+    architecture = manifest["architecture"]
     if (
         not isinstance(manifest["packageId"], str)
         or not IDENTITY.fullmatch(manifest["packageId"])
-        or not all(IDENTITY.fullmatch(value) for value in (channel, platform, architecture))
+        or not isinstance(manifest["version"], str)
+        or not isinstance(channel, str)
+        or not isinstance(platform, str)
+        or not isinstance(architecture, str)
+        or not IDENTITY.fullmatch(channel)
+        or platform not in {"windows", "macos", "linux"}
+        or architecture not in {"x86_64", "arm64"}
     ):
-        raise ValueError("Package channel, platform, or architecture is invalid.")
+        raise ValueError("Package identity, channel, platform, or architecture is invalid.")
     if (
-        not args.package.is_file()
-        or args.package.is_symlink()
+        not package.is_file()
+        or package.is_symlink()
         or not isinstance(artifact["sizeBytes"], int)
         or isinstance(artifact["sizeBytes"], bool)
-        or args.package.stat().st_size != artifact["sizeBytes"]
+        or package.stat().st_size != artifact["sizeBytes"]
         or not SHA256.fullmatch(str(artifact["sha256"]))
-        or sha256_file(args.package) != artifact["sha256"]
+        or sha256_file(package) != artifact["sha256"]
     ):
         raise ValueError("Package bytes do not match the package manifest artifact identity.")
+    return PackageInput(manifest, package, channel, platform, architecture)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--package-manifest", required=True, action="append", type=Path)
+    parser.add_argument("--package", required=True, action="append", type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--key-id", required=True)
+    parser.add_argument("--sequence", required=True, type=int)
+    parser.add_argument("--expires-at", required=True, type=parse_expiry)
+    args = parser.parse_args()
+
+    if args.sequence < 1 or args.sequence > 2**63 - 1:
+        raise ValueError("Catalog sequence must be between 1 and 2^63-1.")
+    if not KEY_ID.fullmatch(args.key_id):
+        raise ValueError("Catalog key ID is invalid.")
+    if len(args.package_manifest) != len(args.package):
+        raise ValueError("Every package manifest requires one package artifact.")
+    packages = [
+        validate_package(manifest, package, args.key_id)
+        for manifest, package in zip(args.package_manifest, args.package, strict=True)
+    ]
+
+    catalogs: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    identities: set[tuple[str, str, str, str, str]] = set()
+    for item in packages:
+        identity = (
+            item.channel,
+            item.platform,
+            item.architecture,
+            str(item.manifest["packageId"]),
+            str(item.manifest["version"]),
+        )
+        if identity in identities:
+            raise ValueError("The prepared snapshot contains a duplicate package identity.")
+        identities.add(identity)
+        catalogs.setdefault((item.channel, item.platform, item.architecture), []).append(item.manifest)
 
     output = args.output.resolve()
     if output.exists():
@@ -132,25 +174,36 @@ def main() -> int:
     parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output.name}.", suffix=".tmp", dir=parent))
     try:
-        catalog_path = staging / "catalogs" / channel / platform / f"{architecture}.json"
-        package_path = staging / "packages" / str(artifact["sha256"])
-        write_atomic(
-            catalog_path,
-            {
-                "schemaVersion": 1,
-                "keyId": args.key_id,
-                "sequence": args.sequence,
-                "expiresAt": args.expires_at,
-                "channel": channel,
-                "platform": platform,
-                "architecture": architecture,
-                "packages": [manifest],
-            },
-        )
-        package_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(args.package, package_path)
-        if sha256_file(package_path) != artifact["sha256"]:
-            raise ValueError("Prepared package copy failed digest verification.")
+        for (channel, platform, architecture), manifests in sorted(catalogs.items()):
+            catalog_path = staging / "catalogs" / channel / platform / f"{architecture}.json"
+            manifests.sort(key=lambda value: (str(value["packageId"]), str(value["version"])))
+            write_atomic(
+                catalog_path,
+                {
+                    "schemaVersion": 1,
+                    "keyId": args.key_id,
+                    "sequence": args.sequence,
+                    "expiresAt": args.expires_at,
+                    "channel": channel,
+                    "platform": platform,
+                    "architecture": architecture,
+                    "packages": manifests,
+                },
+            )
+        package_root = staging / "packages"
+        package_root.mkdir(parents=True, exist_ok=True)
+        for item in packages:
+            artifact = item.manifest["artifact"]
+            assert isinstance(artifact, dict)
+            digest = str(artifact["sha256"])
+            package_path = package_root / digest
+            if package_path.exists():
+                if sha256_file(package_path) != digest:
+                    raise ValueError("Prepared package digest collision was detected.")
+                continue
+            shutil.copyfile(item.package, package_path)
+            if sha256_file(package_path) != digest:
+                raise ValueError("Prepared package copy failed digest verification.")
         os.replace(staging, output)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)

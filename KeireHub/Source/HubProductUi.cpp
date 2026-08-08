@@ -1,5 +1,6 @@
 #include "KeireHub/HubProductUi.h"
 
+#include "KeireHub/HubChromeLayout.h"
 #include "KeireHub/HubModalUi.h"
 
 #include <algorithm>
@@ -254,17 +255,17 @@ namespace KeireHub
         ui.SameLine();
         ui.TextColored(secondary, "Hub  /  " + PageName(page));
 
-        constexpr float buttonHeight = 38.0F;
+        constexpr float buttonHeight = static_cast<float>(HubCaptionButtonHeight);
 #if defined(__APPLE__)
         constexpr float controlsWidth = 0.0F;
 #else
-        constexpr float buttonWidth = 44.0F;
+        constexpr float buttonWidth = static_cast<float>(HubCaptionButtonWidth);
         const bool drawCaptionControls = window.Specification().Decoration == Keire::WindowDecoration::Custom;
-        const float controlsWidth = drawCaptionControls ? buttonWidth * 3.0F : 0.0F;
+        const float controlsWidth = drawCaptionControls ? static_cast<float>(HubCaptionControlsWidth) : 0.0F;
 #endif
-        const float controlsX = bounds.Maximum.X - controlsWidth - 4.0F;
+        const float controlsX = bounds.Maximum.X - controlsWidth - static_cast<float>(HubCaptionRightInset);
         const float controlsY = bounds.Minimum.Y + 1.0F;
-        ui.SetCursorScreenPosition({controlsX - 432.0F, controlsY});
+        ui.SetCursorScreenPosition({controlsX - static_cast<float>(HubProductControlsWidth), controlsY});
         const auto accountLabel = snapshot.AccountSignedIn
                                       ? (snapshot.AccountDisplayName.empty() ? "Account" : snapshot.AccountDisplayName)
                                       : "Sign in";
@@ -312,6 +313,8 @@ namespace KeireHub
 #if !defined(__APPLE__)
         if (drawCaptionControls)
         {
+            [[maybe_unused]] const auto captionSpacing = ui.PushStyleVariable(
+                Keire::UiStyleVariable::ItemSpacing, {static_cast<float>(HubCaptionButtonSpacing), 0.0F});
             ui.SetCursorScreenPosition({controlsX, controlsY});
             if (ui.IconButton("HubMinimize", Keire::UiIcon::Minimize, false, {buttonWidth, buttonHeight}))
                 window.Minimize();
@@ -366,12 +369,14 @@ namespace KeireHub
         ui.TextColored(secondary, "Hub  /  Recovery");
 
 #if !defined(__APPLE__)
-        constexpr float buttonWidth = 44.0F;
-        constexpr float buttonHeight = 38.0F;
+        constexpr float buttonWidth = static_cast<float>(HubCaptionButtonWidth);
+        constexpr float buttonHeight = static_cast<float>(HubCaptionButtonHeight);
         if (window.Specification().Decoration == Keire::WindowDecoration::Custom)
         {
-            const float controlsX = bounds.Maximum.X - buttonWidth * 3.0F - 4.0F;
+            const float controlsX = bounds.Maximum.X - static_cast<float>(HubCaptionStripWidth);
             const float controlsY = bounds.Minimum.Y + 1.0F;
+            [[maybe_unused]] const auto captionSpacing = ui.PushStyleVariable(
+                Keire::UiStyleVariable::ItemSpacing, {static_cast<float>(HubCaptionButtonSpacing), 0.0F});
             ui.SetCursorScreenPosition({controlsX, controlsY});
             if (ui.IconButton("HubFatalMinimize", Keire::UiIcon::Minimize, false, {buttonWidth, buttonHeight}))
                 window.Minimize();
@@ -705,14 +710,18 @@ namespace KeireHub
                     }
                 }
                 ui.SameLine();
-                if (ui.Button("Reveal", {82.0F, 30.0F}))
-                    command = {.Type = HubUiCommandType::RevealPath, .ItemId = editor.Id, .Path = editor.Root};
+                if (auto disabled = ui.BeginDisabled(editor.Missing); disabled)
+                {
+                    if (ui.Button("Reveal", {82.0F, 30.0F}))
+                        command = {.Type = HubUiCommandType::RevealPath, .ItemId = editor.Id, .Path = editor.Root};
+                }
                 ui.SameLine();
                 if (editor.Managed)
                 {
-                    if (auto disabled = ui.BeginDisabled(!editor.Healthy || editorBusy); disabled)
+                    if (auto disabled = ui.BeginDisabled((!editor.Healthy && !editor.Missing) || editorBusy); disabled)
                     {
-                        if (ui.Button("Uninstall...", {102.0F, 30.0F}))
+                        if (ui.Button(editor.Missing ? "Remove from Hub..." : "Uninstall...",
+                                      {editor.Missing ? 142.0F : 102.0F, 30.0F}))
                         {
                             m_PendingEditorRemoval = editor;
                             m_ConfirmManagedEditorRemoval = false;
@@ -723,10 +732,13 @@ namespace KeireHub
                     {
                         ui.TextColoredWrapped(
                             m_Tokens.MutedText,
-                            editor.RepairAvailable
+                            editor.Missing
+                                ? "The editor folder is already missing. Remove this stale Hub registration to "
+                                  "reinstall the version; no files will be deleted."
+                            : editor.RepairAvailable
                                 ? "Repair restores the exact signed package set before uninstall is allowed."
-                                : "This installation has no receipt-bound repair source. Install a replacement editor "
-                                  "before removing it.");
+                                : "This installation has no receipt-bound repair source. Repair or verify it before "
+                                  "removing it.");
                     }
                 }
                 else if (auto disabled = ui.BeginDisabled(editorBusy); disabled)
@@ -754,13 +766,27 @@ namespace KeireHub
         {
             const auto version = m_PendingEditorRemoval ? m_PendingEditorRemoval->Version : std::string("selected");
             const bool managed = m_PendingEditorRemoval && m_PendingEditorRemoval->Managed;
+            const bool missingManaged = managed && m_PendingEditorRemoval->Missing;
             DrawHubModalHeader(ui, m_Tokens,
-                               managed ? "Uninstall Kéire Editor " + version + "?"
-                                       : "Remove Kéire Editor " + version + "?",
-                               managed ? "Review the managed files that will be permanently removed."
-                                       : "The editor files stay on disk; only this Hub registration is removed.",
-                               managed ? "DESTRUCTIVE ACTION" : "EXTERNAL EDITOR");
-            if (managed)
+                               missingManaged ? "Remove missing Kéire Editor " + version + "?"
+                               : managed      ? "Uninstall Kéire Editor " + version + "?"
+                                              : "Remove Kéire Editor " + version + "?",
+                               missingManaged
+                                   ? "The folder is already absent; only its stale Hub registration will be removed."
+                               : managed ? "Review the managed files that will be permanently removed."
+                                         : "The editor files stay on disk; only this Hub registration is removed.",
+                               missingManaged ? "MISSING EDITOR"
+                               : managed      ? "DESTRUCTIVE ACTION"
+                                              : "EXTERNAL EDITOR");
+            if (missingManaged)
+            {
+                ui.TextColoredWrapped(m_Tokens.SecondaryText,
+                                      "This recovery removes the missing installation from the Hub so the same "
+                                      "version can be installed again. It does not delete any files.");
+                if (m_PendingEditorRemoval)
+                    ui.TextColoredWrapped(m_Tokens.Warning, Utf8Path(m_PendingEditorRemoval->Root));
+            }
+            else if (managed)
             {
                 ui.TextColoredWrapped(
                     m_Tokens.SecondaryText,
@@ -785,17 +811,20 @@ namespace KeireHub
                 ui.TextColored(m_Tokens.Warning, "Wait for the active Build Support operation to finish first.");
             else if (snapshot.EditorManagementBusy)
                 ui.TextColored(m_Tokens.Warning, "Wait for the active editor installation check to finish first.");
-            const bool blocked = !m_PendingEditorRemoval || m_PendingEditorRemoval->Running ||
-                                 m_PendingEditorRemoval->HasActiveTask || snapshot.BuildSupportBusy ||
-                                 snapshot.EditorManagementBusy ||
-                                 (managed && (!m_PendingEditorRemoval->Healthy || !m_ConfirmManagedEditorRemoval));
+            const bool blocked =
+                !m_PendingEditorRemoval || m_PendingEditorRemoval->Running || m_PendingEditorRemoval->HasActiveTask ||
+                snapshot.BuildSupportBusy || snapshot.EditorManagementBusy ||
+                (managed && !missingManaged && (!m_PendingEditorRemoval->Healthy || !m_ConfirmManagedEditorRemoval));
             if (auto disabled = ui.BeginDisabled(blocked); disabled)
             {
-                if ((managed ? HubDangerButton(ui, m_Tokens, "Uninstall editor", {142.0F, 38.0F})
-                             : HubPrimaryButton(ui, m_Tokens, "Remove from Hub", {142.0F, 38.0F})))
+                const bool remove = missingManaged ? HubPrimaryButton(ui, m_Tokens, "Remove from Hub", {142.0F, 38.0F})
+                                    : managed      ? HubDangerButton(ui, m_Tokens, "Uninstall editor", {142.0F, 38.0F})
+                                                   : HubPrimaryButton(ui, m_Tokens, "Remove from Hub", {142.0F, 38.0F});
+                if (remove)
                 {
-                    command = {.Type = managed ? HubUiCommandType::RemoveManagedEditor
-                                               : HubUiCommandType::RemoveExternalEditor,
+                    command = {.Type = missingManaged ? HubUiCommandType::RemoveMissingManagedEditor
+                                       : managed      ? HubUiCommandType::RemoveManagedEditor
+                                                      : HubUiCommandType::RemoveExternalEditor,
                                .ItemId = m_PendingEditorRemoval->Id,
                                .Path = m_PendingEditorRemoval->Root};
                     m_PendingEditorRemoval.reset();

@@ -343,6 +343,8 @@ namespace KeireHub
                                           .InstalledSizeBytes = editor.InstalledSizeBytes};
             for (const auto& installation : *installed)
             {
+                if (installation.Health == InstallationHealth::Missing)
+                    continue;
                 const auto installedVersion = SemanticVersion::Parse(installation.Version);
                 if (installedVersion && installedVersion.Value() == editor.Version &&
                     installation.Channel == record.Channel && installation.Platform == m_Specification.HostPlatform &&

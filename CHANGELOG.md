@@ -19,6 +19,23 @@ version tags.
 
 ## Unreleased
 
+- Fixed transient startup or host-network failures leaving distribution discovery permanently unavailable. The Hub now
+  preserves verified catalogs while running interruptible bounded retries, periodically revalidates healthy endpoints,
+  distinguishes Reconnecting from explicit Offline mode, and restarts discovery only for relevant network settings.
+- Fixed the custom Hub caption strip applying ordinary content spacing between fixed-width window buttons, which
+  pushed the Close hover surface through the right client edge. Rendered controls and native hit-test reservations now
+  share one contiguous geometry contract, including the complete account/product command strip.
+
+- Added the public Kéire website, packaged with the distribution service and served by Caddy without changing the
+  signed `/v1/*` or health APIs. Downloads discover native Hub installers from verified catalog fields, while the new
+  Hub-installer publisher and multi-package snapshot preparer keep unpublished platforms safely unavailable.
+- Centered the public home-page presentation, added a private Supabase-backed contact form with bounded validation and
+  abuse throttling, and made the current Windows Hub build downloadable as a clearly labeled unsigned development
+  preview without weakening or modifying the signed stable catalog path.
+- Fixed manually deleted managed editors appearing as both Missing and Installed. Background health scans now persist
+  atomically, missing registrations no longer suppress the matching catalog install action, Verify reports the actual
+  result, and Installs offers a guarded registration-only recovery that proves the exact editor root is absent before
+  enabling reinstall. The sidebar connection/version footer is also centered as one status group.
 - Restyled Build Support management and removal as full Hub design-system modals with editor/component cards, semantic
   status colors, consistent spacing, and accessible actions. Task percentages now render beside their phase instead of
   clipping inside thin progress bars. Asset Tool host diagnostics expose their resolved Build Support root, and invalid

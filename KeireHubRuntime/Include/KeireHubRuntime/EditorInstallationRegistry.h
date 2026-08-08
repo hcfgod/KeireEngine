@@ -72,6 +72,12 @@ namespace KeireHub
         InstallationHealth Health = InstallationHealth::Unknown;
     };
 
+    struct EditorInstallationHealthUpdate final
+    {
+        std::string InstallationId;
+        InstallationHealth Health = InstallationHealth::Unknown;
+    };
+
     [[nodiscard]] std::filesystem::path ResolveEditorEntrypoint(const EditorInstallation& installation);
     [[nodiscard]] std::filesystem::path ResolveAssetToolEntrypoint(const EditorInstallation& installation);
 
@@ -86,9 +92,14 @@ namespace KeireHub
         [[nodiscard]] HubStatus Load();
         [[nodiscard]] HubStatus Upsert(EditorInstallation installation);
         [[nodiscard]] HubStatus UpsertMany(std::span<const EditorInstallation> installations);
+        [[nodiscard]] HubStatus UpdateHealth(std::span<const EditorInstallationHealthUpdate> updates);
         [[nodiscard]] HubStatus RemoveExternal(const std::string& installationId);
         [[nodiscard]] HubStatus RemoveManagedRegistration(const std::string& installationId,
                                                           const std::filesystem::path& expectedRoot);
+        // Removes only a stale managed registration after proving that its exact registered root is already absent.
+        // No filesystem content is deleted by this recovery operation.
+        [[nodiscard]] HubStatus RemoveMissingManagedRegistration(const std::string& installationId,
+                                                                 const std::filesystem::path& expectedRoot);
         // Used only after the worker has atomically hidden and purged an authorized managed root. The registry entry
         // is removed only when every persisted identity field still matches and no filesystem object remains there.
         [[nodiscard]] HubStatus RemoveDeletedManagedRegistration(const ManagedInstallRemovalProof& proof);

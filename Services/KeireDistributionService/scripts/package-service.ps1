@@ -49,6 +49,7 @@ foreach ($runtimeIdentifier in $RuntimeIdentifiers) {
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'README.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDirectory
     Copy-Item -LiteralPath (Join-Path $serviceRoot 'Licenses') -Destination $packageDirectory -Recurse
+    Copy-Item -LiteralPath (Join-Path $serviceRoot 'Website') -Destination $packageDirectory -Recurse
     $deploymentDirectory = Join-Path $packageDirectory 'Deployment'
     $scriptsDirectory = Join-Path $packageDirectory 'scripts'
     [IO.Directory]::CreateDirectory($deploymentDirectory) | Out-Null

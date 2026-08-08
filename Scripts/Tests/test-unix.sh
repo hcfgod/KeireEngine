@@ -31,6 +31,15 @@ bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-package-unix.sh"
 python3 "$ROOT/Scripts/Tests/test-prepare-distribution-snapshot.py"
+python3 "$ROOT/Scripts/Tests/test-website.py"
+if command -v node >/dev/null 2>&1; then
+  node "$ROOT/Scripts/Tests/test-website-downloads.mjs"
+  node "$ROOT/Scripts/Tests/test-website-contact.mjs"
+fi
+assert_true grep -Fq 'cp -R -- "$service_root/Website"' \
+  "$ROOT/Services/KeireDistributionService/scripts/package-service.sh"
+assert_true grep -Fq '@distribution_api path /v1 /v1/* /health /health/*' \
+  "$ROOT/Services/KeireDistributionService/Deployment/Caddyfile.example"
 python3 "$ROOT/Scripts/Tests/test-supabase-config.py"
 bash "$ROOT/Scripts/Tests/test-installer-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-installer-unix.sh"

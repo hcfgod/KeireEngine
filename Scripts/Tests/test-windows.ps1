@@ -27,6 +27,15 @@ if ($runFast) {
 & (Join-Path $PSScriptRoot "test-hub-package-windows.ps1")
 & $python (Join-Path $PSScriptRoot "test-prepare-distribution-snapshot.py")
 if ($LASTEXITCODE -ne 0) { throw "Distribution snapshot preparation checks failed." }
+& $python (Join-Path $PSScriptRoot "test-website.py")
+if ($LASTEXITCODE -ne 0) { throw "Website checks failed." }
+$node = Get-Command node -ErrorAction SilentlyContinue
+if ($node) {
+    & $node.Source (Join-Path $PSScriptRoot "test-website-downloads.mjs")
+    if ($LASTEXITCODE -ne 0) { throw "Website download catalog checks failed." }
+    & $node.Source (Join-Path $PSScriptRoot "test-website-contact.mjs")
+    if ($LASTEXITCODE -ne 0) { throw "Website contact form checks failed." }
+}
 & $python (Join-Path $PSScriptRoot "test-supabase-config.py")
 if ($LASTEXITCODE -ne 0) { throw "Supabase desktop configuration checks failed." }
 & (Join-Path $PSScriptRoot "test-installer-windows.ps1")

@@ -173,6 +173,13 @@ TEST_CASE("Editor install catalogs expose stable editors and compatible componen
           available.Components.end());
     CHECK(snapshot->InstalledEditors == registry.Snapshot());
 
+    auto missing = InstalledEditor(temporary.Path() / "Existing");
+    missing.Health = InstallationHealth::Missing;
+    REQUIRE(registry.Upsert(std::move(missing)));
+    REQUIRE(stable.Refresh(distribution));
+    REQUIRE(stable.Snapshot()->AvailableEditors.size() == 1U);
+    CHECK(stable.Snapshot()->AvailableEditors.front().InstalledInstallationIds.empty());
+
     EditorInstallCatalog optedIn(registry, Specification(true));
     REQUIRE(optedIn.Refresh(distribution));
     CHECK(optedIn.Snapshot()->AvailableEditors.size() == 2U);

@@ -16,7 +16,8 @@ foreach ($contract in @(
         "--executable 'tools/publisher/KeireDistributionPublisher'",
         "--executable 'scripts/health-check.sh'",
         "--executable 'scripts/publish-snapshot.sh'",
-        "scripts\start-windows-host.ps1"
+        "scripts\start-windows-host.ps1",
+        "Website"
     )) {
     if (-not $packager.Contains($contract)) {
         throw "The Windows service packager is missing '$contract'."
@@ -24,6 +25,19 @@ foreach ($contract in @(
 }
 if ($packager.Contains('& tar -czf')) {
     throw "The Windows service packager must not inherit unusable Linux modes from NTFS."
+}
+$caddyTemplate = Get-Content -LiteralPath `
+    (Join-Path $Root "Services\KeireDistributionService\Deployment\Caddyfile.example") -Raw
+foreach ($contract in @(
+        '@distribution_api path /v1 /v1/* /health /health/*',
+        'root * "{$KEIRE_WEBSITE_ROOT:Website}"',
+        'try_files {path} {path}/index.html',
+        'Content-Security-Policy',
+        'handle_errors'
+    )) {
+    if (-not $caddyTemplate.Contains($contract)) {
+        throw "The Caddy website boundary is missing '$contract'."
+    }
 }
 
 $windowsHost = Join-Path $Root `
@@ -70,11 +84,14 @@ $archiveA = Join-Path $fixture "package-a.tar.gz"
 $archiveB = Join-Path $fixture "package-b.tar.gz"
 try {
     New-Item -ItemType Directory -Force (Join-Path $source "Deployment"), `
-        (Join-Path $source "scripts"), (Join-Path $source "tools\publisher") | Out-Null
+        (Join-Path $source "scripts"), (Join-Path $source "tools\publisher"), `
+        (Join-Path $source "Website\assets") | Out-Null
     foreach ($relative in @(
             "Deployment\Caddyfile.example",
             "KeireDistributionService",
             "README.md",
+            "Website\assets\site.css",
+            "Website\index.html",
             "scripts\health-check.sh",
             "scripts\publish-snapshot.sh",
             "tools\publisher\KeireDistributionPublisher",
@@ -113,6 +130,10 @@ try {
         "keire-distribution-linux-x64/Deployment/Caddyfile.example",
         "keire-distribution-linux-x64/KeireDistributionService",
         "keire-distribution-linux-x64/README.md",
+        "keire-distribution-linux-x64/Website/",
+        "keire-distribution-linux-x64/Website/assets/",
+        "keire-distribution-linux-x64/Website/assets/site.css",
+        "keire-distribution-linux-x64/Website/index.html",
         "keire-distribution-linux-x64/scripts/",
         "keire-distribution-linux-x64/scripts/health-check.sh",
         "keire-distribution-linux-x64/scripts/publish-snapshot.sh",
@@ -138,6 +159,10 @@ try {
         "keire-distribution-linux-x64/Deployment/Caddyfile.example" = "-rw-r--r--"
         "keire-distribution-linux-x64/KeireDistributionService" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/README.md" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Website/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Website/assets/" = "drwxr-xr-x"
+        "keire-distribution-linux-x64/Website/assets/site.css" = "-rw-r--r--"
+        "keire-distribution-linux-x64/Website/index.html" = "-rw-r--r--"
         "keire-distribution-linux-x64/scripts/" = "drwxr-xr-x"
         "keire-distribution-linux-x64/scripts/health-check.sh" = "-rwxr-xr-x"
         "keire-distribution-linux-x64/scripts/publish-snapshot.sh" = "-rwxr-xr-x"

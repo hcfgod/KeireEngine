@@ -482,6 +482,54 @@ namespace KeireHub
         return Commit(std::move(prepared).Value());
     }
 
+    HubStatus EditorInstallationRegistry::UpdateHealth(const std::span<const EditorInstallationHealthUpdate> updates)
+    {
+        if (updates.empty())
+            return HubStatus::Success();
+        if (updates.size() > MaximumInstallations)
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
+                                       .Message = "The editor health update exceeds the registry safety limit.",
+                                       .AffectedItem = "installations"});
+        }
+
+        auto installations = *m_Snapshot;
+        std::set<std::string> updatedIds;
+        bool changed = false;
+        for (const auto& update : updates)
+        {
+            if (!updatedIds.insert(update.InstallationId).second)
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::DuplicateIdentifier,
+                                           .Message = "The editor health update contains a duplicate identity.",
+                                           .AffectedItem = update.InstallationId});
+            }
+            switch (update.Health)
+            {
+            case InstallationHealth::Unknown:
+            case InstallationHealth::Healthy:
+            case InstallationHealth::VerificationRequired:
+            case InstallationHealth::Damaged:
+            case InstallationHealth::Missing:
+                break;
+            default:
+                return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
+                                           .Message = "The editor health update contains an invalid state.",
+                                           .AffectedItem = update.InstallationId});
+            }
+            const auto found = std::ranges::find(installations, update.InstallationId, &EditorInstallation::Id);
+            if (found == installations.end())
+            {
+                return HubStatus::Failure({.Code = HubErrorCode::NotFound,
+                                           .Message = "The editor installation is no longer registered.",
+                                           .AffectedItem = update.InstallationId});
+            }
+            changed = changed || found->Health != update.Health;
+            found->Health = update.Health;
+        }
+        return changed ? Commit(std::move(installations)) : HubStatus::Success();
+    }
+
     HubResult<std::vector<EditorInstallation>>
     EditorInstallationRegistry::PrepareUpsertMany(const std::span<const EditorInstallation> incoming) const
     {
@@ -572,6 +620,39 @@ namespace KeireHub
             return status;
         auto installations = *m_Snapshot;
         std::erase_if(installations, [&](const auto& value) { return value.Id == installationId; });
+        return Commit(std::move(installations));
+    }
+
+    HubStatus EditorInstallationRegistry::RemoveMissingManagedRegistration(const std::string& installationId,
+                                                                           const std::filesystem::path& expectedRoot)
+    {
+        auto installations = *m_Snapshot;
+        const auto found = std::ranges::find(installations, installationId, &EditorInstallation::Id);
+        if (found == installations.end())
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::NotFound,
+                                       .Message = "The editor installation is no longer registered.",
+                                       .AffectedItem = installationId});
+        }
+        if (found->Ownership != InstallationOwnership::Managed ||
+            NormalizedPathKey(found->Root) != NormalizedPathKey(expectedRoot))
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                       .Message = "The editor location is not the registered managed installation.",
+                                       .AffectedItem = installationId});
+        }
+
+        std::error_code error;
+        const auto status = std::filesystem::symlink_status(expectedRoot, error);
+        if ((!error && status.type() != std::filesystem::file_type::not_found) ||
+            (error && error != std::errc::no_such_file_or_directory))
+        {
+            return HubStatus::Failure({.Code = HubErrorCode::UnsafeInstallRoot,
+                                       .Message = "The editor root still exists, so its registration was preserved.",
+                                       .AffectedItem = installationId,
+                                       .TechnicalDetails = error.message()});
+        }
+        installations.erase(found);
         return Commit(std::move(installations));
     }
 

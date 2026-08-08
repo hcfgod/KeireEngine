@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Validate the static Kéire website's production and trust contracts."""
+
+from __future__ import annotations
+
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import urlsplit
+import json
+import sys
+import xml.etree.ElementTree as ET
+
+
+ROOT = Path(__file__).resolve().parents[2]
+WEBSITE = ROOT / "Services" / "KeireDistributionService" / "Website"
+PUBLIC_ROUTES = {"/", "/features/", "/docs/", "/downloads/", "/roadmap/", "/contact/", "/privacy/"}
+
+
+class PageParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.links: list[tuple[str, str]] = []
+        self.ids: set[str] = set()
+        self.h1_count = 0
+        self.has_main = False
+        self.has_description = False
+        self.has_title = False
+        self.images: list[dict[str, str | None]] = []
+        self.inline_scripts = 0
+        self.inline_styles = 0
+        self._in_title = False
+
+    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
+        values = dict(attributes)
+        if "id" in values and values["id"]:
+            if values["id"] in self.ids:
+                raise ValueError(f"Duplicate HTML id: {values['id']}")
+            self.ids.add(values["id"])
+        if tag == "a" and values.get("href"):
+            self.links.append(("href", str(values["href"])))
+        if tag in {"link", "script", "img"}:
+            attribute = "href" if tag == "link" else "src"
+            if values.get(attribute):
+                self.links.append((attribute, str(values[attribute])))
+        if tag == "img":
+            self.images.append(values)
+        if tag == "h1":
+            self.h1_count += 1
+        if tag == "main":
+            self.has_main = True
+        if tag == "meta" and values.get("name") == "description" and values.get("content"):
+            self.has_description = True
+        if tag == "script" and not values.get("src"):
+            self.inline_scripts += 1
+        if tag == "style" or "style" in values:
+            self.inline_styles += 1
+        if tag == "title":
+            self._in_title = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title and data.strip():
+            self.has_title = True
+
+
+def target_file(page: Path, value: str) -> tuple[Path, str]:
+    parsed = urlsplit(value)
+    path = parsed.path
+    if not path:
+        return page, parsed.fragment
+    if path.startswith("/"):
+        candidate = WEBSITE / path.lstrip("/")
+    else:
+        candidate = page.parent / path
+    if path.endswith("/") or candidate.is_dir():
+        candidate /= "index.html"
+    return candidate.resolve(), parsed.fragment
+
+
+def validate_page(page: Path) -> None:
+    parser = PageParser()
+    parser.feed(page.read_text(encoding="utf-8"))
+    if parser.h1_count != 1 or not parser.has_main or not parser.has_title or not parser.has_description:
+        raise ValueError(f"Page metadata or landmark contract failed: {page}")
+    if parser.inline_scripts or parser.inline_styles:
+        raise ValueError(f"Inline script or style violates the website CSP: {page}")
+    for image in parser.images:
+        if "alt" not in image or not image.get("width") or not image.get("height"):
+            raise ValueError(f"Image accessibility or layout metadata is incomplete: {page}")
+    for _, value in parser.links:
+        parsed = urlsplit(value)
+        if parsed.scheme:
+            if parsed.scheme != "https":
+                raise ValueError(f"Non-HTTPS external resource in {page}: {value}")
+            continue
+        if value.startswith("//"):
+            raise ValueError(f"Protocol-relative resource in {page}: {value}")
+        target, fragment = target_file(page, value)
+        try:
+            target.relative_to(WEBSITE.resolve())
+        except ValueError as error:
+            raise ValueError(f"Website link escapes its root in {page}: {value}") from error
+        if not target.is_file():
+            raise ValueError(f"Broken website link in {page}: {value}")
+        if fragment and target.suffix == ".html":
+            target_parser = PageParser()
+            target_parser.feed(target.read_text(encoding="utf-8"))
+            if fragment not in target_parser.ids:
+                raise ValueError(f"Missing fragment target in {page}: {value}")
+
+
+def main() -> int:
+    pages = sorted(WEBSITE.rglob("*.html"))
+    if len(pages) != 8:
+        raise ValueError("Website must contain seven public pages and one branded 404 page.")
+    for page in pages:
+        validate_page(page)
+
+    manifest = json.loads((WEBSITE / "site.webmanifest").read_text(encoding="utf-8"))
+    if manifest.get("start_url") != "/" or manifest.get("icons", [{}])[0].get("src") != "/assets/keire.png":
+        raise ValueError("Website manifest identity is invalid.")
+    sitemap = ET.parse(WEBSITE / "sitemap.xml")
+    namespace = {"site": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    routes = {
+        urlsplit(str(value.text)).path
+        for value in sitemap.findall("site:url/site:loc", namespace)
+        if value.text
+    }
+    if routes != PUBLIC_ROUTES:
+        raise ValueError("Website sitemap routes are incomplete or unexpected.")
+
+    downloads = (WEBSITE / "assets" / "downloads.js").read_text(encoding="utf-8")
+    for contract in (
+        "hubInstaller",
+        "/v1/catalog/",
+        "/v1/packages/",
+        "/preview-downloads/",
+        "windows",
+        "macos",
+        "linux",
+        "x86_64",
+        "arm64",
+    ):
+        if contract not in downloads:
+            raise ValueError(f"Downloads implementation is missing '{contract}'.")
+    if "http://" in downloads or "https://" in downloads:
+        raise ValueError("Downloads must not use a separate or untrusted origin.")
+
+    previews = json.loads((WEBSITE / "assets" / "preview-downloads.json").read_text(encoding="utf-8"))
+    packages = previews.get("packages", [])
+    if previews.get("schemaVersion") != 1 or len(packages) != 1:
+        raise ValueError("Preview download metadata must contain one explicit Windows preview.")
+    preview = packages[0]
+    if (
+        preview.get("type") != "hubInstallerPreview"
+        or preview.get("platform") != "windows"
+        or preview.get("signed") is not False
+        or preview.get("developmentArtifact") is not True
+        or not str(preview.get("url", "")).startswith("/preview-downloads/")
+        or len(str(preview.get("sha256", ""))) != 64
+        or int(preview.get("sizeBytes", 0)) < 1
+    ):
+        raise ValueError("Preview download metadata does not preserve its unsigned development identity.")
+
+    contact = (WEBSITE / "assets" / "contact.js").read_text(encoding="utf-8")
+    if "website-contact" not in contact or "textContent" not in contact or "innerHTML" in contact:
+        raise ValueError("Contact form endpoint or safe status rendering is missing.")
+
+    caddy = (ROOT / "Services" / "KeireDistributionService" / "Deployment" / "Caddyfile.example").read_text(
+        encoding="utf-8"
+    )
+    for contract in (
+        "not path /preview-downloads/*",
+        "handle_path /preview-downloads/*",
+        "KEIRE_PREVIEW_DOWNLOAD_ROOT",
+        "khjduyjamzwumhducmou.supabase.co",
+    ):
+        if contract not in caddy:
+            raise ValueError(f"Caddy website contract is missing '{contract}'.")
+
+    print(f"Website validation passed for {len(pages)} HTML pages.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

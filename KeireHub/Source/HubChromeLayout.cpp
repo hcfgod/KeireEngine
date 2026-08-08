@@ -11,7 +11,6 @@ namespace KeireHub
         constexpr std::int32_t edge = 6;
         constexpr std::int32_t corner = 10;
         constexpr std::int32_t titleBarHeight = 40;
-        constexpr std::int32_t productControlsWidth = 382;
         Keire::WindowChromeLayout layout;
         const auto add = [&](const Keire::WindowChromeRole role, const std::int32_t x, const std::int32_t y,
                              const std::int32_t regionWidth, const std::int32_t regionHeight)
@@ -23,20 +22,20 @@ namespace KeireHub
 #if defined(__APPLE__)
         add(Keire::WindowChromeRole::Client, 0, 0, 120, titleBarHeight);
         if (reserveProductControls)
-            add(Keire::WindowChromeRole::Client, width - 4 - productControlsWidth, 0, productControlsWidth,
+            add(Keire::WindowChromeRole::Client, width - 4 - HubProductControlsWidth, 0, HubProductControlsWidth,
                 titleBarHeight);
 #else
-        constexpr std::int32_t captionWidth = 44;
-        constexpr std::int32_t captionStripWidth = captionWidth * 3 + 4;
         add(Keire::WindowChromeRole::SystemMenu, 0, 0, 48, titleBarHeight);
         if (reserveProductControls)
         {
-            add(Keire::WindowChromeRole::Client, width - captionStripWidth - productControlsWidth, 0,
-                productControlsWidth, titleBarHeight);
+            add(Keire::WindowChromeRole::Client, width - HubCaptionStripWidth - HubProductControlsWidth, 0,
+                HubProductControlsWidth, titleBarHeight);
         }
-        add(Keire::WindowChromeRole::Minimize, width - captionStripWidth, 0, captionWidth, titleBarHeight);
-        add(Keire::WindowChromeRole::MaximizeRestore, width - 92, 0, captionWidth, titleBarHeight);
-        add(Keire::WindowChromeRole::Close, width - 48, 0, captionWidth, titleBarHeight);
+        add(Keire::WindowChromeRole::Minimize, width - HubCaptionStripWidth, 0, HubCaptionButtonWidth, titleBarHeight);
+        add(Keire::WindowChromeRole::MaximizeRestore, width - HubCaptionRightInset - HubCaptionButtonWidth * 2, 0,
+            HubCaptionButtonWidth, titleBarHeight);
+        add(Keire::WindowChromeRole::Close, width - HubCaptionRightInset - HubCaptionButtonWidth, 0,
+            HubCaptionButtonWidth, titleBarHeight);
 #endif
         add(Keire::WindowChromeRole::ResizeLeft, 0, corner, edge, height - corner * 2);
         add(Keire::WindowChromeRole::ResizeRight, width - edge, corner, edge, height - corner * 2);

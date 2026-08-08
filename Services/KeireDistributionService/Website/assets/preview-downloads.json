@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    {
+      "type": "hubInstallerPreview",
+      "version": "0.1.0",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "fileName": "keire-hub-windows-x86_64-0.1.0-preview.exe",
+      "url": "/preview-downloads/keire-hub-windows-x86_64-0.1.0-preview.exe",
+      "sizeBytes": 55616135,
+      "sha256": "7628938f149a8094935910584a1d873f5ba41395c6529bbf339040888f2797f3",
+      "signed": false,
+      "developmentArtifact": true
+    }
+  ]
+}

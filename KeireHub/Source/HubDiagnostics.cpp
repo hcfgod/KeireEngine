@@ -58,6 +58,7 @@ namespace KeireHub
                << "Network: "
                << (snapshot.Settings.OfflineMode ? "offline"
                    : snapshot.Online             ? "online"
+                   : snapshot.Reconnecting       ? "reconnecting"
                                                  : "unavailable")
                << '\n'
                << "Signed catalog: " << (snapshot.CatalogAvailable ? "available" : "unavailable") << '\n'

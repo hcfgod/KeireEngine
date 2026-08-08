@@ -90,7 +90,10 @@ instead of an unsafe repair action.
 Install discovery, full inventory refresh, verification, and repair/removal preparation run through an immutable
 single-flight background workflow. A result is discarded if its registration, root, ownership proof, tracked running
 state, or targeted task activity changed before the owner thread receives it; only that owner thread persists health
-and queues a prepared package task.
+and queues a prepared package task. The complete refresh health set is persisted atomically so a missing managed editor
+cannot remain Installed in the signed catalog view. A missing editor card offers a separate **Remove from Hub** recovery:
+the runtime matches the exact managed registration and root, proves no filesystem object remains there, and removes only
+the stale registration. It never deletes editor files and immediately exposes the matching version for reinstall.
 Editor removal is also disabled while any Build Support operation is active, so its selected Asset Tool and
 version-scoped component storage cannot disappear beneath an import, repair, or removal worker.
 
@@ -235,9 +238,13 @@ The companion `KeireDistributionService` is a stateless .NET 10 service behind C
 content bytes, immutable packages with conditional and range requests, and liveness/readiness endpoints. The publisher
 signs offline, validates a complete staging snapshot, and atomically advances `current`; an invalid replacement does not
 displace the last valid snapshot. `KeireHubPackagePublisher create-editor` converts a validated schema-2 editor
-distribution into the generic archive/catalog manifest, and `prepare-distribution-snapshot.py` rechecks the archive
-length and digest before creating exact catalog bytes for offline signing. A production Hub enables online Installs only
-after its package is generated with the real HTTPS service URL and trusted release public key.
+distribution into the generic archive/catalog manifest. `create-hub-installer` creates the corresponding catalog
+manifest only for a clean Hub package and platform-native `.exe`, `.dmg`, or `.deb`; native signing/notarization remains
+a release prerequisite. `prepare-distribution-snapshot.py` accepts repeated manifest/artifact pairs, rechecks every
+length and digest, rejects duplicate identities, and groups records into their host catalog before offline signing. A
+production Hub enables online Installs only after its package is generated with the real HTTPS service URL and trusted
+release public key. Caddy serves the package-local public website for every other route while preserving `/v1/*` and
+`/health/*` as exact backend interfaces.
 
 ## Launch and activation
 

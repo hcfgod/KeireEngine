@@ -129,12 +129,19 @@ Editor manifests expose only the editor and editor-specific tool entrypoints; Hu
 
 For Hub-managed online installs, build the `KeireHubPackagePublisher` target and run its `create-editor` command against
 the unpacked schema-2 editor distribution. It rehashes the complete payload and writes a `.keirepackage` plus canonical
-catalog manifest. `Scripts/Packaging/prepare-distribution-snapshot.py` verifies that pair and creates the immutable
-catalog/package staging layout consumed by the offline Ed25519 publisher and read-only distribution service. See
+catalog manifest. The same tool's `create-hub-installer` command converts a clean schema-2 Hub manifest and a native,
+release-signed `.exe`, `.dmg`, or `.deb` into a canonical `hubInstaller` manifest. The snapshot preparer accepts repeated
+manifest/artifact pairs, rechecks every digest, and groups editor and Hub-installer records into the matching immutable
+catalog endpoints consumed by the offline Ed25519 publisher and read-only distribution service. See
 [Generic Package Archives](docs/PackageArchives.md) and the
 [Distribution Service guide](Services/KeireDistributionService/README.md). A public Hub package must be generated with
 the deployed HTTPS service URL and its trusted release public key; without both, online discovery remains intentionally
-disabled while installed editors and cached content continue to work.
+disabled while installed editors and cached content continue to work. Caddy also serves the packaged static public
+website at `https://keireengine.duckdns.org`; `/v1/*` and `/health/*` remain reserved for the service. Signed stable Hub
+installers continue to come only from the signed catalog. Until the Windows installer completes Authenticode release
+signing, the Downloads page can expose the current build through a separately hosted, explicitly unsigned development
+preview with its byte size and SHA-256 identity. The Contact page sends bounded inquiries to a dedicated Supabase Edge
+Function; browser roles have no direct access to its private tables.
 
 Editor installs are reviewed in a version-aware Hub dialog before they enter the persistent task queue. The title-bar
 Tasks and Notifications controls show the same live download, verification, extraction, and installation progress,
@@ -810,7 +817,9 @@ workflow, and the Hub never invents an installation from a nearby executable.
 The integrated title bar and responsive navigation rail use the packaged icon set while retaining native drag, resize,
 Snap/maximize, and close behavior. Installation refresh, verification, and managed repair/uninstall preparation run in
 the task center without blocking the Hub window; stale results are discarded if the editor registration, process state,
-or active tasks change.
+or active tasks change. If a managed editor folder was removed outside the Hub, Installs marks it Missing, stops
+treating that version as installed, and offers **Remove from Hub** after proving the registered root is absent. That
+registration-only recovery deletes no files and immediately makes the catalog version installable again.
 
 `.keirescene` is the first scene asset. `SceneSystem` loads it asynchronously and commits single/additive activation only
 at application frame boundaries; failures preserve the last-good scene set. Mutable `Scene` instances support stable

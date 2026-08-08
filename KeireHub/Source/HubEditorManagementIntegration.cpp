@@ -38,6 +38,9 @@ namespace KeireHub
         case HubUiCommandType::RemoveExternalEditor:
             notice = "External editor removed from the Hub. Its files were not deleted.";
             break;
+        case HubUiCommandType::RemoveMissingManagedEditor:
+            notice = "Missing editor registration removed. No files were deleted; this version can now be installed.";
+            break;
         default:
             notice = "Editor installation check started.";
             break;
@@ -79,8 +82,29 @@ namespace KeireHub
         }
         if (completion->Operation == HubEditorManagementOperation::Verify)
         {
-            notice = "Editor installation verification completed.";
-            noticeError = false;
+            switch (completion->VerifiedHealth.value_or(InstallationHealth::Unknown))
+            {
+            case InstallationHealth::Healthy:
+                notice = "Editor installation verified and ready.";
+                noticeError = false;
+                break;
+            case InstallationHealth::Missing:
+                notice = "The editor folder is missing. Remove its stale Hub registration to reinstall this version.";
+                noticeError = true;
+                break;
+            case InstallationHealth::Damaged:
+                notice = "Verification found damaged or incomplete editor files. Repair the managed installation.";
+                noticeError = true;
+                break;
+            case InstallationHealth::VerificationRequired:
+                notice = "The editor could not be fully verified on this host. Review its compatibility details.";
+                noticeError = true;
+                break;
+            case InstallationHealth::Unknown:
+                notice = "Editor verification completed without a conclusive health result.";
+                noticeError = true;
+                break;
+            }
             return;
         }
         if (!completion->Authorization || !tasks)

@@ -137,6 +137,7 @@ TEST_CASE("Editor management refresh runs on a value-only worker and projects it
     CHECK(receivedRoot == installation.Root);
     REQUIRE(workflow.Snapshot()->size() == 1);
     CHECK(workflow.Snapshot()->front().Health == InstallationHealth::Healthy);
+    CHECK(controller.Installations().Snapshot()->front().Health == InstallationHealth::Healthy);
     const auto completion = workflow.TakeCompletion();
     REQUIRE(completion);
     CHECK(completion->Operation == HubEditorManagementOperation::Refresh);
@@ -381,6 +382,62 @@ TEST_CASE("External editor removal stays owner-thread local and does not start a
     CHECK(controller.Installations().Snapshot()->empty());
     CHECK(refreshCalls.load(std::memory_order_relaxed) == 0);
     CHECK(workflow.OperationSnapshot()->State == HubEditorManagementState::Idle);
+}
+
+TEST_CASE("Missing managed editor recovery removes only its stale registration")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    auto installation =
+        TestInstallation(temporary.Path() / "MissingManaged", "managed-missing", InstallationOwnership::Managed);
+    installation.Health = InstallationHealth::Missing;
+    REQUIRE(controller.Installations().Upsert(installation));
+    std::error_code error;
+    std::filesystem::remove_all(installation.Root, error);
+    REQUIRE_FALSE(error);
+    HubEditorManagementWorkflow workflow(controller, {.HostPlatform = "windows",
+                                                      .HostArchitecture = "x86_64",
+                                                      .ProbeRunning = [](const EditorInstallation&) { return false; }});
+
+    REQUIRE(workflow.Execute(Command(HubUiCommandType::RemoveMissingManagedEditor, installation)));
+    CHECK(controller.Installations().Snapshot()->empty());
+    CHECK(workflow.Snapshot()->empty());
+    CHECK(workflow.OperationSnapshot()->State == HubEditorManagementState::Idle);
+}
+
+TEST_CASE("Editor verification publishes and persists a missing health result")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    const auto installation =
+        TestInstallation(temporary.Path() / "Editor", "editor-missing", InstallationOwnership::Managed);
+    REQUIRE(controller.Installations().Upsert(installation));
+    HubEditorManagementServices services;
+    services.Verify = [](HubEditorManagementWorkItem item, std::string, std::string)
+    {
+        return HubResult<EditorInstallationHealthSnapshot>::Success(
+            {.Installation = std::move(item.Installation), .Health = InstallationHealth::Missing});
+    };
+    HubEditorManagementWorkflow workflow(controller,
+                                         {.HostPlatform = "windows",
+                                          .HostArchitecture = "x86_64",
+                                          .ProbeRunning = [](const EditorInstallation&) { return false; }},
+                                         std::move(services));
+
+    REQUIRE(workflow.Execute(Command(HubUiCommandType::VerifyEditor, installation)));
+    REQUIRE(PollUntilTerminal(workflow));
+    const auto completion = workflow.TakeCompletion();
+    REQUIRE(completion);
+    REQUIRE(completion->VerifiedHealth);
+    CHECK(*completion->VerifiedHealth == InstallationHealth::Missing);
+    CHECK(controller.Installations().Snapshot()->front().Health == InstallationHealth::Missing);
+    HubProductSnapshot product;
+    workflow.ApplySnapshot(product);
+    REQUIRE(product.Editors.size() == 1U);
+    CHECK(product.Editors.front().Missing);
+    CHECK_FALSE(product.Editors.front().Healthy);
 }
 
 TEST_CASE("Editor management rejects non-owner coordination without changing state")

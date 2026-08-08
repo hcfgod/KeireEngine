@@ -56,18 +56,23 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
     def write_manifest(self) -> None:
         self.manifest.write_text(json.dumps(self.document), encoding="utf-8")
 
-    def run_preparer(self, output: str) -> subprocess.CompletedProcess[str]:
+    def run_preparer(
+        self, output: str, additional: list[tuple[Path, Path]] | None = None, reverse: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         expiry = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         environment = dict(os.environ)
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        package_pairs = [(self.manifest, self.package), *(additional or [])]
+        if reverse:
+            package_pairs.reverse()
+        package_arguments: list[str] = []
+        for manifest, package in package_pairs:
+            package_arguments.extend(["--package-manifest", str(manifest), "--package", str(package)])
         return subprocess.run(
             [
                 sys.executable,
                 str(PREPARER),
-                "--package-manifest",
-                str(self.manifest),
-                "--package",
-                str(self.package),
+                *package_arguments,
                 "--output",
                 str(self.root / output),
                 "--key-id",
@@ -96,6 +101,73 @@ class DistributionSnapshotPreparationTests(unittest.TestCase):
         self.assertEqual(catalog["packages"], [self.document])
         digest = self.document["artifact"]["sha256"]
         self.assertEqual((self.root / "prepared" / "packages" / digest).read_bytes(), self.package.read_bytes())
+
+    def test_combines_hub_installer_and_multiple_host_catalogs(self) -> None:
+        installer = self.root / "keire-hub.exe"
+        installer.write_bytes(b"native-installer")
+        installer_digest = hashlib.sha256(installer.read_bytes()).hexdigest()
+        installer_manifest = self.root / "hub-installer.json"
+        hub_document = {
+            **self.document,
+            "packageId": "keire.hub",
+            "type": "hubInstaller",
+            "displayName": "Keire Hub 1.2.3",
+            "artifact": {"sizeBytes": installer.stat().st_size, "sha256": installer_digest},
+            "installedSizeBytes": installer.stat().st_size,
+            "files": [
+                {
+                    "path": installer.name,
+                    "sizeBytes": installer.stat().st_size,
+                    "sha256": installer_digest,
+                    "mode": 420,
+                }
+            ],
+        }
+        installer_manifest.write_text(json.dumps(hub_document), encoding="utf-8")
+
+        linux_package = self.root / "editor.deb"
+        linux_package.write_bytes(b"linux-package")
+        linux_digest = hashlib.sha256(linux_package.read_bytes()).hexdigest()
+        linux_manifest = self.root / "linux-manifest.json"
+        linux_document = {
+            **self.document,
+            "platform": "linux",
+            "artifact": {"sizeBytes": linux_package.stat().st_size, "sha256": linux_digest},
+        }
+        linux_manifest.write_text(json.dumps(linux_document), encoding="utf-8")
+
+        result = self.run_preparer(
+            "combined", [(installer_manifest, installer), (linux_manifest, linux_package)]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        windows = json.loads(
+            (self.root / "combined/catalogs/stable/windows/x86_64.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([package["packageId"] for package in windows["packages"]], ["keire.editor", "keire.hub"])
+        linux = json.loads(
+            (self.root / "combined/catalogs/stable/linux/x86_64.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(linux["packages"], [linux_document])
+        self.assertEqual((self.root / "combined/packages" / installer_digest).read_bytes(), installer.read_bytes())
+
+        reversed_result = self.run_preparer(
+            "combined-reversed", [(installer_manifest, installer), (linux_manifest, linux_package)], reverse=True
+        )
+        self.assertEqual(reversed_result.returncode, 0, reversed_result.stderr)
+        combined_files = {
+            path.relative_to(self.root / "combined"): path.read_bytes()
+            for path in (self.root / "combined").rglob("*")
+            if path.is_file()
+        }
+        reversed_files = {
+            path.relative_to(self.root / "combined-reversed"): path.read_bytes()
+            for path in (self.root / "combined-reversed").rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(reversed_files, combined_files)
+
+        duplicate = self.run_preparer("duplicate", [(self.manifest, self.package)])
+        self.assertNotEqual(duplicate.returncode, 0)
 
     def test_rejects_tampering_draft_contracts_and_existing_outputs(self) -> None:
         self.package.write_bytes(b"tampered")

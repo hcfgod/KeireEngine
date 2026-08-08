@@ -936,6 +936,7 @@ namespace
                 case KeireHub::HubUiCommandType::RepairManagedEditor:
                 case KeireHub::HubUiCommandType::VerifyEditor:
                 case KeireHub::HubUiCommandType::RemoveExternalEditor:
+                case KeireHub::HubUiCommandType::RemoveMissingManagedEditor:
                 case KeireHub::HubUiCommandType::RemoveManagedEditor:
                     if (!m_EditorManagement)
                         throw std::logic_error("Editor management is unavailable.");
@@ -996,11 +997,13 @@ namespace
                             m_EditorManagement->ReloadRegistrations();
                         KeireHub::ReloadProjectRegistry(m_Registry);
                     }
+                    const bool distributionSettingsChanged =
+                        KeireHub::HubDistributionSettingsChanged(m_ProductSnapshot.Settings, *command.Settings);
                     if (const auto status = m_Controller->Settings().Save(*command.Settings); !status)
                         throw std::runtime_error(status.Error().Message);
                     m_ProductSnapshot.Settings = *command.Settings;
                     m_CreateLocation = Keire::Detail::PathToUtf8(command.Settings->DefaultProjectLocation);
-                    if (m_Distribution)
+                    if (m_Distribution && distributionSettingsChanged)
                         m_DistributionRefreshPending = true;
                     m_Account.RequestRefresh();
                     m_PackageTaskRefreshPending = packageTaskSettingsChanged;

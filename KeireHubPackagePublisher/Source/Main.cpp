@@ -25,9 +25,18 @@ namespace
 {
     using Json = KeireHub::Detail::Json;
 
+    enum class Command
+    {
+        CreateEditor,
+        CreateHubInstaller
+    };
+
     struct Arguments final
     {
+        Command SelectedCommand = Command::CreateEditor;
         std::filesystem::path PayloadRoot;
+        std::filesystem::path HubManifest;
+        std::filesystem::path Installer;
         std::filesystem::path Output;
         std::filesystem::path ManifestOutput;
         std::string SignatureKeyId;
@@ -51,11 +60,17 @@ namespace
         {
             std::cout << "Usage: KeireHubPackagePublisher create-editor --payload-root <directory> "
                          "--output <archive.keirepackage> --manifest-output <manifest.json> "
-                         "--signature-key-id <ed25519-key-id>\n";
+                         "--signature-key-id <ed25519-key-id>\n"
+                         "       KeireHubPackagePublisher create-hub-installer "
+                         "--hub-manifest <hub-package.json> --installer <native-installer> "
+                         "--manifest-output <manifest.json> --signature-key-id <ed25519-key-id>\n";
             std::exit(0);
         }
-        if (count < 2 || std::string_view(values[1]) != "create-editor")
-            throw std::invalid_argument("The create-editor command is required. Use --help for usage.");
+        if (count < 2)
+            throw std::invalid_argument("A publisher command is required. Use --help for usage.");
+        const auto command = std::string_view(values[1]);
+        if (command != "create-editor" && command != "create-hub-installer")
+            throw std::invalid_argument("The publisher command is unsupported. Use --help for usage.");
         std::map<std::string, std::string, std::less<>> options;
         for (int index = 2; index < count; index += 2)
         {
@@ -64,17 +79,28 @@ namespace
             if (!options.emplace(values[index], values[index + 1]).second)
                 throw std::invalid_argument("A publisher option was repeated.");
         }
-        constexpr std::array names{"--payload-root", "--output", "--manifest-output", "--signature-key-id"};
+        constexpr std::array editorNames{"--payload-root", "--output", "--manifest-output", "--signature-key-id"};
+        constexpr std::array installerNames{"--hub-manifest", "--installer", "--manifest-output", "--signature-key-id"};
+        const auto& names = command == "create-editor" ? editorNames : installerNames;
         if (options.size() != names.size() ||
             std::ranges::any_of(names, [&](const std::string_view name) { return !options.contains(name); }))
         {
             throw std::invalid_argument("The publisher options are incomplete or unsupported. Use --help for usage.");
         }
-        auto result = Arguments{
-            .PayloadRoot = std::filesystem::absolute(Path(options.at("--payload-root"))).lexically_normal(),
-            .Output = std::filesystem::absolute(Path(options.at("--output"))).lexically_normal(),
-            .ManifestOutput = std::filesystem::absolute(Path(options.at("--manifest-output"))).lexically_normal(),
-            .SignatureKeyId = options.at("--signature-key-id")};
+        Arguments result;
+        result.SelectedCommand = command == "create-editor" ? Command::CreateEditor : Command::CreateHubInstaller;
+        if (result.SelectedCommand == Command::CreateEditor)
+        {
+            result.PayloadRoot = std::filesystem::absolute(Path(options.at("--payload-root"))).lexically_normal();
+            result.Output = std::filesystem::absolute(Path(options.at("--output"))).lexically_normal();
+        }
+        else
+        {
+            result.HubManifest = std::filesystem::absolute(Path(options.at("--hub-manifest"))).lexically_normal();
+            result.Installer = std::filesystem::absolute(Path(options.at("--installer"))).lexically_normal();
+        }
+        result.ManifestOutput = std::filesystem::absolute(Path(options.at("--manifest-output"))).lexically_normal();
+        result.SignatureKeyId = options.at("--signature-key-id");
         if (!KeireHub::Detail::IsDistributionKeyId(result.SignatureKeyId))
             throw std::invalid_argument("The package signature key ID is invalid.");
         return result;
@@ -175,6 +201,81 @@ namespace
             throw std::runtime_error(canonical.Error().Message + " " + canonical.Error().TechnicalDetails);
         return result;
     }
+
+    [[nodiscard]] KeireHub::PackageManifest ReadHubInstallerManifest(const Arguments& arguments)
+    {
+        std::error_code error;
+        const auto manifestStatus = std::filesystem::symlink_status(arguments.HubManifest, error);
+        if (error || !std::filesystem::is_regular_file(manifestStatus) || std::filesystem::is_symlink(manifestStatus))
+            throw std::invalid_argument("The Hub product manifest is missing or unsafe.");
+        const auto installerStatus = std::filesystem::symlink_status(arguments.Installer, error);
+        if (error || !std::filesystem::is_regular_file(installerStatus) || std::filesystem::is_symlink(installerStatus))
+            throw std::invalid_argument("The native Hub installer is missing or unsafe.");
+
+        auto document = KeireHub::Detail::ReadJsonFile(arguments.HubManifest, 8U * 1024U * 1024U);
+        if (!document)
+            throw std::runtime_error(document.Error().Message + " " + document.Error().TechnicalDetails);
+        const auto& value = document.Value();
+        if (!value.is_object() || value.at("schemaVersion").get<std::uint32_t>() != 2U ||
+            value.at("artifact").get<std::string>() != "hub" || value.at("dirty").get<bool>() ||
+            value.at("developmentArtifact").get<bool>())
+        {
+            throw std::runtime_error("The Hub product manifest must be a clean schema-2 distribution manifest.");
+        }
+
+        auto version = KeireHub::SemanticVersion::Parse(value.at("version").get<std::string>());
+        if (!version)
+            throw std::runtime_error(version.Error().Message);
+        KeireHub::PackageManifest result;
+        result.Id = value.at("packageId").get<std::string>();
+        result.Version = std::move(version).Value();
+        result.Kind = KeireHub::PackageKind::HubInstaller;
+        result.DisplayName = value.at("project").get<std::string>() + " Hub " + result.Version.ToString();
+        result.Channel = Lower(value.at("channel").get<std::string>());
+        result.Platform = Lower(value.at("platform").get<std::string>());
+        result.Architecture = Lower(value.at("architecture").get<std::string>());
+        result.SignatureKeyId = arguments.SignatureKeyId;
+
+        const auto extension = Lower(Text(arguments.Installer.extension()));
+        const bool expectedExtension = (result.Platform == "windows" && extension == ".exe") ||
+                                       (result.Platform == "macos" && extension == ".dmg") ||
+                                       (result.Platform == "linux" && extension == ".deb");
+        if (!expectedExtension || (result.Architecture != "x86_64" && result.Architecture != "arm64"))
+            throw std::invalid_argument("The native Hub installer does not match a supported host identity.");
+
+        const auto size = std::filesystem::file_size(arguments.Installer, error);
+        if (error || size == 0 || size > KeireHub::PackageArchiveLimits::MaximumFileBytes)
+            throw std::invalid_argument("The native Hub installer size is invalid.");
+        auto digest =
+            KeireHub::Detail::Sha256File(arguments.Installer, KeireHub::PackageArchiveLimits::MaximumFileBytes);
+        if (!digest)
+            throw std::runtime_error(digest.Error().Message + " " + digest.Error().TechnicalDetails);
+        result.ArtifactSizeBytes = size;
+        result.ArtifactSha256 = digest.Value();
+        result.InstalledSizeBytes = size;
+        result.Files.push_back({.Path = arguments.Installer.filename(),
+                                .SizeBytes = size,
+                                .Sha256 = std::move(digest).Value(),
+                                .Mode = 0644U});
+        if (auto canonical = KeireHub::EncodePackageManifest(result); !canonical)
+            throw std::runtime_error(canonical.Error().Message + " " + canonical.Error().TechnicalDetails);
+        return result;
+    }
+
+    void WriteManifest(const std::filesystem::path& path, const KeireHub::PackageManifest& manifest)
+    {
+        auto encoded = KeireHub::EncodePackageManifest(manifest);
+        if (!encoded)
+            throw std::runtime_error(encoded.Error().Message + " " + encoded.Error().TechnicalDetails);
+        auto parsed = KeireHub::ParsePackageManifest(encoded.Value());
+        if (!parsed)
+            throw std::runtime_error("The published package manifest failed its parser round trip.");
+        auto roundTrip = KeireHub::EncodePackageManifest(parsed.Value());
+        if (!roundTrip || roundTrip.Value() != encoded.Value())
+            throw std::runtime_error("The published package manifest changed during its parser round trip.");
+        if (const auto status = KeireHub::Detail::WriteTextFileAtomically(path, encoded.Value()); !status)
+            throw std::runtime_error(status.Error().Message + " " + status.Error().TechnicalDetails);
+    }
 } // namespace
 
 namespace
@@ -184,11 +285,24 @@ namespace
         try
         {
             const auto arguments = Parse(count, values);
+            if (!std::filesystem::is_directory(arguments.ManifestOutput.parent_path()) ||
+                std::filesystem::exists(arguments.ManifestOutput))
+            {
+                throw std::invalid_argument("The publisher input or output path is unavailable.");
+            }
+            if (arguments.SelectedCommand == Command::CreateHubInstaller)
+            {
+                const auto manifest = ReadHubInstallerManifest(arguments);
+                WriteManifest(arguments.ManifestOutput, manifest);
+                std::cout << "Published " << manifest.Id << '@' << manifest.Version.ToString()
+                          << " native installer manifest\nArtifact: " << Text(arguments.Installer)
+                          << "\nSHA-256: " << manifest.ArtifactSha256 << "\nBytes: " << manifest.ArtifactSizeBytes
+                          << '\n';
+                return 0;
+            }
             if (!std::filesystem::is_directory(arguments.PayloadRoot) ||
                 !std::filesystem::is_directory(arguments.Output.parent_path()) ||
-                !std::filesystem::is_directory(arguments.ManifestOutput.parent_path()) ||
-                arguments.ManifestOutput == arguments.Output || std::filesystem::exists(arguments.Output) ||
-                std::filesystem::exists(arguments.ManifestOutput))
+                arguments.ManifestOutput == arguments.Output || std::filesystem::exists(arguments.Output))
             {
                 throw std::invalid_argument("The publisher input or output path is unavailable.");
             }
@@ -199,21 +313,7 @@ namespace
                 throw std::runtime_error(archive.Error().Message + " " + archive.Error().TechnicalDetails);
             try
             {
-                auto manifest = KeireHub::EncodePackageManifest(archive.Value().Manifest);
-                if (!manifest)
-                    throw std::runtime_error(manifest.Error().Message + " " + manifest.Error().TechnicalDetails);
-                auto parsed = KeireHub::ParsePackageManifest(manifest.Value());
-                if (!parsed || parsed.Value().ArtifactSizeBytes != archive.Value().ArchiveSizeBytes ||
-                    parsed.Value().ArtifactSha256 != archive.Value().ArchiveSha256)
-                {
-                    throw std::runtime_error("The published package manifest failed its parser round trip.");
-                }
-                if (const auto status =
-                        KeireHub::Detail::WriteTextFileAtomically(arguments.ManifestOutput, manifest.Value());
-                    !status)
-                {
-                    throw std::runtime_error(status.Error().Message + " " + status.Error().TechnicalDetails);
-                }
+                WriteManifest(arguments.ManifestOutput, archive.Value().Manifest);
             }
             catch (...)
             {

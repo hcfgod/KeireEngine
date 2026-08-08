@@ -55,6 +55,10 @@ receipt, and file-inventory work to a bounded background operation. Its owner-th
 registry-generation, security-identity, root, tracked-process, or targeted-task change. Only that poll persists verified
 health or hands a still-current repair/removal plan to the package task system; UI components consume immutable busy,
 result, and failure snapshots and never hash an editor installation inside a frame.
+Refresh health is committed as one bounded registry update so installed cards and catalog availability share a single
+state generation. A separate missing-managed-registration operation checks the exact registered identity and root, then
+requires the filesystem object to be definitively absent before removing only the registry entry; it never authorizes
+or performs filesystem deletion.
 
 Managed-editor repair is a distinct persistent task kind and worker protocol mode. Catalog planning requires every
 signed package manifest to reproduce the exact receipt-bound editor/component versions, artifact digests, dependency
@@ -863,6 +867,17 @@ full .NET SDK, and SDK development trees. Editor and Hub schema-2 manifests shar
 and canonical metadata fingerprints, optional packaged-template/toolchain/license references, SHA-256 file inventories,
 and exact installed sizes while exposing product-owned entrypoints only. Editor manifests preserve their schema-1
 top-level fields so existing combined installers and discovery code can migrate without an atomic format cutover.
+
+The distribution-service package also owns a dependency-free static `Website/` boundary. Caddy serves it for human
+routes and forwards only `/v1`, `/v1/*`, `/health`, and `/health/*` to the loopback .NET origin, so site deployment cannot
+reinterpret signed catalog bytes, package range requests, or readiness semantics. The Downloads page is an untrusted
+catalog consumer: it validates the stable host matrix and exact `hubInstaller` fields before offering a content-addressed
+link, while the installed Hub remains the authority for signature verification and managed update installation. An
+unsigned development preview is a separate static deployment boundary: it is never inserted into a stable catalog,
+must be labeled unsigned, and is offered only after same-origin metadata and a matching content-length HEAD probe pass.
+The public Contact form calls a narrowly scoped Supabase Edge Function. That function enforces exact origins, bounded
+input, a honeypot, and a keyed-IP-hash rate limit before writing with server-only credentials; anonymous and
+authenticated browser roles have explicit deny policies and no table privileges.
 
 macOS release binaries share the deployment target pinned by `MACOS_DEPLOYMENT_TARGET` in the dependency lock. The
 package boundary verifies each non-.NET Mach-O load command against that target before publication. Native installers

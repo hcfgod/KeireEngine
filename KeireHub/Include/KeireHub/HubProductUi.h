@@ -35,6 +35,7 @@ namespace KeireHub
         std::size_t ComponentCount = 0;
         bool Managed = false;
         bool Healthy = false;
+        bool Missing = false;
         bool RepairAvailable = false;
         std::string HealthLabel = "Unknown";
         std::vector<std::string> HealthIssues;
@@ -193,6 +194,7 @@ namespace KeireHub
         bool BuildSupportBusy = false;
         bool BuildSupportInventoryLoading = false;
         bool Online = false;
+        bool Reconnecting = false;
         bool CatalogAvailable = false;
         std::vector<HubEditorUiRecord> Editors;
         std::vector<std::string> PopulatedEditorChannels;
@@ -251,6 +253,7 @@ namespace KeireHub
         VerifyEditor,
         RepairManagedEditor,
         RemoveExternalEditor,
+        RemoveMissingManagedEditor,
         RemoveManagedEditor,
         RevealPath,
         OpenUrl,

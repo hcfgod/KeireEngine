@@ -45,6 +45,7 @@ for runtime_identifier in "${runtime_identifiers[@]}"; do
   cp -- "$service_root/README.md" "$package_directory/"
   cp -- "$service_root/THIRD_PARTY_NOTICES.md" "$package_directory/"
   cp -R -- "$service_root/Licenses" "$package_directory/"
+  cp -R -- "$service_root/Website" "$package_directory/"
   mkdir -p -- "$package_directory/Deployment" "$package_directory/scripts"
   cp -- "$service_root/Deployment/Caddyfile.example" "$package_directory/Deployment/"
   cp -- "$service_root/Deployment/appsettings.Production.example.json" "$package_directory/Deployment/"

@@ -2,7 +2,8 @@
 
 `KeireDistributionService` is the stateless, read-only origin for Kéire Hub catalogs, learning/resource catalogs, and
 content-addressed packages. It targets the repository's pinned .NET 10 toolchain, binds to `127.0.0.1:5088` by default,
-and is intended to run behind Caddy on public HTTPS port 443.
+and runs behind Caddy on public HTTPS port 443. The same package includes the static Kéire website; Caddy serves human
+routes locally and reserves `/v1`, `/v1/*`, `/health`, and `/health/*` for the unchanged origin.
 
 The service has no upload, publishing, account, entitlement, administration, or directory-listing API. Publishing is
 an offline filesystem operation performed by `KeireDistributionPublisher`; the online process never receives a
@@ -30,6 +31,11 @@ offline publisher signs and cryptographically verifies this binding before an im
 online service performs structural validation and serves the already verified bytes; it never receives a private key.
 Package catalogs may additionally declare `minimumSupportedHubVersion` as a semantic version. Because that policy is
 inside the signed bytes, changing it requires a new catalog sequence and signature.
+
+The public Downloads page fetches the stable Windows, macOS, and Linux x86_64/ARM64 catalog matrix. It validates catalog
+identity and exact `hubInstaller` records before exposing `/v1/packages/{sha256}`. This browser validation improves
+failure handling but is not a signature-verification trust boundary; the Hub and offline release workflow remain the
+authorities. Missing or malformed native artifacts stay visibly unavailable.
 
 Trusted public keys use schema 1 JSON. `keyId` is derived, not chosen: `ed25519-` followed by the first 16 bytes of the
 SHA-256 digest of the raw 32-byte public key in lowercase hexadecimal. The document also carries the complete
@@ -99,6 +105,25 @@ python Scripts/Packaging/prepare-distribution-snapshot.py `
     --output C:/release/prepared --key-id ed25519-0123456789abcdef0123456789abcdef `
     --sequence 42 --expires-at $futureUtcExpiry
 ```
+
+After producing and signing a native Hub installer, create its canonical catalog manifest and prepare it beside one or
+more editor packages by repeating the manifest/artifact options:
+
+```powershell
+./Build/Bin/Release-windows-x86_64/KeireHubPackagePublisher/KeireHubPackagePublisher.exe create-hub-installer `
+    --hub-manifest Build/Distributions/keire-hub-windows-x86_64-Dist/hub-package.json `
+    --installer C:/release/KeireHubSetup.exe --manifest-output C:/release/hub.manifest.json `
+    --signature-key-id ed25519-0123456789abcdef0123456789abcdef
+python Scripts/Packaging/prepare-distribution-snapshot.py `
+    --package-manifest C:/release/editor.manifest.json --package C:/release/editor.keirepackage `
+    --package-manifest C:/release/hub.manifest.json --package C:/release/KeireHubSetup.exe `
+    --output C:/release/prepared --key-id ed25519-0123456789abcdef0123456789abcdef `
+    --sequence 42 --expires-at $futureUtcExpiry
+```
+
+The Hub-installer command rejects dirty or development Hub manifests, symlinks/reparse points, existing outputs,
+mismatched host extensions, unsafe identities, invalid sizes/digests, and a manifest that does not round-trip through
+the catalog parser. Do not publish an unsigned Windows executable, an unnotarized macOS DMG, or a non-native Linux DEB.
 
 Use a future expiry appropriate to the release rather than copying the example date. The preparer refuses an existing
 output, draft manifest fields, unsafe input files, key mismatches, expired metadata, and archive size or SHA-256
@@ -177,7 +202,8 @@ KEIRE_DOTNET=dotnet ./scripts/publish-snapshot.sh \
 `package-service.ps1` produces self-contained `win-x64` and `linux-x64` service/publisher packages by default. The shell
 variant defaults to the current Linux architecture. Both refuse to overwrite an existing package directory and include
 the publisher dependency licenses and notices, package-local publish and health-check wrappers, the Caddy and production
-settings examples, and the sample systemd service unit. The PowerShell packager requires Python 3 when producing a Linux
+settings examples, the complete `Website/` tree, and the sample systemd service unit. The PowerShell packager requires
+Python 3 when producing a Linux
 target. Linux archives created on Windows use deterministic tar metadata: directories, service/publisher entrypoints,
 and shell wrappers use mode `0755`, while every other regular file uses mode `0644`.
 
@@ -189,8 +215,18 @@ and shell wrappers use mode `0755`, while every other regular file uses mode `06
 4. Keep Kestrel on loopback. Configure Caddy with `Deployment/Caddyfile.example`, set the real DNS name, and expose only
    Caddy on port 443. Do not expose Kestrel directly or add certificate-bypass behavior.
    Routers may translate public ports 80/443 to different internal ports by setting `KEIRE_CADDY_HTTP_PORT` and
-   `KEIRE_CADDY_HTTPS_PORT` for Caddy; clients still use ordinary public HTTPS on port 443.
+   `KEIRE_CADDY_HTTPS_PORT` for Caddy; clients still use ordinary public HTTPS on port 443. Keep `Website/` beside the
+   Caddyfile, or set `KEIRE_WEBSITE_ROOT` to its absolute path. Development-preview installers are intentionally not
+   repository or service-package payloads. Stage them beneath a separate read-only `PreviewDownloads/` directory, or
+   set `KEIRE_PREVIEW_DOWNLOAD_ROOT`, and keep their exact size and SHA-256 synchronized with
+   `Website/assets/preview-downloads.json`. They never belong in a signed stable catalog.
 5. Run `scripts/health-check.sh https://distribution.example` or the PowerShell equivalent after deployment.
+
+The public Contact form submits directly to the project-owned Supabase `website-contact` Edge Function. Its database
+migrations and function source live under `supabase/`. Deploy those before enabling the CSP origin in Caddy. The
+function is public by design for a website form, but accepts only exact production/local origins, bounds JSON input,
+uses a honeypot and keyed-IP-hash throttle, and writes through server-only credentials into tables unavailable to
+browser roles.
 
 On Windows, an extracted self-contained package can be supervised at user sign-in without an administrator-owned
 service. Copy Caddy beside the service, copy `Deployment/Caddyfile.example` to `Caddyfile`, and create

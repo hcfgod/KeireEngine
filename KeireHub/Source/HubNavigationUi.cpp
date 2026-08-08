@@ -87,11 +87,20 @@ namespace KeireHub
         if (!compact)
         {
             const auto connection = snapshot.Settings.OfflineMode ? "Offline mode"
+                                    : snapshot.Reconnecting       ? "Reconnecting"
                                     : snapshot.Online             ? "Online"
                                                                   : "Unavailable";
+            const auto version = "Hub " + snapshot.HubVersion;
+            constexpr float footerGap = 8.0F;
+            const auto connectionWidth = ui.MeasureText(connection).Width;
+            const auto versionWidth = ui.MeasureText(version).Width;
+            const auto footerWidth = connectionWidth + footerGap + versionWidth;
+            const auto footerOrigin = ui.CursorPosition();
+            ui.SetCursorPosition(
+                {footerOrigin.X + std::max((width - footerWidth) * 0.5F, 0.0F), footerOrigin.Y + 4.0F});
             ui.TextColored(snapshot.Online ? m_Tokens.Success : m_Tokens.Warning, connection);
             ui.SameLine();
-            ui.TextColored(m_Tokens.MutedText, "Hub " + snapshot.HubVersion);
+            ui.TextColored(m_Tokens.MutedText, version);
         }
     }
 } // namespace KeireHub

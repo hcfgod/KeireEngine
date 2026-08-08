@@ -67,7 +67,7 @@ namespace KeireHub
         Stop();
         Publish({.Refreshing = true});
         m_Worker = std::jthread(
-            [this, configurationPath, settings, hubExecutable]
+            [this, configurationPath, settings, hubExecutable](const std::stop_token stopToken)
             {
                 try
                 {
@@ -92,11 +92,43 @@ namespace KeireHub
                         Publish({.Failure = session.Error()});
                         return;
                     }
-                    const auto refreshed = session.Value().Refresh();
-                    Publish({.Catalogs = session.Value().Snapshot(),
-                             .Failure = refreshed ? std::nullopt : std::optional(refreshed.Error()),
-                             .ServiceBaseUrl = serviceBaseUrl,
-                             .AllowInsecureLoopbackDevelopment = developmentEndpoint});
+                    std::size_t consecutiveFailures = 0;
+                    while (!stopToken.stop_requested())
+                    {
+                        Publish({.Refreshing = true,
+                                 .Catalogs = session.Value().Snapshot(),
+                                 .ServiceBaseUrl = serviceBaseUrl,
+                                 .AllowInsecureLoopbackDevelopment = developmentEndpoint});
+                        const auto refreshed = [&]() -> HubStatus
+                        {
+                            try
+                            {
+                                return session.Value().Refresh();
+                            }
+                            catch (const std::exception& error)
+                            {
+                                return HubStatus::Failure({.Code = HubErrorCode::CatalogTransportFailed,
+                                                           .Message = "Distribution discovery failed unexpectedly.",
+                                                           .Retryable = true,
+                                                           .TechnicalDetails = error.what()});
+                            }
+                        }();
+                        const auto catalogs = session.Value().Snapshot();
+                        const auto failure =
+                            refreshed ? std::optional<HubError>{} : std::optional<HubError>{refreshed.Error()};
+                        Publish({.Catalogs = catalogs,
+                                 .Failure = failure,
+                                 .ServiceBaseUrl = serviceBaseUrl,
+                                 .AllowInsecureLoopbackDevelopment = developmentEndpoint});
+
+                        const bool needsNetworkRetry = HubDistributionNeedsNetworkRetry(*catalogs);
+                        const bool refreshComplete = refreshed && !needsNetworkRetry;
+                        consecutiveFailures = refreshComplete ? 0 : consecutiveFailures + 1;
+                        const auto delay = CalculateHubDistributionRefreshDelay(
+                            refreshComplete, needsNetworkRetry || (failure && failure->Retryable), consecutiveFailures);
+                        std::unique_lock wakeLock(m_WakeMutex);
+                        (void)m_Wake.wait_for(wakeLock, stopToken, delay, [] { return false; });
+                    }
                 }
                 catch (const std::exception& error)
                 {
@@ -114,6 +146,7 @@ namespace KeireHub
         if (!m_Worker.joinable())
             return;
         m_Worker.request_stop();
+        m_Wake.notify_all();
         m_Worker.join();
     }
 
@@ -132,12 +165,15 @@ namespace KeireHub
     void ApplyHubDistributionSnapshot(const HubDistributionWorkflowSnapshot& distribution, HubProductSnapshot& product)
     {
         product.Online = false;
+        product.Reconnecting = !product.Settings.OfflineMode &&
+                               (distribution.Refreshing || (distribution.Failure && distribution.Failure->Retryable));
         product.CatalogAvailable = false;
         product.HubUpdate.reset();
         product.HubUpdateMessage.clear();
         if (!distribution.Catalogs)
             return;
         const auto& catalogs = *distribution.Catalogs;
+        product.Reconnecting = product.Reconnecting || HubDistributionNeedsNetworkRetry(catalogs);
         const auto available = [](const DistributionCatalogSourceStatus& status)
         {
             return status.State == DistributionCatalogSourceState::Online ||
@@ -149,6 +185,8 @@ namespace KeireHub
             (std::ranges::any_of(catalogs.PackageCatalogs, [&](const auto& value)
                                  { return value.Status.State == DistributionCatalogSourceState::Online; }) ||
              catalogs.Content.Status.State == DistributionCatalogSourceState::Online);
+        if (product.Online && !HubDistributionNeedsNetworkRetry(catalogs))
+            product.Reconnecting = false;
         product.CatalogAvailable = std::ranges::any_of(catalogs.PackageCatalogs, [&](const auto& value)
                                                        { return value.Catalog && available(value.Status); }) ||
                                    (catalogs.Content.Catalog && available(catalogs.Content.Status));

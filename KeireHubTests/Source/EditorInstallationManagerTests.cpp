@@ -397,6 +397,32 @@ TEST_CASE("Managed registration reconciliation requires exact identity proof and
     CHECK(registry.Snapshot()->empty());
 }
 
+TEST_CASE("Missing managed registration recovery proves the exact root is absent and deletes no files")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "MissingManaged";
+    auto installation = CreateReceiptBoundManagedInstallation(root, "editor-missing");
+    installation.Health = InstallationHealth::Missing;
+    EditorInstallationRegistry registry(temporary.Path() / "installations.json");
+    REQUIRE(registry.Upsert(installation));
+
+    const auto present = registry.RemoveMissingManagedRegistration(installation.Id, installation.Root);
+    REQUIRE_FALSE(present);
+    CHECK(present.Error().Code == HubErrorCode::UnsafeInstallRoot);
+    REQUIRE(registry.Snapshot()->size() == 1U);
+
+    const auto wrongRoot = registry.RemoveMissingManagedRegistration(installation.Id, temporary.Path() / "Elsewhere");
+    REQUIRE_FALSE(wrongRoot);
+    CHECK(wrongRoot.Error().Code == HubErrorCode::UnsafeInstallRoot);
+    REQUIRE(std::filesystem::is_directory(root));
+
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    REQUIRE_FALSE(error);
+    REQUIRE(registry.RemoveMissingManagedRegistration(installation.Id, installation.Root));
+    CHECK(registry.Snapshot()->empty());
+}
+
 TEST_CASE("Managed repair plans list damaged files and require an exact marker")
 {
     KeireHubTests::TemporaryDirectory temporary;

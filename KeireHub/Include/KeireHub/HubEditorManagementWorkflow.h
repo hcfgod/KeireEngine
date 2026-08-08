@@ -86,6 +86,7 @@ namespace KeireHub
         std::uint64_t OperationId = 0;
         HubEditorManagementOperation Operation = HubEditorManagementOperation::None;
         std::string InstallationId;
+        std::optional<InstallationHealth> VerifiedHealth;
         std::optional<EditorManagedOperationPlan> Authorization;
         std::optional<HubError> Failure;
     };

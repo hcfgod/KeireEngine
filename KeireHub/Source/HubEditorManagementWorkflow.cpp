@@ -232,6 +232,7 @@ namespace KeireHub
                               .ProjectCount = static_cast<std::size_t>(projectCount),
                               .Managed = installation.Ownership == InstallationOwnership::Managed,
                               .Healthy = snapshot.Health == InstallationHealth::Healthy,
+                              .Missing = snapshot.Health == InstallationHealth::Missing,
                               .RepairAvailable = installation.Ownership == InstallationOwnership::Managed &&
                                                  snapshot.Health == InstallationHealth::Damaged &&
                                                  !installation.InstalledPackages.empty() &&
@@ -379,6 +380,7 @@ namespace KeireHub
         }
 
         const auto operation = OperationSnapshot();
+        std::optional<InstallationHealth> verifiedHealth;
         if (!result.Failure && m_Controller.Installations().Snapshot() != m_ActiveRegistrations)
         {
             result.Failure = ManagementError(HubErrorCode::InvalidTransition,
@@ -413,12 +415,25 @@ namespace KeireHub
                         break;
                     }
                     const auto activity = Activity(*expected);
+                    snapshot.Installation.Health = snapshot.Health;
                     snapshot.Activity.Running = snapshot.Activity.Running || activity.Running;
                     snapshot.Activity.HasActiveTask = activity.HasActiveTask;
                 }
                 if (!result.Failure)
-                    m_Snapshot = std::make_shared<const std::vector<EditorInstallationHealthSnapshot>>(
-                        std::move(*result.Installations));
+                {
+                    std::vector<EditorInstallationHealthUpdate> updates;
+                    updates.reserve(result.Installations->size());
+                    for (const auto& snapshot : *result.Installations)
+                        updates.push_back({.InstallationId = snapshot.Installation.Id, .Health = snapshot.Health});
+                    if (const auto saved = m_Controller.Installations().UpdateHealth(updates); !saved)
+                        result.Failure = saved.Error();
+                    else
+                    {
+                        m_Snapshot = std::make_shared<const std::vector<EditorInstallationHealthSnapshot>>(
+                            std::move(*result.Installations));
+                        QueueLicenseRefresh(m_Controller.Installations().Snapshot());
+                    }
+                }
             }
         }
         else if (!result.Failure && operation->Operation == HubEditorManagementOperation::Verify)
@@ -435,6 +450,7 @@ namespace KeireHub
                 auto verified = std::move(*result.Verification);
                 verified.Activity = Activity(*m_ActiveTarget);
                 verified.Installation.Health = verified.Health;
+                verifiedHealth = verified.Health;
                 verified.Installation.LastVerifiedUnixSeconds =
                     static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
                                                    std::chrono::system_clock::now().time_since_epoch())
@@ -478,7 +494,8 @@ namespace KeireHub
 
         HubEditorManagementCompletion completion{.OperationId = operation->OperationId,
                                                  .Operation = operation->Operation,
-                                                 .InstallationId = operation->InstallationId};
+                                                 .InstallationId = operation->InstallationId,
+                                                 .VerifiedHealth = verifiedHealth};
         if (result.Failure)
         {
             completion.Failure = *result.Failure;
@@ -549,7 +566,8 @@ namespace KeireHub
     {
         if (const auto owner = RequireOwnerThread("execute"); !owner)
             return owner;
-        if (command.Type == HubUiCommandType::RemoveExternalEditor)
+        if (command.Type == HubUiCommandType::RemoveExternalEditor ||
+            command.Type == HubUiCommandType::RemoveMissingManagedEditor)
         {
             if (m_WorkFuture.valid() || OperationSnapshot()->IsRunning())
             {
@@ -561,15 +579,24 @@ namespace KeireHub
                 return target;
             const auto installations = m_Controller.Installations().Snapshot();
             const auto found = std::ranges::find(*installations, command.ItemId, &EditorInstallation::Id);
-            if (found->Ownership != InstallationOwnership::External)
+            const bool removeMissingManaged = command.Type == HubUiCommandType::RemoveMissingManagedEditor;
+            const auto expectedOwnership =
+                removeMissingManaged ? InstallationOwnership::Managed : InstallationOwnership::External;
+            if (found->Ownership != expectedOwnership)
             {
                 return HubStatus::Failure(ManagementError(HubErrorCode::UnsafeInstallRoot,
-                                                          "Only an external editor registration can be removed.",
+                                                          removeMissingManaged
+                                                              ? "Only a missing managed editor can use this recovery."
+                                                              : "Only an external editor registration can be removed.",
                                                           command.ItemId));
             }
             if (const auto inactive = GuardInactive(*found, Activity(*found)); !inactive)
                 return inactive;
-            if (const auto removed = m_Controller.Installations().RemoveExternal(command.ItemId); !removed)
+            const auto removed =
+                removeMissingManaged
+                    ? m_Controller.Installations().RemoveMissingManagedRegistration(command.ItemId, command.Path)
+                    : m_Controller.Installations().RemoveExternal(command.ItemId);
+            if (!removed)
                 return removed;
             ReloadRegistrations();
             return HubStatus::Success();
